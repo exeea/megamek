@@ -60,17 +60,23 @@ final class BoardObstacles {
 
     private void add(BoardScene scene, BoardScene.Tile tile) {
         for (var feature : tile.features()) {
+            var object = feature.decoration();
+            // Paint has no model footprint. Structures already provide clearance for objects on their roofs/decks.
+            if (object != null && (object.kind().equals("decal") || object.placement().receiver() != null
+                  && !object.placement().receiver().terrain().equals("ground"))) { continue; }
             // Bridges already have height-aware passage/approach clearance. Fields are ground cover, not solids.
             if (feature.kind() != BoardScene.FeatureKind.BUILDING && feature.kind() != BoardScene.FeatureKind.INDUSTRIAL
                   && feature.kind() != BoardScene.FeatureKind.PROP
                   && feature.kind() != BoardScene.FeatureKind.SCENERY
                   || feature.asset().equals("bridge") || feature.asset().equals("field")) { continue; }
             boolean procedural = BoardIndustrial.supports(feature);
-            boolean custom = !procedural && feature.asset().startsWith("buildings/")
+            boolean custom = object == null && !procedural && feature.asset().startsWith("buildings/")
                   && BoardArtwork.customBuildingFile(feature.asset()).isFile();
             File root = new File(Configuration.dataDir(), custom ? "models/buildings" : "models/board");
             File file = custom ? BoardArtwork.customBuildingFile(feature.asset())
                   : new File(root, feature.asset() + ".glb");
+            // Unresolved native references draw a renderer-owned placeholder and must remain editable.
+            if (object != null && !file.isFile()) { continue; }
             var geometry = procedural ? null : MODELS.computeIfAbsent(file.getAbsoluteFile(), key -> new BoardKit<>(() -> {
                 var data = RigidGlb.loadLods(new FileHandle(key), root.toPath()).getFirst();
                 return new Geometry(BoardShape.shapes(data, custom), custom ? GpuBuilding.parts(data) : Map.of());
@@ -97,7 +103,7 @@ final class BoardObstacles {
             float y = BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.hexScale();
             BoundingBox bounds = new BoundingBox().inf();
             for (Vector3 p : points) {
-                float px = p.x, py = p.y;
+                float px = object != null && object.mirror() ? -p.x : p.x, py = p.y;
                 p.set(x + scale * (c * px - s * py), y + scale * (s * px + c * py), p.z);
                 bounds.ext(p);
             }
@@ -115,9 +121,18 @@ final class BoardObstacles {
                           neighbor.elevation() * BoardGeometry.level() + BoardRelief.decoration(neighbor));
                 }
             }
+            if (object != null) {
+                var placement = object.placement();
+                if (placement.mode().equals("absolute")) {
+                    ground = upperGround = placement.level().floatValue() * BoardGeometry.level();
+                } else {
+                    ground += placement.offset().floatValue() * BoardGeometry.level();
+                    upperGround += placement.offset().floatValue() * BoardGeometry.level();
+                }
+            }
             boolean fitHeight = custom || feature.kind() == BoardScene.FeatureKind.BUILDING
                   || feature.asset().startsWith("buildings/");
-            float verticalScale = feature.kind() == BoardScene.FeatureKind.SCENERY ? scale
+            float verticalScale = object != null || feature.kind() == BoardScene.FeatureKind.SCENERY ? scale
                   : custom ? BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT
                   : feature.height() * BoardGeometry.level() / (fitHeight ? bounds.getDepth() : 1);
             // Scenery grounds its lowest authored vertex, including models with an offset origin.

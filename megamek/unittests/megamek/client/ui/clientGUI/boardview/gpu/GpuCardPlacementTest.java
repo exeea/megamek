@@ -2,12 +2,16 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import com.badlogic.gdx.math.Rectangle;
+import com.badlogic.gdx.math.Intersector;
+import com.badlogic.gdx.math.Vector2;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -83,6 +87,35 @@ class GpuCardPlacementTest {
         Map<Integer, Rectangle> placed = GpuCardPlacement.place(List.of(card(6, 300, 265.75f, wolf),
               card(8, 270, 121.5f, master)), BOUNDS, hud(), List.of(css(900.5f, 740.25f, 61, 110.5f), wolf, master));
         assertEquals(Map.of(6, css(812, 9.5f, 300, 265.75f), 8, css(530, 74, 270, 121.5f)), placed);
+    }
+
+    @Test
+    void rulerCardsKeepClearOfHorizontalVerticalDiagonalAndPartlyOffscreenLines() {
+        Rectangle area = new Rectangle(0, 0, 1000, 700);
+        for (float[] ends : new float[][] { { 80, 350, 920, 350 }, { 500, 30, 500, 680 },
+              { 20, 20, 980, 680 }, { 20, 680, 980, 20 }, { -500, 20, 1500, 680 },
+              { 500, 350, 500, 350 }, { 15, 5, 15, 690 } }) {
+            var line = new GpuCardPlacement.Line(ends[0], ends[1], ends[2], ends[3], 24);
+            Rectangle point = new Rectangle((ends[0] + ends[2]) / 2, (ends[1] + ends[3]) / 2, 0, 0);
+            Rectangle card = GpuCardPlacement.place(List.of(card(0, 320, 280, point)), area, List.of(), List.of(), line).get(0);
+            assertTrue(card.x >= 0 && card.y >= 0 && card.x + card.width <= area.width
+                  && card.y + card.height <= area.height, "Card stays on screen: " + card);
+            Rectangle clearance = new Rectangle(card.x - 24, card.y - 24, card.width + 48, card.height + 48);
+            assertFalse(Intersector.intersectSegmentRectangle(new Vector2(ends[0], ends[1]),
+                  new Vector2(ends[2], ends[3]), clearance), "Card leaves clearance along the full ruler: " + line);
+        }
+    }
+
+    @Test
+    void rulerCardUsesTheFreeSideWhenAnEditorPanelOccupiesTheOtherSide() {
+        Rectangle panel = new Rectangle(0, 0, 480, 700), area = new Rectangle(0, 0, 1000, 700);
+        var line = new GpuCardPlacement.Line(500, 20, 500, 680, 24);
+        Rectangle card = GpuCardPlacement.place(List.of(card(0, 320, 400, new Rectangle(500, 350, 0, 0))),
+              area, List.of(panel), List.of(), line).get(0);
+        assertTrue(card.x > 524, "Use the free right side, including a gap");
+        assertFalse(card.overlaps(panel));
+        assertTrue(card.x >= 0 && card.y >= 0 && card.x + card.width <= area.width
+              && card.y + card.height <= area.height, "Touching a viewport edge is allowed: " + card);
     }
 
     private static GpuCardPlacement.Card card(int id, float width, float height, Rectangle target) {

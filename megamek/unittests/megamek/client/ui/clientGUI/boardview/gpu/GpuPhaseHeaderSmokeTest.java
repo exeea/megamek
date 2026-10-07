@@ -29,6 +29,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -349,7 +350,7 @@ class GpuPhaseHeaderSmokeTest {
         return new GpuHudData(new GpuBoardActions.PhaseInfo("", false, "", "", "", List.of(), lines),
               GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY,
               GpuUnitRecord.Snapshot.EMPTY, GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY,
-              GpuToasts.Snapshot.EMPTY, GpuLosResult.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
+              GpuToasts.Snapshot.EMPTY, RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
     }
 
     private static GpuHud.Inputs inputs(GpuHudTestStage hud, GpuBoardSource.Frame frame, boolean conditions) {

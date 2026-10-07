@@ -6,20 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
-import java.awt.GraphicsEnvironment;
 import java.awt.event.InputEvent;
 import java.io.File;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
-import javax.swing.JSpinner;
 import javax.swing.SwingUtilities;
 
-import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.RulerDialog;
+import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -27,6 +22,8 @@ import megamek.common.game.Game;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuMapSourceTest {
     @Test
@@ -124,41 +121,37 @@ class GpuMapSourceTest {
               List.of(GpuMapSource.hexCard(board.getHex(new Coords(0, 0))).split("\n")));
     }
 
-    /**
-     * The preview's line of sight is MegaMek's ruler (the user's decision of 2026-10-03): a Ctrl click starts it at the
-     * height the pointer showed, the status line says what it waits for, a plain click ends it and the ruler shows
-     * with its line on the board. Closing the preview releases the ruler with the board state it measures on.
-     */
-    @Test
-    void aPreviewMeasuresWithMegaMeksRuler() throws Exception {
-        assumeFalse(GraphicsEnvironment.isHeadless(), "Shows the Swing ruler");
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void mapToolsUseAltClickAndPublishNativeMeasurementWithoutSwingWindows(boolean editing) throws Exception {
         onEdt(() -> {
-            Game game = new Game();
+            BoardEditorSession editor = editing ? new BoardEditorSession() : null;
+            Game game = editor == null ? new Game() : editor.game();
             game.setBoard(Board.createEmptyBoard(8, 8));
             var listeners = List.copyOf(game.getGameListeners());
-            RulerDialog ruler;
-            try (var source = new GpuMapSource(game, null, null)) {
-                source.measure(new Coords(2, 2), InputEvent.CTRL_DOWN_MASK, 2 * BoardGeometry.level() + .1f);
-                assertEquals(Messages.getString("GpuBoard.hud.hint.completeLos"), source.phaseStatus().text());
+            var windows = java.util.Set.of(java.awt.Window.getWindows());
+            try (var source = new GpuMapSource(game, null, editor)) {
+                source.measure(new Coords(2, 2), InputEvent.CTRL_DOWN_MASK, Float.NaN);
+                assertFalse(source.takeFrame().panels().los().open(), "Ctrl-click is no longer a measurement");
+                source.measure(new Coords(2, 2), InputEvent.ALT_DOWN_MASK, 2 * BoardGeometry.level() + .1f);
+                assertEquals(InputEvent.ALT_DOWN_MASK, source.takeFrame().panels().los().pending());
                 source.measure(new Coords(2, 6), 0, Float.NaN);
-                assertEquals("", source.phaseStatus().text(), "A plain click ends the measurement");
-                var field = GpuMapSource.class.getDeclaredField("ruler");
-                field.setAccessible(true);
-                ruler = (RulerDialog) field.get(source);
-                assertTrue(ruler.isVisible(), "The ruler shows the measurement");
-                assertEquals(2, GpuDialogRoutingTest.components(ruler, JSpinner.class).getFirst().getValue(),
-                      "from the floor two levels up that the pointer showed");
-                assertNotEquals(BoardTactical.EMPTY, source.takeFrame().scene().tactical(),
-                      "with its line on the board");
-                ruler.setHeight(new Coords(2, 6), 4);
-                source.refresh();
-                assertEquals(4, source.takeFrame().scene().tactical().ruler().endHeight(),
-                      "Changing only a height must invalidate the preview's captured measurement");
+                var frame = source.takeFrame();
+                assertEquals(0, frame.panels().los().pending());
+                assertEquals(2, frame.panels().los().start().height());
+                assertEquals(4, frame.panels().los().distance());
+                assertEquals(frame.panels().los().ruler(), frame.scene().tactical().ruler());
+                source.changeRuler(frame.boardGeneration(), model -> model.height(false, 4));
+                assertEquals(4, source.takeFrame().scene().tactical().ruler().endHeight());
                 source.measure(new Coords(3, 3), 0, Float.NaN);
-                assertEquals("", source.phaseStatus().text(), "A plain click alone measures nothing");
+                assertEquals(frame.panels().los().end().coords(), source.takeFrame().panels().los().end().coords());
+                game.setBoard(Board.createEmptyBoard(8, 8));
+                source.refresh();
+                source.changeRuler(frame.boardGeneration(), model -> model.open());
+                assertFalse(source.takeFrame().panels().los().open(), "An old panel cannot edit a replacement board");
+                assertEquals(windows, java.util.Set.of(java.awt.Window.getWindows()), "Native LOS creates no Swing window");
             }
-            assertFalse(ruler.isDisplayable(), "Closing the preview disposes of its ruler");
-            assertEquals(listeners, game.getGameListeners(), "and of the board state it measured on");
+            assertEquals(listeners, game.getGameListeners());
             return null;
         });
     }

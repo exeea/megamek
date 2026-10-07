@@ -80,7 +80,6 @@ import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.client.ui.clientGUI.boardview.BoardThemeDialog;
 import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.TraceOverlay;
 import megamek.client.ui.clientGUI.boardview.toolTip.BoardEditorTooltip;
@@ -486,7 +485,6 @@ public class BoardEditorPanel extends JPanel
             controller.removeAllActions();
             controller.boardEditor = null;
         }
-        GpuBoardWindow.closeEditor(this);
         if (bv != null) { bv.dispose(); bv = null; }
         tileset.close();
         menuBar.die();
@@ -1060,7 +1058,7 @@ public class BoardEditorPanel extends JPanel
         butSourceFile.setActionCommand(ClientGUI.BOARD_SOURCE_FILE);
 
         editorViewButton.setToolTipText(Messages.getString("BoardEditor.switchView.tooltip"));
-        editorViewButton.addActionListener(e -> GpuBoardWindow.toggleEditor(this));
+        editorViewButton.setVisible(false);
 
         addManyActionListeners(butBoardValidate, butBoardSaveAsImage, butBoardSaveAs, butBoardSave);
         addManyActionListeners(butBoardOpen, butExpandMap, butBoardNew);
@@ -1594,6 +1592,11 @@ public class BoardEditorPanel extends JPanel
 
     public void loadBoard(File file) {
         try (InputStream is = new FileInputStream(file)) {
+            if (megamek.common.board.BoardFile.isNativeName(file.getName())
+                  || megamek.common.board.BoardFile.looksNative(java.nio.file.Files.readString(file.toPath()))) {
+                JOptionPane.showMessageDialog(frame, "This document requires the standalone 3D board editor.");
+                return;
+            }
             // tell the board to load!
             board.load(is, null, true);
             Set<String> boardTags = board.getTags();
@@ -2081,9 +2084,9 @@ public class BoardEditorPanel extends JPanel
         } else if (ae.getActionCommand().equals(ClientGUI.VIEW_CLIENT_SETTINGS)) {
             showSettings();
         } else if (ae.getActionCommand().equals(ClientGUI.VIEW_ZOOM_IN)) {
-            if (bv != null) { bv.zoomIn(); } else { GpuBoardWindow.zoomEditor(this, -1); }
+            if (bv != null) { bv.zoomIn(); }
         } else if (ae.getActionCommand().equals(ClientGUI.VIEW_ZOOM_OUT)) {
-            if (bv != null) { bv.zoomOut(); } else { GpuBoardWindow.zoomEditor(this, 1); }
+            if (bv != null) { bv.zoomOut(); }
         } else if (ae.getActionCommand().equals(ClientGUI.VIEW_TOGGLE_ISOMETRIC)) {
             GUIPreferences.getInstance().setIsometricEnabled(!GUIPreferences.getInstance().getIsometricEnabled());
         } else if (ae.getActionCommand().equals(ClientGUI.VIEW_CHANGE_THEME)) {

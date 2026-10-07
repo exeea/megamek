@@ -199,6 +199,28 @@ public class BoardUtilities {
         }
 
         Board result = new Board();
+        if (boards.length == 1) { result.copyMetadataFrom(boards[0]); }
+        else {
+            result.setNativeFormat(java.util.Arrays.stream(boards).anyMatch(Board::isNativeFormat));
+            result.setSourceHeader(java.util.Arrays.stream(boards).map(Board::getSourceHeader)
+                  .filter(java.util.Objects::nonNull).distinct().collect(java.util.stream.Collectors.joining("\n")));
+            for (int index = 0; index < boards.length; index++) {
+                Board source = boards[index];
+                source.getTags().forEach(result::addTag);
+                int dx = index % sheetWidth * (width + (widthIsOdd ? columnPadding : 0));
+                int dy = index / sheetWidth * height;
+                source.getAnnotations().forEach((at, notes) -> result.setAnnotations(
+                      new Coords(at.getX() + dx, at.getY() + dy), java.util.List.copyOf(notes)));
+            }
+        }
+        java.util.Set<String> identities = new java.util.HashSet<>();
+        for (Hex hex : resultData) {
+            hex.setDecorations(hex.getDecorations().stream().map(object -> {
+                var copy = object;
+                while (!identities.add(copy.id())) { copy = copy.duplicate(); }
+                return copy;
+            }).toList());
+        }
         result.setRoadsAutoExit(roadsAutoExit);
         // Initialize all hexes - buildings, exits, etc
         result.newData(resultWidth, resultHeight, resultData, null);
@@ -395,7 +417,7 @@ public class BoardUtilities {
     protected static void copyBoardInto(Hex[] dest, int destWidth, int x, int y, Board copied) {
         for (int i = 0; i < copied.getHeight(); i++) {
             for (int j = 0; j < copied.getWidth(); j++) {
-                dest[(i + y) * destWidth + j + x] = copied.getHex(j, i);
+                dest[(i + y) * destWidth + j + x] = copied.getHex(j, i).duplicate();
             }
         }
     }
@@ -1615,91 +1637,26 @@ public class BoardUtilities {
             return;
         }
 
-        // We only walk through half the board, but *which* half?
-        int stopX;
-        int stopY;
-        int width = board.getWidth();
-        int height = board.getHeight();
-
-        if (horiz) {
-            // West half of board.
-            stopX = width / 2;
-            stopY = height;
-        } else {
-            // North half of board.
-            stopX = width;
-            stopY = height / 2;
-        }
-
-        // Walk through the current data array and build a new one.
-        int newX;
-        int newY;
-        Hex tempHex;
-        Terrain terr;
-        for (int oldX = 0; oldX < stopX; oldX++) {
-            // Calculate the new X position of the flipped hex.
-            if (horiz) {
-                newX = width - oldX - 1;
-            } else {
-                newX = oldX;
-            }
-            for (int oldY = 0; oldY < stopY; oldY++) {
-                // Calculate the new Y position of the flipped hex.
-                if (vert) {
-                    newY = height - oldY - 1;
-                } else {
-                    newY = oldY;
+        int width = board.getWidth(), height = board.getHeight();
+        Hex[] transformed = new Hex[width * height];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Hex hex = board.getHex(x, y).duplicate();
+                for (int type : new int[] { Terrains.ROAD, Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.BRIDGE, Terrains.CLIFF_TOP }) {
+                    Terrain terrain = hex.getTerrain(type);
+                    // High values select legacy artwork. They must never be truncated as directional bits.
+                    if (terrain != null && terrain.getExits() >= 0 && terrain.getExits() <= 63) { terrain.flipExits(horiz, vert); }
                 }
-
-                // Swap the old hex for the new hex.
-                tempHex = board.getHex(oldX, oldY);
-                board.setHex(oldX, oldY, board.getHex(newX, newY));
-                board.setHex(newX, newY, tempHex);
-
-                Hex newHex = board.getHex(newX, newY);
-                Hex oldHex = board.getHex(oldX, oldY);
-
-                // Update the road exits in the swapped hexes.
-                terr = newHex.getTerrain(Terrains.ROAD);
-                if (terr != null) {
-                    terr.flipExits(horiz, vert);
-                }
-                terr = oldHex.getTerrain(Terrains.ROAD);
-                if (terr != null) {
-                    terr.flipExits(horiz, vert);
-                }
-
-                // Update the building exits in the swapped hexes.
-                terr = newHex.getTerrain(Terrains.BUILDING);
-                if (terr != null) {
-                    terr.flipExits(horiz, vert);
-                }
-                terr = oldHex.getTerrain(Terrains.BUILDING);
-                if (terr != null) {
-                    terr.flipExits(horiz, vert);
-                }
-
-                // Update the fuel tank exits in the swapped hexes.
-                terr = newHex.getTerrain(Terrains.FUEL_TANK);
-                if (terr != null) {
-                    terr.flipExits(horiz, vert);
-                }
-                terr = oldHex.getTerrain(Terrains.FUEL_TANK);
-                if (terr != null) {
-                    terr.flipExits(horiz, vert);
-                }
-
-                // Update the bridge exits in the swapped hexes.
-                terr = newHex.getTerrain(Terrains.BRIDGE);
-                if (terr != null) {
-                    terr.flipExits(horiz, vert);
-                }
-                terr = oldHex.getTerrain(Terrains.BRIDGE);
-                if (terr != null) {
-                    terr.flipExits(horiz, vert);
-                }
+                hex.setDecorations(hex.getDecorations().stream().map(object -> object.flip(horiz, vert)).toList());
+                int nx = horiz ? width - x - 1 : x, ny = vert ? height - y - 1 : y;
+                transformed[ny * width + nx] = hex;
             }
         }
+        var notes = new java.util.HashMap<>(board.getAnnotations());
+        notes.keySet().forEach(at -> board.setAnnotations(at, null));
+        notes.forEach((at, text) -> board.setAnnotations(new Coords(horiz ? width - at.getX() - 1 : at.getX(),
+              vert ? height - at.getY() - 1 : at.getY()), java.util.List.copyOf(text)));
+        board.newData(width, height, transformed, null);
     }
 
     /**

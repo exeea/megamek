@@ -7,7 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -111,17 +114,44 @@ class GpuTerrainShowcaseSmokeTest {
         Files.createDirectories(output.toPath());
         AtomicReference<Throwable> failure = new AtomicReference<>();
         StringBuilder report = new StringBuilder();
+        boolean measure = Boolean.getBoolean("megamek.gpu.showcase.measure");
+        Map<String, String> baseline = new HashMap<>();
+        String baselineDirectory = System.getProperty("megamek.gpu.showcase.baseline", "");
+        if (measure && !baselineDirectory.isBlank()) {
+            try (var files = Files.list(Path.of(baselineDirectory))) {
+                for (Path file : files.filter(p -> p.toString().matches(".*\\.(glsl|frag|vert)$")).toList()) {
+                    baseline.put(file.getFileName().toString(), Files.readString(file));
+                }
+            }
+            assertTrue(!baseline.isEmpty(), "The comparison needs saved shader sources");
+        }
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1440, 1080);
+        if (measure) {
+            config.useVsync(false);
+            config.setForegroundFPS(0);
+        }
         new Lwjgl3Application(new ApplicationAdapter() {
+            private final GpuShaderManager shaders = new GpuShaderManager();
+
             @Override
             public void create() {
+                try { shaders.run(this::capture); }
+                finally { shaders.close(); }
+            }
+
+            private void capture() {
                 GpuTerrain terrain = new GpuTerrain();
+                GL20 rawGl20 = Gdx.gl20;
                 GLProfiler profiler = new GLProfiler(Gdx.graphics);
                 GpuReviewFrame frame = new GpuReviewFrame(settings(hours.get(0)));
                 try {
                     report.append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append(" / ")
                           .append(Gdx.gl.glGetString(GL20.GL_VERSION)).append('\n');
+                    if (measure) {
+                        report.append("1440x1080; 24 warmup + 40 samples with glFinish; profiler excluded.\n")
+                              .append("Terrain, plants, shadows and atmosphere only; not full-game FPS.\n");
+                    }
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     for (String name : families.split(",")) {
@@ -145,10 +175,25 @@ class GpuTerrainShowcaseSmokeTest {
                             camera.center(BoardGeometry.center(view.focus(), view.level()));
                             for (String at : hours) {
                                 frame.configure(settings(at));
+                                if (measure) {
+                                    int rounds = baseline.isEmpty() ? 1 : 2;
+                                    for (int round = 0; round < rounds; round++) {
+                                        if (!baseline.isEmpty()) {
+                                            var change = shaders.apply(baseline);
+                                            assertTrue(change.success(), change.message());
+                                            report.append(String.format(Locale.ROOT, "  %s h%s baseline%d: %s%n",
+                                                  view.name(), at, round, measure(frame, terrain, camera, scene)));
+                                            change = shaders.apply(Map.of());
+                                            assertTrue(change.success(), change.message());
+                                        }
+                                        report.append(String.format(Locale.ROOT, "  %s h%s current%d: %s%n", view.name(),
+                                              at, round, measure(frame, terrain, camera, scene)));
+                                    }
+                                }
                                 profiler.reset();
                                 profiler.enable();
                                 frame.render(terrain, camera, scene);
-                                profiler.disable();
+                                GpuStageTimings.stopCounting(profiler, rawGl20);
                                 report.append(String.format(Locale.ROOT, "  %s: draws=%d vertices=%.0f%n",
                                       view.name(), profiler.getDrawCalls(), profiler.getVertexCount().total));
                                 GpuReviewFrame.save(new File(output, family.name().toLowerCase(Locale.ROOT) + "-"
@@ -162,6 +207,7 @@ class GpuTerrainShowcaseSmokeTest {
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
+                    GpuStageTimings.stopCounting(profiler, rawGl20);
                     BoardGeometry.tune(BoardGeometry.DEFAULTS);
                     frame.dispose();
                     terrain.dispose();
@@ -171,6 +217,19 @@ class GpuTerrainShowcaseSmokeTest {
         }, config);
         if (failure.get() != null) { throw new AssertionError("Terrain showcase", failure.get()); }
         System.out.print(report);
+    }
+
+    /** Settled terrain, shadows and atmosphere; no GLProfiler, file capture, UI or presentation in the timed frames. */
+    private static String measure(GpuReviewFrame frame, GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
+        double[] samples = new double[40];
+        for (int i = -24; i < samples.length; i++) {
+            long start = System.nanoTime();
+            frame.render(terrain, camera, scene);
+            Gdx.gl.glFinish();
+            if (i >= 0) { samples[i] = (System.nanoTime() - start) / 1e6; }
+        }
+        Arrays.sort(samples);
+        return String.format(Locale.ROOT, "medianMs=%.3f p95Ms=%.3f", samples[20], samples[38]);
     }
 
     private static BoardAtmosphere.Settings settings(String hour) {

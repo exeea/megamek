@@ -234,8 +234,15 @@ final class BoardSurface {
     }
     /** DRESSING is thin detail on the ground, such as tree pits: drawn and picked, never raising what stands there. */
     enum Finish { TOP, RIM, CAP, WALL, OUTCROP, SHORE, BED, BANK, ICE, DRESSING, ROUGH }
-    /** landEdge is the edge a bank or wall face stands on (bank artwork takes the hex across it); else -1. */
-    record Face(Vector3 a, Vector3 b, Vector3 c, Finish finish, int landEdge) {
+    /**
+     * landEdge is the edge a bank or wall face stands on (bank artwork takes the hex across it); else -1.
+     * Scatter marks cosmetic cover for rendering only; the canonical geometry retains its support/picking behavior.
+     */
+    record Face(Vector3 a, Vector3 b, Vector3 c, Finish finish, int landEdge, boolean scatter) {
+        Face(Vector3 a, Vector3 b, Vector3 c, Finish finish, int landEdge) {
+            this(a, b, c, finish, landEdge, false);
+        }
+
         Face(Vector3 a, Vector3 b, Vector3 c, Finish finish) {
             this(a, b, c, finish, -1);
         }
@@ -1669,6 +1676,15 @@ final class BoardSurface {
         return true;
     }
 
+    /**
+     * A deep, level pool's bed is wholly submerged inside the same contour as its water. Exposed shallow bars,
+     * descending streams, pulled-back waterfall lips and refined cliff contacts still need coverage clipping.
+     */
+    boolean bedUnderLevelWater() {
+        return tile.waterDepth() > 0 && !tile.frozen() && !tile.liquid().molten() && !gradedWater
+              && waterfalls.isEmpty() && waterContacts.isEmpty();
+    }
+
     /** The caller owns the supplied bed list; canonical faces remain available for normal and depth sampling. */
     List<Face> renderBed(List<Face> canonical) {
         if (renderBed != null) { return new ArrayList<>(renderBed); }
@@ -2487,7 +2503,7 @@ final class BoardSurface {
         for (int i = 0; i < faces.size(); i++) {
             Face face = faces.get(i);
             faces.set(i, new Face(moved.get(face.a()), moved.get(face.b()), moved.get(face.c()), face.finish(),
-                  face.landEdge()));
+                  face.landEdge(), face.scatter()));
         }
         // A rounded rim can make a quad concave. Use its interior diagonal, as the natural top's rim band does.
         for (int i = 0; i + 1 < faces.size(); i++) {

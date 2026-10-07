@@ -117,6 +117,45 @@ public final class UiKit {
         return scroll;
     }
 
+    /** A horizontal choice row with the same scroll behaviour and styling as other UIKit lists. */
+    public ScrollPane scrollStrip(Actor strip) {
+        ScrollPane scroll = scrollList(strip);
+        scroll.setScrollingDisabled(false, true);
+        scroll.setFadeScrollBars(false);
+        scroll.setScrollbarsOnTop(false);
+        return scroll;
+    }
+
+    /** Equal-size visual choices that fit their content and viewport, with bounded growth when space permits. */
+    public UiChoiceGrid choiceGrid(float cardWidth, float gap) {
+        return new UiChoiceGrid(cardWidth, gap);
+    }
+
+    /**
+     * Fits a dialog's choice grid inside the available viewport, measuring its existing header/footer/padding.
+     * The dialog's parent should use its preferred size. Excess choices scroll vertically in the supplied pane.
+     */
+    public void fitChoices(Table dialog, ScrollPane scroll, UiChoiceGrid choices, float width, float height) {
+        Cell<ScrollPane> cell = dialog.getCell(scroll);
+        cell.height(0);
+        dialog.invalidate();
+        float chromeHeight = dialog.getPrefHeight();
+        float chromeWidth = dialog.getPadX() + cell.getPadLeft() + cell.getPadRight();
+        choices.fit(width - chromeWidth, height - chromeHeight);
+        cell.width(choices.getPrefWidth()).height(Math.min(choices.getPrefHeight(), Math.max(1, height - chromeHeight)));
+        dialog.invalidateHierarchy();
+    }
+
+    /** Optional search row: collapse it when all choices are visible, but keep a filter accessible until cleared. */
+    public void fitSearch(Cell<SearchField> row, boolean hiddenChoices) {
+        SearchField search = row.getActor();
+        boolean shown = hiddenChoices || !search.field.getText().isEmpty();
+        search.setVisible(shown);
+        if (!shown && search.field.hasKeyboardFocus()) { search.getStage().setKeyboardFocus(null); }
+        row.height(shown ? search.getPrefHeight() : 0).pad(0, 8, shown ? 8 : 0, 8);
+        row.getTable().invalidateHierarchy();
+    }
+
     /**
      * Gives {@code actor} the stage's scroll focus while the pointer is over it, so the wheel reaches it without a
      * click, and gives the focus back when the pointer leaves it and its children, so the wheel then reaches what lies
@@ -140,6 +179,12 @@ public final class UiKit {
                 }
             }
         });
+    }
+
+    /** Resolve wheel focus at dispatch time: replacing a hovered widget need not produce a Scene2D exit event. */
+    public static void focusScrollAt(Stage stage, int screenX, int screenY) {
+        var point = stage.screenToStageCoordinates(new com.badlogic.gdx.math.Vector2(screenX, screenY));
+        stage.setScrollFocus(stage.hit(point.x, point.y, true));
     }
 
     /** A label in a hud font at another size and color. */
@@ -380,6 +425,18 @@ public final class UiKit {
     /** A search field (.field) with its placeholder, and a clear button while it holds text. */
     public SearchField search(String placeholder) {
         return new SearchField(placeholder);
+    }
+
+    /** Shared numeric controls use the theme's track, mint fill and narrow handle. */
+    public com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle sliderStyle() {
+        var track = skin.newDrawable("white", UiTheme.TRACK); track.setMinHeight(4); track.setMinWidth(0);
+        var knob = skin.newDrawable("white", UiTheme.FILL); knob.setMinWidth(4); knob.setMinHeight(14);
+        var filled = skin.newDrawable("white", UiTheme.MINT); filled.setMinHeight(4); filled.setMinWidth(0);
+        var style = new com.badlogic.gdx.scenes.scene2d.ui.Slider.SliderStyle(track, knob);
+        style.knobBefore = filled;
+        var active = skin.newDrawable("white", Color.WHITE); active.setMinWidth(4); active.setMinHeight(14);
+        style.knobDown = active; style.knobOver = active;
+        return style;
     }
 
     /** A labelled bar (.meter; compact: the overview card's .bars2). */

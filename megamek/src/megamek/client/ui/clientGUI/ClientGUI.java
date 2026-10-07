@@ -1965,6 +1965,9 @@ public class ClientGUI extends AbstractClientGUI
         if (enabled) {
             boardStates().forEach(this::createClassicBoardView);
         } else {
+            rulers.values().forEach(RulerDialog::dispose);
+            rulers.clear();
+            boardStates().forEach(state -> { state.setFirstLOS(null); state.drawRuler(null); });
             boardViews().forEach(IBoardView::dispose);
             boardViews.clear();
         }
@@ -3619,6 +3622,7 @@ public class ClientGUI extends AbstractClientGUI
      * distance, to-hit modifiers, and an elevation cross-section diagram.
      */
     private void showLOSSettingDialog() {
+        if (GpuBoardWindow.showRuler(this)) { return; }
         RulerDialog ruler = getCurrentBoardState().map(state -> rulers.get(state.getBoardId())).orElse(null);
         if (ruler != null) {
             ruler.setVisible(true);
@@ -3626,16 +3630,18 @@ public class ClientGUI extends AbstractClientGUI
         }
     }
 
-    /** Measures from {@code from} to {@code to} with the board's ruler, which shows (RulerDialog.measure). */
+    /** Measures from {@code from} to {@code to} in the active board's native panel or classic ruler dialog. */
     public void measureLineOfSight(int boardId, Coords from, Coords to) {
+        if (GpuBoardWindow.updateRuler(this, boardId, model -> model.measure(from, to, Entity.NONE, null))) { return; }
         RulerDialog ruler = rulers.get(boardId);
         if (ruler != null) {
             ruler.measure(from, to);
         }
     }
 
-    /** The height of the board's ruler point at {@code point}, as the GPU view's pointer shows it (RulerDialog). */
+    /** Sets the height of the active board's ruler point at {@code point}. */
     public void setRulerHeight(int boardId, Coords point, int height) {
+        if (GpuBoardWindow.updateRuler(this, boardId, model -> model.height(point, height))) { return; }
         RulerDialog ruler = rulers.get(boardId);
         if (ruler != null) {
             ruler.setHeight(point, height);
@@ -3873,7 +3879,6 @@ public class ClientGUI extends AbstractClientGUI
                           && boardViewsContainer.isClassicViewEnabled() && !GpuBoardWindow.isActiveFor(ClientGUI.this)
                           && GUIP.getMinimapEnabled());
                     miniMaps.put(boardId, minimap);
-                    rulers.put(boardId, new RulerDialog(frame, state, client.getGame()));
                 } catch (IOException ex) { throw new IllegalStateException("Could not initialize board presentation", ex); }
             }
             boardViewsContainer.updateMapTabs();
@@ -4516,8 +4521,15 @@ public class ClientGUI extends AbstractClientGUI
      * the specified file.
      */
     private void boardSave(Game game) {
-        if (curFileBoard == null) {
+        if (curFileBoard == null || game.getBoard().requiresNativeFormat()
+              && !megamek.common.board.BoardFile.isNativeName(curFileBoard.getName())) {
             boardSaveAs(game);
+            return;
+        }
+
+        if (game.getBoard().requiresNativeFormat() || megamek.common.board.BoardFile.isNativeName(curFileBoard.getName())) {
+            try { megamek.common.board.BoardFile.save(game.getBoard(), curFileBoard.toPath()); }
+            catch (IOException failure) { logger.error(failure, "Failed to save native board"); }
             return;
         }
 
@@ -4568,6 +4580,17 @@ public class ClientGUI extends AbstractClientGUI
         fc.setFileFilter(new BoardFileFilter());
         int returnVal = fc.showSaveDialog(frame);
         if ((returnVal != JFileChooser.APPROVE_OPTION) || (fc.getSelectedFile() == null)) {
+            return;
+        }
+        if (game.getBoard().requiresNativeFormat() || megamek.common.board.BoardFile.isNativeName(fc.getSelectedFile().getName())) {
+            java.nio.file.Path target = fc.getSelectedFile().toPath();
+            if (!megamek.common.board.BoardFile.isNativeName(target.toString())) {
+                target = target.resolveSibling(megamek.common.board.BoardFile.withoutExtension(target.getFileName().toString()) + ".board2");
+            }
+            if (java.nio.file.Files.exists(target) && JOptionPane.showConfirmDialog(frame,
+                  "Replace " + target.getFileName() + "?", "Save board", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) { return; }
+            try { megamek.common.board.BoardFile.save(game.getBoard(), target); curFileBoard = target.toFile(); }
+            catch (IOException failure) { logger.error(failure, "Failed to save native board"); }
             return;
         }
         curFileBoard = fc.getSelectedFile();
@@ -5147,6 +5170,7 @@ public class ClientGUI extends AbstractClientGUI
                 @Override public void keyPressed(java.awt.event.KeyEvent event) { state.chatKey(event); }
             });
             boardViews.put(state.getBoardId(), view);
+            rulers.computeIfAbsent(state.getBoardId(), id -> new RulerDialog(frame, state, client.getGame()));
             view.redrawAllEntities();
         } catch (IOException exception) { throw new IllegalStateException("Could not open the classic board", exception); }
     }

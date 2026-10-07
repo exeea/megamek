@@ -210,6 +210,8 @@ public class Terrain implements Serializable {
             if (vert) {
                 // Becomes South.
                 newExits |= 0x08;
+            } else {
+                newExits |= 0x01;
             }
         }
         // Is there a North-East exit?
@@ -243,6 +245,8 @@ public class Terrain implements Serializable {
             if (vert) {
                 // Becomes North.
                 newExits |= 0x01;
+            } else {
+                newExits |= 0x08;
             }
         }
         // Is there a South-West exit?

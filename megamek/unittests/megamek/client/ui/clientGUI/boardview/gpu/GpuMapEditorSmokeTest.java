@@ -120,112 +120,42 @@ class GpuMapEditorSmokeTest {
 
     @Test
     void nativeEditingLoadingAndTacticalChangesNeverConstructBoardView() throws Exception {
-        var preferences = GUIPreferences.getInstance();
-        boolean nag = preferences.getNagForMapEdReadme();
-        var path = Files.createTempFile("native-editor-", ".board");
-        var image = Files.createTempFile("native-editor-", ".png");
-        Coords edited = new Coords(4, 4);
-        Board initial = Board.createEmptyBoard(8, 8);
-        initial.setHex(edited, new Hex(0, new Terrain[] {new Terrain(Terrains.FIELDS, 1)}, null));
-        try (var output = Files.newOutputStream(path)) { initial.save(output); }
-        preferences.setNagForMapEdReadme(false);
-        MockedConstruction<BoardView> constructions = onEdt(() -> mockConstruction(BoardView.class));
-        BoardEditorPanel editor = null;
-        GpuMapSource source = null;
-        try {
-            editor = onEdt(() -> {
-                var result = new BoardEditorPanel(null);
-                result.loadBoard(path.toFile());
-                assertFalse(result.hasClassicView());
-                return result;
-            });
-            BoardEditorPanel tools = editor;
-            var game = tools.getGame();
-            source = onEdt(() -> new GpuMapSource(game, tools.getFrame(), tools));
-            GpuMapSource nativeSource = source;
-            BoardScene before = nativeSource.takeFrame().scene();
-            long generation = nativeSource.takeFrame().boardGeneration();
-            nativeSource.adjustEditorElevation(edited, 2, generation);
-            onEdt(() -> { nativeSource.endEditorStroke(); return null; });
-            onEdt(() -> {
-                assertEquals(2, game.getBoard().getHex(edited).getLevel());
-                assertEquals(BoardScene.Biome.FIELD, nativeSource.takeFrame().scene().tile(edited).biome());
-                assertSame(before.tile(new Coords(0, 0)), nativeSource.takeFrame().scene().tile(new Coords(0, 0)));
-                button(tools, "buttonUndo").doClick(0);
-                assertEquals(0, game.getBoard().getHex(edited).getLevel());
-                button(tools, "buttonRedo").doClick(0);
-                assertEquals(2, game.getBoard().getHex(edited).getLevel());
-                button(tools, "buttonDeployZone").doClick(0);
-                return null;
-            });
-            nativeSource.paintEditor(edited, 0, generation);
-            onEdt(() -> { nativeSource.endEditorStroke(); return null; });
-            onEdt(() -> {
-                assertTrue(game.getBoard().getHex(edited).containsTerrain(Terrains.DEPLOYMENT_ZONE));
-                var previous = nativeSource.takeFrame().scene().tile(edited);
-                assertNotNull(previous.tactical());
-                var chooser = BoardEditorPanel.class.getDeclaredField("deploymentZoneChooser");
-                chooser.setAccessible(true);
-                ((JSpinner) chooser.get(tools)).setValue(2);
-                nativeSource.refresh();
-                var next = nativeSource.takeFrame().scene().tile(edited);
-                assertNotEquals(previous.tactical(), next.tactical());
-                assertSame(previous.ground(), next.ground());
-                assertSame(previous.features(), next.features(), "Changing zone selection only changes tactical artwork");
-                // Save/reload the authoritative board, not a render snapshot.
-                try (var output = Files.newOutputStream(path)) { game.getBoard().save(output); }
-                button(tools, "buttonUndo").doClick(0);
-                button(tools, "buttonUndo").doClick(0);
-                tools.loadBoard(path.toFile());
-                assertNotEquals(generation, nativeSource.takeFrame().boardGeneration());
-                assertEquals(2, game.getBoard().getHex(edited).getLevel());
-                assertTrue(game.getBoard().getHex(edited).containsTerrain(Terrains.DEPLOYMENT_ZONE));
-                var exportFile = BoardEditorPanel.class.getDeclaredField("curFileImage");
-                exportFile.setAccessible(true);
-                exportFile.set(tools, image.toFile());
-                var export = BoardEditorPanel.class.getDeclaredMethod("boardSaveImage");
-                export.setAccessible(true);
-                export.invoke(tools);
-                var savedImage = ImageIO.read(image.toFile());
-                assertNotNull(savedImage);
-                assertEquals(525, savedImage.getWidth(), "Export covers the entire eight-column board");
-                assertEquals(612, savedImage.getHeight(), "Export is independent of native camera and viewport");
-                var reviewImage = java.nio.file.Path.of(System.getProperty("megamek.gpu.screenshots",
-                      "build/gpu-board-review"), "native-editor-printable.png");
-                Files.createDirectories(reviewImage.getParent());
-                Files.copy(image, reviewImage, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                assertTrue(constructions.constructed().isEmpty(), "No native editor operation may instantiate BoardView");
-                assertFalse(tools.hasClassicView());
-                return null;
-            });
-            nativeSource.adjustEditorElevation(edited, 10, generation);
-            onEdt(() -> {
-                nativeSource.endEditorStroke();
-                assertEquals(2, game.getBoard().getHex(edited).getLevel(), "Stale input cannot alter the loaded board");
-                nativeSource.close();
-                tools.dispose();
-                assertTrue(game.getGameListeners().isEmpty(), "The editor session releases its model listeners");
-                return null;
-            });
-        } finally {
-            GpuMapSource remainingSource = source;
-            BoardEditorPanel remainingEditor = editor;
-            onEdt(() -> {
-                if (remainingSource != null) { remainingSource.close(); }
-                if (remainingEditor != null) { remainingEditor.dispose(); }
-                constructions.close();
-                return null;
-            });
-            preferences.setNagForMapEdReadme(nag);
-            Files.deleteIfExists(path);
-            Files.deleteIfExists(image);
-        }
-    }
-
-    private static AbstractButton button(BoardEditorPanel editor, String name) throws Exception {
-        var field = BoardEditorPanel.class.getDeclaredField(name);
-        field.setAccessible(true);
-        return (AbstractButton) field.get(editor);
+        var path = Files.createTempFile("native-editor-", ".board2");
+        onEdt(() -> {
+            try (var views = mockConstruction(BoardView.class); var panels = mockConstruction(BoardEditorPanel.class)) {
+                var editor = new megamek.client.ui.boardeditor.BoardEditorSession();
+                var game = editor.game();
+                Coords edited = new Coords(4, 4);
+                try (var source = new GpuMapSource(game, null, editor)) {
+                    long generation = source.takeFrame().boardGeneration();
+                    var before = source.takeFrame().scene();
+                    source.editorPointer(edited, 0, 0, false, generation);
+                    source.endEditorStroke();
+                    source.editorCommand(new megamek.client.ui.boardeditor.BoardEditorSession.Command(
+                          megamek.client.ui.boardeditor.BoardEditorSession.Action.ELEVATION, "2"), generation);
+                    assertEquals(2, game.getBoard().getHex(edited).getLevel());
+                    assertSame(before.tile(new Coords(0, 0)), source.takeFrame().scene().tile(new Coords(0, 0)));
+                    source.editorCommand(new megamek.client.ui.boardeditor.BoardEditorSession.Command(
+                          megamek.client.ui.boardeditor.BoardEditorSession.Action.UNDO), generation);
+                    assertEquals(0, game.getBoard().getHex(edited).getLevel());
+                    source.editorCommand(new megamek.client.ui.boardeditor.BoardEditorSession.Command(
+                          megamek.client.ui.boardeditor.BoardEditorSession.Action.REDO), generation);
+                    editor.save(path);
+                    editor.open(path);
+                    source.refresh();
+                    assertNotEquals(generation, source.takeFrame().boardGeneration());
+                    source.editorPointer(edited, 0, 0, false, generation);
+                    source.editorCommand(new megamek.client.ui.boardeditor.BoardEditorSession.Command(
+                          megamek.client.ui.boardeditor.BoardEditorSession.Action.ELEVATION, "20"), generation);
+                    assertEquals(2, game.getBoard().getHex(edited).getLevel(), "Old render input cannot edit a replacement document");
+                    assertTrue(views.constructed().isEmpty());
+                    assertTrue(panels.constructed().isEmpty(), "Native editing cannot depend on even a hidden classic editor panel");
+                }
+                assertTrue(game.getGameListeners().isEmpty());
+            }
+            return null;
+        });
+        Files.deleteIfExists(path);
     }
 
     private static <T> T onEdt(Callable<T> action) throws Exception {

@@ -2,24 +2,11 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 
-import java.awt.Color;
 import java.awt.event.InputEvent;
 import java.io.File;
-import java.util.concurrent.Callable;
-import java.util.concurrent.FutureTask;
 import javax.swing.SwingUtilities;
 
-import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.board.Coords;
@@ -31,10 +18,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-/**
- * Line of sight stays MegaMek's Swing ruler (the user's decision of 2026-10-03): the menu's line of sight from an own
- * unit measures with it, and a measurement waiting for its second point is published for the plain second click.
- */
+/** Native measurement integration: menu ownership, endpoint heights, plain completion and legacy isolation. */
 @Timeout(120)
 class GpuLosResultTest {
     private static final Coords OWN = new Coords(5, 5);
@@ -73,61 +57,45 @@ class GpuLosResultTest {
         return fixture;
     }
 
-    /**
-     * The menu's line of sight from the own Atlas to a hex is the ruler's measurement between them, its target at the
-     * height the pointer showed when one did; none into the unit's own hex, from an enemy or off the board.
-     */
     @Test
-    void theMenusLineOfSightMeasuresWithTheRulerFromAnOwnUnit() throws Exception {
-        ClientGUI gui = mock(ClientGUI.class);
+    void menuMeasuresFromTheChosenOwnUnitAndRejectsInvalidEndpoints() throws Exception {
         try (GpuBoardFixture fixture = battle()) {
-            BoardClientState view = spy(fixture.view);
-            doReturn(gui).when(view).getClientgui();
-            GpuBoardSource source = onSwing(() -> new GpuBoardSource(view, () -> fixture.panel));
-            try {
-                GpuLosResult los = source.los();
-                los.lineOfSight(1, ENEMY, Float.NaN);
-                los.lineOfSight(1, OWN, Float.NaN);
-                los.lineOfSight(2, OWN, Float.NaN);
-                los.lineOfSight(1, new Coords(20, 20), Float.NaN);
-                SwingUtilities.invokeAndWait(() -> { });
-                verify(gui).measureLineOfSight(view.getBoardId(), OWN, ENEMY);
-                verify(gui, times(1)).measureLineOfSight(anyInt(), any(), any());
-                verify(gui, never()).setRulerHeight(anyInt(), any(), anyInt());
-                // A floor two levels up, where the pointer hit a building.
-                Coords floor = new Coords(5, 1);
-                los.lineOfSight(1, floor, 2 * BoardGeometry.level() + .1f);
-                SwingUtilities.invokeAndWait(() -> { });
-                verify(gui).measureLineOfSight(view.getBoardId(), OWN, floor);
-                verify(gui).setRulerHeight(view.getBoardId(), floor, 2);
-            } finally {
-                SwingUtilities.invokeAndWait(source::close);
-            }
+            GpuLosResult los = fixture.source.los();
+            los.lineOfSight(1, ENEMY, Float.NaN);
+            SwingUtilities.invokeAndWait(() -> { });
+            var result = fixture.source.takeFrame().panels().los();
+            assertEquals(OWN, result.start().coords());
+            assertEquals(1, result.start().entityId());
+            assertEquals(ENEMY, result.end().coords());
+            org.junit.jupiter.api.Assertions.assertTrue(result.entityBased());
+            los.lineOfSight(1, OWN, Float.NaN);
+            los.lineOfSight(2, OWN, Float.NaN);
+            los.lineOfSight(1, new Coords(20, 20), Float.NaN);
+            SwingUtilities.invokeAndWait(() -> { });
+            assertEquals(result, fixture.source.takeFrame().panels().los());
+            Coords floor = new Coords(5, 1);
+            los.lineOfSight(1, floor, 2 * BoardGeometry.level() + .1f);
+            SwingUtilities.invokeAndWait(() -> { });
+            assertEquals(2, fixture.source.takeFrame().panels().los().end().height());
+            org.junit.jupiter.api.Assertions.assertNull(fixture.view.getRuler(), "The Swing ruler receives no measurement");
+            org.junit.jupiter.api.Assertions.assertNull(fixture.view.getFirstLOS());
         }
     }
 
-    /**
-     * A measurement waiting for its second point is published with its modifier, Ctrl for MegaMek's line of sight and
-     * Alt for its ruler, so that a plain left click can end it (GpuHud.boardClick).
-     */
     @Test
-    void aMeasurementWaitingForItsSecondPointIsPublishedWithItsModifier() throws Exception {
+    void onlyAltClickStartsLosAndPlainClickCompletesItsPendingEndpoint() throws Exception {
         try (GpuBoardFixture fixture = battle()) {
+            fixture.source.measure(OWN, InputEvent.CTRL_DOWN_MASK, Float.NaN);
+            SwingUtilities.invokeAndWait(() -> { });
             assertEquals(0, pending(fixture));
-            SwingUtilities.invokeAndWait(() -> fixture.view.checkLOS(OWN));
-            assertEquals(InputEvent.CTRL_DOWN_MASK, pending(fixture), "A line of sight from its first point");
-            SwingUtilities.invokeAndWait(() -> fixture.view.checkLOS(ENEMY));
-            assertEquals(0, pending(fixture), "Its second point ends it");
-            ruler(fixture, OWN, null);
-            assertEquals(InputEvent.ALT_DOWN_MASK, pending(fixture), "A ruler with its start alone");
-            ruler(fixture, OWN, ENEMY);
-            assertEquals(0, pending(fixture), "A complete ruler waits for nothing");
+            fixture.source.measure(OWN, InputEvent.ALT_DOWN_MASK, Float.NaN);
+            SwingUtilities.invokeAndWait(() -> { });
+            assertEquals(InputEvent.ALT_DOWN_MASK, pending(fixture));
+            fixture.source.measure(ENEMY, 0, Float.NaN);
+            SwingUtilities.invokeAndWait(() -> { });
+            assertEquals(0, pending(fixture));
+            assertEquals(2, fixture.source.takeFrame().panels().los().distance());
         }
-    }
-
-    /** Draws MegaMek's ruler as the Swing ruler dialog does after a Ctrl or Alt click. */
-    private static void ruler(GpuBoardFixture fixture, Coords start, Coords end) throws Exception {
-        SwingUtilities.invokeAndWait(() -> fixture.view.drawRuler(start, end, Color.CYAN, Color.PINK));
     }
 
     private static Entity unit(String file, int id, Player owner) {
@@ -148,9 +116,4 @@ class GpuLosResultTest {
         return fixture.source.takeFrame().panels().los().pending();
     }
 
-    private static <T> T onSwing(Callable<T> action) throws Exception {
-        FutureTask<T> task = new FutureTask<>(action);
-        SwingUtilities.invokeAndWait(task);
-        return task.get();
-    }
 }

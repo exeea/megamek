@@ -39,11 +39,8 @@ import megamek.common.units.Entity;
 final class GpuHud implements GpuBoardHud {
     /** The prototype's spacing between stacked panels. */
     private static final float STACK = 12;
-    /** The minimap's top, and the top of panels beside the right column; it does not follow the gap. */
+    /** The top of larger overlays and panels beside the right column. */
     private static final float SECOND_ROW = 90;
-    private static final float RIGHT_TOP_WITHOUT_MAP = 94;
-    private static final float UTILITY_TOP = 18;
-    private static final float CHIP_TOP = 20;
     private static final float RIGHT_BOTTOM = 70;
     private static final float DOCK_BOTTOM = 30;
     private static final float HINT_BOTTOM = 7;
@@ -91,7 +88,7 @@ final class GpuHud implements GpuBoardHud {
         static Metrics of(float width, float height) {
             boolean compact = width <= 1500;
             boolean narrow = width <= 1350;
-            return new Metrics(width, height, narrow ? 16 : 20, narrow ? 250 : compact ? 270 : 300,
+            return new Metrics(width, height, GAP, narrow ? 250 : compact ? 270 : 300,
                   narrow ? 270 : compact ? 290 : 310, narrow ? 500 : compact ? 540 : 580,
                   narrow ? 310 : compact ? 340 : 380, narrow ? 270 : 300, compact, narrow, height <= 800);
         }
@@ -172,6 +169,7 @@ final class GpuHud implements GpuBoardHud {
     private final GpuBoardSource source;
     private final GpuHudKit kit;
     private final GpuContextMenu contextMenu;
+    private final GpuLosPanel losPanel;
     /** The board labels draw the leaders to the target cards as the cards placed themselves this frame. */
     private final GpuBoardLabels boardLabels;
     private final GpuTargetCards targetCards;
@@ -266,6 +264,7 @@ final class GpuHud implements GpuBoardHud {
         contextMenu = new GpuContextMenu(kit, source, state, this::select);
         GpuNameplates nameplates = new GpuNameplates(kit, source, state);
         targetCards = new GpuTargetCards(kit, source, state, contextMenu);
+        losPanel = new GpuLosPanel(kit.ui, stage, source, camera);
         GpuPhaseHeader phaseHeader = new GpuPhaseHeader(kit, source, state);
         GpuInitiativeCard initiativeCard = new GpuInitiativeCard(kit, source, state);
         GpuConditionsCard conditionsCard = new GpuConditionsCard(kit, source, state);
@@ -291,7 +290,7 @@ final class GpuHud implements GpuBoardHud {
         GpuPlayersPanel players = new GpuPlayersPanel(kit, source, state);
         GpuToastStack toasts = new GpuToastStack(kit, source, state);
         modal = new GpuModalDialog(kit, source, state);
-        List<Component> parts = new ArrayList<>(List.of(nameplates, boardLabels, targetCards, phaseHeader,
+        List<Component> parts = new ArrayList<>(List.of(nameplates, boardLabels, targetCards, losPanel, phaseHeader,
               initiativeCard, conditionsCard, forces, unitCard, recordSheet, utilities, hint, minimap, contacts,
               weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, toasts, modal));
 
@@ -300,7 +299,7 @@ final class GpuHud implements GpuBoardHud {
         northSlot = slot(labels, utilities.north());
         // The unit panel's hover card and slot popover share the popover layer with the context menu.
         List<Container<Actor>> spanning = new ArrayList<>(List.of(slot(labels, boardLabels.fx()),
-              slot(labels, nameplates.actor()), slot(labels, boardLabels.actor()), slot(labels, targetCards.actor()),
+              slot(labels, nameplates.actor()), slot(labels, boardLabels.actor()), slot(labels, targetCards.actor()), slot(labels, losPanel.actor()),
               slot(popover, unitCard.overlay()), slot(popover, recordSheet.overlay()),
               slot(popover, contextMenu.actor())));
         phaseSlot = panel(panels, phaseHeader.actor()).top().left().fillX();
@@ -571,6 +570,7 @@ final class GpuHud implements GpuBoardHud {
     public void focusLost() {
         state.altHeld = false;
         consumedKeys.clear();
+        losPanel.dismiss();
     }
 
     private Set<KeyCommandBind> binds(int awt, int modifiers) {
@@ -622,7 +622,7 @@ final class GpuHud implements GpuBoardHud {
             state.chatOpen = false;
         } else if (picking(inputs)) {
             source.players().endPick(false);
-        } else if (dock.cancel() || recordSheet.cancel()) {
+        } else if (losPanel.cancel() || dock.cancel() || recordSheet.cancel()) {
             // The sheet's step: its popover, the expanded weapon row, then the sheet (U3).
             return true;
         } else if (weapons.cancel()) {
@@ -684,7 +684,7 @@ final class GpuHud implements GpuBoardHud {
         } else if (binds.contains(KeyCommandBind.BOT_COMMANDS)) {
             state.toggle(GpuHudState.Dialog.PLAYERS);
         } else if (binds.contains(KeyCommandBind.LOS_SETTING)) {
-            // View > Ruler / LOS Tool: MegaMek's ruler, which line of sight stays (the user's decision of 2026-10-03).
+            // View > Ruler / LOS Tool opens the native measurement panel.
             BoardScene.Command ruler = GpuBoardActions.menuItem(inputs.frame().globalCommands(),
                   ClientGUI.VIEW_LOS_SETTING);
             if (ruler != null && ruler.enabled()) {
@@ -781,7 +781,7 @@ final class GpuHud implements GpuBoardHud {
      * A short board click (C.4) on {@code coords} and the unit {@code unitId} picked there ({@code Entity.NONE} for
      * none), at screen pixel ({@code x}, {@code y}), with the world height of the terrain the pointer hit
      * ({@code pointedZ}; NaN on a unit, or in the Tactical View). A right click opens the context menu and never
-     * changes orders; Ctrl or Alt keeps MegaMek's measurement tools, measuring at the pointed height, and a plain left
+     * changes orders; Alt opens the native LOS ruler at the pointed height, and a plain left
      * click ends a measurement waiting for its second point with that measurement's modifier;
      * while a bot order picks hexes, a left click picks one, as the classic board's click does.
      */
@@ -813,6 +813,7 @@ final class GpuHud implements GpuBoardHud {
         GamePhase phase = status.phase();
         boolean own = unit != null && unit.side() == GpuBattleStatus.Side.OWN;
         boolean shift = (modifiers & InputEvent.SHIFT_DOWN_MASK) != 0;
+        boolean control = (modifiers & InputEvent.CTRL_DOWN_MASK) != 0;
         if (!status.myTurn() || state.turnLocked(status)) {
             // Outside the local turn, and in it with the selection cleared: a unit is selected or inspected, a hex
             // does nothing.
@@ -820,10 +821,10 @@ final class GpuHud implements GpuBoardHud {
                 select(unit.id());
             }
         } else if (planning(inputs)) {
-            // As in the prototype, a hex plans the route (Shift pins it), and so does Shift on a unit, except on an
-            // own unit before a route exists.
-            if (unit == null || shift && (!own || !data.move().route().isEmpty())) {
-                source.moves().planTo(coords, inputs.frame().scene().boardId(), shift);
+            if (shift) {
+                source.moves().faceToward(coords, inputs.frame().scene().boardId());
+            } else if (unit == null || control) {
+                source.moves().planTo(coords, inputs.frame().scene().boardId(), control);
             } else {
                 select(unit.id());
             }
@@ -899,21 +900,17 @@ final class GpuHud implements GpuBoardHud {
         }
     }
 
-    /** Window pixels left of the unobstructed board: the left column and its two gaps (rebuild plan A.1 A5). */
     @Override
-    public float cameraLeft() {
-        return (2 * metrics.gap() + leftWidth()) * scale;
+    public float framingLeft() { return (2 * metrics.gap() + leftWidth()) * scale; }
+
+    @Override
+    public float framingWidth() {
+        return Math.max(1, (metrics.width() - 4 * metrics.gap() - leftWidth() - rightWidth()) * scale);
     }
 
     /** The left column's width: the grid's while the unit sheet or the forces grid is open (unit panel design 3.6). */
     private float leftWidth() {
         return state.forcesGrid || GpuRecordSheet.open(state) && !state.overview ? metrics.grid() : metrics.left();
-    }
-
-    /** Window pixels between the left and right columns and their gaps. */
-    @Override
-    public float cameraWidth() {
-        return Math.max(1, (metrics.width() - 4 * metrics.gap() - leftWidth() - rightWidth()) * scale);
     }
 
     /** The right column's width: the log's while it is open (r1 3.15). */
@@ -981,11 +978,13 @@ final class GpuHud implements GpuBoardHud {
         // Right column: utilities, minimap, contacts / weapons / log, solution card, chat button.
         float utilityWidth = utilitySlot.getPrefWidth();
         float utilityLeft = width - gap - utilityWidth;
-        place(utilitySlot, utilityLeft, UTILITY_TOP, utilityWidth, utilitySlot.getPrefHeight());
+        float utilityHeight = utilitySlot.getPrefHeight();
+        place(utilitySlot, utilityLeft, gap, utilityWidth, utilityHeight);
+        float rightStart = gap + utilityHeight + gap;
         float minimapHeight = height(minimapSlot);
-        place(minimapSlot, width - gap - m.right(), SECOND_ROW, m.right(), minimapHeight);
+        place(minimapSlot, width - gap - m.right(), rightStart, m.right(), minimapHeight);
         float rightWidth = rightWidth();
-        float rightTop = minimapHeight > 0 ? SECOND_ROW + minimapHeight + STACK : RIGHT_TOP_WITHOUT_MAP;
+        float rightTop = minimapHeight > 0 ? rightStart + minimapHeight + gap : rightStart;
         float solutionHeight = height(solutionSlot);
         boolean beside = solutionHeight > 0
               && height - rightTop - RIGHT_BOTTOM - solutionHeight - STACK < SOLUTION_ROOM;
@@ -1026,7 +1025,7 @@ final class GpuHud implements GpuBoardHud {
         float chipRight = utilityLeft - STACK;
         float chipWidth = chipSlot.getPrefWidth();
         chipSlot.setVisible(chipRight - chipLeft >= chipWidth);
-        place(chipSlot, centred(chipWidth, chipLeft, chipRight), CHIP_TOP, chipWidth, height(chipSlot));
+        place(chipSlot, centred(chipWidth, chipLeft, chipRight), gap, chipWidth, height(chipSlot));
         // The north mark stays centred under the chip's place, whether or not the chip has room (G4).
         float northWidth = northSlot.getPrefWidth();
         place(northSlot, (width - northWidth) / 2, GpuUtilityBar.NORTH_TOP, northWidth, northSlot.getPrefHeight());

@@ -77,7 +77,9 @@ final class GpuHelpDialog implements GpuHud.Component {
     /** The mouse gestures, which no bind names: the message keys of each gesture and of what it does. */
     private static final List<Pair> MOUSE = List.of(
           new Pair("GpuBoard.hud.mouse.leftClick", "GpuBoard.hud.help.leftClick"),
+          new Pair("GpuBoard.hud.mouse.ctrlClick", "GpuBoard.hud.help.ctrlClick"),
           new Pair("GpuBoard.hud.mouse.shiftLeftClick", "GpuBoard.hud.help.shiftLeftClick"),
+          new Pair("GpuBoard.hud.mouse.altClick", "GpuBoard.hud.help.altClick"),
           new Pair("GpuBoard.hud.mouse.rightDrag", "GpuBoard.hud.hint.pan"),
           new Pair("GpuBoard.hud.mouse.orbitDrag", "GpuBoard.hud.help.orbit"),
           new Pair("GpuBoard.hud.mouse.shortRightClick", "GpuBoard.hud.help.shortRightClick"),

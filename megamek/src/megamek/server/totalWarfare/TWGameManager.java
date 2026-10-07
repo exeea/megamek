@@ -25557,7 +25557,7 @@ public class TWGameManager extends AbstractGameManager {
                     getBoardSizesInDir(query_file, sizes);
                 } else {
                     try {
-                        if (filename.endsWith(".board")) {
+                        if (megamek.common.board.BoardFile.isBoardName(filename)) {
                             BoardDimensions size = Board.getSize(query_file);
                             if (size == null) {
                                 throw new Exception();

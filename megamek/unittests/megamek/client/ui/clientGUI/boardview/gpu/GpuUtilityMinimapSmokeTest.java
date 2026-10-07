@@ -515,7 +515,8 @@ class GpuUtilityMinimapSmokeTest {
               text("GpuBoard.hud.hint.zoom"), "T", text("GpuBoard.hud.util.backTo3d")), GpuHintLine.items(tactical));
         GpuHud.Inputs planning = parts.update(scene, fixture, move(), GpuReportLog.Snapshot.EMPTY, false, 1920, 1080);
         assertEquals(List.of(text("GpuBoard.hud.mouse.leftClick"), text("GpuBoard.hud.hint.selectPlan"),
-              text("GpuBoard.hud.mouse.shiftClick"), text("GpuBoard.hud.hint.waypoint"),
+              text("GpuBoard.hud.mouse.ctrlClick"), text("GpuBoard.hud.hint.waypoint"),
+              text("GpuBoard.hud.mouse.shiftClick"), text("GpuBoard.hud.hint.orientation"),
               text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.pan"),
               text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit"), "WASD QE",
               text("GpuBoard.hud.hint.camera")),

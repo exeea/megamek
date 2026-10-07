@@ -9,7 +9,6 @@ import java.util.Set;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -22,36 +21,33 @@ import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
-import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuHudState.Dialog;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiMenuList;
+import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.common.board.Coords;
 
 /**
- * The HUD over the board editor's 3D view and the lobby's map preview, whose sources have no game (M1 row 13). At the
- * top right the battle HUD's utilities that apply to a map: the Tactical View, the wireframe view, in the editor its
- * menu bar, Tools and 2D Editor, and the developer tuning panel. At the bottom the hovered or inspected hex's card
- * over a hint line: the editor's title or what the preview's measurement waits for, and the keys of the editor, of
- * Free Flight or of the preview's line of sight.
+ * Native map workspace: the standalone editor uses UIKit panels; previews use a corner hex card and native LOS.
+ * Both presentations share the camera utilities and developer tuning panel.
  */
 final class GpuMapHud implements GpuBoardHud {
-    /** The hint line's widest text, in stage units. */
-    private static final float HINT_WIDTH = 760;
     /** The hex card's width, in stage units. */
     private static final float CARD_WIDTH = 320;
-    /** The space between the hex card and the hint line. */
-    private static final float CARD_GAP = 8;
 
     private final Stage stage;
+    private final GpuBoardEditor editor;
     private final BoardSource source;
     private final BoardCamera camera;
     private final GpuBoardTuning tuningModel;
     private final GpuHudKit kit;
     private final GpuHudState state;
     private final GpuTuningPanel tuning;
+    private final Container<Actor> tuningSlot;
     private final Table top = new Table();
     private final Table utilityRow = new Table();
     private final UiButton tactical;
@@ -63,21 +59,21 @@ final class GpuMapHud implements GpuBoardHud {
     private final Container<Table> menuSlot;
     private final GpuCommandTree tree;
     private final Table bottom = new Table();
-    private final Table hint;
-    private final List<Label> lines;
-    /** The hovered or inspected hex's card (GpuMapSource.hexCard), over the hint line. */
+    private final GpuLosPanel losPanel;
+    private final UiPopover contextMenu;
+    private long boardGeneration;
+    /** The hovered or inspected hex's card in the bottom-right corner. */
     private final Table hexCard;
     /** The card's text as last laid out. */
     private String shownCard = "";
     private GpuHud.Metrics metrics;
     private float scale = 1;
+    private BoardScene scene;
     private boolean narrowShown;
-    /** The hint's texts as last laid out. */
-    private List<String> shownHint = List.of();
 
     /** {@code tuningModel} is the model the board view reads; {@code history} the view's (no game plays here). */
     GpuMapHud(BoardSource source, Skin skin, Batch batch, BoardCamera camera, GpuBoardTuning tuningModel,
-          GpuPlaybackHistory history) {
+          GpuPlaybackHistory history, java.util.function.Supplier<GpuTerrain> terrain) {
         this.source = source;
         this.camera = camera;
         this.tuningModel = tuningModel;
@@ -86,48 +82,44 @@ final class GpuMapHud implements GpuBoardHud {
         state = new GpuHudState(history);
         stage = new Stage(new ScreenViewport(), batch);
 
+        cameraButton("top", "hex", "Top view", () -> camera.setIsometric(false));
+        cameraButton("isometric", "layers", "Isometric view", () -> camera.setIsometric(true));
+        cameraButton("fit", "expand", "Fit board", () -> {
+            if (scene != null) { camera.fit(scene, framingLeft(), framingWidth(), framingBottom(), framingTop()); }
+        });
         tactical = utility(GpuUtilityBar.utility(ui, "tactical", "GpuBoard.hud.util.tactical", "utility-tactical"));
-        onChange(tactical, () -> camera.setTactical(!camera.tactical(), null));
+        onChange(tactical, () -> camera.setTactical(!camera.tactical(), scene));
         wireframe = utility(GpuUtilityBar.utility(ui, "wireframe", "GpuBoard.hud.util.wireframe",
               "utility-wireframe"));
         onChange(wireframe, () -> tuningModel.setWireframe(!tuningModel.wireframe()));
         UiButton menuButton = null;
-        if (source.isEditor()) {
-            // Only the editor has menus (its menu bar), Tools and a 2D editor; a map preview has none of them.
-            menuButton = utility(GpuUtilityBar.utility(ui, "menu", "GpuBoard.hud.menu.title", "utility-menu"));
-            onChange(menuButton, () -> state.toggle(Dialog.MENU));
-            UiButton tools = utility(GpuUtilityBar.utility(ui, "settings", "BoardEditor.tools", "editor-tools"));
-            onChange(tools, source::showEditorTools);
-            UiButton classic = utility(GpuUtilityBar.utility(ui, "map", "BoardEditor.edit2D", "editor-2d"));
-            onChange(classic, source::showClassicEditor);
-        }
         menu = menuButton;
         tuning = new GpuTuningPanel(kit, source, state, camera, tuningModel);
         utility((UiButton) tuning.button());
-        wide = ui.skin.get("hud-utility", TextButton.TextButtonStyle.class);
-        narrow = ui.skin.get("hud-utility-narrow", TextButton.TextButtonStyle.class);
+        wide = ui.skin.get(source.isEditor() ? "hud-utility-small" : "hud-utility", TextButton.TextButtonStyle.class);
+        narrow = ui.skin.get(source.isEditor() ? "hud-utility-small" : "hud-utility-narrow", TextButton.TextButtonStyle.class);
 
         top.setFillParent(true);
+        utilityRow.setName("map-utilities");
         top.setTouchable(Touchable.childrenOnly);
         top.top().right().add(utilityRow);
         stage.addActor(top);
-        Container<Actor> tuningSlot = new Container<>(tuning.actor()).fill();
+        tuningSlot = new Container<>(tuning.actor()).fill();
         tuningSlot.setFillParent(true);
         tuningSlot.setTouchable(Touchable.childrenOnly);
         stage.addActor(tuningSlot);
 
-        // Presses pass through the hint line to the board, as through the battle HUD's.
-        hint = ui.panel();
-        hint.setName("map-hint");
-        hint.pad(8, 14, 9, 14);
-        lines = List.of(hintLine(ui, "hud-medium", 12.5f, UiTheme.TEXT),
-              hintLine(ui, "hud-small", 11.5f, UiTheme.MUTED));
         hexCard = ui.panel();
         hexCard.setName("map-hex");
         bottom.setFillParent(true);
         bottom.setTouchable(Touchable.disabled);
-        bottom.bottom();
+        bottom.bottom().right();
         stage.addActor(bottom);
+        losPanel = new GpuLosPanel(ui, stage, source, camera);
+        stage.addActor(losPanel.actor());
+        contextMenu = new UiPopover(ui);
+        contextMenu.setName("map-context-menu");
+        stage.addActor(contextMenu);
 
         Table dialog = ui.dialog(Messages.getString("GpuBoard.hud.menu.title"), () -> state.dialog = Dialog.NONE);
         dialog.setName("menu-panel");
@@ -137,19 +129,39 @@ final class GpuMapHud implements GpuBoardHud {
         menuSlot = new Container<>(dialog).fill();
         stage.addActor(menuSlot);
         metrics = GpuHud.Metrics.of(stage.getWidth(), stage.getHeight());
+        editor = source.isEditor() ? new GpuBoardEditor(source, ui, stage, terrain) : null;
+        if (editor != null) {
+            UiButton settings = utility(ui.button("hud-utility", "settings", "Settings", null));
+            settings.setName("editor-settings-button");
+            onChange(settings, () -> { state.dialog = Dialog.NONE; editor.openSettings(); });
+            onChange(tuning.button(), editor::closeSettings);
+        }
+        top.toFront(); tuningSlot.toFront();
     }
 
     private UiButton utility(UiButton button) {
-        utilityRow.add(button).padLeft(utilities.isEmpty() ? 0 : GpuUtilityBar.GAP);
+        if (source.isEditor()) {
+            button.setStyle(kit.ui.skin.get("hud-utility-small", TextButton.TextButtonStyle.class));
+            button.clearChildren();
+            button.icons.forEach(icon -> button.add(icon).size(14));
+            button.add(button.getLabel()).padLeft(5);
+        }
+        float gap = utilityRow.getCells().isEmpty() ? 0 : GpuUtilityBar.GAP;
+        var cell = utilityRow.add(button).padLeft(gap);
+        if (source.isEditor()) { cell.height(GpuBoardEditor.TOOLBAR_HEIGHT); }
         utilities.add(button);
         return button;
     }
 
-    private static Label hintLine(UiKit ui, String font, float size, Color color) {
-        Label line = ui.label("", font, size, color);
-        line.setWrap(true);
-        line.setAlignment(Align.center);
-        return line;
+    private void cameraButton(String name, String icon, String caption, Runnable action) {
+        UiButton button = kit.ui.button("hud-utility-small", icon, "", null);
+        button.setName("map-view-" + name);
+        button.clearChildren(); button.pad(0);
+        button.icons.forEach(image -> button.add(image).size(19));
+        float gap = utilityRow.getCells().isEmpty() ? 0 : GpuUtilityBar.GAP;
+        utilityRow.add(button).size(GpuBoardEditor.TOOLBAR_HEIGHT).padLeft(gap);
+        kit.ui.tip(button).getActor().setText(caption);
+        onChange(button, () -> { stage.setKeyboardFocus(null); action.run(); });
     }
 
     @Override
@@ -159,33 +171,68 @@ final class GpuMapHud implements GpuBoardHud {
 
     @Override
     public void resize(int width, int height, float displayScale) {
-        scale = displayScale;
-        ((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / displayScale);
+        // Keep the complete editing workspace usable when a large desktop UI scale meets a smaller window.
+        scale = editor == null ? displayScale : Math.min(displayScale, Math.min(width / 1280f, height / 800f));
+        ((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / scale);
         stage.getViewport().update(width, height, true);
         metrics = GpuHud.Metrics.of(stage.getWidth(), stage.getHeight());
         top.pad(metrics.gap(), 0, 0, metrics.gap());
-        bottom.padBottom(metrics.gap());
-        shownHint = List.of();
+        bottom.padBottom(metrics.gap()).padRight(metrics.gap());
+        losPanel.actor().setSize(metrics.width(), metrics.height());
         shownCard = "";
+        layoutEditor();
+    }
+
+    private void layoutEditor() {
+        if (editor != null) { editor.layout(metrics.width(), metrics.height(), utilityRow.getPrefWidth(), utilityRow.getPrefHeight()); }
     }
 
     @Override
     public void update(BoardSource.Frame frame, GpuHud.HudView view, GpuBoardWindow.DialogRequest dialog,
           BoardSource.UiPreferences preferences) {
+        scene = frame.scene();
+        if (boardGeneration != frame.boardGeneration()) { contextMenu.cancel(); }
+        boardGeneration = frame.boardGeneration();
+        // Only an open menu pins the hex card; every dismissal path returns it to the latest hover.
+        if (!contextMenu.isVisible() && frame.context() != null) { source.inspect(null); }
         if (narrowShown != metrics.narrow()) {
             narrowShown = metrics.narrow();
             utilities.forEach(utility -> utility.setStyle(narrowShown ? narrow : wide));
+            layoutEditor();
         }
         tactical.pressed(camera.tactical());
         wireframe.pressed(tuningModel.wireframe()).setDisabled(!GpuWireframe.supported());
         if (menu != null) { menu.pressed(state.dialog == Dialog.MENU); }
         tuning.update(new GpuHud.Inputs(frame, view, dialog, preferences, metrics, List.of()));
+        if (state.dialog == Dialog.TUNING) { tuningSlot.toFront(); }
         showMenu(frame.globalCommands());
-        String keys = camera.firstPerson() ? Messages.getString("GpuBoard.firstPersonHelp")
-              : Messages.getString(source.isEditor() ? "BoardEditor.edit3DHelp" : "GpuBoard.preview.measureHelp");
-        showCard(frame.tooltip());
-        showHint(List.of(source.phaseStatus().text(), keys));
+        List<com.badlogic.gdx.math.Rectangle> occupied = new ArrayList<>();
+        if (editor == null) {
+            showCard(frame.tooltip());
+            bottom.validate();
+            top.validate();
+            var bounds = hexCard.localToStageCoordinates(new Vector2());
+            if (hexCard.hasChildren()) {
+                occupied.add(new com.badlogic.gdx.math.Rectangle(bounds.x, bounds.y, hexCard.getWidth(), hexCard.getHeight()));
+            }
+        } else {
+            editor.update(frame.boardGeneration());
+            // Keep the shared ruler in the editor's board area, clear of its tools, inspector and hex section.
+            float left = GpuBoardEditor.LIBRARY_WIDTH + 2 * GAP;
+            float right = metrics.width() - GpuBoardEditor.INSPECTOR_WIDTH - 2 * GAP;
+            occupied.add(new com.badlogic.gdx.math.Rectangle(0, 0, left, metrics.height()));
+            occupied.add(new com.badlogic.gdx.math.Rectangle(right, 0, metrics.width() - right, metrics.height()));
+            occupied.add(new com.badlogic.gdx.math.Rectangle(left, 0, right - left, editor.bottomInset()));
+            occupied.add(new com.badlogic.gdx.math.Rectangle(left, metrics.height() - editor.topInset(),
+                  right - left, editor.topInset()));
+        }
+        top.validate();
+        var bounds = utilityRow.localToStageCoordinates(new Vector2());
+        occupied.add(new com.badlogic.gdx.math.Rectangle(bounds.x, bounds.y, utilityRow.getWidth(), utilityRow.getHeight()));
+        losPanel.update(new GpuHud.Inputs(frame, view, dialog, preferences, metrics, occupied));
     }
+
+    boolean measuring() { return losPanel.pending(); }
 
     /** The map's menus as the battle HUD's Menu panel lists a game's; choosing an item closes the panel. */
     private void showMenu(List<BoardScene.Command> commands) {
@@ -204,23 +251,6 @@ final class GpuMapHud implements GpuBoardHud {
         float width = Math.min(UiKit.DIALOG_WIDTH, metrics.width() - 2 * metrics.gap());
         float height = Math.min(menuSlot.getActor().getPrefHeight(), metrics.height() - UiKit.DIALOG_MARGIN);
         menuSlot.setBounds((metrics.width() - width) / 2, (metrics.height() - height) / 2, width, height);
-    }
-
-    /** The hint line's non-empty texts, one row each; laid out again only when a text changes. */
-    private void showHint(List<String> texts) {
-        if (texts.equals(shownHint)) {
-            return;
-        }
-        shownHint = texts;
-        hint.clearChildren();
-        float width = Math.min(HINT_WIDTH, metrics.width() - 2 * metrics.gap()) - 28;
-        for (int index = 0; index < texts.size(); index++) {
-            if (!texts.get(index).isEmpty()) {
-                lines.get(index).setText(texts.get(index));
-                hint.add(lines.get(index)).width(width).row();
-            }
-        }
-        layoutBottom();
     }
 
     /**
@@ -260,15 +290,11 @@ final class GpuMapHud implements GpuBoardHud {
               : new String[] { row.substring(0, column), row.substring(column + 1) };
     }
 
-    /** The bottom stack: the hex card over the hint line, each only while it shows something. */
+    /** Keep the inspected hex in the bottom-right corner, clear of the board centre. */
     private void layoutBottom() {
         bottom.clearChildren();
         if (hexCard.hasChildren()) {
-            bottom.add(hexCard).width(Math.min(CARD_WIDTH, metrics.width() - 2 * metrics.gap())).padBottom(CARD_GAP)
-                  .row();
-        }
-        if (hint.hasChildren()) {
-            bottom.add(hint);
+            bottom.add(hexCard).width(Math.min(CARD_WIDTH, metrics.width() - 2 * metrics.gap())).row();
         }
     }
 
@@ -299,8 +325,14 @@ final class GpuMapHud implements GpuBoardHud {
     /** Esc closes the open menu or tuning panel; the open menu takes its list keys. */
     @Override
     public boolean keyDown(int key, int awt, int modifiers) {
+        if (isTextEditing()) { return stage.keyDown(key); }
+        if (contextMenu.isVisible()) {
+            if (key == Input.Keys.ESCAPE) { contextMenu.cancel(); return true; }
+            return stage.keyDown(key);
+        }
+        if (key == Input.Keys.ESCAPE && editor != null && editor.escape()) { return true; }
         if (state.dialog == Dialog.NONE) {
-            return false;
+            return key == Input.Keys.ESCAPE && losPanel.cancel();
         }
         if (key == Input.Keys.ESCAPE) {
             state.dialog = Dialog.NONE;
@@ -311,7 +343,7 @@ final class GpuMapHud implements GpuBoardHud {
 
     @Override
     public boolean keyUp(int key, int awt) {
-        return state.dialog != Dialog.NONE && stage.keyUp(key);
+        return (isTextEditing() || contextMenu.isVisible() || state.dialog != Dialog.NONE) && stage.keyUp(key);
     }
 
     @Override
@@ -321,27 +353,56 @@ final class GpuMapHud implements GpuBoardHud {
 
     @Override
     public void focusLost() {
+        stage.cancelTouchFocus();
+        losPanel.dismiss();
+        contextMenu.cancel();
+        stage.setKeyboardFocus(null);
     }
 
     @Override
     public void boardPress() {
         stage.setKeyboardFocus(null);
+        contextMenu.cancel();
+    }
+
+    /** Map actions are anchored to the clicked hex; preview and editor share view controls and the native ruler. */
+    void boardMenu(Coords coords, float pointedZ, int x, int y) {
+        if (scene == null || coords == null || scene.tile(coords) == null) { return; }
+        source.inspect(coords);
+        UiMenuList list = new UiMenuList(kit.ui);
+        if (editor != null) { editor.contextTools(list, contextMenu::cancel); }
+        long generation = boardGeneration;
+        Integer height = Float.isNaN(pointedZ) ? null : GpuLosResult.pointedHeight(scene.tile(coords).elevation(), pointedZ);
+        list.item("Line of Sight", "Alt + click", null, false, true, () -> {
+            contextMenu.cancel();
+            source.changeRuler(generation, model -> { model.clear(); model.addPoint(coords, height); });
+        }).setName("map-line-of-sight");
+        if (editor != null) {
+            editor.contextActions(list, contextMenu::cancel, () -> { state.dialog = Dialog.NONE; editor.openSettings(); });
+        }
+        contextMenu.header("Hex " + coords.getBoardNum(), null).content(list);
+        Vector2 at = stage.screenToStageCoordinates(new Vector2(x, y));
+        contextMenu.showAt(at.x, at.y);
     }
 
     @Override
-    public float cameraLeft() {
-        return 0;
+    public float framingLeft() { return editor == null ? 0 : (GpuBoardEditor.LIBRARY_WIDTH + 2 * GAP) * scale; }
+
+    @Override
+    public float framingWidth() {
+        return Math.max(1, metrics.width() * scale - framingLeft()
+              - (editor == null ? 0 : (GpuBoardEditor.INSPECTOR_WIDTH + 2 * GAP) * scale));
     }
 
-    /** The window's width beside the editor's Swing tools, which cover its right edge. */
-    @Override
-    public float cameraWidth() {
-        return Math.max(1, metrics.width() * scale * (1 - Math.max(0, source.toolsInset())));
-    }
+    @Override public float framingBottom() { return editor == null ? 0 : editor.bottomInset() * scale; }
+    @Override public float framingTop() { return editor == null ? 0 : editor.topInset() * scale; }
 
     @Override
     public void dispose() {
+        if (editor != null) { editor.dispose(); }
         tuning.dispose();
+        losPanel.dispose();
+        contextMenu.cancel(); contextMenu.remove();
         stage.dispose();
         kit.dispose();
     }

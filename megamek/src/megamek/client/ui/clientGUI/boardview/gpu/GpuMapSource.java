@@ -7,24 +7,20 @@ import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import javax.swing.JFrame;
-import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
 import megamek.client.ui.Messages;
-import megamek.client.ui.boardeditor.BoardEditorPanel;
+import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
-import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.RulerDialog;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.util.UIUtil;
 import megamek.codeUtilities.StringUtility;
 import megamek.common.Hex;
@@ -50,16 +46,9 @@ final class GpuMapSource implements BoardSource {
 
     private final Game game;
     private final Window owner;
-    /**
-     * A preview's line of sight instrument, made at its first measurement: a board state over the preview's game, whose
-     * ruler line the scene draws, and MegaMek's ruler on it (the user's decision of 2026-10-03).
-     */
-    private BoardClientState measuring;
-    private RulerDialog ruler;
-    /** The measurement the scene's ruler line shows, and that line. */
-    private List<?> measured = List.of();
-    private BoardTactical rulerLine = BoardTactical.EMPTY;
-    private final BoardEditorPanel editor;
+    /** EDT-owned measurement; map previews and battles share the same model and native panel. */
+    private RulerModel ruler;
+    private final BoardEditorSession editor;
     /** Only Swing owns the active brush stroke; render input carries the board generation it picked. */
     private Board editorStrokeBoard;
     /** Swing combines wheel ticks between captures; releasing Ctrl commits the shared editor undo entry. */
@@ -70,9 +59,9 @@ final class GpuMapSource implements BoardSource {
     private volatile EditorBrush editorBrush = new EditorBrush(null, -1, List.of());
 
     private final BoardArtwork artwork = new BoardArtwork();
+    private volatile List<String> editorThemes = artwork.themes();
     private final BoardScene.PixelPool images = new BoardScene.PixelPool();
     private final GpuAtmosphereControls atmosphere;
-    private final GpuMenuCommands menus;
     private final Timer timer;
     private final BoardListenerAdapter boardListener = new BoardListenerAdapter() {
         @Override public void boardNewBoard(BoardEvent event) {
@@ -108,34 +97,23 @@ final class GpuMapSource implements BoardSource {
     private BoardTactical editorTerrain = BoardTactical.EMPTY;
     private boolean terrainDirty = true;
     private Rectangle dirtyHexes;
-    private long overlayRevision = -1;
     private long boardGeneration;
-    private volatile Frame frame;
+    private record Publication(Frame frame, BoardEditorSession.Snapshot editor) { }
+    private volatile Publication publication;
+    /** Render-thread latch: selection and geometry must describe the same EDT capture for the entire frame. */
+    private Publication rendering;
     private volatile UiPreferences uiPreferences = UiPreferences.capture();
     private volatile PhaseStatus phaseStatus = new PhaseStatus("", false);
     private volatile Coords hoverCoords;
     private Coords contextCoords;
     private volatile boolean closed;
-    private volatile java.awt.Dimension viewport = new java.awt.Dimension(1, 1);
-    /** EDT-measured width of the editor's Swing tools over the native window's right edge. */
-    private volatile int toolsWidth;
-    public void setViewport(int width, int height, int pixelWidth, int pixelHeight) {
-        viewport = new java.awt.Dimension(Math.max(1, width), Math.max(1, height));
-    }
-
-    @Override
-    public float toolsInset() {
-        java.awt.Dimension size = viewport;
-        return size.width <= 1 ? -1 : toolsWidth / (float) size.width;
-    }
-
-    GpuMapSource(Game game, Window owner, BoardEditorPanel editor) {
+    GpuMapSource(Game game, Window owner, BoardEditorSession editor) {
         if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
+        if (editor != null && editor.game() != game) { throw new IllegalArgumentException("The editor owns its Game"); }
         this.game = game;
         this.owner = owner;
         this.editor = editor;
         atmosphere = new GpuAtmosphereControls(() -> owner, game::getBoard, game::getPlanetaryConditions, () -> closed);
-        menus = new GpuMenuCommands(() -> closed, this::refresh);
         timer = new Timer(33, event -> refresh());
         try {
             refresh();
@@ -167,10 +145,9 @@ final class GpuMapSource implements BoardSource {
             dirtyAll();
             atmosphere.reset();
         }
-        boolean overlaysChanged = editor != null && overlayRevision != editor.overlayRevision();
-        if (terrainDirty || dirtyHexes != null || overlaysChanged) {
+        if (terrainDirty || dirtyHexes != null) {
             if (terrainDirty) { terrainMarkers.clear(); }
-            Rectangle area = terrainDirty || overlaysChanged ? new Rectangle(0, 0, board.getWidth(), board.getHeight())
+            Rectangle area = terrainDirty ? new Rectangle(0, 0, board.getWidth(), board.getHeight())
                   : dirtyHexes.intersection(new Rectangle(0, 0, board.getWidth(), board.getHeight()));
             List<BoardScene.Tile> next = terrainDirty
                   ? new ArrayList<>(Collections.nCopies(board.getWidth() * board.getHeight(), null)) : new ArrayList<>(tiles);
@@ -190,10 +167,6 @@ final class GpuMapSource implements BoardSource {
                             else { terrainMarkers.put(coords, markers); }
                         }
                     }
-                    if (editor != null) {
-                        tile = tile.withTactical(images.captureOverlay(editor.captureOverlay(coords),
-                              previous == null ? null : previous.tactical()));
-                    }
                     next.set(index, tile.equals(previous) ? previous : tile);
                 }
             }
@@ -204,21 +177,23 @@ final class GpuMapSource implements BoardSource {
             images.retain(tiles);
             terrainDirty = false;
             dirtyHexes = null;
-            overlayRevision = editor == null ? -1 : editor.overlayRevision();
+
         }
         Coords hover = hoverCoords;
-        if (editor != null) { editorBrush = new EditorBrush(hover, boardGeneration, editor.elevationBrush(hover)); }
-        phaseStatus = new PhaseStatus(editor == null ? measuringStatus() : editor.getFrame().getTitle(), false);
+        if (editor != null) { editorBrush = new EditorBrush(hover, boardGeneration, editor.brush(hover)); }
+        RulerModel.Snapshot measurement = ruler == null ? RulerModel.Snapshot.NONE : ruler.capture();
+        phaseStatus = new PhaseStatus(editor == null ? measuringStatus(measurement) : editor.title(), false);
         Coords inspected = contextCoords == null ? hover : contextCoords;
         String tooltip = inspected == null || !board.contains(inspected) ? "" : hexCard(board.getHex(inspected));
         BoardScene scene = new BoardScene(0, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(),
               Entity.NONE, "", List.of(), null, List.of(), List.of(), List.of(),
-              measuring == null ? editorTerrain : rulerLine());
-        toolsWidth = editor == null ? 0 : editor.tools3DWidth();
-        frame = new Frame(scene, List.of(), contextCoords == null ? null : new BoardScene.Context(contextCoords, List.of()),
-              editor == null ? List.of() : menus.capture(editor.getMenuBar(), editor::getMenuBar, () -> true), tooltip,
-              editor == null ? new BoardFocus(0, null) : editor.focusRequest(), boardGeneration, "",
-              atmosphere.settings(game.getPlanetaryConditions(), board.isSpace()));
+              editorTerrain.withRuler(measurement.ruler()));
+        Frame nextFrame = new Frame(scene, List.of(), contextCoords == null ? null : new BoardScene.Context(contextCoords, List.of()),
+              List.of(), tooltip,
+              new BoardFocus(0, null), boardGeneration, "",
+              atmosphere.settings(game.getPlanetaryConditions(), board.isSpace()),
+              GpuReportLog.Snapshot.EMPTY, GpuBattleStatus.Snapshot.EMPTY, GpuHudData.EMPTY.withLos(measurement));
+        publication = new Publication(nextFrame, editor == null ? null : editor.snapshot());
     }
 
     @Override
@@ -227,16 +202,18 @@ final class GpuMapSource implements BoardSource {
         if (closed) { return; }
         megamek.common.util.ImageUtil.reloadImages();
         artwork.reload();
+        editorThemes = artwork.themes();
         images.clear();
         dirtyAll();
         refresh();
     }
 
+    @Override public List<String> editorThemes() { return editorThemes; }
     private void dirtyAll() { terrainDirty = true; artwork.clear(); }
     private static void onSwing(Runnable action) {
         if (SwingUtilities.isEventDispatchThread()) { action.run(); } else { SwingUtilities.invokeLater(action); }
     }
-    public Frame takeFrame() { return frame; }
+    public Frame takeFrame() { rendering = publication; return rendering.frame(); }
     public UiPreferences uiPreferences() { return uiPreferences; }
     public PhaseStatus phaseStatus() { return phaseStatus; }
     public GpuAtmosphereControls atmosphere() { return atmosphere; }
@@ -246,11 +223,11 @@ final class GpuMapSource implements BoardSource {
 
     public void key(int keyCode, boolean down, int modifiers) {
         onSwing(() -> {
-            if (!closed && editor != null && down && !editor.shouldIgnoreHotKeys()
+            if (!closed && editor != null && down
                   && keyCode != KeyEvent.VK_SHIFT && keyCode != KeyEvent.VK_CONTROL
                   && keyCode != KeyEvent.VK_ALT && keyCode != KeyEvent.VK_META) {
                 finishEditorStroke();
-                GpuMenuCommands.menuShortcut(editor.getMenuBar(), KeyStroke.getKeyStroke(keyCode, modifiers));
+                editor.key(keyCode, modifiers, owner);
                 refresh();
             }
         });
@@ -294,98 +271,87 @@ final class GpuMapSource implements BoardSource {
     @Override
     public void measure(Coords coords, int modifiers, float pointedZ) {
         onSwing(() -> {
-            if (closed || editor != null || coords == null || !board.contains(coords)) {
+            if (closed || coords == null || !board.contains(coords)) {
                 return;
             }
-            int measurement = GpuBoardSource.isMeasurement(modifiers) ? modifiers
-                  : measuring == null ? 0 : GpuLosResult.pending(measuring);
-            if (measurement != 0 && measuring() != null) {
-                measuring.mouseAction(coords, BoardClientState.BOARD_HEX_CLICK, measurement, 1);
-                if (!Float.isNaN(pointedZ)) {
-                    ruler.setHeight(coords, GpuLosResult.pointedHeight(board.getHex(coords), pointedZ));
-                }
+            if (ruler == null) { ruler = new RulerModel(game, 0, null); }
+            int measurement = GpuBoardSource.isMeasurement(modifiers) ? modifiers : ruler.capture().pending();
+            if (measurement != 0) {
+                finishEditorStroke();
+                ruler.addPoint(coords, Float.isNaN(pointedZ) ? null
+                      : GpuLosResult.pointedHeight(board.getHex(coords), pointedZ));
                 refresh();
             }
         });
     }
 
-    /** EDT: the preview's measuring board state with its ruler, made the first time; null when it cannot be made. */
-    private BoardClientState measuring() {
-        if (measuring == null) {
-            try {
-                measuring = new BoardClientState(game, null, null, 0, null);
-            } catch (IOException failure) {
-                LOGGER.error("The preview's line of sight could not start", failure);
-                return null;
-            }
-            JFrame frame = null;
-            for (Window window = owner; window != null && frame == null; window = window.getOwner()) {
-                frame = window instanceof JFrame classic ? classic : null;
-            }
-            ruler = new RulerDialog(frame, measuring, game);
-            // The native preview window would cover it; the battle window raises its client's ruler the same way.
-            ruler.setAlwaysOnTop(true);
-        }
-        return measuring;
+    @Override
+    public void changeRuler(long generation, java.util.function.Consumer<RulerModel> action) {
+        onSwing(() -> {
+            if (closed || generation != boardGeneration || board != game.getBoard()) { return; }
+            if (ruler == null) { ruler = new RulerModel(game, 0, null); }
+            action.accept(ruler);
+            refresh();
+        });
     }
 
-    /** The ruler's line, crosshairs and line of sight hexes as the scene draws them, captured when they change. */
-    private BoardTactical rulerLine() {
-        List<?> now = Arrays.asList(measuring.getRuler(), measuring.getFirstLOS());
-        if (!now.equals(measured)) {
-            measured = now;
-            rulerLine = measuring.captureTacticalGeometry();
-        }
-        return rulerLine;
+    private String measuringStatus(RulerModel.Snapshot measurement) {
+        return measurement.pending() == 0 ? "" : Messages.getString("GpuBoard.hud.hint.completeLos");
     }
 
-    /** The preview's status line: what a measurement waiting for its second point needs, else nothing. */
-    private String measuringStatus() {
-        int pending = measuring == null ? 0 : GpuLosResult.pending(measuring);
-        return pending == 0 ? "" : Messages.getString(pending == InputEvent.CTRL_DOWN_MASK
-              ? "GpuBoard.hud.hint.completeLos" : "GpuBoard.hud.hint.completeDistance");
-    }
+    private void closeMeasuring() { ruler = null; }
 
-    /** Ends the preview's measurement with its ruler; the next one starts afresh. */
-    private void closeMeasuring() {
-        if (measuring != null) {
-            ruler.dispose();
-            measuring.close();
-            measuring = null;
-            ruler = null;
-            measured = List.of();
-            rulerLine = BoardTactical.EMPTY;
-        }
-    }
+    public BoardEditorSession.Snapshot editorState() { return (rendering == null ? publication : rendering).editor(); }
 
-    public void showEditorTools() {
-        SwingUtilities.invokeLater(() -> {
-            if (!closed && editor != null) {
-                editor.show3DTools();
+    public void editorCommand(BoardEditorSession.Command command, long generation) {
+        onSwing(() -> {
+            if (!closed && editor != null && generation == boardGeneration && board == game.getBoard()) {
+                finishEditorStroke();
+                editor.command(command, owner);
+                refresh();
             }
         });
     }
 
-    public void showClassicEditor() {
-        SwingUtilities.invokeLater(() -> {
-            if (!closed && editor != null) {
-                GpuBoardWindow.toggleEditor(editor);
-            }
-        });
-    }
-
-    /** Route picked hexes to the shared editor operation, rejecting input from a replaced board. */
-    public void paintEditor(Coords coords, int modifiers, long generation) {
-        SwingUtilities.invokeLater(() -> {
-            if (!closed && editor != null && generation == boardGeneration && board == game.getBoard()
-                  && coords != null && board.contains(coords) && !editor.shouldIgnoreHotKeys()) {
-                if (editorElevationStroke) {
-                    finishEditorStroke();
-                }
+    public void editorValue(BoardEditorSession.Command command, boolean finished, long generation) {
+        onSwing(() -> {
+            if (!closed && editor != null && generation == boardGeneration && board == game.getBoard()) {
+                if (editorElevationStroke) { finishEditorStroke(); }
                 editorStrokeBoard = board;
-                editor.paintIn3D(coords, modifiers);
+                editor.command(command, owner, true);
+                // The existing capture timer publishes drag previews at most once per tick. Capturing every
+                // mouse event backs up the EDT with intermediate values the renderer cannot display anyway.
+                if (finished) { finishEditorStroke(); refresh(); }
             }
         });
+    }
+
+    /** Reject pointer input from a board that has been replaced since the render frame was captured. */
+    public void editorPointer(Coords coords, double x, double y, boolean drag, long generation) {
+        editorPointer(coords, x, y, drag, null, generation);
+    }
+
+    public void editorPointer(Coords coords, double x, double y, boolean drag, String object, long generation) {
+        editorPointer(coords, x, y, drag, object, false, generation);
+    }
+
+    public void editorPointer(Coords coords, double x, double y, boolean drag, String object, boolean additive, long generation) {
+        editorPointer(coords, x, y, drag, object, additive, "ground", generation);
+    }
+
+    public void editorPointer(Coords coords, double x, double y, boolean drag, String object, boolean additive, String receiver, long generation) {
+        onSwing(() -> {
+            if (!closed && editor != null && generation == boardGeneration && board == game.getBoard()
+                  && coords != null && board.contains(coords)) {
+                if (editorElevationStroke) { finishEditorStroke(); }
+                editorStrokeBoard = board;
+                editor.pointer(coords, x, y, drag, object, additive, receiver);
+            }
+        });
+    }
+
+    public void paintEditor(Coords coords, int modifiers, long generation) {
+        editorPointer(coords, 0, 0, false, generation);
     }
 
     public List<Coords> editorBrush(Coords center, long generation) {
@@ -398,7 +364,7 @@ final class GpuMapSource implements BoardSource {
         SwingUtilities.invokeLater(() -> {
             if (!closed && editor != null && generation == boardGeneration && board == game.getBoard()
                   && coords != null && board.contains(coords) && levels != 0) {
-                List<Coords> brush = editor.elevationBrush(coords);
+                List<Coords> brush = editor.brush(coords);
                 if (brush.isEmpty()) {
                     return;
                 }
@@ -436,7 +402,7 @@ final class GpuMapSource implements BoardSource {
         editorElevationStroke = false;
         if (editorStrokeBoard != null) {
             if (editorStrokeBoard == game.getBoard()) {
-                editor.finishBrushStroke();
+                editor.finishStroke();
             }
             editorStrokeBoard = null;
         }
@@ -454,7 +420,7 @@ final class GpuMapSource implements BoardSource {
         if (board != null) { board.removeBoardListener(boardListener); }
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferences);
         GUIPreferences.getInstance().removePreferenceChangeListener(preferences);
-        artwork.clear();
+        artwork.close();
         images.clear();
         tiles = List.of();
     }

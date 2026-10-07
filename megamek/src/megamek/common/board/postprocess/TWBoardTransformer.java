@@ -131,7 +131,7 @@ public class TWBoardTransformer {
                   || (mapSettings.getMedium() == MapSettings.MEDIUM_SPACE)) {
                 sheetBoards[i] = BoardUtilities.generateRandom(mapSettings);
             } else {
-                sheetBoards[i].load(new MegaMekFile(Configuration.boardsDir(), name + ".board").getFile());
+                sheetBoards[i].load(new MegaMekFile(Configuration.boardsDir(), megamek.common.board.BoardFile.fileName(name)).getFile());
                 BoardUtilities.flip(sheetBoards[i], isRotated, isRotated);
             }
         }

@@ -212,7 +212,17 @@ final class GpuMovePlan implements AutoCloseable {
 
     /** G9: turns the final facing one hexside, left for a negative {@code direction}. */
     void turn(int direction) {
-        command(md -> face(md, direction));
+        command(md -> face(md, (md.getPlannedMovement().getFinalFacing() + (direction < 0 ? 5 : 1)) % 6));
+    }
+
+    /** Orient the route's endpoint toward the clicked hex, preserving its destination and pinned waypoints. */
+    void faceToward(Coords hex, int boardId) {
+        command(md -> {
+            MovePath path = md.getPlannedMovement();
+            if (hex != null && boardId == path.getFinalBoardId() && !hex.equals(path.getFinalCoords())) {
+                face(md, path.getFinalCoords().direction(hex));
+            }
+        });
     }
 
     /** G10: an explicit mode, or automatic movement when it is the mode already. */
@@ -357,19 +367,17 @@ final class GpuMovePlan implements AutoCloseable {
      * one of the computed path from the last pin that ends on the destination in the new facing, and the route plus a
      * turn at the destination. Neither legal: the facing stays, with a toast.
      */
-    private void face(MovementDisplay md, int direction) {
+    private void face(MovementDisplay md, int wanted) {
         MovePath path = md.getPlannedMovement();
+        if (wanted == path.getFinalFacing() || !available(md, MoveCommand.MOVE_TURN)) { return; }
         boolean route = path.length() > base(path);
-        int wanted = (path.getFinalFacing() + ((direction < 0) ? 5 : 1)) % 6;
         Entry before = entry(md);
         Mode mode = mode(md);
         MovePath reroute = (route && (mode != Mode.JUMP)) ? reroute(md, path, wanted) : null;
         if ((reroute != null) && cheaper(reroute, path, wanted, mode)) {
             md.plotPath(reroute);
-        } else if (direction < 0) {
-            md.turnLeft();
         } else {
-            md.turnRight();
+            md.faceToward(path.getFinalCoords().translated(wanted), path.getFinalBoardId());
         }
         MovePath after = md.getPlannedMovement();
         if ((after.getFinalFacing() != wanted) || !after.isMoveLegal()

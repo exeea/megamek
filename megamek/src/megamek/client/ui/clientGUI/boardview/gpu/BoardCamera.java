@@ -72,6 +72,7 @@ final class BoardCamera {
     /** Screen composition only: focus remains the world-space orbit pivot in the unobstructed board area. */
     private float viewOffsetPixels;
     private float viewLeftPixels;
+    private float viewBottomPixels, viewTopPixels, viewVerticalOffset;
     private long revision;
     private float rotationStart;
     private float rotationSweep;
@@ -296,6 +297,8 @@ final class BoardCamera {
         viewableWidth(availableWidth);
     }
 
+    private float viewHeight() { return Math.max(1, camera.viewportHeight - viewBottomPixels - viewTopPixels); }
+
     /** Move the orbit pivot to the usable area's center without moving the displayed board. */
     void viewableWidth(float availableWidth) {
         float offset = (camera.viewportWidth - MathUtils.clamp(availableWidth, 1, camera.viewportWidth)) / 2 - viewLeftPixels;
@@ -497,6 +500,7 @@ final class BoardCamera {
         Vector3 origin = camera.position.cpy();
         if (!camera.perspective) {
             origin.mulAdd(new Vector3(camera.direction).crs(camera.up).nor(), -viewOffsetPixels * camera.zoom);
+            origin.mulAdd(camera.up, -viewVerticalOffset * camera.zoom);
         }
         Ray ray = new Ray(origin, camera.perspective ? new Vector3(focus).sub(origin) : camera.direction);
         BoardGeometry.Hit hit = terrainHit.apply(ray);
@@ -677,20 +681,20 @@ final class BoardCamera {
         }
         if (!centered && minX >= -width * camera.zoom / 2
               && maxX <= width * camera.zoom / 2
-              && minY >= -camera.viewportHeight * camera.zoom / 2 && maxY <= camera.viewportHeight * camera.zoom / 2) {
+              && minY >= -viewHeight() * camera.zoom / 2 && maxY <= viewHeight() * camera.zoom / 2) {
             return new Pose(focus.cpy(), camera.zoom, azimuth, tilt);
         }
-        float margin = Math.min(FRAMING_MARGIN_PIXELS * displayScale, Math.min(width, camera.viewportHeight) * .2f);
+        float margin = Math.min(FRAMING_MARGIN_PIXELS * displayScale, Math.min(width, viewHeight()) * .2f);
         float zoom = Math.max(minimumZoom, Math.max((maxX - minX) / (width - 2 * margin),
-              (maxY - minY) / (camera.viewportHeight - 2 * margin)));
+              (maxY - minY) / (viewHeight() - 2 * margin)));
         float x = (minX + maxX) / 2;
         float y = (minY + maxY) / 2;
         if (!centered) {
             // Clamp the current pivot to the interval that fits the route, rather than centering it.
             x = MathUtils.clamp(0, maxX - (width / 2 - margin) * zoom,
                   minX + (width / 2 - margin) * zoom);
-            y = MathUtils.clamp(0, maxY - (camera.viewportHeight / 2 - margin) * zoom,
-                  minY + (camera.viewportHeight / 2 - margin) * zoom);
+            y = MathUtils.clamp(0, maxY - (viewHeight() / 2 - margin) * zoom,
+                  minY + (viewHeight() / 2 - margin) * zoom);
         }
         return new Pose(new Vector3(origin).mulAdd(right, x).mulAdd(up, y), zoom, bearing, inclination);
     }
@@ -717,8 +721,8 @@ final class BoardCamera {
         }
         Vector3 pivot = new Vector3(focus).mulAdd(right, (minX + maxX) / 2).mulAdd(up, (minY + maxY) / 2);
         pivot.mulAdd(outward, (plane - pivot.z) / outward.z);
-        float margin = Math.min(FRAMING_MARGIN_PIXELS * displayScale, Math.min(width, camera.viewportHeight) * .2f);
-        float halfWidth = width / 2 - margin, halfHeight = camera.viewportHeight / 2 - margin;
+        float margin = Math.min(FRAMING_MARGIN_PIXELS * displayScale, Math.min(width, viewHeight()) * .2f);
+        float halfWidth = width / 2 - margin, halfHeight = viewHeight() / 2 - margin;
         float focalLength = camera.viewportHeight / (2 * (float) Math.tan(Math.toRadians(camera.fieldOfView / 2)));
         float distancePerZoom = camera.distance() / camera.zoom;
         float distance = Math.max(camera.near, minimumZoom * distancePerZoom);
@@ -730,7 +734,7 @@ final class BoardCamera {
             Vector3 relative = new Vector3(point).sub(pivot);
             float depth = relative.dot(outward);
             float horizontal = Math.abs(focalLength * relative.dot(right) - viewOffsetPixels * depth) / halfWidth;
-            float vertical = Math.abs(focalLength * relative.dot(up)) / halfHeight;
+            float vertical = Math.abs(focalLength * relative.dot(up) - viewVerticalOffset * depth) / halfHeight;
             distance = Math.max(distance, depth + Math.max(camera.near * 2, Math.max(horizontal, vertical)));
         }
         if (!centered) {
@@ -754,8 +758,10 @@ final class BoardCamera {
                   + (halfWidth - viewOffsetPixels) * depth / focalLength);
             upperX = Math.min(upperX, x + halfWidth * distance / focalLength
                   - (halfWidth + viewOffsetPixels) * depth / focalLength);
-            if (!restrict(vertical, halfHeight * slope - focalLength, halfHeight * (distance - depth) - focalLength * y)
-                  || !restrict(vertical, halfHeight * slope + focalLength, halfHeight * (distance - depth) + focalLength * y)
+            if (!restrict(vertical, (halfHeight - viewVerticalOffset) * slope - focalLength,
+                  halfHeight * (distance - depth) - focalLength * y + viewVerticalOffset * depth)
+                  || !restrict(vertical, (halfHeight + viewVerticalOffset) * slope + focalLength,
+                        halfHeight * (distance - depth) + focalLength * y - viewVerticalOffset * depth)
                   || !restrict(vertical, slope, distance - depth - 2 * camera.near)) { return null; }
         }
         if (!restrict(vertical, 2 * halfWidth * slope / focalLength, upperX - lowerX)) { return null; }
@@ -780,7 +786,7 @@ final class BoardCamera {
         if (new Vector3(point).sub(camera.position).dot(camera.direction) <= camera.near) { return false; }
         Vector3 screen = camera.project(new Vector3(point), 0, 0, camera.viewportWidth, camera.viewportHeight);
         return screen.x >= viewLeftPixels && screen.x <= viewLeftPixels + width
-              && screen.y >= 0 && screen.y <= camera.viewportHeight;
+              && screen.y >= viewBottomPixels && screen.y <= camera.viewportHeight - viewTopPixels;
     }
 
     private void animateTo(Pose target, float plane, boolean animate) {
@@ -884,12 +890,26 @@ final class BoardCamera {
         zoom(factor);
         float difference = before - camera.zoom;
         moveOnBoard((x - camera.viewportWidth / 2 + viewOffsetPixels) * difference,
-              (y - camera.viewportHeight / 2) * difference);
+              (y - camera.viewportHeight / 2 + viewVerticalOffset) * difference);
         constrainPan();
         update();
     }
 
     void fit(BoardScene scene) {
+        fit(scene, scene.tiles());
+    }
+
+    /** Explicit Fit board snapshots panel clearance; subsequent panel changes never update this camera state. */
+    void fit(BoardScene scene, float left, float width, float bottom, float top) {
+        viewBottomPixels = bottom;
+        viewTopPixels = top;
+        viewVerticalOffset = (top - bottom) / 2;
+        viewableArea(left, width);
+        fit(scene);
+    }
+
+    /** Frame a displayed subset with the same projection and height bounds as a complete board. */
+    void fit(BoardScene scene, List<BoardScene.Tile> shown) {
         boardColumns = scene.width();
         boardRows = scene.height();
         setFirstPerson(false);
@@ -903,12 +923,8 @@ final class BoardCamera {
         if (camera.perspective) {
             List<Vector3> points = new ArrayList<>();
             float floor = BoardGeometry.floor(scene) / BoardGeometry.level();
-            for (BoardScene.Tile tile : scene.tiles()) {
-                float top = tile.elevation();
-                for (BoardScene.Feature feature : tile.features()) {
-                    top = Math.max(top, tile.elevation() + feature.elevation() + feature.height());
-                }
-                addHex(points, tile.coords(), floor, top);
+            for (BoardScene.Tile tile : shown) {
+                addHex(points, tile.coords(), floor, fitTop(tile));
             }
             if (!points.isEmpty()) {
                 var pose = perspectiveFit(points, camera.viewportWidth - 2 * (viewOffsetPixels + viewLeftPixels),
@@ -925,11 +941,8 @@ final class BoardCamera {
         float maxX = Float.NEGATIVE_INFINITY;
         float maxY = Float.NEGATIVE_INFINITY;
         float floor = BoardGeometry.floor(scene) / BoardGeometry.level();
-        for (BoardScene.Tile tile : scene.tiles()) {
-            float top = tile.elevation();
-            for (BoardScene.Feature feature : tile.features()) {
-                top = Math.max(top, tile.elevation() + feature.elevation() + feature.height());
-            }
+        for (BoardScene.Tile tile : shown) {
+            float top = fitTop(tile);
             for (int corner = 0; corner < 6; corner++) {
                 for (float elevation : new float[] { top, floor }) {
                     Vector3 point = BoardGeometry.corner(tile.coords(), elevation, corner).sub(focus);
@@ -944,8 +957,39 @@ final class BoardCamera {
         }
         moveOnBoard((minX + maxX) / 2, (minY + maxY) / 2);
         camera.zoom = Math.max((maxX - minX) / Math.max(1, camera.viewportWidth - 2 * (viewOffsetPixels + viewLeftPixels)),
-              (maxY - minY) / camera.viewportHeight) * 1.05f;
+              (maxY - minY) / viewHeight()) * 1.05f;
         update();
+    }
+
+    /** Initial framing uses nominal heights before meshes load; support placement still uses the actual geometry. */
+    private static float fitTop(BoardScene.Tile tile) {
+        float top = tile.elevation();
+        for (var feature : tile.features()) {
+            float base = tile.elevation(), height = feature.height();
+            var object = feature.decoration();
+            if (object != null) {
+                var placement = object.placement();
+                if (placement.mode().equals("absolute")) {
+                    base = placement.level().floatValue();
+                } else {
+                    String receiver = placement.receiver().terrain();
+                    for (var support : tile.features()) {
+                        if (support.decoration() != null) { continue; }
+                        boolean matches = switch (receiver) {
+                            case "bridge" -> support.asset().equals("bridge");
+                            case "building" -> support.kind() == BoardScene.FeatureKind.BUILDING;
+                            case "industrial" -> support.kind() == BoardScene.FeatureKind.INDUSTRIAL;
+                            default -> false;
+                        };
+                        if (matches) { base = Math.max(base, tile.elevation() + support.elevation() + support.height()); }
+                    }
+                    base += placement.offset().floatValue();
+                }
+                height *= feature.scale();
+            }
+            top = Math.max(top, base + feature.elevation() + height);
+        }
+        return top;
     }
 
     void pan(float dx, float dy) {
@@ -958,7 +1002,7 @@ final class BoardCamera {
         stopFraming();
         fitToWindow = false;
         if (camera.perspective) {
-            float x = camera.viewportWidth / 2 - viewOffsetPixels, y = camera.viewportHeight / 2;
+            float x = camera.viewportWidth / 2 - viewOffsetPixels, y = camera.viewportHeight / 2 - viewVerticalOffset;
             Vector3 before = pointOnPlane(x, y, focus.z);
             Vector3 after = pointOnPlane(x + dx, y - dy, focus.z);
             if (before != null && after != null) { focus.add(before.sub(after)); }
@@ -970,18 +1014,22 @@ final class BoardCamera {
     }
 
     /**
-     * Keep the usable screen's orbit pivot over the board. Inset the jagged hex perimeter just enough to keep
+     * Keep the full viewport's center over the board, including the area behind HUD panels. Inset the hex perimeter to keep
      * every point in the allowed rectangle on the map, including its corners at close zoom. All edge hexes remain
      * reachable. Clamping each world axis separately lets a drag slide along an edge and reverse immediately.
      */
     private void constrainPan() {
         if (boardColumns <= 0 || boardRows <= 0) { return; }
+        // The orbit pivot belongs to the unobstructed area; constrain the viewport center on its ground plane.
+        float dx = viewOffsetPixels * camera.zoom, dy = viewVerticalOffset * camera.zoom;
+        moveOnBoard(dx, dy);
         float width = BoardGeometry.width(), height = BoardGeometry.height();
         // Stay just inside the silhouette, avoiding round-off on an exact outer edge when projecting a distant eye.
         float inset = Math.min(width, height) * .001f;
         focus.x = MathUtils.clamp(focus.x, width * .25f + inset, boardColumns * width * .75f - inset);
         focus.y = MathUtils.clamp(focus.y, -boardRows * height + inset,
               (boardColumns == 1 ? 0 : -height * .5f) - inset);
+        moveOnBoard(-dx, -dy);
     }
 
     /** Screen coordinates use the bottom-left origin, without relying on a global graphics viewport. */
@@ -1085,6 +1133,7 @@ final class BoardCamera {
         if (!firstPerson) {
             camera.position.set(camera.direction).scl(-distance).add(focus);
             camera.position.mulAdd(new Vector3(camera.direction).crs(camera.up).nor(), viewOffsetPixels * camera.zoom);
+            camera.position.mulAdd(camera.up, viewVerticalOffset * camera.zoom);
         }
         // Perspective depth precision falls with the square of distance over the near plane: keep the near plane a
         // fiftieth of the way to the pivot, so depth comparisons (occluded outlines, text, fog edges) stay exact there

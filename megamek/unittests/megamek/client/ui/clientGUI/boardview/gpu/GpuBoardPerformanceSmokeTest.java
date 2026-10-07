@@ -20,6 +20,8 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
+import java.util.stream.Collectors;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
@@ -160,11 +162,32 @@ class GpuBoardPerformanceSmokeTest {
                         report("edit-capture", start);
                         scene = overlayPresentation(fixture.source.takeFrame().scene());
                         start = System.nanoTime();
-                        terrain.update(scene);
+                        updateWithTimeline(terrain, scene, "edit-terrain");
                         report("edit-terrain", start);
                         start = System.nanoTime();
                         tactical.update(scene);
                         report("edit-overlay", start);
+                        // The frame after each edit, for comparing an atlas or mesh change pixel for pixel.
+                        File screens = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
+                        screens.mkdirs();
+                        draw(terrain, camera);
+                        GpuBoardTestUi.capture(new File(screens, "performance-edit.png"));
+                        // A planting edit changes trees but no ground, water, level, road or structure.
+                        start = System.nanoTime();
+                        SwingUtilities.invokeAndWait(() -> {
+                            Coords planted = new Coords(size / 2 + 1, size / 2);
+                            Hex woods = board.getHex(planted).duplicate();
+                            woods.addTerrain(new Terrain(Terrains.WOODS, 1));
+                            board.setHex(planted, woods);
+                            fixture.source.refresh();
+                        });
+                        report("woods-capture", start);
+                        scene = overlayPresentation(fixture.source.takeFrame().scene());
+                        start = System.nanoTime();
+                        updateWithTimeline(terrain, scene, "woods-terrain");
+                        report("woods-terrain", start);
+                        draw(terrain, camera);
+                        GpuBoardTestUi.capture(new File(screens, "performance-woods.png"));
                         if (size <= 32) {
                             start = System.nanoTime();
                             BoardSurface.tune(new BoardSurface.Tuning(original.fallsOffBoard(), original.bottomlessLevels(),
@@ -581,6 +604,29 @@ class GpuBoardPerformanceSmokeTest {
                 ((Timer) field.get(fixture.source)).stop();
             } catch (ReflectiveOperationException error) { throw new IllegalStateException(error); }
         });
+    }
+
+    /**
+     * Drives an update to completion with the editor's frame slice, printing the wall time of every stage the
+     * terrain reports, so an edit's cost can be read per stage rather than as one number.
+     */
+    private static void updateWithTimeline(GpuTerrain terrain, BoardScene scene, String name) {
+        long stageStart = System.nanoTime();
+        String stage = "";
+        terrain.update(scene, null);
+        while (terrain.busy()) {
+            terrain.refine(null, true);
+            String current = terrain.buildDetails().stream()
+                  .map(status -> status.section() + ":" + status.step().task()).collect(Collectors.joining(" "));
+            if (!current.equals(stage)) {
+                long now = System.nanoTime();
+                if (!stage.isEmpty()) { System.out.printf("PERF %s stage %-48s %8.1f ms%n", name, stage, (now - stageStart) / 1e6); }
+                stage = current;
+                stageStart = now;
+            }
+            if (terrain.busy()) { LockSupport.parkNanos(200_000); }
+        }
+        System.out.printf("PERF %s stage %-48s %8.1f ms%n", name, stage.isEmpty() ? "(done)" : stage, (System.nanoTime() - stageStart) / 1e6);
     }
 
     private static void report(String name, long start) {

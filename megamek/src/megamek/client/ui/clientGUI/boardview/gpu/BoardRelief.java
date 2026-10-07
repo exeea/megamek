@@ -1209,6 +1209,8 @@ final class BoardRelief {
         final Vector3 bandNormal;
         final float length;
         final boolean profiled;
+        /** An internal seam between joined, level tops has no exposed relief of its own. */
+        final boolean levelJoin;
         /** Two graded roads meet across this edge; see {@link #gate(Site, Site)}. */
         final boolean gate;
         final boolean fixedSampling;
@@ -1227,6 +1229,7 @@ final class BoardRelief {
         final float drop;
 
         Edge(Corner first, Corner second, Site one, Site other) {
+            levelJoin = joined(one, other);
             boolean shore = one != null && other != null && one.liquid() != other.liquid();
             shoreRoad = !shore ? null : one.road() ? one : other.road() ? other : null;
             // Coarse shores still need the samples that hold a road's full width at its shared gate.
@@ -1479,10 +1482,11 @@ final class BoardRelief {
 
     /** The relief before any road cuts it back; see {@link #cutForRoads}. */
     private Vector3 naturalPoint(Edge edge, float t, float z) {
-        // A cast face joins its canonical corners with a straight line at every height. Blending
-        // through the natural edge profile here bends the wall away from its straight slab rim.
-        if (t > 0 && t < 1 && edge.upper != null && (edge.lower == null || edge.upper.family() == CONCRETE
-              && BoardRelief.geology().get(CONCRETE).equals(GEOLOGY[CONCRETE]))) {
+        // Joined tops interpolate their displaced corners directly: independently easing both corners
+        // can double back along a narrow plateau neck. Cast faces also keep their straight slab rims.
+        boolean straight = edge.levelJoin || edge.upper != null && (edge.lower == null || edge.upper.family() == CONCRETE
+              && BoardRelief.geology().get(CONCRETE).equals(GEOLOGY[CONCRETE]));
+        if (t > 0 && t < 1 && straight) {
             return naturalPoint(edge, 0, z).lerp(naturalPoint(edge, 1, z), t);
         }
         float lx = edge.b.x - edge.a.x, ly = edge.b.y - edge.a.y;
@@ -2019,7 +2023,7 @@ final class BoardRelief {
         center.z = groundHeight(center.x, center.y);
         shades.put(center, groundShade(center));
         // Every top is planar: an ordinary hex needs six triangles at every detail level.
-        // Keep the real cliff/coast outline; only deep notches need the fallback below.
+        // Keep the real cliff/coast outline; deep notches and narrow necks need the fallback below.
         if (canFan(center, boundary)) {
             for (int j = 0; j < boundary.size(); j++) {
                 addTriangle(destination, center, boundary.get(j), boundary.get((j + 1) % boundary.size()), BoardSurface.Finish.TOP);
@@ -2030,31 +2034,106 @@ final class BoardRelief {
             return;
         }
         // A concave rim can reverse its bearing around the hex centre. Radial inset rings then fold too.
-        // Triangulate the real outline with the same planar-polygon helper as shores; nearby views keep one
-        // interior material sample per triangle so cliff shading does not stretch across the whole plateau.
+        // Triangulate the real outline with the same planar-polygon helper as shores. Interior diagonals need
+        // shared ground samples: a centre sample in each ear leaves rim normals along its long edges and draws
+        // alternating lit spokes across an otherwise flat plateau.
         List<BoardSurface.Face> top = new ArrayList<>();
         BoardSurface.polygon(boundary.toArray(Vector3[]::new), BoardSurface.Finish.TOP, top);
-        for (BoardSurface.Face face : top) {
-            if (detail.dressing) {
-                Vector3 middle = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1 / 3f);
-                shades.put(middle, groundShade(middle));
-                addTriangle(destination, middle, face.a(), face.b(), BoardSurface.Finish.TOP);
-                addTriangle(destination, middle, face.b(), face.c(), BoardSurface.Finish.TOP);
-                addTriangle(destination, middle, face.c(), face.a(), BoardSurface.Finish.TOP);
-            } else {
-                addTriangle(destination, face.a(), face.b(), face.c(), BoardSurface.Finish.TOP);
+        Map<TopEdge, Vector3> splits = new HashMap<>();
+        for (int i = 0; i < boundary.size(); i++) {
+            Vector3 a = boundary.get(i), b = boundary.get((i + 1) % boundary.size());
+            splits.put(new TopEdge(a, b), null);
+            splits.put(new TopEdge(b, a), null);
+        }
+        // Work in shared passes so a new diagonal cannot recursively chase an unsplit boundary into slivers.
+        for (int pass = 0; pass < 12; pass++) {
+            boolean split = false;
+            for (BoardSurface.Face face : top) {
+                split |= topSplit(face.a(), face.b(), splits) != null;
+                split |= topSplit(face.b(), face.c(), splits) != null;
+                split |= topSplit(face.c(), face.a(), splits) != null;
             }
+            if (!split) { break; }
+            List<BoardSurface.Face> refined = new ArrayList<>();
+            for (BoardSurface.Face face : top) {
+                topTriangle(refined, face.a(), face.b(), face.c(), splits);
+            }
+            top = refined;
+        }
+        for (BoardSurface.Face face : top) {
+            addTriangle(destination, face.a(), face.b(), face.c(), BoardSurface.Finish.TOP);
         }
         rocks(destination, center);
         field(destination, center);
         pits(destination);
     }
 
-    private static boolean canFan(Vector3 center, List<Vector3> boundary) {
+    private boolean canFan(Vector3 center, List<Vector3> boundary) {
+        // If the cliffs consume more than half of a shared edge, the neck needs interior lighting
+        // samples even when a centre fan is geometrically valid. Otherwise rim normals span its top.
+        for (int e = 0; e < 6; e++) {
+            Edge edge = edge(e);
+            Vector3[] rim = rims[e];
+            if (edge.levelJoin && rim[0].dst2(rim[rim.length - 1]) < edge.length * edge.length * .25f) { return false; }
+        }
         for (int j = 0; j < boundary.size(); j++) {
             if (upward(center, boundary.get(j), boundary.get((j + 1) % boundary.size())) <= 0) { return false; }
         }
         return true;
+    }
+
+    private record TopEdge(Vector3 a, Vector3 b) { }
+
+    /** Refine only non-linear interior shading; both sides of a diagonal reuse its decision and sample. */
+    private void topTriangle(List<BoardSurface.Face> destination, Vector3 a, Vector3 b, Vector3 c,
+          Map<TopEdge, Vector3> splits) {
+        Vector3[] points = { a, b, c };
+        Vector3 middle = null;
+        int edge = 0;
+        float longest = 0;
+        for (int i = 0; i < 3; i++) {
+            Vector3 p = points[i], q = points[(i + 1) % 3];
+            float length = p.dst2(q);
+            if (length <= longest) { continue; }
+            Vector3 sample = splits.get(new TopEdge(p, q));
+            if (sample != null) { middle = sample; edge = i; longest = length; }
+        }
+        if (middle == null) {
+            addTriangle(destination, a, b, c, BoardSurface.Finish.TOP);
+            return;
+        }
+        topTriangle(destination, points[edge], middle, points[(edge + 2) % 3], splits);
+        topTriangle(destination, middle, points[(edge + 1) % 3], points[(edge + 2) % 3], splits);
+    }
+
+    private Vector3 topSplit(Vector3 a, Vector3 b, Map<TopEdge, Vector3> splits) {
+        TopEdge key = new TopEdge(a, b);
+        if (splits.containsKey(key)) { return splits.get(key); }
+        Vector3 middle = null;
+        float spacing = metres(detail.dressing ? 1 : 2);
+        if (a.dst2(b) > spacing * spacing) {
+            Vector3 p = new Vector3(a).lerp(b, .5f);
+            Shade sample = groundShade(p), sa = shades.get(a), sb = shades.get(b);
+            boolean curved = new Vector3(sa.normal()).lerp(sb.normal(), .5f).dst2(sample.normal()) > .0001f
+                  || Math.abs((sa.rim() + sb.rim()) * .5f - sample.rim()) > .5f
+                  || Math.abs((sa.foot() + sb.foot()) * .5f - sample.foot()) > .5f;
+            // A long straight boundary stays shared with its neighbour. Do not chase its interpolation into
+            // ever thinner triangles immediately beside it.
+            float margin = Float.POSITIVE_INFINITY;
+            if (curved) {
+                for (int i = 0; i < outline.size(); i++) {
+                    Vector3 from = outline.get(i), to = outline.get((i + 1) % outline.size());
+                    margin = Math.min(margin, distance(p.x, p.y, from.x, from.y, to.x, to.y));
+                }
+            }
+            if (curved && margin > metres(.25f)) {
+                shades.put(p, sample);
+                middle = p;
+            }
+        }
+        splits.put(key, middle);
+        splits.put(new TopEdge(b, a), middle);
+        return middle;
     }
 
     // ---- Water hex banks -------------------------------------------------------------------------------------
@@ -2987,7 +3066,8 @@ final class BoardRelief {
                 }
             }
             for (int i = 1; i + 1 < points.length; i++) {
-                destination.add(new BoardSurface.Face(points[0], points[i], points[i + 1], BoardSurface.Finish.OUTCROP, landEdge));
+                destination.add(new BoardSurface.Face(points[0], points[i], points[i + 1],
+                      BoardSurface.Finish.OUTCROP, landEdge, cosmetic));
             }
         }
     }

@@ -105,7 +105,7 @@ public class BoardsValidator {
      */
     private void validateBoard(File boardFile) throws IOException {
         // If this isn't a board, ignore it
-        if (!boardFile.toString().endsWith(".board")) {
+        if (!megamek.common.board.BoardFile.isBoardName(boardFile.toString())) {
             return;
         }
 

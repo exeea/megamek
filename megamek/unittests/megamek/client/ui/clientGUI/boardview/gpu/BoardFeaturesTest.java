@@ -20,6 +20,26 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFeaturesTest {
+    @Test
+    void authoredCompositionsKeepTheirPlacementAndTransformEveryPartTogether() {
+        String asset = "scenery/saxarba/SMV_Fluff/FluffSystem-07-Garden-02-Table-1-01";
+        var layout = BoardSceneryLayouts.layout(asset);
+        assertTrue(layout.components().size() > 1);
+        var placement = megamek.common.board.BoardDecoration.Placement.absolute(4);
+        var object = new megamek.common.board.BoardDecoration("picnic", "prop", asset, null, .1, -.2, 90, true, .5, placement, 0);
+        Hex hex = new Hex(); hex.setDecorations(java.util.List.of(object));
+        var features = BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
+              .filter(f -> f.decoration() != null).toList();
+        assertEquals(layout.components().size(), features.size());
+        var first = features.getFirst(); var part = layout.components().getFirst();
+        assertEquals(.1 * 84 - part.y() * .5, first.x(), .0001);
+        assertEquals(-.2 * 72 - part.x() * .5, first.y(), .0001);
+        assertEquals(.5 * part.scale(), first.scale(), .0001);
+        assertTrue(features.stream().allMatch(f -> f.decoration().equals(object)));
+        hex.addTerrain(new Terrain(Terrains.ULTRA_SUBLEVEL, 1));
+        assertEquals(features, BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
+              .filter(f -> f.decoration() != null).toList(), "Absolute objects remain available above a chasm");
+    }
     @ParameterizedTest
     @ValueSource(ints = { 1, 3, 7, 10 })
     void industrialHeightProvidesCoverWithoutOccupiableStoreys(int height) {

@@ -62,7 +62,7 @@ class MapListPopup {
 
         ScalingPopup popup = new ScalingPopup();
         File boardFile = new MegaMekFile(Configuration.boardsDir(),
-              boards.getFirst() + MMConstants.CL_KEY_FILE_EXTENSION_BOARD).getFile();
+              megamek.common.board.BoardFile.fileName(boards.getFirst())).getFile();
         JMenuItem preview = new JMenuItem(Messages.getString("GpuBoard.preview"));
         preview.setEnabled(oneSelected && boardFile.isFile());
         preview.addActionListener(event -> GpuBoardWindow.openPreview(lobby.getClientGUI().getFrame(), boardFile));

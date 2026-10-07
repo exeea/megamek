@@ -32,8 +32,12 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.RenderableProvider;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
+import com.badlogic.gdx.scenes.scene2d.ui.Slider;
+import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
 import megamek.common.loaders.MekFileParser;
@@ -72,7 +76,9 @@ class GpuWireframeSmokeTest {
                     try {
                         view.create();
                         verify(view, fixture);
+                        verifyGlare(view);
                         verifySprite();
+                        verifyScatter();
                     } catch (Throwable error) { failure.set(error); }
                     finally { view.dispose(); Gdx.app.exit(); }
                 }
@@ -179,6 +185,109 @@ class GpuWireframeSmokeTest {
         Mix restored = render(view, "wireframe-restored.png");
         assertTrue(restored.other > .6, "Leaving the wireframe restores shading: " + restored);
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Restored frames");
+    }
+
+    /** The actual HUD toggle must suppress the composite's entire lens effect and restore the chosen strength. */
+    private static void verifyGlare(GpuBattleView view) throws Exception {
+        var tuning = GpuBoardTestUi.tuning(view);
+        tuning.setFixedSun(false);
+        GpuBoardTestUi.<Slider>tuning(view, "Sun glare").setValue(.65f);
+        for (int hour : new int[] { 6, 18, 0 }) {
+            GpuBoardTestUi.<Slider>tuning(view, "Time of day").setValue(hour);
+            Vector3 direction = BoardAtmosphere.lighting(tuning.atmosphere()).direction();
+            view.boardCamera.setIsometric(false);
+            view.boardCamera.orbit(MathUtils.atan2Deg(direction.x, -direction.y), 70);
+            render(view, "wireframe-glare-shaded-" + hour + ".png");
+            float shaded = glareStrength(view);
+            if (hour != 0) { assertTrue(shaded > 0, "Facing dawn/dusk must enable the lens effect"); }
+
+            toggle("utility-wireframe");
+            render(view, "wireframe-glare-off-" + hour + ".png");
+            assertEquals(0, glareStrength(view), "Wireframe must suppress glare, source bloom and lens reflections");
+            assertEquals(.65f, tuning.atmosphereOptions().sunGlare(), .00001f,
+                  "Wireframe must retain the user's glare setting");
+
+            toggle("utility-wireframe");
+            render(view, "wireframe-glare-restored-" + hour + ".png");
+            assertEquals(shaded, glareStrength(view), .00001f, "Leaving wireframe must restore the lens effect");
+        }
+        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Wireframe glare toggles");
+    }
+
+    private static float glareStrength(GpuBattleView view) throws Exception {
+        var shader = (ShaderProgram) field(field(view, "atmosphere"), "compositeShader");
+        var value = BufferUtils.newFloatBuffer(4);
+        Gdx.gl.glGetUniformfv(shader.getHandle(), shader.getUniformLocation("u_sunGlare"), value);
+        return value.get(2);
+    }
+
+    /** Baked field cover and instanced fungi must look exactly like the same wireframe board without scatter. */
+    private static void verifyScatter() throws Exception {
+        var terrain = new GpuTerrain();
+        var plain = new GpuTerrain();
+        var wireframe = new GpuWireframe();
+        var geology = BoardRelief.geology();
+        var withoutCover = geology.stream().map(g -> new BoardRelief.Geology(g.cellWidth(), g.cellHeight(), g.cells(),
+              g.fractures(), g.strata(), g.bedding(), g.buttress(), g.recess(), g.relief(), g.cap(), g.talus(),
+              g.round(), g.bank(), g.lean(), g.cast(), 0, 0)).toList();
+        var camera = new BoardCamera();
+        camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        camera.setIsometric(true);
+        camera.camera.zoom = .3f;
+        camera.center(BoardGeometry.center(new Coords(1, 1), 0));
+        try {
+            for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.FUNGUS)) {
+                terrain.update(scatterScene(family, true));
+                try {
+                    BoardRelief.tuneGeology(withoutCover);
+                    plain.update(scatterScene(family, false));
+                } finally { BoardRelief.tuneGeology(geology); }
+                Pixmap shaded = scatterFrame(terrain, camera, null);
+                Pixmap bare = scatterFrame(plain, camera, null);
+                Pixmap expected = scatterFrame(plain, camera, wireframe);
+                Pixmap actual = scatterFrame(terrain, camera, wireframe);
+                Pixmap restored = scatterFrame(terrain, camera, null);
+                try {
+                    assertFalse(shaded.getPixels().equals(bare.getPixels()), family + " must have visible scatter in normal rendering");
+                    assertEquals(expected.getPixels(), actual.getPixels(), family + " scatter must affect neither wireframe fill nor lines");
+                    assertEquals(shaded.getPixels(), restored.getPixels(), family + " scatter returns after wireframe");
+                } finally {
+                    shaded.dispose(); bare.dispose(); expected.dispose(); actual.dispose(); restored.dispose();
+                }
+            }
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Scatter wireframe and shaded rendering");
+        } finally {
+            BoardRelief.tuneGeology(geology);
+            wireframe.dispose(); plain.dispose(); terrain.dispose();
+        }
+    }
+
+    private static BoardScene scatterScene(BoardScene.Surface family, boolean scatter) {
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        var image = new BufferedImage(32, 32, BufferedImage.TYPE_INT_RGB);
+        for (int x = 0; x < 32; x++) for (int y = 0; y < 32; y++) { image.setRGB(x, y, 0x607055); }
+        var ground = new BoardScene.Pixels(image);
+        for (int x = 0; x < 4; x++) {
+            for (int y = 0; y < 4; y++) {
+                var features = family == BoardScene.Surface.FUNGUS && scatter
+                      ? List.of(new BoardScene.Feature(BoardFungus.SCATTER.get((x + y) % BoardFungus.SCATTER.size()),
+                            20, 8, 0, 1, .2f, 0, BoardScene.FeatureKind.SCATTER)) : List.<BoardScene.Feature>of();
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, family, ground, null,
+                      null, null, null, features, List.of(), BoardLiquid.NONE, null, true));
+            }
+        }
+        return new BoardScene(0, 4, 4, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    private static Pixmap scatterFrame(GpuTerrain terrain, BoardCamera camera, GpuWireframe wireframe) {
+        terrain.settings().run(() -> {
+            if (wireframe == null) { terrain.renderShadows(camera.camera, List.of()); }
+            Gdx.gl.glDepthMask(true);
+            ScreenUtils.clear(0, 0, 0, 1, true);
+            if (wireframe == null) { terrain.render(camera.camera, false); }
+            else { wireframe.fill(camera.camera, terrain); wireframe.lines(camera.camera, terrain); }
+        });
+        return Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
     }
 
     /** The scatter that the board's visible chunks show at the camera's detail. */

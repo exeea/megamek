@@ -28,6 +28,8 @@ public class UiButton extends TextButton {
     private boolean pressed;
     private Label badge;
     private Image dot;
+    private Actor trailing;
+    private float trailingSize;
 
     /** An empty button in the hud style {@code style} of the kit's skin; {@link UiKit} adds its parts. */
     public UiButton(UiKit kit, String style) {
@@ -84,9 +86,18 @@ public class UiButton extends TextButton {
         return this;
     }
 
+    /** An independent action inside the row's frame, without changing its label or selection hit target. */
+    public UiButton trailingAction(Actor action, float size) {
+        if (trailing != null) { trailing.remove(); }
+        trailing = action; trailingSize = size;
+        padRight(size + 6); addActor(action); invalidate();
+        return this;
+    }
+
     @Override
     public void layout() {
         super.layout();
+        if (trailing != null) { trailing.setBounds(getWidth() - trailingSize - 3, (getHeight() - trailingSize) / 2, trailingSize, trailingSize); }
         if (badge != null) {
             badge.setSize(Math.max(17, badge.getPrefWidth()), 17);
             badge.setPosition(getWidth() + 6 - badge.getWidth(), getHeight() + 6 - badge.getHeight());

@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.util.KeyCommandBind;
@@ -94,21 +95,18 @@ interface BoardSource extends AutoCloseable {
     void setHover(Coords coords);
     void inspect(Coords coords);
     /**
-     * A measurement with MegaMek's ruler: Ctrl for a line of sight, Alt for a distance; in a map preview a plain click
+     * Alt-click starts the native LOS ruler (including range); a plain click
      * ends one that waits for its second point. The point lies at the height the pointer shows there
      * ({@code pointedZ}, the terrain hit's world height; NaN for none, so a unit's own counts).
      */
     default void measure(Coords coords, int modifiers, float pointedZ) { }
+    /** Commands from a panel are valid only on the board generation that supplied its snapshot. */
+    default void changeRuler(long generation, Consumer<RulerModel> action) { }
 
     // A map preview has no gameplay overlays, chat, selection, or editing input.
     default void setVisibleArea(Rectangle area) { }
-    /** The native window's size in its own units and in pixels; the board editor measures its tools against it. */
+    /** The native window's size in its own units and in pixels. */
     default void setViewport(int width, int height, int pixelWidth, int pixelHeight) { }
-    /**
-     * The part of the window's width, from its right edge, that a Swing tool window covers (the board editor's
-     * tools), as a fraction; the camera centres the board beside it. Negative while the window size is unknown.
-     */
-    default float toolsInset() { return 0; }
     default void key(int keyCode, boolean down, int modifiers) { }
     default void stopKeys() { }
     /** Full play needs its tactical artwork prepared before interactive frames; map-only views do not. */
@@ -120,8 +118,22 @@ interface BoardSource extends AutoCloseable {
     default List<Coords> editorBrush(Coords coords, long generation) { return List.of(); }
     default void adjustEditorElevation(Coords coords, int levels, long generation) { }
     default void endEditorStroke() { }
-    default void showEditorTools() { }
-    default void showClassicEditor() { }
+    default megamek.client.ui.boardeditor.BoardEditorSession.Snapshot editorState() { return null; }
+    default List<String> editorThemes() { return List.of(); }
+    default void editorCommand(megamek.client.ui.boardeditor.BoardEditorSession.Command command, long generation) { }
+    default void editorValue(megamek.client.ui.boardeditor.BoardEditorSession.Command command, boolean finished, long generation) { }
+    default void editorPointer(Coords coords, double x, double y, boolean drag, long generation) { }
+    default void editorPointer(Coords coords, double x, double y, boolean drag, String object, long generation) {
+        editorPointer(coords, x, y, drag, generation);
+    }
+    default void editorPointer(Coords coords, double x, double y, boolean drag, String object, boolean additive, long generation) {
+        editorPointer(coords, x, y, drag, object, generation);
+    }
+    default void editorPointer(Coords coords, double x, double y, boolean drag, String object, boolean additive,
+          String receiver, long generation) {
+        editorPointer(coords, x, y, drag, object, additive, generation);
+    }
+
     default void editPlanetaryConditions(Consumer<BoardAtmosphere.Settings> completed) { atmosphere().edit(completed); }
     default BoardAtmosphere.Settings atmosphereFor(PlanetaryConditions conditions, boolean inSpace) {
         return atmosphere().settings(conditions, inSpace);

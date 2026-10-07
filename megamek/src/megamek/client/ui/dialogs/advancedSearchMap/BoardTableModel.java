@@ -102,7 +102,7 @@ class BoardTableModel extends AbstractTableModel {
 
         if (col == COL_NAME) {
             value = path.substring(path.lastIndexOf("\\") + 1);
-            value = value.substring(0, value.lastIndexOf(".board"));
+            value = megamek.common.board.BoardFile.withoutExtension(value);
             value = value.replace(width + "x" + height, "").trim();
         } else if (col == COL_SIZE) {
             value = String.format("%03dx%03d", width, height);

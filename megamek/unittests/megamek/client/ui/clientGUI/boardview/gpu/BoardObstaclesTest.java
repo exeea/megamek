@@ -17,6 +17,37 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
 class BoardObstaclesTest {
+    @Test
+    void nativePaintAndUnresolvedModelsRemainEditableWithoutLoadingMeshes() {
+        for (String kind : List.of("prop", "decal")) {
+            var object = new megamek.common.board.BoardDecoration("unknown", kind, "missing/catalog-entry", null,
+                  0, 0, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
+            var feature = new BoardScene.Feature(object.asset(), 0, 0, 0, 1, 1, 0,
+                  BoardScene.FeatureKind.PROP, 0, false, object);
+            var scene = scene(CENTER, feature, 0);
+            assertTrue(new BoardObstacles(scene, scene.tile(CENTER)).isEmpty());
+        }
+    }
+
+    @Test
+    void floatingNativeObjectsUseTheirAbsoluteHeightAndUniformScaleForClearance() {
+        var object = new megamek.common.board.BoardDecoration("floating", "prop", TANK, null,
+              0, 0, 0, false, .5, megamek.common.board.BoardDecoration.Placement.absolute(8), 0);
+        var feature = new BoardScene.Feature(TANK, 0, 0, 0, .5f, 1, 0, BoardScene.FeatureKind.PROP, 0, false, object);
+        var scene = scene(CENTER, feature, 2);
+        var obstacles = new BoardObstacles(scene, scene.tile(CENTER));
+        int occupied = 0;
+        for (int x = -30; x <= 30; x += 2) {
+            for (int y = -30; y <= 30; y += 2) {
+                var point = BoardGeometry.center(CENTER, 2).add(x, y, 0);
+                assertFalse(obstacles.obstructs(point, .1f, 1), "Floating objects cannot clear the ground below");
+                point.z = 8 * BoardGeometry.level();
+                if (obstacles.obstructs(point, .1f, 1)) { occupied++; }
+            }
+        }
+        assertTrue(occupied > 0, "The actual elevated footprint still provides clearance");
+    }
+
     private static final Coords CENTER = new Coords(2, 2);
     private static final String TANK = "buildings/saxarba/fuel_tanks/fuel_tank_hard_15";
 

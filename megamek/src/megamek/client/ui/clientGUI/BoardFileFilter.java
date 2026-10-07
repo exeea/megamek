@@ -34,6 +34,7 @@ package megamek.client.ui.clientGUI;
 
 import java.io.File;
 import javax.swing.filechooser.FileFilter;
+import megamek.common.board.BoardFile;
 
 /**
  * A FileFilter for MegaMek Board files. Accepts files with the .board extension and directories.
@@ -44,12 +45,12 @@ public class BoardFileFilter extends FileFilter {
 
     @Override
     public boolean accept(File dir) {
-        return (dir.getName().endsWith(".board") || dir.isDirectory());
+        return BoardFile.isBoardName(dir.getName()) || dir.isDirectory();
     }
 
     @Override
     public String getDescription() {
-        return "*.board";
+        return "MegaMek boards (*.board, *.board2)";
     }
 
 }

@@ -238,10 +238,10 @@ class GpuContextMenuSmokeTest {
             verify(menu.source).inspect(HEX);
             String title = "HEX 1512";
             String subtitle = "Light woods (TF: 50) · Road (TF: 150) · Woods/Jungle elevation: 2 · level 0";
-            assertEquals(List.of(title, subtitle, "Plan move here", "Plan and pin as waypoint [Shift+click]",
+            assertEquals(List.of(title, subtitle, "Plan move here", "Plan and pin as waypoint [Ctrl + click]",
                   "Center camera here", "Line of sight from Atlas"), lines(menu.popover));
             menu.update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.AUTO), context()));
-            assertEquals(List.of(title, subtitle, "Plan move here", "Plan and pin as waypoint [Shift+click]",
+            assertEquals(List.of(title, subtitle, "Plan move here", "Plan and pin as waypoint [Ctrl + click]",
                   "Center camera here", "Line of sight from Atlas", "---", "Clear minefield", "---",
                   "Mark as objective [Ctrl+O]", "✓ Show elevation"), lines(menu.popover),
                   "the map menu's command, then its group's commands in a section of their own");
@@ -262,7 +262,7 @@ class GpuContextMenuSmokeTest {
             // A jump has one landing hex; outside the planning turn the hex only centres and measures.
             menu.update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.JUMP)));
             menu.menu.open(HEX, Entity.NONE, 700, 600);
-            assertEquals("Plan and pin as waypoint [Shift+click]" + OFF, lines(menu.popover).get(3));
+            assertEquals("Plan and pin as waypoint [Ctrl + click]" + OFF, lines(menu.popover).get(3));
             menu.update(hud, frame(status(MOVEMENT, unit -> unit), GpuMovePlan.Snapshot.EMPTY));
             menu.menu.open(HEX, Entity.NONE, 700, 600);
             assertEquals(List.of(title, subtitle, "Center camera here", "Line of sight from Atlas"),

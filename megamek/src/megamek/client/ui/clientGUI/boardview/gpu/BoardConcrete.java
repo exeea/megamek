@@ -65,6 +65,15 @@ final class BoardConcrete {
         return shape;
     }
 
+    /** A scene whose concrete inputs are unchanged keeps the previous fit; the cache then serves it for the new tiles. */
+    static BoardConcrete adopt(BoardScene scene, BoardConcrete shape) {
+        synchronized (BoardConcrete.class) {
+            previous = cached;
+            cached = new Cached(new WeakReference<>(scene.tiles()), scene.width(), scene.height(), BoardGeometry.hexScale(), mode(), shape);
+        }
+        return shape;
+    }
+
     Shift shift(long corner) { return shifts.get(corner, ZERO); }
 
     /** The same fitted corner for terrain, water, artwork and picking in both GPU views. */

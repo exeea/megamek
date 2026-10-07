@@ -177,7 +177,7 @@ public class BoardClassifier {
                 if (filePath.isDirectory()) {
                     scanForBoardsInDir(filePath, partialBoardPath);
                 } else {
-                    if (filename.endsWith(".board")) {
+                    if (megamek.common.board.BoardFile.isBoardName(filename)) {
                         BoardDimensions dimension = Board.getSize(filePath);
 
                         if (dimension != null) {

@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-
 import java.awt.Color;
 import java.awt.Image;
 import java.awt.Point;
@@ -29,6 +28,7 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -872,6 +872,7 @@ final class GpuBoardSource implements BoardSource {
         Coords hover = hoverCoords;
         GpuMovePlan.Snapshot move = moves.capture(panel, hover);
         Point light = view.getTerrainLightDirection();
+        var rulerSnapshot = los.capture();
         BoardScene scene = new BoardScene(view.getBoardId(), board.getWidth(), board.getHeight(), tiles, units,
               List.of(), actorId, view.game.getPhase().localizedName(), commands,
               light == null || light.x == 0 && light.y == 0 ? null : new BoardScene.Light(light.x, -light.y),
@@ -879,7 +880,7 @@ final class GpuBoardSource implements BoardSource {
                     sprite.getPosition(), sprite.getBorders(),
                     FieldOfFireSprite.getFieldOfFireColor(sprite.getRangeBracket()).getRGB(),
                     FieldOfFireSprite.getRangeText(sprite.getRangeBracket()))).toList(),
-              view.getBoardMarkers(), tacticalGeometry(move.planner()),
+              view.getBoardMarkers(), tacticalGeometry(move.planner()).withRuler(rulerSnapshot.ruler()),
               view.getWeaponRangeTextSprites().stream().map(sprite -> new BoardScene.RangeLabel(sprite.getPosition(),
                     FieldOfFireSprite.getFieldOfFireColor(sprite.getRangeBracket()).getRGB(),
                     FieldOfFireSprite.getRangeText(sprite.getRangeBracket()))).toList(), fieldOfView);
@@ -894,7 +895,7 @@ final class GpuBoardSource implements BoardSource {
               unitRecord.capture(checked(cardUnit, this::identified)),
               preview.capture(view.getLocalPlayer(), activeTurn, focus == Entity.NONE ? actorId : focus, path,
                     this::visible, this::sensorContact),
-              chat.capture(), toasts.capture(), los.capture(), players.capture());
+              chat.capture(), toasts.capture(), rulerSnapshot, players.capture());
         if (!nextPanels.equals(panels)) {
             panels = nextPanels;
         }
@@ -1356,9 +1357,9 @@ final class GpuBoardSource implements BoardSource {
         });
     }
 
-    /** Both measurement gestures belong to the shared ruler, independently of the active phase tool. */
+    /** Alt-click opens the native LOS ruler, independently of the active phase tool. */
     static boolean isMeasurement(int modifiers) {
-        return (modifiers & (InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK)) != 0;
+        return (modifiers & InputEvent.ALT_DOWN_MASK) != 0;
     }
 
     public void click(Coords coords, boolean doubleClick, int modifiers) {
@@ -1373,8 +1374,11 @@ final class GpuBoardSource implements BoardSource {
     /** EDT: the board click {@link #click} posts, run now, as a HUD command runs it inside its own guard. */
     void clickNow(Coords coords, boolean doubleClick, int modifiers) {
         if (isCurrentView(view) && coords != null && (view.game.getPhase().isOnMap() || isMeasurement(modifiers))) {
-            view.mouseAction(coords, doubleClick ? BoardClientState.BOARD_HEX_DOUBLE_CLICK
-                  : BoardClientState.BOARD_HEX_CLICK, modifiers, 1);
+            if (isMeasurement(modifiers)) { los.model().addPoint(coords, null); }
+            else {
+                view.mouseAction(coords, doubleClick ? BoardClientState.BOARD_HEX_DOUBLE_CLICK
+                      : BoardClientState.BOARD_HEX_CLICK, modifiers & ~InputEvent.CTRL_DOWN_MASK, 1);
+            }
         }
     }
 
@@ -1382,13 +1386,18 @@ final class GpuBoardSource implements BoardSource {
     public void measure(Coords coords, int modifiers, float pointedZ) {
         SwingUtilities.invokeLater(() -> {
             if (acceptsInput() && isCurrentView(view) && coords != null && view.getBoard().contains(coords)) {
-                view.mouseAction(coords, BoardClientState.BOARD_HEX_CLICK, modifiers, 1);
-                if (!Float.isNaN(pointedZ) && view.getClientgui() != null) {
-                    view.getClientgui().setRulerHeight(view.getBoardId(), coords,
-                          GpuLosResult.pointedHeight(view.getBoard().getHex(coords), pointedZ));
-                }
+                if (!isMeasurement(modifiers) && los.capture().pending() == 0) { return; }
+                los.model().addPoint(coords, Float.isNaN(pointedZ) ? null
+                      : GpuLosResult.pointedHeight(view.getBoard().getHex(coords), pointedZ));
                 refresh();
             }
+        });
+    }
+
+    @Override
+    public void changeRuler(long generation, java.util.function.Consumer<RulerModel> action) {
+        command(() -> {
+            if (generation == boardGeneration && isCurrentView(view)) { action.accept(los.model()); }
         });
     }
 

@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import java.awt.event.InputEvent;
 import java.io.File;
 import java.nio.FloatBuffer;
 import java.util.List;
@@ -90,7 +89,7 @@ class GpuHoverRingSmokeTest {
                 camera.setPerspective(perspective);
                 for (boolean editor : List.of(false, true)) {
                     when(source.isEditor()).thenReturn(editor);
-                    view.editorToolsInput(editor ? InputEvent.CTRL_DOWN_MASK : 0, false);
+                    when(Gdx.input.isKeyPressed(Input.Keys.CONTROL_LEFT)).thenReturn(editor);
                     target.begin();
                     try {
                         Gdx.gl.glDepthMask(true);

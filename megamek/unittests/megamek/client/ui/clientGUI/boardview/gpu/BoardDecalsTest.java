@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.HashMap;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
@@ -88,15 +91,56 @@ class BoardDecalsTest {
     }
 
     private static List<BoardSurface.Face> ground(float z) {
+        return ground(COORDS, z);
+    }
+
+    private static List<BoardSurface.Face> ground(Coords coords, float z) {
         List<BoardSurface.Face> result = new ArrayList<>();
-        Vector3 center = BoardGeometry.center(COORDS, 0);
+        Vector3 center = BoardGeometry.center(coords, 0);
         center.z = z;
         for (int i = 0; i < 6; i++) {
-            Vector3 a = BoardGeometry.corner(COORDS, 0, i), b = BoardGeometry.corner(COORDS, 0, i + 1);
+            Vector3 a = BoardGeometry.corner(coords, 0, i), b = BoardGeometry.corner(coords, 0, i + 1);
             a.z = b.z = z;
             result.add(new BoardSurface.Face(center, a, b, BoardSurface.Finish.BED));
         }
         return result;
+    }
+
+    @Test void rotatedScaledPaintCoversItsFullRectangleAcrossChunkEdgesAndRetiresBothFootprints() {
+        Coords owner = new Coords(7, 7);
+        var paint = new megamek.common.board.BoardDecoration("paint", "decal", "marking", null,
+              .25, -.15, 35, false, 3, megamek.common.board.BoardDecoration.Placement.ground(), 0, false);
+        Set<Coords> footprint = BoardDecals.footprint(owner, paint, 24, 24);
+        assertTrue(footprint.stream().map(at -> new Coords(at.getX() / 8, at.getY() / 8)).distinct().count() >= 4);
+        double area = footprint.stream().mapToDouble(at -> area(BoardDecals.project(owner, at, ground(at, at.getX() % 2), paint))).sum();
+        assertEquals(9 * BoardGeometry.width() * BoardGeometry.height(), area, 1,
+              "No seam, missing neighbour, double projection, or clipping at lower ground");
+        var moved = paint.transform(6, 0, -45, false, 2, paint.placement());
+        Set<Coords> next = BoardDecals.footprint(owner, moved, 24, 24);
+        Map<Coords, List<BoardDecals.Stamp>> before = new HashMap<>(), after = new HashMap<>();
+        footprint.forEach(at -> before.put(at, List.of(new BoardDecals.Stamp(owner, paint))));
+        next.forEach(at -> after.put(at, List.of(new BoardDecals.Stamp(owner, moved))));
+        Set<Coords> union = new java.util.HashSet<>(footprint); union.addAll(next);
+        assertEquals(union, BoardDecals.changed(before, after));
+        assertEquals(next, BoardDecals.changed(after, Map.of()), "Removal clears every receiving hex");
+        assertTrue(union.size() < 100, "A local edit must not invalidate a 24 × 24 board");
+    }
+
+    @Test
+    void translatedPaintClipsToItsHexAndCannotFallBackFromAMissingReceiver() {
+        var paint = new megamek.common.board.BoardDecoration("paint", "decal", "marking", null,
+              .2, 0, 35, true, 1, megamek.common.board.BoardDecoration.Placement.surface("bridge", "deck", 0), 2);
+        var projected = BoardDecals.project(COORDS, ground(40), paint);
+        assertTrue(area(projected) > 0 && area(projected) < area(ground(40)));
+        assertEquals(40, height(projected, 0, 0), .001f);
+        for (var face : projected) {
+            for (Vector3 vertex : List.of(face.a(), face.b(), face.c())) {
+                assertEquals(40, vertex.z, .001f);
+            }
+        }
+        assertTrue(BoardDecals.project(COORDS, List.of(), paint).isEmpty());
+        var outside = paint.transform(.45, 0, 0, false, 1, paint.placement());
+        assertTrue(BoardDecals.project(COORDS, roof(40, 40), outside).isEmpty(), "Paint outside the deck must not land underneath it");
     }
 
     private static List<BoardSurface.Face> roof(float left, float right) {

@@ -68,7 +68,7 @@ class BoardCameraPanTest {
     }
 
     @Test
-    void pointerZoomCannotPullTheBoardAwayFromTheUsableCenter() {
+    void pointerZoomCannotPullTheBoardAwayFromTheViewportCenter() {
         BoardScene scene = scene(5, 4);
         for (boolean perspective : new boolean[] { false, true }) {
             BoardCamera view = camera(scene, perspective);
@@ -160,12 +160,14 @@ class BoardCameraPanTest {
     }
 
     private static void assertBoardAtCenter(BoardCamera view, BoardScene scene) {
-        Vector3 center = project(view, view.focus);
-        assertEquals(view.camera.viewportWidth == 600 ? 240 : 450, center.x, .05f);
-        assertEquals(view.camera.viewportHeight / 2, center.y, .05f);
-        Ray ray = new Ray(view.camera.position, view.focus.cpy().sub(view.camera.position));
+        Ray ray = new Ray(view.camera.position, view.camera.direction);
+        Vector3 center = ray.origin.cpy().mulAdd(ray.direction,
+              (view.focus.z - ray.origin.z) / ray.direction.z);
+        Vector3 screen = project(view, center);
+        assertEquals(view.camera.viewportWidth / 2, screen.x, .05f);
+        assertEquals(view.camera.viewportHeight / 2, screen.y, .05f);
         assertNotNull(BoardGeometry.hit(scene, ray),
-              () -> "The usable screen center must still point at terrain: " + view.focus
+              () -> "The full viewport center must still point at terrain: " + center
                     + ", angle=" + view.azimuth() + "/" + view.tilt() + ", zoom=" + view.camera.zoom);
     }
 

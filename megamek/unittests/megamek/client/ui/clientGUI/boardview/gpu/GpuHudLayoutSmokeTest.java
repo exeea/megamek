@@ -116,6 +116,13 @@ class GpuHudLayoutSmokeTest {
         List<Actor> shown = shown(hud, layout);
         Map<String, Rectangle> slots = new LinkedHashMap<>();
         shown.forEach(actor -> slots.put(actor.getName(), GpuHudTestStage.bounds(actor)));
+        if (!layout.overlays()) {
+            Rectangle phase = slots.get("phase-header"), utilities = slots.get("utility-bar"), minimap = slots.get("minimap");
+            assertEquals(metrics.gap(), phase.x, .5f);
+            assertEquals(metrics.gap(), height - phase.y - phase.height, .5f);
+            assertEquals(metrics.gap(), height - utilities.y - utilities.height, .5f);
+            assertEquals(metrics.gap(), utilities.y - minimap.y - minimap.height, .5f);
+        }
         System.out.println(name + " (stage " + hud.stage.getWidth() + " x " + hud.stage.getHeight() + "): " + slots);
         for (Actor actor : shown) {
             if (layout.overlays()) {

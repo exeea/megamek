@@ -48,6 +48,9 @@ import java.util.stream.Collectors;
 
 import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
+import megamek.common.board.BoardDecoration;
+import megamek.common.board.HexAppearance;
+import megamek.common.board.BoardFile;
 import megamek.common.enums.BasementType;
 import megamek.common.equipment.Minefield;
 import megamek.common.rolls.PilotingRollData;
@@ -73,6 +76,9 @@ public class Hex implements Serializable {
     private String theme;
     private final String originalTheme;
     private int fireTurn;
+    // Null in historical serialized games. Immutable values can safely be shared by undo snapshots.
+    private Map<String, HexAppearance> appearance;
+    private List<BoardDecoration> decorations;
     //endregion Variable Declarations
 
     //region Constructors
@@ -154,6 +160,33 @@ public class Hex implements Serializable {
 
     public void setTheme(String theme) {
         this.theme = theme;
+    }
+
+    public Map<String, HexAppearance> getAppearance() {
+        return appearance == null ? Map.of() : appearance;
+    }
+
+    public void setAppearance(Map<String, HexAppearance> value) {
+        value.forEach((owner, style) -> style.validateOwner(owner));
+        appearance = value.isEmpty() ? null : Map.copyOf(value);
+    }
+
+    public List<BoardDecoration> getDecorations() {
+        return decorations == null ? List.of() : decorations;
+    }
+
+    public void setDecorations(List<BoardDecoration> value) {
+        if (value.stream().map(BoardDecoration::id).distinct().count() != value.size()) {
+            throw new IllegalArgumentException("Duplicate object ID in hex");
+        }
+        decorations = value.isEmpty() ? null : List.copyOf(value);
+    }
+
+    public boolean hasAppearance() { return !getAppearance().isEmpty() || !getDecorations().isEmpty(); }
+
+    /** Use on paste/stamp/merge, not on snapshots for undo or movement. */
+    public void duplicateDecorationIds() {
+        setDecorations(getDecorations().stream().map(BoardDecoration::duplicate).toList());
     }
     //endregion Getters/Setters
 
@@ -660,7 +693,10 @@ public class Hex implements Serializable {
         for (Integer i : terrains.keySet()) {
             terrainCopy[i] = new Terrain(terrains.get(i));
         }
-        return new Hex(level, terrainCopy, theme, coords);
+        Hex copy = new Hex(level, terrainCopy, theme, coords);
+        copy.appearance = appearance;
+        copy.decorations = decorations;
+        return copy;
     }
 
     /**
@@ -765,10 +801,12 @@ public class Hex implements Serializable {
         }
     }
 
-    /**
-     * True if this hex has a clifftop towards otherHex. This hex must have the terrain CLIFF_TOP, it must have exits
-     * specified (exits set to active) for the CLIFF_TOP terrain, and must have an exit in the direction of otherHex.
-     */
+    /** Manual cliff edges apply to drops of one or two floor levels; larger drops are generated automatically. */
+    public boolean canHaveCliffTopTowards(@Nullable Hex otherHex) {
+        return otherHex != null && (floor() - otherHex.floor() == 1 || floor() - otherHex.floor() == 2);
+    }
+
+    /** Whether an authored cliff edge faces this neighbor. */
     public boolean hasCliffTopTowards(Hex otherHex) {
         return containsTerrain(Terrains.CLIFF_TOP)
               && getTerrain(Terrains.CLIFF_TOP).hasExitsSpecified()
@@ -965,6 +1003,7 @@ public class Hex implements Serializable {
      * @return A string representation to use when copying a hex to the clipboard.
      */
     public String getClipboardString() {
+        if (hasAppearance()) { return BoardFile.clipboard(this); }
         StringBuilder hexString = new StringBuilder("MegaMek Hex///");
         hexString.append("Level###").append(getLevel()).append("///");
         hexString.append("Theme###").append(getTheme()).append("///");
@@ -985,6 +1024,10 @@ public class Hex implements Serializable {
      * @return A hex containing any features that could be parsed from clipboardString
      */
     public static @Nullable Hex parseClipboardString(String clipboardString) {
+        if (clipboardString.startsWith("MegaMek Hex2\n")) {
+            try { return BoardFile.fromClipboard(clipboardString); }
+            catch (java.io.IOException failure) { return null; }
+        }
         if (!clipboardString.startsWith("MegaMek Hex")) {
             return null;
         }

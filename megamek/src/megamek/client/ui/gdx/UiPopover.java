@@ -95,11 +95,11 @@ public final class UiPopover extends Table {
     }
 
     /**
-     * The header's title, upper-cased, over the subtitle; a null title removes the header and a null subtitle its
+     * The header's title, upper-cased, over the subtitle; a null or blank title removes the header and a null subtitle its
      * line. An open popover keeps the corner it opened at.
      */
     public UiPopover header(String text, String detail) {
-        boolean shown = text != null;
+        boolean shown = text != null && !text.isBlank();
         title.setText(shown ? UiTheme.upper(text) : "");
         subtitle.setText(detail == null ? "" : detail);
         head.getCell(subtitle).height(detail == null ? 0 : BODY_LINE);
@@ -165,7 +165,7 @@ public final class UiPopover extends Table {
         Vector2 top = item.localToActorCoordinates(menu.getParent(), new Vector2(0, item.getHeight()));
         float width = menu.getPrefWidth();
         float x = getX() + getWidth() - OVERLAP;
-        if (x + width > menu.getParent().getWidth() - MARGIN) {
+        if (x + width > menu.parentWidth() - MARGIN) {
             x = getX() - width + OVERLAP;
         }
         menu.show(x, top.y + FIRST_ROW, false);
@@ -194,13 +194,16 @@ public final class UiPopover extends Table {
      * the prototype, one wider than the parent keeps its left edge in.
      */
     private void place() {
-        Group parent = getParent();
-        setSize(getPrefWidth(), Math.min(getPrefHeight(), Math.max(0, parent.getHeight() - 2 * MARGIN)));
+        setSize(getPrefWidth(), Math.min(getPrefHeight(), Math.max(0, parentHeight() - 2 * MARGIN)));
         validate();
         float bottom = above ? edge : edge - getHeight();
-        setPosition(Math.max(MARGIN, Math.min(parent.getWidth() - getWidth() - MARGIN, left)),
-              MathUtils.clamp(bottom, MARGIN, Math.max(MARGIN, parent.getHeight() - getHeight() - MARGIN)));
+        setPosition(Math.max(MARGIN, Math.min(parentWidth() - getWidth() - MARGIN, left)),
+              MathUtils.clamp(bottom, MARGIN, Math.max(MARGIN, parentHeight() - getHeight() - MARGIN)));
     }
+
+    // Stage's root group has no layout size; overlays added directly to it use the stage viewport.
+    private float parentWidth() { return getParent() == getStage().getRoot() ? getStage().getWidth() : getParent().getWidth(); }
+    private float parentHeight() { return getParent() == getStage().getRoot() ? getStage().getHeight() : getParent().getHeight(); }
 
     /**
      * One Esc step: closes the deepest open submenu, whose menu takes the keyboard back, or this popover without one;

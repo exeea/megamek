@@ -83,7 +83,6 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.ui.swing.BotGUI;
 import megamek.client.ui.BugReportMessages;
 import megamek.client.ui.Messages;
-import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.tooltip.PilotToolTip;
 import megamek.client.ui.dialogs.LicensingDialog;
 import megamek.client.ui.dialogs.MMAboutDialog;
@@ -960,22 +959,14 @@ public class MegaMekGUI implements IPreferenceChangeListener {
      * Display the board editor.
      */
     void showEditor() {
-        BoardEditorPanel editor = new BoardEditorPanel(controller);
-        controller.boardEditor = editor;
-        launch(editor.getFrame());
-        editor.boardNew(GUIPreferences.getInstance().getBoardEdRndStart());
-        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.toggleEditor(editor);
+        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.openEditor(frame, null, false);
     }
 
     /**
      * Display the board editor and load the given board
      */
     void showEditor(String boardFile) {
-        BoardEditorPanel editor = new BoardEditorPanel(controller);
-        controller.boardEditor = editor;
-        launch(editor.getFrame());
-        editor.loadBoard(new File(boardFile));
-        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.toggleEditor(editor);
+        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.openEditor(frame, new File(boardFile), false);
     }
 
     void showSkinEditor() {
@@ -997,11 +988,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
      * Display the board editor and open an "open" dialog.
      */
     void showEditorOpen() {
-        BoardEditorPanel editor = new BoardEditorPanel(controller);
-        controller.boardEditor = editor;
-        launch(editor.getFrame());
-        editor.loadBoard();
-        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.toggleEditor(editor);
+        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.openEditor(frame, null, true);
     }
 
     /**

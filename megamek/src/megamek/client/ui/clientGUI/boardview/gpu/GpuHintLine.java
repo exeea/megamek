@@ -142,17 +142,17 @@ final class GpuHintLine implements GpuHud.Component {
         // A measurement waiting for its second point takes the next left click (GpuHud.boardClick).
         int pending = inputs.frame().panels().los().pending();
         List<String> items = new ArrayList<>(List.of(text("GpuBoard.hud.mouse.leftClick"),
-              text(pending == InputEvent.CTRL_DOWN_MASK ? "GpuBoard.hud.hint.completeLos"
-                    : pending != 0 ? "GpuBoard.hud.hint.completeDistance" : leftClick(status, planning))));
+              text(pending != 0 ? "GpuBoard.hud.hint.completeLos" : leftClick(status, planning))));
+        if (planning && pending == 0) {
+            items.addAll(List.of(text("GpuBoard.hud.mouse.ctrlClick"), text("GpuBoard.hud.hint.waypoint"),
+                  text("GpuBoard.hud.mouse.shiftClick"), text("GpuBoard.hud.hint.orientation")));
+        }
         if (inputs.view().tactical()) {
             items.addAll(List.of(text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.panMap"),
                   text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit"),
                   text("GpuBoard.hud.mouse.wheel"), text("GpuBoard.hud.hint.zoom"),
                   key(preferences, KeyCommandBind.TOGGLE_ISO), text("GpuBoard.hud.util.backTo3d")));
         } else {
-            if (planning) {
-                items.addAll(List.of(text("GpuBoard.hud.mouse.shiftClick"), text("GpuBoard.hud.hint.waypoint")));
-            }
             String camera = key(preferences, KeyCommandBind.SCROLL_NORTH) + key(preferences, KeyCommandBind.SCROLL_WEST)
                   + key(preferences, KeyCommandBind.SCROLL_SOUTH) + key(preferences, KeyCommandBind.SCROLL_EAST) + " "
                   + key(preferences, KeyCommandBind.CAMERA_ROTATE_LEFT)

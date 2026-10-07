@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -15,6 +17,33 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
 class TerrainSettingsTest {
+    @Test
+    void shutdownCancelsGeometryInsideARunningTerrainTask() throws Exception {
+        TerrainSettings settings = TerrainSettings.capture();
+        var scene = GpuTerrainReliefSmokeTest.scene(BoardScene.Surface.SAND);
+        var tile = scene.tile(new Coords(4, 4));
+        CountDownLatch started = new CountDownLatch(1), resume = new CountDownLatch(1);
+        try (var workers = TerrainSettings.workers(2)) {
+            var result = CompletableFuture.runAsync(() -> settings.run(() -> {
+                started.countDown();
+                try { resume.await(); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+                // Already inside the hex's task: there is no outer per-hex cancellation check here.
+                assertThrows(CancellationException.class, () -> new BoardSurface(scene, tile, TerrainLod.FULL));
+                assertTrue(Thread.currentThread().isInterrupted(), "Geometry must preserve the shutdown interrupt");
+            }), workers);
+            try {
+                assertTrue(started.await(10, TimeUnit.SECONDS));
+                workers.shutdownNow();
+                result.get(10, TimeUnit.SECONDS);
+                assertTrue(workers.awaitTermination(5, TimeUnit.SECONDS));
+            } finally {
+                resume.countDown();
+                workers.shutdownNow();
+            }
+        }
+    }
+
     @Test
     void aRunningBuildKeepsItsGeometryWhenControlsChangeAndReleasesItsScope() throws Exception {
         GdxNativesLoader.load();

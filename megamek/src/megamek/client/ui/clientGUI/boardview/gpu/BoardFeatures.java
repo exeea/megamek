@@ -168,7 +168,7 @@ final class BoardFeatures {
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
           Set<Integer> blankTerrains, Function<Coords, Hex> board, BoardArtwork.Scenery scenery,
           boolean natural) {
-        if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return List.of(); }
+        if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return decorations(hex); }
         List<BoardScene.Feature> result = new ArrayList<>();
         for (String asset : scenery.models()) {
             var layout = BoardSceneryLayouts.layout(asset);
@@ -216,29 +216,31 @@ final class BoardFeatures {
             result.add(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1,
                   hex.terrainLevel(Terrains.BRIDGE_ELEV), BoardScene.FeatureKind.PROP, exits));
         }
-        boolean jungle = hex.containsTerrain(Terrains.JUNGLE);
-        BoardRoad road = BoardRoad.capture(hex) == BoardRoad.Kind.NONE ? null
-              : BoardRoad.clearance(coords, hex, board);
-        if ((jungle || hex.containsTerrain(Terrains.WOODS)) && !scenery.modelTerrains().contains(Terrains.WOODS)) {
+        Hex vegetation = hex.getAppearance().containsKey("vegetation")
+              ? megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "vegetation") : hex;
+        boolean jungle = vegetation.containsTerrain(Terrains.JUNGLE);
+        BoardRoad road = BoardRoad.capture(vegetation) == BoardRoad.Kind.NONE ? null
+              : BoardRoad.clearance(coords, vegetation, board);
+        if ((jungle || vegetation.containsTerrain(Terrains.WOODS)) && !scenery.modelTerrains().contains(Terrains.WOODS)) {
             // Snow/pavement change the ground, not the planet's vegetation (including low cover and jungle).
-            boolean mars = hex.getTheme() != null && hex.getTheme().toLowerCase(Locale.ROOT).contains("mars");
-            boolean volcano = hex.getTheme() != null && hex.getTheme().toLowerCase(Locale.ROOT).contains("volcan");
-            boolean orchard = !mars && !volcano && orchard(hex);
-            boolean fungus = surface(hex) == BoardScene.Surface.FUNGUS;
-            int density = hex.terrainLevel(jungle ? Terrains.JUNGLE : Terrains.WOODS);
+            boolean mars = vegetation.getTheme() != null && vegetation.getTheme().toLowerCase(Locale.ROOT).contains("mars");
+            boolean volcano = vegetation.getTheme() != null && vegetation.getTheme().toLowerCase(Locale.ROOT).contains("volcan");
+            boolean orchard = !mars && !volcano && orchard(vegetation);
+            boolean fungus = surface(vegetation) == BoardScene.Surface.FUNGUS;
+            int density = vegetation.terrainLevel(jungle ? Terrains.JUNGLE : Terrains.WOODS);
             int count = fungus || mars ? (density >= 3 ? 6 : density == 2 ? 4 : 2)
                   : density >= 3 ? 16 : density == 2 ? 9 : orchard ? 6 : 3;
             // Foliage reaches its rules height. Level-one cover uses proportioned shrubs; taller woods keep
             // broad tree crowns so the canopy reads as an obstacle. Light woods have the broadest tree crowns.
-            float height = Math.max(1, hex.terrainLevel(Terrains.FOLIAGE_ELEV));
+            float height = Math.max(1, vegetation.terrainLevel(Terrains.FOLIAGE_ELEV));
             float crown = orchard ? (density >= 3 ? .62f : .82f)
                   : density >= 3 ? 1.35f : density == 2 ? 1.45f : 1.7f;
             List<String> species = mars ? MARS_CORALS
                   : volcano ? (height == 1 ? List.of("foliage-volcano") : VOLCANO_TREES)
-                  : fungus ? BoardFungus.COVER : orchard ? orchardSpecies(hex)
-                  : height == 1 ? List.of(shrub(hex, jungle)) : species(hex, jungle);
+                  : fungus ? BoardFungus.COVER : orchard ? orchardSpecies(vegetation)
+                  : height == 1 ? List.of(shrub(vegetation, jungle)) : species(vegetation, jungle);
             // Cosmetic understory shares the canopy's placement, road clearance, grounding and tree LODs.
-            boolean understory = surface(hex) == BoardScene.Surface.TROPICAL && height > 1 && !orchard && !volcano;
+            boolean understory = surface(vegetation) == BoardScene.Surface.TROPICAL && height > 1 && !orchard && !volcano;
             if (understory) { count *= 2; }
             Random treeRandom = natural ? new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L) : null;
             for (int index = 0; index < count; index++) {
@@ -247,7 +249,7 @@ final class BoardFeatures {
                 // Space light foliage around the centre; dense foliage fills an equal-area spiral.
                 float radius = density >= 2 ? 28 * (float) Math.sqrt(index / (count - 1f))
                       : 20 + index * 2;
-                // Keep the density and bounded footprint, but break identical per-hex spirals.
+                // Keep the density and bounded footprint, but break identical per-vegetation spirals.
                 if (natural) {
                     angle += treeRandom.nextFloat() * .7f - .35f;
                     radius = Math.min(28, radius) * (.86f + treeRandom.nextFloat() * .14f);
@@ -255,7 +257,7 @@ final class BoardFeatures {
                 if (fungus || mars) { radius *= .8f; }
                 float x = (float) Math.cos(angle) * radius, y = (float) Math.sin(angle) * radius;
                 if (orchard && !natural) {
-                    // Light orchard rows align across the 63x72 staggered hex lattice.
+                    // Light orchard rows align across the 63x72 staggered vegetation lattice.
                     int columns = density >= 3 ? 4 : 3;
                     int rows = count / columns;
                     float spacing = density >= 3 ? 15 : 21;
@@ -290,6 +292,28 @@ final class BoardFeatures {
         }
         rough(hex, coords, result, board);
         BoardScatter.capture(hex, coords, result);
+        result.addAll(decorations(hex));
+        return List.copyOf(result);
+    }
+
+    private static List<BoardScene.Feature> decorations(Hex hex) {
+        List<BoardScene.Feature> result = new ArrayList<>();
+        for (var object : hex.getDecorations()) {
+            var layout = object.kind().equals("prop") ? BoardSceneryLayouts.layout(object.asset()) : null;
+            var parts = layout == null ? List.of(new BoardSceneryLayouts.Component(object.asset(),
+                  BoardScene.FeatureKind.PROP, 0, 0, 0, 0, 1)) : layout.components();
+            double angle = Math.toRadians(object.rotation());
+            for (var part : parts) {
+                double x = part.x() * object.scale() * (object.mirror() ? -1 : 1), y = part.y() * object.scale();
+                result.add(new BoardScene.Feature(part.asset(),
+                      (float) (object.x() * BoardGeometry.TILE_WIDTH + x * Math.cos(angle) - y * Math.sin(angle)),
+                      (float) (object.y() * BoardGeometry.TILE_HEIGHT + x * Math.sin(angle) + y * Math.cos(angle)),
+                      (float) (object.rotation() + (object.mirror() ? -part.rotation() : part.rotation())),
+                      (float) (object.scale() * part.scale()), 1,
+                      (float) (part.z() * object.scale() / BoardGeometry.MODEL_LEVEL_HEIGHT),
+                      BoardScene.FeatureKind.PROP, 0, false, object));
+            }
+        }
         return List.copyOf(result);
     }
 

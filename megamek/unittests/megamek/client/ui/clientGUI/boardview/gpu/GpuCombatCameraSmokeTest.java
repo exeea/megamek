@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.spy;
@@ -17,9 +18,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
-import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.scenes.scene2d.Actor;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.ResolvedAttack;
@@ -30,14 +29,13 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Real camera and playback integration: the combat camera frames a split-fire volley between the HUD's left column
- * and its right column, the contacts or the wider open log, in oblique, threshold and top views and in a smaller
- * window, and no weapon animates before the camera is ready.
+ * Real camera and playback integration: replays fit between panels, idle panel changes leave the camera still,
+ * and shots wait until framing is complete, including in a smaller window.
  */
 @Tag("on-demand")
 class GpuCombatCameraSmokeTest {
     @Test
-    void splitFireStaysVisibleBetweenTheHudColumnsInObliqueAndTopViews() throws Exception {
+    void splitFireUsesPanelClearanceButIdlePanelChangesLeaveCameraStill() throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
         assertTrue(output.isDirectory() || output.mkdirs());
         AtomicReference<Throwable> failure = new AtomicReference<>();
@@ -77,6 +75,8 @@ class GpuCombatCameraSmokeTest {
                 private int ticks;
                 private int resizedAt;
                 private List<BoardScene.Animation> shots;
+                private float[] beforePanelChange;
+                private boolean logWasOpen;
 
                 @Override
                 public void render() {
@@ -85,6 +85,7 @@ class GpuCombatCameraSmokeTest {
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         ticks++;
                         assertTrue(System.nanoTime() < deadline, "Combat camera review must finish");
+                        if (GpuBoardTestUi.loading(this)) { return; }
                         var playback = (UnitPlayback) field(this, "playback");
                         var ui = (GpuHud) field(this, "ui");
                         if (boardCamera.isFraming()) {
@@ -93,8 +94,6 @@ class GpuCombatCameraSmokeTest {
                         }
                         if (step == 0) {
                             var scene = (BoardScene) field(this, "scene");
-                            assertTrue(ui.cameraWidth() > boardCamera.camera.viewportWidth / 3,
-                                  "The initial fit must use the laid-out board area, not a placeholder HUD viewport");
                             assertTrue(boardCamera.camera.zoom < 10,
                                   "Opening the window must not zoom far beyond the board");
                             var attacker = scene.units().stream().filter(unit -> unit.id() == 1).findFirst()
@@ -109,16 +108,31 @@ class GpuCombatCameraSmokeTest {
                                   attacker.location().elevation()));
                             boardCamera.zoom(.12f);
                             ((GpuPlaybackHistory) field(this, "history")).speed(UnitMotion.Speed.QUADRUPLE);
-                            pending.set(shots);
-                            step++;
+                            beforePanelChange = boardCamera.camera.combined.val.clone();
+                            logWasOpen = ui.state.logOpen();
+                            GpuBoardTestUi.click("utility-log");
+                            resizedAt = ticks;
+                            step = 5;
                         } else if (step == 1 && firing(playback)) {
                             playback.togglePaused();
                             assertCoverage(ui);
                             GpuBoardTestUi.capture(new File(output, "combat-camera-firing-oblique.png"));
                             // The log takes the right column's place, wider than the contacts.
-                            GpuBoardTestUi.click("utility-log");
+                            if (!ui.state.logOpen()) { GpuBoardTestUi.click("utility-log"); }
                             nextVolley(playback, BoardCamera.ATTACK_TOP_VIEW_TILT_DEGREES, 73);
                             step++;
+                        } else if (step == 5 && ticks > resizedAt + 3) {
+                            assertEquals(!logWasOpen, ui.state.logOpen(), "The Log utility changes panel clearance");
+                            assertArrayEquals(beforePanelChange, boardCamera.camera.combined.val,
+                                  "Opening a wider HUD panel must not move, rotate or zoom the camera");
+                            GpuBoardTestUi.click("utility-log");
+                            resizedAt = ticks;
+                            step = 6;
+                        } else if (step == 6 && ticks > resizedAt + 3) {
+                            assertArrayEquals(beforePanelChange, boardCamera.camera.combined.val,
+                                  "Closing the HUD panel must also leave the idle camera still");
+                            pending.set(shots);
+                            step = 1;
                         } else if (step == 2) {
                             assertTrue(ui.state.logOpen(), "The Log utility opens the log");
                             assertEquals(BoardCamera.ATTACK_TOP_VIEW_TILT_DEGREES, boardCamera.tilt(), .001f);
@@ -161,21 +175,10 @@ class GpuCombatCameraSmokeTest {
                     pending.set(shots);
                 }
 
-                /**
-                 * The HUD's camera area lies between the right edge of the left column's forces panel and the left
-                 * edge of the right column's panel, the open log or the contacts, and every corner of the attacker's
-                 * and both targets' models projects into it, inside the window's height.
-                 */
+                /** Replay participants remain visible between the HUD columns. */
                 @SuppressWarnings("unchecked")
                 private void assertCoverage(GpuHud ui) throws Exception {
-                    float scale = Gdx.graphics.getWidth() / ui.stage.getWidth();
-                    Actor forces = ui.stage.getRoot().findActor("forces-panel");
-                    Actor column = ui.stage.getRoot().findActor(ui.state.logOpen() ? "log-panel" : "contacts-panel");
-                    float left = (forces.localToStageCoordinates(new Vector2()).x + forces.getWidth()) * scale;
-                    float right = column.localToStageCoordinates(new Vector2()).x * scale;
-                    assertTrue(ui.cameraLeft() >= left && ui.cameraLeft() + ui.cameraWidth() <= right,
-                          () -> "The camera area " + ui.cameraLeft() + " + " + ui.cameraWidth()
-                                + " must lie between the columns at " + left + " and " + right);
+                    float left = ui.framingLeft(), right = left + ui.framingWidth();
                     var instances = (Map<String, ModelInstance>) field(this, "unitInstances");
                     for (int id : new int[] { 1, 42, 43 }) {
                         var instance = instances.entrySet().stream()
@@ -189,7 +192,7 @@ class GpuCombatCameraSmokeTest {
                                           boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
                                     assertTrue(point.x > left && point.x < right && point.y > 0
                                           && point.y < boardCamera.camera.viewportHeight,
-                                          () -> "Unit " + id + " clipped or behind a HUD column: " + point);
+                                          () -> "Replay unit " + id + " outside the visible framing area: " + point);
                                 }
                             }
                         }

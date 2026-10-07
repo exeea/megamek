@@ -620,10 +620,8 @@ final class GpuTactical implements Disposable {
             float a = distance / length, b = Math.min(length, distance + (dashed ? 10 : length)) / length;
             float ax = start.x + (end.x - start.x) * a, ay = start.y + (end.y - start.y) * a;
             float bx = start.x + (end.x - start.x) * b, by = start.y + (end.y - start.y) * b;
-            rulerShapes.setColor(Color.BLACK);
-            rulerShapes.rectLine(ax, ay, bx, by, 5);
             rulerShapes.setColor(new Color(rgba));
-            rulerShapes.rectLine(ax, ay, bx, by, 3);
+            rulerShapes.rectLine(ax, ay, bx, by, 6);
         }
     }
 

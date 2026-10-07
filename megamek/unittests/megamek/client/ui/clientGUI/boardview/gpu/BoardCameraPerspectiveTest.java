@@ -12,6 +12,7 @@ import java.util.List;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.GdxNativesLoader;
+import megamek.common.board.BoardDecoration;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,24 @@ class BoardCameraPerspectiveTest {
         assertEquals(BoardCamera.MAX_FIELD_OF_VIEW, camera.fieldOfView());
         camera.setFieldOfView(Float.NaN);
         assertEquals(BoardCamera.MAX_FIELD_OF_VIEW, camera.fieldOfView());
+    }
+
+    @Test
+    void explicitFitUsesPanelClearanceInBothProjections() {
+        BoardScene scene = scene(6, 6, 2);
+        for (boolean perspective : new boolean[] { false, true }) {
+            BoardCamera camera = camera();
+            camera.setPerspective(perspective);
+            camera.setIsometric(true);
+            camera.fit(scene, 250, 630, 240, 80);
+            for (var tile : scene.tiles()) {
+                for (int corner = 0; corner < 6; corner++) {
+                    Vector3 screen = project(camera, BoardGeometry.corner(tile.coords(), tile.elevation(), corner));
+                    assertTrue(screen.x >= 250 && screen.x <= 880, "Explicit fit reserves both side panels");
+                    assertTrue(screen.y >= 240 && screen.y <= 720, "Explicit fit reserves bottom controls and toolbar");
+                }
+            }
+        }
     }
 
     @Test
@@ -91,6 +110,34 @@ class BoardCameraPerspectiveTest {
                         }
                     }
                     assertTrue(camera.visibleArea(scene).contains(tile.coords().getX(), tile.coords().getY()));
+                }
+            }
+        }
+    }
+
+    @Test
+    void initialFitIncludesFloatingAndSurfaceAttachedObjectsInBothProjections() {
+        for (boolean perspective : new boolean[] { false, true }) {
+            for (var placement : List.of(BoardDecoration.Placement.absolute(80),
+                  BoardDecoration.Placement.surface("bridge", "deck", 60))) {
+                BoardCamera camera = camera();
+                camera.setPerspective(perspective);
+                camera.setIsometric(true);
+                camera.viewableArea(100, 600);
+                var object = new BoardDecoration("floating", "prop", "scenery/car", null, 0, 0, 0,
+                      false, 2, placement, 0);
+                var features = List.of(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, 4),
+                      new BoardScene.Feature(object.asset(), 0, 0, 0, 2, 1, 0,
+                            BoardScene.FeatureKind.PROP, 0, false, object));
+                var tile = new BoardScene.Tile(new Coords(0, 0), 5, -1, false, 0,
+                      BoardScene.Surface.GRASS, null, null, null, features, List.of());
+                var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
+                camera.fit(scene);
+                float top = placement.mode().equals("absolute") ? 82 : 5 + 4 + 60 + 2;
+                for (int corner = 0; corner < 6; corner++) {
+                    Vector3 screen = project(camera, BoardGeometry.corner(tile.coords(), top, corner));
+                    assertTrue(screen.x > 100 && screen.x < 700 && screen.y > 0 && screen.y < 800,
+                          () -> "Authored height outside fitted viewport: " + screen);
                 }
             }
         }

@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -33,6 +34,16 @@ final class GpuCardPlacement {
     /** A card to place: its id, its size and its target's screen rectangle. */
     record Card(int id, float width, float height, Rectangle target) { }
 
+    /** A screen-space ruler and its clearance, including its endpoint markers. */
+    record Line(float x1, float y1, float x2, float y2, float clearance) {
+        boolean overlaps(Rectangle rectangle) { return overlaps(Box.of(rectangle)); }
+
+        private boolean overlaps(Box box) {
+            return new Rectangle2D.Double(box.x() - clearance, box.y() - clearance,
+                  box.width() + 2 * clearance, box.height() + 2 * clearance).intersectsLine(x1, y1, x2, y2);
+        }
+    }
+
     /** A rectangle in double precision, as the prototype's numbers: every candidate is computed from these. */
     private record Box(double x, double y, double width, double height) {
         static Box of(Rectangle rectangle) {
@@ -59,12 +70,18 @@ final class GpuCardPlacement {
      */
     static Map<Integer, Rectangle> place(List<Card> cards, Rectangle bounds, List<Rectangle> panels,
           List<Rectangle> units) {
+        return place(cards, bounds, panels, units, null);
+    }
+
+    /** The same placement with a ruler to keep visible. Diagonal lines leave their two sides available. */
+    static Map<Integer, Rectangle> place(List<Card> cards, Rectangle bounds, List<Rectangle> panels,
+          List<Rectangle> units, Line line) {
         Box area = Box.of(bounds);
         List<Box> hard = panels.stream().map(Box::of).toList();
         List<Box> soft = units.stream().map(Box::of).toList();
-        Arrangement chosen = arrange(cards, area, hard, soft);
+        Arrangement chosen = arrange(cards, area, hard, soft, line);
         if (cards.size() > 1) {
-            Arrangement reverse = arrange(cards.reversed(), area, hard, soft);
+            Arrangement reverse = arrange(cards.reversed(), area, hard, soft, line);
             if (reverse.total() < chosen.total()) {
                 chosen = reverse;
             }
@@ -82,7 +99,7 @@ final class GpuCardPlacement {
      * Places the cards one after the other: the panels and the cards placed before are hard blocks, the units soft
      * ones. The candidates and their order are the prototype's, mirrored for y up (its "above" is a greater y here).
      */
-    private static Arrangement arrange(List<Card> order, Box bounds, List<Box> panels, List<Box> units) {
+    private static Arrangement arrange(List<Card> order, Box bounds, List<Box> panels, List<Box> units, Line line) {
         Map<Integer, Box> placed = new LinkedHashMap<>();
         double total = 0;
         for (Card card : order) {
@@ -111,6 +128,25 @@ final class GpuCardPlacement {
                 ys.add(clampY(block.top() + GAP, height, bounds));
                 ys.add(clampY(block.y() - GAP - height, height, bounds));
             }
+            if (line != null) {
+                // Positions on either side of the actual segment, including near its endpoints. A bounding box
+                // would wrongly occupy most of the viewport for a long diagonal ruler.
+                double dx = line.x2() - line.x1(), dy = line.y2() - line.y1();
+                double length = Math.hypot(dx, dy);
+                double nx = length == 0 ? 1 : -dy / length, ny = length == 0 ? 0 : dx / length;
+                double offset = Math.abs(nx) * (width / 2 + line.clearance())
+                      + Math.abs(ny) * (height / 2 + line.clearance()) + 1;
+                for (double along : new double[] { 0, .5, 1 }) {
+                    for (int side : new int[] { -1, 1 }) {
+                        xs.add(clampX(line.x1() + dx * along + nx * offset * side - width / 2, width, bounds));
+                        ys.add(clampY(line.y1() + dy * along + ny * offset * side - height / 2, height, bounds));
+                    }
+                }
+                xs.add(clampX(Math.min(line.x1(), line.x2()) - line.clearance() - width - 1, width, bounds));
+                xs.add(clampX(Math.max(line.x1(), line.x2()) + line.clearance() + 1, width, bounds));
+                ys.add(clampY(Math.min(line.y1(), line.y2()) - line.clearance() - height - 1, height, bounds));
+                ys.add(clampY(Math.max(line.y1(), line.y2()) + line.clearance() + 1, height, bounds));
+            }
             Box best = null;
             double score = Double.POSITIVE_INFINITY;
             for (double x : xs) {
@@ -122,7 +158,8 @@ final class GpuCardPlacement {
                     if (distance >= score) {
                         continue;
                     }
-                    double hardOverlap = 0;
+                    double hardOverlap = line != null && line.overlaps(new Box(x, y, width, height))
+                          ? width * height + 1 : 0;
                     for (int index = 0; index < hard.size() && hardOverlap * HARD < score; index++) {
                         hardOverlap += overlap(x, y, width, height, hard.get(index));
                     }

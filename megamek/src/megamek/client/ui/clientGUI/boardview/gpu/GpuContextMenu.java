@@ -244,7 +244,7 @@ final class GpuContextMenu implements GpuHud.Component {
             int board = inputs.frame().scene().boardId();
             item(list, text("GpuBoard.hud.context.planMove"), null, true,
                   () -> source.moves().planTo(coords, board, false));
-            item(list, text("GpuBoard.hud.context.planPin"), text("GpuBoard.hud.context.shiftClick"),
+            item(list, text("GpuBoard.hud.context.planPin"), text("GpuBoard.hud.mouse.ctrlClick"),
                   move.mode() != GpuMovePlan.Mode.JUMP, () -> source.moves().planTo(coords, board, true));
         }
         item(list, text("GpuBoard.hud.context.centerHere"), null, true,

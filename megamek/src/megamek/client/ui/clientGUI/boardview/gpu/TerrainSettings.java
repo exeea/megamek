@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -28,7 +29,13 @@ record TerrainSettings(BoardGeometry.Tuning geometry, BoardRelief.Tuning relief,
     }
 
     static TerrainSettings current() {
-        return Thread.currentThread() instanceof Worker worker ? worker.settings : CURRENT.get();
+        if (Thread.currentThread() instanceof Worker worker) {
+            // Geometry reads these settings throughout a hex's build. Honour shutdown here too, so expensive
+            // sculpting, clipping and vegetation do not have to finish the whole hex before they can stop.
+            if (worker.isInterrupted()) { throw new CancellationException(); }
+            return worker.settings;
+        }
+        return CURRENT.get();
     }
 
     /** Terrain worker threads, numbered as they start so a profile can tell them apart. */

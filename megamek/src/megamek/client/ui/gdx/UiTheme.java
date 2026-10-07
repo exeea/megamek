@@ -114,7 +114,7 @@ public final class UiTheme implements Disposable {
           Map.entry("target", 0xE1B3), Map.entry("move", 0xE569), Map.entry("group", 0xE241),
           Map.entry("orders", 0xE241), Map.entry("info", 0xE88E), Map.entry("unit", 0xE9E0),
           Map.entry("hex", 0xEB39), Map.entry("close", 0xE5CD), Map.entry("search", 0xE8B6),
-          Map.entry("arrow", 0xE5CC), Map.entry("lock", 0xE897), Map.entry("checkbox-off", 0xE835),
+          Map.entry("arrow", 0xE5CC), Map.entry("lock", 0xE897), Map.entry("unlock", 0xE898), Map.entry("checkbox-off", 0xE835),
           Map.entry("checkbox-on", 0xE834),
           Map.entry("tactical", 0xE3B4), Map.entry("map", 0xE55B), Map.entry("report", 0xE873),
           Map.entry("help", 0xF1C0), Map.entry("settings", 0xE8B8), Map.entry("menu", 0xE5D2),
@@ -124,7 +124,7 @@ public final class UiTheme implements Disposable {
           Map.entry("twist-right", 0xE41A), Map.entry("more", 0xE5D3), Map.entry("undo", 0xE166),
           Map.entry("locate", 0xE55C), Map.entry("play", 0xE037), Map.entry("pause", 0xE034),
           Map.entry("skip", 0xE044), Map.entry("warn", 0xE002), Map.entry("walk", 0xF87D),
-          Map.entry("chevron-right", 0xE5CC), Map.entry("expand", 0xF1CE), Map.entry("grip", 0xE945),
+          Map.entry("chevron-left", 0xE5CB), Map.entry("chevron-right", 0xE5CC), Map.entry("expand", 0xF1CE), Map.entry("grip", 0xE945),
           Map.entry("layers", 0xE53B), Map.entry("replay", 0xE042), Map.entry("rewind", 0xE020),
           Map.entry("star", 0xE838), Map.entry("star-outline", 0xE838), Map.entry("tune", 0xE429),
           Map.entry("arrow-right", 0xE941), Map.entry("arrow-up", 0xE986), Map.entry("arrow-down", 0xE984),
@@ -199,6 +199,18 @@ public final class UiTheme implements Disposable {
         TextButton.TextButtonStyle hud = quietButton("hud-button", 8, 12, 36);
         skin.add("hud", hud);
         skin.add("hud-mini", quietButton("hud-mini", 3, 9, 26));
+        TextButton.TextButtonStyle danger = quietButton("hud-mini", 3, 9, 26);
+        danger.fontColor = CORAL;
+        danger.overFontColor = Color.WHITE;
+        danger.over = box("button-danger-over", alpha(CORAL, .35f), CORAL, 1, 3, null, 3, 9, 26);
+        danger.down = danger.over;
+        skin.add("hud-danger", danger);
+        TextButton.TextButtonStyle deleteIcon = new TextButton.TextButtonStyle(danger);
+        deleteIcon.up = flat(Color.CLEAR, 0, 0);
+        deleteIcon.over = flat(alpha(CORAL, .15f), 0, 0);
+        deleteIcon.down = flat(alpha(CORAL, .3f), 0, 0);
+        deleteIcon.overFontColor = Color.valueOf("FF554C");
+        skin.add("hud-delete-icon", deleteIcon);
         skin.add("hud-seg", quietButton("hud-medium", 6, 4, 0));
         // The sections of a pill: bare, the hovered one lighter, the pressed one filled.
         TextButton.TextButtonStyle section = new TextButton.TextButtonStyle();
@@ -639,6 +651,11 @@ public final class UiTheme implements Disposable {
         style.vScroll.setMinWidth(width);
         style.vScrollKnob.setMinWidth(width);
         style.vScrollKnob.setMinHeight(knobHeight);
+        style.hScroll = skin.newDrawable("white", alpha(QUIET, .3f));
+        style.hScrollKnob = skin.newDrawable("white", Color.valueOf("738581"));
+        style.hScroll.setMinHeight(width);
+        style.hScrollKnob.setMinHeight(width);
+        style.hScrollKnob.setMinWidth(knobHeight);
         return style;
     }
 

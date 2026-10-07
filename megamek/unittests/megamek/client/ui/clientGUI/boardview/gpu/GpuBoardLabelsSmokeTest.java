@@ -44,6 +44,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuFirePreview.Contact;
@@ -1221,7 +1222,7 @@ class GpuBoardLabelsSmokeTest {
           GpuFirePreview.Snapshot preview) {
         return new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move, fire, GpuPhysicalOptions.Snapshot.EMPTY,
               GpuUnitRecord.Snapshot.EMPTY, preview, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-              GpuLosResult.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
+              RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
     }
 
     /** The mock's battle in another phase, turn and actor, with the given units. */

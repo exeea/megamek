@@ -240,7 +240,8 @@ final class BoardGeometry {
         return null;
     }
 
-    record Hit(Coords coords, float distance, boolean hardSurface) {
+    record Hit(Coords coords, float distance, boolean hardSurface, String receiver) {
+        Hit(Coords coords, float distance, boolean hardSurface) { this(coords, distance, hardSurface, "ground"); }
         Hit(Coords coords, float distance) { this(coords, distance, false); }
     }
 

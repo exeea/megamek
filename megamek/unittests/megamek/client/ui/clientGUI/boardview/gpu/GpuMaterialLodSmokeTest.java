@@ -6,9 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -22,7 +24,7 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Change the sampled map values, not the LOD code: distant rendering must become independent of those maps. */
+/** Mapped material response near the camera; distant rendering must become independent of fine detail maps. */
 @Tag("on-demand")
 class GpuMaterialLodSmokeTest {
     @Test
@@ -54,7 +56,9 @@ class GpuMaterialLodSmokeTest {
             camera.far = 10000;
             terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0,
                   BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
-            for (String material : List.of("sand", "desert", "mars", "volcano", "concrete", "crust", "lava")) {
+            var outcropFailures = new ArrayList<String>();
+            for (String material : List.of("grass", "dirt", "sand", "rock", "concrete", "snow", "lunar", "fungus",
+                  "desert", "mars", "volcano", "tropical", "crust", "lava")) {
                 assertTrue(manager.apply(Map.of()).success());
                 terrain.update(scene(material));
                 double closeDifference = 0;
@@ -64,6 +68,10 @@ class GpuMaterialLodSmokeTest {
                     camera.update();
                     assertTrue(manager.apply(Map.of()).success());
                     byte[] original = render(terrain, camera);
+                    if (List.of("desert", "mars", "volcano", "dirt", "rock", "lunar").contains(material)
+                          && footprint < 1f) {
+                        checkPlateauOutcrops(manager, terrain, camera, original, material, footprint, outcropFailures);
+                    }
                     var changed = manager.apply(changedMaps(false));
                     assertTrue(changed.success(), changed.message());
                     byte[] altered = render(terrain, camera);
@@ -74,6 +82,16 @@ class GpuMaterialLodSmokeTest {
                         closeDifference = difference;
                         // Molten emission dominates its reflected light; even a large normal change is subtle.
                         assertTrue(difference > .001, description + " still uses its normal map");
+                        if (!material.equals("crust") && !material.equals("lava")) {
+                            String lighting = GpuShaderSource.readDisk("surface-lighting.glsl");
+                            changed = manager.apply(Map.of("surface-lighting.glsl", lighting.replace(
+                                  "float dielectricSheen(vec3 normal, vec3 light, vec3 view, float film, float roughness) {",
+                                  "float dielectricSheen(vec3 normal, vec3 light, vec3 view, float film, float roughness) {"
+                                        + " return 0.0;")));
+                            assertTrue(changed.success(), changed.message());
+                            assertTrue(difference(original, render(terrain, camera)) > .001,
+                                  description + " reflects light even when dry");
+                        }
                     } else if (footprint < 1f) {
                         // Small stone sides retain cliff detail after the surrounding flat top stops sampling.
                         assertTrue(difference < closeDifference * .1, description + " removes ground detail first");
@@ -87,8 +105,71 @@ class GpuMaterialLodSmokeTest {
                     }
                 }
             }
+            // Both fungal skins need visible weathering, while retaining mauve lowlands and cyan raised crust.
+            for (int elevation : new int[] { -3, 0, 3 }) {
+                assertTrue(manager.apply(Map.of()).success());
+                terrain.update(scene("fungus", elevation));
+                camera.position.set(BoardGeometry.center(new Coords(3, 3), elevation)).add(0, 0, 5000);
+                camera.viewportWidth = Gdx.graphics.getBackBufferWidth() * BoardRelief.metres(.4f);
+                camera.viewportHeight = Gdx.graphics.getBackBufferHeight() * BoardRelief.metres(.4f);
+                camera.update();
+                byte[] original = render(terrain, camera);
+                String review = System.getProperty("megamek.gpu.screenshots");
+                if (review != null) {
+                    File output = new File(review, "fungal-elevations");
+                    assertTrue(output.isDirectory() || output.mkdirs());
+                    GpuReviewFrame.save(new File(output, "level-" + elevation + ".png"));
+                }
+                double weathered = visiblePatchFraction(manager, terrain, camera, original, "fungus");
+                System.out.println("fungus at level " + elevation + ": weathering on " + weathered + " of visible ground");
+                if (weathered <= .05) { outcropFailures.add("Fungal weathering must remain visible at level " + elevation); }
+                int mauve = 0, cyan = 0;
+                for (int i = 0; i < original.length; i += 4) {
+                    int red = original[i] & 255, green = original[i + 1] & 255;
+                    if (red > green + 2) { mauve++; }
+                    if (green > red + 2) { cyan++; }
+                }
+                assertTrue(elevation <= 0 ? mauve > cyan : cyan > mauve,
+                      "Fungus must retain its elevation-specific skin at level " + elevation);
+            }
+            assertTrue(outcropFailures.isEmpty(), String.join("\n", outcropFailures));
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally { terrain.dispose(); }
+    }
+
+    /** Mineral caps must visibly break up a clear plateau at close and normal map zoom, with quiet ground left. */
+    private static void checkPlateauOutcrops(GpuShaderManager manager, GpuTerrain terrain,
+          OrthographicCamera camera, byte[] original, String family, float footprint, List<String> failures) {
+        double visible = visiblePatchFraction(manager, terrain, camera, original, family);
+        String description = family + " at " + footprint + " m/pixel";
+        System.out.println(description + ": outcrops on " + visible + " of visible ground");
+        if (visible <= .05) { failures.add(description + " must retain visible bedrock patches (" + visible + ")"); }
+        if (visible >= .55) { failures.add(description + " must retain broad areas of ground cover (" + visible + ")"); }
+    }
+
+    private static double visiblePatchFraction(GpuShaderManager manager, GpuTerrain terrain,
+          OrthographicCamera camera, byte[] original, String family) {
+        String material = GpuShaderSource.readDisk("terrain-materials.glsl");
+        var changed = manager.apply(Map.of("terrain-materials.glsl", material.replace("vec4 roles = vec4(cover,",
+              "cover = 1.0; soil = 0.0; deposit = 0.0; dust = 0.0; vec4 roles = vec4(cover,")));
+        assertTrue(changed.success(), changed.message());
+        byte[] hardpan = render(terrain, camera);
+        int ground = 0, patches = 0;
+        for (int i = 0; i < original.length; i += 4) {
+            int plain = (hardpan[i] & 255) + (hardpan[i + 1] & 255) + (hardpan[i + 2] & 255);
+            if (plain <= 30) { continue; } // Exclude the clear color, but retain dark fungal lowlands.
+            ground++;
+            int contrast = 0;
+            for (int channel = 0; channel < 3; channel++) {
+                int difference = (original[i + channel] & 255) - (hardpan[i + channel] & 255);
+                contrast += family.equals("desert") ? difference : Math.abs(difference);
+            }
+            // Fungal depressions are deliberately dark. Judge their contrast relative to their own skin;
+            // mineral caps still need a clear absolute difference at normal map zoom.
+            if (contrast > (family.equals("fungus") ? plain * .20 : 36)) { patches++; }
+        }
+        assertTrue(ground > 100, "The " + family + " scene must render visible ground");
+        return patches / (double) ground;
     }
 
     private static Map<String, String> changedMaps(boolean surfaces) {
@@ -123,6 +204,10 @@ class GpuMaterialLodSmokeTest {
     }
 
     private static BoardScene scene(String material) {
+        return scene(material, 0);
+    }
+
+    private static BoardScene scene(String material, int elevation) {
         var pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
         BoardLiquid liquid = switch (material) {
             case "crust" -> new BoardLiquid(BoardLiquid.Kind.MAGMA_CRUST, "", 0);
@@ -132,14 +217,9 @@ class GpuMaterialLodSmokeTest {
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      switch (material) {
-                          case "concrete" -> BoardScene.Surface.CONCRETE;
-                          case "desert" -> BoardScene.Surface.DESERT;
-                          case "mars" -> BoardScene.Surface.MARS;
-                          case "volcano" -> BoardScene.Surface.VOLCANO;
-                          default -> BoardScene.Surface.SAND;
-                      },
+                tiles.add(new BoardScene.Tile(new Coords(x, y), elevation, -1, false, 0,
+                      liquid.kind() == BoardLiquid.Kind.NONE ? BoardScene.Surface.valueOf(material.toUpperCase(Locale.ROOT))
+                            : BoardScene.Surface.SAND,
                       pixels, null, null, null, null, List.of(), List.of(), liquid, null, true));
             }
         }

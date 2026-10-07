@@ -33,6 +33,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
@@ -424,7 +425,7 @@ class GpuContactsPanelSmokeTest {
     private static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, GpuFirePreview.Snapshot preview) {
         GpuHudData panels = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY, preview,
-              GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY, GpuLosResult.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
+              GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY, RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
         return new GpuBoardSource.Frame(null, List.of(), null, List.of(), "", null, 0, "", null,
               GpuReportLog.Snapshot.EMPTY, status, panels);
     }

@@ -427,6 +427,30 @@ and picking at all LODs, forced cliff classification and an unobstructed opening
 closed mixed-height seams and their shading, cache invalidation, live game/map-preview
 edits, adjacent pits, and the three pits on Fungal Crevasse.
 
+## Dry surface response
+
+Natural ground, slopes, cliffs and boulders use the existing dielectric lighting
+response when dry as well as when wet. Ground cover, soil, debris and exposed
+stone blend their roughness with the same weights as their color, normals and
+cavity. Cleaner stone faces reflect more than loose grains; fine variation
+comes from the already sampled height/cavity channels and fades with material
+LOD. These are art-directed estimates, not measured roughness scans.
+
+The shared ground-color function receives the actual rim and foot distances,
+restoring its existing wear and shelter tint at those contacts. Sand and snow
+covering a boulder also blend its roughness. No new geometry, texture lookup,
+sampler, material batch or shadow pass is introduced. This adds fragment shading
+work, so it is not a performance optimization.
+
+## Plateau weathering
+
+Desert, Mars and volcanic ground expose broad, connected patches of flush stone
+through their hardpan or ash. The existing region, broad and fine world fields
+control the coverage, with the existing material height blend breaking the
+contact. Foot deposits shelter loose cover; a thin film of the local ground
+material softens exposed horizontal stone. Color, normal, cavity, height and
+roughness all use the same final weights. Submerged beds keep their sediment.
+
 ## Authoring and related features
 
 The [board asset format](../../mm-data/data/models/board/README.md) owns dimensions,

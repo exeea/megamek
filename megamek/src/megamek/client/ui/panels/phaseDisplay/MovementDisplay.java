@@ -400,8 +400,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
             finalFacing = (finalFacing + 5) % 6;
             Coords curPos = cmd.getFinalCoords();
             Coords target = curPos.translated(finalFacing);
-            currentMoveHoldingShift(target, cmd.getFinalBoardId());
-            updateMove();
+            faceToward(target, cmd.getFinalBoardId());
         }
     }
 
@@ -412,7 +411,15 @@ public class MovementDisplay extends ActionPhaseDisplay {
             finalFacing = (finalFacing + 7) % 6;
             Coords curPos = cmd.getFinalCoords();
             Coords target = curPos.translated(finalFacing);
-            currentMoveHoldingShift(target, cmd.getFinalBoardId());
+            faceToward(target, cmd.getFinalBoardId());
+        }
+    }
+
+    /** Turns the current path's endpoint toward a hex through the same command as Shift-click. */
+    public void faceToward(Coords target, int boardId) {
+        if (target != null && cmd != null && cmd.getFinalBoardId() == boardId
+              && !target.equals(cmd.getFinalCoords()) && buttons.get(MoveCommand.MOVE_TURN).isEnabled()) {
+            currentMoveHoldingShift(target, boardId);
             updateMove();
         }
     }

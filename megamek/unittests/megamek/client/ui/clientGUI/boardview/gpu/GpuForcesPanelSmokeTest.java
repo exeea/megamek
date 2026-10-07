@@ -36,6 +36,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.clientGUI.unitDisplay.HeatEffects;
@@ -542,7 +543,7 @@ class GpuForcesPanelSmokeTest {
         return frame(status, GpuReportLog.Snapshot.EMPTY, List.of(), new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY,
               GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY,
               GpuUnitRecord.Snapshot.EMPTY, GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY,
-              GpuToasts.Snapshot.EMPTY, GpuLosResult.Snapshot.NONE, players));
+              GpuToasts.Snapshot.EMPTY, RulerModel.Snapshot.NONE, players));
     }
 
     private static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, GpuReportLog.Snapshot reports,

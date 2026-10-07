@@ -391,6 +391,18 @@ final class GpuAtmosphere implements Disposable {
 
     void end(Camera camera, GpuTerrain terrain, BoardScene board, int bottom,
           GpuFieldOfView fieldOfView) {
+        end(camera, terrain, board, bottom, fieldOfView, true);
+    }
+
+    /** Wireframe suppresses source bloom and lens reflections without changing the user's glare setting. */
+    void end(Camera camera, GpuTerrain terrain, BoardScene board, int bottom,
+          GpuFieldOfView fieldOfView, boolean glareEnabled) {
+        end(camera, terrain, board, bottom, fieldOfView, glareEnabled, null);
+    }
+
+    /** Offscreen editor samples use the board's color grading, without changing the main view's targets. */
+    void end(Camera camera, GpuTerrain terrain, BoardScene board, int bottom,
+          GpuFieldOfView fieldOfView, boolean glareEnabled, FrameBuffer target) {
         boolean fovActive = fieldOfView != null && fieldOfView.active();
         sceneColor.end();
         if (hasScattering()) {
@@ -402,7 +414,8 @@ final class GpuAtmosphere implements Disposable {
             heatGlow.render(sceneColor.getColorBufferTexture(), sceneDepth,
                   hasScattering() ? fog.getColorBufferTexture() : null, camera, fieldOfView);
         }
-        HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight);
+        if (target == null) { HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight); }
+        else { target.begin(); }
         screenState();
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
         Gdx.gl.glDepthFunc(GL20.GL_ALWAYS);
@@ -444,7 +457,7 @@ final class GpuAtmosphere implements Disposable {
         compositeShader.setUniformMatrix("u_inverseView", camera.invProjectionView);
         compositeShader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.width(), BoardGeometry.height());
         bindSand(camera, board);
-        bindSunGlare(camera);
+        bindSunGlare(camera, glareEnabled);
         // Strike promptly when enabled, then at seven-second intervals, with a quick attack and longer decay.
         float attack = MathUtils.clamp((stormClock - 0.35f) / 0.06f, 0, 1);
         float decay = 1 - MathUtils.clamp((stormClock - 0.41f) / 0.54f, 0, 1);
@@ -452,15 +465,16 @@ final class GpuAtmosphere implements Disposable {
         quad.render(compositeShader, GL20.GL_TRIANGLES);
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
         Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+        if (target != null) { target.end(); }
     }
 
     /** A distant light follows the viewing angle and perspective FOV, independently of camera position. */
-    private void bindSunGlare(Camera camera) {
+    private void bindSunGlare(Camera camera, boolean enabled) {
         float aspect = camera.viewportWidth / Math.max(1, camera.viewportHeight);
         float forward = -camera.direction.dot(lighting.direction());
         // The glare takes the sun's normalized color, and its brightness up to that of a full-strength sun.
         float peak = Math.max(worldLighting.direct().r, Math.max(worldLighting.direct().g, worldLighting.direct().b));
-        if (options.sunGlare() == 0 || !lighting.sunlight() || peak <= 0 || forward <= 0.15f) {
+        if (!enabled || options.sunGlare() == 0 || !lighting.sunlight() || peak <= 0 || forward <= 0.15f) {
             compositeShader.setUniformf("u_sunGlare", 0, 0, 0, aspect);
             return;
         }

@@ -20,6 +20,7 @@ import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
+import megamek.client.ui.clientGUI.boardview.RulerDialog;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
 import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricSprite;
@@ -47,6 +48,7 @@ class ClientGUIBoardLifecycleTest {
         onClient(() -> {
             try (var views = mockConstruction(BoardView.class);
                   var panels = mockConstruction(BoardViewPanel.class);
+                  var rulers = mockConstruction(RulerDialog.class);
                   var units = mockConstruction(EntitySprite.class);
                   var isometric = mockConstruction(IsometricSprite.class);
                   var display = mockConstruction(UnitDisplayPanel.class);
@@ -95,6 +97,7 @@ class ClientGUIBoardLifecycleTest {
                 assertEquals(List.of(), boardListeners(removedBoard));
                 assertTrue(views.constructed().isEmpty());
                 assertTrue(panels.constructed().isEmpty());
+                assertTrue(rulers.constructed().isEmpty(), "Native startup must not construct a Swing ruler");
                 assertTrue(units.constructed().isEmpty());
                 assertTrue(isometric.constructed().isEmpty());
                 assertTrue(display.constructed().isEmpty(), "Native startup must not construct the Swing inspector");

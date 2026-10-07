@@ -28,6 +28,7 @@ import javax.swing.Timer;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -81,7 +82,7 @@ class GpuHudServicesTest {
             assertSame(GpuFirePreview.Snapshot.NONE, panels.preview());
             assertSame(GpuChat.Snapshot.EMPTY, panels.chat());
             assertSame(GpuToasts.Snapshot.EMPTY, panels.toasts());
-            assertSame(GpuLosResult.Snapshot.NONE, panels.los());
+            assertSame(RulerModel.Snapshot.NONE, panels.los());
             assertEquals(List.of("GPU review"), panels.players().players().stream().map(GpuPlayers.PlayerRow::name)
                   .toList(), "The players panel lists the fixture's one player");
 

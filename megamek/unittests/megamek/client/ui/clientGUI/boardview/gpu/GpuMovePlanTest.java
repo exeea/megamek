@@ -161,7 +161,7 @@ class GpuMovePlanTest {
             assertFalse(automatic.explicit());
             assertEquals(Set.of(Band.WALK, Band.RUN), Set.copyOf(automatic.envelope().values()));
 
-            // Line 47: Shift+click pins a waypoint.
+            // Ctrl+click pins a waypoint.
             plan.planTo(NORTH_1, 0, true);
             Snapshot pinned = shown(moving);
             assertEquals(List.of(NORTH_1), pinned.pins());
@@ -223,6 +223,33 @@ class GpuMovePlanTest {
             // Undo puts the route through the woods back.
             plan.undo();
             assertEquals(route(through.route()), route(shown(moving).route()));
+        }
+    }
+
+    @Test
+    void orientationKeepsTheDestinationAndPinsAndUndoesInOneStep() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            GpuMovePlan plan = plan(moving);
+            plan.planTo(NORTH_1, 0, true);
+            plan.planTo(NORTH_2, 0, false);
+            Snapshot before = shown(moving);
+
+            plan.faceToward(NORTH_2.translated(2), 0);
+            Snapshot oriented = shown(moving);
+            assertEquals(2, oriented.facing());
+            assertEquals(before.destination(), oriented.destination());
+            assertEquals(before.pins(), oriented.pins());
+            assertTrue(onSwing(() -> moving.display.getPlannedMovement().isMoveLegal()));
+
+            // Same-hex and other-board clicks add no command to undo.
+            plan.faceToward(NORTH_2, 0);
+            plan.faceToward(NORTH_2.translated(3), 1);
+            assertEquals(route(oriented.route()), route(shown(moving).route()));
+            plan.undo();
+            Snapshot undone = shown(moving);
+            assertEquals(route(before.route()), route(undone.route()));
+            assertEquals(before.pins(), undone.pins());
+            verify(moving.gui, never()).addToast(any(), anyString());
         }
     }
 

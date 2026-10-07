@@ -149,6 +149,11 @@ public final class BoardArtwork implements AutoCloseable {
         reload();
     }
 
+    /** Native terrain themes exclude the legacy tileset's synthetic transparent-image selector. */
+    public java.util.List<String> themes() {
+        return gpuTileset.getThemes().stream().filter(theme -> !HexTileset.TRANSPARENT_THEME.equals(theme)).toList();
+    }
+
     /** Reread the definitions and source images, including normal maps that ordinary hex invalidation retains. */
     public void reload() {
         var replacement = new HexTileset(new File(Configuration.dataDir(), "models/board/tileset"));
@@ -301,10 +306,42 @@ public final class BoardArtwork implements AutoCloseable {
         return new File(Configuration.dataDir(), "models/buildings/" + relative + ".glb");
     }
 
+    /** Resolve each appearance in isolation, retaining unrelated shared-fluff artwork from the original hex. */
+    private List<Image> appearanceLayers(Hex hex, boolean orthographic) {
+        List<Image> images = new ArrayList<>(gpuTileset.getSupers(hex));
+        if (orthographic) { images.addAll(gpuTileset.getOrthographic(hex)); }
+        if (hex.getAppearance().isEmpty()) { return images; }
+        var blueprint = megamek.common.board.BoardEditorBlueprint.get();
+        for (String owner : hex.getAppearance().keySet().stream().sorted().toList()) {
+            Hex query = blueprint.artwork(hex, owner);
+            if (query == hex) { continue; }
+            List<Integer> types = owner.equals("rough") ? List.of(Terrains.ROUGH)
+                  : blueprint.components().stream().filter(c -> c.id().equals(owner)).flatMap(c -> c.fields().stream())
+                        .map(f -> Terrains.getType(f.terrain())).toList();
+            java.util.function.Predicate<Image> belongs = image -> types.stream().anyMatch(type -> gpuTileset.imageHasTerrain(image, type));
+            int position = 0;
+            while (position < images.size() && !belongs.test(images.get(position))) { position++; }
+            images.removeIf(belongs);
+            List<Image> replacement = new ArrayList<>(gpuTileset.getSupers(query));
+            if (orthographic) { replacement.addAll(gpuTileset.getOrthographic(query)); }
+            replacement.removeIf(belongs.negate());
+            images.addAll(Math.min(position, images.size()), replacement);
+            gpuTileset.clearHex(query);
+        }
+        return images;
+    }
+
     private Map<Integer, String> structureModels(Hex hex) {
         Map<Integer, String> models = new HashMap<>();
+        var building = hex.getAppearance().get("building");
+        if (building != null && hex.containsTerrain(Terrains.BUILDING)) {
+            var variant = megamek.common.board.BoardEditorBlueprint.get().variant(building.variant());
+            String asset = building.asset() != null ? building.asset() : variant == null ? null : variant.asset();
+            if (asset != null && !asset.isBlank() && (new File(Configuration.dataDir(), "models/board/" + asset + ".glb").isFile()
+                  || asset.startsWith("buildings/") && customBuildingFile(asset).isFile())) { models.put(Terrains.BUILDING, asset); }
+        }
         if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL)) {
-            List<Image> images = new ArrayList<>(gpuTileset.getSupers(hex));
+            List<Image> images = new ArrayList<>(appearanceLayers(hex, false));
             images.add(gpuTileset.getBase(hex));
             for (Image image : images) {
                 String source = gpuTileset.imageSource(image).replace('\\', '/');
@@ -330,6 +367,9 @@ public final class BoardArtwork implements AutoCloseable {
             Hex ground = board.getHex(key).duplicate();
             ground.removeAllTerrains();
             Hex source = board.getHex(key);
+            if (source.getAppearance().containsKey("ground")) {
+                source = megamek.common.board.BoardEditorBlueprint.get().artwork(source, "ground");
+            }
             for (int terrain : GROUND_TERRAINS) {
                 if (source.containsTerrain(terrain)) {
                     ground.addTerrain(source.getTerrain(terrain));
@@ -346,7 +386,7 @@ public final class BoardArtwork implements AutoCloseable {
                 drawBaseTerrain(ground, graphics, base, base, mask(), 1);
                 drawBaseTerrain(ground, normalGraphics, groundNormal(base), groundNormal(base), mask(), 1);
                 // Select variants once, and use the same layering and large-image crop for their normal maps.
-                for (Image overlay : gpuTileset.getSupers(ground)) {
+                for (Image overlay : appearanceLayers(ground, false)) {
                     if (overlay != null) {
                         graphics.drawImage(overlay, 0, 0, null);
                         normalGraphics.drawImage(groundNormal(overlay), 0, 0, null);
@@ -428,9 +468,17 @@ public final class BoardArtwork implements AutoCloseable {
         List<Image> paint = new ArrayList<>();
         Set<Integer> covered = new HashSet<>(), modeled = new HashSet<>();
         int cosmeticRoadExits = 0;
-        List<Image> layers = new ArrayList<>(gpuTileset.getSupers(hex));
-        layers.addAll(gpuTileset.getOrthographic(hex));
+        List<Image> layers = new ArrayList<>(appearanceLayers(hex, true));
         layers.add(gpuTileset.getBase(hex));
+        Set<Integer> queryTypes = new HashSet<>();
+        for (int type : hex.getTerrainTypes()) { queryTypes.add(type); }
+        if (!hex.getAppearance().isEmpty()) {
+            for (String owner : hex.getAppearance().keySet()) {
+                for (int type : megamek.common.board.BoardEditorBlueprint.get().artwork(hex, owner).getTerrainTypes()) {
+                    queryTypes.add(type);
+                }
+            }
+        }
         Graphics2D graphics = decals.createGraphics();
         Graphics2D original = tilesetDecals == null ? null : tilesetDecals.createGraphics();
         Graphics2D objects = tilesetScenery == null ? null : tilesetScenery.createGraphics();
@@ -440,7 +488,7 @@ public final class BoardArtwork implements AutoCloseable {
             if (objects != null) { UIUtil.setHighQualityRendering(objects); }
             for (Image layer : layers) {
                 Set<Integer> types = new HashSet<>();
-                for (int type : hex.getTerrainTypes()) {
+                for (int type : queryTypes) {
                     if (gpuTileset.imageHasTerrain(layer, type)) { types.add(type); }
                 }
                 boolean decoration = false;

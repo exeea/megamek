@@ -107,7 +107,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               terrainImages.captureOverlay(pixels.bridge(), previous == null ? null : previous.bridge()),
               hex.containsTerrain(Terrains.ULTRA_SUBLEVEL),
               terrainImages.captureOverlay(pixels.tilesetDecals(), previous == null ? null : previous.tilesetDecals()),
-              terrainImages.captureOverlay(pixels.tilesetScenery(), previous == null ? null : previous.tilesetScenery()));
+              terrainImages.captureOverlay(pixels.tilesetScenery(), previous == null ? null : previous.tilesetScenery()), hex.getAppearance());
     }
 
     /** Pit rims use the existing authored-cliff path. The source hex and its gameplay exits remain untouched. */
@@ -193,7 +193,11 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
     /** Authored model or scatter shape, placement in tile pixels, and height/root lift in elevation levels. */
     record Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
-          FeatureKind kind, int bridgeExits, boolean authoredPlacement) {
+          FeatureKind kind, int bridgeExits, boolean authoredPlacement, megamek.common.board.BoardDecoration decoration) {
+        Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
+              FeatureKind kind, int bridgeExits, boolean authoredPlacement) {
+            this(asset, x, y, rotation, scale, height, elevation, kind, bridgeExits, authoredPlacement, null);
+        }
         Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
               FeatureKind kind, int bridgeExits) {
             this(asset, x, y, rotation, scale, height, elevation, kind, bridgeExits, false);
@@ -220,7 +224,17 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
           Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
           boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
           boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
+          boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
+          java.util.Map<String, megamek.common.board.HexAppearance> appearance) {
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
+          Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
+          Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+          boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
+          boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
           boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs, tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, java.util.Map.of());
+        }
+
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
               Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
@@ -349,7 +363,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             if (marking == tactical) { return this; }
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
                   decalsWithoutLimbs, marking, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome,
-                  impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery);
+                  impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance);
         }
 
         /** Zero-gravity presentation only: expose the liquid bed as bare rock, without editing the source hex. */
@@ -406,12 +420,14 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             }
             return new Tile(coords, level, -1, false, roadExits, Surface.LUNAR, ground, null, null, null,
                   tactical, kept, labels, BoardLiquid.NONE, null, true, road, fireSmoke, Biome.NONE,
-                  impassable, false, cliffTopExits, true, BoardSurfaceBlend.solid(Surface.LUNAR), bridge(), ultraSublevel);
+                  impassable, false, cliffTopExits, true, BoardSurfaceBlend.solid(Surface.LUNAR), bridge(), ultraSublevel,
+                  null, null, appearance);
         }
 
         Tile {
             features = List.copyOf(features);
             text = List.copyOf(text);
+            appearance = java.util.Map.copyOf(appearance);
         }
 
         boolean water() {
@@ -435,7 +451,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                   && waterDepth == other.waterDepth && frozen == other.frozen && roadExits == other.roadExits
                   && cliffTopExits == other.cliffTopExits && bare == other.bare && ultraSublevel == other.ultraSublevel
                   && surface == other.surface && detailedGround == other.detailedGround && road == other.road && biome == other.biome
-                  && liquid.equals(other.liquid) && features.equals(other.features) && groundCover.equals(other.groundCover);
+                  && liquid.equals(other.liquid) && features.equals(other.features) && groundCover.equals(other.groundCover)
+                  && appearance.equals(other.appearance);
         }
     }
 

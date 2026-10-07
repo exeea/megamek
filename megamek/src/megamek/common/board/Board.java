@@ -230,6 +230,44 @@ public class Board implements Serializable {
     private int enclosingBoard = -1;
 
     private String mapName = BOARD_NAME_UNNAMED;
+    private boolean nativeFormat;
+    private String documentName;
+    private String sourceHeader;
+
+    public boolean isNativeFormat() { return nativeFormat; }
+    public boolean requiresNativeFormat() {
+        return nativeFormat || Arrays.stream(data).filter(Objects::nonNull).anyMatch(Hex::hasAppearance);
+    }
+    public void setNativeFormat(boolean value) { nativeFormat = value; }
+    public String getDocumentName() { return documentName; }
+    public void setDocumentName(String value) {
+        documentName = value;
+        if (value != null) { mapName = value; }
+    }
+    public String getSourceHeader() { return sourceHeader; }
+    public void setSourceHeader(String value) { sourceHeader = value; }
+
+    /** Copies authored metadata alongside a board replacement, resize or single-sheet combination. */
+    public void copyMetadataFrom(Board source) {
+        nativeFormat = source.nativeFormat;
+        documentName = source.documentName;
+        sourceHeader = source.sourceHeader;
+        originalCopyrightYear = source.originalCopyrightYear;
+        mapName = source.mapName;
+        description = source.description;
+        roadsAutoExit = source.roadsAutoExit;
+        boardType = source.boardType;
+        tags.clear(); tags.addAll(source.tags);
+        annotations.clear();
+        source.annotations.forEach((coords, lines) -> annotations.put(coords, List.copyOf(lines)));
+    }
+
+    /** The existing Board object keeps its listeners when a shared loader replaces its document. */
+    private void adopt(Board source) {
+        copyMetadataFrom(source);
+        resetStoredElevation();
+        newData(source.width, source.height, source.data, null);
+    }
 
     // endregion Variable Declarations
 
@@ -633,7 +671,7 @@ public class Board implements Serializable {
             boolean manualCliffTopExitInThisDir = ((origCliffTopExits & (1 << i)) != 0);
             boolean cliffTopExitInThisDir = false;
 
-            if (((levelDiff == 1) || (levelDiff == 2)) && manualCliffTopExitInThisDir) {
+            if (hex.canHaveCliffTopTowards(other) && manualCliffTopExitInThisDir) {
                 correctedCliffTopExits += (1 << i);
                 cliffTopExitInThisDir = true;
             }
@@ -800,6 +838,7 @@ public class Board implements Serializable {
      * @param changedHexes A map of locations and hexes; the locations need not all (or any) match this board
      */
     public void setHexes(Map<BoardLocation, Hex> changedHexes) {
+        Set<Coords> changedCoords = new HashSet<>();
         Set<Coords> needsUpdate = new HashSet<>();
         for (Map.Entry<BoardLocation, Hex> entry : changedHexes.entrySet()) {
             if (boardId != entry.getKey().boardId()) {
@@ -817,20 +856,25 @@ public class Board implements Serializable {
             }
 
             data[(y * width) + x] = currHex;
-            initializeHex(x, y);
-
-            // Add any adjacent hexes that may need to have exits updated
-            if (currHex.hasExitableTerrain()) {
-                for (int dir = 0; dir < 6; dir++) {
-                    if (currHex.containsExit(dir)) {
-                        needsUpdate.add(currCoords.translated(dir));
-                    }
-                }
+            changedCoords.add(currCoords);
+            needsUpdate.add(currCoords);
+            // Removed roads and changed floor levels affect neighbors too. Install the whole batch before
+            // deriving connections, so restoring an undo batch cannot erase another restored cliff edge.
+            for (int dir = 0; dir < 6; dir++) {
+                Coords neighbor = currCoords.translated(dir);
+                if (contains(neighbor) && getHex(neighbor) != null) { needsUpdate.add(neighbor); }
             }
         }
-
+        resetStoredElevation();
         for (Coords coords : needsUpdate) {
-            initializeHex(coords.getX(), coords.getY());
+            initializeHex(coords.getX(), coords.getY(), false);
+        }
+        // Cliff bottoms refer to neighboring tops; finish this after all tops have been corrected.
+        for (Coords coords : needsUpdate) { initializeAutomaticTerrain(coords.getX(), coords.getY()); }
+        // Listeners already invalidate the neighbors of each changed hex. Emit only the edited locations,
+        // after all derived terrain is ready, rather than expanding their invalidation radius twice.
+        for (Coords coords : changedCoords) {
+            processBoardEvent(new BoardEvent(this, coords, BoardEvent.BOARD_CHANGED_HEX));
         }
     }
 
@@ -860,6 +904,7 @@ public class Board implements Serializable {
      */
     public static boolean boardIsSize(final File filepath,
                                       final BoardDimensions size) {
+        if (BoardFile.isNativeName(filepath.getName())) { return size.equals(getSize(filepath)); }
         int boardX = 0;
         int boardY = 0;
         try (FileReader fr = new FileReader(filepath); BufferedReader br = new BufferedReader(fr)) {
@@ -894,6 +939,10 @@ public class Board implements Serializable {
      * @return A {@link BoardDimensions} object containing the dimension.
      */
     public static BoardDimensions getSize(final File filepath) {
+        if (BoardFile.isNativeName(filepath.getName())) {
+            try { return BoardFile.metadata(filepath.toPath()).size(); }
+            catch (IOException failure) { return null; }
+        }
         int boardX = 0;
         int boardY = 0;
         try (FileReader fileReader = new FileReader(filepath);
@@ -924,6 +973,10 @@ public class Board implements Serializable {
      * Inspects the given board file and returns a set of its tags.
      */
     public static Set<String> getTags(final File filepath) {
+        if (BoardFile.isNativeName(filepath.getName())) {
+            try { return BoardFile.metadata(filepath.toPath()).tags(); }
+            catch (IOException failure) { return Set.of(); }
+        }
         var result = new HashSet<String>();
         try (FileReader fr = new FileReader(filepath); BufferedReader br = new BufferedReader(fr)) {
             // read board, looking for "size"
@@ -952,9 +1005,7 @@ public class Board implements Serializable {
 
     public static boolean isValid(String board) {
         Board tempBoard = new Board(16, 17);
-        if (!board.endsWith(".board")) {
-            board += ".board";
-        }
+        board = BoardFile.fileName(board);
 
         try (InputStream is = new FileInputStream(new MegaMekFile(Configuration.boardsDir(), board).getFile())) {
             tempBoard.load(is, null, false);
@@ -1107,8 +1158,8 @@ public class Board implements Serializable {
      * @param filepath The path to the file.
      */
     public void load(final File filepath) {
-        try (InputStream is = new FileInputStream(filepath)) {
-            load(is);
+        try {
+            adopt(BoardFile.read(filepath.toPath()));
             // Default the displayable map name to the filename (without .board) when loading a legacy
             // .board file. The YAML deserializer sets it explicitly; the legacy loader has no in-file
             // map-name field, so we use the filename so the UI shows something more useful than the
@@ -1117,15 +1168,13 @@ public class Board implements Serializable {
                 String fileName = filepath.getName();
                 // Locale.ROOT keeps the case fold deterministic - default locale could mishandle the
                 // dotless-i case (Turkish) and miss the .board suffix.
-                if (fileName.toLowerCase(Locale.ROOT).endsWith(".board")) {
-                    fileName = fileName.substring(0, fileName.length() - ".board".length());
-                }
+                fileName = BoardFile.withoutExtension(fileName);
                 if (!fileName.isBlank()) {
                     mapName = fileName;
                 }
             }
         } catch (IOException ex) {
-            logger.error("IO Error opening file to load board! {}", String.valueOf(ex));
+            throw new IllegalArgumentException("Cannot load board " + filepath + ": " + ex.getMessage(), ex);
         }
     }
 
@@ -1152,17 +1201,36 @@ public class Board implements Serializable {
         int nw = 0, nh = 0, di = 0;
         Hex[] nd = new Hex[0];
         int index = 0;
-        resetStoredElevation();
-        originalCopyrightYear = -1;
 
         // Read the entire content first to extract copyright year from header
         String content;
         try {
             content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            logger.error(e, "Error reading board file content");
+            throw new UncheckedIOException("Error reading board file content", e);
+        }
+
+        if (BoardFile.looksNative(content)) {
+            try { adopt(BoardFile.readNative(content)); }
+            catch (IOException failure) { throw new IllegalArgumentException(failure.getMessage(), failure); }
             return;
         }
+        resetStoredElevation();
+        originalCopyrightYear = -1;
+        nativeFormat = false;
+        documentName = null;
+        mapName = BOARD_NAME_UNNAMED;
+        description = null;
+        annotations.clear();
+        tags.clear();
+        roadsAutoExit = true;
+        boardType = BoardType.GROUND;
+        StringBuilder header = new StringBuilder();
+        for (String line : content.split("(?<=\n)", -1)) {
+            if (!line.isBlank() && !line.stripLeading().startsWith("#")) { break; }
+            header.append(line);
+        }
+        sourceHeader = header.isEmpty() ? null : header.toString();
 
         // Extract original copyright year from header if present
         Matcher matcher = COPYRIGHT_YEAR_PATTERN.matcher(content);
@@ -1372,6 +1440,11 @@ public class Board implements Serializable {
      */
     public void save(OutputStream os,
                      boolean includeLicense) {
+        if (requiresNativeFormat()) {
+            try { BoardFile.write(this, os); }
+            catch (IOException failure) { throw new UncheckedIOException(failure); }
+            return;
+        }
         try (Writer w = new OutputStreamWriter(os)) {
             if (includeLicense) {
                 int currentYear = Calendar.getInstance().get(Calendar.YEAR);

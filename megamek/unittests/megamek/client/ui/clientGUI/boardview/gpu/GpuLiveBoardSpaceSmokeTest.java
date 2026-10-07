@@ -650,8 +650,8 @@ class GpuLiveBoardSpaceSmokeTest {
                 Vector3 archer = live.camera().camera.project(BoardGeometry.center(ARCHER_HEX,
                       live.scene().tile(ARCHER_HEX).elevation()), 0, 0, live.camera().camera.viewportWidth,
                       live.camera().camera.viewportHeight);
-                assertEquals(live.hud.cameraLeft() + live.hud.cameraWidth() / 2, archer.x, 3,
-                      "The Archer stands in the middle of the board area left of the open log");
+                assertEquals(live.camera().camera.viewportWidth / 2, archer.x, 3,
+                      "The Archer stands in the full viewport center even with the log open");
             });
         }
     }

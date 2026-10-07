@@ -34,6 +34,8 @@
 package megamek.client.ui.clientGUI.boardview;
 
 import java.util.List;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import megamek.common.Hex;
 import megamek.common.LosEffects;
@@ -81,24 +83,41 @@ final class LOSModifierCalculator {
     }
 
     /** One engine result supplies the ruler text, Swing diagram and native ray. */
-    record Measurement(LosEffects effects, String description) { }
+    record Measurement(LosEffects effects, String description, String summary) {
+        Measurement(LosEffects effects, ToHitData modifiers) {
+            this(effects, (modifiers.getValue() == TargetRoll.IMPOSSIBLE ? "" : modifiers.getValue() + " = ")
+                  + modifiers.getDesc(), modifierSummary(modifiers));
+        }
+    }
+
+    /** Compact presentation of the same engine modifiers, without parsing the full explanation. */
+    private static String modifierSummary(ToHitData modifiers) {
+        if (!modifiers.needsRoll()) { return ""; }
+        var terms = modifiers.getModifiers().stream().filter(modifier -> modifier.value() != 0).toList();
+        if (terms.isEmpty()) { return ""; }
+        String reason = terms.size() == 1 ? terms.getFirst().getDesc() : terms.stream()
+              .map(modifier -> signed(modifier.value()) + " " + modifier.getDesc()).collect(Collectors.joining("; "));
+        return signed(modifiers.getValue()) + " · " + reason;
+    }
+
+    private static String signed(int value) { return value > 0 ? "+" + value : Integer.toString(value); }
 
     static Measurement measureEntities(Game game, Entity attacker, Entity target, boolean trace) {
         LosEffects losEffects = LosEffects.calculateLOS(game, attacker, target, false, trace);
         ToHitData thd = losEffects.losModifiers(game);
 
         if (thd.getValue() == TargetRoll.IMPOSSIBLE) {
-            return new Measurement(losEffects, thd.getDesc());
+            return new Measurement(losEffects, thd);
         }
 
         // Attacker hex terrain modifiers
-        Hex attackerHex = game.getBoard().getHex(attacker.getPosition());
+        Hex attackerHex = game.getBoard(attacker.getBoardId()).getHex(attacker.getPosition());
         if (attackerHex != null) {
             addAttackerTerrainModifiers(thd, attackerHex);
         }
 
         // Target hex terrain modifiers
-        Hex targetHex = game.getBoard().getHex(target.getPosition());
+        Hex targetHex = game.getBoard(target.getBoardId()).getHex(target.getPosition());
         if (targetHex != null) {
             int targetRelHeight = target.relHeight() + 1;
             addTargetTerrainModifiers(thd, targetHex, targetRelHeight, game);
@@ -115,12 +134,7 @@ final class LOSModifierCalculator {
         int hexDistance = attacker.getPosition().distance(target.getPosition());
         addKnownTargetEntityStateModifiers(thd, losEffects, target, hexDistance);
 
-        String result = "";
-        if (thd.getValue() != TargetRoll.IMPOSSIBLE) {
-            result = thd.getValue() + " = ";
-        }
-        result += thd.getDesc();
-        return new Measurement(losEffects, result);
+        return new Measurement(losEffects, thd);
     }
 
     /**
@@ -172,57 +186,77 @@ final class LOSModifierCalculator {
     static Measurement measure(Game game, Coords attackerPos, Coords targetPos,
           int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
           boolean attackerIsAltitude, boolean targetIsAltitude, @Nullable Player localPlayer, boolean trace) {
+        return measure(game, 0, attackerPos, targetPos, attackerHeight, targetHeight, attackerIsMek, targetIsMek,
+              attackerIsAltitude, targetIsAltitude, localPlayer, trace);
+    }
+
+    static Measurement measure(Game game, int boardId, Coords attackerPos, Coords targetPos,
+          int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
+          boolean attackerIsAltitude, boolean targetIsAltitude, @Nullable Player localPlayer, boolean trace) {
         // LosEffects needs the physical (non-hull-down) heights to correctly detect partial
         // cover, matching the real game where Mek.height() doesn't change for hull-down.
         // The hull-down modifier (+2) is applied separately via addTargetEntityStateModifiers.
         int losAttackerHeight = attackerHeight;
         int losTargetHeight = targetHeight;
-        if (attackerIsMek && isMekHullDownAt(game, attackerPos, localPlayer)) {
+        if (attackerIsMek && isMekHullDownAt(game, boardId, attackerPos, localPlayer)) {
             losAttackerHeight += 1;
         }
-        if (targetIsMek && isMekHullDownAt(game, targetPos, localPlayer)) {
+        if (targetIsMek && isMekHullDownAt(game, boardId, targetPos, localPlayer)) {
             losTargetHeight += 1;
         }
 
-        LosEffects.AttackInfo attackInfo = buildAttackInfo(game, attackerPos, targetPos,
+        LosEffects.AttackInfo attackInfo = buildAttackInfo(game, boardId, attackerPos, targetPos,
               losAttackerHeight, losTargetHeight, attackerIsMek, targetIsMek,
               attackerIsAltitude, targetIsAltitude);
+        return measure(game, attackInfo, targetHeight, localPlayer, trace);
+    }
+
+    /** Native endpoints use LOS levels above the hex, with zero at the surface, rather than TW unit heights. */
+    static Measurement measureAtHeights(Game game, int boardId, Coords attackerPos, Coords targetPos,
+          int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
+          boolean attackerIsAltitude, boolean targetIsAltitude, @Nullable Player localPlayer, boolean trace) {
+        int attackerTwHeight = attackerIsAltitude ? attackerHeight : attackerHeight + 1;
+        int targetTwHeight = targetIsAltitude ? targetHeight : targetHeight + 1;
+        // The explicit endpoint already specifies the sight level; hull-down must not raise that point again.
+        return measure(game, buildAttackInfo(game, boardId, attackerPos, targetPos, attackerTwHeight, targetTwHeight,
+              attackerIsMek, targetIsMek, attackerIsAltitude, targetIsAltitude), targetTwHeight, localPlayer, trace);
+    }
+
+    private static Measurement measure(Game game, LosEffects.AttackInfo attackInfo, int targetHeight,
+          @Nullable Player localPlayer, boolean trace) {
+        int boardId = attackInfo.boardId;
+        Coords attackerPos = attackInfo.attackPos, targetPos = attackInfo.targetPos;
         LosEffects losEffects = LosEffects.calculateLos(game, attackInfo, trace);
         ToHitData thd = losEffects.losModifiers(game);
 
         // If LOS is blocked, no point adding terrain modifiers
         if (thd.getValue() == TargetRoll.IMPOSSIBLE) {
-            return new Measurement(losEffects, thd.getDesc());
+            return new Measurement(losEffects, thd);
         }
 
         // Attacker hex terrain modifiers (matching Compute.getAttackerTerrainModifier)
-        Hex attackerHex = game.getBoard().getHex(attackerPos);
+        Hex attackerHex = game.getBoard(boardId).getHex(attackerPos);
         if (attackerHex != null) {
             addAttackerTerrainModifiers(thd, attackerHex);
         }
 
         // Target hex terrain modifiers (matching Compute.getTargetTerrainModifier)
-        Hex targetHex = game.getBoard().getHex(targetPos);
+        Hex targetHex = game.getBoard(boardId).getHex(targetPos);
         if (targetHex != null) {
             addTargetTerrainModifiers(thd, targetHex, targetHeight, game);
         }
 
         // Water partial cover (matching ComputeTerrainMods lines 167-180)
-        if ((targetHex != null) && targetIsMek) {
+        if ((targetHex != null) && attackInfo.targetIsMek) {
             addWaterPartialCover(thd, losEffects, targetHex, targetHeight);
         }
 
         // Target entity state modifiers (prone, immobile, hull down, stuck) from visible
         // entities on the board at the target hex (filtered by double-blind visibility)
         int hexDistance = attackerPos.distance(targetPos);
-        addTargetEntityStateModifiers(thd, losEffects, game, targetPos, hexDistance, localPlayer);
+        addTargetEntityStateModifiers(thd, losEffects, game, boardId, targetPos, hexDistance, localPlayer);
 
-        String result = "";
-        if (thd.getValue() != TargetRoll.IMPOSSIBLE) {
-            result = thd.getValue() + " = ";
-        }
-        result += thd.getDesc();
-        return new Measurement(losEffects, result);
+        return new Measurement(losEffects, thd);
     }
 
     /**
@@ -247,7 +281,13 @@ final class LOSModifierCalculator {
     static LosEffects.AttackInfo buildAttackInfo(Game game, Coords c1, Coords c2, int h1, int h2,
           boolean attackerIsMek, boolean targetIsMek,
           boolean attackerIsAltitude, boolean targetIsAltitude) {
+        return buildAttackInfo(game, 0, c1, c2, h1, h2, attackerIsMek, targetIsMek, attackerIsAltitude, targetIsAltitude);
+    }
+
+    static LosEffects.AttackInfo buildAttackInfo(Game game, int boardId, Coords c1, Coords c2, int h1, int h2,
+          boolean attackerIsMek, boolean targetIsMek, boolean attackerIsAltitude, boolean targetIsAltitude) {
         LosEffects.AttackInfo attackInfo = new LosEffects.AttackInfo();
+        attackInfo.boardId = boardId;
         attackInfo.attackPos = c1;
         attackInfo.targetPos = c2;
         attackInfo.attackerIsMek = attackerIsMek;
@@ -258,8 +298,8 @@ final class LOSModifierCalculator {
         attackInfo.attackHeight = attackerIsMek ? 1 : 0;
         attackInfo.targetHeight = targetIsMek ? 1 : 0;
 
-        Hex attackerHex = game.getBoard().getHex(c1);
-        Hex targetHex = game.getBoard().getHex(c2);
+        Hex attackerHex = game.getBoard(boardId).getHex(c1);
+        Hex targetHex = game.getBoard(boardId).getHex(c2);
 
         // h1/h2 are TW heights (1-indexed) or altitude for aero units. Use toAbsoluteHeight to convert.
         attackInfo.attackAbsHeight = LOSHeightCalculation.toAbsoluteHeight(
@@ -336,6 +376,22 @@ final class LOSModifierCalculator {
     static LOSComparison computeAllModes(Game game, Coords attackerPos, Coords targetPos,
           int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
           boolean attackerIsAltitude, boolean targetIsAltitude, @Nullable Player localPlayer) {
+        return computeAllModes(game, 0, attackerPos, targetPos, attackerHeight, targetHeight, attackerIsMek,
+              targetIsMek, attackerIsAltitude, targetIsAltitude, localPlayer);
+    }
+
+    static LOSComparison computeAllModes(Game game, int boardId, Coords attackerPos, Coords targetPos,
+          int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
+          boolean attackerIsAltitude, boolean targetIsAltitude, @Nullable Player localPlayer) {
+        return compare(game,
+              () -> measure(game, boardId, attackerPos, targetPos, attackerHeight, targetHeight,
+                    attackerIsMek, targetIsMek, attackerIsAltitude, targetIsAltitude, localPlayer, false).description(),
+              () -> measure(game, boardId, targetPos, attackerPos, targetHeight, attackerHeight,
+                    targetIsMek, attackerIsMek, targetIsAltitude, attackerIsAltitude, localPlayer, false).description());
+    }
+
+    /** Compare the same endpoints and calculation path in each rules mode, restoring the game's options afterward. */
+    static LOSComparison compare(Game game, Supplier<String> forward, Supplier<String> reverse) {
         IOption losOption = game.getOptions().getOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_LOS1);
         IOption deadZoneOption = game.getOptions().getOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_DEAD_ZONES);
         boolean originalLos = losOption.booleanValue();
@@ -345,32 +401,20 @@ final class LOSModifierCalculator {
             // Standard: both off
             losOption.setValue(false);
             deadZoneOption.setValue(false);
-            String standardAttacker = computeFullModifiers(game, attackerPos, targetPos,
-                  attackerHeight, targetHeight, attackerIsMek, targetIsMek,
-                  attackerIsAltitude, targetIsAltitude, localPlayer);
-            String standardTarget = computeFullModifiers(game, targetPos, attackerPos,
-                  targetHeight, attackerHeight, targetIsMek, attackerIsMek,
-                  targetIsAltitude, attackerIsAltitude, localPlayer);
+            String standardAttacker = forward.get();
+            String standardTarget = reverse.get();
 
             // Diagrammed: LOS1 on, Dead Zone off
             losOption.setValue(true);
             deadZoneOption.setValue(false);
-            String diagrammedAttacker = computeFullModifiers(game, attackerPos, targetPos,
-                  attackerHeight, targetHeight, attackerIsMek, targetIsMek,
-                  attackerIsAltitude, targetIsAltitude, localPlayer);
-            String diagrammedTarget = computeFullModifiers(game, targetPos, attackerPos,
-                  targetHeight, attackerHeight, targetIsMek, attackerIsMek,
-                  targetIsAltitude, attackerIsAltitude, localPlayer);
+            String diagrammedAttacker = forward.get();
+            String diagrammedTarget = reverse.get();
 
             // Dead Zone: LOS1 off, Dead Zone on
             losOption.setValue(false);
             deadZoneOption.setValue(true);
-            String deadZoneAttacker = computeFullModifiers(game, attackerPos, targetPos,
-                  attackerHeight, targetHeight, attackerIsMek, targetIsMek,
-                  attackerIsAltitude, targetIsAltitude, localPlayer);
-            String deadZoneTarget = computeFullModifiers(game, targetPos, attackerPos,
-                  targetHeight, attackerHeight, targetIsMek, attackerIsMek,
-                  targetIsAltitude, attackerIsAltitude, localPlayer);
+            String deadZoneAttacker = forward.get();
+            String deadZoneTarget = reverse.get();
 
             return new LOSComparison(standardAttacker, standardTarget,
                   diagrammedAttacker, diagrammedTarget,
@@ -398,9 +442,13 @@ final class LOSModifierCalculator {
      * If {@code localPlayer} is null, no visibility filtering is applied.
      */
     static boolean isMekHullDownAt(Game game, Coords hexPos, @Nullable Player localPlayer) {
-        List<Entity> entities = game.getEntitiesVector(hexPos);
+        return isMekHullDownAt(game, 0, hexPos, localPlayer);
+    }
+
+    private static boolean isMekHullDownAt(Game game, int boardId, Coords hexPos, @Nullable Player localPlayer) {
+        List<Entity> entities = game.getEntitiesVector(hexPos, boardId);
         for (Entity entity : entities) {
-            if (!isVisibleToLocalPlayer(game, entity, localPlayer)) {
+            if (!entity.isOnBoard(boardId) || !isVisibleToLocalPlayer(game, entity, localPlayer)) {
                 continue;
             }
             if ((entity instanceof Mek) && entity.isHullDown()) {
@@ -609,9 +657,14 @@ final class LOSModifierCalculator {
      */
     static void addTargetEntityStateModifiers(ToHitData thd, LosEffects losEffects,
           Game game, Coords targetPos, int distance, @Nullable Player localPlayer) {
-        List<Entity> entitiesAtTarget = game.getEntitiesVector(targetPos);
+        addTargetEntityStateModifiers(thd, losEffects, game, 0, targetPos, distance, localPlayer);
+    }
+
+    private static void addTargetEntityStateModifiers(ToHitData thd, LosEffects losEffects,
+          Game game, int boardId, Coords targetPos, int distance, @Nullable Player localPlayer) {
+        List<Entity> entitiesAtTarget = game.getEntitiesVector(targetPos, boardId);
         for (Entity entity : entitiesAtTarget) {
-            if (isVisibleToLocalPlayer(game, entity, localPlayer)) {
+            if (entity.isOnBoard(boardId) && isVisibleToLocalPlayer(game, entity, localPlayer)) {
                 addKnownTargetEntityStateModifiers(thd, losEffects, entity, distance);
                 return;
             }

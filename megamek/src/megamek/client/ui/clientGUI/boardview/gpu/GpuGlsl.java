@@ -35,6 +35,8 @@ import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.opengl.KHRParallelShaderCompile;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
 
 /**
  * The board's shading language. The board asks for the newest core context the driver creates, from 4.6 down to 3.3,
@@ -409,15 +411,18 @@ final class GpuGlsl {
     }
 
     /**
-     * Tries a hidden window for each version in {@link #CONTEXTS}; 3.3 when GLFW cannot start. libGDX's own window
-     * then finds GLFW initialized; the init hints it would add concern joysticks and ANGLE, which the board does not use.
+     * Tries a hidden window for each supported version. A failed probe reports its native error instead of pretending
+     * that 3.3 is available. libGDX's own window then finds GLFW initialized; its remaining hints concern unused input
+     * and ANGLE settings.
      */
     private static int[] newestContext() {
         Lwjgl3NativesLoader.load();
         // These windows are the run's first OpenGL contexts, which fix the graphics card it draws with.
         GpuGraphicsCard.apply();
-        if (!GLFW.glfwInit()) { return CONTEXTS[CONTEXTS.length - 1]; }
+        if (!GLFW.glfwInit()) { throw new GdxRuntimeException("Could not initialize GLFW. " + glfwError()); }
+        boolean available = false;
         try {
+            String error = "";
             for (int[] candidate : CONTEXTS) {
                 GLFW.glfwDefaultWindowHints();
                 GLFW.glfwWindowHint(GLFW.GLFW_VISIBLE, GLFW.GLFW_FALSE);
@@ -430,12 +435,26 @@ final class GpuGlsl {
                 long window = GLFW.glfwCreateWindow(1, 1, "", 0, 0);
                 if (window != 0) {
                     GLFW.glfwDestroyWindow(window);
+                    available = true;
                     return candidate;
                 }
+                error = glfwError();
             }
-            return CONTEXTS[CONTEXTS.length - 1];
+            throw new GdxRuntimeException("Could not create an OpenGL 3.3 or newer context. " + error);
         } finally {
             GLFW.glfwDefaultWindowHints();
+            if (!available) { GLFW.glfwTerminate(); }
+        }
+    }
+
+    /** GLFW errors belong to the calling thread; capture them before handing a failure to the EDT. */
+    static String glfwError() {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            var description = stack.callocPointer(1);
+            int error = GLFW.glfwGetError(description);
+            if (error == GLFW.GLFW_NO_ERROR) { return ""; }
+            String detail = description.get(0) == 0 ? "No description" : MemoryUtil.memUTF8(description.get(0));
+            return String.format(Locale.ROOT, "GLFW 0x%08X: %s", error, detail);
         }
     }
 

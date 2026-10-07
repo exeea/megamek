@@ -36,6 +36,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 import com.badlogic.gdx.utils.Pools;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -471,7 +472,7 @@ class GpuHelpMenuPlayersSmokeTest {
         GpuHudData panels = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-              GpuLosResult.Snapshot.NONE, players);
+              RulerModel.Snapshot.NONE, players);
         return new GpuBoardSource.Frame(board(), List.of(), null, menuBar, "", null, 0, "", null,
               GpuReportLog.Snapshot.EMPTY, GpuBattleStatus.Snapshot.EMPTY, panels);
     }

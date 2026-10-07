@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.clearInvocations;
@@ -50,6 +51,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.UIUtils;
 import com.badlogic.gdx.utils.GdxNativesLoader;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.util.KeyCommandBind;
@@ -471,9 +473,9 @@ class GpuHudInputTest {
         GpuBattleStatus.UnitStatus blip = unit(BLIP, ENEMY, false, false, 1, true);
         GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, actor, ready, foe);
         update(moving, panels(move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
-        click(HEX, Entity.NONE, SHIFT_DOWN_MASK);
+        click(HEX, Entity.NONE, CTRL_DOWN_MASK);
         verify(moves).planTo(HEX, 0, true);
-        click(HEX, SECOND, SHIFT_DOWN_MASK);
+        click(HEX, SECOND, 0);
         verify(source).selectUnit(SECOND);
         click(HEX, FOE, 0);
         assertEquals(FOE, hud.state.inspected);
@@ -481,14 +483,14 @@ class GpuHudInputTest {
         click(HEX, FIRST, 0);
         assertEquals(Entity.NONE, hud.state.inspected, "selecting ends the inspection");
         click(HEX, Entity.NONE, CTRL_DOWN_MASK);
-        verify(source).measure(HEX, CTRL_DOWN_MASK, Float.NaN);
+        verify(source, never()).measure(HEX, CTRL_DOWN_MASK, Float.NaN);
         // At the height the pointer shows (the user's decision of 2026-10-03), the terrain hit's world height.
         hud.boardClick(HEX, Entity.NONE, Input.Buttons.LEFT, ALT_DOWN_MASK, 100, 100, 3.5f);
         verify(source).measure(HEX, ALT_DOWN_MASK, 3.5f);
-        // With a route, Shift on an own unit pins a waypoint in its hex instead of selecting it.
+        // Ctrl on an own unit pins a waypoint in its hex instead of selecting it.
         update(moving, panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
-        click(HEX, SECOND, SHIFT_DOWN_MASK);
-        verify(moves, times(2)).planTo(HEX, 0, true);
+        click(HEX, SECOND, CTRL_DOWN_MASK);
+        verify(moves, times(3)).planTo(HEX, 0, true);
         verify(source, times(1)).selectUnit(anyInt());
 
         update(status(3, GamePhase.FIRING, true, FIRST, 1, actor, ready, foe, blip), GpuHudData.EMPTY, null);
@@ -529,6 +531,20 @@ class GpuHudInputTest {
         verifyNoInteractions(moves);
     }
 
+    @Test
+    void shiftClickOrientsThePlannedEndpointWithoutSelectingUnitsOrAddingWaypoints() {
+        update(status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true),
+              unit(SECOND, OWN, true, true), unit(FOE, ENEMY, false, false)),
+              panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        for (int target : new int[] { Entity.NONE, SECOND, FOE }) {
+            click(HEX, target, SHIFT_DOWN_MASK);
+        }
+        verify(moves, times(3)).faceToward(HEX, 0);
+        verify(moves, never()).planTo(any(), anyInt(), anyBoolean());
+        verify(source, never()).selectUnit(anyInt());
+        verify(source, never()).measure(any(), anyInt(), anyFloat());
+    }
+
     /**
      * Movement the HUD does not plan (G20), as while the movement display picks a hex (E2d), keeps MegaMek's board
      * tool: a left click is its press and click, never a plan command.
@@ -557,7 +573,7 @@ class GpuHudInputTest {
         GpuHudData picking = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of(STEP)),
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-              GpuLosResult.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null, pick));
+              RulerModel.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null, pick));
         GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true),
               unit(SECOND, OWN, true, true));
         update(moving, picking, null);
@@ -579,23 +595,22 @@ class GpuHudInputTest {
     }
 
     /**
-     * A measurement waiting for its second point (Ctrl for a line of sight, Alt for a distance)
+     * A native LOS measurement waiting for its second point (Alt-click starts it)
      * takes a plain left click with its modifier, ahead of the phase's own gestures, and the hint line names it; with
      * none waiting, a plain click plans again.
      */
     @Test
     void aPlainClickEndsAMeasurementWaitingForItsSecondPoint() {
         GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true));
-        for (int pending : new int[] { CTRL_DOWN_MASK, ALT_DOWN_MASK }) {
+        for (int pending : new int[] { ALT_DOWN_MASK }) {
             GpuHudData waiting = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of()),
                   GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
                   GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-                  new GpuLosResult.Snapshot(pending), GpuPlayers.Snapshot.EMPTY);
+                  new RulerModel.Snapshot(true, pending, null, null, 0, "", "", "", "", true, false, null, List.of()), GpuPlayers.Snapshot.EMPTY);
             update(moving, waiting, null);
             click(HEX, Entity.NONE, 0);
             verify(source).measure(HEX, pending, Float.NaN);
-            assertEquals(UiKit.text(pending == CTRL_DOWN_MASK ? "GpuBoard.hud.hint.completeLos"
-                        : "GpuBoard.hud.hint.completeDistance"),
+            assertEquals(UiKit.text("GpuBoard.hud.hint.completeLos"),
                   GpuHintLine.items(new GpuHud.Inputs(frame(moving, waiting), GpuHud.HudView.EMPTY, null,
                         preferences(), GpuHud.Metrics.of(1920, 1080), List.of())).get(1));
         }
@@ -620,7 +635,7 @@ class GpuHudInputTest {
         GpuHudData picking = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of(STEP)),
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-              GpuLosResult.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null, pick));
+              RulerModel.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null, pick));
         GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true));
         Actor chip = hud.stage.getRoot().findActor("pick-chip");
         Actor hint = hud.stage.getRoot().findActor("hint-line");
@@ -639,7 +654,7 @@ class GpuHudInputTest {
         update(moving, new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of(STEP)),
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-              GpuLosResult.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null, started)), null);
+              RulerModel.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null, started)), null);
         assertNull(hud.stage.getRoot().findActor("pick-status"), "no picked hexes, no second line");
 
         hud.resize(1920, 1080, 1);
@@ -735,7 +750,7 @@ class GpuHudInputTest {
           GpuPhysicalOptions.Snapshot physical, GpuUnitRecord.Snapshot record) {
         return new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move, fire, physical, record,
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-              GpuLosResult.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
+              RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
     }
 
     private static GpuHudData panels(GpuMovePlan.Snapshot move, GpuPhysicalOptions.Snapshot physical) {

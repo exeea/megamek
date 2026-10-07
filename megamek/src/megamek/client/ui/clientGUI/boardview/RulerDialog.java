@@ -1028,44 +1028,15 @@ public class RulerDialog extends JDialog implements BoardViewListener {
             return;
         }
 
-        // Determine if we can use entity-based LOS (same as fire phase)
-        boolean attackerIsFirst = flip;
-        Entity attackerEntity = getSelectedEntity(attackerIsFirst);
-        Entity targetEntity = getSelectedEntity(!attackerIsFirst);
-        boolean spinnerMatch1 = isSpinnerAtEntityHeight(true);
-        boolean spinnerMatch2 = isSpinnerAtEntityHeight(false);
-        // A sensor return is measured as its bare hex, so its real height, cover and states stay hidden
-        boolean useEntityPath = (attackerEntity != null) && (targetEntity != null)
-              && spinnerMatch1 && spinnerMatch2
-              && !isSensorReturn(attackerEntity) && !isSensorReturn(targetEntity);
-
-        LOSModifierCalculator.Measurement measurement;
-        String toHit2;
-        if (useEntityPath) {
-            // Entity-based path: identical to fire phase LOS calculation
-            measurement = LOSModifierCalculator.measureEntities(game, attackerEntity, targetEntity, true);
-            toHit2 = LOSModifierCalculator.computeEntityBasedModifiers(game, targetEntity, attackerEntity);
-        } else {
-            // Manual path: scenario testing with spinner overrides or no entities
-            boolean isMek1 = unitType1.isMek();
-            boolean isMek2 = unitType2.isMek();
-            Coords attackerPos = flip ? start : end;
-            Coords targetPos = flip ? end : start;
-            int attackerHeight = flip ? h1 : h2;
-            int targetHeight = flip ? h2 : h1;
-            boolean attackerIsMek = flip ? isMek1 : isMek2;
-            boolean targetIsMek = flip ? isMek2 : isMek1;
-            boolean attackerIsAlt = flip ? atAltitude1 : atAltitude2;
-            boolean targetIsAlt = flip ? atAltitude2 : atAltitude1;
-
-            Player localPlayer = bv.getLocalPlayer();
-            measurement = LOSModifierCalculator.measure(game, attackerPos, targetPos,
-                  attackerHeight, targetHeight, attackerIsMek, targetIsMek,
-                  attackerIsAlt, targetIsAlt, localPlayer, true);
-            toHit2 = LOSModifierCalculator.computeFullModifiers(game, targetPos, attackerPos,
-                  targetHeight, attackerHeight, targetIsMek, attackerIsMek,
-                  targetIsAlt, attackerIsAlt, localPlayer);
-        }
+        RulerModel.Evaluation result = RulerModel.evaluate(game, bv.getBoardId(), bv.getLocalPlayer(),
+              flip ? start : end, flip ? end : start, flip ? h1 : h2, flip ? h2 : h1,
+              (flip ? unitType1 : unitType2).isMek(), (flip ? unitType2 : unitType1).isMek(),
+              flip ? atAltitude1 : atAltitude2, flip ? atAltitude2 : atAltitude1,
+              getSelectedEntity(flip), getSelectedEntity(!flip),
+              isSpinnerAtEntityHeight(true) && isSpinnerAtEntityHeight(false));
+        LOSModifierCalculator.Measurement measurement = result.forward();
+        String toHit2 = result.reverse();
+        boolean useEntityPath = result.entityBased();
 
         tf_start.setText(start.toString());
         tf_end.setText(end.toString());

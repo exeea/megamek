@@ -284,6 +284,7 @@ void main() {
                     cavity = mix(cavity, top.a * .5 + .5, crown);
                 }
             }
+            roughness = mappedRoughness(stoneRoughness(u_sculptFamily, .5), wall.a, cavity);
             float h = v_diffuseUV.x, d = v_diffuseUV.y;
             if (cliff) {
                 float drop = h + d;
@@ -327,6 +328,7 @@ void main() {
                 vec4 top = planar(u_sculptLayers.x, p, u_sculptTiles.x, broad);
                 float w = heightBlend(wall.a, top.a, ledge);
                 albedo = mix(albedo, groundTone(top.rgb, world, broad, fine, region, 0.0, 0.0), w);
+                roughness = mix(roughness, mappedRoughness(coverRoughness(u_sculptFamily), top.a, cavity), w);
                 if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
                     normal = normalize(mix(normal, upNormal(planarNormal(u_sculptLayers.x + 1.0, p, u_sculptTiles.x, broad).rgb, face), w));
                 }
@@ -450,7 +452,11 @@ void main() {
     float incidence = plant ? max(0.0, dot(normal, light) * .6 + .4) : max(0.0, dot(normal, light));
     vec3 sun = u_dirLights[0].color * sculptShadow(face, light);
     direct = sun * incidence * mix(1.0, cavity, .5) * (1.0 + caustic);
-    if (film > 0.0 && incidence > 0.0) {
+    if (!plant && u_clay < .5 && volcanic < 1.0 && incidence > 0.0) {
+        // Reuse the same shadowed sun and dielectric response as the other mapped materials. No additional
+        // shadow pass or surface-map fetch: roughness follows the already blended height/cavity channels.
+        sheen = sun * dielectricSheen(normal, light, -viewDirection(), film, roughness) * cavity;
+    } else if (film > 0.0 && incidence > 0.0) {
         vec3 halfVector = normalize(light - viewDirection());
         float exponent = mix(12.0, 96.0, film);
         float fresnel = .02 + .98 * pow(1.0 - max(0.0, dot(-viewDirection(), halfVector)), 5.0);

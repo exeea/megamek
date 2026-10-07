@@ -429,7 +429,7 @@ public class BoardsTagger {
      */
     private static void tagBoard(File boardFile) {
         // If this isn't a board, ignore it
-        if (!boardFile.toString().endsWith(".board")) {
+        if (!megamek.common.board.BoardFile.isBoardName(boardFile.toString())) {
             return;
         }
 
@@ -553,7 +553,7 @@ public class BoardsTagger {
      */
     private static void updateCopyrightHeader(File boardFile) {
         // If this isn't a board, ignore it
-        if (!boardFile.toString().endsWith(".board")) {
+        if (!megamek.common.board.BoardFile.isBoardName(boardFile.toString())) {
             return;
         }
 

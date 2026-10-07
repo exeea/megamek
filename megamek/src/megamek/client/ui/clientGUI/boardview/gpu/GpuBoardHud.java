@@ -10,6 +10,9 @@ import com.badlogic.gdx.utils.Disposable;
  * coordinates, y down; everything runs on the GL thread.
  */
 interface GpuBoardHud extends Disposable {
+    /** Shared outer margin and panel clearance for the editor, preview and game HUD, in stage units. */
+    float GAP = 10;
+
     Stage stage();
 
     /** The window's logical size and the display scale. */
@@ -43,8 +46,10 @@ interface GpuBoardHud extends Disposable {
     /** A press on the board, which closes what such a press closes. */
     void boardPress();
 
-    /** The camera's usable area: its left edge and width in window pixels, beside the HUD's columns. */
-    float cameraLeft();
+    /** Panel clearance in window pixels, consumed only by explicit Fit board and replay framing. */
+    float framingLeft();
+    float framingWidth();
+    default float framingBottom() { return 0; }
+    default float framingTop() { return 0; }
 
-    float cameraWidth();
 }

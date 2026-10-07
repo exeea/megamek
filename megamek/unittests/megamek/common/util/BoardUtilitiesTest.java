@@ -34,6 +34,8 @@ package megamek.common.util;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import megamek.common.board.Board;
 import org.junit.jupiter.api.Test;
@@ -43,6 +45,45 @@ import org.junit.jupiter.api.Test;
  * @since 9/3/14 1:44 PM
  */
 class BoardUtilitiesTest {
+
+    @Test
+    void combiningRepeatedSheetsCopiesDecorationsAndKeepsTheirMetadata() {
+        Board source = Board.createEmptyBoard(2, 2);
+        source.setNativeFormat(true); source.setSourceHeader("# Original author"); source.addTag("test");
+        var at = new megamek.common.board.Coords(0, 0);
+        source.setAnnotations(at, java.util.List.of("annotation"));
+        var object = new megamek.common.board.BoardDecoration("car", "prop", "car", null, .2, -.1, 30,
+              false, .8, megamek.common.board.BoardDecoration.Placement.absolute(4), 0);
+        source.getHex(at).setDecorations(java.util.List.of(object));
+        Board result = BoardUtilities.combine(2, 2, 2, 1, new Board[] { source, source }, megamek.common.loaders.MapSettings.MEDIUM_GROUND);
+        assertNotSame(source.getHex(at), result.getHex(at));
+        var instances = java.util.List.of(result.getHex(0, 0).getDecorations().getFirst(), result.getHex(2, 0).getDecorations().getFirst());
+        assertEquals(2, instances.stream().map(megamek.common.board.BoardDecoration::id).distinct().count());
+        assertEquals(object.placement(), instances.get(1).placement());
+        assertEquals(java.util.List.of("annotation"), result.getAnnotations(new megamek.common.board.Coords(2, 0)));
+        assertEquals(source.getSourceHeader(), result.getSourceHeader());
+        assertTrue(result.isNativeFormat());
+        assertTrue(result.getTags().contains("test"));
+        result.getHex(at).setDecorations(java.util.List.of());
+        assertEquals(java.util.List.of(object), source.getHex(at).getDecorations());
+    }
+
+    @Test
+    void flipsTransformCenterObjectsWithoutLosingNorthSouthEdgesOrLegacyDesigns() {
+        Board board = Board.createEmptyBoard(3, 3);
+        var at = new megamek.common.board.Coords(1, 1);
+        var hex = new megamek.common.Hex(0, "road:1:9;building:1:65;bldg_cf:15;bldg_elev:1", "");
+        var object = new megamek.common.board.BoardDecoration("tree", "prop", "tree", null, .2, -.1, 30,
+              false, .8, megamek.common.board.BoardDecoration.Placement.ground(), 0);
+        hex.setDecorations(java.util.List.of(object)); board.setHex(at, hex);
+        BoardUtilities.flip(board, true, false);
+        var flipped = board.getHex(at).getDecorations().getFirst();
+        assertEquals(-.2, flipped.x()); assertEquals(-30, flipped.rotation()); assertTrue(flipped.mirror());
+        assertEquals(9, board.getHex(at).getTerrain(megamek.common.units.Terrains.ROAD).getExits());
+        assertEquals(65, board.getHex(at).getTerrain(megamek.common.units.Terrains.BUILDING).getExits());
+        BoardUtilities.flip(board, true, false);
+        assertEquals(object, board.getHex(at).getDecorations().getFirst());
+    }
 
     @Test
     void testCraterProfile() {

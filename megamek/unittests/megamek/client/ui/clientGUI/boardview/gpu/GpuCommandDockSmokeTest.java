@@ -42,6 +42,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Layout;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.gdx.UiButton;
@@ -1139,7 +1140,7 @@ class GpuCommandDockSmokeTest {
     private static GpuHudData panels(GpuBoardActions.PhaseInfo info, GpuMovePlan.Snapshot move,
           GpuFireOrders.Snapshot orders, GpuPhysicalOptions.Snapshot attacks) {
         return new GpuHudData(info, move, orders, attacks, GpuUnitRecord.Snapshot.EMPTY, GpuFirePreview.Snapshot.NONE,
-              GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY, GpuLosResult.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
+              GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY, RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
     }
 
     /** The mock roster's round 3 in another phase and turn. */

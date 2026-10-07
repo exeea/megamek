@@ -17,6 +17,7 @@ public final class BoardRough {
 
     /** The modeled rough appearance; other uses of fluff retain their tileset artwork. Safe during EDT capture. */
     public static int variant(Hex hex) {
+        if (hex.getAppearance().containsKey("rough")) { hex = megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "rough"); }
         int fluff = hex.terrainLevel(Terrains.FLUFF);
         return hex.containsTerrain(Terrains.ROUGH) && (fluff == 1 || fluff == 2) ? fluff : 0;
     }

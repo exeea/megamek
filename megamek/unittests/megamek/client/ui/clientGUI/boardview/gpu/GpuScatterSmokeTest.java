@@ -163,7 +163,7 @@ class GpuScatterSmokeTest {
                         camera.fit(scene);
                         preview(terrain, camera, "scatter-overview");
                         for (BoardScene.Surface surface : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DIRT,
-                              BoardScene.Surface.SAND, BoardScene.Surface.ROCK, BoardScene.Surface.LUNAR)) {
+                              BoardScene.Surface.DESERT, BoardScene.Surface.ROCK, BoardScene.Surface.LUNAR)) {
                             var tile = scene.tiles().stream().filter(value -> value.surface() == surface
                                   && !value.features().isEmpty()).findFirst().orElseThrow();
                             camera.camera.zoom = .15f;
@@ -186,7 +186,7 @@ class GpuScatterSmokeTest {
                         // Inspect both plant paths in the same daylight/composite pipeline as the real board.
                         GpuReviewFrame frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
                         try {
-                            for (var family : List.of(BoardScene.Surface.SAND, BoardScene.Surface.GRASS)) {
+                            for (var family : List.of(BoardScene.Surface.DESERT, BoardScene.Surface.GRASS)) {
                                 var shrubTile = captured.tiles().stream().filter(tile -> tile.surface() == family
                                       && tile.features().isEmpty()).filter(tile -> {
                                           var ground = new BoardSurface(captured, tile);

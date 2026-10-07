@@ -209,6 +209,21 @@ final class GpuAssets implements Disposable {
         return lodModel(name, 0);
     }
 
+    /** Missing authored references remain editable and visibly marked instead of aborting the board renderer. */
+    Model decoration(String name) {
+        if (new File(root, name + ".glb").isFile()) { return model(name); }
+        return models.computeIfAbsent("missing-decoration", key -> new com.badlogic.gdx.graphics.g3d.utils.ModelBuilder()
+              .createBox(8, 8, 8, new com.badlogic.gdx.graphics.g3d.Material(ColorAttribute.createDiffuse(1, .25f, .1f, 1)),
+                    com.badlogic.gdx.graphics.VertexAttributes.Usage.Position | com.badlogic.gdx.graphics.VertexAttributes.Usage.Normal));
+    }
+
+    Texture decorationPaint(String asset) {
+        var entry = megamek.common.board.BoardEditorBlueprint.get().asset(asset);
+        if (entry == null || entry.image().isEmpty()) { return null; }
+        FileHandle file = new FileHandle(new File(Configuration.dataDir(), entry.image()));
+        return file.exists() ? texture(file) : null;
+    }
+
     /** Custom kits override the exact tileset path for buildings, fuel tanks and industrial structures. */
     GpuBuilding.Assembly building(String asset, int levels, long seed) {
         return building(asset, levels, seed, true);

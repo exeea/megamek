@@ -257,8 +257,9 @@ class GpuHudInteractionSmokeTest {
 
     /**
      * Lines 30-83: the Atlas's movement plan. A click plots an automatic walk, a longer route runs, Backspace undoes;
-     * 1 constrains the route to walking and again returns to automatic; Shift+click pins a waypoint the next route
-     * continues from; Shift+D turns the final facing; the fire preview evaluates from the destination, and its Incoming
+     * 1 constrains the route to walking and again returns to automatic; Ctrl+click pins a waypoint the next route
+     * continues from; Shift+click and the turn button change the final facing; the fire preview evaluates from the
+     * destination, and its Incoming
      * toggle hides the incoming guides only. A short right click opens the hex menu and keeps the plan; right drags
      * pan, middle and Shift+right drags orbit; a left drag on the minimap pans and keeps the draft; the chat's draft
      * survives new frames with its focus; the DONE key sends the planned route.
@@ -312,9 +313,9 @@ class GpuHudInteractionSmokeTest {
                     assertEquals(GpuMovePlan.Mode.AUTO, move.mode());
                     assertTrue(move.envelope().containsValue(GpuMovePlan.Band.WALK)
                           && move.envelope().containsValue(GpuMovePlan.Band.RUN), "Walk and run bands");
-                    // 47: Shift+click pins a waypoint.
+                    // Ctrl+click pins a waypoint.
                     Coords pin = start.translated(0);
-                    play.click(pin, Input.Buttons.LEFT, InputEvent.SHIFT_DOWN_MASK);
+                    play.click(pin, Input.Buttons.LEFT, InputEvent.CTRL_DOWN_MASK);
                     assertEquals(List.of(pin), play.move().pins(), "One waypoint");
                     // 50: the route continues from the waypoint with the cumulative cost.
                     Coords destination = pin.translated(1);
@@ -324,9 +325,16 @@ class GpuHudInteractionSmokeTest {
                     assertEquals(destination, move.destination());
                     assertEquals(pin, move.route().getFirst().coords(), "The route runs through the waypoint");
                     assertTrue(move.cost() >= 2, "The cost counts both legs: " + move.cost());
-                    // 52: Shift+D turns the final facing.
                     int facing = move.facing();
-                    play.press(KeyCommandBind.TURN_RIGHT);
+                    // Shift+click turns the endpoint while retaining its destination and waypoint.
+                    play.click(destination.translated((facing + 1) % 6), Input.Buttons.LEFT, InputEvent.SHIFT_DOWN_MASK);
+                    assertEquals((facing + 1) % 6, play.move().facing());
+                    assertEquals(destination, play.move().destination());
+                    assertEquals(List.of(pin), play.move().pins());
+                    play.press(KeyCommandBind.UNDO_LAST_STEP);
+                    assertEquals(facing, play.move().facing());
+                    // The turn button uses the same facing command; Shift+D is a boosted camera gesture.
+                    play.click("dock-turn-right");
                     assertEquals((facing + 1) % 6, play.move().facing());
                     // 54: the fire preview evaluates from the destination, outgoing and incoming.
                     GpuHudParitySmokeTest.awaitPreview(live, live.real, ATLAS, play::asCaptured);

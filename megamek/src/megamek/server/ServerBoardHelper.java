@@ -103,9 +103,9 @@ public class ServerBoardHelper {
                 if (filePath.isDirectory()) {
                     scanForBoardsInDir(filePath, basePath + File.separator + filename, dimensions, boards);
                 } else {
-                    if (filename.endsWith(".board")) {
+                    if (megamek.common.board.BoardFile.isBoardName(filename)) {
                         if (Board.boardIsSize(filePath, dimensions)) {
-                            boards.add(basePath + File.separator + filename.substring(0, filename.lastIndexOf(".")));
+                            boards.add(basePath + File.separator + megamek.common.board.BoardFile.selectionName(filename));
                         }
                     }
                 }
@@ -154,7 +154,7 @@ public class ServerBoardHelper {
                 }
 
                 sheetBoards[i].load(new MegaMekFile(Configuration.boardsDir(),
-                      name + MMConstants.CL_KEY_FILE_EXTENSION_BOARD).getFile());
+                      megamek.common.board.BoardFile.fileName(name)).getFile());
                 BoardUtilities.flip(sheetBoards[i], flipBoard, flipBoard);
             }
             i++;

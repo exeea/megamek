@@ -49,6 +49,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
@@ -850,7 +851,7 @@ class GpuChatToastModalSmokeTest {
                 GpuHudData picking = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
                       GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
                       GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-                      GpuLosResult.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null,
+                      RulerModel.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null,
                       new GpuPlayers.Pick(instructions, status)));
                 GpuBoardSource.Frame frame = GpuHudInputTest.frame(GpuHudInputTest.status(3, GamePhase.MOVEMENT,
                       false, Entity.NONE, 0), picking);
@@ -886,7 +887,7 @@ class GpuChatToastModalSmokeTest {
         GpuHudData picking = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-              GpuLosResult.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null,
+              RulerModel.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null,
               new GpuPlayers.Pick(instructions, status)));
         GpuBoardSource.Frame frame = GpuHudInputTest.frame(GpuHudInputTest.status(3, GamePhase.MOVEMENT, false,
               Entity.NONE, 0), picking);
@@ -962,7 +963,7 @@ class GpuChatToastModalSmokeTest {
     private static GpuHudData panels(GpuChat.Snapshot chat, GpuToasts.Snapshot toasts) {
         return new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY,
               GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY, GpuFirePreview.Snapshot.NONE, chat,
-              toasts, GpuLosResult.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
+              toasts, RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
     }
 
     private static GpuHud.Inputs inputs(GpuHudTestStage harness, GpuBoardSource.Frame frame, DialogRequest dialog) {

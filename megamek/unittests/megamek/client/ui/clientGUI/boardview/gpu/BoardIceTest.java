@@ -87,13 +87,9 @@ class BoardIceTest {
             var coords = new Coords(0, 0);
             board.setHex(coords, new Hex(0, "black_ice:1;bldg_base_collapsed:1", ""));
             game.setBoard(board);
-            var editor = mock(BoardEditorPanel.class);
-            var window = mock(JFrame.class);
-            when(window.getTitle()).thenReturn("Ice editor test");
-            when(editor.getFrame()).thenReturn(window);
-            when(editor.getMenuBar()).thenReturn(new JMenuBar());
-            when(editor.elevationBrush(null)).thenReturn(List.of());
-            try (var source = new GpuMapSource(game, null, editor)) {
+            var editor = new megamek.client.ui.boardeditor.BoardEditorSession();
+            editor.game().setBoard(board);
+            try (var source = new GpuMapSource(editor.game(), null, editor)) {
                 var markers = source.takeFrame().scene().tactical();
                 assertFalse(markers.fills().isEmpty());
                 markers.fills().forEach(fill -> assertNotNull(fill.planeAnchor()));

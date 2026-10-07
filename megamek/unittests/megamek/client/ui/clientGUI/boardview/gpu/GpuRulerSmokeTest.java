@@ -10,7 +10,6 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
-import megamek.client.ui.clientGUI.boardview.RulerDialog;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -27,20 +26,14 @@ class GpuRulerSmokeTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create(map)) {
             SwingUtilities.invokeAndWait(() -> {
                 fixture.entity.setPosition(from);
-                RulerDialog dialog = new RulerDialog(null, fixture.view, fixture.game);
-                try {
-                    dialog.measure(from, to);
-                    dialog.setHeight(to, 2);
-                    fixture.source.refresh();
-                    blocked.set(fixture.source.takeFrame().scene());
-                    assertEquals(hill, blocked.get().tactical().ruler().blockedAt());
-                    dialog.setHeight(from, 5);
-                    dialog.setHeight(to, 5);
-                    fixture.source.refresh();
-                    clear.set(fixture.source.takeFrame().scene());
-                } finally {
-                    dialog.dispose();
-                }
+                var ruler = fixture.source.los().model();
+                ruler.measure(from, to, fixture.entity.getId(), 2);
+                fixture.source.refresh();
+                blocked.set(fixture.source.takeFrame().scene());
+                assertEquals(hill, blocked.get().tactical().ruler().blockedAt());
+                ruler.height(true, 5); ruler.height(false, 5);
+                fixture.source.refresh();
+                clear.set(fixture.source.takeFrame().scene());
             });
         }
         GpuHudTestStage.run(hud -> {

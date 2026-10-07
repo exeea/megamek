@@ -124,7 +124,7 @@ record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind ki
                 for (int i = 1; i + 1 < kept.size(); i++) {
                     Vector3 a = kept.getFirst(), b = kept.get(i), c = kept.get(i + 1);
                     if (new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).len2() > 1e-10f) {
-                        result.add(new BoardSurface.Face(a, b, c, face.finish(), face.landEdge()));
+                        result.add(new BoardSurface.Face(a, b, c, face.finish(), face.landEdge(), face.scatter()));
                     }
                 }
                 inside = removed;

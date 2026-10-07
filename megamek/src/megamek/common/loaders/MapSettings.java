@@ -740,7 +740,7 @@ public class MapSettings implements Serializable {
                         if (!MapSettings.BOARD_GENERATED.equals(boardSelected) &&
                               !MapSettings.BOARD_RANDOM.equals(boardSelected) &&
                               !MapSettings.BOARD_SURPRISE.equals(boardSelected)) {
-                            b.load(new File(Configuration.boardsDir(), boardSelected + ".board"));
+                            b.load(new File(Configuration.boardsDir(), megamek.common.board.BoardFile.fileName(boardSelected)));
                             if (b.isValid()) {
                                 nonFound = false;
                             } else {

@@ -13,6 +13,24 @@ struct TerrainMaterial {
 
 float materialBlendWidth() { return .13 + min(.2, pixelMetres * .16); }
 
+// Dry dielectric surfaces still reflect light. These are art-directed estimates from the existing relief/cavity
+// channels, not measured roughness scans. Keep loose grains matte and let the cleaner stone faces catch the sun.
+// Fine variation fades with the normal maps; distant materials retain their broad response without extra reads.
+float mappedRoughness(float base, float height, float cavity) {
+    return clamp(base + terrainNormalDetail * ((.5 - height) * .12 + (1.0 - cavity) * .25), .55, .98);
+}
+
+float stoneRoughness(float familyId, float hardness) {
+    float stone = mix(.80, .66, hardness);
+    if (abs(familyId - 2.0) < .5 || abs(familyId - DESERT_FAMILY) < .5
+          || abs(familyId - MARS_FAMILY) < .5) stone += .08;
+    return stone;
+}
+
+float coverRoughness(float familyId) {
+    return abs(familyId - 2.0) < .5 || abs(familyId) < .5 || abs(familyId - TROPICAL_FAMILY) < .5 ? .94 : .88;
+}
+
 // Competing covers retain their texture rather than becoming a muddy colour crossfade. All channels use the same
 // weights; filtering broadens the contact only when its detail becomes subpixel.
 vec4 materialWeights(vec4 coverage, vec4 height) {
@@ -89,7 +107,7 @@ vec4 cliffTexel(float layer, vec2 uv, mat2 gradient, float variation) {
 
 // Every role shares projection and metre scale through a bend. No UV origin at an individual hex's rim or foot.
 vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection p,
-      vec3 world, float variation, float fine, float region, bool groundMap, float familyId) {
+      vec3 world, float variation, float fine, float region, bool groundMap, float familyId, vec2 contact) {
     if (amount < .0001) return vec4(0.0);
     bool fungus = abs(familyId - FUNGUS_FAMILY) < .5;
     vec4 pigment = vec4(0.0);
@@ -112,7 +130,7 @@ vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection
         pigment = mix(steep, pigment, p.lying);
     }
     vec3 color = pigment.rgb;
-    if (groundMap) color = groundToneFor(familyId, color, world, variation, fine, region, 0.0, 0.0);
+    if (groundMap) color = groundToneFor(familyId, color, world, variation, fine, region, contact.x, contact.y);
     if (abs(familyId - 2.0) < .5) {
         float mineral = dot(color, vec3(.2126, .7152, .0722));
         color = mix(color, mineral * vec3(.86, .92, .98), greySand());
@@ -187,6 +205,13 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     float coverUp = up - .2 * wear;
     float cover = smoothstep(.4, .96, coverUp + (variation - .5) * .55);
     float soil = 0.0;
+    float dust = 0.0;
+    bool desert = abs(familyId - DESERT_FAMILY) < .5;
+    bool arid = desert || abs(familyId - MARS_FAMILY) < .5 || abs(familyId - VOLCANO_FAMILY) < .5;
+    // A continuous exposure field crosses plateau interiors as well as their rims. Each material retains its
+    // own substrate and response: this is not a new terrain type or the same pale patch painted on every biome.
+    float thin = smoothstep(.50, .72, region * .6 + broad * .3 + fine * .1);
+    thin *= smoothstep(.82, .97, up) * (1.0 - deposit) * (1.0 - .75 * foot);
     if (abs(familyId) < .5 || abs(familyId - TROPICAL_FAMILY) < .5) {
         // The two-level earth bank keeps a ragged turf lip and broken turf on its real intermediate shoulder.
         // Color remains legible from above when individual blades are too small to draw.
@@ -203,37 +228,55 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
         soil = (1.0 - cover) * ((1.0 - exposure) * .9 + rim * .5 * smoothstep(.25, .7, variation));
         deposit *= mix(.25, 1.0, rock);
     } else if (abs(familyId - FUNGUS_FAMILY) < .5) {
-        // A's cyan crust caps the ridges; mauve fibrous tissue drapes their slopes, with exposed violet rock on
-        // tall cliffs. The level plain keeps its own quiet mineral skin instead of coating every face alike.
+        // Preserve the two fungal skins: mauve lowlands, cyan crust above level zero. Weather each in its own
+        // material: lowland skin wears through to violet bedrock, while gaps in the upper crust expose mauve tissue.
         float levelMetres = u_levelHeight / u_metre;
         float rise = smoothstep(.25, .9, (aboveFoot + belowRim) / levelMetres);
         float raised = smoothstep(.15, 1.3, v_cloudPosition.z / u_levelHeight);
         float lip = 1.0 - smoothstep(.1, 1.4 + 1.6 * pockets, belowRim);
         float growth = max(raised, lip * rise);
-        float colonies = smoothstep(.23, .64, pockets * .65 + broad * .35);
-        deposit = smoothstep(.48, .88, up) * mix(.10 * colonies, .62 + .36 * colonies, growth);
+        float colonies = smoothstep(.28, .69, region * .5 + broad * .3 + pockets * .2);
+        deposit = smoothstep(.48, .88, up) * mix(.10 * colonies, .28 + .70 * colonies, growth);
         cover = smoothstep(.76, .97, up);
-        soil = (1.0 - cover) * (1.0 - exposure);
+        cover *= 1.0 - .90 * thin * (1.0 - growth);
+        soil = (1.0 - cover) * (1.0 - exposure) * (1.0 - smoothstep(.90, .99, up));
     } else if (abs(familyId - 5.0) < .5) {
         cover = smoothstep(.36, .92, coverUp + (variation - .5) * .5 + deposit * .18);
-        cover *= 1.0 - .85 * scour;
+        cover *= 1.0 - max(.85 * scour, .88 * thin * rim);
         deposit *= .35;
     } else if (abs(familyId - 2.0) < .5) {
         cover = smoothstep(.38, .94, coverUp + (variation - .5) * .45 + deposit * .15);
         cover *= 1.0 - .92 * scour;
         deposit *= .55;
-    } else if (abs(familyId - DESERT_FAMILY) < .5 || abs(familyId - MARS_FAMILY) < .5
-          || abs(familyId - VOLCANO_FAMILY) < .5) {
+    } else if (arid) {
         // Firm crust wears back to exposed rock on banks and a broken mineral shoulder at the crest.
         cover = smoothstep(.38, .96, coverUp + (variation - .5) * .22);
         float shoulder = (1.0 - smoothstep(.1, 1.3 + 1.6 * broad, belowRim))
               * smoothstep(.28, .65, pockets) * smoothstep(.55, .94, up);
-        cover *= 1.0 - max(.90 * scour, .85 * shoulder);
+        // Thin hardpan/dust opens onto flush bedrock in broad connected patches, including plateau interiors.
+        // Reuse the existing regional fields: no hex-local mask, new noise lookup or displaced playing surface.
+        // Deposited material shelters the foot; small height-map detail breaks the final material contact.
+        cover *= 1.0 - max(.90 * scour, max(.85 * shoulder, .92 * thin));
+        // Horizontal cap maps show fractured plates; the wall maps keep their upright bedding or basalt columns.
+        // Reuse each family's mantle slot; native slopes blend back to the wall with the same height weights.
+        soil = (1.0 - cover) * smoothstep(.82, .97, up);
+        // A light film of the local hardpan/ash remains on exposed horizontal stone. Keep its complete material,
+        // rather than painting dark cliff patches onto a flat plain; submerged beds keep their sediment instead.
+        dust = .24 * smoothstep(.88, .98, up) * (1.0 - sediment);
         deposit *= .55;
     } else if (abs(familyId - 1.0) < .5) {
         cover = smoothstep(.28, .9, coverUp + (variation - .5) * .16);
+        cover *= 1.0 - .9 * thin;
         soil = (1.0 - cover) * (1.0 - exposure);
+        // Weathered compact soil gives way to flush bedrock on level ground; its bank keeps its earthen mantle.
+        soil *= 1.0 - smoothstep(.90, .99, up);
+        dust = .18 * smoothstep(.88, .98, up) * (1.0 - sediment);
         deposit *= .6;
+    } else if (abs(familyId - 3.0) < .5 || abs(familyId - 6.0) < .5) {
+        // Rocky ground and lunar regolith retain their own loose fines between broad exposed rock plates.
+        // Lunar coverage is visual only; it does not create gravity-driven deposits or extra rubble geometry.
+        cover *= 1.0 - .92 * thin;
+        dust = .12 * smoothstep(.88, .98, up) * (1.0 - sediment);
     }
     soil = clamp(soil, 0.0, 1.0 - cover);
     vec4 roles = vec4(cover, soil, deposit, max(0.0, 1.0 - cover - soil));
@@ -249,21 +292,31 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     float highestMinimum = max(max(roles.x, roles.y), max(roles.z, roles.w));
     float width = materialBlendWidth();
     vec4 candidates = step(vec4(highestMinimum - width), roles + .38 * (4.0 * roles * (1.0 - roles)));
+    if (dust > 0.0) candidates.x = 1.0;
     vec4 a = sampleMaterial(layers.x, tiles.x, roles.x * candidates.x, projection,
-          world, broad, fine, region, true, familyId);
+          world, broad, fine, region, true, familyId, vec2(rim, foot));
     vec4 b = sampleMaterial(layers.w, tiles.w, roles.y * candidates.y, projection,
-          world, fine, fine, region, false, familyId);
+          world, fine, fine, region, false, familyId, vec2(0.0));
     vec4 c = sampleMaterial(layers.y, tiles.y, roles.z * candidates.z, projection,
-          world, fine, fine, region, false, familyId);
+          world, fine, fine, region, false, familyId, vec2(0.0));
     vec4 d = sampleMaterial(layers.z, tiles.z, roles.w * candidates.w, projection,
-          world, broad, fine, region, false, familyId);
+          world, broad, fine, region, false, familyId, vec2(0.0));
     d.rgb *= toLinear(bedTintFor(familyId, hardness));
-    if (abs(familyId - DESERT_FAMILY) < .5) {
+    // Exposed horizontal mineral faces retain a legible pigment difference after fine normals fade out.
+    // Granite is paler than compact soil; lunar bedrock is darker than its blanket of fine regolith.
+    if (abs(familyId - 1.0) < .5 || abs(familyId - 3.0) < .5) {
+        d.rgb *= toLinear(vec3(mix(1.0, 1.18, smoothstep(.85, .99, up))));
+    } else if (abs(familyId - 6.0) < .5) {
+        d.rgb *= toLinear(vec3(mix(1.0, .78, smoothstep(.85, .99, up))));
+    }
+    if (desert) {
         // Pale abraded sandstone at the actual rim reads from above; deeper faces retain their warm brown.
         float abrasion = (1.0 - smoothstep(.15, 2.2, belowRim)) * smoothstep(.45, .95, up);
         d.rgb *= toLinear(mix(vec3(.98, .91, .85), vec3(1.14, 1.15, 1.13), abrasion));
     }
     vec4 weights = materialWeights(roles, vec4(a.a, b.a, c.a, d.a));
+    vec2 coating = weights.yw * dust;
+    weights += vec4(coating.x + coating.y, -coating.x, 0.0, -coating.y);
     bool fungus = abs(familyId - FUNGUS_FAMILY) < .5;
     vec4 na = materialNormal(layers.x + 1.0, tiles.x, weights.x, projection, face, broad, fungus,
           abs(familyId - 2.0) < .5);
@@ -276,7 +329,11 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     result.cavity = dot(vec4(na.a, nb.a, nc.a, nd.a), weights);
     result.height = dot(vec4(a.a, b.a, c.a, d.a), weights);
     result.emission = vec3(0.0);
-    result.roughness = .9;
+    vec4 roughness = vec4(mappedRoughness(coverRoughness(familyId), a.a, na.a),
+          mappedRoughness(arid ? stoneRoughness(familyId, hardness) : .92, b.a, nb.a),
+          mappedRoughness(.90, c.a, nc.a),
+          mappedRoughness(stoneRoughness(familyId, hardness), d.a, nd.a));
+    result.roughness = dot(roughness, weights);
     result.volcanic = 0.0;
     return result;
 }
