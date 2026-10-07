@@ -9,8 +9,9 @@ float biomeWetness(vec2 p) {
 
 // One bounded stencil serves both the shoreline treatment and the connected liquid's optical mixture.
 // A negative waterLevel disables the liquid work for dry terrain. No additional textures or per-hex draws.
-void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, out vec4 fringe, out vec4 liquids) {
-    cover = vec4(0.0); fringe = vec4(0.0); liquids = vec4(0.0);
+void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, out vec4 fringe, out vec4 liquids,
+      out float tundra) {
+    cover = vec4(0.0); fringe = vec4(0.0); liquids = vec4(0.0); tundra = 0.0;
     if (u_biomeBoard.x < 1.0) return;
     const float width = 30.0, height = 30.0 * 72.0 / 84.0;
     int column = int(floor(world.x / (width * .75)));
@@ -36,6 +37,10 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
     float drainage = mix(1.4, max(3.6, u_levelHeight / u_metre * 1.4), smoothstep(.15, .85, drainNoise));
     vec3 wetTiles = vec3(0.0);
     float wetAbove = 0.0, wetBelow = 0.0;
+    float tundraTiles = 0.0, tundraAbove = 0.0, tundraBelow = 0.0;
+    // Like peat, low mats continue between covered terraces and taper down an isolated bank.
+    // Keep this field independent of screen derivatives so vegetation can use it on the CPU as well.
+    float tundraDown = mix(1.4, max(3.6, u_levelHeight / u_metre * 1.4), smoothstep(.15, .85, edgeNoise));
     float total = 0.0, fieldTotal = 0.0, fringeTotal = 0.0;
     for (int dx = -1; dx <= 1; dx++) {
         int x = column + dx;
@@ -59,6 +64,12 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
                 float level = tile.a * 255.0 - 64.0;
                 float z = level * u_levelHeight / u_metre;
                 int kind = int(tile.r * 255.0 + .5) & 15;
+                float tw = float(kind == 5) * w;
+                float tundraReach = world.z < z ? tundraDown : 2.8 + edgeNoise * .8;
+                tundra += tw * (1.0 - smoothstep(.15, tundraReach, abs(world.z - z)));
+                tundraTiles += tw;
+                tundraAbove += tw * step(world.z + .15, z);
+                tundraBelow += tw * step(z + .15, world.z);
                 vec4 kinds = vec4(kind == 1, kind == 2, kind == 3, kind == 4);
                 cover += kinds * vec4(fw, w, w, w) * (1.0 - smoothstep(.15, 1.25, abs(world.z - z)));
                 vec4 reach = vec4(2.0, 2.8, 2.8, 2.8) + edgeNoise * .8;
@@ -77,6 +88,9 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
         }
     }
     cover /= max(vec4(fieldTotal, total, total, total), vec4(.0001));
+    tundra /= max(total, .0001);
+    float tundraConnected = smoothstep(0.0, .18, min(tundraAbove, tundraBelow) / max(total, .0001));
+    tundra = max(tundra, tundraTiles / max(total, .0001) * tundraConnected);
     fringe /= max(vec4(fringeTotal, total, total, total), vec4(.0001));
     // Wet neighbours on both sides of this height share a peat bank across the whole drop.
     // Only sediment connects: the narrower cover mask still confines pools and plants to their supported level.
@@ -85,9 +99,14 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
     liquids /= max(dot(liquids, vec4(1.0)), .0001);
 }
 
-void biomeCoverage(vec3 world, float edge, out vec4 cover, out vec4 fringe) {
+void biomeCoverage(vec3 world, float edge, out vec4 cover, out vec4 fringe, out float tundra) {
     vec4 liquids;
-    terrainCoverage(world, edge, -10000.0, cover, fringe, liquids);
+    terrainCoverage(world, edge, -10000.0, cover, fringe, liquids, tundra);
+}
+
+void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, out vec4 fringe, out vec4 liquids) {
+    float tundra;
+    terrainCoverage(world, edge, waterLevel, cover, fringe, liquids, tundra);
 }
 
 vec4 liquidCoverage(vec3 world, float level) {

@@ -25,6 +25,9 @@ public final class UiNumber extends Table {
     private final UiPopover popup;
     private final Slider slider;
     private final Label readout;
+    private final Label caption;
+    private final String label;
+    private UiAngleDial dial;
     private final BiConsumer<String, Boolean> change;
     private final double step;
     private double value;
@@ -35,9 +38,10 @@ public final class UiNumber extends Table {
         this.ui = ui;
         this.change = change;
         this.step = step;
+        label = name;
         value = initial;
         checkboxCell = add((UiKit.Checkbox) null);
-        Label caption = ui.label(name + "  ↔", "hud-small", 12, UiTheme.TEXT);
+        caption = ui.label(name + "  ↔", "hud-small", 12, UiTheme.TEXT);
         caption.setName("editor-scrub-" + name);
         caption.setEllipsis(true);
         add(caption).growX().minWidth(0).padRight(8);
@@ -68,20 +72,23 @@ public final class UiNumber extends Table {
         });
         caption.addListener(new InputListener() {
             float origin;
+            float originY;
             double start;
             boolean dragged;
             @Override public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
                 if (button != Input.Buttons.LEFT) { return false; }
                 stage.setKeyboardFocus(null);
-                origin = event.getStageX(); start = value; dragged = false; held = true;
+                origin = event.getStageX(); originY = event.getStageY(); start = value; dragged = false; held = true;
                 syncSlider(value);
                 popup.showAbove(caption, 0);
+                if (dial != null) { popup.validate(); dial.begin(event.getStageX(), event.getStageY(), value); }
                 return true;
             }
             @Override public void touchDragged(InputEvent event, float x, float y, int pointer) {
                 float distance = event.getStageX() - origin;
-                if (Math.abs(distance) > 3) { dragged = true; }
+                if (Math.hypot(distance, event.getStageY() - originY) > 3) { dragged = true; }
                 if (dragged) {
+                    if (dial != null) { dial.drag(event.getStageX(), event.getStageY()); return; }
                     double next = Math.round((start + distance * step / 4) / step) * step;
                     next = MathUtils.clamp((float) next, slider.getMinValue(), slider.getMaxValue());
                     syncSlider(next); preview(next);
@@ -107,6 +114,7 @@ public final class UiNumber extends Table {
     }
 
     private void preview(double next) {
+        next = normalized(next);
         if (Math.abs(next - value) < step * .001) { return; }
         value = next; showValue(); change.accept(format(next), false);
     }
@@ -116,6 +124,7 @@ public final class UiNumber extends Table {
         try {
             double next = Double.parseDouble(field.getText().trim());
             if (!Double.isFinite(next) || step >= 1 && next != Math.rint(next)) { throw new NumberFormatException(); }
+            next = normalized(next);
             if (next != value) { value = next; finish(); }
         } catch (IllegalArgumentException invalid) { value = previous; }
         showValue();
@@ -124,6 +133,7 @@ public final class UiNumber extends Table {
         String shown = format(value);
         field.setText(shown);
         readout.setText(shown);
+        if (dial != null) { dial.value(value); }
     }
     /** Silence only our own updates: libGDX uses setValue for pointer drags too. */
     private void syncSlider(double next) {
@@ -134,6 +144,20 @@ public final class UiNumber extends Table {
         } finally { slider.setProgrammaticChangeEvents(true); }
     }
     public boolean editing() { return held || popup.isVisible() || field.hasKeyboardFocus(); }
+    /** An angle wraps at +/-180 degrees and uses the kit's circular dial, including caption dragging. */
+    public UiNumber angle() {
+        dial = new UiAngleDial(ui, next -> preview(Math.round(next / step) * step), () -> { finish(); popup.cancel(); });
+        dial.setName("editor-dial-" + label);
+        caption.setText(label + "  ↻");
+        Table content = new Table(); content.pad(4, 12, 4, 12);
+        content.add(dial).size(132); content.add(readout).minWidth(62).padLeft(8);
+        popup.header(label + " rotation", "Drag around the dial · angles wrap").content(content);
+        value = normalized(value); showValue();
+        return this;
+    }
+    private double normalized(double next) {
+        return dial == null ? next : next - 360 * Math.floor((next + 180) / 360);
+    }
     /** Optional application toggle; typing and caption scrubbing remain available while it is unchecked. */
     public UiNumber withCheckbox(boolean checked, Consumer<Boolean> changed) {
         UiKit.Checkbox checkbox = ui.checkbox("", checked);
@@ -148,10 +172,14 @@ public final class UiNumber extends Table {
         getCell(field).size(width, height);
         return this;
     }
+    /** Axis triplets share their rotation heading, so each caption can be just X, Y or Z. */
+    public UiNumber compactCaption() {
+        caption.setText(label); getCell(caption).padRight(4); return this;
+    }
     /** Refresh from an authoritative snapshot without interrupting typing or a drag, or firing a command. */
     public void value(double next) {
         if (editing() || value == next) { return; }
-        value = next;
+        value = normalized(next);
         showValue();
         syncSlider(next);
     }
@@ -159,11 +187,12 @@ public final class UiNumber extends Table {
     /** Give reusable controls stable names in their owner's namespace. */
     public UiNumber names(String id) {
         setName(id);
-        getChildren().get(0).setName(id + "-caption");
+        caption.setName(id + "-caption");
         field.setName(id + "-field");
         slider.setName(id + "-slider");
         readout.setName(id + "-slider-value");
         popup.setName(id + "-popup");
+        if (dial != null) { dial.setName(id + "-dial"); }
         return this;
     }
     public void dismiss() { popup.cancel(); }

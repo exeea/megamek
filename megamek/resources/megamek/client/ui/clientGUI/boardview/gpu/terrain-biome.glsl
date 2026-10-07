@@ -12,7 +12,10 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
     // Both sides of the bank use the same field. A different width/normal gate on water-owned triangles
     // leaves straight wedges wherever the sculpted shoreline crosses the original hex boundary.
     vec4 cover, fringe;
-    biomeCoverage(world, 14.0, cover, fringe);
+    float tundra;
+    biomeCoverage(world, 14.0, cover, fringe, tundra);
+    if (!shore) { tundraSurface(world, face, tundra, color, normal, cavity, grass, bounce); }
+    if (family(4.0)) return;
     cover.yzw *= min(3.0, 1.0 / max(dot(cover.yzw, vec3(1.0)), .0001));
     // Broad reach on level ground connects shore patches. On a draining face retain the graded coverage;
     // amplifying it to a solid mask makes isolated peat fingers look pasted onto the neighbouring turf.
