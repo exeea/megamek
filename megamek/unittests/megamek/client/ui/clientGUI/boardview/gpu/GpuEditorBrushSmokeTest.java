@@ -194,6 +194,7 @@ class GpuEditorBrushSmokeTest {
                             }
                             case 14 -> {
                                 assertFalse(root.findActor("editor-brush").isVisible(), "An unrelated category has no empty brush panel");
+                                command(Action.SELECT_OBJECT, "", "paint");
                                 command(Action.SAMPLE, "", "");
                             }
                             case 15 -> {
