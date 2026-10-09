@@ -47,7 +47,7 @@ class GpuSceneryCarSmokeTest {
                     for (int index = 0; index < scenes.size(); index++) {
                         var scene = scenes.get(index);
                         var cars = scene.tile(coords).features().stream()
-                              .filter(f -> f.asset().startsWith("scenery/components/car-")).toList();
+                              .filter(f -> f.asset().startsWith("scenery/vehicles/car")).toList();
                         assertEquals(BoardSceneryCarTest.COUNTS.get(index).intValue(), cars.size());
                         terrain.setTacticalView(false);
                         frame.prepare(terrain, camera, scene);
@@ -56,7 +56,7 @@ class GpuSceneryCarSmokeTest {
                         for (Object chunk : (List<?>) field(terrain, "chunks")) {
                             for (Object prop : (List<?>) field(chunk, "props")) {
                                 var instance = (ModelInstance) field(prop, "instance");
-                                if (coords.equals(field(prop, "coords")) && instance.nodes.first().id.startsWith("car-")) {
+                                if (coords.equals(field(prop, "coords")) && instance.nodes.first().id.equals("car")) {
                                     installed.add(instance);
                                 }
                             }

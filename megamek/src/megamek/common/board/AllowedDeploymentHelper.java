@@ -97,6 +97,9 @@ public record AllowedDeploymentHelper(Entity entity, Coords coords, Board board,
             addAirborneWiGEOptions(result);
         }
 
+        result.removeIf(o -> !Game.rulesManager.getRulesMovement()
+              .isBuildingElevationAllowed(entity, hex, o.elevation()));
+
         if (limitToType != null) {
             result.removeIf(o -> o.type() != limitToType);
         }

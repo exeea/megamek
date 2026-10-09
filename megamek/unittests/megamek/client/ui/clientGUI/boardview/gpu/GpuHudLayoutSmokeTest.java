@@ -49,7 +49,7 @@ class GpuHudLayoutSmokeTest {
     private record Layout(String name, GamePhase phase, boolean grid, boolean overlays, List<String> panels) { }
 
     private static final List<String> BASE = List.of("phase-header", "forces-panel", "unit-card", "command-dock",
-          "hint-line", "utility-bar", "tuning-button", "minimap", "chat-button");
+          "hint-line", "utility-bar", "minimap", "chat-button");
     private static final List<Layout> LAYOUTS = List.of(
           new Layout("movement", GamePhase.MOVEMENT, false, false, with("contacts-panel")),
           new Layout("firing", GamePhase.FIRING, false, false, with("weapons-panel", "solution-card")),
@@ -62,7 +62,7 @@ class GpuHudLayoutSmokeTest {
           new Layout("overview", GamePhase.MOVEMENT, false, true, List.of("force-overview")));
     /** Every slotted component actor, by name. */
     private static final List<String> SLOTTED = List.of("phase-header", "initiative-card", "conditions-card",
-          "forces-panel", "unit-card", "record-sheet", "utility-bar", "tuning-button", "tactical-chip", "hint-line",
+          "forces-panel", "unit-card", "record-sheet", "utility-bar", "tactical-chip", "hint-line",
           "minimap", "contacts-panel", "weapons-panel", "log-panel", "solution-card", "command-dock",
           "chat-button", "chat-panel", "force-overview", "help-dialog", "menu-panel", "players-panel",
           "toast-stack");
@@ -119,9 +119,16 @@ class GpuHudLayoutSmokeTest {
         if (!layout.overlays()) {
             Rectangle phase = slots.get("phase-header"), utilities = slots.get("utility-bar"), minimap = slots.get("minimap");
             assertEquals(metrics.gap(), phase.x, .5f);
-            assertEquals(metrics.gap(), height - phase.y - phase.height, .5f);
+            float phaseTop = utilities.x < metrics.left() + 2 * metrics.gap()
+                  ? utilities.height + 2 * metrics.gap() : metrics.gap();
+            assertEquals(phaseTop, height - phase.y - phase.height, .5f);
             assertEquals(metrics.gap(), height - utilities.y - utilities.height, .5f);
             assertEquals(metrics.gap(), utilities.y - minimap.y - minimap.height, .5f);
+            Rectangle dock = slots.get("command-dock"), hint = slots.get("hint-line");
+            assertEquals(metrics.gap(), dock.y, .5f);
+            if (hint != null) {
+                assertEquals(12, hint.y - dock.y - dock.height, .5f, "shortcuts sit above the dock");
+            }
         }
         System.out.println(name + " (stage " + hud.stage.getWidth() + " x " + hud.stage.getHeight() + "): " + slots);
         for (Actor actor : shown) {
@@ -175,7 +182,6 @@ class GpuHudLayoutSmokeTest {
     /** The prototype's size of a stand-in, width by height; fill-width slots ignore the width. */
     private static float[] size(String name, Layout layout, GpuHud.Metrics metrics) {
         boolean moving = layout.phase() == GamePhase.MOVEMENT;
-        float utility = metrics.narrow() ? 54 : 62;
         return switch (name) {
             // Header: 84 without the movement ribbon and 100 with it; 4 less with the narrow phase name (shot 15: 80).
             case "phase-header" -> new float[] { metrics.left(), (moving ? 100 : 84) - (metrics.narrow() ? 4 : 0) };
@@ -185,9 +191,8 @@ class GpuHudLayoutSmokeTest {
             case "command-dock" -> new float[] { metrics.dock(),
                   moving ? 174 : layout.phase() == GamePhase.FIRING ? 158 : 116 };
             case "hint-line" -> new float[] { 590, 13 };
-            // Tactical view about 85 wide, then Map, Contacts, Log, Help and Menu at the utility minimum, 8 apart.
-            case "utility-bar" -> new float[] { 85 + 5 * utility + 5 * 8, 56 };
-            case "tuning-button" -> new float[] { utility, 56 };
+            // Camera presets, labelled utilities, then icon-only Help and Menu.
+            case "utility-bar" -> new float[] { 690, 34 };
             // Minimap: the prototype's 210 (180 at 800 or less), which its map fills inside the rails.
             case "minimap" -> new float[] { metrics.right(), metrics.lowHeight() ? 180 : 210 };
             case "solution-card" -> new float[] { metrics.right(), 145 };

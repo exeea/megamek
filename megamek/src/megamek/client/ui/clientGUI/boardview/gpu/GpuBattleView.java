@@ -46,6 +46,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.gdx.DisplayScale;
+import megamek.client.ui.gdx.UiCursorCapture;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
@@ -65,7 +66,7 @@ class GpuBattleView extends ApplicationAdapter {
     static final float HOVER_OCCLUDED_ALPHA = .5f;
     /** Hide all declared firing arrows while combat is playing, regardless of selection. */
     static final boolean HIDE_TARGET_ARROWS_DURING_ATTACKS = true;
-    /** hud-v3's unitRect (view3d.js): in 3D a unit's screen rectangle is .55 of a hex wide. */
+    /** unit's screen rectangle is .55 of a hex wide. */
     private static final float UNIT_RECT_WIDTH = .55f;
     /** Floating units are tied to their hex with this faint solid stem; solid, so it needs no blending state. */
     private static final Color TETHER_COLOR = Color.valueOf("A9B8B8");
@@ -130,7 +131,7 @@ class GpuBattleView extends ApplicationAdapter {
     private final List<Hover> hover = new ArrayList<>();
     private GpuTerrain terrain;
     private GpuFireControl fireControl;
-    /** The hud-v3 board overlay (G7): envelopes, the route and its ghost, rings and glows, bands and arcs. */
+    /** The board overlay: envelopes, the route and its ghost, rings and glows, bands and arcs. */
     private GpuBoardOverlay overlay;
     private GpuTactical tactical;
     private final GpuFieldOfView fieldOfView;
@@ -142,7 +143,7 @@ class GpuBattleView extends ApplicationAdapter {
     private ModelBatch unitBatch;
     private SpriteBatch annotationBatch;
     private ShapeRenderer lines;
-    /** The hud-v3 HUD (C.4); its skin also holds the hex labels' font. */
+    /** The HUD; its skin also holds the hex labels' font. */
     private GpuBoardHud ui;
     private GpuBoardSkin theme;
     /** The presentation settings the board reads; the HUD's developer tuning panel edits them. */
@@ -154,8 +155,11 @@ class GpuBattleView extends ApplicationAdapter {
     private int hoveredUnit = Entity.NONE;
     /** While a move animates the hovered hex is not published, so no route is previewed (rebuild plan A.17 Q5). */
     private boolean hoverHeld;
-    /** Height of the latest pointer's terrain/object hit, owned by the render thread like hovered. */
+    /** Height of the walkable surface under the latest pointer in the hovered hex, owned by the render thread like hovered. */
     private float hoverZ = Float.NaN;
+    /** {@link #frameObjects}' hexes, read during frame {@link #frameObjectsFrame}. */
+    private final Map<Coords, List<GpuTerrain.EditorObject>> frameObjects = new HashMap<>();
+    private long frameObjectsFrame = -1;
     private SystemCursor cursor = SystemCursor.Arrow;
     private boolean fitted;
     private long frames;
@@ -450,6 +454,7 @@ class GpuBattleView extends ApplicationAdapter {
                         BoardFungus.reload();
                         BoardScatter.reload();
                         BoardObstacles.reload();
+                        BoardDecals.reload();
                         BoardBridgeFooting.reload();
                         BoardBridgeSlope.reload();
                         createSceneRenderers();
@@ -549,6 +554,7 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
         terrain.setGravity(atmosphereSettings.gravity());
+        terrain.editableObjects(source.isEditor());
         terrain.update(scene, boardCamera.camera);
         boolean detailChanged = terrain.refine(boardCamera.camera, source.isEditor());
         settings.set(terrain.settings());
@@ -582,7 +588,7 @@ class GpuBattleView extends ApplicationAdapter {
         scene = terrain.presentation(scene);
         boolean changedTiles = previousTiles != scene.tiles();
         if (changedTiles || cameraTerrainRevision != BoardGeometry.revision()) {
-            boardCamera.terrainChanged();
+            boardCamera.terrainChanged(scene);
             cameraTerrainRevision = BoardGeometry.revision();
         }
         fireControl.update(scene, HIDE_TARGET_ARROWS_DURING_ATTACKS && !playback.attacks().isEmpty(), frame.status(),
@@ -592,7 +598,10 @@ class GpuBattleView extends ApplicationAdapter {
         fieldOfView.configure(tuning.fovStyle(), tuning.fovDarkness(), tuning.sensorStyle(), tuning.sensorDarkness());
         attackEffects.setWind(atmosphereSettings.effects());
         terrain.setNormalMaps(tuning.normalMaps());
+        terrain.setTerrainWear(tuning.terrainWear());
         terrain.setGrass(tuning.grass());
+        terrain.setWaterEffects(tuning.waterEffects());
+        terrain.setSmallObjects(tuning.objectLod());
         if (unitTextures.update(scene.units().stream().filter(unit -> !unit.sensorContact()
               && (unitModels == null || unitModels.get(unit.model(), unit.id()) == null)).map(BoardScene.Unit::image).distinct()
               .collect(Collectors.toMap(pixels -> pixels, pixels -> pixels)))) {
@@ -618,8 +627,8 @@ class GpuBattleView extends ApplicationAdapter {
         boardCamera.advance(entranceStarting ? 0 : Gdx.graphics.getDeltaTime());
         entranceStarting = false;
         float cameraSpeed = (modifiers() & InputEvent.SHIFT_DOWN_MASK) != 0 ? CAMERA_SPEED_BOOST : 1;
-        if (ui.isTextEditing()) {
-            // The camera keys work with every panel open and pause only while a text field takes the keys (Q9).
+        if (ui.isTextEditing() || ui.isModal()) {
+            // Text editing and modal dialogs suspend held camera movement.
             cameraKeys.clear();
         } else if (boardCamera.firstPerson()) {
             advanceFirstPerson(Gdx.graphics.getDeltaTime(), cameraSpeed);
@@ -663,7 +672,13 @@ class GpuBattleView extends ApplicationAdapter {
                 unitAnchors.put(unit, visual.anchor(instance, boardCamera.camera));
             }
         }
-        for (var attack : playback.attacks()) { attack.landscape = ray -> terrain.hit(scene, ray); }
+        var completedAttacks = playback.takeCompletedAttacks();
+        for (var attacks : List.of(playback.attacks(), completedAttacks)) {
+            for (var attack : attacks) {
+                attack.landscape = ray -> terrain.hit(scene, ray);
+                attack.landscapeSegment = (ray, length) -> terrain.hit(scene, ray, length);
+            }
+        }
         aimAttack();
         attachments.place(scene, unitModels, unitInstances, animators, playback.attachment(), boardCamera.camera, unitAnchors, hoverClock);
         for (var unit : scene.units()) {
@@ -680,7 +695,10 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setTacticalView(boardCamera.tactical());
         markers.update(unitIcons.active() ? unitIcons.instances() : unitInstances.values(), boardCamera.camera);
         updateJumpJets();
-        attackEffects.update(playback.attacks(), unitModels, unitInstances);
+        attackEffects.update(playback.attacks(), completedAttacks, unitModels, unitInstances);
+        if (!terrain.tacticalView()) {
+            attackEffects.groundImpacts(completedAttacks, impact -> terrain.impact(scene, impact));
+        }
         unitBounds.begin();
         List<ModelInstance> units = new ArrayList<>(unitIcons.active() ? unitIcons.instances() : unitInstances.values());
         List<ModelInstance> outlined = scene.units().stream()
@@ -743,13 +761,10 @@ class GpuBattleView extends ApplicationAdapter {
         atmosphere.renderWeather(boardCamera.camera, scene);
         renderStage("unit outlines");
         unitVisibility.render(boardCamera.camera, outlined, atmosphere.depthTexture(), 0, seeThrough, layoutScale,
-              unitBounds, terrain.tacticalView() ? null : terrainEffects.opacityTexture());
+              unitBounds, terrain.tacticalView() ? null : terrainEffects.opacityTexture(), terrain);
         renderStage("tactical overlays");
         terrain.render(boardCamera.camera, true);
-        // The board overlay over the terrain's marks, its unit marks where the units stand this frame first; in 3D
-        // after the route's ghost, whose depth hides the marks under it. In the Tactical View the overlay lies under
-        // the icons and the ghost icon over them.
-        if (!unitIcons.active()) { overlay.renderGhost(boardCamera.camera, shownUnit); }
+        // Movement annotations show through scenery; draw the destination ghost after the route and unit icons.
         overlay.renderMarks(boardCamera.camera, unitFootprints::get);
         overlay.render(boardCamera.camera);
         renderHoverRings();
@@ -758,12 +773,13 @@ class GpuBattleView extends ApplicationAdapter {
         hexGrid.render(boardCamera, scene, terrain.tacticalView());
         renderHexText();
         unitIcons.render(boardCamera.camera);
-        if (unitIcons.active()) { overlay.renderGhost(boardCamera.camera, shownUnit); }
+        overlay.renderGhost(boardCamera.camera, shownUnit);
         fireControl.renderLabels(boardCamera.camera);
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         tactical.renderLabels(boardCamera.camera);
         renderStage("annotations and UI");
         renderAnnotations();
+        renderMarquee();
         renderEntrance();
         try (TerrainSettings.Scope ignored = TerrainSettings.use(null)) { ui.draw(); }
         renderStage(null);
@@ -784,6 +800,14 @@ class GpuBattleView extends ApplicationAdapter {
         try (TerrainSettings.Scope ignored = TerrainSettings.use(null)) {
             ui.update(frame, view, dialog(), source.uiPreferences());
         }
+        if (ui.isModal()) {
+            cameraKeys.clear();
+            if (!boardInput.pressedKeys.isEmpty()) {
+                boardInput.pressedKeys.clear();
+                source.stopKeys();
+            }
+            if (boardInput.boardGesture) { boardInput.reset(); }
+        }
         if (ui instanceof GpuHud hud && frame.scene() != null) {
             overlay.update(frame.withScene(scene), view, source.uiPreferences(), hud.state);
         }
@@ -803,7 +827,8 @@ class GpuBattleView extends ApplicationAdapter {
     private void renderHoverRings() {
         float top = hoverTop();
         if ((hovered == null || scene.tile(hovered) == null || ui.hit(Gdx.input.getX(), Gdx.input.getY()))
-              && (!source.isEditor() || source.editorState() == null || source.editorState().selection().isEmpty())) {
+              && (!source.isEditor() || source.editorState() == null || source.editorState().selection().isEmpty())
+              && ui.cliffEdgeAt(Gdx.input.getX(), Gdx.input.getY()) < 0) {
             return;
         }
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
@@ -835,17 +860,41 @@ class GpuBattleView extends ApplicationAdapter {
                       ? state.movePreview().get(selectionIndex) : item.coords();
                 selectionIndex++;
                 if (scene.tile(item.coords()) == null) { continue; }
-                if (item.object().isEmpty()) { ring(item.coords(), BoardTacticalGeometry.floatingZ(scene, item.coords())); }
+                if (item.object().isEmpty()) {
+                    float z = BoardTacticalGeometry.floatingZ(scene, item.coords());
+                    ring(item.coords(), z);
+                    var cliff = state.property("cliff_top");
+                    if (item.coords().equals(state.selected()) && cliff != null) {
+                        for (int edge = 0; edge < 6; edge++) {
+                            if ((cliff.exits() & (1 << BoardGeometry.edgeDirection(edge))) != 0) {
+                                ringEdge(item.coords(), z, edge, HOVER_HEX_INSET + .05f);
+                            }
+                        }
+                    }
+                }
                 else {
-                    var object = terrain.editorObjects(item.coords()).stream().filter(o -> o.id().equals(item.object())).findFirst();
+                    var object = frameObjects(item.coords()).stream()
+                          .filter(o -> o.id().equals(item.object())).findFirst();
                     if (object.isPresent()) {
                         var bounds = object.get().bounds();
+                        // The outline is the object's own box; only a held drag adds the ground projection of its drop.
                         lines.box(bounds.min.x, bounds.min.y, bounds.max.z, bounds.getWidth(), bounds.getHeight(), bounds.getDepth());
-                        editorProjection(destination, object.get().anchorLevel() * BoardGeometry.level());
+                        if (boardInput.dragged && boardInput.editorGrab != null) {
+                            editorProjection(destination, object.get().anchorLevel() * BoardGeometry.level());
+                        }
                     } else {
                         ring(destination, BoardTacticalGeometry.floatingZ(scene, destination));
                     }
                 }
+            }
+            // The objects hovered in the side view (every one of a shared pill) or Layers.
+            List<String> hoveredObjects = ui instanceof GpuMapHud map ? map.editorHoverObjects() : List.of();
+            if (!hoveredObjects.isEmpty() && state.selected() != null) {
+                lines.setColor(1, 1, 1, alpha);
+                frameObjects(state.selected()).stream().filter(o -> hoveredObjects.contains(o.id())).forEach(object -> {
+                    var bounds = object.bounds();
+                    lines.box(bounds.min.x, bounds.min.y, bounds.max.z, bounds.getWidth(), bounds.getHeight(), bounds.getDepth());
+                });
             }
             for (Coords coords : state.movePreview()) {
                 boolean valid = scene.tile(coords) != null;
@@ -854,7 +903,10 @@ class GpuBattleView extends ApplicationAdapter {
                 else { ring(coords, valid ? BoardTacticalGeometry.floatingZ(scene, coords) : BoardGeometry.level()); }
             }
         }
-        if (hovered == null || scene.tile(hovered) == null || ui.hit(Gdx.input.getX(), Gdx.input.getY())) { lines.end(); return; }
+        lines.end();
+        drawCliffEdgeHover(alpha);
+        if (hovered == null || scene.tile(hovered) == null || ui.hit(Gdx.input.getX(), Gdx.input.getY())) { return; }
+        lines.begin(ShapeRenderer.ShapeType.Line);
         lines.setColor(1, 1, 1, alpha);
         if (source.isEditor() && (modifiers() == InputEvent.CTRL_DOWN_MASK
               || source.editorState() != null && source.editorState().tool() != megamek.client.ui.boardeditor.BoardEditorSession.Tool.SELECT)) {
@@ -882,12 +934,35 @@ class GpuBattleView extends ApplicationAdapter {
 
     /** A hex's outline, inset by {@link #HOVER_HEX_INSET}, at height {@code z}. */
     private void ring(Coords coords, float z) {
-        Vector3 center = BoardGeometry.center(coords, 0);
         for (int edge = 0; edge < 6; edge++) {
-            Vector3 from = BoardGeometry.inset(BoardGeometry.corner(coords, 0, edge), center, HOVER_HEX_INSET);
-            Vector3 to = BoardGeometry.inset(BoardGeometry.corner(coords, 0, edge + 1), center, HOVER_HEX_INSET);
-            lines.line(from.x, from.y, z, to.x, to.y, z);
+            ringEdge(coords, z, edge, HOVER_HEX_INSET);
         }
+    }
+
+    private void ringEdge(Coords coords, float z, int edge, float inset) {
+        Vector3 center = BoardGeometry.center(coords, 0);
+        Vector3 from = BoardGeometry.inset(BoardGeometry.corner(coords, 0, edge), center, inset);
+        Vector3 to = BoardGeometry.inset(BoardGeometry.corner(coords, 0, edge + 1), center, inset);
+        lines.line(from.x, from.y, z, to.x, to.y, z);
+    }
+
+    /** A filled ribbon keeps the hovered side visible without depending on native wide-line support. */
+    private void drawCliffEdgeHover(float alpha) {
+        int direction = ui.cliffEdgeAt(Gdx.input.getX(), Gdx.input.getY());
+        var state = source.editorState();
+        if (direction < 0 || state == null || state.selected() == null || scene.tile(state.selected()) == null) { return; }
+        Coords coords = state.selected();
+        int edge = Math.floorMod(1 - direction, 6);
+        float z = BoardTacticalGeometry.floatingZ(scene, coords);
+        Vector3 center = BoardGeometry.center(coords, 0);
+        Vector3 a = BoardGeometry.inset(BoardGeometry.corner(coords, 0, edge), center, HOVER_HEX_INSET);
+        Vector3 b = BoardGeometry.inset(BoardGeometry.corner(coords, 0, edge + 1), center, HOVER_HEX_INSET);
+        lines.translate(0, 0, z);
+        lines.begin(ShapeRenderer.ShapeType.Filled);
+        lines.setColor(1, .85f, .35f, alpha);
+        lines.rectLine(a.x, a.y, b.x, b.y, BoardGeometry.hexScale());
+        lines.end();
+        lines.identity();
     }
 
     /**
@@ -948,6 +1023,28 @@ class GpuBattleView extends ApplicationAdapter {
 
     /** Benchmark boundary only. Normal gameplay does not allocate queries, read clocks or wait for the GPU. */
     void renderStage(String stage) { }
+
+    /** The editor's selection box, drawn in window pixels like {@link #renderEntrance}; coral while Ctrl removes. */
+    private void renderMarquee() {
+        if (!boardInput.marquee || !boardInput.dragged) { return; }
+        Color tone = (boardInput.gestureModifiers & InputEvent.CTRL_DOWN_MASK) != 0 ? UiTheme.CORAL : UiTheme.MINT;
+        float height = Gdx.graphics.getHeight();
+        float x = Math.min(boardInput.startX, boardInput.dragX), y = height - Math.max(boardInput.startY, boardInput.dragY);
+        float width = Math.abs(boardInput.dragX - boardInput.startX), boxHeight = Math.abs(boardInput.dragY - boardInput.startY);
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+        lines.setProjectionMatrix(new Matrix4().setToOrtho2D(0, 0,
+              boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight));
+        lines.begin(ShapeRenderer.ShapeType.Filled);
+        lines.setColor(tone.r, tone.g, tone.b, .12f);
+        lines.rect(x, y, width, boxHeight);
+        lines.end();
+        lines.begin(ShapeRenderer.ShapeType.Line);
+        lines.setColor(tone.r, tone.g, tone.b, .9f);
+        lines.rect(x, y, width, boxHeight);
+        lines.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+    }
 
     private void renderEntrance() {
         float opacity = entrancePending ? 0 : boardCamera.entranceOpacity();
@@ -1059,8 +1156,9 @@ class GpuBattleView extends ApplicationAdapter {
                   ? unit.model().state().appearance() : null;
             if (visual.meeple()) {
                 // Fresh materials make repair/camouflage changes reversible; mesh buffers remain shared.
-                float loss = tuning.damageOverride() >= 0 ? tuning.damageOverride() : appearance == null ? 0 : appearance.bodyLoss();
-                var bodyDamage = UnitDamageDisplay.preview(BoardScene.LocationDamage.NONE, false, loss);
+                var bodyDamage = tuning.damageOverride() >= 0
+                      ? UnitDamageDisplay.preview(BoardScene.LocationDamage.NONE, false, tuning.damageOverride())
+                      : UnitDamageDisplay.body(appearance == null ? null : appearance.bodyStage());
                 if (!bodyDamage.equals(shownDamage) || !java.util.Objects.equals(appearance, equipmentAppearance.get(key))) {
                     instance = newUnitInstance(key, visual);
                     MeepleVisual.appearance(instance, visual, appearance, tuning.damageOverride(), unit.id(), camouflage, damageDisplay);
@@ -1392,8 +1490,38 @@ class GpuBattleView extends ApplicationAdapter {
             renderRulerTether(ruler.start(), ruler.startHeight());
             if (ruler.end() != null) { renderRulerTether(ruler.end(), ruler.endHeight()); }
         }
+        if (source.isEditor() && source.editorState() != null && terrain != null) { renderObjectTethers(source.editorState()); }
         lines.end();
         Gdx.gl.glDepthMask(true);
+    }
+
+    /**
+     * The same stems for the editor's selected objects that do not rest on their support, during drags too: from the
+     * drawn anchor down by a positive offset to the support (the ground where the support is missing), or from a fixed
+     * level down to the owning hex's level.
+     */
+    private void renderObjectTethers(megamek.client.ui.boardeditor.BoardEditorSession.Snapshot state) {
+        for (var item : state.selection()) {
+            if (item.object().isEmpty() || scene.tile(item.coords()) == null) { continue; }
+            var drawn = frameObjects(item.coords()).stream()
+                  .filter(value -> value.id().equals(item.object())).findFirst().orElse(null);
+            if (drawn == null) { continue; }
+            var placement = drawn.placement();
+            renderTether(drawn.anchor(), placement.mode().equals("absolute") ? BoardTacticalGeometry.floatingZ(scene, item.coords())
+                  : drawn.anchor().z - (float) (placement.offset() * BoardGeometry.level()));
+        }
+    }
+
+    /**
+     * The installed objects of a hex whose selection outlines, hover boxes or tethers this frame draws: each hex is
+     * listed once per frame for both outline passes and the tethers.
+     */
+    private List<GpuTerrain.EditorObject> frameObjects(Coords coords) {
+        if (frameObjectsFrame != Gdx.graphics.getFrameId()) {
+            frameObjects.clear();
+            frameObjectsFrame = Gdx.graphics.getFrameId();
+        }
+        return frameObjects.computeIfAbsent(coords, terrain::editorObjects);
     }
 
     /** Keep the elevated anchor and its drop footprint visible as one column throughout the drag. */
@@ -1586,9 +1714,9 @@ class GpuBattleView extends ApplicationAdapter {
         return (float) Math.pow(1.12, notches);
     }
 
-    /** The level floor under the pointer's terrain or object hit, NaN without one. */
+    /** The level of the walkable surface under the pointer ({@link GpuTerrain#walkableHit}), NaN without one. */
     private float hoverFloorZ() {
-        return Float.isNaN(hoverZ) ? Float.NaN : MathUtils.floor(hoverZ / BoardGeometry.level() + .0001f) * BoardGeometry.level();
+        return Float.isNaN(hoverZ) ? Float.NaN : GpuLosResult.pointedLevel(hoverZ) * BoardGeometry.level();
     }
 
     /**
@@ -1600,18 +1728,8 @@ class GpuBattleView extends ApplicationAdapter {
             return Float.NaN;
         }
         float base = BoardTacticalGeometry.floatingZ(scene, hovered);
-        // Editor anchors include terrain relief and fractional offsets. Flooring them can drop the outline a full level.
-        float top = Math.max(base, (source.isEditor() ? editorHoverZ() : hoverFloorZ()) + .5f * BoardGeometry.hexScale());
+        float top = Math.max(base, hoverFloorZ() + .5f * BoardGeometry.hexScale());
         return top > base + BoardGeometry.hexScale() ? top : Float.NaN;
-    }
-
-    private float editorHoverZ() {
-        if (boardInput.editorGrab != null) {
-            var object = terrain.editorObjects(boardInput.editorGrab.coords()).stream()
-                  .filter(value -> value.id().equals(boardInput.editorGrab.id())).findFirst();
-            if (object.isPresent()) { return object.get().anchorLevel() * BoardGeometry.level(); }
-        }
-        return hoverZ;
     }
 
     private boolean hovers(BoardScene.Unit unit) {
@@ -1620,7 +1738,7 @@ class GpuBattleView extends ApplicationAdapter {
 
     /**
      * The selected unit and the enemy the board overlay focuses (as of its last update); their Tactical View icons
-     * get the bold white frame (hud-v3 flat.js).
+     * get the bold white frame
      */
     private boolean marked(BoardScene.Unit unit) {
         return unit.id() == scene.selectedId() || unit.id() == overlay.focus();
@@ -1662,8 +1780,16 @@ class GpuBattleView extends ApplicationAdapter {
         private boolean orbiting;
         private boolean dragged;
         private boolean boardGesture;
+        /** Every end of a gesture (release, focus loss, a modal, a new board) goes through {@link #reset()}. */
+        private final UiCursorCapture cursorCapture = new UiCursorCapture();
         /** Frozen at the press: an editor LOS gesture must never paint, even if Alt is released first. */
         private boolean measurementGesture;
+        /**
+         * A Select press that grabbed no selected item: its drag draws a selection box (Shift adds, Ctrl removes) and a
+         * release without a drag is a click. Only a press on the selection, or inside a selected object's outline,
+         * moves it.
+         */
+        private boolean marquee;
         private int gestureButton;
         private GpuTerrain.DecorationHit editorGrab;
         private Coords editorHexGrab;
@@ -1677,7 +1803,15 @@ class GpuBattleView extends ApplicationAdapter {
         private record KeyPress(int code, int modifiers) { }
         private final Map<Integer, KeyPress> pressedKeys = new HashMap<>();
 
-        private record Pick(Coords coords, int entityId, float surfaceZ) { }
+        /**
+         * {@code floorZ}: the height of the walkable surface under the pointer in the picked hex ({@link
+         * GpuTerrain#walkableHit}), which the hover ring marks; NaN without one. {@code onTerrain}: no unit or marker
+         * takes priority over the terrain hit.
+         */
+        private record Pick(Coords coords, int entityId, float floorZ, boolean onTerrain) {
+            /** The height a click measures to: the ring's, or NaN (the unit's own) when a unit or marker takes it. */
+            float pointedZ() { return onTerrain ? floorZ : Float.NaN; }
+        }
 
         private void editorPointer(int x, int y, boolean drag) {
             if (scene == null || terrain == null) { return; }
@@ -1688,13 +1822,13 @@ class GpuBattleView extends ApplicationAdapter {
             if (!drag || additive) {
                 editorHexGrab = null;
                 editorGrab = state != null && state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.SELECT
-                      ? terrain.decorationHit(scene, ray) : null;
+                      ? objectPress(ray, state) : null;
             }
             if (drag && !additive && editorHexGrab != null && Math.abs(ray.direction.z) > .00001f) {
                 Vector3 point = ray.getEndPoint(new Vector3(), (editorPlaneZ - ray.origin.z) / ray.direction.z);
                 var target = BoardGeometry.tile(scene, point.x - editorGrabX, point.y - editorGrabY);
                 if (target != null) {
-                    hovered = target.coords(); hoverZ = editorPlaneZ; source.setHover(hovered);
+                    hovered = target.coords(); hoverZ = Float.NaN; source.setHover(hovered);
                     source.editorPointer(target.coords(), 0, 0, true, null, false, gestureBoardGeneration);
                 }
                 return;
@@ -1711,7 +1845,7 @@ class GpuBattleView extends ApplicationAdapter {
                 }
                 var target = BoardGeometry.tile(scene, point.x - editorGrabX, point.y - editorGrabY);
                 if (target == null) { return; }
-                hovered = target.coords(); hoverZ = editorGrab.anchorZ(); source.setHover(hovered);
+                hovered = target.coords(); hoverZ = Float.NaN; source.setHover(hovered);
                 source.editorPointer(at, (point.x - editorGrabX - BoardGeometry.centerX(at)) / BoardGeometry.width(),
                       (point.y - editorGrabY - BoardGeometry.centerY(at)) / BoardGeometry.height(), drag, editorGrab.id(), additive, gestureBoardGeneration);
                 return;
@@ -1726,16 +1860,85 @@ class GpuBattleView extends ApplicationAdapter {
                 editorGrabY = point.y - BoardGeometry.centerY(hit.coords());
             }
             source.editorPointer(hit.coords(), (point.x - BoardGeometry.centerX(hit.coords())) / BoardGeometry.width(),
-                  (point.y - BoardGeometry.centerY(hit.coords())) / BoardGeometry.height(), drag, null, additive, hit.receiver(), gestureBoardGeneration);
+                  (point.y - BoardGeometry.centerY(hit.coords())) / BoardGeometry.height(), drag, null, additive, hit.receiver(),
+                  (gestureModifiers & InputEvent.CTRL_DOWN_MASK) != 0, gestureBoardGeneration);
+        }
+
+        /**
+         * The object a Select press picks: over a hex selection, a press on a selected hex picks that hex (null); a press
+         * inside a selected object's outline (its installed bounds) picks that object even where its mesh is open;
+         * otherwise the nearest object hit, or null for the ground.
+         */
+        private GpuTerrain.DecorationHit objectPress(com.badlogic.gdx.math.collision.Ray ray,
+              megamek.client.ui.boardeditor.BoardEditorSession.Snapshot state) {
+            var selection = state.selection();
+            if (!selection.isEmpty() && selection.getFirst().object().isEmpty()) {
+                var ground = terrain.selectionHit(scene, ray);
+                if (ground != null && selection.contains(new megamek.client.ui.boardeditor.BoardEditorSession.Selection(ground.coords(), ""))) {
+                    return null;
+                }
+            }
+            var hit = terrain.decorationHit(scene, ray);
+            if (hit != null && selection.contains(new megamek.client.ui.boardeditor.BoardEditorSession.Selection(hit.coords(), hit.id()))) {
+                return hit;
+            }
+            for (var item : selection) {
+                if (item.object().isEmpty()) { continue; }
+                for (var object : terrain.editorObjects(item.coords())) {
+                    if (object.id().equals(item.object()) && com.badlogic.gdx.math.Intersector.intersectRayBoundsFast(ray, object.bounds())) {
+                        return new GpuTerrain.DecorationHit(item.coords(), object.id(), 0, object.anchorLevel() * BoardGeometry.level());
+                    }
+                }
+            }
+            return hit;
+        }
+
+        /** The item a Select press at x, y picks: the object {@link #objectPress} picks, else the ground's hex, else null. */
+        private megamek.client.ui.boardeditor.BoardEditorSession.Selection pressedItem(int x, int y,
+              megamek.client.ui.boardeditor.BoardEditorSession.Snapshot state) {
+            if (scene == null || terrain == null) { return null; }
+            var ray = boardCamera.camera.getPickRay(x, y, 0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
+            var object = objectPress(ray, state);
+            if (object != null) { return new megamek.client.ui.boardeditor.BoardEditorSession.Selection(object.coords(), object.id()); }
+            var ground = terrain.selectionHit(scene, ray);
+            return ground == null ? null : new megamek.client.ui.boardeditor.BoardEditorSession.Selection(ground.coords(), "");
         }
 
         private Coords pick(int x, int y) {
             return pickSelection(x, y).coords();
         }
 
+        /** The nearest rendered unit under the pointer, including units outlined through scenery. */
+        private BoardScene.Unit pickUnit(float x, float y) {
+            var ray = boardCamera.camera.getPickRay(x, y, 0, 0,
+                  boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
+            float nearest = Float.POSITIVE_INFINITY;
+            BoardScene.Unit picked = null;
+            for (BoardScene.Unit unit : scene.units()) {
+                var instance = unitIcons.active() ? unitIcons.instance(unit) : unitInstances.get(unit.id() + ":" + unit.part());
+                if (instance == null) { continue; }
+                float distance = unitPicking.distance(instance, ray);
+                if (distance < nearest) {
+                    nearest = distance;
+                    picked = unit;
+                }
+            }
+            return picked;
+        }
+
         private Pick pickSelection(int x, int y) {
             if (scene == null || reloadingAssets || assetReloadFailed) {
-                return new Pick(null, Entity.NONE, Float.NaN);
+                return new Pick(null, Entity.NONE, Float.NaN, false);
+            }
+            var pickedUnit = pickUnit(x, y);
+            if (pickedUnit == null && !unitIcons.active() && tuning.seeThrough() > 0) {
+                // The outline extends slightly beyond the mesh. Direct model hits always take priority.
+                float step = GpuUnitVisibility.OUTLINE_STEP * layoutScale;
+                for (int dx = -1; dx <= 1 && pickedUnit == null; dx++) {
+                    for (int dy = -1; dy <= 1 && pickedUnit == null; dy++) {
+                        if (dx != 0 || dy != 0) { pickedUnit = pickUnit(x + dx * step, y + dy * step); }
+                    }
+                }
             }
             var ray = boardCamera.camera.getPickRay(x, y, 0, 0,
                   boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
@@ -1743,38 +1946,35 @@ class GpuBattleView extends ApplicationAdapter {
             float nearest = ground == null ? Float.POSITIVE_INFINITY : ground.distance();
             Coords coords = ground == null ? null : ground.coords();
             int entityId = Entity.NONE;
-            float nearestUnit = unitIcons.active() ? Float.POSITIVE_INFINITY : nearest;
-            for (BoardScene.Unit unit : scene.units()) {
-                var instance = unitIcons.active() ? unitIcons.instance(unit) : unitInstances.get(unit.id() + ":" + unit.part());
-                if (instance != null) {
-                    float distance = unitPicking.distance(instance, ray);
-                    if (distance < nearestUnit) {
-                        nearestUnit = distance;
+            boolean onTerrain = ground != null;
+            if (pickedUnit != null) {
+                coords = pickedUnit.location().coords();
+                entityId = pickedUnit.id();
+                onTerrain = false;
+            } else {
+                for (var entry : markers.locatedInstances().entrySet()) {
+                    float distance = unitPicking.distance(entry.getValue(), ray);
+                    if (distance < nearest) {
                         nearest = distance;
-                        entityId = unit.id();
-                        coords = unit.location().coords();
+                        coords = entry.getKey().coords();
+                        onTerrain = false;
                     }
                 }
             }
-            for (var entry : markers.locatedInstances().entrySet()) {
-                float distance = unitPicking.distance(entry.getValue(), ray);
-                if (distance < nearest) {
-                    nearest = distance;
-                    coords = entry.getKey().coords();
-                    entityId = Entity.NONE;
-                }
-            }
+            var floor = coords == null ? null : terrain.walkableHit(scene, ray);
+            float floorZ = floor != null && floor.coords().equals(coords)
+                  ? ray.getEndPoint(new Vector3(), (float) Math.sqrt(floor.distance())).z : Float.NaN;
             if (entityId == Entity.NONE && coords != null) {
                 for (BoardScene.Unit unit : scene.units()) {
-                    if (unit.footprint().contains(coords)) {
+                    // A unit's hex footprint must not intercept a click on another floor of its building.
+                    if (unit.footprint().contains(coords) && (!scene.tile(coords).building() || Float.isNaN(floorZ)
+                          || GpuLosResult.pointedLevel(floorZ) == Math.round(unit.location().elevation()))) {
                         entityId = unit.id();
                         break;
                     }
                 }
             }
-            float surfaceZ = ground != null && nearest == ground.distance()
-                  ? ray.getEndPoint(new Vector3(), (float) Math.sqrt(nearest)).z : Float.NaN;
-            return new Pick(coords, entityId, surfaceZ);
+            return new Pick(coords, entityId, floorZ, onTerrain);
         }
 
         @Override
@@ -1796,14 +1996,19 @@ class GpuBattleView extends ApplicationAdapter {
             dragged = false;
             panning = button == Input.Buttons.RIGHT || button == Input.Buttons.MIDDLE;
             boolean shiftDown = (gestureModifiers & InputEvent.SHIFT_DOWN_MASK) != 0;
-            // Right drags pan and middle drags orbit; Shift at the press swaps them (C.4). Free Flight looks around
-            // with the right drag instead.
-            int orbitButton = boardCamera.firstPerson() ? Input.Buttons.RIGHT : Input.Buttons.MIDDLE;
-            orbiting = panning && (button == orbitButton) != shiftDown;
+            // Right drags pan and middle drags orbit or look around; Shift at the press swaps them in every mode.
+            orbiting = panning && (button == Input.Buttons.MIDDLE) != shiftDown;
             ui.boardPress();
             if (button == Input.Buttons.LEFT && source.isEditor() && !measurementGesture) {
+                var state = source.editorState();
+                // A plain press on the selection grabs it to move; any other Select press (also one that hits nothing,
+                // such as the sky around the board) waits for a box or a click.
+                var item = state == null || state.selection().isEmpty() ? null : pressedItem(x, y, state);
+                marquee = state != null && state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.SELECT
+                      && ((gestureModifiers & (InputEvent.SHIFT_DOWN_MASK | InputEvent.CTRL_DOWN_MASK)) != 0
+                      || item == null || !state.selection().contains(item));
                 // The board editor paints from the press on; a left drag goes on painting.
-                editorPointer(x, y, false);
+                if (!marquee) { editorPointer(x, y, false); }
             }
             return true;
         }
@@ -1816,6 +2021,7 @@ class GpuBattleView extends ApplicationAdapter {
             if (source.isEditor() && gestureButton == Input.Buttons.LEFT && !measurementGesture) {
                 if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < DRAG_THRESHOLD * layoutScale) { return true; }
                 dragged = true;
+                if (marquee) { dragX = x; dragY = y; return true; }
                 // The board editor's left drag paints every hex it crosses, from the press on.
                 if (!ui.hit(x, y)) {
                     editorPointer(x, y, true);
@@ -1825,16 +2031,17 @@ class GpuBattleView extends ApplicationAdapter {
             if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < DRAG_THRESHOLD * layoutScale) {
                 return true;
             }
-            // Past the threshold a gesture is a drag: a left one does nothing more and cancels its click (C.4).
+            // Past the threshold a gesture is a drag: a left one does nothing more and cancels its click (C.4). An orbit
+            // holds the cursor still, so it never stops at the screen's edge; a pan keeps the board under the pointer.
+            if (!dragged && orbiting) { cursorCapture.capture(x, y); }
             dragged = true;
             if (orbiting) {
-                if (boardCamera.firstPerson()) {
-                    boardCamera.look((x - dragX) * ORBIT_DEGREES / layoutScale,
-                          (dragY - y) * ORBIT_DEGREES / layoutScale);
-                } else {
-                    boardCamera.orbit((x - dragX) * ORBIT_DEGREES / layoutScale,
-                          (y - dragY) * ORBIT_DEGREES / layoutScale);
-                }
+                // Without the frame after the capture, whose first poll can report a stale jump (UiCursorCapture).
+                Vector2 at = cursorCapture.trusted(x, y);
+                x = (int) at.x;
+                y = (int) at.y;
+                boardCamera.orbit((x - dragX) * ORBIT_DEGREES / layoutScale,
+                      (y - dragY) * ORBIT_DEGREES / layoutScale);
             } else if (panning) {
                 boardCamera.pan(x - dragX, y - dragY);
             }
@@ -1849,6 +2056,22 @@ class GpuBattleView extends ApplicationAdapter {
                 return false;
             }
             if (source.isEditor() && !measurementGesture && button == Input.Buttons.LEFT) {
+                if (marquee && dragged) { selectBox(x, y); }
+                // A click: Ctrl removes the clicked item; otherwise it selects it, or with Shift toggles it.
+                else if (marquee && (gestureModifiers & InputEvent.CTRL_DOWN_MASK) != 0) {
+                    var state = source.editorState();
+                    var item = state == null ? null : pressedItem(startX, startY, state);
+                    if (item != null) {
+                        source.editorSelect(List.of(item), megamek.client.ui.boardeditor.BoardEditorSession.SelectMode.REMOVE,
+                              gestureBoardGeneration);
+                    }
+                } else if (marquee) { editorPointer(startX, startY, false); }
+                else if (!dragged && editorHexGrab != null) {
+                    // A click on a placed object standing on a selected hex selects the object; only a drag moves hexes.
+                    var object = terrain == null ? null : terrain.decorationHit(scene, boardCamera.camera.getPickRay(startX, startY,
+                          0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight));
+                    if (object != null) { source.editorPointer(object.coords(), 0, 0, false, object.id(), false, gestureBoardGeneration); }
+                }
                 source.endEditorStroke();
                 reset();
                 return true;
@@ -1859,7 +2082,7 @@ class GpuBattleView extends ApplicationAdapter {
                   && gestureBoardGeneration == boardGeneration) {
                 Pick picked = pickSelection(x, y);
                 // The height the pointer shows, which a measurement takes.
-                float pointedZ = picked.surfaceZ();
+                float pointedZ = picked.pointedZ();
                 if (ui instanceof GpuHud hud) {
                     // The shared phase tool handles a press; releasing Shift first must not turn it into placement.
                     hud.boardClick(picked.coords(), picked.entityId(), button, gestureModifiers, x, y, pointedZ);
@@ -1876,13 +2099,61 @@ class GpuBattleView extends ApplicationAdapter {
         }
 
         void reset() {
+            cursorCapture.release();
             panning = false;
             orbiting = false;
             dragged = false;
             boardGesture = false;
             measurementGesture = false;
+            marquee = false;
             editorGrab = null; editorHexGrab = null;
             clearElevationScroll();
+        }
+
+        /**
+         * One box selection of the objects whose anchors, and the hexes whose centres, in the scene the frame drew,
+         * project inside the rectangle; the session takes the objects, or the hexes when the box holds no object.
+         */
+        private void selectBox(int x, int y) {
+            if (scene == null) { return; }
+            int left = Math.min(startX, x), right = Math.max(startX, x), top = Math.min(startY, y), bottom = Math.max(startY, y);
+            Set<megamek.client.ui.boardeditor.BoardEditorSession.Selection> hits = new java.util.LinkedHashSet<>();
+            for (BoardScene.Tile tile : scene.tiles()) {
+                Vector3 centre = boardCamera.camera.project(BoardGeometry.center(tile.coords(), tile.elevation()),
+                      0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
+                float centreY = Gdx.graphics.getHeight() - centre.y;
+                if (centre.z >= 0 && centre.z <= 1 && centre.x >= left && centre.x <= right && centreY >= top && centreY <= bottom) {
+                    hits.add(new megamek.client.ui.boardeditor.BoardEditorSession.Selection(tile.coords(), ""));
+                }
+                if (tile.features().stream().allMatch(feature -> feature.decoration() == null)) { continue; }
+                // The installed anchors, the same placement the selection outlines use: roofs, decks and offsets.
+                Map<String, Float> anchors = new HashMap<>();
+                // What the zoom hides cannot be box selected, as it cannot be clicked: the box takes the hexes there.
+                Set<String> hidden = new java.util.HashSet<>();
+                if (terrain != null) {
+                    for (var installed : terrain.editorObjects(tile.coords())) {
+                        anchors.put(installed.id(), installed.anchorLevel());
+                        if (!installed.shown()) { hidden.add(installed.id()); }
+                    }
+                }
+                for (BoardScene.Feature feature : tile.features()) {
+                    var object = feature.decoration();
+                    if (object == null || hidden.contains(object.id())) { continue; }
+                    Vector3 point = boardCamera.camera.project(new Vector3(
+                                BoardGeometry.centerX(tile.coords()) + (float) object.x() * BoardGeometry.width(),
+                                BoardGeometry.centerY(tile.coords()) + (float) object.y() * BoardGeometry.height(),
+                                anchors.getOrDefault(object.id(), (float) tile.elevation()) * BoardGeometry.level()),
+                          0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
+                    float screenY = Gdx.graphics.getHeight() - point.y;
+                    if (point.z >= 0 && point.z <= 1 && point.x >= left && point.x <= right && screenY >= top && screenY <= bottom) {
+                        hits.add(new megamek.client.ui.boardeditor.BoardEditorSession.Selection(tile.coords(), object.id()));
+                    }
+                }
+            }
+            var mode = (gestureModifiers & InputEvent.CTRL_DOWN_MASK) != 0 ? megamek.client.ui.boardeditor.BoardEditorSession.SelectMode.REMOVE
+                  : (gestureModifiers & InputEvent.SHIFT_DOWN_MASK) != 0 ? megamek.client.ui.boardeditor.BoardEditorSession.SelectMode.ADD
+                  : megamek.client.ui.boardeditor.BoardEditorSession.SelectMode.REPLACE;
+            source.editorSelect(List.copyOf(hits), mode, gestureBoardGeneration);
         }
 
         private void clearElevationScroll() {
@@ -1896,11 +2167,17 @@ class GpuBattleView extends ApplicationAdapter {
             if (source.isEditor() && boardGesture && gestureButton == Input.Buttons.LEFT && !measurementGesture
                   && (editorGrab != null || editorHexGrab != null)) { return true; }
             boolean overHud = ui.hit(x, y);
-            Pick picked = overHud ? new Pick(null, Entity.NONE, Float.NaN) : pickSelection(x, y);
+            Pick picked = overHud ? new Pick(null, Entity.NONE, Float.NaN, false) : pickSelection(x, y);
             hovered = picked.coords();
             hoveredUnit = picked.entityId();
-            hoverZ = picked.surfaceZ();
-            source.setHover(hoverHeld ? null : hovered);
+            hoverZ = picked.floorZ();
+            source.setHover(hoverHeld ? null : hovered, picked.pointedZ());
+            // An object under the pointer in the editor's inspected hex is highlighted in its side view and Layers.
+            if (ui instanceof GpuMapHud map && source.editorState() != null) {
+                var hit = hovered != null && hovered.equals(source.editorState().selected()) ? terrain.decorationHit(scene,
+                      boardCamera.camera.getPickRay(x, y, 0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight)) : null;
+                map.editorBoardHover(hit != null && hit.coords().equals(hovered) ? hit.id() : "");
+            }
             // Desktop pointers: a hand over units, a move cursor over the minimap, which drags the camera (Q5).
             cursor(overHud ? ui.dragsCamera(x, y) ? SystemCursor.AllResize : SystemCursor.Arrow
                   : hoveredUnit == Entity.NONE ? SystemCursor.Arrow : SystemCursor.Hand);

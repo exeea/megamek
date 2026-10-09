@@ -69,14 +69,13 @@ final class UnitModelSelection {
      * takes its arm with it. Combat damage records that arm as destroyed too, but the damage editor can zero a torso
      * and leave the arm's own numbers alone, so the arm is worked out here instead of trusted to be recorded.
      *
-     * @return the locations to show as lost; {@link BoardScene.LocationDamage#NONE} for anything but a Mek
+     * @return the locations to show as lost; for any other unit but infantry its whole-body stage
+     *       ({@link #bodyStage}), and {@link BoardScene.LocationDamage#NONE} for infantry or an undamaged unit
      */
     static BoardScene.LocationDamage damage(Entity entity) {
         if (entity instanceof Infantry) { return BoardScene.LocationDamage.NONE; }
         if (!(entity instanceof Mek mek)) {
-            var stage = UnitDamageDisplay.bodyStage(bodyLoss(entity));
-            return stage == null ? BoardScene.LocationDamage.NONE
-                  : new BoardScene.LocationDamage(Set.of(), Set.of(), java.util.Map.of("*", stage));
+            return UnitDamageDisplay.body(bodyStage(entity));
         }
         Set<String> removed = new TreeSet<>();
         Set<String> wrecked = new TreeSet<>();
@@ -105,15 +104,13 @@ final class UnitModelSelection {
         return value;
     }
 
-    /** Whole-body appearance, using the same armor/structure totals as unsplit authored units. */
-    static float bodyLoss(Entity entity) {
-        if (entity.isDestroyed() || entity.isDoomed()) { return 1; }
-        float original = 0, remaining = 0;
-        for (int location = 0; location < entity.locations(); location++) {
-            original += armor(entity, location, true) + Math.max(0, entity.getOInternal(location));
-            remaining += armor(entity, location, false) + Math.max(0, entity.getInternal(location));
-        }
-        return loss(remaining, original);
+    /**
+     * Whole-body appearance, of unsplit authored units and meeples: the stage of the unit's damage level, the state its
+     * board label's damage tile and the unit card show, and the last stage once it is destroyed or doomed.
+     */
+    static UnitDamageDisplay.Stage bodyStage(Entity entity) {
+        if (entity.isDestroyed() || entity.isDoomed()) { return UnitDamageDisplay.Stage.BODY_100; }
+        return UnitDamageDisplay.levelStage(entity.getDamageLevel());
     }
 
     private static float loss(float remaining, float original) {

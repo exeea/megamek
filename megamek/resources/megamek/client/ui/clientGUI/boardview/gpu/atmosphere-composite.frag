@@ -81,8 +81,8 @@ void main() {
     if (u_heatEnabled > 0.5) {
         float hot = heatWeight(linear);
         heat = linear * hot;
-        // Match the old RGBA8 surface path; only the selected heat retains HDR and bypasses night desaturation.
-        linear = min(linear, vec3(1.0)) * (1.0 - hot);
+        // Only selected heat bypasses night desaturation. Ordinary reflected highlights retain their range too.
+        linear *= 1.0 - hot;
     }
     vec4 sand = sandLayer(surfaceDepth);
     linear = (linear * sand.a + sand.rgb) * atmosphere.a + atmosphere.rgb;

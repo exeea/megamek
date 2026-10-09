@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -54,9 +55,6 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuUtilityMinimapSmokeTest {
     private static final int[][] SIZES = { { 900, 600 }, { 1280, 720 }, { 1920, 1080 } };
-    /** GpuHud puts the developer tuning utility after the row, one gap on: 62 wide, 54 at W <= 1350. */
-    private static final float TUNING_WIDE = 62;
-    private static final float TUNING_NARROW = 54;
     /** The Atlas's planned route of the fixture: three hexes north. */
     private static final List<GpuMovePlan.Step> ROUTE = Stream.of(new Coords(14, 13), new Coords(14, 12),
           new Coords(14, 11), new Coords(14, 10))
@@ -75,12 +73,14 @@ class GpuUtilityMinimapSmokeTest {
         /** The client's preferences the frames carry. */
         GpuBoardSource.UiPreferences preferences = PREFERENCES;
 
-        Parts(GpuHudTestStage hud, BoardCamera camera) {
+        Parts(GpuHudTestStage hud, BoardCamera camera, BoardScene scene) {
             BoardScene.Command item = new BoardScene.Command("View:View/" + ClientGUI.VIEW_MINI_MAP + ":Minimap",
                   "Minimap", "", true, false, false, List.of(), minimapRuns::incrementAndGet, "Ctrl+M", true);
             global = List.of(new BoardScene.Command("View:View", "View", "", true, false, false, List.of(item),
                   () -> { }, "", null));
-            utilities = new GpuUtilityBar(hud.kit, source, state, camera, new GpuBoardTuning(hud.kit.ui.skin));
+            utilities = new GpuUtilityBar(hud.kit, source, state, camera, new GpuBoardTuning(hud.kit.ui.skin),
+                  GpuUtilityBar.utility(hud.kit.ui, "tune", "GpuBoard.hud.tuning.title", "tuning-button"),
+                  () -> camera.fit(scene));
             hint = new GpuHintLine(hud.kit, source, state, camera);
             minimap = new GpuMinimap(hud.kit, source, state, camera);
             for (Actor actor : List.of(utilities.north(), utilities.actor(), utilities.chip(), hint.actor(),
@@ -108,26 +108,25 @@ class GpuUtilityMinimapSmokeTest {
         }
 
         /**
-         * Places the components at the prototype's anchors (r1 section 2), which GpuHud's layout uses: utilities at
-         * the right gap and top 18, the minimap at top 90 in the right column's width, the chip centred at top 20, the
+         * Places the components as GpuHud does: utilities at the top-right gap, the minimap one gap below them
+         * in the right column's width, the chip centred at top 20, the
          * Tactical View's north mark centred at its own top, and the hint line centred at bottom 7, hidden at
-         * W <= 1350. {@code tuning} reserves the tuning utility's room.
+         * W <= 1350.
          */
-        void place(GpuHud.Metrics metrics, boolean tuning) {
+        void place(GpuHud.Metrics metrics) {
             float width = metrics.width();
             float height = metrics.height();
             Table bar = (Table) utilities.actor();
             bar.pack();
-            float room = tuning ? GpuUtilityBar.GAP + (metrics.narrow() ? TUNING_NARROW : TUNING_WIDE) : 0;
-            bar.setPosition(width - metrics.gap() - room - bar.getWidth(), height - 18 - bar.getHeight());
+            bar.setPosition(width - metrics.gap() - bar.getWidth(), height - metrics.gap() - bar.getHeight());
             Table map = (Table) minimap.actor();
             map.setSize(metrics.right(), map.getPrefHeight());
             map.validate();
-            map.setPosition(width - metrics.gap() - metrics.right(), height - 90 - map.getHeight());
+            map.setPosition(width - metrics.gap() - metrics.right(), bar.getY() - metrics.gap() - map.getHeight());
             Table chip = (Table) utilities.chip();
             chip.pack();
             chip.setPosition(Math.round((width - chip.getWidth()) / 2), height - 20 - chip.getHeight());
-            Label north = (Label) utilities.north();
+            var north = (com.badlogic.gdx.scenes.scene2d.ui.Container<?>) utilities.north();
             north.pack();
             north.setPosition(Math.round((width - north.getWidth()) / 2),
                   height - GpuUtilityBar.NORTH_TOP - north.getHeight());
@@ -144,7 +143,7 @@ class GpuUtilityMinimapSmokeTest {
         System.out.println("Tileset " + PreferenceManager.getClientPreferences().getMapTileset());
         GpuHudTestStage.run(hud -> {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
-            Parts parts = new Parts(hud, board.camera);
+            Parts parts = new Parts(hud, board.camera, scene);
             try {
                 GpuBattleStatus.Snapshot fixture = GpuHudFixtures.status();
                 GpuBattleStatus.Snapshot initiative = status(fixture, GamePhase.INITIATIVE_REPORT, false, Entity.NONE);
@@ -186,7 +185,7 @@ class GpuUtilityMinimapSmokeTest {
                     GpuHud.Metrics metrics = GpuHud.Metrics.of(size[0], size[1]);
                     for (boolean tactical : new boolean[] { false, true }) {
                         parts.update(scene, firing, move(), GpuReportLog.Snapshot.EMPTY, tactical, size[0], size[1]);
-                        parts.place(metrics, true);
+                        parts.place(metrics);
                         assertLayout(hud, parts, metrics, tactical);
                     }
                 }
@@ -202,7 +201,7 @@ class GpuUtilityMinimapSmokeTest {
         BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
-            Parts parts = new Parts(hud, board.camera);
+            Parts parts = new Parts(hud, board.camera, scene);
             try {
                 GpuBattleStatus.Snapshot moving = GpuHudFixtures.status();
                 board.view(false);
@@ -229,7 +228,7 @@ class GpuUtilityMinimapSmokeTest {
         BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
-            Parts parts = new Parts(hud, board.camera);
+            Parts parts = new Parts(hud, board.camera, scene);
             try {
                 UiButton contacts = hud.stage.getRoot().findActor("utility-contacts");
                 assertSame(hud.kit.ui.skin.getDrawable("icon-enemy"), ((Image) contacts.icons.getFirst())
@@ -280,9 +279,18 @@ class GpuUtilityMinimapSmokeTest {
         assertFalse(parts.state.logOpen());
         List<String> row = new ArrayList<>();
         ((Table) parts.utilities.actor()).getChildren().forEach(child -> row.add(child.getName()));
-        assertEquals(List.of("utility-tactical", "utility-wireframe", "utility-map", "utility-contacts",
-              "utility-log", "utility-help", "utility-menu"), row, "Wireframe follows Tactical view, Menu takes the "
-              + "place of Settings, Contacts follows Map, and there is no Home");
+        assertEquals(List.of("map-view-top", "map-view-isometric", "map-view-fit", "utility-tactical",
+              "utility-wireframe", "utility-map", "utility-contacts", "utility-log", "tuning-button",
+              "utility-help", "utility-menu"), row);
+        click(hud, "map-view-top");
+        assertTrue(board.camera.isTopDown());
+        click(hud, "map-view-isometric");
+        assertFalse(board.camera.isTopDown());
+        click(hud, "map-view-fit");
+        Vector3 fitted = board.camera.focus.cpy();
+        board.camera.center(BoardGeometry.center(new Coords(1, 1), 0));
+        click(hud, "map-view-fit");
+        assertTrue(fitted.epsilonEquals(board.camera.focus, .01f), "Fit restores the board framing after a pan");
 
         click(hud, "utility-tactical");
         assertTrue(board.camera.tactical(), "Tactical view enters the Tactical View");
@@ -351,6 +359,12 @@ class GpuUtilityMinimapSmokeTest {
             assertEquals(azimuth, board.camera.azimuth(), "The drag pans only");
             assertEquals(tilt, board.camera.tilt(), "The drag pans only");
             assertEquals(z, board.camera.focus.z, "The drag keeps the focus plane");
+            assertFalse(Gdx.input.isCursorCatched(), "The left drag follows the visible pointer");
+            // A middle drag orbits with the cursor held still, as the board's does.
+            assertTrue(hud.stage.touchDown(x, y, 0, Input.Buttons.MIDDLE), "The canvas takes the orbit");
+            assertTrue(Gdx.input.isCursorCatched(), "An orbit holds the cursor");
+            hud.stage.touchUp(x, y, 0, Input.Buttons.MIDDLE);
+            assertFalse(Gdx.input.isCursorCatched(), "Releasing the orbit shows the cursor again");
             // The wheel over the map zooms the camera by the board's step, about the view's centre (the user's
             // decision of 2026-10-03); off the map the wheel is not the map's.
             // The stage fires enter and exit in act, as each frame does.
@@ -510,11 +524,12 @@ class GpuUtilityMinimapSmokeTest {
         GpuBattleStatus.Snapshot fixture = GpuHudFixtures.status();
         GpuHud.Inputs tactical = parts.update(scene, status(fixture, GamePhase.FIRING, true, GpuHudFixtures.ATLAS),
               move(), GpuReportLog.Snapshot.EMPTY, true, 1920, 1080);
-        assertEquals(List.of(text("GpuBoard.hud.mouse.leftClick"), text("GpuBoard.hud.hint.selectTarget"),
-              text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.panMap"), text("GpuBoard.hud.mouse.wheel"),
+        assertEquals(List.of(text("GpuBoard.hud.mouse.leftClick"), text("GpuBoard.hud.hint.select"),
+              text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.panMap"),
+              text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit"), text("GpuBoard.hud.mouse.wheel"),
               text("GpuBoard.hud.hint.zoom"), "T", text("GpuBoard.hud.util.backTo3d")), GpuHintLine.items(tactical));
         GpuHud.Inputs planning = parts.update(scene, fixture, move(), GpuReportLog.Snapshot.EMPTY, false, 1920, 1080);
-        assertEquals(List.of(text("GpuBoard.hud.mouse.leftClick"), text("GpuBoard.hud.hint.selectPlan"),
+        assertEquals(List.of(text("GpuBoard.hud.mouse.leftClick"), text("GpuBoard.hud.hint.select"),
               text("GpuBoard.hud.mouse.ctrlClick"), text("GpuBoard.hud.hint.waypoint"),
               text("GpuBoard.hud.mouse.shiftClick"), text("GpuBoard.hud.hint.orientation"),
               text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.pan"),
@@ -523,11 +538,10 @@ class GpuUtilityMinimapSmokeTest {
               GpuHintLine.items(planning));
         GpuHud.Inputs waiting = parts.update(scene, status(fixture, GamePhase.MOVEMENT, false, 6), move(),
               GpuReportLog.Snapshot.EMPTY, false, 1920, 1080);
-        // User item 29c: outside the local turn an own unit's click selects it, any other unit's inspects it.
-        assertEquals("Select / inspect", GpuHintLine.items(waiting).get(1));
+        assertEquals(text("GpuBoard.hud.hint.select"), GpuHintLine.items(waiting).get(1));
         GpuHud.Inputs review = parts.update(scene, status(fixture, GamePhase.END_REPORT, false, Entity.NONE), move(),
               GpuReportLog.Snapshot.EMPTY, false, 1920, 1080);
-        assertEquals("Select / inspect", GpuHintLine.items(review).get(1));
+        assertEquals(text("GpuBoard.hud.hint.select"), GpuHintLine.items(review).get(1));
     }
 
     /** Updates, places and draws the parts over the board in one view, at 1920 x 1080. */
@@ -535,7 +549,7 @@ class GpuUtilityMinimapSmokeTest {
           GpuBattleStatus.Snapshot status, GpuMovePlan.Snapshot move, boolean tactical) {
         hud.size(1920, 1080);
         parts.update(scene, status, move, GpuReportLog.Snapshot.EMPTY, tactical, 1920, 1080);
-        parts.place(GpuHud.Metrics.of(1920, 1080), false);
+        parts.place(GpuHud.Metrics.of(1920, 1080));
         board.draw(camera -> { });
         hud.drawStage();
     }
@@ -553,7 +567,7 @@ class GpuUtilityMinimapSmokeTest {
         }
         hud.size(width, height);
         parts.update(scene, status, move, reports, tactical, width, height);
-        parts.place(GpuHud.Metrics.of(width, height), false);
+        parts.place(GpuHud.Metrics.of(width, height));
         board.draw(camera -> { });
         hud.drawStage();
         Pixmap image = hud.capture(name);
@@ -584,9 +598,7 @@ class GpuUtilityMinimapSmokeTest {
         Actor map = parts.minimap.actor();
         Actor chip = parts.utilities.chip();
         Rectangle barArea = GpuHudTestStage.bounds(bar);
-        Rectangle tuning = new Rectangle(barArea.x + barArea.width + GpuUtilityBar.GAP, barArea.y,
-              metrics.narrow() ? TUNING_NARROW : TUNING_WIDE, barArea.height);
-        List<Rectangle> others = new ArrayList<>(List.of(tuning, GpuHudTestStage.bounds(map)));
+        List<Rectangle> others = new ArrayList<>(List.of(GpuHudTestStage.bounds(map)));
         // GpuHud hides the chip where the top row has no room for it (below about 1000 units wide).
         boolean chipShown = tactical && metrics.width() >= 1280;
         assertEquals(tactical, chip.isVisible());
@@ -594,9 +606,9 @@ class GpuUtilityMinimapSmokeTest {
             others.add(GpuHudTestStage.bounds(chip));
         }
         hud.assertLayout(bar, others.toArray(new Rectangle[0]));
-        hud.assertLayout(map, barArea, tuning);
+        hud.assertLayout(map, barArea);
         if (chipShown) {
-            hud.assertLayout(chip, barArea, tuning, GpuHudTestStage.bounds(map));
+            hud.assertLayout(chip, barArea, GpuHudTestStage.bounds(map));
         }
         // The north mark shows in the Tactical View whether or not the chip has room.
         Actor north = parts.utilities.north();

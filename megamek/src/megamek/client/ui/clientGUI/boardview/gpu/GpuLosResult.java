@@ -40,7 +40,15 @@ final class GpuLosResult {
     }
 
     static int pointedHeight(int ground, float z) {
-        return Math.max(0, MathUtils.floor(z / BoardGeometry.level() + .0001f) - ground);
+        return Math.max(0, pointedLevel(z) - ground);
+    }
+
+    /**
+     * The level of a walkable surface hit at world height {@code z}, the one rule for the hover ring and the ruler. A
+     * surface drawn a hair below its level, such as a bridge deck's mesh, still stands at that level.
+     */
+    static int pointedLevel(float z) {
+        return MathUtils.floor(z / BoardGeometry.level() + .05f);
     }
 
     /**

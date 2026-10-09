@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -42,10 +43,11 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Layout;
-import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.PlayerColour;
@@ -66,7 +68,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The G6 command dock in the component harness: every variant beside the hud-v3 shot it ports (01-06, 08-11, 15),
- * the states no shot shows (hold, auto-declare, confirm strips, read-only drafts, generic phases, More), inside the
+ * the states no shot shows (hold, auto-declare, confirmations, read-only drafts, generic phases, More), inside the
  * window and clear of the columns and the hint line at 900 x 600, 1280 x 720 and 1920 x 1080; and each button running
  * the command of its variant. The services are mocks that record the commands, phase commands record their ids, the
  * playback history plays scripted events, and More opens in the context menu's popover. The weapon declaration also
@@ -89,9 +91,8 @@ class GpuCommandDockSmokeTest {
     private static final String DONE = GpuBoardActions.DONE_ID;
     private static final String SKIP = GpuBoardActions.SKIP_ID;
     private static final String REROLL = "reportRerollInitiative";
-    /** The dock's anchor (#dock bottom 30) and the hint line's (bottom 7, one 11-unit line). */
-    private static final float DOCK_BOTTOM = 30;
-    private static final float HINT_BOTTOM = 7;
+    /** The hint line's gap above the dock, and its height (one 11-unit line). */
+    private static final float HINT_GAP = 12;
     private static final float HINT_HEIGHT = 16;
     /** The board the scripted playback plays on: one hex, as the playback only needs the scene's board. */
     private static final BoardScene SCENE = UnitPlaybackTest.scene(IntStream.concat(
@@ -125,6 +126,11 @@ class GpuCommandDockSmokeTest {
     private record Dock(GpuCommandDock dock, GpuHudState state, BoardCamera camera, GpuContextMenu menu) {
         Group root() {
             return (Group) dock.actor();
+        }
+
+        <T extends Actor> T find(String name) {
+            T actor = root().findActor(name);
+            return actor != null ? actor : dock.confirmation().actor().findActor(name);
         }
 
         UiPopover popover() {
@@ -212,19 +218,19 @@ class GpuCommandDockSmokeTest {
             confirm.dock().twist(-1);
             show(hud, confirm, weapons(2, true, true));
             hud.capture("g6-twist-confirm").dispose();
-            click(hud, confirm.root().findActor("dock-resolve"));
+            clickAndShow(hud, confirm, weapons(2, true, true), "dock-confirm-no", "dock-resolve");
             show(hud, confirm, weapons(2, true, true));
             hud.capture("g6-resolve-confirm").dispose();
             // The weapon declaration's More: the unit's record and MegaMek's other firing commands (H38).
             Dock firingMore = dock(hud, weapons(2, true, true));
             show(hud, firingMore, weapons(2, true, true));
-            click(hud, firingMore.root().findActor("dock-more"));
+            click(hud, firingMore.find("dock-more"));
             hud.draw();
             hud.capture("g6-more-firing").dispose();
             // More above its button, in the context menu's popover.
             Dock more = dock(hud, movement(atlasRoute(), ATLAS));
             show(hud, more, movement(atlasRoute(), ATLAS));
-            click(hud, more.root().findActor("dock-more"));
+            click(hud, more.find("dock-more"));
             hud.draw();
             hud.capture("g6-more-movement").dispose();
 
@@ -241,7 +247,7 @@ class GpuCommandDockSmokeTest {
                 for (Shot shot : layouts) {
                     Dock dock = dock(hud, shot);
                     show(hud, dock, shot);
-                    hud.assertLayout(dock.dock().actor(), neighbours(hud, dock.state()));
+                    hud.assertLayout(dock.dock().actor(), neighbours(hud, dock));
                 }
                 // The fullest rows at this size: the plan's modes, the transport and the physical options.
                 Map<String, Shot> fullest = Map.of("movement", movement(atlasRoute(), ATLAS), "playback",
@@ -270,8 +276,8 @@ class GpuCommandDockSmokeTest {
             verify(moves).pinDestination();
             assertEquals(List.of(DONE, SKIP), ran);
             // The route walks, so the planner's choice outlines Walk and not Run (plan G2).
-            TextButton walk = dock.root().findActor("dock-mode-walk");
-            TextButton run = dock.root().findActor("dock-mode-run");
+            TextButton walk = dock.find("dock-mode-walk");
+            TextButton run = dock.find("dock-mode-run");
             assertNotSame(walk.getStyle(), run.getStyle());
             assertEquals("2 / 3 MP", label(dock, "dock-foot-bold"));
             assertEquals(" \u00B7 walk auto \u00B7 facing N \u00B7 heat +1", label(dock, "dock-foot"));
@@ -279,7 +285,7 @@ class GpuCommandDockSmokeTest {
             // Without a route Confirm is ghosted and DONE says how to go on instead of committing.
             ran.clear();
             show(hud, dock, movement(GpuMovePlan.Snapshot.EMPTY, ATLAS));
-            assertTrue(((TextButton) dock.root().findActor("dock-main")).isDisabled());
+            assertTrue(((TextButton) dock.find("dock-main")).isDisabled());
             dock.dock().main();
             verify(toasts).post(ToastLevel.INFO, "Plot a route first, or use Hold position");
             assertEquals("automatic \u00B7 facing N", label(dock, "dock-legend"));
@@ -304,15 +310,14 @@ class GpuCommandDockSmokeTest {
                   label(dock, "dock-torso"), label(dock, "dock-torso-value"), label(dock, "dock-foot")));
             // H5: a twist with queued attacks asks first; Keep attacks and Esc keep them, Twist anyway twists.
             dock.dock().twist(-1);
-            // GpuHud updates and measures the dock once per frame: the frame that opens the strip already measures
-            // the dock at its settled height, the wrapped question included.
+            // The dock keeps its settled height while the question is in a separate overlay.
             dock.dock().update(inputs(hud, dock, weapons));
             float opening = ((Layout) dock.dock().actor()).getPrefHeight();
             show(hud, dock, weapons);
             assertEquals(dock.dock().actor().getHeight(), opening, .5f);
             assertEquals("Twisting clears 5 queued attacks.", label(dock, "dock-confirm-text"));
             clickAndShow(hud, dock, weapons, "dock-confirm-no");
-            assertNull(dock.root().findActor("dock-confirm"));
+            assertNull(dock.find("dock-confirm"));
             dock.dock().twist(1);
             assertTrue(dock.dock().cancel());
             assertFalse(dock.dock().cancel());
@@ -321,10 +326,10 @@ class GpuCommandDockSmokeTest {
             show(hud, dock, weapons);
             clickAndShow(hud, dock, weapons, "dock-confirm-yes");
             verify(fire).twist(-1);
-            // The strip closes once nothing is queued any more (the display cleared the queue meanwhile).
+            // The confirmation closes once nothing is queued any more (the display cleared the queue meanwhile).
             dock.dock().twist(1);
             show(hud, dock, weapons(orders(0, 0, 0, "", true, true, 5, 0)));
-            assertNull(dock.root().findActor("dock-confirm"));
+            assertNull(dock.find("dock-confirm"));
             // H6: Clear (the Delete key's call too) drops the orders and the armed weapon; Enter fires the weapons.
             show(hud, dock, weapons);
             dock.state().armedWeapon = 3;
@@ -341,7 +346,7 @@ class GpuCommandDockSmokeTest {
             assertEquals("Resolve now: 4 other units declare saved drafts on your next turns; units without a draft"
                   + " hold fire.", label(dock, "dock-confirm-text"));
             clickAndShow(hud, dock, weapons, "dock-confirm-no");
-            assertNull(dock.root().findActor("dock-confirm"));
+            assertNull(dock.find("dock-confirm"));
             verify(fire, never()).resolvePhase();
             clickAndShow(hud, dock, weapons, "dock-resolve", "dock-confirm-yes");
             verify(fire).resolvePhase();
@@ -352,20 +357,20 @@ class GpuCommandDockSmokeTest {
             assertFalse(dock.dock().cancel());
 
             // Without orders Enter holds fire: MegaMek's Skip, or Done while the display hides Skip; the last unit
-            // to declare resolves at once (no disclosure), and its foot says the resolution follows.
+            // to declare resolves at once (no disclosure).
             ran.clear();
             Shot holding = weapons(orders(0, 0, 0, "", true, true, 1, 0));
             show(hud, dock, holding);
-            assertEquals(List.of("ATLAS \u00B7 0 WEAPON ATTACKS", "Draft orders", "HOLD FIRE", "Resolution follows"),
+            assertEquals(List.of("ATLAS \u00B7 0 WEAPON ATTACKS", "", "HOLD FIRE"),
                   List.of(label(dock, "dock-title"), label(dock, "dock-span"),
-                        button(dock, "dock-main").getText().toString(), label(dock, "dock-foot")));
+                        button(dock, "dock-main").getText().toString()));
             assertTrue(button(dock, "dock-clear").isDisabled());
             dock.dock().main();
             show(hud, dock, weapons(orders(0, 0, 0, "", true, true, 1, 0), false));
             dock.dock().main();
             assertEquals(List.of(SKIP, DONE), ran);
             clickAndShow(hud, dock, holding, "dock-resolve");
-            assertNull(dock.root().findActor("dock-confirm"));
+            assertNull(dock.find("dock-confirm"));
             verify(fire, times(2)).resolvePhase();
             // While the mode declares, Resolve is off and the span counts with Stop beside it.
             Shot resolving = weapons(orders(2, 1, 0, "", true, true, 3, 3));
@@ -439,14 +444,14 @@ class GpuCommandDockSmokeTest {
             show(hud, dock, none);
             clickAndShow(hud, dock, none, "dock-main");
             assertEquals(List.of(SKIP), ran);
-            assertNotNull(dock.root().findActor("dock-more"));
+            assertNotNull(dock.find("dock-more"));
 
             // Initiative: the result names the local side "you"; the reroll shows only while MegaMek offers it.
             ran.clear();
             dock = dock(hud, initiative(false));
             show(hud, dock, initiative(false));
             assertEquals("Princess won \u00B7 you move first", label(dock, "dock-span"));
-            assertNull(dock.root().findActor("dock-secondary"));
+            assertNull(dock.find("dock-secondary"));
             show(hud, dock, initiative(true));
             clickAndShow(hud, dock, initiative(true), "dock-secondary", "dock-main");
             assertEquals(List.of(REROLL, DONE), ran);
@@ -469,7 +474,7 @@ class GpuCommandDockSmokeTest {
             show(hud, dock, opponent(GamePhase.FIRING, GpuMovePlan.Snapshot.EMPTY, draft(2)));
             assertEquals(List.of("OPPONENT TURN \u00B7 PRINCESS", "Timber Wolf", "Atlas \u00B7 2 weapon attacks"),
                   List.of(label(dock, "dock-title"), label(dock, "dock-span"), label(dock, "dock-foot-bold")));
-            assertNull(dock.root().findActor("dock-stop"));
+            assertNull(dock.find("dock-stop"));
 
             // Generic phases: the first five available commands in MegaMek's order, Done with MegaMek's label, and
             // the rest in More.
@@ -487,7 +492,7 @@ class GpuCommandDockSmokeTest {
             // A display whose Done also skips shows it once.
             Shot generic = withInfo(nonPlanner(), DONE, DONE);
             show(hud, dock, generic);
-            assertNull(dock.root().findActor("dock-secondary"));
+            assertNull(dock.find("dock-secondary"));
             assertEquals("MOVE", button(dock, "dock-main").getText().toString());
         });
     }
@@ -576,22 +581,19 @@ class GpuCommandDockSmokeTest {
             click(hud, more);
             UiPopover popover = dock.popover();
             assertTrue(popover.isVisible());
-            // A.7 G14: the plan's own items, a separator, MegaMek's other movement commands; an unavailable one
-            // says so (r1 3.10). Clear route's detail is the CANCEL key, which the harness's binds leave unnamed.
-            assertEquals(List.of("MORE MOVEMENT", "Atlas", "Walk backwards", "Clear route", "Hold all remaining units",
-                  "Unit record", "Go Prone", "Hull Down", "unavailable"), texts(popover));
+            // The panel's movement controls and unit record no longer appear in More.
+            assertEquals(List.of("MORE MOVEMENT", "Go Prone", "Hull Down", "unavailable"), texts(popover));
             // r1 2: More opens above its button, 150 to its left.
             Rectangle button = GpuHudTestStage.bounds(more);
             Rectangle area = GpuHudTestStage.bounds(popover);
             assertEquals(button.x - 150, area.x, .01f);
             assertEquals(button.y + button.height + 8, area.y, .01f);
-            click(hud, item(popover, "Hold all remaining units"));
-            verify(moves).holdAll();
+            click(hud, item(popover, "Go Prone"));
+            assertEquals(List.of("moveGoProne"), ran);
             assertFalse(popover.isVisible(), "choosing an item closes the menu");
-            // The moving unit's record (unit panel design 2.2), as its card's button opens it
-            click(hud, more);
-            click(hud, item(popover, "Unit record"));
-            assertTrue(dock.state().recordOpen && dock.state().inspected == Entity.NONE);
+            assertEquals(List.of("Hull Down"), dock.dock().more().commands().stream()
+                  .map(BoardScene.Command::label).toList());
+            ran.clear();
 
             // Without an adjacent enemy, More closes the action row and lists the physical phase's own commands.
             Shot none = noPhysical();
@@ -602,6 +604,140 @@ class GpuCommandDockSmokeTest {
                   texts(dock.popover()));
             click(hud, item(dock.popover(), "Dodge"));
             assertEquals(List.of("dodge"), ran);
+        });
+    }
+
+    @Test
+    void movementControlsFollowThePlanAndHoldAllRequiresConfirmation() {
+        GpuHudTestStage.run(hud -> {
+            Shot plan = movement(atlasRoute(), ATLAS);
+            Dock dock = dock(hud, plan);
+            show(hud, dock, plan);
+            assertEquals("", label(dock, "dock-span"));
+            UiKit.Checkbox backwards = dock.find("dock-backwards");
+            assertFalse(backwards.isTicked());
+            click(hud, backwards);
+            verify(moves).setMode(GpuMovePlan.Mode.BACK);
+            Shot back = movement(explicit(GpuMovePlan.Mode.BACK, "Walk backwards"), ATLAS);
+            show(hud, dock, back);
+            assertTrue(backwards.isTicked());
+            click(hud, backwards);
+            verify(moves, times(2)).setMode(GpuMovePlan.Mode.BACK);
+            show(hud, dock, plan);
+            assertFalse(backwards.isTicked());
+            verify(moves, times(2)).setMode(GpuMovePlan.Mode.BACK);
+
+            Rectangle hold = GpuHudTestStage.bounds(button(dock, "dock-hold-all"));
+            Rectangle waypoint = GpuHudTestStage.bounds(button(dock, "dock-waypoint"));
+            Rectangle clear = GpuHudTestStage.bounds(button(dock, "dock-clear-route"));
+            assertTrue(hold.x + hold.width <= waypoint.x && waypoint.x + waypoint.width <= clear.x);
+            assertEquals(waypoint.y, clear.y, .01f);
+            clickAndShow(hud, dock, plan, "dock-clear-route");
+            verify(moves).clearRoute();
+            show(hud, dock, back);
+            assertTrue(button(dock, "dock-clear-route").isDisabled());
+
+            Shot noBack = new Shot(plan.status(), plan.panels(), plan.commands().stream()
+                  .filter(command -> !command.id().equals("moveBackUp")).toList());
+            show(hud, dock, noBack);
+            assertNull(dock.find("dock-backwards"));
+            assertEquals("", label(dock, "dock-span"));
+
+            clickAndShow(hud, dock, plan, "dock-hold-all");
+            verify(moves, never()).holdAll();
+            assertEquals(Messages.getString("GpuBoard.hud.dock.holdAllConfirm"), label(dock, "dock-confirm-text"));
+            hud.assertLayout(dock.dock().actor(), neighbours(hud, dock));
+            hud.capture("g6-movement-hold-confirm").dispose();
+            clickAndShow(hud, dock, plan, "dock-confirm-no");
+            assertNull(dock.find("dock-confirm"));
+            verify(moves, never()).holdAll();
+
+            clickAndShow(hud, dock, plan, "dock-hold-all");
+            assertTrue(dock.dock().cancel());
+            show(hud, dock, plan);
+            verify(moves, never()).holdAll();
+
+            // An actor change invalidates the pending confirmation.
+            clickAndShow(hud, dock, plan, "dock-hold-all");
+            show(hud, dock, movement(pantherRoute(), PANTHER));
+            assertNull(dock.find("dock-confirm"));
+            verify(moves, never()).holdAll();
+
+            show(hud, dock, plan);
+            clickAndShow(hud, dock, plan, "dock-hold-all", "dock-confirm-yes");
+            verify(moves).holdAll();
+            assertNull(dock.find("dock-confirm"));
+        });
+    }
+
+    @Test
+    void confirmationsAnchorWithoutMovingControlsAndToggleSafely() {
+        GpuHudTestStage.run(hud -> {
+            Shot plan = movement(atlasRoute(), ATLAS);
+            for (int[] size : new int[][] { { 900, 600 }, { 1280, 720 }, { 1920, 1080 } }) {
+                hud.size(size[0], size[1]);
+                Dock dock = dock(hud, plan);
+                show(hud, dock, plan);
+                Rectangle before = GpuHudTestStage.bounds(dock.root());
+                UiButton trigger = button(dock, "dock-hold-all");
+                Rectangle hold = GpuHudTestStage.bounds(trigger);
+                clickAndShow(hud, dock, plan, "dock-hold-all");
+                Rectangle card = GpuHudTestStage.bounds(dock.find("dock-confirm"));
+                assertEquals(before, GpuHudTestStage.bounds(dock.root()), "confirmation leaves the dock in place");
+                assertEquals(hold, GpuHudTestStage.bounds(trigger));
+                assertEquals(hold.y + hold.height + 8, card.y, .01f);
+                assertFalse(card.overlaps(hold), "a second click on the trigger cannot confirm");
+                hud.assertLayout(dock.find("dock-confirm"));
+                assertSame(button(dock, "dock-confirm-no"), hud.stage.getKeyboardFocus());
+                for (String name : List.of("dock-confirm-no", "dock-confirm-yes")) {
+                    Label label = button(dock, name).getLabel();
+                    assertTrue(label.getWidth() >= label.getPrefWidth() - .5f, "confirmation labels stay readable");
+                }
+                hud.capture("g6-hold-confirm-" + size[0] + "x" + size[1]).dispose();
+
+                // The trigger toggles the card closed without running or reopening the action.
+                click(hud, trigger);
+                assertFalse(dock.dock().confirmation().isOpen());
+                assertSame(trigger, hud.stage.getKeyboardFocus());
+                verify(moves, never()).holdAll();
+
+                clickAndShow(hud, dock, plan, "dock-hold-all");
+                hud.stage.keyDown(Input.Keys.ENTER);
+                hud.stage.keyUp(Input.Keys.ENTER);
+                assertFalse(dock.dock().confirmation().isOpen(), "Enter initially chooses Cancel");
+                clickAndShow(hud, dock, plan, "dock-hold-all");
+                hud.stage.keyDown(Input.Keys.TAB);
+                assertSame(button(dock, "dock-confirm-yes"), hud.stage.getKeyboardFocus());
+                hud.stage.keyDown(Input.Keys.TAB);
+                assertSame(button(dock, "dock-confirm-no"), hud.stage.getKeyboardFocus(), "Tab stays in the card");
+                hud.stage.keyDown(Input.Keys.ESCAPE);
+                assertFalse(dock.dock().confirmation().isOpen());
+                assertSame(trigger, hud.stage.getKeyboardFocus());
+
+                // Near the top edge the card flips below its trigger, keeping both inside the window.
+                dock.root().getParent().setY(hud.height() - dock.root().getHeight() - 10);
+                click(hud, trigger);
+                dock.dock().layoutConfirmation(hud.width(), hud.height());
+                card = GpuHudTestStage.bounds(dock.find("dock-confirm"));
+                hold = GpuHudTestStage.bounds(trigger);
+                assertEquals(hold.y - 8, card.y + card.height, .01f);
+                assertFalse(card.overlaps(hold));
+                hud.assertLayout(dock.find("dock-confirm"));
+                dock.dock().cancel();
+            }
+
+            Shot weapons = weapons(2, true, true);
+            Dock dock = dock(hud, weapons);
+            show(hud, dock, weapons);
+            for (String trigger : List.of("dock-twist-left", "dock-twist-right", "dock-resolve")) {
+                clickAndShow(hud, dock, weapons, trigger);
+                Rectangle button = GpuHudTestStage.bounds(button(dock, trigger));
+                Rectangle card = GpuHudTestStage.bounds(dock.find("dock-confirm"));
+                assertEquals(button.y + button.height + 8, card.y, .01f);
+                assertFalse(card.overlaps(button));
+                hud.assertLayout(dock.find("dock-confirm"));
+                dock.dock().cancel();
+            }
         });
     }
 
@@ -669,8 +805,8 @@ class GpuCommandDockSmokeTest {
                 GpuFireDraftsTest.nextTurn(firing);
                 Shot last = settled(firing, status(GamePhase.FIRING, true, sagittaire.getId(), 2));
                 show(hud, dock, last);
-                assertEquals(List.of("HOLD FIRE", "Resolution follows"),
-                      List.of(button(dock, "dock-main").getText().toString(), label(dock, "dock-foot")));
+                assertEquals(List.of("HOLD FIRE"),
+                      List.of(button(dock, "dock-main").getText().toString()));
                 dock.dock().main();
                 settled(firing, atlasTurn);
                 assertEquals(List.of(), GpuFireOrdersTest.sent(firing, sagittaire.getId()));
@@ -702,7 +838,7 @@ class GpuCommandDockSmokeTest {
                 assertEquals("Resolve now: 1 other unit declares saved drafts on your next turns; units without a"
                       + " draft hold fire.", label(dock, "dock-confirm-text"));
                 clickAndShow(hud, dock, declaring, "dock-confirm-no");
-                assertNull(dock.root().findActor("dock-confirm"));
+                assertNull(dock.find("dock-confirm"));
                 assertEquals(0, settled(firing, ownTurn).panels().fire().autoDeclareRemaining());
 
                 clickAndShow(hud, dock, declaring, "dock-resolve", "dock-confirm-yes");
@@ -710,7 +846,7 @@ class GpuCommandDockSmokeTest {
                 show(hud, dock, resolving);
                 assertEquals(List.of(), GpuFireOrdersTest.sent(firing, sagittaire.getId()), "It holds fire at once");
                 assertEquals("Auto-declaring \u00B7 2 remaining", label(dock, "dock-span"));
-                assertNotNull(dock.root().findActor("dock-stop"));
+                assertNotNull(dock.find("dock-stop"));
 
                 GpuFireDraftsTest.nextTurn(firing, sagittaire);
                 Shot waiting = settled(firing, opponentTurn(GamePhase.FIRING));
@@ -723,13 +859,13 @@ class GpuCommandDockSmokeTest {
                 assertEquals(List.of(0, "Timber Wolf", "Atlas \u00B7 1 weapon attack"), List.of(
                       stopped.panels().fire().autoDeclareRemaining(), label(dock, "dock-span"),
                       label(dock, "dock-foot-bold")));
-                assertNull(dock.root().findActor("dock-stop"));
+                assertNull(dock.find("dock-stop"));
 
                 GpuFireDraftsTest.nextTurn(firing);
                 Shot back = settled(firing, status(GamePhase.FIRING, true, ATLAS, 2));
                 show(hud, dock, back);
-                assertEquals(List.of("ATLAS \u00B7 1 WEAPON ATTACK \u00B7 1 TARGET", "Resolution follows"),
-                      List.of(label(dock, "dock-title"), label(dock, "dock-foot")));
+                assertEquals(List.of("ATLAS \u00B7 1 WEAPON ATTACK \u00B7 1 TARGET"),
+                      List.of(label(dock, "dock-title")));
                 verify(firing.client, never()).sendAttackData(eq(ATLAS), any());
             });
         }
@@ -831,8 +967,10 @@ class GpuCommandDockSmokeTest {
           int facing, int heat, List<Coords> pins) {
         List<GpuMovePlan.Step> route = IntStream.range(0, cost).mapToObj(step -> new GpuMovePlan.Step(
               new Coords(14, 12 - step), 0, 0, facing, band, false)).toList();
+        List<GpuMovePlan.Step> pinned = pins.stream()
+              .map(hex -> new GpuMovePlan.Step(hex, 0, 0, facing, band, false)).toList();
         return new GpuMovePlan.Snapshot(true, true, false, unit, GpuMovePlan.Mode.AUTO, false, "", route, List.of(),
-              pins, route.getLast().coords(), facing, cost, budget, EntityMovementType.MOVE_WALK, type, true, heat, 0,
+              pinned, route.getLast().coords(), facing, cost, budget, EntityMovementType.MOVE_WALK, type, true, heat, 0,
               true, List.of(), true, true, Map.of(), 0);
     }
 
@@ -1221,19 +1359,26 @@ class GpuCommandDockSmokeTest {
     private static void show(GpuHudTestStage hud, Dock dock, Shot shot) {
         GpuHud.Inputs inputs = inputs(hud, dock, shot);
         GpuHud.Metrics metrics = inputs.metrics();
+        Actor focus = hud.stage.getKeyboardFocus();
         hud.window.clearChildren();
         Container<Actor> slot = new Container<>(dock.dock().actor()).bottom().fillX();
         hud.window.addActor(slot);
         Actor menu = dock.menu().actor();
         menu.setBounds(0, 0, hud.width(), hud.height());
         hud.window.addActor(menu);
+        hud.window.addActor(dock.dock().confirmation().actor());
+        // Unlike the real HUD, this harness reattaches its actors each frame. Preserve their existing focus.
+        if (focus != null && focus.getStage() == hud.stage) {
+            hud.stage.setKeyboardFocus(focus);
+        }
         float[] band = band(metrics, dock.state());
         float width = Math.min(metrics.dock(), band[1] - band[0]);
         float x = MathUtils.clamp((metrics.width() - width) / 2, band[0], band[1] - width);
         dock.dock().update(inputs);
         dock.menu().update(inputs);
-        slot.setBounds(x, DOCK_BOTTOM, width, slot.getPrefHeight());
+        slot.setBounds(x, metrics.gap(), width, slot.getPrefHeight());
         slot.validate();
+        dock.dock().layoutConfirmation(hud.width(), hud.height());
         hud.draw();
     }
 
@@ -1257,16 +1402,18 @@ class GpuCommandDockSmokeTest {
     }
 
     /** The slots the dock must keep clear of (y up): both columns, and the hint line where it shows. */
-    private static Rectangle[] neighbours(GpuHudTestStage hud, GpuHudState state) {
+    private static Rectangle[] neighbours(GpuHudTestStage hud, Dock dock) {
         GpuHud.Metrics metrics = GpuHud.Metrics.of(hud.width(), hud.height());
         float gap = metrics.gap();
+        GpuHudState state = dock.state();
         float right = state.logOpen() ? metrics.log() : metrics.right();
         float[] band = band(metrics, state);
         List<Rectangle> slots = new ArrayList<>(List.of(
               new Rectangle(gap, gap, metrics.left(), metrics.height() - 2 * gap),
               new Rectangle(metrics.width() - gap - right, gap, right, metrics.height() - 2 * gap)));
         if (!metrics.narrow()) {
-            slots.add(new Rectangle(band[0], HINT_BOTTOM, band[1] - band[0], HINT_HEIGHT));
+            slots.add(new Rectangle(band[0], gap + dock.root().getHeight() + HINT_GAP,
+                  band[1] - band[0], HINT_HEIGHT));
         }
         return slots.toArray(Rectangle[]::new);
     }
@@ -1277,7 +1424,7 @@ class GpuCommandDockSmokeTest {
      */
     private static void clickAndShow(GpuHudTestStage hud, Dock dock, Shot shot, String... names) {
         for (String name : names) {
-            click(hud, dock.root().findActor(name));
+            click(hud, dock.find(name));
             hud.stage.mouseMoved(0, 0);
             show(hud, dock, shot);
         }
@@ -1294,13 +1441,13 @@ class GpuCommandDockSmokeTest {
 
     /** The text of the dock's label with this name. */
     private static String label(Dock dock, String name) {
-        Label label = dock.root().findActor(name);
+        Label label = dock.find(name);
         assertNotNull(label, name);
         return label.getText().toString();
     }
 
     private static UiButton button(Dock dock, String name) {
-        UiButton button = dock.root().findActor(name);
+        UiButton button = dock.find(name);
         assertNotNull(button, name);
         return button;
     }

@@ -44,9 +44,11 @@ import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.common.Configuration;
+import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.enums.BasementType;
 import megamek.common.enums.GamePhase;
 import megamek.common.enums.MoveStepType;
 import megamek.common.equipment.EquipmentType;
@@ -56,7 +58,9 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.moves.MovePath;
 import megamek.common.moves.MoveStep;
 import megamek.common.rules.RulesManager;
+import megamek.common.rules.core.CoreRulesManager;
 import megamek.common.rules.totalwarfare.TWRulesManager;
+import megamek.common.units.BuildingTerrain;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
@@ -68,6 +72,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The movement plan on a real MovementDisplay (GpuMovementFixture: a Sagittaire with walk 3, run 5 and jump 3 at
@@ -164,7 +170,7 @@ class GpuMovePlanTest {
             // Ctrl+click pins a waypoint.
             plan.planTo(NORTH_1, 0, true);
             Snapshot pinned = shown(moving);
-            assertEquals(List.of(NORTH_1), pinned.pins());
+            assertEquals(List.of(NORTH_1), pinHexes(pinned));
             assertEquals(List.of("11,10 f0 WALK"), route(pinned.route()));
 
             // Line 50: the next click continues from the waypoint with the MP so far (from the unit it costs 2 MP),
@@ -173,7 +179,7 @@ class GpuMovePlanTest {
             Snapshot continued = shown(moving);
             assertEquals(List.of("11,10 f0 WALK", "11,10 f1 WALK", "11,10 f2 WALK", "12,11 f2 RUN"),
                   route(continued.route()));
-            assertEquals(List.of(NORTH_1), continued.pins());
+            assertEquals(List.of(NORTH_1), pinHexes(continued));
             assertEquals(4, continued.cost());
             assertEquals(17, continued.envelope().size());
 
@@ -327,7 +333,7 @@ class GpuMovePlanTest {
             });
             Snapshot clicked = shown(moving);
             assertTrue(clicked.external() && clicked.canUndo());
-            assertEquals(List.of(NORTH_3), clicked.pins(), "Everything so far is pinned");
+            assertEquals(List.of(NORTH_3), pinHexes(clicked), "Everything so far is pinned");
             assertEquals(List.of("11,10 f0 WALK", "11,9 f0 WALK", "11,8 f0 WALK"), route(clicked.route()));
 
             plan.planTo(NORTH_4, 0, false);
@@ -339,7 +345,7 @@ class GpuMovePlanTest {
             plan.undo();
             Snapshot backspace = shown(moving);
             assertEquals(List.of("11,10 f0 WALK", "11,9 f0 WALK"), route(backspace.route()));
-            assertEquals(List.of(NORTH_2), backspace.pins());
+            assertEquals(List.of(NORTH_2), pinHexes(backspace));
 
             // A gear chosen elsewhere (Swing's Jump command clears the path): the plan follows its mode.
             moving.command(MoveCommand.MOVE_JUMP);
@@ -380,7 +386,7 @@ class GpuMovePlanTest {
             plan.setMode(Mode.WALK);
             plan.planTo(NORTH_1, 0, true);
             plan.planTo(NORTH_2, 0, false);
-            assertEquals(List.of(NORTH_1), shown(moving).pins());
+            assertEquals(List.of(NORTH_1), pinHexes(shown(moving)));
             for (Entity unit : List.of(moving.board.entity, moving.unit)) {
                 onSwing(() -> {
                     moving.display.selectEntity(unit.getId());
@@ -771,6 +777,257 @@ class GpuMovePlanTest {
             afterHold(moving);
             verify(moving.client).moveEntity(eq(atlas), argThat(GpuMovePlanTest::held));
         }
+    }
+
+    @Test
+    void infantryCanPreviewAndMoveBetweenFloorsWithoutLeavingTheHex() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            Entity infantry = buildingUnit(moving, "Foot Platoon (AFFS) (Laser 3067+).blk", 20);
+            GpuMovePlan plan = plan(moving);
+            List<Step> preview = floorHover(moving, GpuMovementFixture.START, 21);
+            assertEquals(24, preview.getLast().level(), "Floor 21 above terrain level 3");
+            plan.planTo(GpuMovementFixture.START, 0, false, floorZ(21));
+            Snapshot up = shown(moving);
+            assertEquals(preview, up.route());
+            assertEquals(1, up.cost());
+            assertEquals(20, infantry.getElevation(), "Planning must not move the authoritative unit");
+            assertTrue(up.legal());
+
+            plan.undo();
+            assertTrue(shown(moving).route().isEmpty());
+            assertEquals(22, floorHover(moving, GpuMovementFixture.START, 19).getLast().level(),
+                  "Changing the hovered floor in the same hex must invalidate the preview");
+            plan.planTo(GpuMovementFixture.START, 0, false, floorZ(19));
+            assertEquals(22, shown(moving).route().getLast().level());
+            assertEquals(1, shown(moving).cost());
+        }
+    }
+
+    @Test
+    void buildingWaypointsAndTurnsKeepTheirFloorAndAllowGroundAndRoofTargets() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            buildingUnit(moving, "Foot Platoon (AFFS) (Laser 3067+).blk", 2);
+            GpuMovePlan plan = plan(moving);
+            plan.planTo(GpuMovementFixture.START, 0, true, floorZ(1));
+            assertEquals(1, shown(moving).pins().size());
+            plan.planTo(GpuMovementFixture.START, 0, true, floorZ(0));
+            Snapshot ground = shown(moving);
+            assertEquals(2, ground.pins().size(), "Different floors in one hex are distinct waypoints");
+            assertEquals(List.of(4f, 3f), ground.pins().stream().map(Step::level).toList(),
+                  "Waypoint rendering retains each floor even when both pins share one hex");
+            assertEquals(3, ground.route().getLast().level());
+            assertEquals(2, ground.cost());
+            plan.undo();
+            assertEquals(4, shown(moving).route().getLast().level());
+            assertEquals(1, shown(moving).pins().size());
+
+            plan.planTo(NORTH_1, 0, false, floorZ(2));
+            Snapshot adjacent = shown(moving);
+            assertEquals(5, adjacent.route().getLast().level());
+            plan.turn(1);
+            assertEquals(5, shown(moving).route().getLast().level(), "A cheaper facing route must not change floor");
+
+            onSwing(() -> {
+                moving.display.currentEntity().setElevation(23);
+                moving.display.selectEntity(moving.display.currentEntity().getId());
+                return null;
+            });
+            plan = plan(moving);
+            plan.planTo(GpuMovementFixture.START, 0, false, floorZ(24));
+            assertEquals(27, shown(moving).route().getLast().level(), "The roof is a valid vertical destination");
+        }
+    }
+
+    @Test
+    void adjacentBuildingFloorsUseTheSameLegalRouteForHoverAndClick() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            buildingUnit(moving, "Foot Platoon (AFFS) (Laser 3067+).blk", 2);
+            GpuMovePlan plan = plan(moving);
+            List<Step> preview = floorHover(moving, NORTH_1, 1);
+            assertEquals(4, preview.getLast().level());
+            plan.planTo(NORTH_1, 0, false, floorZ(1));
+            Snapshot plotted = shown(moving);
+            assertEquals(preview, plotted.route());
+            assertEquals(NORTH_1, plotted.destination());
+            assertEquals(2, plotted.cost(), "One hex and one infantry floor change");
+            assertTrue(plotted.legal());
+
+            plan.planTo(NORTH_1, 0, false, floorZ(20));
+            assertEquals(plotted.route(), shown(moving).route(), "An unaffordable floor must preserve the draft");
+            verify(moving.gui).addToast(ToastLevel.WARNING,
+                  Messages.getString("GpuBoard.hud.move.floorUnreachable", 20));
+        }
+    }
+
+    @Test
+    void protoMekFloorChangesUseTheEngineMovementCost() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            buildingUnit(moving, "Centaur.blk", 20);
+            GpuMovePlan plan = plan(moving);
+            plan.planTo(GpuMovementFixture.START, 0, false, floorZ(21));
+            Snapshot up = shown(moving);
+            assertTrue(up.legal());
+            assertEquals(24, up.route().getLast().level());
+            assertEquals(2, up.cost());
+        }
+    }
+
+    @Test
+    void mekCanStillJumpToARoofButCannotSelectAnInteriorLanding() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            buildingUnit(moving, null, 24);
+            GpuMovePlan plan = plan(moving);
+            plan.setMode(Mode.JUMP);
+            shown(moving);
+            List<Step> preview = floorHover(moving, NORTH_1, 24);
+            assertEquals(27, preview.getLast().level());
+            plan.planTo(NORTH_1, 0, false, floorZ(24));
+            Snapshot roof = shown(moving);
+            assertEquals(preview, roof.route());
+            assertEquals(Band.JUMP, roof.route().getLast().band());
+            assertTrue(roof.legal());
+
+            plan.planTo(NORTH_1, 0, false, floorZ(23));
+            assertEquals(roof.route(), shown(moving).route());
+        }
+    }
+
+    @Test
+    void floorSelectionPreservesBuildingEntryAndExit() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            Entity infantry = buildingUnit(moving, "Foot Platoon (AFFS) (Laser 3067+).blk", 0);
+            Coords outside = GpuMovementFixture.START.translated(3);
+            onSwing(() -> {
+                moving.board.game.getBoard().setHex(outside, new Hex(3));
+                infantry.setPosition(outside);
+                moving.display.selectEntity(infantry.getId());
+                return null;
+            });
+            GpuMovePlan plan = plan(moving);
+            plan.planTo(GpuMovementFixture.START, 0, false, floorZ(1));
+            Snapshot entry = shown(moving);
+            assertEquals(GpuMovementFixture.START, entry.destination());
+            assertEquals(4, entry.route().getLast().level());
+            assertEquals(2, entry.cost());
+            assertTrue(entry.legal());
+
+            onSwing(() -> {
+                infantry.setPosition(GpuMovementFixture.START);
+                infantry.setElevation(1);
+                infantry.setFacing(3);
+                moving.display.selectEntity(infantry.getId());
+                return null;
+            });
+            plan = plan(moving);
+            plan.planTo(outside, 0, false, floorZ(0));
+            Snapshot exit = shown(moving);
+            assertEquals(outside, exit.destination());
+            assertEquals(3, exit.route().getLast().level());
+            assertTrue(exit.legal());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void mekFloorAccessRespectsRulesetAndCannotSilentlyChangeFloor(boolean core) throws Exception {
+        RulesManager rules = Game.rulesManager;
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            Game.rulesManager = core ? new CoreRulesManager() : new TWRulesManager();
+            buildingUnit(moving, null, 20);
+            GpuMovePlan plan = plan(moving);
+            assertTrue(floorHover(moving, GpuMovementFixture.START, 19).isEmpty());
+            plan.planTo(GpuMovementFixture.START, 0, false, floorZ(19));
+            assertTrue(shown(moving).route().isEmpty());
+            verify(moving.gui).addToast(ToastLevel.WARNING,
+                  Messages.getString("GpuBoard.hud.move.floorUnreachable", 19));
+
+            plan.planTo(NORTH_1, 0, false, floorZ(20));
+            Snapshot sameFloor = shown(moving);
+            if (core) {
+                assertTrue(sameFloor.route().isEmpty(), "CORE forbids entering another hex's interior floor too");
+            } else {
+                assertEquals(NORTH_1, sameFloor.destination());
+                assertEquals(23, sameFloor.route().getLast().level());
+            }
+            plan.planTo(NORTH_1, 0, false, floorZ(2));
+            assertEquals(sameFloor.route(), shown(moving).route());
+            plan.planTo(GpuMovementFixture.START, 0, false, floorZ(0));
+            assertEquals(sameFloor.route(), shown(moving).route());
+        } finally {
+            Game.rulesManager = rules;
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void coreMekCanEnterAtGroundOrJumpOntoRoof(boolean jump) throws Exception {
+        RulesManager rules = Game.rulesManager;
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            Game.rulesManager = new CoreRulesManager();
+            buildingUnit(moving, null, 0);
+            Coords outside = GpuMovementFixture.START.translated(3);
+            onSwing(() -> {
+                moving.board.game.getBoard().setHex(outside, new Hex(3));
+                moving.board.game.getBoard().setHex(GpuMovementFixture.START,
+                      new Hex(3, "building:2;bldg_elev:2;bldg_cf:120;bldg_basement_type:1", ""));
+                moving.unit.setPosition(outside);
+                moving.display.selectEntity(moving.unit.getId());
+                return null;
+            });
+            GpuMovePlan plan = plan(moving);
+            plan.setMode(jump ? Mode.JUMP : Mode.WALK);
+            assertTrue(floorHover(moving, GpuMovementFixture.START, 1).isEmpty());
+            plan.planTo(GpuMovementFixture.START, 0, false, floorZ(1));
+            assertTrue(shown(moving).route().isEmpty(), "An interior floor cannot become a plotted destination");
+            int elevation = jump ? 2 : 0;
+            plan.planTo(GpuMovementFixture.START, 0, false, floorZ(elevation));
+            Snapshot entry = shown(moving);
+            assertTrue(entry.legal());
+            assertEquals(GpuMovementFixture.START, entry.destination());
+            assertEquals(3 + elevation, entry.route().getLast().level());
+        } finally {
+            Game.rulesManager = rules;
+        }
+    }
+
+    /** Three connected building hexes on elevated ground; real units and movement compiler, no legality mocks. */
+    private static Entity buildingUnit(GpuMovementFixture moving, String filename, int elevation) throws Exception {
+        Entity unit = filename == null ? moving.unit : new MekFileParser(
+              new File("testresources/megamek/common/units/" + filename)).getEntity();
+        onSwing(() -> {
+            Board board = moving.board.game.getBoard();
+            for (Coords coords : List.of(GpuMovementFixture.START, NORTH_1, NORTH_2)) {
+                board.setHex(coords, new Hex(3, "building:2;bldg_elev:24;bldg_cf:120;bldg_basement_type:1", ""));
+            }
+            for (Coords coords : List.of(GpuMovementFixture.START, NORTH_1, NORTH_2)) {
+                if (board.getBuildingAt(coords) == null) {
+                    board.addBuildingToBoard(new BuildingTerrain(coords, board, Terrains.BUILDING, BasementType.NONE));
+                }
+            }
+            // Keep enough MP for a multi-hex floor route; still enforce the compiler's real per-step costs and cap.
+            if (unit instanceof ConvInfantry) { unit.setOriginalWalkMP(6); }
+            unit.setElevation(elevation);
+            if (unit != moving.unit) { moving.unit.setPosition(new Coords(14, 14)); }
+            return null;
+        });
+        return select(moving, unit, unit == moving.unit ? unit.getId() : 7, GpuMovementFixture.START);
+    }
+
+    private static List<Coords> pinHexes(Snapshot plan) {
+        return plan.pins().stream().map(Step::coords).toList();
+    }
+
+    private static float floorZ(int elevation) {
+        return (3 + elevation) * BoardGeometry.level();
+    }
+
+    private static List<Step> floorHover(GpuMovementFixture moving, Coords coords, int elevation) throws Exception {
+        onSwing(() -> {
+            moving.board.source.setHover(coords, floorZ(elevation));
+            moving.board.source.refresh();
+            return null;
+        });
+        return shown(moving).hover();
     }
 
     /** An airborne Cheetah F-11 of the local player at (4, 12), velocity 3 at altitude 5, selected in the display. */

@@ -126,7 +126,8 @@ final class GpuRoads {
     /** Pavement and bridge decks share this small clearance above their supporting elevation. */
     static final float SURFACE_LIFT = .04f;
     static final float WHEEL_TINT = .92f;
-    private static final float FEATHER = .45f;
+    /** The paved carriageway's edge fades out over this width inside its half width (car parks meet its middle). */
+    static final float FEATHER = .45f;
     private static final float LOOSE_FEATHER = 3;
 
     record Fade(float outer, float inner, float end, boolean wheels, BoardRoad.Join join, float setback, boolean landing) {

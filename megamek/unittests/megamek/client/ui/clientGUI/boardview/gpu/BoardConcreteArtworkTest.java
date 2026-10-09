@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,6 +37,28 @@ class BoardConcreteArtworkTest {
                     assertTrue(tile.detailedGround(), "The replaced wall does not disable native water terrain");
                     assertEquals(variant, hex.getTerrain(Terrains.FLUFF).getExits(), "Rendering preserves map data");
                 }
+            }
+            return null;
+        });
+        SwingUtilities.invokeAndWait(capture);
+        capture.get();
+    }
+
+    @Test
+    void ultraSublevelArtStaysInTheTacticalViewOnly() throws Exception {
+        FutureTask<Void> capture = new FutureTask<>(() -> {
+            Board board = Board.createEmptyBoard(1, 1);
+            Coords at = new Coords(0, 0);
+            try (var artwork = new BoardArtwork()) {
+                Hex plain = new Hex(0, "", "grass", at);
+                board.setHex(at, plain);
+                var ground = BoardScene.captureTile(plain, artwork.capture(board, at, true), null, new BoardScene.PixelPool());
+                Hex pit = new Hex(0, "ultra_sublevel:1", "grass", at);
+                board.setHex(at, pit);
+                artwork.invalidate(at);
+                var tile = BoardScene.captureTile(pit, artwork.capture(board, at, true), null, new BoardScene.PixelPool());
+                assertNull(tile.decals(), "The pit geometry replaces the painted hole in 3D");
+                assertNotEquals(ground.tileset(), tile.tileset(), "Tactical View keeps the painted hole");
             }
             return null;
         });

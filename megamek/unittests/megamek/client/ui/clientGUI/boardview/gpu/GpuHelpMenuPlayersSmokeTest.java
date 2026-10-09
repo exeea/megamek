@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -26,6 +27,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Rectangle;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
@@ -80,7 +82,7 @@ class GpuHelpMenuPlayersSmokeTest {
     }
 
     @Test
-    void helpListsTheBindsCurrentKeysByGroupBesideTheMockDialog() {
+    void helpCategoriesStayCompactAndShowCurrentBindings() {
         GpuHudTestStage.run(hud -> {
             Dialogs dialogs = new Dialogs();
             GpuHelpDialog help = new GpuHelpDialog(hud.kit, dialogs.source, dialogs.state);
@@ -91,23 +93,31 @@ class GpuHelpMenuPlayersSmokeTest {
             help.update(inputs(hud, frame(List.of(), GpuPlayers.Snapshot.EMPTY), preferences, false));
             centre(hud, root);
             List<String> lines = lines(root);
-            assertEquals(List.of("CONTROLS", "CAMERA", key(preferences, KeyCommandBind.SCROLL_NORTH),
-                  Messages.getString("KeyBinds.cmdNames.scrollN")), lines.subList(0, 4), "the first pair");
-            assertEquals(List.of("CAMERA", "SELECTION", "MOVEMENT", "WEAPONS", "PLAYBACK", "PANELS", "MOUSE"),
-                  lines.stream().filter(line -> List.of("CAMERA", "SELECTION", "MOVEMENT", "WEAPONS", "PLAYBACK",
-                        "PANELS", "MOUSE").contains(line)).toList(), "the plan's groups, in order");
-            assertPair(lines, key(preferences, KeyCommandBind.KEY_BINDS), "KeyBinds.cmdNames.toggleKeybinds");
-            assertPair(lines, key(preferences, KeyCommandBind.CANCEL), "KeyBinds.cmdNames.cancel");
-            assertPair(lines, key(preferences, KeyCommandBind.MOVE_MODE_WALK), "KeyBinds.cmdNames.moveModeWalk");
-            assertPair(lines, key(preferences, KeyCommandBind.PLAYBACK_TOGGLE), "KeyBinds.cmdNames.playbackToggle");
-            assertEquals(List.of("MOUSE", Messages.getString("GpuBoard.hud.mouse.leftClick"),
-                        Messages.getString("GpuBoard.hud.help.leftClick")),
-                  lines.subList(lines.indexOf("MOUSE"), lines.indexOf("MOUSE") + 3), "the gestures follow the binds");
+            assertEquals(List.of("CONTROLS", "Camera", "Selection", "Movement", "Weapons", "Playback", "Panels",
+                  "Mouse"), lines.subList(0, 8));
+            assertPair(lines, key(preferences, KeyCommandBind.SCROLL_NORTH), "KeyBinds.cmdNames.scrollN");
+            assertPair(lines, key(preferences, KeyCommandBind.CAMERA_TILT_UP), "KeyBinds.cmdNames.cameraTiltUp");
+            assertPair(lines, key(preferences, KeyCommandBind.CAMERA_FIT_BOARD), "KeyBinds.cmdNames.cameraFitBoard");
+            assertFalse(lines.contains(Messages.getString("KeyBinds.cmdNames.moveModeWalk")));
             Rectangle area = GpuHudTestStage.bounds(root);
             assertEquals(620, area.width, .01f);
-            assertEquals(hud.height() - 140, area.height, .01f, "a dialog taller than the window less 140 scrolls");
-            hud.draw();
-            hud.capture("help-dialog").dispose();
+            assertTrue(area.height < 450, "a compact dialog rather than a window-height sheet");
+            for (int[] size : List.of(new int[] {900, 600}, new int[] {1280, 720}, new int[] {1920, 1080})) {
+                hud.size(size[0], size[1]);
+                for (String category : List.of("Camera", "Selection", "Movement", "Weapons", "Playback", "Panels", "Mouse")) {
+                    choose(item(root, category));
+                    centre(hud, root);
+                    hud.draw();
+                    hud.assertLayout(root);
+                    assertEquals(List.of(category), highlighted(root));
+                    assertTrue(lines(root).stream().noneMatch(line -> line.contains("GPU Battle View")));
+                    hud.capture("help-" + category.toLowerCase() + "-" + size[0]).dispose();
+                }
+            }
+            assertTrue(lines(root).contains(Messages.getString("GpuBoard.hud.help.leftClick")));
+            choose(item(root, "Movement"));
+            assertPair(lines(root), key(preferences, KeyCommandBind.MOVE_MODE_WALK), "KeyBinds.cmdNames.moveModeWalk");
+            choose(item(root, "Panels"));
 
             // A new key shows at once; an unbound command drops out.
             List<GpuBoardSource.Bind> binds = new ArrayList<>(preferences.binds());
@@ -387,7 +397,7 @@ class GpuHelpMenuPlayersSmokeTest {
                 GpuBoardSource.Frame frame = GpuHudInputTest.frame(GpuHudInputTest.status(1, GamePhase.MOVEMENT,
                       false, Entity.NONE, 0), GpuHudInputTest.panels(GpuMovePlan.Snapshot.EMPTY,
                       GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
-                GpuBoardSource.UiPreferences preferences = GpuHudInputTest.preferences();
+                GpuBoardSource.UiPreferences preferences = GpuBoardSource.UiPreferences.capture();
                 hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
                 Actor players = hud.stage.getRoot().findActor("players-panel");
                 Actor help = hud.stage.getRoot().findActor("help-dialog");
@@ -410,6 +420,51 @@ class GpuHelpMenuPlayersSmokeTest {
                 hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
                 assertTrue(shown(help) && !shown(players), "one dialog at a time");
                 verify(dialogs.players).setPanelOpen(false);
+                assertTrue(hud.isModal());
+                assertTrue(hud.keyDown(Input.Keys.W, KeyEvent.VK_W, 0), "camera keys stay in the modal");
+                boolean grid = hud.state.forcesGrid;
+                assertTrue(hud.keyDown(Input.Keys.G, KeyEvent.VK_G, 0));
+                assertEquals(grid, hud.state.forcesGrid, "background panel shortcuts stay blocked");
+                assertTrue(hud.keyTyped('w'));
+                assertTrue(hud.stage.getKeyboardFocus().isDescendantOf(help.getParent().getParent()));
+                assertTrue(hud.hit(2, 2), "even the board outside the dialog is blocked");
+                Actor backdrop = hud.stage.getRoot().findActor("dialog-backdrop");
+                assertSame(backdrop, hud.stage.hit(2, 2, true));
+                hud.stage.setScrollFocus(backdrop);
+                assertTrue(hud.stage.scrolled(0, 1), "the backdrop consumes the wheel");
+                ScreenUtils.clear(.42f, .5f, .3f, 1, true);
+                hud.draw();
+                harness.capture("hud-controls-modal").dispose();
+                byte[] dimmedBackground = ScreenUtils.getFrameBufferPixels(2, 2, 1, 1, false);
+                var request = new GpuBoardWindow.DialogRequest(91, GpuBoardWindow.DialogKind.MESSAGE,
+                      "Nested prompt", "This prompt shares the Controls backdrop.", false, List.of("OK"), 0, -1,
+                      List.of(), List.of(), "", false, null, null, null, List.of());
+                hud.update(frame, GpuHud.HudView.EMPTY, request, preferences);
+                ScreenUtils.clear(.42f, .5f, .3f, 1, true);
+                hud.draw();
+                assertArrayEquals(dimmedBackground, ScreenUtils.getFrameBufferPixels(2, 2, 1, 1, false),
+                      "native prompts and centered dialogs share one dimming pass");
+                assertTrue(shown(help), "Controls stays beneath the prompt");
+                assertSame(hud.stage.getRoot().findActor("modal-dialog"), hud.stage.getKeyboardFocus());
+                harness.capture("hud-nested-modal").dispose();
+                hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
+                ScreenUtils.clear(.42f, .5f, .3f, 1, true);
+                hud.draw();
+                assertArrayEquals(dimmedBackground, ScreenUtils.getFrameBufferPixels(2, 2, 1, 1, false));
+                assertSame(backdrop, hud.stage.getKeyboardFocus(), "closing the prompt restores the lower modal");
+                // Content clicks stay inside; dismissing the backdrop consumes both ends of the click.
+                choose(item(help, "Movement"));
+                assertEquals(Dialog.HELP, hud.state.dialog);
+                Vector2 outside = hud.stage.stageToScreenCoordinates(new Vector2(2, 2));
+                assertTrue(hud.stage.touchDown((int) outside.x, (int) outside.y, 0, Input.Buttons.LEFT));
+                hud.stage.touchUp((int) outside.x, (int) outside.y, 0, Input.Buttons.LEFT);
+                assertEquals(Dialog.NONE, hud.state.dialog);
+                hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
+                assertFalse(backdrop.isVisible());
+                assertFalse(hud.isModal());
+                assertTrue(hud.stage.getKeyboardFocus() == null);
+                hud.state.dialog = Dialog.HELP;
+                hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
                 assertTrue(hud.keyDown(Input.Keys.ESCAPE, KeyEvent.VK_ESCAPE, 0));
                 assertEquals(Dialog.NONE, hud.state.dialog);
 
@@ -422,12 +477,19 @@ class GpuHelpMenuPlayersSmokeTest {
                 assertTrue(hud.keyDown(Input.Keys.DOWN, KeyEvent.VK_DOWN, 0), "the open Menu takes the arrows");
                 ScreenUtils.clear(.1f, .13f, .13f, 1, true);
                 hud.draw();
+                assertTrue(hud.isModal());
+                assertTrue(backdrop.isVisible());
                 // The capture checks the harness stage's texts; the HUD draws on its own stage.
                 UiTestStage.assertTexts(hud.stage.getRoot());
                 harness.capture("hud-menu-open").dispose();
                 assertTrue(hud.keyDown(Input.Keys.ESCAPE, KeyEvent.VK_ESCAPE, 0));
                 assertEquals(Dialog.NONE, hud.state.dialog);
                 assertTrue(hud.stage.getKeyboardFocus() == null, "the closed Menu keeps no focus");
+                hud.state.dialog = Dialog.MENU;
+                hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
+                assertTrue(hud.stage.touchDown((int) outside.x, (int) outside.y, 0, Input.Buttons.LEFT));
+                hud.stage.touchUp((int) outside.x, (int) outside.y, 0, Input.Buttons.LEFT);
+                assertEquals(Dialog.NONE, hud.state.dialog, "Menu shares the same outside-click dismissal");
             } finally {
                 hud.dispose();
                 batch.dispose();
@@ -607,13 +669,13 @@ class GpuHelpMenuPlayersSmokeTest {
         return texts;
     }
 
-    /** The key's line directly over the bind's MegaMek name. */
+    /** The action name directly followed by its shortcut. */
     private static void assertPair(List<String> lines, String key, String name) {
         boolean found = false;
         for (int index = 0; index + 1 < lines.size() && !found; index++) {
-            found = lines.get(index).equals(key) && lines.get(index + 1).equals(Messages.getString(name));
+            found = lines.get(index).equals(Messages.getString(name)) && lines.get(index + 1).equals(key);
         }
-        assertTrue(found, "\"" + key + "\" over \"" + Messages.getString(name) + "\" in " + lines);
+        assertTrue(found, "\"" + key + "\" beside \"" + Messages.getString(name) + "\" in " + lines);
     }
 
     private static String key(GpuBoardSource.UiPreferences preferences, KeyCommandBind bind) {

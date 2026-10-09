@@ -120,6 +120,12 @@ final class GpuBoardTestUi {
         clickActor(stage().getRoot().findActor(name));
     }
 
+    /** Chooses an editor library category: opens the Assets drop-down and clicks the category's item in its list. */
+    static void category(String id) {
+        click("editor-category");
+        click("editor-library-" + id);
+    }
+
     /** Whether the actor is on a stage and shown: it and every group above it are visible. */
     static boolean shown(Actor actor) {
         for (Actor each = actor; each != null; each = each.getParent()) {

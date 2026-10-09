@@ -4,15 +4,18 @@ package megamek.client.ui.gdx;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
-import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
+import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
@@ -33,7 +36,7 @@ public final class UiNumber extends Table {
     private final double step;
     private double value;
     private boolean held;
-    private Input capturedInput;
+    private final UiCursorCapture cursor = new UiCursorCapture();
 
     public UiNumber(UiKit ui, Stage stage, String name, double initial, double min, double max, double step,
           BiConsumer<String, Boolean> change) {
@@ -83,21 +86,17 @@ public final class UiNumber extends Table {
                 origin = event.getStageX(); originY = event.getStageY(); start = value; dragged = false; held = true;
                 syncSlider(value);
                 popup.showAbove(caption, 0);
-                if (dial != null) { popup.validate(); dial.begin(event.getStageX(), event.getStageY(), value); }
-                // The desktop backend supplies unbounded virtual coordinates while keeping the cursor hidden
-                // and anchored, then restores its visible position on release. Do not take over another capture.
-                if (!Gdx.input.isCursorCatched()) {
-                    capturedInput = Gdx.input;
-                    capturedInput.setCursorCatched(true);
-                }
+                if (dial != null) { dial.begin(event.getStageX(), event.getStageY(), value); }
+                cursor.capture(event.getStageX(), event.getStageY());
                 return true;
             }
             @Override public void touchDragged(InputEvent event, float x, float y, int pointer) {
                 if (!held) { return; }
-                float distance = event.getStageX() - origin;
-                if (Math.hypot(distance, event.getStageY() - originY) > 3) { dragged = true; }
+                Vector2 at = cursor.trusted(event.getStageX(), event.getStageY());
+                float distance = at.x - origin;
+                if (Math.hypot(distance, at.y - originY) > 3) { dragged = true; }
                 if (dragged) {
-                    if (dial != null) { dial.drag(event.getStageX(), event.getStageY()); return; }
+                    if (dial != null) { dial.drag(at.x, at.y); return; }
                     double next = Math.round((start + distance * step / 4) / step) * step;
                     next = MathUtils.clamp((float) next, slider.getMinValue(), slider.getMaxValue());
                     syncSlider(next); preview(next);
@@ -106,10 +105,7 @@ public final class UiNumber extends Table {
             @Override public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
                 if (!held) { return; }
                 held = false;
-                if (capturedInput != null) {
-                    capturedInput.setCursorCatched(false);
-                    capturedInput = null;
-                }
+                cursor.release();
                 if (dragged) { finish(); popup.cancel(); }
                 else if (event.isTouchFocusCancel()) { popup.cancel(); }
             }
@@ -147,7 +143,7 @@ public final class UiNumber extends Table {
     private void showValue() {
         String shown = format(value);
         field.setText(shown);
-        readout.setText(shown);
+        readout.setText(dial == null ? shown : shown + "°");
         if (dial != null) { dial.value(value); }
     }
     /** Silence only our own updates: libGDX uses setValue for pointer drags too. */
@@ -159,14 +155,21 @@ public final class UiNumber extends Table {
         } finally { slider.setProgrammaticChangeEvents(true); }
     }
     public boolean editing() { return held || popup.isVisible() || field.hasKeyboardFocus(); }
-    /** An angle wraps at +/-180 degrees and uses the kit's circular dial, including caption dragging. */
+    /**
+     * An angle wraps at +/-180 degrees and uses the kit's dial, with the value in its hub. A straight drag turns it,
+     * from the caption or on the dial: right and up add, left and down subtract.
+     */
     public UiNumber angle() {
         dial = new UiAngleDial(ui, next -> preview(Math.round(next / step) * step), () -> { finish(); popup.cancel(); });
         dial.setName("editor-dial-" + label);
         caption.setText(label + "  ↻");
-        Table content = new Table(); content.pad(4, 12, 4, 12);
-        content.add(dial).size(132); content.add(readout).minWidth(62).padLeft(8);
-        popup.header(label + " rotation", "Drag around the dial · angles wrap").content(content);
+        readout.setStyle(new Label.LabelStyle(ui.skin.getFont("hud-heading"), UiTheme.TEXT));
+        UiKit.size(readout, "hud-heading", 20);
+        Container<Label> hub = new Container<>(readout);
+        hub.setTouchable(Touchable.disabled);
+        Table content = new Table(); content.pad(8, 14, 10, 14);
+        content.add(new Stack(dial, hub)).size(UiAngleDial.SIZE);
+        popup.header(label + " rotation", "Drag right or up to add · click to aim").content(content);
         value = normalized(value); showValue();
         return this;
     }
@@ -212,6 +215,8 @@ public final class UiNumber extends Table {
     }
     public void dismiss() {
         if (held && getStage() != null) { getStage().cancelTouchFocus(caption); }
+        // A drag on the dial ends too, so a hidden dial never keeps the cursor.
+        if (dial != null && getStage() != null) { getStage().cancelTouchFocus(dial); }
         popup.cancel();
     }
     @Override protected void setStage(Stage stage) {

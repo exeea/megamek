@@ -11,7 +11,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
-import com.badlogic.gdx.files.FileHandle;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -108,7 +107,7 @@ class BoardOrchardTest {
         var shapes = new HashSet<Integer>();
         for (String form : FORMS) {
             String name = "orchard-" + form + (snow ? "-snow" : "");
-            var levels = RigidGlb.loadLods(new FileHandle(new File(root, name + ".glb")), root.toPath());
+            var levels = RigidGlb.loadLods(RigidGlb.source(root, name), root.toPath());
             assertEquals(4, levels.size(), name);
             assertNotSame(levels.get(0), levels.get(1));
             assertNotSame(levels.get(1), levels.get(2));
@@ -133,12 +132,17 @@ class BoardOrchardTest {
                 boolean hasSnow = false;
                 for (var material : data.materials) {
                     hasSnow |= material.id.equals("snow") || material.id.equals("canopy-snow-cutout");
-                    if (material.id.endsWith("-cutout")) {
+                    boolean cutout = material.id.endsWith("-cutout");
+                    if (cutout) {
                         assertEquals(.5f, ((RigidGlb.Data) data).alphaTests.get(material.id), .0001f);
                     }
-                    assertEquals(1, material.textures.size);
-                    var image = ((RigidGlb.Data) data).images.get(material.textures.first().fileName);
-                    assertTrue(new File(image.file()).isFile(), "The sampler cache key must resolve to a shipped texture");
+                    // Crowns carry albedo, normal and surface maps; bark and fruit use their source atlases.
+                    assertEquals(cutout ? 3 : 1, material.textures.size, name + " LOD" + lod + ": " + material.id);
+                    for (var texture : material.textures) {
+                        var image = ((RigidGlb.Data) data).images.get(texture.fileName);
+                        assertTrue(image != null && image.file() != null && new File(image.file()).isFile(),
+                              "The sampler cache key must resolve to a shipped texture: " + texture.fileName);
+                    }
                 }
                 assertEquals(snow, hasSnow);
                 previous = triangles;

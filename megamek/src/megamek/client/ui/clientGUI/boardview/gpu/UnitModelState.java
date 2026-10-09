@@ -95,11 +95,12 @@ record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
         }
     }
 
+    /** {@code bodyStage}: the whole-body damage overlay ({@link UnitModelSelection#bodyStage}), null for none. */
     record Appearance(Set<Integer> inoperableEquipment, boolean searchlightOn, Camo camo,
-          Map<Integer, Appearance> fighters, float bodyLoss) {
+          Map<Integer, Appearance> fighters, UnitDamageDisplay.Stage bodyStage) {
         Appearance(Set<Integer> inoperableEquipment, boolean searchlightOn, Camo camo,
               Map<Integer, Appearance> fighters) {
-            this(inoperableEquipment, searchlightOn, camo, fighters, 0);
+            this(inoperableEquipment, searchlightOn, camo, fighters, null);
         }
         Appearance(Set<Integer> inoperableEquipment, boolean searchlightOn, Camo camo) {
             this(inoperableEquipment, searchlightOn, camo, Map.of());
@@ -197,7 +198,7 @@ record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
         return new UnitModelState(new Structure(movement, equipment, members, troopers,
               externalLamp, anatomy, form, UnitFamilyScale.forEntity(entity)),
               new Appearance(inoperable, entity.isUsingSearchlight(), appearance, fighterAppearances,
-                    UnitModelSelection.bodyLoss(entity)),
+                    UnitModelSelection.bodyStage(entity)),
               new Pose(entity instanceof Mek ? entity.getProneCause() : ProneCause.NONE,
                     entity.getFacing(), entity.getSecondaryFacing(), megamek.common.units.UnitLocation.Form.capture(entity),
                     entity.isDestroyed() || entity.isDoomed(),

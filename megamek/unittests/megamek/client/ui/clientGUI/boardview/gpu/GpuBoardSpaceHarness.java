@@ -94,7 +94,7 @@ final class GpuBoardSpaceHarness implements Disposable {
     /** Fits the board in the 3D view's isometric start pose, or in the Tactical View on its tileset columns. */
     void view(boolean tactical) {
         camera.setTactical(tactical, scene);
-        camera.setIsometric(true);
+        camera.setIsometric(!tactical);
         camera.fit(scene);
         terrain.setTacticalView(tactical);
     }

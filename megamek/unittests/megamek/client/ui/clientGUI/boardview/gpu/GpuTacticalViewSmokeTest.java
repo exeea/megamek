@@ -57,7 +57,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The Tactical View on the real Saxarba capture: the T key swaps the shaded terrain for the tileset columns and the
- * unit meshes for framed icons, and T again restores the 3D view, which keeps its meshes at every angle and zoom.
+ * unit meshes for classic sprites, and T again restores the 3D view, which keeps its meshes at every angle and zoom.
  */
 @Tag("on-demand")
 class GpuTacticalViewSmokeTest {
@@ -105,6 +105,7 @@ class GpuTacticalViewSmokeTest {
             });
             var configuration = GpuBoardWindow.configuration(false);
             configuration.setWindowedMode(1920, 1080);
+            configuration.setInitialVisible(false);
             new Lwjgl3Application(new ApplicationAdapter() {
                 @Override public void create() {
                     GpuBattleView view = null;
@@ -263,8 +264,8 @@ class GpuTacticalViewSmokeTest {
     }
 
     /**
-     * Every unit is a framed icon lying on the board, turned with its animated facing and colored by its side; its
-     * head, where labels hang, is hud-v3's: the icon's centre lifted up the screen by .62 of its side.
+     * Classic sprites lie on the board and turn with their animated facing. The facing tick carries the side colour;
+     * labels sit above the centre by .62 of the nominal sprite size, which is .9 hex heights.
      */
     @SuppressWarnings("unchecked")
     private static void verifyIcons(GpuBattleView view, BoardScene scene, GpuUnitIcons icons) throws Exception {
@@ -274,11 +275,11 @@ class GpuTacticalViewSmokeTest {
             ModelInstance placed = icons.instance(unit);
             Vector3 centre = screen(view, placed.transform.getTranslation(new Vector3()));
             Vector3 head = screen(view, anchors.get(unit));
-            float side = screen(view, new Vector3(-.5f, 0, 0).mul(placed.transform))
-                  .dst(screen(view, new Vector3(.5f, 0, 0).mul(placed.transform)));
+            float hexHeight = screen(view, new Vector3(0, -.5f, 0).mul(placed.transform))
+                  .dst(screen(view, new Vector3(0, .5f, 0).mul(placed.transform)));
             assertEquals(centre.x, head.x, .5f, "The head of " + unit.name() + " is straight above its icon");
-            assertEquals(GpuUnitIcons.HEAD_LIFT * side, centre.y - head.y, .5f, "The head of " + unit.name()
-                  + " is .62 of the icon's side above its centre");
+            assertEquals(GpuUnitIcons.HEAD_LIFT * GpuUnitIcons.SIZE_IN_HEXES * hexHeight, centre.y - head.y, .5f,
+                  "The head of " + unit.name() + " is .62 of the nominal sprite size above its centre");
         }
         for (BoardScene.Unit unit : scene.units()) {
             ModelInstance icon = icons.instance(unit);
@@ -291,20 +292,19 @@ class GpuTacticalViewSmokeTest {
             assertEquals((360 - facing) % 360, turn, .01f, "The whole icon turns with the facing of " + unit.name());
             assertEquals(0, UnitBounds.local(icon).getDepth(), .0001f, "Icons are flat");
             assertEquals(1, new Vector3(Vector3.Z).rot(icon.transform).nor().z, .0001f, "Icons lie on the board");
-            assertTrue(part(icon, "frame").enabled && part(icon, "tick").enabled && !part(icon, "bold").enabled);
+            assertEquals(3, icon.nodes.first().parts.size, "Icons contain only the sprite, facing tick and wreck cross");
+            assertTrue(part(icon, "sprite").enabled && part(icon, "tick").enabled && !part(icon, "cross").enabled);
+            assertEquals(Color.WHITE, color(icon, "sprite"), "The classic sprite keeps its colours");
         }
         ModelInstance own = icon(scene, icons, OWN);
         ModelInstance enemy = icon(scene, icons, ENEMY);
         assertEquals(0, poses.get(unit(scene, OWN)).facing(), .01f);
         assertEquals(ENEMY_FACING * 60, poses.get(unit(scene, ENEMY)).facing(), .01f);
-        assertEquals(frameColor(view, OWN, UiTheme.MINT), color(own, "frame"), "Own units are framed in mint");
         assertEquals(UiTheme.MINT, color(own, "tick"));
-        assertEquals(frameColor(view, ENEMY, UiTheme.CORAL), color(enemy, "frame"), "Enemies are framed in coral");
         assertEquals(UiTheme.CORAL, color(enemy, "tick"));
-        assertNotEquals(color(own, "fill"), color(enemy, "fill"), "Each side has its own tint under the sprite");
     }
 
-    /** A sensor contact is blip orange with a dashed frame and no tick; a unit the status does not list is grey. */
+    /** Sensor contacts and units without a status keep their supplied sprite but reveal no facing tick. */
     @SuppressWarnings("unchecked")
     private static void verifyContactAndUnlistedIcons(GpuBattleView view, BoardScene scene, GpuUnitIcons icons)
           throws Exception {
@@ -322,18 +322,14 @@ class GpuTacticalViewSmokeTest {
         icons.update(true, view.boardCamera.camera, scene.withUnits(List.of(contact, unlisted)),
               (GpuBattleStatus.Snapshot) field(icons, "status"), shown, new HashMap<>());
         ModelInstance blip = icons.instance(contact);
-        assertTrue(part(blip, "dashed").enabled && !part(blip, "frame").enabled && !part(blip, "tick").enabled,
-              "A sensor contact has a dashed frame and no facing tick");
-        assertEquals(UiTheme.BLIP, color(blip, "frame"));
-        assertEquals(UiTheme.ACCENT, color(icons.instance(unlisted), "frame"), "A unit of no listed side is grey");
+        assertTrue(part(blip, "sprite").enabled && !part(blip, "tick").enabled,
+              "A sensor contact's sprite reveals no facing");
+        assertEquals(Color.WHITE, color(blip, "sprite"));
+        assertFalse(part(icons.instance(unlisted), "tick").enabled, "A unit without a status has no facing tick");
+        assertEquals(Color.WHITE, color(icons.instance(unlisted), "sprite"));
         assertFalse(part(icons.instance(unlisted), "cross").enabled, "and whole while its pose is alive");
         render(view);
         assertEquals(UiTheme.CORAL, color(icon(scene, icons, ENEMY), "tick"), "The next frame restores the enemy");
-    }
-
-    /** A unit under the real, uncontrolled mouse pointer has a white frame; otherwise its side's color. */
-    private static Color frameColor(GpuBattleView view, Coords coords, Color side) throws Exception {
-        return coords.equals(field(view, "hovered")) ? Color.WHITE : side;
     }
 
     private static BoardScene.Unit unit(BoardScene scene, Coords coords) {
@@ -355,7 +351,7 @@ class GpuTacticalViewSmokeTest {
         return ((ColorAttribute) part(icon, id).material.get(ColorAttribute.Diffuse)).color;
     }
 
-    /** Zoomed in, the frames show the sides' colors on screen, full-bright over the lit board. */
+    /** Zoomed in, facing ticks show the sides' colours on screen, full-bright over the lit board. */
     private static void verifyCloseup(GpuBattleView view, BoardScene scene, GpuUnitIcons icons) throws Exception {
         view.boardCamera.center(BoardGeometry.center(OWN, 0).lerp(BoardGeometry.center(ENEMY, 0), .5f));
         view.boardCamera.zoom(BoardGeometry.HEIGHT / 300 / view.boardCamera.camera.zoom);
@@ -367,16 +363,15 @@ class GpuTacticalViewSmokeTest {
         try {
             for (Coords coords : List.of(OWN, ENEMY)) {
                 ModelInstance icon = icon(scene, icons, coords);
-                // The middle of the square's left side: clear of the tick, the name label and the hex numbers.
-                Vector3 side = camera.project(new Vector3(-.5f, 0, 0).mul(icon.transform), 0, 0,
+                // Inside the facing triangle, away from its edges and the name label.
+                Vector3 side = camera.project(new Vector3(0, .4f, 0).mul(icon.transform), 0, 0,
                       camera.viewportWidth, camera.viewportHeight);
                 int rgba = pixel(frame, side.x, side.y);
-                Color color = coords.equals(ENEMY) ? UiTheme.CORAL : UiTheme.MINT;
-                Color expected = frameColor(view, coords, color);
-                System.out.printf("Frame pixel at %s: #%08X, expected #%08X%n", coords, rgba, Color.rgba8888(expected));
+                Color expected = coords.equals(ENEMY) ? UiTheme.CORAL : UiTheme.MINT;
+                System.out.printf("Facing tick at %s: #%08X, expected #%08X%n", coords, rgba, Color.rgba8888(expected));
                 for (int shift : new int[] { 24, 16, 8 }) {
                     assertEquals((Color.rgba8888(expected) >>> shift) & 255, (rgba >>> shift) & 255, 8,
-                          "The frame of the unit at " + coords + " shows its side's color");
+                          "The facing tick of the unit at " + coords + " shows its side's colour");
                 }
             }
         } finally {
@@ -386,26 +381,20 @@ class GpuTacticalViewSmokeTest {
 
     /**
      * Zooming scales each icon with its hex, like the classic 2D board's units: on hexes from 20 to 800 HUD pixels
-     * wide, the icon's side stays 0.7 hex heights on screen.
+     * wide, the sprite retains its aspect ratio and fills .9 of the hex in its limiting direction.
      */
     private static void verifyScreenSize(GpuBattleView view, BoardScene scene, GpuUnitIcons icons) throws Exception {
         float scale = layoutScale(view);
-        float share = GpuUnitIcons.SIZE_IN_HEXES * BoardGeometry.HEIGHT / BoardGeometry.WIDTH;
         for (float hexPixels : new float[] { 60, 300, 800, 20 }) {
             for (Coords coords : List.of(OWN, ENEMY)) {
                 view.boardCamera.center(BoardGeometry.center(coords, 0));
                 view.boardCamera.zoom(BoardGeometry.WIDTH / (hexPixels * scale) / view.boardCamera.camera.zoom);
                 render(view);
                 ModelInstance icon = icon(scene, icons, coords);
-                float side = screen(view, new Vector3(-.5f, 0, 0).mul(icon.transform))
-                      .dst(screen(view, new Vector3(.5f, 0, 0).mul(icon.transform)));
                 float width = screen(view, BoardGeometry.corner(coords, 0, 3))
                       .dst(screen(view, BoardGeometry.corner(coords, 0, 0)));
-                System.out.printf("Hex at %s %.1f pixels wide: icon side %.1f pixels (%.3f of the hex)%n", coords,
-                      width, side, side / width);
                 assertEquals(hexPixels * scale, width, .01f * hexPixels * scale, "The camera zooms to the hex size");
-                assertEquals(share, side / width, .01f * share,
-                      "The icon at " + coords + " keeps its share of a hex " + hexPixels + " HUD pixels wide");
+                assertSpriteSize(view, unit(scene, coords), icon, width);
             }
             // Both captures are centred on the enemy's icon.
             if (hexPixels == 800) { capture("tactical-view-zoom-in.png"); }
@@ -413,9 +402,29 @@ class GpuTacticalViewSmokeTest {
         }
     }
 
+    /** Measures the rendered sprite quad, whose size is independent of the facing tick and placement transform. */
+    private static Vector3 spriteSize(ModelInstance icon) {
+        var mesh = part(icon, "sprite").meshPart;
+        mesh.update();
+        return mesh.halfExtents.cpy().scl(2);
+    }
+
+    static void assertSpriteSize(GpuBattleView view, BoardScene.Unit unit, ModelInstance icon, float hexWidth) {
+        Vector3 size = spriteSize(icon);
+        float width = screen(view, new Vector3(-size.x / 2, 0, 0).mul(icon.transform))
+              .dst(screen(view, new Vector3(size.x / 2, 0, 0).mul(icon.transform)));
+        float height = screen(view, new Vector3(0, -size.y / 2, 0).mul(icon.transform))
+              .dst(screen(view, new Vector3(0, size.y / 2, 0).mul(icon.transform)));
+        float hexHeight = hexWidth * BoardGeometry.height() / BoardGeometry.width();
+        assertEquals(.9f, Math.max(width / hexWidth, height / hexHeight), .009f,
+              "The sprite fills 90% of its hex in the limiting direction at every zoom");
+        assertEquals(unit.image().width() / (float) unit.image().height(), width / height, .001f,
+              "The classic sprite retains its aspect ratio");
+    }
+
     /**
      * The client's selection, an own unit that has already moved and a doomed enemy, through the real capture: the
-     * selected unit's frame is bold and white, the moved unit is veiled, and the doomed one is crossed out and faded.
+     * selected and moved units retain their sprite colours, and the doomed one is crossed out and faded.
      */
     private static void verifyStates(GpuBattleView view, GpuBoardFixture fixture, GpuUnitIcons icons)
           throws Exception {
@@ -436,14 +445,14 @@ class GpuTacticalViewSmokeTest {
         var scene = (BoardScene) field(view, "scene");
         assertEquals(fixture.entity.getId(), scene.selectedId(), "The client selects the Atlas");
         ModelInstance own = icon(scene, icons, OWN);
-        assertTrue(part(own, "bold").enabled && !part(own, "frame").enabled, "The selected unit's frame is bold");
-        assertEquals(Color.WHITE, color(own, "bold"), "The selected unit's frame is white");
+        assertEquals(Color.WHITE, color(own, "sprite"), "Selection and having moved do not tint the classic sprite");
         assertEquals(UiTheme.MINT, color(own, "tick"), "The tick keeps the side's color");
-        assertTrue(part(own, "veil").enabled && !part(own, "cross").enabled, "An own unit that has moved is veiled");
+        assertFalse(part(own, "cross").enabled, "The own unit is still alive");
         ModelInstance doomed = icon(scene, icons, ENEMY);
-        assertTrue(part(doomed, "cross").enabled && !part(doomed, "veil").enabled, "A doomed unit is crossed out");
+        assertTrue(part(doomed, "cross").enabled, "A doomed unit is crossed out");
         assertEquals(.45f, color(doomed, "tick").a, .001f, "A doomed unit's icon fades");
-        assertEquals(.88f * .45f, color(doomed, "fill").a, .001f);
+        assertEquals(.45f, color(doomed, "sprite").a, .001f);
+        assertEquals(.45f, color(doomed, "cross").a, .001f);
         capture("tactical-view-icon-states.png");
 
         SwingUtilities.invokeAndWait(() -> {
@@ -456,14 +465,14 @@ class GpuTacticalViewSmokeTest {
         scene = (BoardScene) field(view, "scene");
         own = icon(scene, icons, OWN);
         doomed = icon(scene, icons, ENEMY);
-        assertTrue(part(own, "frame").enabled && !part(own, "bold").enabled && !part(own, "veil").enabled);
+        assertEquals(Color.WHITE, color(own, "sprite"));
         assertTrue(!part(doomed, "cross").enabled && color(doomed, "tick").a == 1, "The enemy is whole again");
+        assertEquals(Color.WHITE, color(doomed, "sprite"));
     }
 
     /**
      * The game removes the destroyed enemy and leaves its wreck, through the real capture: the battle status no longer
-     * lists it, so its icon is grey, and its dead pose crosses the icon out and fades it, as hud-v3 shows a destroyed
-     * unit.
+     * lists it, so it has no facing tick, and its dead pose crosses the sprite out and fades it.
      */
     private static void verifyWreck(GpuBattleView view, GpuBoardFixture fixture, GpuUnitIcons icons)
           throws Exception {
@@ -480,11 +489,9 @@ class GpuTacticalViewSmokeTest {
         var status = (GpuBattleStatus.Snapshot) field(icons, "status");
         assertTrue(status.units().stream().noneMatch(listed -> listed.id() == 2), "The status no longer lists it");
         ModelInstance wreck = icon(scene, icons, ENEMY);
-        assertTrue(part(wreck, "cross").enabled && !part(wreck, "veil").enabled, "The wreck is crossed out");
-        Color frame = color(wreck, "frame");
-        Color side = frameColor(view, ENEMY, UiTheme.ACCENT);
-        assertEquals(side.r, frame.r, .001f, "A wreck of no listed side is grey");
-        assertEquals(side.a * .45f, frame.a, .001f, "and faded");
+        assertTrue(part(wreck, "cross").enabled, "The wreck is crossed out");
+        assertFalse(part(wreck, "tick").enabled, "The wreck has no facing tick");
+        assertEquals(.45f, color(wreck, "cross").a, .001f);
         assertEquals(.45f, color(wreck, "sprite").a, .001f);
         assertFalse(part(icon(scene, icons, OWN), "cross").enabled, "The own unit stays whole");
         capture("tactical-view-wreck.png");
@@ -626,7 +633,6 @@ class GpuTacticalViewSmokeTest {
         Vector3 position = poses.get(enemy).position().cpy().add(offset).add(0, 0, 200);
         moved.put(enemy, new UnitFootprint.Pose(enemy, position, poses.get(enemy).facing()));
         var status = (GpuBattleStatus.Snapshot) field(icons, "status");
-        // The own unit is hovered; verifyStates covers the client's selection.
         icons.update(true, view.boardCamera.camera, scene, status, moved, new HashMap<>());
         ModelInstance icon = icons.instance(enemy);
         Vector3 center = icon.transform.getTranslation(new Vector3());
@@ -639,8 +645,9 @@ class GpuTacticalViewSmokeTest {
         // Off the icon's centre too: the icon corner farthest from the enemy's hex, over another hex's ground.
         Vector3 hexCenter = BoardGeometry.center(ENEMY, 0);
         Vector3 corner = null;
-        for (float x : new float[] { -.4f, .4f }) {
-            for (float y : new float[] { -.4f, .4f }) {
+        Vector3 size = spriteSize(icon);
+        for (float x : new float[] { -.4f * size.x, .4f * size.x }) {
+            for (float y : new float[] { -.4f * size.y, .4f * size.y }) {
                 Vector3 point = new Vector3(x, y, 0).mul(icon.transform);
                 if (corner == null || point.dst2(hexCenter) > corner.dst2(hexCenter)) { corner = point; }
             }
@@ -648,16 +655,13 @@ class GpuTacticalViewSmokeTest {
         ground = terrain.hit(scene, new Ray(new Vector3(corner.x, corner.y, 1000), new Vector3(0, 0, -1)));
         assertNotEquals(ENEMY, ground.coords());
         assertEquals(ENEMY, pick(view, screen(view, corner)), "A click off the icon's centre picks its unit");
-        assertEquals(UiTheme.CORAL, color(icon, "frame"), "A unit neither marked nor hovered keeps its color");
-        ModelInstance own = icon(scene, icons, OWN);
-        assertTrue(part(own, "frame").enabled && !part(own, "bold").enabled, "Hovering keeps the thin frame");
-        assertEquals(Color.WHITE, color(own, "frame"), "A hovered unit's frame turns white");
+        assertEquals(UiTheme.CORAL, color(icon, "tick"), "The moving unit keeps its side's colour");
         render(view);
-        assertEquals(frameColor(view, OWN, UiTheme.MINT), color(own, "frame"), "The next frame restores it");
+        assertEquals(UiTheme.CORAL, color(icon(scene, icons, ENEMY), "tick"), "The next frame restores its normal pose");
 
         // A 3D feature mesh that overhangs a neighbouring hex takes the vertical pick there; the Tactical View hides
         // it, so the hex under the pointer takes the pick.
-        Overhang overhang = overhang(terrain, scene);
+        Overhang overhang = overhang(view, terrain, scene);
         assertNotNull(overhang, "A 3D feature mesh overhangs a neighbouring hex");
         System.out.printf("The 3D mesh of %s overhangs %s%n", overhang.feature(), overhang.under());
         assertEquals(overhang.under(), pick(view, screen(view, overhang.under(), overhang.offset())),
@@ -670,7 +674,7 @@ class GpuTacticalViewSmokeTest {
      * A point over a hex's own ground, away from units, where a 3D feature mesh of another hex takes the vertical
      * pick. Leaves the Tactical View on.
      */
-    private static Overhang overhang(GpuTerrain terrain, BoardScene scene) {
+    private static Overhang overhang(GpuBattleView view, GpuTerrain terrain, BoardScene scene) {
         List<Coords> under = new ArrayList<>();
         List<Vector3> offsets = new ArrayList<>();
         List<Ray> rays = new ArrayList<>();
@@ -683,8 +687,11 @@ class GpuTacticalViewSmokeTest {
                       (step / 20 / 19f - .5f) * BoardGeometry.HEIGHT, 0);
                 under.add(tile.coords());
                 offsets.add(offset);
-                rays.add(new Ray(BoardGeometry.center(tile.coords(), 0).add(offset).add(0, 0, 1000),
-                      new Vector3(0, 0, -1)));
+                // Probe the same rounded screen pixel that pick() will click, including at hex boundaries.
+                Vector3 pointer = screen(view, tile.coords(), offset);
+                var camera = view.boardCamera.camera;
+                rays.add(new Ray().set(camera.getPickRay(Math.round(pointer.x), Math.round(pointer.y), 0, 0,
+                      camera.viewportWidth, camera.viewportHeight)));
             }
         }
         // Switching the view recaches every section's props, so each view answers all the rays in turn.

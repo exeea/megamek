@@ -35,6 +35,7 @@ package megamek.common.util;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import megamek.common.board.Board;
@@ -69,16 +70,45 @@ class BoardUtilitiesTest {
     }
 
     @Test
+    void combiningSheetsKeepsEachSheetsGroupsApart() {
+        var ground = megamek.common.board.BoardDecoration.Placement.ground();
+        Board first = Board.createEmptyBoard(2, 2), second = Board.createEmptyBoard(2, 2);
+        // Imported ids are deterministic per hex, so two sheets can share some ids and group names but not others.
+        first.getHex(0, 0).setDecorations(java.util.List.of(
+              new megamek.common.board.BoardDecoration("L1_1_0", "prop", "car", null, 0, 0, 0, false, 1, ground, 0).withGroup("L1_1_g0"),
+              new megamek.common.board.BoardDecoration("L1_1_1", "prop", "car", null, .2, 0, 0, false, 1, ground, 0).withGroup("L1_1_g0")));
+        second.getHex(0, 0).setDecorations(java.util.List.of(
+              new megamek.common.board.BoardDecoration("L1_1_0", "prop", "car", null, 0, 0, 0, false, 1, ground, 0).withGroup("L1_1_g0"),
+              new megamek.common.board.BoardDecoration("L1_1_5", "prop", "car", null, .2, 0, 0, false, 1, ground, 0).withGroup("L1_1_g0"),
+              new megamek.common.board.BoardDecoration("L1_1_6", "prop", "car", null, -.2, 0, 0, false, 1, ground, 0)));
+        Board result = BoardUtilities.combine(2, 2, 3, 1, new Board[] { first, first, second },
+              megamek.common.loaders.MapSettings.MEDIUM_GROUND);
+        var sheets = java.util.List.of(result.getHex(0, 0).getDecorations(), result.getHex(2, 0).getDecorations(),
+              result.getHex(4, 0).getDecorations());
+        for (var sheet : sheets) {
+            assertEquals(1, sheet.stream().map(megamek.common.board.BoardDecoration::group)
+                  .filter(java.util.Objects::nonNull).distinct().count(), "Each sheet keeps its members together");
+        }
+        assertEquals(3, sheets.stream().map(sheet -> sheet.getFirst().group()).distinct().count(),
+              "Repeated and different sheets never share a group");
+        assertEquals(7, sheets.stream().flatMap(java.util.List::stream).map(megamek.common.board.BoardDecoration::id)
+              .distinct().count());
+        assertNull(sheets.get(2).get(2).group());
+        assertEquals("L1_1_g0", first.getHex(0, 0).getDecorations().getFirst().group(), "Sources are untouched");
+    }
+
+    @Test
     void flipsTransformCenterObjectsWithoutLosingNorthSouthEdgesOrLegacyDesigns() {
         Board board = Board.createEmptyBoard(3, 3);
         var at = new megamek.common.board.Coords(1, 1);
         var hex = new megamek.common.Hex(0, "road:1:9;building:1:65;bldg_cf:15;bldg_elev:1", "");
         var object = new megamek.common.board.BoardDecoration("tree", "prop", "tree", null, .2, -.1, 30,
-              false, .8, megamek.common.board.BoardDecoration.Placement.ground(), 0);
+              false, .8, megamek.common.board.BoardDecoration.Placement.ground(), 0).withGroup("grove");
         hex.setDecorations(java.util.List.of(object)); board.setHex(at, hex);
         BoardUtilities.flip(board, true, false);
         var flipped = board.getHex(at).getDecorations().getFirst();
         assertEquals(-.2, flipped.x()); assertEquals(-30, flipped.rotation()); assertTrue(flipped.mirror());
+        assertEquals("grove", flipped.group());
         assertEquals(9, board.getHex(at).getTerrain(megamek.common.units.Terrains.ROAD).getExits());
         assertEquals(65, board.getHex(at).getTerrain(megamek.common.units.Terrains.BUILDING).getExits());
         BoardUtilities.flip(board, true, false);

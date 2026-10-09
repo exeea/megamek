@@ -21,7 +21,6 @@ import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
-import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
@@ -44,7 +43,7 @@ class GpuEditorBrushSmokeTest {
             for (int x = 0; x < 24; x++) {
                 for (int y = 0; y < 24; y++) { board.setHex(new Coords(x, y), new Hex(0, "", "lunar")); }
             }
-            board.getHex(owner).setDecorations(List.of(new BoardDecoration("paint", "decal", "decal/saxarba/rubble_light_path", null,
+            board.getHex(owner).setDecorations(List.of(new BoardDecoration("paint", "decal", "decal/damage/rubble-light-path", null,
                   0, 0, 25, false, 3, BoardDecoration.Placement.ground(), 0, false)));
             editor.game().setBoard(board); editor.pointer(owner, 0, 0, false); editor.finishStroke();
             return new GpuMapSource(editor.game(), null, editor);
@@ -57,6 +56,8 @@ class GpuEditorBrushSmokeTest {
             new Lwjgl3Application(new GpuBattleView(source) {
                 final long deadline = System.nanoTime() + 90_000_000_000L;
                 int step; long after;
+                /** Set by the EDT once it has run every command the last step sent; edits apply there, in order. */
+                java.util.concurrent.atomic.AtomicBoolean applied = new java.util.concurrent.atomic.AtomicBoolean(true);
                 Set<Coords> oldPaint;
                 Object distantChunk;
                 float[] cameraProjection;
@@ -81,13 +82,18 @@ class GpuEditorBrushSmokeTest {
                     }
                     return result;
                 }
+                /** The next step waits for the EDT to apply this step's commands, then for the frames that draw them. */
+                private void next() {
+                    step++; after = frames() + 8; applied = new java.util.concurrent.atomic.AtomicBoolean();
+                    var marker = applied; SwingUtilities.invokeLater(() -> marker.set(true));
+                }
                 @Override public void create() { super.create(); boardCamera.setIsometric(true); }
                 @Override public void render() {
                     try {
                         super.render();
                         assertTrue(System.nanoTime() < deadline, "Brush smoke stalled at " + step);
                         GpuTerrain terrain = terrain();
-                        if (GpuBoardTestUi.loading(this) || terrain.busy() || frames() < after) { return; }
+                        if (!applied.get() || GpuBoardTestUi.loading(this) || terrain.busy() || frames() < after) { return; }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         var root = GpuBoardTestUi.stage().getRoot();
                         if (step > 0 && step < 13) {
@@ -108,14 +114,14 @@ class GpuEditorBrushSmokeTest {
                                 distantChunk = ((List<?>) field(terrain, "chunks")).getLast();
                                 assertFalse(GpuBoardTestUi.texts(root.findActor("editor-toolbar")).contains("PLACE"));
                                 assertNull(root.findActor("editor-library-space"));
-                                GpuBoardTestUi.click("editor-library-vegetation");
+                                GpuBoardTestUi.category("vegetation");
                             }
                             case 1 -> {
                                 assertNotNull(root.findActor("editor-library-vegetation/jungle-2"));
                                 GpuBoardTestUi.click("editor-library-vegetation/jungle-2");
                             }
                             case 2 -> {
-                                if (!previewsReady(root.findActor("editor-asset-strip"))) { return; }
+                                if (!previewsReady(root.findActor("editor-library"))) { return; }
                                 assertEquals(BoardEditorSession.Tool.PAINT, source.editorState().tool());
                                 assertEquals("vegetation/jungle-2", source.editorState().activeBrush().key());
                                 assertEquals(owner, source.editorState().selected());
@@ -126,18 +132,18 @@ class GpuEditorBrushSmokeTest {
                                 GpuBoardTestUi.capture(new File(output, "editor-brush-vegetation.png"));
                                 boardCamera.pan(30, -20); boardCamera.zoom(.8f);
                                 cameraProjection = boardCamera.camera.combined.val.clone();
-                                GpuBoardTestUi.click("editor-library-Vehicles");
+                                GpuBoardTestUi.category("Vehicles");
                             }
-                            case 3 -> GpuBoardTestUi.click("editor-library-Vehicles");
+                            case 3 -> GpuBoardTestUi.category("Vehicles");
                             case 4 -> {
-                                ((TextField) root.findActor("editor-search")).setText("car-red");
+                                ((TextField) root.findActor("editor-search")).setText("vehicles/car");
                             }
-                            case 5 -> GpuBoardTestUi.click("editor-library-scenery/components/car-red");
+                            case 5 -> GpuBoardTestUi.click("editor-library-scenery/vehicles/car");
                             case 6 -> {
                                 boardCamera.setPerspective(true);
                                 GpuBoardTestUi.click("map-view-fit");
                                 cameraProjection = boardCamera.camera.combined.val.clone();
-                                assertEquals("scenery/components/car-red", source.editorState().asset());
+                                assertEquals("scenery/vehicles/car", source.editorState().asset());
                                 var scale = (TextField) ((Group) root.findActor("editor-brush")).findActor("editor-Scale");
                                 GpuBoardTestUi.stage().setKeyboardFocus(scale); scale.setText("1.5"); GpuBoardTestUi.stage().setKeyboardFocus(null);
                             }
@@ -147,7 +153,7 @@ class GpuEditorBrushSmokeTest {
                                 command(Action.SELECT_OBJECT, "", "paint");
                             }
                             case 8 -> {
-                                if (!previewsReady(root.findActor("editor-asset-strip"))) { return; }
+                                if (!previewsReady(root.findActor("editor-library"))) { return; }
                                 assertNotNull(((Group) root.findActor("editor-inspector")).findActor("editor-Scale"), "Decals expose scale too");
                                 assertEquals(1.5, source.editorState().activeBrush().object().scale());
                                 GpuBoardTestUi.capture(new File(output, "editor-brush-spanning-decal.png"));
@@ -179,21 +185,28 @@ class GpuEditorBrushSmokeTest {
                             case 11 -> { assertTrue(painted(terrain).isEmpty()); command(Action.UNDO, "", ""); }
                             case 12 -> {
                                 assertFalse(painted(terrain).isEmpty());
+                                // A narrow board area starts with the side view collapsed; open it for the section.
+                                if (root.findActor("editor-section-panel") == null) { GpuBoardTestUi.click("editor-side-view-toggle"); }
                                 var section = root.findActor("editor-section-panel");
-                                var inspector = (ScrollPane) root.findActor("editor-inspector-scroll");
-                                assertTrue(section.isDescendantOf(inspector.getActor()));
-                                assertTrue(section.getWidth() < root.findActor("editor-inspector").getWidth());
+                                assertTrue(section.isDescendantOf(root.findActor("editor-side-view")), "The section is in the side view");
+                                assertTrue(root.findActor("editor-side-view").getRight() < root.findActor("editor-inspector").getX());
                                 GpuBoardTestUi.click("editor-section-reveal");
-                                after = frames() + 8; step++; Gdx.graphics.setWindowedMode(1280, 800); return;
+                                next(); Gdx.graphics.setWindowedMode(1280, 800); return;
                             }
                             case 13 -> {
-                                assertCompactBrush(root);
+                                assertTrue(source.editorState().object().isEmpty(), "Undo restores the removed object without selecting it");
+                                assertEquals(source.editorState().tool() != BoardEditorSession.Tool.SELECT, root.findActor("editor-brush").isVisible(),
+                                      "The Brush panel shows for Paint, Sculpt and Erase only");
                                 GpuBoardTestUi.capture(new File(output, "editor-brush-compact.png"));
+                                command(Action.SELECT_OBJECT, "", "paint");
                                 String group = megamek.common.board.BoardEditorBlueprint.get().asset(source.editorState().objects().getFirst().asset()).group();
-                                GpuBoardTestUi.click("editor-library-" + group);
+                                GpuBoardTestUi.category(group);
                             }
                             case 14 -> {
-                                assertFalse(root.findActor("editor-brush").isVisible(), "An unrelated category has no empty brush panel");
+                                assertEquals(BoardEditorSession.Tool.SELECT, source.editorState().tool());
+                                assertFalse(root.findActor("editor-brush").isVisible(), "Select has no brush options");
+                                assertNotNull(((Group) root.findActor("editor-details")).findActor("editor-Scale"),
+                                      "Edit shows the selected instance independently of the library category");
                                 command(Action.SELECT_OBJECT, "", "paint");
                                 command(Action.SAMPLE, "", "");
                             }
@@ -205,7 +218,7 @@ class GpuEditorBrushSmokeTest {
                             }
                             default -> throw new AssertionError(step);
                         }
-                        step++; after = frames() + 8;
+                        next();
                     } catch (Throwable error) {
                         GpuBoardTestUi.capture(new File(output, "editor-brush-failure.png"));
                         failure.set(error); Gdx.app.exit();
@@ -219,7 +232,8 @@ class GpuEditorBrushSmokeTest {
     private static void assertCompactBrush(Group root) {
         Actor brush = root.findActor("editor-brush"), precision = root.findActor("editor-precision");
         assertTrue(brush.isVisible());
-        assertTrue(brush.getHeight() < 180, "Brush controls must not stretch into a tall panel");
+        // Beside an open side view the panel wraps into its corner; it stays no taller than the side view next to it.
+        assertTrue(brush.getHeight() <= root.findActor("editor-side-view").getHeight(), "Brush controls must not stretch into a tall panel");
         assertEquals(1, precision.getParent().getChildren().size, "Precision mode occupies the first row alone");
         var top = precision.localToAscendantCoordinates((Group) brush, new com.badlogic.gdx.math.Vector2());
         var rotation = root.findActor("editor-brush-object:rotation").localToAscendantCoordinates((Group) brush, new com.badlogic.gdx.math.Vector2());

@@ -471,8 +471,8 @@ final class GpuContextMenu implements GpuHud.Component {
     }
 
     /**
-     * Shows the dock's More popover above its {@code button}, 150 units to its left: the dock's own items, a separator
-     * and MegaMek's other phase commands, each with its detail.
+     * Shows the dock's More popover above its {@code button}, 150 units to its left: the dock's two groups, each
+     * command with its detail, and a separator when both groups have items.
      */
     void more(GpuCommandDock.More more, Actor button) {
         cancel();

@@ -68,8 +68,8 @@ final class MeepleVisual {
     static void appearance(ModelInstance instance, GpuUnitModel model, UnitModelState.Appearance appearance,
           float preview, int id, GpuUnitCamouflage camouflage, UnitDamageDisplay damage) {
         if (appearance != null) { camouflage.apply(instance, model.instance, appearance); }
-        float loss = preview >= 0 ? preview : appearance == null ? 0 : appearance.bodyLoss();
-        var stage = UnitDamageDisplay.bodyStage(loss);
+        var stage = preview >= 0 ? UnitDamageDisplay.bodyStage(preview) : appearance == null ? null
+              : appearance.bodyStage();
         var texture = stage == null ? null : damage.overlay(stage);
         for (var part : instance.getNode(ROOT).parts) {
             if (!"paint".equals(part.material.id)) { continue; }

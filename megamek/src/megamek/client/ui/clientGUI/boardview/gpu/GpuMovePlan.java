@@ -37,6 +37,7 @@ import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityMovementType;
+import megamek.common.units.Terrains;
 
 /**
  * EDT service for the local movement plan: an immutable route snapshot and guarded movement commands, and the hold
@@ -62,10 +63,11 @@ final class GpuMovePlan implements AutoCloseable {
 
     /**
      * The plan of the acting unit during the local movement turn; otherwise {@link #idle} (EMPTY unless a hold is on).
-     * {@code route} is a copy of the phase display's planned path in every mode, without the jump start (the unit's
-     * own hex is not in it); {@code hover} has the same shape for the hovered hex while {@code route} is empty.
-     * {@code pins} are the pinned waypoints, {@code destination} is null without a route, {@code facing} is the
-     * path's final facing. {@code cost}, {@code budget}, {@code type}, {@code heat}, {@code tmm} and {@code warnings}
+     * {@code route} is a copy of the phase display's planned path after the initial mode markers;
+     * {@code hover} has the same shape while {@code route} is empty.
+     * {@code pins} retain the complete pinned steps, including floors; {@code destination} is null without a route,
+     * {@code facing} is the path's final facing. {@code cost}, {@code budget}, {@code type}, {@code heat}, {@code tmm}
+     * and {@code warnings}
      * describe the whole path (walk, run and jump MP come from the battle status). {@code envelope} is banded for the
      * mode whether or not the board shows envelopes. {@code holdingRemaining} is, while "Hold all remaining units" is
      * on, the local player's units MegaMek has not moved yet in the held movement phase, on every turn of it (the
@@ -74,7 +76,7 @@ final class GpuMovePlan implements AutoCloseable {
      * then the display's last one, and none during a hex pick.
      */
     record Snapshot(boolean active, boolean planner, boolean external, int entityId, Mode mode, boolean explicit,
-          String gearLabel, List<Step> route, List<Step> hover, List<Coords> pins, Coords destination, int facing,
+          String gearLabel, List<Step> route, List<Step> hover, List<Step> pins, Coords destination, int facing,
           int cost, int budget, EntityMovementType type, String typeLabel, boolean auto, int heat, int tmm,
           boolean legal, List<String> warnings, boolean canUndo, boolean canPin, Map<Coords, Band> envelope,
           int holdingRemaining) {
@@ -97,7 +99,7 @@ final class GpuMovePlan implements AutoCloseable {
     }
 
     /** One path step as the plan compares paths. */
-    private record StepKey(MoveStepType type, Coords coords, int boardId, int facing) { }
+    private record StepKey(MoveStepType type, Coords coords, int boardId, int facing, int elevation, int altitude) { }
 
     /** A path's gear and steps: what tells the plan's own changes from changes made elsewhere. */
     private record PathKey(int gear, List<StepKey> steps) { }
@@ -105,8 +107,8 @@ final class GpuMovePlan implements AutoCloseable {
     /** What an envelope was searched from: the gear and the steps up to the last pin. */
     private record EnvelopeKey(int gear, List<StepKey> start) { }
 
-    /** A wanted hover route: the hovered hex for one plan and mode. */
-    private record HoverKey(Coords hex, PathKey plan, Mode mode) { }
+    /** A wanted hover route: the hovered hex and floor for one plan and mode. */
+    private record HoverKey(Coords hex, Integer elevation, PathKey plan, Mode mode) { }
 
     /** One undo step: the plan before a command. EDT only; never published. */
     private record Entry(MovePath path, List<Integer> pins, Mode landMode, int gear, boolean external) { }
@@ -157,7 +159,7 @@ final class GpuMovePlan implements AutoCloseable {
      * display's path only; the envelope from the last pin and the hover route are searched in a job after this
      * capture (rule 9), and until then the unit's previous ones stay. A hold's skip also runs in its own event.
      */
-    Snapshot capture(JComponent panel, @Nullable Coords hover) {
+    Snapshot capture(JComponent panel, @Nullable Coords hover, float pointedZ) {
         GpuBoardSource.requireSwingThread();
         MovementDisplay md = (panel instanceof MovementDisplay movement) ? movement : null;
         int held = hold(md);
@@ -184,7 +186,8 @@ final class GpuMovePlan implements AutoCloseable {
         // During a hex pick MegaMek's board shows the pick's hexes instead of an envelope, so the plan shows none.
         Map<Coords, Band> reach = planner ? plannedEnvelope(md, key, entity, mode)
               : md.isSelectingHex() ? Map.of() : bands(md.getLastEnvelope(), entity, mode);
-        List<Step> hovered = (planner && shown.route().isEmpty()) ? hover(md, key, hover, reach) : List.of();
+        Integer elevation = floorElevation(hover, source.currentView().getBoardId(), pointedZ);
+        List<Step> hovered = (planner && shown.route().isEmpty()) ? hover(md, key, hover, elevation, reach) : List.of();
         boolean explicit = (mode != Mode.AUTO) && (mode != Mode.OTHER);
         Snapshot next = new Snapshot(true, planner, planner && external, entityId, mode, explicit, label(mode),
               shown.route(), hovered, planner ? pinned(path) : List.of(), shown.destination(), shown.facing(),
@@ -202,7 +205,12 @@ final class GpuMovePlan implements AutoCloseable {
 
     /** G6, G7: plots from the last pin to the hex; with {@code pin} the destination becomes a waypoint. */
     void planTo(Coords hex, int boardId, boolean pin) {
-        command(md -> plot(md, hex, boardId, pin));
+        planTo(hex, boardId, pin, Float.NaN);
+    }
+
+    /** Plots to the picked building floor, when the pointer supplied a walkable surface height. */
+    void planTo(Coords hex, int boardId, boolean pin, float pointedZ) {
+        command(md -> plot(md, hex, boardId, pin, floorElevation(hex, boardId, pointedZ)));
     }
 
     /** G7: pins the destination ("+ Waypoint"). */
@@ -304,22 +312,43 @@ final class GpuMovePlan implements AutoCloseable {
 
     /**
      * G6, G7: cuts the path back to the last pin and plots to the hex as a click does. A click on the hex the route
-     * continues from is ignored. An illegal tail is cut off with a toast; a route the explicit walk or run does not
-     * allow is refused.
+     * continues from is ignored unless another floor is selected. An explicit floor must be reached legally;
+     * otherwise the previous draft stays. Without a picked floor an illegal tail is cut off with a toast.
      */
-    private void plot(MovementDisplay md, Coords hex, int boardId, boolean pin) {
+    private void plot(MovementDisplay md, Coords hex, int boardId, boolean pin, @Nullable Integer elevation) {
         if (pin && (md.getGear() == MovementDisplay.GEAR_JUMP)) {
             toast(md, "GpuBoard.hud.move.jumpSingleHex");
             return;
         }
         MovePath path = md.getPlannedMovement();
         int anchor = anchor(path);
-        if (!pin && hex.equals(position(path, anchor)) && (boardId == board(path, anchor))) {
+        if (!pin && hex.equals(position(path, anchor)) && (boardId == board(path, anchor))
+              && (elevation == null || elevation == elevation(path, anchor))) {
             return;
         }
         Entry before = entry(md);
         md.truncateTo(anchor);
-        md.plotTo(hex, boardId);
+        if (elevation != null && !path.contains(MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER)) {
+            MovePath start = md.getPlannedMovement();
+            MovePath floorPath = start.getFinalBoardId() == boardId
+                  ? start.findPathToElevation(hex, approach(md), elevation) : null;
+            if (floorPath == null || !allowed(mode(md), floorPath.getLastStepMovementType())) {
+                restore(md, before);
+                toast(md, "GpuBoard.hud.move.floorUnreachable", elevation);
+                return;
+            }
+            md.plotPath(floorPath);
+        } else {
+            md.plotTo(hex, boardId);
+            if (elevation != null && (!hex.equals(md.getPlannedMovement().getFinalCoords())
+                  || md.getPlannedMovement().getFinalBoardId() != boardId
+                  || md.getPlannedMovement().getFinalElevation() != elevation
+                  || !md.getPlannedMovement().isMoveLegal())) {
+                restore(md, before);
+                toast(md, "GpuBoard.hud.move.floorUnreachable", elevation);
+                return;
+            }
+        }
         MovePath possible = md.getPlannedMovement().clone();
         possible.clipToPossible();
         boolean cut = possible.length() < md.getPlannedMovement().length();
@@ -398,6 +427,8 @@ final class GpuMovePlan implements AutoCloseable {
         return envelope.paths().stream()
               .filter(candidate -> destination.equals(candidate.getFinalCoords())
                     && (candidate.getFinalBoardId() == boardId) && (candidate.getFinalFacing() == facing)
+                    && (candidate.getFinalElevation() == path.getFinalElevation())
+                    && (candidate.getFinalAltitude() == path.getFinalAltitude())
                     && candidate.isMoveLegal() && allowed(mode, candidate.getLastStepMovementType()))
               .min(Comparator.comparingInt(MovePath::getMpUsed)).orElse(null);
     }
@@ -686,8 +717,23 @@ final class GpuMovePlan implements AutoCloseable {
         return (length == 0) ? path.getEntity().getBoardId() : path.getStep(length - 1).getBoardId();
     }
 
-    private List<Coords> pinned(MovePath path) {
-        return pins.stream().filter(length -> length <= path.length()).map(length -> position(path, length))
+    private static int elevation(MovePath path, int length) {
+        return (length == 0) ? path.getEntity().getElevation() : path.getStep(length - 1).getElevation();
+    }
+
+    /** Interpret only building surfaces as a requested floor; other terrain keeps the normal hex-click behavior. */
+    private @Nullable Integer floorElevation(@Nullable Coords coords, int boardId, float pointedZ) {
+        if (coords == null || !Float.isFinite(pointedZ)
+              || !source.currentView().game.hasBoardLocation(coords, boardId)) {
+            return null;
+        }
+        Hex hex = source.currentView().game.getBoard(boardId).getHex(coords);
+        return hex.containsTerrain(Terrains.BUILDING) ? GpuLosResult.pointedLevel(pointedZ) - hex.getLevel() : null;
+    }
+
+    private List<Step> pinned(MovePath path) {
+        return pins.stream().filter(length -> length > 0 && length <= path.length())
+              .map(length -> drawingStep(path.getStep(length - 1), length == path.length()))
               .toList();
     }
 
@@ -695,11 +741,12 @@ final class GpuMovePlan implements AutoCloseable {
         return !history.isEmpty() || (external && (path.length() > base(path)));
     }
 
-    /** G7: a walk or run destination that cost MP and is not on the last pin's hex can be pinned. */
+    /** G7: a walk or run destination that cost MP and differs from the last pin's hex or floor can be pinned. */
     private boolean pinnable(MovementDisplay md, MovePath path) {
-        List<Coords> pinned = pinned(path);
         return (md.getGear() != MovementDisplay.GEAR_JUMP) && (path.length() > base(path)) && (path.getMpUsed() > 0)
-              && (pinned.isEmpty() || !pinned.getLast().equals(path.getFinalCoords()));
+              && (pins.isEmpty() || !position(path, anchor(path)).equals(path.getFinalCoords())
+                    || board(path, anchor(path)) != path.getFinalBoardId()
+                    || elevation(path, anchor(path)) != path.getFinalElevation());
     }
 
     /**
@@ -723,7 +770,8 @@ final class GpuMovePlan implements AutoCloseable {
 
     private static List<StepKey> steps(MovePath path) {
         return path.getStepVector().stream()
-              .map(step -> new StepKey(step.getType(), step.getPosition(), step.getBoardId(), step.getFacing()))
+              .map(step -> new StepKey(step.getType(), step.getPosition(), step.getBoardId(), step.getFacing(),
+                    step.getElevation(), step.getAltitude()))
               .toList();
     }
 
@@ -748,17 +796,22 @@ final class GpuMovePlan implements AutoCloseable {
         for (int index = base(path); index <= last; index++) {
             MoveStep step = path.getStep(index);
             if (step.getPosition() != null) {
-                Hex hex = source.currentView().game.getBoard(step.getBoardId()).getHex(step.getPosition());
-                EntityMovementMode movement = step.getMovementMode();
-                boolean flying = (step.getAltitude() > 0)
-                      || ((movement.isVTOL() || movement.isWiGE()) && (step.getClearance() > 0));
-                float level = (step.getAltitude() > 0) ? step.getAltitude()
-                      : (step.getElevation() + ((hex == null) ? 0 : hex.getLevel()));
-                route.add(new Step(step.getPosition(), step.getBoardId(), level, step.getFacing(),
-                      band(step.getMovementType(index == last)), flying));
+                route.add(drawingStep(step, index == last));
             }
         }
         return List.copyOf(route);
+    }
+
+    /** Routes and pinned waypoints use the same engine-supplied position and height. */
+    private Step drawingStep(MoveStep step, boolean last) {
+        Hex hex = source.currentView().game.getBoard(step.getBoardId()).getHex(step.getPosition());
+        EntityMovementMode movement = step.getMovementMode();
+        boolean flying = (step.getAltitude() > 0)
+              || ((movement.isVTOL() || movement.isWiGE()) && (step.getClearance() > 0));
+        float level = (step.getAltitude() > 0) ? step.getAltitude()
+              : (step.getElevation() + ((hex == null) ? 0 : hex.getLevel()));
+        return new Step(step.getPosition(), step.getBoardId(), level, step.getFacing(),
+              band(step.getMovementType(last)), flying);
     }
 
     /** A movement type's band, grouped as GpuBoardSource.movementMP groups the MP the type uses. */
@@ -843,23 +896,26 @@ final class GpuMovePlan implements AutoCloseable {
     }
 
     /**
-     * G3: the route a click on the hovered hex would plot, while nothing is plotted; only for a hex of the shown
-     * envelope. Searched in the job after this capture; the previous one of the same plan meanwhile.
+     * G3: the route a click on the hovered hex would plot, while nothing is plotted. Ordinary hexes use the shown
+     * envelope; explicit building floors need their own legality check. Searched in the job after this capture;
+     * retain the previous ordinary-hex route while waiting, but never show a preview for a different floor.
      */
-    private List<Step> hover(MovementDisplay md, PathKey key, @Nullable Coords hex, Map<Coords, Band> reach) {
+    private List<Step> hover(MovementDisplay md, PathKey key, @Nullable Coords hex, @Nullable Integer elevation,
+          Map<Coords, Band> reach) {
         MovePath path = md.getPlannedMovement();
-        if ((hex == null) || !reach.containsKey(hex) || hex.equals(position(path, anchor(path)))
+        if ((hex == null) || (elevation == null && (!reach.containsKey(hex) || hex.equals(position(path, anchor(path)))))
               || path.contains(MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER)) {
             hoverWanted = null;
             return List.of();
         }
-        HoverKey wanted = new HoverKey(hex, key, landMode);
+        HoverKey wanted = new HoverKey(hex, elevation, key, landMode);
         if (wanted.equals(hoverKey)) {
             return hoverRoute;
         }
         hoverWanted = wanted;
         requestSearch();
-        return ((hoverKey != null) && hoverKey.plan().equals(key) && (hoverKey.mode() == landMode)) ? hoverRoute
+        return ((hoverKey != null) && elevation == null && hoverKey.elevation() == null
+              && hoverKey.plan().equals(key) && (hoverKey.mode() == landMode)) ? hoverRoute
               : List.of();
     }
 
@@ -888,7 +944,7 @@ final class GpuMovePlan implements AutoCloseable {
             // Key first, so a search that fails is not repeated for the same hex.
             hoverKey = wanted;
             hoverRoute = List.of();
-            hoverRoute = hoverRoute(md, wanted.hex());
+            hoverRoute = hoverRoute(md, wanted.hex(), wanted.elevation());
             changed = true;
         }
         if (changed) {
@@ -923,17 +979,27 @@ final class GpuMovePlan implements AutoCloseable {
     }
 
     /** The route a click on the hex would plot now, without plotting it; empty when the plan would refuse it. */
-    private List<Step> hoverRoute(MovementDisplay md, Coords hex) {
+    private List<Step> hoverRoute(MovementDisplay md, Coords hex, @Nullable Integer elevation) {
         MovePath plotted = md.getPlannedMovement().clone();
         if (plotted.getFinalBoardId() != source.currentView().getBoardId()) {
             return List.of();
         }
-        // The click's search in the walk, jump and back-up gears (MovementDisplay.currentMove).
-        plotted.findPathTo(hex, (md.getGear() == MovementDisplay.GEAR_BACKUP) ? MoveStepType.BACKWARDS
-              : MoveStepType.FORWARDS);
+        if (elevation != null) {
+            plotted = plotted.findPathToElevation(hex, approach(md), elevation);
+            if (plotted == null) {
+                return List.of();
+            }
+        } else {
+            // The click's search in the walk, jump and back-up gears (MovementDisplay.currentMove).
+            plotted.findPathTo(hex, approach(md));
+        }
         plotted.clipToPossible();
         return (hex.equals(plotted.getFinalCoords()) && allowed(mode(md), plotted.getLastStepMovementType()))
               ? route(plotted) : List.of();
+    }
+
+    private static MoveStepType approach(MovementDisplay md) {
+        return md.getGear() == MovementDisplay.GEAR_BACKUP ? MoveStepType.BACKWARDS : MoveStepType.FORWARDS;
     }
 
     private static void toast(MovementDisplay md, String key, Object... args) {

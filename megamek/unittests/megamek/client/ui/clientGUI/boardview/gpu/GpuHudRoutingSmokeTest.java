@@ -353,6 +353,76 @@ class GpuHudRoutingSmokeTest {
         });
     }
 
+    @Test
+    void dockConfirmationPassesOutsideClicksAndTogglesFromItsTrigger() throws Exception {
+        run(routing -> {
+            GpuBoardSource.Frame frame = routing.frame(SCENARIOS.get(2));
+            BoardScene scene = frame.scene();
+            List<BoardScene.Command> commands = List.of(new BoardScene.Command(GpuBoardActions.SKIP_ID,
+                  "Hold position", "", true, false, List.of(), () -> routing.moves.holdAll()));
+            scene = new BoardScene(scene.boardId(), scene.width(), scene.height(), scene.tiles(), scene.units(),
+                  scene.plannedPath(), scene.selectedId(), scene.phase(), commands, scene.light(), scene.firingLines(),
+                  scene.rangeBorders(), scene.markers(), scene.tactical(), scene.rangeLabels(), scene.fieldOfView());
+            GpuHudData data = frame.panels();
+            GpuBoardActions.PhaseInfo phase = new GpuBoardActions.PhaseInfo("", false, "", GpuBoardActions.SKIP_ID,
+                  "", List.of(), List.of());
+            data = new GpuHudData(phase, data.move(), data.fire(), data.physical(), data.record(), data.preview(),
+                  data.chat(), data.toasts(), data.los(), data.players());
+            routing.show(new GpuBoardSource.Frame(scene, List.of(), null, List.of(), "", frame.centerRequest(),
+                  frame.boardGeneration(), "", frame.scenarioAtmosphere(), GpuReportLog.Snapshot.EMPTY,
+                  frame.status(), data));
+            Vector3 board = routing.screen(EMPTY_HEX);
+            Actor trigger = routing.find("dock-hold-all");
+            routing.press(trigger);
+            assertTrue(shown(routing.find("dock-confirm")));
+            assertFalse(routing.hud.isModal());
+            assertSame(routing.find("dock-confirm-no"), routing.hud.stage.getKeyboardFocus());
+            BoardCamera camera = routing.view.boardCamera;
+            Vector3 focus = camera.focus.cpy();
+            clearInvocations(routing.source, routing.moves);
+            routing.key(Input.Keys.NUM_1, 0);
+            routing.key(Input.Keys.F, 0);
+            routing.key(Input.Keys.DEL, 0);
+            routing.hold(Input.Keys.W, () -> routing.advance(3, .1f));
+            assertTrue(focus.epsilonEquals(camera.focus, .001f));
+            verifyNoInteractions(routing.moves);
+            verify(routing.source, never()).key(anyInt(), anyBoolean(), anyInt());
+            routing.capture("g6-hold-confirm-board");
+
+            // The same outside click dismisses the card and reaches the board's normal movement handler.
+            Coords picked = routing.pick(Math.round(board.x), Math.round(board.y));
+            assertNotNull(picked);
+            routing.touch(board, Input.Buttons.LEFT, 0, 0);
+            assertFalse(shown(routing.find("dock-confirm")));
+            verify(routing.moves).planTo(eq(picked), eq(0), eq(false), anyFloat());
+
+            // An outside HUD button also receives its first click.
+            routing.press(trigger);
+            routing.press(routing.find("dock-turn-right"));
+            assertFalse(shown(routing.find("dock-confirm")));
+            verify(routing.moves).turn(1);
+            routing.press(trigger);
+            routing.press(trigger);
+            assertFalse(shown(routing.find("dock-confirm")), "A second trigger click closes without reopening");
+            verify(routing.moves, never()).holdAll();
+
+            routing.press(trigger);
+            routing.key(Input.Keys.ENTER, 0);
+            assertFalse(shown(routing.find("dock-confirm")), "Enter initially cancels");
+            routing.press(trigger);
+            routing.key(Input.Keys.TAB, InputEvent.SHIFT_DOWN_MASK);
+            assertSame(routing.find("dock-confirm-yes"), routing.hud.stage.getKeyboardFocus());
+            routing.key(Input.Keys.ENTER, 0);
+            verify(routing.moves).holdAll();
+            assertFalse(shown(routing.find("dock-confirm")));
+            routing.press(trigger);
+            routing.key(Input.Keys.ESCAPE, 0);
+            assertFalse(shown(routing.find("dock-confirm")));
+            verify(routing.moves, never()).clearRoute();
+            verify(routing.moves).holdAll();
+        });
+    }
+
     /**
      * A4 and W3: a dialog asked before the first board exists is drawn over the empty window and answered once; the
      * HUD draws without a board.
@@ -402,7 +472,7 @@ class GpuHudRoutingSmokeTest {
                 Coords picked = routing.pick(x, y);
                 assertNotNull(picked, "The board reaches the window's edge at " + y);
                 routing.touch(new Vector3(x, y, 0), Input.Buttons.LEFT, 0, 0);
-                verify(routing.moves).planTo(picked, 0, false);
+                verify(routing.moves).planTo(eq(picked), eq(0), eq(false), anyFloat());
             }
 
             float azimuth = camera.azimuth();

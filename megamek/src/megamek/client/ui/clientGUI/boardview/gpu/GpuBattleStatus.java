@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.Color;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.UnitAnnotations;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.tooltip.UnitToolTip;
 import megamek.client.ui.clientGUI.unitDisplay.HeatEffects;
@@ -104,9 +106,11 @@ final class GpuBattleStatus {
      * actions it has declared this phase, including in the physical phase a charge, death from above or ram declared
      * while moving (see {@code declaredAttacks}); for the unit acting in the local player's firing turn it also counts
      * the attacks queued but not yet sent, so it is a declaration only once the unit is {@code done}.
-     * {@code ownerId} is its owner's player id. A sensor contact carries only its id, side, position, board and blip
-     * icon: its text is empty, its numbers are zero, its facing is -1, its meters are {@code ARMOR_NA}, its owner is
-     * {@code Player.PLAYER_NONE} and it has no status words or tiles.
+     * {@code ownerId} is its owner's player id. {@code label} is its board label's name in the client's label style
+     * ({@code UnitAnnotations.labelName}), empty where that style names none, and {@code marks} are the label's damage
+     * tile and bars. A sensor contact carries only its id, side, position, board and blip icon: its text is empty, its
+     * numbers are zero, its facing is -1, its meters are {@code ARMOR_NA}, its owner is {@code Player.PLAYER_NONE}, it
+     * has no status words or tiles and its marks are {@link Marks#NONE}.
      */
     record UnitStatus(int id, Side side, boolean sensorContact, String name, String chassis, String model,
           double tons, String weightClass, String formation, String pilot, int gunnery, int piloting, double armor,
@@ -114,11 +118,43 @@ final class GpuBattleStatus {
           int mpUsed, int hexesMoved, int facing, int tmm, boolean canActNow, boolean pending, boolean done,
           boolean destroyed, int damageLevel, List<String> destroyedLocations, String heatEffects, Coords position,
           int boardId, BoardScene.Pixels icon, List<UnitStatusWords.StatusWord> statusWords, int weightClassIndex,
-          int declaredAttacks, int ownerId, List<UnitStatusWords.StatusWord> statusTiles) {
+          int declaredAttacks, int ownerId, List<UnitStatusWords.StatusWord> statusTiles, String label, Marks marks) {
         UnitStatus {
             destroyedLocations = List.copyOf(destroyedLocations);
             statusWords = List.copyOf(statusWords);
             statusTiles = List.copyOf(statusTiles);
+        }
+
+        /**
+         * A unit labelled with its chassis, or its name without one, and without marks ({@link Marks#NONE}), as the
+         * HUD tests that do not show the label style build it.
+         */
+        UnitStatus(int id, Side side, boolean sensorContact, String name, String chassis, String model,
+              double tons, String weightClass, String formation, String pilot, int gunnery, int piloting, double armor,
+              double structure, int heat, int heatRgb, String heatCapacity, int walk, String run, int jump,
+              String moved, int mpUsed, int hexesMoved, int facing, int tmm, boolean canActNow, boolean pending,
+              boolean done, boolean destroyed, int damageLevel, List<String> destroyedLocations, String heatEffects,
+              Coords position, int boardId, BoardScene.Pixels icon, List<UnitStatusWords.StatusWord> statusWords,
+              int weightClassIndex, int declaredAttacks, int ownerId, List<UnitStatusWords.StatusWord> statusTiles) {
+            this(id, side, sensorContact, name, chassis, model, tons, weightClass, formation, pilot, gunnery,
+                  piloting, armor, structure, heat, heatRgb, heatCapacity, walk, run, jump, moved, mpUsed, hexesMoved,
+                  facing, tmm, canActNow, pending, done, destroyed, damageLevel, destroyedLocations, heatEffects,
+                  position, boardId, icon, statusWords, weightClassIndex, declaredAttacks, ownerId, statusTiles,
+                  chassis.isEmpty() ? name : chassis, Marks.NONE);
+        }
+    }
+
+    /**
+     * The colours of a unit's board label marks ({@code UnitAnnotations}) as ARGB: its damage-level tile, 0 for none
+     * (undamaged, or the client hides damage levels), its armor bar, and its structure bar, 0 for a unit without one.
+     * The bars' filled shares are the unit's {@code armor} and {@code structure}. {@link #NONE}: no marks at all.
+     */
+    record Marks(int damageArgb, int armorArgb, int structureArgb) {
+        static final Marks NONE = new Marks(0, 0, 0);
+
+        /** Whether there are marks to show: every listed unit but a sensor contact has an armor bar. */
+        boolean shown() {
+            return armorArgb != 0;
         }
     }
 
@@ -163,7 +199,7 @@ final class GpuBattleStatus {
                 units.add(new UnitStatus(entity.getId(), side, true, "", "", "", 0, "", "", "", 0, 0,
                       IArmorState.ARMOR_NA, IArmorState.ARMOR_NA, 0, 0, "", 0, "", 0, "", 0, 0, -1, 0, false, false,
                       false, false, Entity.DMG_NONE, List.of(), "", entity.getPosition(), entity.getBoardId(),
-                      icon.apply(entity), List.of(), 0, 0, Player.PLAYER_NONE, List.of()));
+                      icon.apply(entity), List.of(), 0, 0, Player.PLAYER_NONE, List.of(), "", Marks.NONE));
                 continue;
             }
             // Turn types override either isValidEntity form. The form without the infantry/ProtoMek "move later"
@@ -375,6 +411,11 @@ final class GpuBattleStatus {
         }
         List<String> destroyedLocations = IntStream.range(0, entity.locations()).filter(entity::isLocationBad)
               .mapToObj(entity::getLocationAbbr).toList();
+        Color damage = UnitAnnotations.damageColor(entity);
+        Marks marks = new Marks(damage == null ? 0 : damage.getRGB(),
+              UnitAnnotations.barColor(entity.getArmorRemainingPercent()).getRGB(),
+              UnitAnnotations.hasStructureBar(entity)
+                    ? UnitAnnotations.barColor(entity.getInternalRemainingPercent()).getRGB() : 0);
         // An entity built without a model name (scenario code, tests) shows as one with a blank model name.
         return new UnitStatus(entity.getId(), side, false, entity.getShortName(), entity.getChassis(),
               Objects.requireNonNullElse(entity.getModel(), ""), entity.getWeight(), weightClass(entity),
@@ -389,6 +430,7 @@ final class GpuBattleStatus {
               Compute.getTargetMovementModifier(game, entity.getId()).getValue(), canActNow, pending,
               entity.isDone(), entity.isDoomed() || entity.isDestroyed(), entity.getDamageLevel(),
               destroyedLocations, heatEffects, entity.getPosition(), entity.getBoardId(), icon, statusWords,
-              entity.getWeightClass(), declaredAttacks, entity.getOwnerId(), statusTiles);
+              entity.getWeightClass(), declaredAttacks, entity.getOwnerId(), statusTiles,
+              UnitAnnotations.labelName(entity, GUIPreferences.getInstance().getUnitLabelStyle()), marks);
     }
 }

@@ -15,6 +15,7 @@ import megamek.common.equipment.WeaponType;
 import megamek.common.units.Entity;
 import megamek.common.units.IAero;
 import megamek.common.units.UnitLocation;
+import megamek.common.weapons.infantry.InfantryWeapon;
 
 /** A transient, server-confirmed visual event. It is not an attack order or another damage/rules calculation. */
 public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLocation target, int targetType,
@@ -59,12 +60,28 @@ public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLoca
     /** Correlates authorized counter-fire with one incoming salvo, including a neighboring unit's APDS. */
     public record Interception(UUID id, int missiles) implements Serializable { }
 
-    /** Observed firing configuration, not another equipment matcher or attack-resolution calculation. */
+    /** Observed firing configuration. Damage per hit is nominal projectile/beam damage, before target modifiers. */
     public record Shot(String mode, Set<String> munitions, boolean artillery, boolean defensive, int shots,
           int missiles, boolean indirect, Integer missileHits, UnitLocation launch, UnitLocation impact,
           boolean ballistic, int rackSize, boolean ppc, boolean machineGun, boolean rapidFire,
-          Interception interception) implements Serializable {
+          Interception interception, double damagePerHit, boolean plasma) implements Serializable {
         public Shot { munitions = Set.copyOf(munitions); }
+
+        public Shot(String mode, Set<String> munitions, boolean artillery, boolean defensive, int shots,
+              int missiles, boolean indirect, Integer missileHits, UnitLocation launch, UnitLocation impact,
+              boolean ballistic, int rackSize, boolean ppc, boolean machineGun, boolean rapidFire,
+              Interception interception, double damagePerHit) {
+            this(mode, munitions, artillery, defensive, shots, missiles, indirect, missileHits, launch, impact,
+                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, damagePerHit, false);
+        }
+
+        public Shot(String mode, Set<String> munitions, boolean artillery, boolean defensive, int shots,
+              int missiles, boolean indirect, Integer missileHits, UnitLocation launch, UnitLocation impact,
+              boolean ballistic, int rackSize, boolean ppc, boolean machineGun, boolean rapidFire,
+              Interception interception) {
+            this(mode, munitions, artillery, defensive, shots, missiles, indirect, missileHits, launch, impact,
+                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, 0);
+        }
 
         public Shot(String mode, Set<String> munitions, boolean artillery, boolean defensive, int shots,
               int missiles, boolean indirect, Integer missileHits, UnitLocation launch, UnitLocation impact,
@@ -105,37 +122,47 @@ public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLoca
         public Shot withResolution(AmmoType ammo, Integer hits) {
             return new Shot(mode, ammo == null ? munitions : ammo.getMunitionType().stream()
                   .map(Enum::name).collect(java.util.stream.Collectors.toSet()), artillery, defensive, shots,
-                  missiles, indirect, hits, launch, impact, ballistic, rackSize, ppc, machineGun, rapidFire, interception);
+                  missiles, indirect, hits, launch, impact, ballistic, rackSize, ppc, machineGun, rapidFire, interception,
+                  damagePerHit, plasma);
         }
 
         public Shot asDefensive() {
             return new Shot(mode, munitions, artillery, true, shots, missiles, indirect, missileHits, launch, impact,
-                  ballistic, rackSize, ppc, machineGun, rapidFire, interception);
+                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, damagePerHit, plasma);
         }
 
         public Shot withInterception(UUID id, int count) {
             return new Shot(mode, munitions, artillery, defensive, shots, missiles, indirect, missileHits, launch, impact,
-                  ballistic, rackSize, ppc, machineGun, rapidFire, id == null ? null : new Interception(id, Math.max(0, count)));
+                  ballistic, rackSize, ppc, machineGun, rapidFire, id == null ? null : new Interception(id, Math.max(0, count)), damagePerHit, plasma);
         }
 
         /** Artillery supplies its observed launch and resolved landing, including scatter. No client re-roll. */
         public Shot withTrajectory(UnitLocation origin, UnitLocation destination) {
             return new Shot(mode, munitions, true, defensive, shots, missiles, true, missileHits, origin, destination,
-                  ballistic, rackSize, ppc, machineGun, rapidFire, interception);
+                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, damagePerHit, plasma);
         }
 
         public static Shot capture(Mounted<?> mount) {
             if (!(mount instanceof WeaponMounted weapon)) { return null; }
-            var ammo = weapon.getLinked() == null ? null : weapon.getLinked().getType();
-            Set<String> munitions = ammo instanceof AmmoType type ? type.getMunitionType().stream()
+            var type = weapon.getType();
+            var ammo = weapon.getLinkedAmmo() == null ? null : weapon.getLinkedAmmo().getType();
+            Set<String> munitions = ammo != null ? ammo.getMunitionType().stream()
                   .map(Enum::name).collect(java.util.stream.Collectors.toSet()) : Set.of();
-            return new Shot(weapon.curMode().getName(), munitions, weapon.getType().hasFlag(WeaponType.F_ARTILLERY),
-                  weapon.getType().hasFlag(WeaponType.F_AMS) || weapon.getType().hasFlag(WeaponType.F_AMS_BAY),
-                  weapon.getCurrentShots(), weapon.getType().hasFlag(WeaponType.F_MISSILE)
-                        ? weapon.getType().hasFlag(WeaponType.F_LARGE_MISSILE) ? 1 : Math.max(1, weapon.getType().getRackSize()) : 0,
+            boolean artillery = type.hasFlag(WeaponType.F_ARTILLERY);
+            boolean missile = type.hasFlag(WeaponType.F_MISSILE) || type.hasFlag(WeaponType.F_CRUISE_MISSILE)
+                  || type.hasFlag(WeaponType.F_ARROW_IV);
+            int missiles = missile ? artillery || type.hasFlag(WeaponType.F_LARGE_MISSILE) ? 1 : Math.max(1, type.getRackSize()) : 0;
+            // Cluster rack size counts projectiles; artillery rack size is the damage of one shell.
+            // Thunderbolt warhead damage comes from its ammo, not its (single-projectile) rack size.
+            double damage = type instanceof InfantryWeapon infantry ? infantry.getInfantryDamage()
+                  : type.getDamage() == WeaponType.DAMAGE_ARTILLERY ? type.getRackSize() : type.getDamage(0);
+            if (damage < 0) { damage = ammo != null ? ammo.getDamagePerShot() : missiles > 0 ? 1 : 0; }
+            return new Shot(weapon.curMode().getName(), munitions, artillery,
+                  type.hasFlag(WeaponType.F_AMS) || type.hasFlag(WeaponType.F_AMS_BAY), weapon.getCurrentShots(), missiles,
                   weapon.curMode().isIndirect(), null, null, null,
-                  weapon.getType().hasFlag(WeaponType.F_BALLISTIC), weapon.getType().getRackSize(), weapon.getType().hasFlag(WeaponType.F_PPC),
-                  weapon.getType().hasFlag(WeaponType.F_MG), weapon.isRapidFire());
+                  type.hasFlag(WeaponType.F_BALLISTIC), type.getRackSize(), type.hasFlag(WeaponType.F_PPC),
+                  type.hasFlag(WeaponType.F_MG), weapon.isRapidFire(), null, damage,
+                  type.hasFlag(WeaponType.F_PLASMA) || type.hasFlag(WeaponType.F_PLASMA_MFUK));
         }
     }
 

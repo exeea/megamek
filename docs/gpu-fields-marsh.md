@@ -187,11 +187,15 @@ chunk arrives, as it shows the finer ground then.
 
 `GpuBiomeSurface` owns one RGBA8 texel per hex and a bounded nine-hex shader
 stencil. It updates on the GL thread when captured tile data changes, and is
-disabled when no special ground or palette mixture needs it. The texel also
-flags every hex within two rings of a biome or aqueous hex; a fragment reads
-its own hex's flag first and skips the stencil elsewhere, which on a mixed
-board such as MesaCity is most of the ground (the stencil was about 4 ms of
-the marsh test board's 19 ms ground at 110 px/hex).
+disabled when no special ground or palette mixture needs it. Spare bits of the
+texel also flag the quarters of the hex's stencil cell (halves of its column and
+of its row) that a biome hex, or liquids of two or more palettes, can reach:
+14 m for biome blends, 5 m around a liquid position the noise moves up to 3 m.
+A fragment reads its own quarter's flag first and skips the stencil elsewhere,
+which on a mixed board such as MesaCity is most of the ground (the stencil was
+about 4 ms of the marsh test board's 19 ms ground at 110 px/hex). Water of a
+single palette is never flagged: there the stencil can only return its own
+palette, which the shaders already use when it is skipped.
 
 Reeds plant their distant subset first and extend the same deterministic
 lattice for closer detail, so a chunk refined from medium to full detail keeps

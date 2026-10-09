@@ -21,7 +21,7 @@ import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 
 /**
- * Top-right utilities (Tactical view, Wireframe, Map, Contacts, Log, Help, Menu), the Tactical View chip and the
+ * Top-right camera controls and utilities, the Tactical View chip and the
  * Tactical View's north mark (C.1 G4). They show the camera, the wireframe view, the minimap and contacts preferences,
  * the log's presented events and the HUD's open panels, and run the camera's Tactical View, the tuning model's
  * wireframe view, the View menu's minimap item, the contacts preference and the HUD's own toggles.
@@ -29,6 +29,7 @@ import megamek.client.ui.gdx.UiTheme;
 final class GpuUtilityBar implements GpuHud.Component {
     /** The row's gap (#sys). */
     static final float GAP = 8;
+    static final float HEIGHT = 34;
     /**
      * The top of the Tactical View's north mark in the window, centred: its baseline then lies at the prototype's
      * y 96 (flat.js), whether or not the chip above it has room.
@@ -53,34 +54,33 @@ final class GpuUtilityBar implements GpuHud.Component {
     private final UiButton log;
     private final UiButton help;
     private final UiButton menu;
-    private final List<UiButton> utilities;
-    private final TextButton.TextButtonStyle wide;
-    private final TextButton.TextButtonStyle narrow;
     private GpuHud.Inputs inputs;
-    private boolean narrowShown;
 
     GpuUtilityBar(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera,
-          GpuBoardTuning tuning) {
+          GpuBoardTuning tuning, Actor tuningButton, Runnable fitBoard) {
         this.state = state;
         this.camera = camera;
         this.tuning = tuning;
         root.setName("utility-bar");
         chip.setName("tactical-chip");
         UiKit ui = kit.ui;
+        cameraButtons(ui, root, camera, fitBoard);
         tactical = utility(ui, "tactical", "GpuBoard.hud.util.tactical", "utility-tactical");
         wireframe = utility(ui, "wireframe", "GpuBoard.hud.util.wireframe", "utility-wireframe");
         map = utility(ui, "map", "GpuBoard.hud.util.map", "utility-map");
         contacts = utility(ui, "enemy", "GpuBoard.hud.common.contacts", "utility-contacts");
         log = utility(ui, "report", "GpuBoard.hud.util.log", "utility-log");
-        help = utility(ui, "help", "GpuBoard.hud.util.help", "utility-help");
-        menu = utility(ui, "menu", "GpuBoard.hud.menu.title", "utility-menu");
-        utilities = List.of(tactical, wireframe, map, contacts, log, help, menu);
-        for (UiButton utility : utilities) {
-            root.add(utility).padLeft(utility == tactical ? 0 : GAP);
+        help = iconButton(ui, null, Messages.getString("GpuBoard.hud.util.help"), "utility-help");
+        help.setText("?");
+        UiKit.size(help.getLabel(), "hud-medium", 19);
+        help.add(help.getLabel());
+        menu = iconButton(ui, "menu", Messages.getString("GpuBoard.hud.menu.title"), "utility-menu");
+        for (UiButton utility : List.of(tactical, wireframe, map, contacts, log)) {
+            root.add(utility).height(HEIGHT).padLeft(GAP);
         }
-        wide = ui.skin.get("hud-utility", TextButton.TextButtonStyle.class);
-        // The style at W <= 1350, which the developer Tuning utility at the row's end (G17) also takes.
-        narrow = ui.skin.get("hud-utility-narrow", TextButton.TextButtonStyle.class);
+        root.add(tuningButton).height(HEIGHT).padLeft(GAP);
+        root.add(help).size(HEIGHT).padLeft(GAP);
+        root.add(menu).size(HEIGHT).padLeft(GAP);
         onChange(tactical, () -> setTactical(!camera.tactical()));
         // The thermal wireframe view, a switch of the tuning model the board reads.
         onChange(wireframe, () -> tuning.setWireframe(!tuning.wireframe()));
@@ -107,11 +107,46 @@ final class GpuUtilityBar implements GpuHud.Component {
         north.setTouchable(Touchable.disabled);
     }
 
-    /** A top-right utility: its icon over its caption, the message {@code label}. The map tools share them. */
+    /** A compact top-right utility shared by gameplay, map previews and the editor. */
     static UiButton utility(UiKit ui, String icon, String label, String name) {
         UiButton button = ui.button("hud-utility", icon, Messages.getString(label), null);
         button.setName(name);
+        return compact(ui, button);
+    }
+
+    static UiButton compact(UiKit ui, UiButton button) {
+        button.setStyle(ui.skin.get("hud-utility-small", TextButton.TextButtonStyle.class));
+        button.clearChildren();
+        button.icons.forEach(icon -> button.add(icon).size(14));
+        button.add(button.getLabel()).padLeft(5);
         return button;
+    }
+
+    static UiButton iconButton(UiKit ui, String icon, String caption, String name) {
+        UiButton button = ui.button("hud-utility-small", icon, "", null);
+        button.setName(name);
+        button.clearChildren();
+        button.pad(0);
+        button.icons.forEach(image -> button.add(image).size(19));
+        ui.tip(button).getActor().setText(caption);
+        return button;
+    }
+
+    /** Camera presets and explicit fitting share their controls in every board workspace. */
+    static void cameraButtons(UiKit ui, Table row, BoardCamera camera, Runnable fitBoard) {
+        cameraButton(ui, row, "top", "hex", "Top view", () -> camera.setIsometric(false));
+        cameraButton(ui, row, "isometric", "layers", "Isometric view", () -> camera.setIsometric(true));
+        cameraButton(ui, row, "fit", "expand", "Fit board", fitBoard);
+    }
+
+    private static void cameraButton(UiKit ui, Table row, String name, String icon, String caption, Runnable action) {
+        UiButton button = iconButton(ui, icon, caption, "map-view-" + name);
+        float gap = row.getCells().isEmpty() ? 0 : GAP;
+        row.add(button).size(HEIGHT).padLeft(gap);
+        onChange(button, () -> {
+            if (button.getStage() != null) { button.getStage().setKeyboardFocus(null); }
+            action.run();
+        });
     }
 
     @Override
@@ -151,10 +186,6 @@ final class GpuUtilityBar implements GpuHud.Component {
         // Scene2D turns counterclockwise; the camera's azimuth turns the board's north that far clockwise on screen.
         north.setOrigin(Align.center);
         north.setRotation(-camera.azimuth());
-        if (narrowShown != inputs.metrics().narrow()) {
-            narrowShown = inputs.metrics().narrow();
-            utilities.forEach(utility -> utility.setStyle(narrowShown ? narrow : wide));
-        }
     }
 
     /** As the T key: the camera enters the Tactical View or returns to the 3D pose it replaced. */

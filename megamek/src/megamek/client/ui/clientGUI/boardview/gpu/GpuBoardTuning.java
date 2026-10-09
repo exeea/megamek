@@ -35,7 +35,7 @@ import megamek.common.planetaryConditions.AtmosphericTaint;
 
 /**
  * The board view's presentation settings as a model of Scene2D controls: the rows of a Board and an Atmosphere page,
- * and Defaults. Each control holds its value and applies it when set; GpuTuningPanel shows the rows in the hud-v3 look
+ * and Defaults. Each control holds its value and applies it when set; GpuTuningPanel shows the rows in the hud look
  * and never draws these widgets. Geometry is shared with picking; the other settings belong to this GPU window.
  */
 final class GpuBoardTuning {
@@ -116,8 +116,11 @@ final class GpuBoardTuning {
     private final List<Control> relief;
     private final List<Control> water;
     private final CheckBox grass;
+    private final CheckBox waterEffects;
     private final CheckBox terrainLod;
     private final List<Control> terrainDetail;
+    private final CheckBox objectLod;
+    private final List<Control> terrainWear;
     private final Label terrainProgress;
     private int terrainPercent = -1;
     private final SelectBox<String> concreteShapes;
@@ -171,9 +174,9 @@ final class GpuBoardTuning {
         rows.top().defaults().pad(0, 3, 0, 3);
         firstPerson = checkbox(skin, "Free Flight", "tuning-free-flight");
         firstPerson.addListener(new TextTooltip("Fly freely: WASD moves, Q/E lowers/raises, Shift speeds up, "
-              + "right drag looks around, middle drag pans, Shift swaps the drags, and the wheel moves forward/back. "
+              + "right drag pans, middle drag looks around, Shift swaps the drags, and the wheel moves forward/back. "
               + "Turn off to restore the tactical view.", skin, "menu"));
-        cameraFieldOfView = controls(skin, List.of(new Knob("Camera FOV", BoardCamera.MIN_FIELD_OF_VIEW,
+        cameraFieldOfView = controls(skin, List.of(new Knob("Vertical FOV",BoardCamera.MIN_FIELD_OF_VIEW,
               BoardCamera.MAX_FIELD_OF_VIEW, 1, "%.0f\u00b0")), this::applyCamera, 0);
         cameraFieldOfView.getFirst().slider().setName("tuning-camera-fov");
         cameraFieldOfView.getFirst().slider().addListener(new TextTooltip(
@@ -466,6 +469,11 @@ final class GpuBoardTuning {
         terrainProgress = new Label("", skin, "small");
         terrainProgress.setName("terrain-build-progress");
         rows.add(terrainProgress).colspan(3).left().row();
+        section(skin, "Surface weathering");
+        terrainWear = controls(skin, List.of(new Knob("Ambient wear", 0, 1, .01f, "%.2f",
+              "Natural surface weathering, including exposed mineral patches and worn cover. "
+                    + "0 disables it; 1 is full strength. Updates immediately. Combat scars are independent.")),
+              this::applyTerrainWear, 0);
         section(skin, "Concrete shapes");
         concreteShapes = choice(skin, "Rectangle fitting", "tuning-concrete-shapes",
               new String[] { "None", "Water only", "Everywhere" }, this::applyConcreteShapes);
@@ -559,6 +567,9 @@ final class GpuBoardTuning {
         grass = checkbox(skin, "Grass blades", "tuning-grass");
         grass.addListener(new TextTooltip("Show wind-blown grass blades on the ground. Uncheck to remove the blades.",
               skin, "menu"));
+        waterEffects = checkbox(skin, "Water effects", "tuning-water-effects");
+        waterEffects.addListener(new TextTooltip("Animate water: waves, currents, foam, ripples, sun glints and the "
+              + "light patterns on riverbeds. Uncheck for calm, still water.", skin, "menu"));
         terrainLod = checkbox(skin, "Terrain LoD", "tuning-terrain-lod");
         terrainLod.addListener(new TextTooltip("Adjust terrain detail with zoom. Off keeps the full-detail mesh at every distance.",
               skin, "menu"));
@@ -577,6 +588,9 @@ final class GpuBoardTuning {
               new Knob("Medium detail at (px)", 4, 128, 2, "%.0f",
                     "LoD switches to medium detail at this hex width on screen. Smaller hexes use coarser meshes; map size does not set quality.")),
               this::applyRelief, 0, true);
+        objectLod = checkbox(skin, "Object LoD", "tuning-object-lod");
+        objectLod.addListener(new TextTooltip("Skip placed objects smaller than a quarter hex while a hex is narrower than "
+              + "12 px on screen; selected and hovered objects always show. Off draws every object at every zoom.", skin, "menu"));
         section(skin, "Material geology");
         geologyFamily = choice(skin, "Material", "tuning-geology-family",
               new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Lunar", "Fungus",
@@ -916,8 +930,12 @@ final class GpuBoardTuning {
         setValues(cameraFieldOfView, new float[] { BoardCamera.DEFAULT_FIELD_OF_VIEW });
         applyCamera();
         normalMaps.setChecked(true);
+        setValues(terrainWear, new float[] { GpuTerrain.DEFAULT_TERRAIN_WEAR });
+        applyTerrainWear();
         unitDisplayMode.setSelected(UnitDisplayMode.DEFAULT);
         grass.setChecked(true);
+        waterEffects.setChecked(true);
+        objectLod.setChecked(true);
         boolean fixedSunKept = fixedSun.isChecked();
         BoardGeometry.Tuning defaults = BoardGeometry.DEFAULTS;
         float[] values = { defaults.hexScale(), defaults.unitScale(), defaults.unitHeightScale(),
@@ -1014,12 +1032,28 @@ final class GpuBoardTuning {
         return normalMaps.isChecked();
     }
 
+    float terrainWear() {
+        return value(terrainWear, 0);
+    }
+
+    private void applyTerrainWear() {
+        updateReadings(terrainWear);
+    }
+
     UnitDisplayMode unitDisplayMode() {
         return unitDisplayMode.getSelected();
     }
 
     boolean grass() {
         return grass.isChecked();
+    }
+
+    boolean waterEffects() {
+        return waterEffects.isChecked();
+    }
+
+    boolean objectLod() {
+        return objectLod.isChecked();
     }
 
     boolean fixedSun() {

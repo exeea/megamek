@@ -36,12 +36,12 @@ class GpuEditorPaintOrderSmokeTest {
             for (int x = 0; x < 16; x++) {
                 for (int y = 0; y < 16; y++) { board.setHex(new Coords(x, y), new Hex(0, "pavement:1", "lunar")); }
             }
-            String symbols = "decal/saxarba/SMV_GroundSymbols/";
+            // The full emblems at the size their legacy one-hex tiles drew them at scale 3.
             board.getHex(owner).setDecorations(List.of(
-                  new BoardDecoration("red", "decal", symbols + "FluffSystem-05-Symbol-01-RedCross-1-01", null,
-                        0, 0, 0, false, 3, BoardDecoration.Placement.ground(), 4, false),
-                  new BoardDecoration("green", "decal", symbols + "FluffSystem-06-Faction-01-PreAgeofWarIS-1-CapellanCondederation-04", null,
-                        0, 0, 0, false, 3, BoardDecoration.Placement.ground(), 2, false)));
+                  new BoardDecoration("red", "decal", "decal/emblems/red-cross", null,
+                        0, 0, 0, false, 3 * .263, BoardDecoration.Placement.ground(), 4, false),
+                  new BoardDecoration("green", "decal", "decal/emblems/capellan-confederation", null,
+                        0, 0, 0, false, 3 * .496, BoardDecoration.Placement.ground(), 2, false)));
             editor.game().setBoard(board); editor.pointer(owner, 0, 0, false, "red"); editor.finishStroke();
             return new GpuMapSource(editor.game(), null, editor);
         });

@@ -40,6 +40,7 @@ import java.util.Vector;
 import megamek.common.Hex;
 import megamek.common.OffBoardDirection;
 import megamek.common.board.Coords;
+import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.net.packets.InvalidPacketDataException;
 import megamek.common.net.packets.Packet;
@@ -102,8 +103,12 @@ public class DeploymentProcessor extends AbstractTWRuleHandler {
 
         DeploymentServerHelper deploymentServerHelper = new DeploymentServerHelper(gameManager);
         boolean isLegalLocation = deploymentServerHelper.isLegalDeployment(coords, boardId, entity, nFacing);
+        Hex destinationHex = getGame().hasBoardLocation(coords, boardId)
+              ? getGame().getBoard(boardId).getHex(coords) : null;
+        boolean isLegalElevation = (destinationHex == null)
+              || Game.rulesManager.getRulesMovement().isBuildingElevationAllowed(entity, destinationHex, elevation);
 
-        if ((turn == null) || !turn.isValid(connId, entity, getGame())
+        if ((turn == null) || !turn.isValid(connId, entity, getGame()) || !isLegalElevation
               // FIXME: The combination with assault drop and the assault drop check dont look right:
               || !(isLegalLocation
               || (assaultDrop && getGame().getOptions().booleanOption(OptionsConstants.ADVANCED_ASSAULT_DROP)

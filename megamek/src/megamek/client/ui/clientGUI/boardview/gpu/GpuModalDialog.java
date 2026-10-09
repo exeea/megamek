@@ -38,6 +38,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.FieldKind;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiMenuList;
+import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.logging.MMLogger;
@@ -59,8 +60,6 @@ import megamek.logging.MMLogger;
  */
 final class GpuModalDialog implements GpuHud.Component {
     private static final MMLogger LOGGER = MMLogger.create(GpuModalDialog.class);
-    /** The scrim between the board and the dialog: the prototype's page background (#0d1112) at half opacity. */
-    private static final Color SCRIM = UiTheme.rgba(13, 17, 18, .5f);
     /** A MESSAGE's image fits this box left of the text, never above its own size, as a story dialog's portrait. */
     private static final float IMAGE_WIDTH = 240;
     private static final float IMAGE_HEIGHT = 320;
@@ -75,8 +74,8 @@ final class GpuModalDialog implements GpuHud.Component {
 
     private final UiKit ui;
     private final GpuBoardSource source;
-    /** The scrim over the whole window; the HUD makes it take every press around the dialog. */
-    private final Table root = new Table();
+    /** Shares UIKit's single backdrop with any Controls or Menu dialog underneath this request. */
+    private final UiModal root;
     /** The request on screen with its controls, or null. */
     private Prompt prompt;
     private Cell<Table> dialogCell;
@@ -85,8 +84,8 @@ final class GpuModalDialog implements GpuHud.Component {
     GpuModalDialog(GpuHudKit kit, GpuBoardSource source, GpuHudState state) {
         ui = kit.ui;
         this.source = source;
+        root = new UiModal(ui, this::cancel, false);
         root.setName("modal-dialog");
-        root.setBackground(ui.skin.newDrawable("white", SCRIM));
         // The HUD keeps the keyboard focus on the dialog or one of its fields while a request is pending.
         root.addListener(new InputListener() {
             @Override
@@ -108,6 +107,7 @@ final class GpuModalDialog implements GpuHud.Component {
     @Override
     public void update(GpuHud.Inputs inputs) {
         DialogRequest request = inputs.dialog();
+        root.open(request != null);
         if (prompt != null && (request == null || prompt.request.id() != request.id())) {
             prompt.close();
             prompt = null;

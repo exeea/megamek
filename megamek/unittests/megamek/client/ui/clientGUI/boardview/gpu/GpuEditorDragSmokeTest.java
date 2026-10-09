@@ -35,10 +35,12 @@ class GpuEditorDragSmokeTest {
                 for (int y = 0; y < board.getHeight(); y++) { board.setHex(new Coords(x, y), new Hex(0, "", "lunar")); }
             }
             board.setHex(owner, new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:4", "lunar"));
-            board.getHex(owner).setDecorations(List.of(new BoardDecoration("moving", "prop", "scenery/components/car-red", null,
+            board.getHex(owner).setDecorations(List.of(new BoardDecoration("moving", "prop", "scenery/vehicles/car", null,
                   0, 0, 0, false, 3, BoardDecoration.Placement.surface("bridge", "deck", 3.7), 0)));
             board.setHex(bridge, new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:10", "lunar"));
             editor.game().setBoard(board);
+            // Only a selected object drags; a press elsewhere starts a selection box.
+            editor.pointer(owner, 0, 0, false, "moving"); editor.finishStroke(); editor.release();
             return new GpuMapSource(editor.game(), null, editor);
         });
         SwingUtilities.invokeAndWait(setup); GpuMapSource source = setup.get();
@@ -66,10 +68,10 @@ class GpuEditorDragSmokeTest {
                 private void release(Vector3 point) {
                     Gdx.input.getInputProcessor().touchUp(Math.round(point.x), Math.round(point.y), 0, Input.Buttons.LEFT);
                 }
-                private void assertHoverAnchor(GpuTerrain.EditorObject object) throws Exception {
+                /** The hover outline stays on the hex's walkable level; the drag's projection column shows the object's anchor. */
+                private void assertHoverOnGround() throws Exception {
                     var method = GpuBattleView.class.getDeclaredMethod("hoverTop"); method.setAccessible(true);
-                    assertEquals(object.anchorLevel() * BoardGeometry.level() + .5f * BoardGeometry.hexScale(),
-                          (Float) method.invoke(this), .001f, "An editor drag follows the rendered anchor without flooring it to a lower level");
+                    assertTrue(Float.isNaN((Float) method.invoke(this)), "A dragged object never raises the hover outline");
                 }
                 @Override public void create() { super.create(); boardCamera.setIsometric(true); }
                 @Override public void render() {
@@ -89,8 +91,8 @@ class GpuEditorDragSmokeTest {
                             }
                             case 1 -> {
                                 if (!"moving".equals(state.object())) { return; }
-                                assertEquals("moving", state.object(), "The real press selects the elevated prop");
-                                assertHoverAnchor(terrain.editorObjects(owner).getFirst());
+                                assertEquals("moving", state.object(), "The press grabs the selected elevated prop");
+                                assertHoverOnGround();
                                 drag = screen(new Vector3(start).add(1.5f * BoardGeometry.width(), 0, 0));
                                 move(drag); step++; after = frames() + 5;
                             }
@@ -103,9 +105,11 @@ class GpuEditorDragSmokeTest {
                                 assertEquals(3.7, state.objects().getFirst().placement().offset());
                                 var object = terrain.editorObjects(owner).stream().filter(o -> o.id().equals("moving")).findFirst().orElseThrow();
                                 assertEquals(originalX + 1.5f * BoardGeometry.width(), object.bounds().getCenterX(), 3);
-                                assertHoverAnchor(object);
+                                assertHoverOnGround();
                                 assertEquals("moving", terrain.editorSectionPick(owner,
                                       new Ray(new Vector3(object.bounds().getCenterX(), object.bounds().getCenterY(), 500), new Vector3(0, 0, -1))));
+                                // The held object's tether runs down to the ground it now floats above.
+                                GpuBoardTestUi.capture(new File("build/gpu-board-review", "editor-object-drag-tether.png"));
                                 release(drag); step++; after = frames() + 2;
                             }
                             case 3 -> {
@@ -118,11 +122,13 @@ class GpuEditorDragSmokeTest {
                                 assertTrue(terrain.editorObjects(owner).stream().noneMatch(o -> o.id().equals("moving")));
                                 if (terrain.busy()) { return; }
                                 start = BoardGeometry.center(bridge, 10); start.z += .5f;
-                                press(screen(start)); step++; after = frames() + 5;
+                                // A click selects the hex; only then does a press on it grab it.
+                                press(screen(start)); release(screen(start)); step++; after = frames() + 5;
                             }
                             case 4 -> {
                                 if (!bridge.equals(state.selected())) { return; }
                                 assertEquals(bridge, state.selected()); assertEquals("", state.object());
+                                press(screen(start));
                                 drag = screen(new Vector3(start).add(-1.5f * BoardGeometry.width(), 0, 0));
                                 move(drag); step++; after = frames() + 5;
                             }

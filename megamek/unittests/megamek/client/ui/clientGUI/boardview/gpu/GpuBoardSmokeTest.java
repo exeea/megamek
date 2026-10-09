@@ -204,13 +204,26 @@ class GpuBoardSmokeTest {
                             cameraDrag(false, 80, 30);
                             assertFalse(focus.epsilonEquals(boardCamera.focus, 0.001f));
                             assertEquals(focus.z, boardCamera.focus.z, 0.001f);
-                            // A drag returning to its starting point must not be mistaken for a context click.
+                            // A drag returning to its starting point must not be mistaken for a context click. A pan
+                            // keeps the visible cursor; an orbit holds it still, so the screen's edge never stops it.
                             Gdx.input.getInputProcessor().touchDown(500, 300, 0, Input.Buttons.RIGHT);
                             Gdx.input.getInputProcessor().touchDragged(550, 340, 0);
+                            assertFalse(Gdx.input.isCursorCatched(), "A pan keeps the cursor");
                             Gdx.input.getInputProcessor().touchDragged(500, 300, 0);
                             Gdx.input.getInputProcessor().touchUp(500, 300, 0, Input.Buttons.RIGHT);
                             SwingUtilities.invokeAndWait(() -> { });
                             assertNull(fixture.source.takeFrame().context());
+                            Gdx.input.getInputProcessor().touchDown(500, 300, 0, Input.Buttons.MIDDLE);
+                            assertFalse(Gdx.input.isCursorCatched(), "A press that may be a click keeps the cursor");
+                            Gdx.input.getInputProcessor().touchDragged(550, 300, 0);
+                            assertTrue(Gdx.input.isCursorCatched(), "An orbit holds the cursor");
+                            Gdx.input.getInputProcessor().touchUp(550, 300, 0, Input.Buttons.MIDDLE);
+                            assertFalse(Gdx.input.isCursorCatched(), "Releasing the orbit shows the cursor again");
+                            Gdx.input.getInputProcessor().touchDown(500, 300, 0, Input.Buttons.MIDDLE);
+                            Gdx.input.getInputProcessor().touchDragged(550, 300, 0);
+                            pause();
+                            assertFalse(Gdx.input.isCursorCatched(), "Focus loss shows the cursor again");
+                            Gdx.input.getInputProcessor().touchUp(550, 300, 0, Input.Buttons.MIDDLE);
                             focus.set(boardCamera.focus);
                             Gdx.input.getInputProcessor().touchDown(500, 300, 0, Input.Buttons.RIGHT);
                             pause();

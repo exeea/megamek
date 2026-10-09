@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -49,7 +50,7 @@ class GpuScenerySmokeTest {
               "fluff:93:11", "fluff:92:3", "fluff:13:3", "fluff:13:3", "fluff:13:3", "fluff:13:3", "fluff:13:3", "fluff:13:3",
               "fluff:7:3", "fluff:7:4", "fluff:7:5", "fluff:8:6", "fluff:4:6", "fluff:30:1",
               "fluff:6:18", "fluff:92:1", "fluff:92:2", "fluff:92:3", "fluff:92:4", "fluff:92:5",
-              "water:0;fluff:94:1", "water:0;fluff:94:2", "water:0;fluff:94:3", "water:0;fluff:94:4", "water:0;fluff:94:5");
+              "fluff:94:1", "fluff:94:2", "fluff:94:3", "fluff:94:4", "fluff:94:5");
         for (int i = 0; i < detailVariants.size(); i++) {
             details.setHex(new Coords(1 + i % 6, 1 + i / 6), new Hex(0, "pavement:1;" + detailVariants.get(i), ""));
         }
@@ -128,17 +129,24 @@ class GpuScenerySmokeTest {
         var fccwScene = scenes.get(1);
         assertTrue(fccwScene.tiles().stream().filter(t -> t.features().stream()
               .anyMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY)).count() >= 25);
-        assertEquals(2, scenes.get(3).tiles().stream().flatMap(t -> t.features().stream())
-              .map(BoardScene.Feature::asset).filter(a -> a.startsWith("scenery/fluff/horses")).distinct().count(),
-              "The native review must exercise both shuffled horse variants");
+        // Herds decode to one row per animal; a herd's hex is the one holding its first animal where the row puts it.
+        java.util.function.BiFunction<BoardScene, String, Coords> herd = (scene, key) -> {
+            var first = BoardSceneryLayouts.layout("scenery/fluff/" + key).components().getFirst();
+            return scene.tiles().stream().filter(t -> t.features().stream().anyMatch(f -> f.asset().equals(first.asset())
+                  && f.x() == first.x() && f.y() == first.y())).findFirst().orElseThrow(() -> new AssertionError(key)).coords();
+        };
+        herd.apply(scenes.get(3), "horses1");
+        herd.apply(scenes.get(3), "horses2");
         assertEquals(48, scenes.get(4).tiles().stream().flatMap(t -> t.features().stream())
-              .map(BoardScene.Feature::asset).filter(a -> a.contains("GantryCrane-01-")).distinct().count());
-        assertEquals(11, scenes.get(7).tiles().stream().flatMap(t -> t.features().stream())
-              .filter(f -> f.asset().equals("scenery/fluff/ledge1")).count());
+              .map(BoardScene.Feature::asset).filter(a -> a.contains("scenery/seaport/gantry-crane-")).distinct().count());
+        // ledge1 (fluff:8:0) decodes to the unrotated row of the canonical ledge.
+        Predicate<BoardScene.Feature> ledge1 = f -> f.asset().equals("scenery/roofs/ledge") && f.rotation() == 0;
+        assertEquals(11, scenes.get(7).tiles().stream().flatMap(t -> t.features().stream()).filter(ledge1).count());
         assertTrue(scenes.get(7).tile(new Coords(13, 44)).features().stream()
-              .anyMatch(f -> f.asset().equals("scenery/fluff/ledge1")), "Review the reported ledge beside the helipad");
+              .anyMatch(ledge1), "Review the reported ledge beside the helipad");
         assertEquals(12, scenes.get(8).tiles().stream().flatMap(t -> t.features().stream())
-              .map(BoardScene.Feature::asset).filter(a -> a.startsWith("scenery/fluff/")).distinct().count());
+              .filter(f -> f.asset().equals("scenery/roofs/ledge") || f.asset().equals("scenery/roofs/bevel"))
+              .map(f -> f.asset() + "@" + f.rotation()).distinct().count(), "Six ledge and six bevel orientations");
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "scenery");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
@@ -160,7 +168,7 @@ class GpuScenerySmokeTest {
                         terrain.update(scene);
                         terrain.animate(.5f, List.of());
                         Coords focus = i == 7 ? new Coords(13, 43) : i == 4 ? new Coords(9, 12) : i != 1 ? new Coords(4, 3) : scene.tiles().stream()
-                              .filter(t -> t.features().stream().anyMatch(f -> f.asset().equals("scenery/fluff/construction1")))
+                              .filter(t -> t.features().stream().anyMatch(f -> f.asset().equals("scenery/construction/crawler-crane")))
                               .findFirst().orElseThrow().coords();
                         var ray = new Ray(BoardGeometry.center(focus, 0).add(0, 0, 1000), new Vector3(0, 0, -1));
                         BoardGeometry.Hit picked = null;
@@ -193,14 +201,12 @@ class GpuScenerySmokeTest {
                             GpuReviewFrame.save(new File(output, "pools-in-game.png"));
                         }
                         if (i == 3) {
-                            for (String asset : List.of("horses1", "horses2", "cattle1", "cattle2", "cattle3",
-                                  "pigs1", "pigs2", "bison1")) {
-                                Coords horse = scene.tiles().stream().filter(t -> t.features().stream()
-                                      .anyMatch(f -> f.asset().equals("scenery/fluff/" + asset))).findFirst().orElseThrow().coords();
+                            for (String key : List.of("horses1", "horses2", "cattle1", "cattle2", "cattle3", "pigs1", "pigs2",
+                                  "bison1")) {
                                 camera.camera.zoom = .12f;
-                                camera.center(BoardGeometry.center(horse, 0));
+                                camera.center(BoardGeometry.center(herd.apply(scene, key), 0));
                                 frame.render(terrain, camera, scene);
-                                GpuReviewFrame.save(new File(output, asset + "-in-game.png"));
+                                GpuReviewFrame.save(new File(output, key + "-in-game.png"));
                             }
                         }
                         if (i == 4) {

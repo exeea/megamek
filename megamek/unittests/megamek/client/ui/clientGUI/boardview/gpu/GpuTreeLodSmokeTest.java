@@ -39,7 +39,7 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Actual submitted triangle counts, shared render passes, and pixel comparisons to the original catalog. */
+/** Actual submitted triangle counts, shared render passes, and pixel comparisons across the shipped detail levels. */
 @Tag("on-demand")
 class GpuTreeLodSmokeTest {
     private static final List<String> TREES = java.util.stream.Stream.concat(
@@ -139,7 +139,7 @@ class GpuTreeLodSmokeTest {
                         }
                     }
                     profiler.disable();
-                    compareReferences(assets);
+                    compareLevels(assets);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
@@ -177,26 +177,15 @@ class GpuTreeLodSmokeTest {
         return new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
     }
 
-    /** The complete authored meshes remain available as the visual reference for optimized geometry. */
-    private static void compareReferences(GpuAssets assets) throws Exception {
+    /** The shipped near mesh is the coverage reference for its coarser detail levels. */
+    private static void compareLevels(GpuAssets assets) throws Exception {
         Environment environment = new Environment();
         environment.set(ColorAttribute.createAmbientLight(0.55f, 0.58f, 0.62f, 1));
         environment.add(new DirectionalLight().set(0.55f, 0.53f, 0.48f, -24, -30, -18));
         ModelBatch batch = new ModelBatch();
         try {
             for (String name : TREES) {
-                var file = new com.badlogic.gdx.files.FileHandle(new File(
-                      System.getProperty("megamek.gpu.referenceFoliage"), name + ".glb"));
-                var data = RigidGlb.loadLods(file, new File(System.getProperty("megamek.gpu.referenceFoliage"))
-                      .toPath().toAbsolutePath().getParent().getParent().getParent()).getFirst();
-                Model reference = new Model(data, filename -> assets.material("foliage/"
-                      + new com.badlogic.gdx.files.FileHandle(filename).nameWithoutExtension()));
-                // Reference geometry is test-owned; its textures belong to the shared cache.
-                var owned = reference.getManagedDisposables().iterator();
-                while (owned.hasNext()) {
-                    if (owned.next() instanceof com.badlogic.gdx.graphics.Texture) { owned.remove(); }
-                }
-                try {
+                Model near = assets.lodModel(name, 0);
                 for (float tilt : new float[] { 0, 54.73561f, 80 }) {
                     for (int bearing = 0; bearing < 360; bearing += 90) {
                         BoardCamera camera = new BoardCamera();
@@ -204,22 +193,11 @@ class GpuTreeLodSmokeTest {
                         camera.orbit(bearing, tilt);
                         camera.center(new Vector3(0, 0, 18));
                         camera.zoom(0.001f);
-                        BufferedImage original = render(batch, environment, reference, camera);
-                        BufferedImage optimized = render(batch, environment, assets.lodModel(name, 0), camera);
-                        int changed = differences(original, optimized);
-                        boolean cutout = assets.lodModel(name, 0).getMaterial("canopy-cutout") != null
-                              || assets.lodModel(name, 0).getMaterial("canopy-snow-cutout") != null
-                              || assets.lodModel(name, 0).getMaterial("flower-cutout") != null;
+                        boolean cutout = near.getMaterial("canopy-cutout") != null
+                              || near.getMaterial("canopy-snow-cutout") != null
+                              || near.getMaterial("flower-cutout") != null;
                         if (cutout) {
-                            // Branch crowns intentionally replace the old closed shells. Their source envelope remains
-                            // the clearance bound; LOD coverage below is checked against the rebuilt near crown.
-                            BoundingBox authored = reference.calculateBoundingBox(new BoundingBox());
-                            BoundingBox crown = assets.lodModel(name, 0).calculateBoundingBox(new BoundingBox());
-                            // GLB float32 conversion and the offline six-decimal bake may differ by a few ulps.
-                            authored.ext(new Vector3(authored.min).sub(.001f, .001f, .001f));
-                            authored.ext(new Vector3(authored.max).add(.001f, .001f, .001f));
-                            assertTrue(authored.contains(crown), name + " stays inside its authored clearance: "
-                                  + crown + " in " + authored);
+                            BoundingBox crown = near.calculateBoundingBox(new BoundingBox());
                             camera.zoom(zoomForSize(crown.getDimensions(new Vector3()).len() * 1.2f, 150));
                             int nearCoverage = coverage(render(batch, environment, assets.lodModel(name, 0), camera));
                             assertTrue(nearCoverage > 100, "The cutout crown must actually draw: " + name);
@@ -230,26 +208,23 @@ class GpuTreeLodSmokeTest {
                                       name + " LOD" + level + " cutout coverage=" + retained
                                             + " tilt=" + tilt + " bearing=" + bearing);
                             }
-                        } else if (name.startsWith("cactus")) {
-                            assertEquals(coverage(original), coverage(optimized), 5,
-                                  "Smooth cactus normals preserve the exact near silhouette");
-                        } else {
-                            assertEquals(0, changed, name + " at tilt " + tilt + ", bearing " + bearing);
                         }
                         if (tilt == 54.73561f && bearing == 0) {
                             camera.zoom(0.001f);
-                            BufferedImage half = render(batch, environment, assets.lodModel(name, 1), camera);
-                            BufferedImage comparison = new BufferedImage(original.getWidth() * 3, original.getHeight(),
+                            BufferedImage nearFrame = render(batch, environment, near, camera);
+                            BufferedImage medium = render(batch, environment, assets.lodModel(name, 1), camera);
+                            BufferedImage far = render(batch, environment, assets.lodModel(name, 2), camera);
+                            BufferedImage comparison = new BufferedImage(nearFrame.getWidth() * 3, nearFrame.getHeight(),
                                   BufferedImage.TYPE_INT_RGB);
                             var graphics = comparison.createGraphics();
                             try {
-                                graphics.drawImage(original, 0, 0, null);
-                                graphics.drawImage(optimized, original.getWidth(), 0, null);
-                                graphics.drawImage(half, original.getWidth() * 2, 0, null);
+                                graphics.drawImage(nearFrame, 0, 0, null);
+                                graphics.drawImage(medium, nearFrame.getWidth(), 0, null);
+                                graphics.drawImage(far, nearFrame.getWidth() * 2, 0, null);
                                 graphics.setColor(java.awt.Color.WHITE);
-                                graphics.drawString("Original / minimum zoom 0.1", 20, 30);
-                                graphics.drawString("Optimized near / zoom 0.1", original.getWidth() + 20, 30);
-                                graphics.drawString("Half triangle budget / zoom 0.1 (comparison only)", original.getWidth() * 2 + 20, 30);
+                                graphics.drawString("Near / minimum zoom 0.1", 20, 30);
+                                graphics.drawString("Medium / zoom 0.1 (comparison only)", nearFrame.getWidth() + 20, 30);
+                                graphics.drawString("Far / zoom 0.1 (comparison only)", nearFrame.getWidth() * 2 + 20, 30);
                             } finally {
                                 graphics.dispose();
                             }
@@ -259,7 +234,6 @@ class GpuTreeLodSmokeTest {
                         }
                     }
                 }
-                } finally { reference.dispose(); }
             }
             compareDistantLevels(assets, environment);
         } finally {

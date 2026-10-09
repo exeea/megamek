@@ -76,11 +76,46 @@ board's Z-up/display-color convention. Preserve node and part names: descriptors
 damage and animation use them to find rigid geometry.
 
 The importer rejects skins, animation clips, morph targets, external geometry
-buffers, required extensions and non-opaque or double-sided materials.
-Back faces must be explicit geometry. Diffuse textures may be embedded PNG/JPEG
-data or local relative images inside the permitted model directory.
-`ModelTextures` shares them by image and sampler; `paint` receives runtime
-camouflage while `detail` retains authored artwork.
+buffers, required extensions and blended materials. Opaque and alpha-tested
+materials are supported; double-sided faces get reversed geometry and normals.
+Textures may be embedded PNG/JPEG data or local relative images inside the
+permitted model directory. `ModelTextures` shares them by image and sampler;
+`paint` receives runtime camouflage while `detail` retains authored artwork.
+
+Imported models in the main 3D board use authored glTF roughness and metallic
+factors, plus an optional metallic-roughness map (linear G/B channels multiplied
+by the factors). Defaults follow glTF: both factors are one when absent. The
+generic kit writer defaults to roughness one / metalness zero; the unit builder
+authors Atlas and Warhammer paint at roughness 0.68, with mixed detail still at one.
+Normal maps and occlusion maps (linear R) use the original mesh UVs, including on camouflaged
+units; only `TEXCOORD_0`, normal scale one and occlusion strength one are accepted.
+Normals use a derivative tangent frame; degenerate UVs retain the geometric
+normal. Occlusion shades indirect light, not direct sunlight or emission.
+
+`GpuModelMaterial` carries these values through instance copies and static prop
+batching. `model-surface.glsl` shares direct GGX reflection with terrain and foliage,
+using the board's sun and sky/ground hemisphere. Metal reflections take their
+colour from albedo; dielectric highlights remain neutral. Orthographic top and
+isometric cameras use parallel view rays. Roughness is bounded to 0.15–0.98 for
+board-scale highlights. Ambient metal reflection is a broad hemisphere
+approximation, without a cubemap or reflections of nearby objects; this is not
+a complete glTF PBR renderer.
+
+The sibling `mm-data/tools/glb_geometry.py` writer/reader preserves `roughness`,
+`metallic` and a `METALLIC_ROUGHNESS` texture role in its authoring dictionaries.
+These controls do not retune existing assets automatically. Keep paint
+nonmetallic even when the underlying object is metal, and author exposed metal
+as a separate material where its geometry already permits it.
+
+`mm-data/tools/model_surfaces.py` owns the generated kit's starting values.
+The first deployed calibration covers the Atlas and Warhammer bodies only;
+their paint stays nonmetallic and `detail` stays matte because it combines
+metal, rubber, glass and other surfaces. The shared selection also scopes complete
+kit rebuilds: other bodies, equipment, troops and vehicles retain their existing
+defaults. All LODs of a reviewed body share its surface settings.
+`calibrate_model_materials.py --apply`
+reproduces the small reference update without changing geometry or embedded
+images and updates the two manifest hashes; omit `--apply` to preview it.
 
 `RigidGlb.loadLods` requires top-level identity groups named after the component:
 `atlas.glb` contains `atlas-lod0`, optionally `atlas-lod1` and `atlas-lod2`.

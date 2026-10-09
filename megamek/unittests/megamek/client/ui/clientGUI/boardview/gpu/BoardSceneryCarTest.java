@@ -33,13 +33,15 @@ class BoardSceneryCarTest {
             String variant = VARIANTS.get(index);
             String name = "scenery/fluff/cars_" + variant;
             var layout = BoardSceneryLayouts.layout(name);
-            var cars = layout.components().stream().filter(c -> c.asset().startsWith("scenery/components/car-")).toList();
+            var cars = layout.components().stream().filter(c -> c.asset().startsWith("scenery/vehicles/car")).toList();
             assertEquals(COUNTS.get(index).intValue(), cars.size(), variant);
             assertFalse(Files.exists(root.resolve(name + ".glb")), "No duplicate car geometry stays in the layout");
             BufferedImage reference = ImageIO.read(root.resolve("tileset/fluff/cars_" + variant + ".gif").toFile());
             for (var car : cars) {
                 assertEquals(BoardScene.FeatureKind.SCENERY, car.kind());
                 var data = RigidGlb.loadLods(new FileHandle(root.resolve(car.asset() + ".glb").toFile()), root).getFirst();
+                // The row's paint replaces the shared car's paint slot, as the renderer replaces it.
+                RigidGlb.recolour(data, car.colours());
                 float[] vertices = data.meshes.first().vertices;
                 float red = vertices[6], green = vertices[7], blue = vertices[8];
                 if (Math.max(red, Math.max(green, blue)) - Math.min(red, Math.min(green, blue)) > .01f) { continue; }
@@ -65,7 +67,12 @@ class BoardSceneryCarTest {
                   "The vegetation switch cannot randomize parked cars");
         }
         assertEquals(16, neutralCars);
-        assertEquals(BoardSceneryLayouts.layout("scenery/fluff/cars_7"), BoardSceneryLayouts.layout("scenery/fluff/cars_2b"));
-        assertEquals(BoardSceneryLayouts.layout("scenery/fluff/cars_8"), BoardSceneryLayouts.layout("scenery/fluff/cars_3b"));
+        // The road-free 2b/3b sprites are 7/8 without the lane.
+        assertEquals(objects("scenery/fluff/cars_7"), objects("scenery/fluff/cars_2b"));
+        assertEquals(objects("scenery/fluff/cars_8"), objects("scenery/fluff/cars_3b"));
+    }
+
+    private static List<BoardSceneryLayouts.Component> objects(String layout) {
+        return BoardSceneryLayouts.layout(layout).components().stream().filter(c -> !c.decal()).toList();
     }
 }

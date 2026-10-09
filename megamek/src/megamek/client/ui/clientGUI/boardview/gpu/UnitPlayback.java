@@ -30,6 +30,8 @@ final class UnitPlayback {
     private BoardScene.Animation active;
     private UnitAttack attack;
     private final List<UnitAttack> attacks = new ArrayList<>();
+    /** Completed/instant shots wait only until the next render consumes their persistent cosmetic impacts. */
+    private final Map<UUID, UnitAttack> completedAttacks = new LinkedHashMap<>();
     private final UnitVolley volley = new UnitVolley();
     private record Reaction(BoardScene.Movement movement, double start) { }
     private final List<Reaction> reactions = new ArrayList<>();
@@ -247,6 +249,7 @@ final class UnitPlayback {
             }
             active = null;
             attack = null;
+            attacks.forEach(this::completeAttack);
             attacks.clear();
             reactions.clear();
             volley.clear();
@@ -268,6 +271,19 @@ final class UnitPlayback {
     UnitAttack attack() { return review != null ? review : attack; }
 
     List<UnitAttack> attacks() { return review != null ? reviewed : visibleAttacks; }
+
+    List<UnitAttack> takeCompletedAttacks() {
+        var result = List.copyOf(completedAttacks.values());
+        completedAttacks.clear();
+        return result;
+    }
+
+    private void completeAttack(UnitAttack shot) {
+        if (!GpuGroundDamage.COMBAT_SCARS || !shot.shot() || shot.defensive()) { return; }
+        shot.seconds = shot.duration;
+        completedAttacks.putIfAbsent(shot.event.result().id(), shot);
+        if (completedAttacks.size() > MAX_PENDING_EVENTS) { completedAttacks.remove(completedAttacks.keySet().iterator().next()); }
+    }
 
     /** The live movement under way; none while a review presents an attack. */
     BoardScene.Movement movement() {
@@ -418,6 +434,7 @@ final class UnitPlayback {
     }
 
     void finish() {
+        attacks.forEach(this::completeAttack);
         motions.values().forEach(UnitMotion::finish);
         if (!completed) { reactions.forEach(reaction -> completeMovement.accept(reaction.movement())); }
         if (active instanceof BoardScene.Movement movement && !completed) {
@@ -434,6 +451,8 @@ final class UnitPlayback {
                 completeMovement.accept(movement);
             } else if (event instanceof BoardScene.Conversion change) {
                 settleConversion(change);
+            } else if (event instanceof BoardScene.Combat combat) {
+                completeAttack(new UnitAttack(combat));
             }
         }
         resetQueue();
@@ -456,6 +475,7 @@ final class UnitPlayback {
     }
 
     void clear() {
+        completedAttacks.clear();
         resetQueue();
         review(null);
         paused = false;

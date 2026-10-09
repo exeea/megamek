@@ -2,33 +2,31 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
-/** A Tactical View icon is sized in board units: a fixed share of its hex, inside the hex at every facing. */
+/** Tactical sprites preserve their aspect ratio and board-space size while turning with the unit. */
 class GpuUnitIconsTest {
     @Test
-    void iconsFillTheSameShareOfTheirHexAndStayInsideItAtEveryFacing() {
+    void spritesKeepTheirAspectAndHexShareAtEveryFacing() {
         Coords hex = new Coords(5, 5);
         Vector3 center = BoardGeometry.center(hex, 0);
-        // 0.7 hex heights (0.6 hex widths), as the classic 2D board sizes its units against the hex (user
-        // correction; the mock's 24-58 pixel screen clamp is not used). The camera never enters the size, so the
-        // zoom invariance through the real render is left to GpuTacticalViewSmokeTest.verifyScreenSize.
-        Matrix4 north = GpuUnitIcons.place(new Matrix4(), center, 0, 0);
-        float side = new Vector3(-.5f, 0, 0).mul(north).dst(new Vector3(.5f, 0, 0).mul(north));
-        assertEquals(.6f, side / BoardGeometry.WIDTH, .006f, "Icon side per hex width");
-        for (int facing = 0; facing < 360; facing += 15) {
-            Matrix4 icon = GpuUnitIcons.place(new Matrix4(), center, 0, facing);
-            for (float x : new float[] { -.5f, .5f }) {
-                for (float y : new float[] { -.5f, .5f }) {
-                    Vector3 corner = new Vector3(x, y, 0).mul(icon);
-                    assertTrue(BoardGeometry.contains(hex, corner.x, corner.y),
-                          "Corner " + corner + " of the icon turned to " + facing + " degrees lies inside its hex");
-                }
+        for (int[] pixels : new int[][] { { 84, 72 }, { 40, 80 }, { 120, 40 } }) {
+            float scale = GpuUnitIcons.spriteScale(pixels[0], pixels[1]);
+            float halfWidth = pixels[0] * scale / 2, halfHeight = pixels[1] * scale / 2;
+            for (int facing = 0; facing < 360; facing += 15) {
+                Matrix4 icon = GpuUnitIcons.place(new Matrix4(), center, 0, facing);
+                float width = new Vector3(-halfWidth, 0, 0).mul(icon)
+                      .dst(new Vector3(halfWidth, 0, 0).mul(icon));
+                float height = new Vector3(0, -halfHeight, 0).mul(icon)
+                      .dst(new Vector3(0, halfHeight, 0).mul(icon));
+                assertEquals(.9f, Math.max(width / BoardGeometry.width(), height / BoardGeometry.height()), .0001f,
+                      "The limiting sprite dimension fills 90% of the hex");
+                assertEquals(pixels[0] / (float) pixels[1], width / height, .0001f,
+                      "Rotating the sprite preserves its aspect ratio");
             }
         }
     }

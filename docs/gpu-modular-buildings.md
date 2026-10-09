@@ -90,9 +90,11 @@ footprint is extruded through the stack height and passed to `GpuBuildingInterio
 therefore use their intersection rather than allowing full-height columns to extend outside any storey.
 Supports require their center and all four corners to lie inside the footprint. The roof cap's furniture does
 not increase occupied floor height. Generated floors and struts enter the render/depth passes only while that
-building is faded because of an occupant. Leaving, or disabling transparency, hides them again. They do not
-enter the exterior shadow pass, which retains the authored opaque shell. Existing occupancy cutaways fade
-walls and upper slabs while the occupied/lower floors and struts remain opaque.
+building is faded because of an occupant or an interior-floor hover. Leaving, or disabling transparency, hides them
+again. They do not enter the exterior shadow pass, which retains the authored opaque shell. Existing occupancy cutaways
+fade walls and upper slabs while the occupied/lower floors and struts remain opaque. Hover cutaways reveal the selected
+interior floor and fade its walls; the top storey's cutaway also fades the entire roof cap and trim. Hovering the roof
+itself does not start a cutaway.
 
 Picking keeps one triangle set per LOD0 module and offsets the ray for each story. It does not retain expanded
 triangles for every possible building combination. Picking is independent of the displayed LOD.

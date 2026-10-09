@@ -25,6 +25,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.utils.Align;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiConfirmation;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay.FiringCommand;
@@ -37,7 +38,7 @@ import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
 
 /**
- * Command dock, bottom centre (C.1 G6): a head line, an option row, the confirm strip, an action row and a foot line,
+ * Command dock, bottom centre (C.1 G6): a head line, an option row, an action row and a foot line,
  * in one variant per phase and turn (plan C.2). It presents the snapshots and runs the phase's own commands, the
  * movement, fire and physical services, the playback history and the camera's follow flag; the client keeps every
  * rule.
@@ -46,20 +47,27 @@ final class GpuCommandDock implements GpuHud.Component {
     /** The dock's variants (plan C.2); GENERIC is every phase and turn the prototype does not design. */
     private enum Variant { INITIATIVE, PLAN, WAITING, FIRE, PHYSICAL, NO_PHYSICAL, PLAYBACK, GENERIC }
 
-    /** An open confirm strip (A.8 H5, H6): a twist in that direction, which clears the queued attacks, or Resolve. */
-    private record Confirm(boolean twist, int direction) { }
+    /** The action awaiting an explicit choice beside its triggering button. */
+    private enum Confirm {
+        TWIST_LEFT, TWIST_RIGHT, RESOLVE, HOLD_ALL;
+
+        boolean twist() {
+            return this == TWIST_LEFT || this == TWIST_RIGHT;
+        }
+    }
 
     /**
      * What decides the dock's cells; they are rebuilt only when it changes. {@code buttons} are the ids of the option
      * row's physical options or phase commands.
      */
     private record Shape(Variant variant, List<String> buttons, boolean more, boolean primary, boolean secondary,
-          boolean confirm, boolean stop, boolean legend, boolean steps) { }
+          boolean stop, boolean legend, boolean steps, boolean backwards) { }
 
     /**
      * The More popover's content (plan A.7 G14, A.8 H38, C.2), which G12 shows above the More button: a title and
      * subtitle, the dock's own items, and MegaMek's other phase commands after a separator (an unavailable one says so
-     * in its detail).
+     * in its detail). Movement instead groups all available actions before all unavailable actions and omits the
+     * subtitle.
      */
     record More(String title, String subtitle, List<BoardScene.Command> items, List<BoardScene.Command> commands) {
         More {
@@ -124,8 +132,8 @@ final class GpuCommandDock implements GpuHud.Component {
     private final Table row2 = new Table();
     private final Table foot = new Table();
     private final Cell<Actor> row1Cell;
-    private final Cell<Actor> confirmCell;
     private final Cell<Actor> row2Cell;
+    private final Cell<Table> footCell;
     private final UiButton main;
     private final UiButton secondary;
     private final UiButton more;
@@ -137,6 +145,9 @@ final class GpuCommandDock implements GpuHud.Component {
     private final UiButton turnRight;
     private final UiButton undo;
     private final UiButton waypoint;
+    private final UiKit.Checkbox backwards;
+    private final UiButton clearRoute;
+    private final UiButton holdAll;
     // Weapon declaration.
     private final UiButton twistLeft;
     private final UiButton twistRight;
@@ -145,10 +156,7 @@ final class GpuCommandDock implements GpuHud.Component {
     private final Label torsoValue;
     private final UiButton clear;
     private final UiButton resolve;
-    private final Table confirm = new Table();
-    private final Label confirmText;
-    private final UiButton confirmYes;
-    private final UiButton confirmNo;
+    private final UiConfirmation confirmation;
     // Another player's turn.
     private final Container<Label> waiting;
     // Playback and review.
@@ -177,6 +185,9 @@ final class GpuCommandDock implements GpuHud.Component {
     private int chosenTarget = Entity.NONE;
     private Confirm open;
     private int confirmActor = Entity.NONE;
+    private int confirmTurn;
+    private int confirmRound;
+    private GamePhase confirmPhase;
     private GpuHud.Inputs inputs;
     private Variant variant = Variant.GENERIC;
     private Shape shown;
@@ -238,6 +249,15 @@ final class GpuCommandDock implements GpuHud.Component {
         waypoint = button("hud-mini", null, text("GpuBoard.hud.dock.waypoint"), null, "dock-waypoint");
         onChange(waypoint, () -> source.moves().pinDestination());
         ui.tip(waypoint).getActor().setText(text("GpuBoard.hud.dock.waypointTip"));
+        backwards = ui.checkbox(text("GpuBoard.hud.dock.walkBackwards"), false);
+        backwards.setName("dock-backwards");
+        onChange(backwards, () -> source.moves().setMode(GpuMovePlan.Mode.BACK));
+        clearRoute = button("hud-mini", null, "X", null, "dock-clear-route");
+        onChange(clearRoute, () -> source.moves().clearRoute());
+        ui.tip(clearRoute).getActor().setText(text("GpuBoard.hud.dock.clearRoute"));
+        holdAll = button("hud-mini", null, text("GpuBoard.hud.dock.holdAllButton"), null, "dock-hold-all");
+        onChange(holdAll, () -> requestConfirmation(Confirm.HOLD_ALL));
+        ui.tip(holdAll).getActor().setText(text("GpuBoard.hud.dock.holdAll"));
 
         // Weapons: .b.wide with the icon before (left) or after (right) the caption, 7 units apart, the torso
         // read-out between them.
@@ -261,21 +281,8 @@ final class GpuCommandDock implements GpuHud.Component {
         onChange(resolve, this::resolve);
         ui.tip(resolve).getActor().setText(text("GpuBoard.hud.dock.resolvePhaseTip"));
 
-        // .confirm: an amber outline around a warning, the question and two mini buttons.
-        confirm.setName("dock-confirm");
-        confirm.setBackground(ui.skin.newDrawable("button-auto", UiTheme.alpha(UiTheme.AMBER, .6f)));
-        confirm.pad(7, 9, 7, 9);
-        confirmText = ui.label("", "hud-body", 12, UiTheme.TEXT);
-        confirmText.setWrap(true);
-        confirmText.setName("dock-confirm-text");
-        confirmYes = button("hud-mini", null, "", null, "dock-confirm-yes");
-        confirmNo = button("hud-mini", null, "", null, "dock-confirm-no");
-        onChange(confirmYes, this::confirmed);
-        onChange(confirmNo, this::cancel);
-        confirm.add(ui.icon("warn", 16, UiTheme.AMBER));
-        confirm.add(confirmText).growX().minWidth(0).padLeft(8);
-        confirm.add(confirmYes).padLeft(8);
-        confirm.add(confirmNo).padLeft(8);
+        // A floating card on the popover layer, separate from the dock's layout.
+        confirmation = new UiConfirmation(ui, "dock-confirm", () -> open = null);
 
         Label waitingLabel = ui.label(UiTheme.upper(text("GpuBoard.hud.dock.waitingForOpponent")), "hud-main",
               17, WAITING);
@@ -326,11 +333,9 @@ final class GpuCommandDock implements GpuHud.Component {
         root.add(head).growX().padBottom(7).row();
         row1Cell = root.add((Actor) null).growX();
         root.row();
-        confirmCell = root.add((Actor) null).growX();
-        root.row();
         row2Cell = root.add((Actor) null).growX();
         root.row();
-        root.add(foot).growX().minHeight(26);
+        footCell = root.add(foot).growX().minHeight(26);
     }
 
     /** A named button whose caption and sub-label end in an ellipsis instead of widening the dock. */
@@ -401,8 +406,9 @@ final class GpuCommandDock implements GpuHud.Component {
         boolean stopShown = phase.isMovement() && panels.move().holdingRemaining() > 0
               || (phase.isFiring() || phase.isTargeting()) && panels.fire().autoDeclareRemaining() > 0;
         Shape shape = new Shape(variant, buttons, hasMore(), variant != Variant.WAITING
-              && (variant != Variant.GENERIC || done() != null), secondaryShown, open != null, stopShown,
-              variant == Variant.PLAN && panels.move().route().isEmpty(), stepsShown());
+              && (variant != Variant.GENERIC || done() != null), secondaryShown, stopShown,
+              variant == Variant.PLAN && panels.move().route().isEmpty(), stepsShown(),
+              variant == Variant.PLAN && enabled(command(MoveCommand.MOVE_BACK_UP.getCmd())));
         if (!shape.equals(shown)) {
             shown = shape;
             layout(shape);
@@ -417,6 +423,9 @@ final class GpuCommandDock implements GpuHud.Component {
             case PLAYBACK -> showPlayback();
             case GENERIC -> showGeneric();
         }
+        // The last firing declaration has no status footer; keep any available footer controls.
+        boolean footerShown = variant != Variant.FIRE || !footText.getText().isEmpty() || footRight.hasChildren();
+        footCell.setActor(footerShown ? foot : null).minHeight(footerShown ? 26 : 0);
         // The hold and auto-declare modes (A.7 G15, A.8 H6) replace the span with their count, beside Stop.
         if (phase.isMovement() && panels.move().holdingRemaining() > 0) {
             span(text("GpuBoard.hud.dock.holding", panels.move().holdingRemaining()), UiTheme.AMBER);
@@ -426,7 +435,7 @@ final class GpuCommandDock implements GpuHud.Component {
         if (shape.steps()) {
             stepsTip.getActor().setText(String.join("\n", panels.phase().turnDetails()));
         }
-        // Wrapped labels (the confirm strip's question, an unavailable option's reason) measure their height at their
+        // Wrapped labels (an unavailable option's reason) measure their height at their
         // width: laid out at its current width, the dock gives the HUD its settled height in this very frame.
         if (root.getWidth() > 0) {
             root.validate();
@@ -463,16 +472,28 @@ final class GpuCommandDock implements GpuHud.Component {
     }
 
     /**
-     * Drops a confirm strip and chosen options that no longer belong to the shown actor, target and orders: a twist
-     * strip without queued attacks, the resolve disclosure without another unit to declare.
+     * Drops a confirmation and chosen options that no longer belong to the shown actor, target and orders: a twist
+     * without queued attacks, the resolve disclosure without another unit to declare, or Hold all when the
+     * movement turn changes or holding becomes unavailable.
      */
     private void forget() {
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
-        if (variant != Variant.FIRE || fire.actorId() != confirmActor
-              || open != null && (open.twist() ? fire.attacks().isEmpty() : othersToDeclare(fire) == 0)) {
-            open = null;
+        GpuMovePlan.Snapshot move = inputs.frame().panels().move();
+        if (open != null && (inputs.dialog() != null || state.dialog != GpuHudState.Dialog.NONE || state.overview
+              || inputs.frame().status().turnIndex() != confirmTurn
+              || inputs.frame().status().round() != confirmRound
+              || inputs.frame().status().phase() != confirmPhase)) {
+            cancel();
         }
-        confirmActor = fire.actorId();
+        if (open == Confirm.HOLD_ALL) {
+            if (variant != Variant.PLAN || move.entityId() != confirmActor || !enabled(skip())
+                  || move.holdingRemaining() > 0) {
+                cancel();
+            }
+        } else if (variant != Variant.FIRE || fire.actorId() != confirmActor
+              || open != null && (open.twist() ? fire.attacks().isEmpty() : othersToDeclare(fire) == 0)) {
+            cancel();
+        }
         GpuPhysicalOptions.Snapshot physical = inputs.frame().panels().physical();
         if (variant != Variant.PHYSICAL || physical.actorId() != chosenActor || physical.targetId() != chosenTarget) {
             chosen.clear();
@@ -489,6 +510,9 @@ final class GpuCommandDock implements GpuHud.Component {
         head.add(title).left().minWidth(0);
         head.add().expandX();
         head.add(span).right().padLeft(10);
+        if (shape.backwards()) {
+            head.add(backwards).padLeft(10);
+        }
         if (shape.stop()) {
             head.add(stop).padLeft(8);
         }
@@ -571,14 +595,15 @@ final class GpuCommandDock implements GpuHud.Component {
             }
         }
         row1Cell.setActor(row1.getCells().isEmpty() ? null : row1).padBottom(row1.getCells().isEmpty() ? 0 : GAP);
-        confirmCell.setActor(shape.confirm() ? confirm : null).padBottom(shape.confirm() ? GAP : 0);
         row2Cell.setActor(row2.getCells().isEmpty() ? null : row2);
 
         foot.clearChildren();
         footRight.clearChildren();
         foot.add(shape.legend() ? legend : footLine).growX().minWidth(0);
         if (shape.variant() == Variant.PLAN) {
+            footRight.add(holdAll).padLeft(8);
             footRight.add(waypoint).padLeft(8);
+            footRight.add(clearRoute).padLeft(8);
         } else if (shape.variant() == Variant.PLAYBACK) {
             footRight.add(follow).padLeft(8);
         }
@@ -595,7 +620,7 @@ final class GpuCommandDock implements GpuHud.Component {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         // The start-of-game deployment's initiative belongs to no round.
         head(status.round() > 0 ? text("GpuBoard.hud.dock.initiativeHead", status.round())
-              : text("GpuBoard.hud.phase.initiative"), false);
+              : text("GpuBoard.hud.phase.deploymentOrder"), false);
         span(initiativeResult(status), UiTheme.MINT);
         main(text("GpuBoard.hud.dock.continue"), enabled(done()));
         secondary(text("GpuBoard.hud.dock.rerollInitiative"), true);
@@ -614,14 +639,15 @@ final class GpuCommandDock implements GpuHud.Component {
         }
         boolean youWon = winner.side() == GpuBattleStatus.Side.OWN;
         boolean youFirst = first.side() == GpuBattleStatus.Side.OWN;
+        String prefix = "GpuBoard.hud.dock." + (status.round() > 0 ? "initiative" : "deployment");
         if (youWon && youFirst) {
-            return text("GpuBoard.hud.dock.initiativeYouWonFirst");
+            return text(prefix + "YouWonFirst");
         } else if (youWon) {
-            return text("GpuBoard.hud.dock.initiativeYouWon", first.name());
+            return text(prefix + "YouWon", first.name());
         } else if (youFirst) {
-            return text("GpuBoard.hud.dock.initiativeYouFirst", winner.name());
+            return text(prefix + "YouFirst", winner.name());
         }
-        return text("GpuBoard.hud.dock.initiativeResult", winner.name(), first.name());
+        return text(prefix + "Result", winner.name(), first.name());
     }
 
     /** The local movement plan (A.7 G2, G9-G16): modes, facing, undo, confirm, hold and the route's foot line. */
@@ -630,8 +656,8 @@ final class GpuCommandDock implements GpuHud.Component {
         GpuBattleStatus.UnitStatus unit = state.presented(move.entityId());
         boolean route = !move.route().isEmpty();
         head(text("GpuBoard.hud.dock.movementPlan", name(unit)), false);
-        span(text(route ? "GpuBoard.hud.dock.draftOrders" : "GpuBoard.hud.dock.clickHexToPlan"),
-              route ? UiTheme.MINT : UiTheme.MUTED);
+        span("", UiTheme.MUTED);
+        backwards.ticked(move.mode() == GpuMovePlan.Mode.BACK);
         GpuMovePlan.Band band = route ? move.route().getLast().band() : null;
         for (int i = 0; i < MODES.size(); i++) {
             GpuMovePlan.Mode mode = MODES.get(i);
@@ -669,6 +695,12 @@ final class GpuCommandDock implements GpuHud.Component {
         main(text("GpuBoard.hud.dock.confirmMove"), route && enabled(done()));
         secondary(text("GpuBoard.hud.dock.holdPosition"), enabled(skip()));
         waypoint.setDisabled(!move.canPin());
+        clearRoute.setDisabled(!route);
+        holdAll.setDisabled(!enabled(skip()) || move.holdingRemaining() > 0);
+        if (open == Confirm.HOLD_ALL) {
+            confirmation.text(text("GpuBoard.hud.dock.holdAllTitle"), text("GpuBoard.hud.dock.holdAllConfirm"),
+                  text("GpuBoard.hud.dock.holdAllButton"), text("Cancel"));
+        }
         // The plan's facing: the route's last, or the unit's own without a route (E2b).
         String facing = GpuHudKit.facing(move.facing());
         if (route) {
@@ -700,7 +732,7 @@ final class GpuCommandDock implements GpuHud.Component {
 
     /**
      * The local weapon declaration (A.8 H3-H7): the orders' count, the twist and its read-out, Clear, Fire weapons or
-     * Hold fire, Resolve phase, the confirm strip and the units left to declare.
+     * Hold fire, Resolve phase, the confirmation prompt and the units left to declare.
      */
     private void showFire() {
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
@@ -709,7 +741,7 @@ final class GpuCommandDock implements GpuHud.Component {
         String name = name(state.presented(fire.actorId()));
         head(targets > 0 ? text("GpuBoard.hud.dock.weaponAttacksTargets", name, attacks, targets)
               : text("GpuBoard.hud.dock.weaponAttacks", name, attacks), false);
-        span(attacks > 0 ? "" : text("GpuBoard.hud.dock.draftOrders"), UiTheme.MINT);
+        span("", UiTheme.MINT);
         twistLeft.setDisabled(!fire.canTwistLeft());
         twistRight.setDisabled(!fire.canTwistRight());
         // The read-out's word is the service's ("Torso", or "Turret" for a turret); its value follows the twist.
@@ -723,11 +755,11 @@ final class GpuCommandDock implements GpuHud.Component {
         resolve.setDisabled(fire.autoDeclareRemaining() > 0);
         int others = othersToDeclare(fire);
         if (open != null) {
-            confirmText.setText(open.twist() ? text("GpuBoard.hud.dock.twistConfirm", attacks)
-                  : text("GpuBoard.hud.dock.resolveConfirm", others));
-            confirmYes.setText(UiTheme.upper(text(open.twist() ? "GpuBoard.hud.dock.twistAnyway"
-                  : "GpuBoard.hud.dock.resolve")));
-            confirmNo.setText(UiTheme.upper(text(open.twist() ? "GpuBoard.hud.dock.keepAttacks" : "Cancel")));
+            confirmation.text(text(open.twist() ? "GpuBoard.hud.dock.twistTitle" : "GpuBoard.hud.dock.resolveTitle"),
+                  open.twist() ? text("GpuBoard.hud.dock.twistConfirm", attacks)
+                        : text("GpuBoard.hud.dock.resolveConfirm", others),
+                  text(open.twist() ? "GpuBoard.hud.dock.twistAnyway" : "GpuBoard.hud.dock.resolve"),
+                  text(open.twist() ? "GpuBoard.hud.dock.keepAttacks" : "Cancel"));
         }
         foot("", text("GpuBoard.hud.dock.fireFoot", others));
     }
@@ -896,12 +928,12 @@ final class GpuCommandDock implements GpuHud.Component {
         if (othersToDeclare(inputs.frame().panels().fire()) == 0) {
             source.fire().resolvePhase();
         } else {
-            open = new Confirm(false, 0);
+            requestConfirmation(Confirm.RESOLVE);
         }
     }
 
     /**
-     * Torso twist (TWIST_LEFT -1, TWIST_RIGHT +1) through the confirm strip while attacks are queued (A.8 H5); at the
+     * Torso twist (TWIST_LEFT -1, TWIST_RIGHT +1) through confirmation while attacks are queued (A.8 H5); at the
      * limit a toast says so.
      */
     void twist(int direction) {
@@ -914,26 +946,63 @@ final class GpuCommandDock implements GpuHud.Component {
         } else if (fire.attacks().isEmpty()) {
             source.fire().twist(direction);
         } else {
-            open = new Confirm(true, direction);
+            requestConfirmation(direction < 0 ? Confirm.TWIST_LEFT : Confirm.TWIST_RIGHT);
         }
     }
 
-    /** The confirm strip's first button: twist anyway, or resolve. */
-    private void confirmed() {
-        Confirm confirmed = open;
-        open = null;
-        if (confirmed != null && confirmed.twist()) {
-            source.fire().twist(confirmed.direction());
-        } else if (confirmed != null) {
-            source.fire().resolvePhase();
+    /** The shared non-modal prompt, hosted in the HUD's popover layer. */
+    UiConfirmation confirmation() {
+        return confirmation;
+    }
+
+    private UiButton confirmAnchor(Confirm action) {
+        return switch (action) {
+            case HOLD_ALL -> holdAll;
+            case TWIST_LEFT -> twistLeft;
+            case TWIST_RIGHT -> twistRight;
+            case RESOLVE -> resolve;
+        };
+    }
+
+    private void requestConfirmation(Confirm action) {
+        menu.cancel();
+        if (!confirmation.toggle(confirmAnchor(action), () -> confirmed(action))) {
+            return;
+        }
+        open = action;
+        confirmActor = action == Confirm.HOLD_ALL ? inputs.frame().panels().move().entityId()
+              : inputs.frame().panels().fire().actorId();
+        confirmTurn = inputs.frame().status().turnIndex();
+        confirmRound = inputs.frame().status().round();
+        confirmPhase = inputs.frame().status().phase();
+        if (action == Confirm.HOLD_ALL) {
+            showPlan();
+        } else {
+            showFire();
         }
     }
 
-    /** One Esc step (C.4), and the strip's second button: closes the confirm strip; true when it was open. */
+    /** Called after the HUD places the dock, including after resize. Opening a card never reflows the dock. */
+    void layoutConfirmation(float width, float height) {
+        if (open != null && confirmAnchor(open).isDisabled()) {
+            cancel();
+        }
+        confirmation.resize(width, height);
+    }
+
+    /** Runs the explicitly confirmed action, closing the card before invoking the existing game command. */
+    private void confirmed(Confirm action) {
+        switch (action) {
+            case TWIST_LEFT -> source.fire().twist(-1);
+            case TWIST_RIGHT -> source.fire().twist(1);
+            case RESOLVE -> source.fire().resolvePhase();
+            case HOLD_ALL -> source.moves().holdAll();
+        }
+    }
+
+    /** Cancels without acting; the shared prompt also handles outside clicks and trigger toggling. */
     boolean cancel() {
-        boolean wasOpen = open != null;
-        open = null;
-        return wasOpen;
+        return confirmation.cancel();
     }
 
     /** Clear and the CLEAR_ORDERS key (A.8 H6, Delete): every queued attack, and the armed weapon with them (r2 5). */
@@ -989,10 +1058,10 @@ final class GpuCommandDock implements GpuHud.Component {
     }
 
     /**
-     * The More popover of the shown variant, or null without one: the movement plan's own items and MegaMek's other
-     * movement commands (A.7 G14), the weapon declaration's MegaMek extras (H38), the physical options beyond the
-     * option row and the physical phase's other commands, or the phase commands beyond the generic row (C.2). A variant
-     * of one unit's turn ends its own items with that unit's record (unit panel design 2.2).
+     * The More popover of the shown variant, or null without one: the remaining movement commands grouped by
+     * availability, the weapon declaration's MegaMek extras (H38), the physical options beyond the option row and the
+     * physical phase's other commands, or the phase commands beyond the generic row (C.2). Firing and physical turns
+     * also offer the unit's record (unit panel design 2.2).
      */
     More more() {
         if (inputs == null || !hasMore()) {
@@ -1001,19 +1070,10 @@ final class GpuCommandDock implements GpuHud.Component {
         List<BoardScene.Command> items = new ArrayList<>();
         return switch (variant) {
             case PLAN -> {
-                GpuMovePlan.Snapshot move = inputs.frame().panels().move();
-                boolean back = move.mode() == GpuMovePlan.Mode.BACK;
-                items.add(item("dock.walkBackwards", text("GpuBoard.hud.dock.walkBackwards"),
-                      back ? text("GpuBoard.hud.dock.on") : "", enabled(command(MoveCommand.MOVE_BACK_UP.getCmd())),
-                      () -> source.moves().setMode(GpuMovePlan.Mode.BACK)));
-                items.add(item("dock.clearRoute", text("GpuBoard.hud.dock.clearRoute"),
-                      GpuHintLine.key(inputs.preferences(), KeyCommandBind.CANCEL), !move.route().isEmpty(),
-                      () -> source.moves().clearRoute()));
-                items.add(item("dock.holdAll", text("GpuBoard.hud.dock.holdAll"), "", enabled(skip()),
-                      () -> source.moves().holdAll()));
-                items.add(unitRecord(move.entityId()));
-                yield new More(text("GpuBoard.hud.dock.moreMovement"), name(state.presented(move.entityId())), items,
-                      others(MOVE_SHOWN).map(GpuCommandDock::entry).toList());
+                items.addAll(others(MOVE_SHOWN).map(GpuCommandDock::entry).toList());
+                yield new More(text("GpuBoard.hud.dock.moreMovement"), null,
+                      items.stream().filter(BoardScene.Command::enabled).toList(),
+                      items.stream().filter(command -> !command.enabled()).toList());
             }
             case FIRE -> {
                 int actor = inputs.frame().panels().fire().actorId();
@@ -1041,8 +1101,8 @@ final class GpuCommandDock implements GpuHud.Component {
     }
 
     /**
-     * Whether the shown variant has a More popover: the movement plan and the weapon declaration always have their own
-     * items; the turn without an adjacent enemy only while one of MegaMek's other physical commands (dodge,
+     * Whether the shown variant has a More popover: movement and weapon declaration always offer it; the turn
+     * without an adjacent enemy only while one of MegaMek's other physical commands (dodge,
      * explosives, clear woods) can be used.
      */
     private boolean hasMore() {

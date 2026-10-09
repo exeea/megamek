@@ -43,7 +43,7 @@ class BoardFoliageTest {
           "pine-slender", "pine-layered", "pine-slender-snow", "pine-layered-snow" })
     void upperPineBranchesStayAttachedToTheirBentTrunk(String name) {
         File root = new File(Configuration.dataDir(), "models/board");
-        var near = RigidGlb.loadLods(new FileHandle(new File(root, name + ".glb")), root.toPath()).getFirst();
+        var near = RigidGlb.loadLods(RigidGlb.source(root, name), root.toPath()).getFirst();
         Map<String, String> materials = new HashMap<>();
         partMaterials(near.nodes, materials);
         var mesh = near.meshes.first();
@@ -244,7 +244,7 @@ class BoardFoliageTest {
         float[][] views = { { 0, -.866f, .5f }, { .866f, 0, .5f }, { 0, 0, 1 } };
         for (File atlas : atlases) {
             String plant = atlas.getName().replace(".png", "");
-            var near = (RigidGlb.Data) RigidGlb.loadLods(new FileHandle(new File(root, plant + ".glb")), root.toPath())
+            var near = (RigidGlb.Data) RigidGlb.loadLods(RigidGlb.source(root, plant), root.toPath())
                   .getFirst();
             Map<String, BufferedImage> textures = new HashMap<>();
             Map<String, double[]> cutoutMeans = new HashMap<>();
@@ -320,9 +320,9 @@ class BoardFoliageTest {
         // The board camera's views: from 35 degrees above on four sides, and from straight above.
         float[][] views = { { across, 0, up }, { 0, across, up }, { -across, 0, up }, { 0, -across, up }, { 0, 0, 1 } };
         for (JsonValue entry : manifest) {
-            // Entries with an authoring source are the trees whose levels prepare_tree_lods.py builds.
+            // Entries with an authoring source identify the imported tree catalog.
             if (!entry.has("source")) { continue; }
-            var levels = RigidGlb.loadLods(new FileHandle(new File(root, entry.name + ".glb")), root.toPath());
+            var levels = RigidGlb.loadLods(RigidGlb.source(root, entry.name), root.toPath());
             // Summing overlapping card areas is not silhouette coverage. The native tree LOD regression measures
             // alpha-tested pixels for these crowns at the same scale and from several bearings instead.
             boolean cutout = false;

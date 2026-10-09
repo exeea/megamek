@@ -35,8 +35,14 @@ final class ModelTextures {
             if (material.textures == null) { continue; }
             for (var texture : material.textures) { provider.load(texture.fileName); }
         }
+        if (data instanceof RigidGlb.Data glb) {
+            glb.surfaces.values().stream().map(RigidGlb.Surface::map).filter(java.util.Objects::nonNull)
+                  .forEach(provider::load);
+        }
         Model model = new Model(data, provider);
         if (data instanceof RigidGlb.Data glb) {
+            glb.surfaces.forEach((id, surface) -> model.getMaterial(id).set(new GpuModelMaterial(
+                  surface.roughness(), surface.metallic(), surface.map() == null ? null : provider.load(surface.map()))));
             glb.alphaTests.forEach((id, cutoff) -> model.getMaterial(id).set(
                   new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
                   new FloatAttribute(FloatAttribute.AlphaTest, cutoff)));

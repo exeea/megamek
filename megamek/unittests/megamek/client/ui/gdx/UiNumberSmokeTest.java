@@ -4,6 +4,7 @@ package megamek.client.ui.gdx;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.ArrayList;
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -16,6 +17,104 @@ import org.junit.jupiter.api.Test;
 
 @Tag("on-demand")
 class UiNumberSmokeTest {
+    @Test void captionCaptureAllowsOffscreenDragsAndReleasesOnEveryExit() {
+        UiTestStage.run(ui -> {
+            record Change(String value, boolean finished) { }
+            var events = new ArrayList<Change>();
+            UiNumber number = new UiNumber(ui.kit, ui.stage, "Distance", 0, -10000, 10000, 1,
+                  (value, finished) -> events.add(new Change(value, finished)));
+            ui.stage.addActor(number); number.setBounds(100, 350, 320, 36); ui.draw();
+            Vector2 at = point(ui.stage, number.findActor("editor-scrub-Distance"));
+            try {
+                ui.stage.touchDown((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
+                assertTrue(Gdx.input.isCursorCatched());
+                ui.stage.touchDragged((int) at.x + 4000, (int) at.y, 0);
+                assertEquals(new Change("1000", false), events.getLast());
+                ui.stage.touchDragged((int) at.x - 4000, (int) at.y, 0);
+                assertEquals(new Change("-1000", false), events.getLast());
+                ui.stage.touchUp((int) at.x - 4000, (int) at.y, 0, Input.Buttons.LEFT);
+                assertFalse(Gdx.input.isCursorCatched());
+                assertEquals(new Change("-1000", true), events.getLast());
+                assertEquals(1, events.stream().filter(Change::finished).count());
+
+                for (Runnable end : new Runnable[] {ui.stage::cancelTouchFocus, number::dismiss, number::remove,
+                      number::close}) {
+                    ui.stage.touchDown((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
+                    assertTrue(Gdx.input.isCursorCatched());
+                    end.run();
+                    assertFalse(Gdx.input.isCursorCatched(), "Ending the gesture must restore the cursor");
+                    assertFalse(number.editing());
+                    ui.stage.addActor(number);
+                }
+            } finally { number.close(); }
+        });
+    }
+
+    @Test void straightDragsTurnAnglesAcrossTheSeamAndCommitOnceOnRelease() {
+        UiTestStage.run(ui -> {
+            record Change(String value, boolean finished) { }
+            var events = new ArrayList<Change>();
+            UiNumber number = new UiNumber(ui.kit, ui.stage, "Z", 170, -180, 180, 1,
+                  (value, finished) -> events.add(new Change(value, finished))).angle();
+            ui.stage.addActor(number); number.setBounds(100, 160, 220, 32); ui.draw();
+            try {
+                Vector2 caption = point(ui.stage, number.findActor("editor-scrub-Z"));
+                int x = (int) caption.x, y = (int) caption.y;
+                // From the caption, half a degree per unit: right and up add, left and down subtract, across the seam.
+                ui.stage.touchDown(x, y, 0, Input.Buttons.LEFT);
+                assertTrue(Gdx.input.isCursorCatched());
+                ui.stage.touchDragged(x + 30, y, 0);
+                assertEquals(new Change("-175", false), events.getLast(), "Right adds");
+                ui.stage.touchDragged(x + 30, y - 20, 0);
+                assertEquals(new Change("-165", false), events.getLast(), "Up adds");
+                ui.stage.touchDragged(x - 30, y + 40, 0);
+                assertEquals(new Change("135", false), events.getLast(), "Left and down subtract");
+                ui.stage.touchUp(x - 30, y + 40, 0, Input.Buttons.LEFT);
+                assertEquals(new Change("135", true), events.getLast());
+                assertEquals(1, events.stream().filter(Change::finished).count());
+                assertFalse(Gdx.input.isCursorCatched());
+                assertFalse(number.editing());
+
+                // A caption click opens the dial, which a straight drag turns the same way.
+                ui.stage.touchDown(x, y, 0, Input.Buttons.LEFT);
+                ui.stage.touchUp(x, y, 0, Input.Buttons.LEFT);
+                ui.draw(); ui.capture("editor-angle-dial").dispose();
+                Actor dial = ui.stage.getRoot().findActor("editor-dial-Z");
+                assertNotNull(dial);
+                // Zero points up and values turn clockwise, so 135 degrees lies at -45 from the right.
+                Vector2 grip = dialPoint(ui.stage, dial, -45);
+                ui.stage.touchDown((int) grip.x, (int) grip.y, 0, Input.Buttons.LEFT);
+                assertTrue(Gdx.input.isCursorCatched());
+                ui.stage.touchDragged((int) grip.x, (int) grip.y - 50, 0);
+                assertEquals(new Change("160", false), events.getLast(), "Up on the dial adds");
+                ui.stage.touchUp((int) grip.x, (int) grip.y - 50, 0, Input.Buttons.LEFT);
+                assertEquals(new Change("160", true), events.getLast());
+                assertFalse(Gdx.input.isCursorCatched());
+                assertFalse(number.editing());
+
+                // A click on the dial points it there, as a compass reads: the right is 90, the left -90, the top 0.
+                for (int[] aim : new int[][] {{0, 90}, {180, -90}, {90, 0}}) {
+                    ui.stage.touchDown(x, y, 0, Input.Buttons.LEFT);
+                    ui.stage.touchUp(x, y, 0, Input.Buttons.LEFT);
+                    ui.draw();
+                    Vector2 at = dialPoint(ui.stage, dial, aim[0]);
+                    ui.stage.touchDown((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
+                    ui.stage.touchUp((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
+                    assertEquals(new Change(String.valueOf(aim[1]), true), events.getLast());
+                    assertFalse(Gdx.input.isCursorCatched());
+                }
+
+                TextField field = number.findActor("editor-Z");
+                ui.stage.setKeyboardFocus(field); field.setText("725"); ui.stage.setKeyboardFocus(null);
+                assertEquals("5", field.getText());
+            } finally { number.close(); }
+        });
+    }
+    private static Vector2 dialPoint(Stage stage, Actor dial, double angle) {
+        double radians = Math.toRadians(angle);
+        return stage.stageToScreenCoordinates(dial.localToStageCoordinates(new Vector2(
+              dial.getWidth() / 2 + 46 * (float) Math.cos(radians), dial.getHeight() / 2 + 46 * (float) Math.sin(radians))));
+    }
     @Test void captionClickDragAndBlurHaveDistinctCommitBoundaries() {
         UiTestStage.run(ui -> {
             record Change(String value, boolean finished) { }
@@ -35,6 +134,7 @@ class UiNumberSmokeTest {
                 Vector2 at = point(ui.stage, caption);
                 ui.stage.touchDown((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
                 ui.stage.touchUp((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
+                assertFalse(Gdx.input.isCursorCatched(), "A caption click must release the cursor too");
                 assertTrue(number.editing());
                 assertTrue(ui.stage.getRoot().findActor("editor-number-popup").isVisible());
                 assertTrue(events.isEmpty(), "Opening the slider does not edit the value");
@@ -66,6 +166,7 @@ class UiNumberSmokeTest {
                 ui.stage.touchDown((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
                 ui.stage.touchDragged((int) at.x + 20, (int) at.y, 0);
                 ui.stage.cancelTouchFocus();
+                assertFalse(Gdx.input.isCursorCatched());
                 assertEquals(new Change("5", true), events.getLast(), "Focus loss commits the last preview, not cancelled pointer coordinates");
                 assertFalse(number.editing());
                 ui.stage.setKeyboardFocus(field); field.setText("NaN"); ui.stage.setKeyboardFocus(null);

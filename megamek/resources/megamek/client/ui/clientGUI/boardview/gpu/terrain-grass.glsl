@@ -27,12 +27,16 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     float density = smoothstep(GRASS_START_PIXELS, GRASS_FULL_PIXELS, pixels) * GRASS_ROOTS_PER_HEX;
     if (density <= a_coverRoot.w) { return false; }
     uint seed = floatBitsToUint(root.x) ^ (floatBitsToUint(root.y) * 1664525u) ^ uint(a_coverRoot.w);
+    // Reject the whole rooted blade, not fragments of a swaying tip. Buffers remain unchanged after an impact.
+    float scar = groundScarCover(groundDamageAt(root.xy));
+    if (scar > grassRandom(seed + 83u)) { return false; }
     float angle = grassRandom(seed) * 6.2831853;
     float variation = grassRandom(seed + 23u);
     vec2 direction = vec2(cos(angle), sin(angle));
     vec3 side = vec3(-direction.y, direction.x, 0.0);
     float meadow = meadowCover(root.xy / u_worldMetre);
     float height = u_coverHexWidth * mix(.025, GRASS_MAX_HEIGHT, variation) * mix(.55, 1.0, meadow);
+    height *= 1.0 - scar * .5;
     float width = u_coverHexWidth * mix(.0015, .0028, grassRandom(seed + 37u)) * mix(.75, 1.0, meadow);
     // Fractional growth of the last blade keeps density transitions continuous, without shading invisible blades.
     float growth = clamp(density - a_coverRoot.w, 0.0, 1.0);
@@ -53,6 +57,7 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     normal = normalize(cross(side, tangent));
     float tone = grassRandom(seed + 71u);
     color = vec4(mix(vec3(.24, .30, .10), vec3(.44, .48, .21), tone), 1.0);
+    color.rgb = mix(color.rgb, vec3(.18, .14, .08), scar * .75);
     v_coverData = vec2(height, t);
     v_coverRoot = root.xy / u_worldMetre;
     return true;

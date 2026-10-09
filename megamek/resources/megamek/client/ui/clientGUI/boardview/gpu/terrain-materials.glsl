@@ -1,6 +1,8 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // One surface evaluation for natural tops, slopes, rock faces and deposits. Inserted after the lighting helpers.
 
+uniform float u_terrainWear; // 0: no ambient weathering; 1: full material weathering and cover erosion
+
 struct TerrainMaterial {
     vec3 color;
     vec3 normal;
@@ -29,6 +31,59 @@ float stoneRoughness(float familyId, float hardness) {
 
 float coverRoughness(float familyId) {
     return abs(familyId - 2.0) < .5 || abs(familyId) < .5 || abs(familyId - TROPICAL_FAMILY) < .5 ? .94 : .88;
+}
+
+// Natural wear follows the existing relief, modulated by continuous world fields instead of repeated stamps.
+// Channels are recesses, low grains, chipped edges and high grains. Loose/organic covers favour the height
+// channels; stone favours cavities and normal-map edges. Fine wear fades with the material's normal detail.
+vec4 terrainWear(vec3 fields, float height, float cavity, vec3 face, vec3 normal) {
+    float exposure = smoothstep(.30, .67, fields.x * .65 + fields.z * .35);
+    float abrasion = smoothstep(.32, .73, fields.y * .7 + fields.z * .3);
+    float low = (1.0 - smoothstep(.24, .53, height)) * .75;
+    float recess = max(low, clamp((1.0 - cavity) * 2.2, 0.0, 1.0));
+    float high = smoothstep(.40, .65, height);
+    float edge = clamp((1.0 - dot(face, normal)) * 5.0, 0.0, 1.0) * high;
+    return vec4(recess * exposure, low * exposure, edge * abrasion, high * abrasion) * terrainNormalDetail;
+}
+
+// Small relative pigment changes preserve each source texture, including fungal mauve/cyan and cool snow.
+// Keep the softened desert baseline: the previous .30 darkening was too strong. These are visual material
+// estimates, not simulated erosion or a second terrain layer. No new maps, geometry or sampling are needed.
+vec3 materialWeathering(float familyId, vec4 wear, vec3 fields, float cavity) {
+    vec3 recess, crest;
+    vec2 grain;
+    if (abs(familyId) < .5) { // Grass: soil in worn turf, straw-coloured tips.
+        recess = vec3(.12, .24, .18); crest = vec3(.24, .11, .025); grain = vec2(.25, .70);
+    } else if (abs(familyId - 1.0) < .5) { // Dirt: compacted pockets and dry, crumbling grains.
+        recess = vec3(.21, .24, .27); crest = vec3(.18, .15, .09); grain = vec2(.15, .35);
+    } else if (abs(familyId - 2.0) < .5) {
+        return vec3(0.0); // SAND is a tile cover, not a theme. Only exposed substrate weathers.
+    } else if (abs(familyId - 3.0) < .5) { // Rock: fissures and pale mineral edges.
+        recess = vec3(.27, .28, .28); crest = vec3(.22, .21, .18); grain = vec2(0.0, .04);
+    } else if (abs(familyId - 4.0) < .5) {
+        // Ground concrete collects a light, uneven film of grime, strongest in pores. Its height is a float finish,
+        // not rocky relief: brightening its crests made false raised outlines across the pavement.
+        float grime = smoothstep(.32, .70, fields.x * .5 + fields.y * .2 + fields.z * .3);
+        float pores = smoothstep(.005, .08, 1.0 - cavity);
+        return -vec3(.15, .135, .115) * grime * (.4 + .6 * pores) * terrainNormalDetail;
+    } else if (abs(familyId - 5.0) < .5) { // Snow: irregular grey-blue refrozen crust, without drawn wave motifs.
+        recess = vec3(.16, .12, .075); crest = vec3(.025, .03, .035); grain = vec2(.30, .65);
+    } else if (abs(familyId - LUNAR_FAMILY) < .5) { // Lunar: neutral dust pockets and pitted mineral rims.
+        recess = vec3(.15); crest = vec3(.10); grain = vec2(.15, .20);
+    } else if (abs(familyId - FUNGUS_FAMILY) < .5) { // Fungus: mottled ageing tissue and pale raised skin.
+        recess = vec3(.15, .24, .17); crest = vec3(.18, .13, .17); grain = vec2(.15, .65);
+    } else if (abs(familyId - DESERT_FAMILY) < .5) { // Desert: soft sandstone varnish and abraded plates.
+        recess = vec3(.20); crest = vec3(.085, .08, .07); grain = vec2(0.0);
+    } else if (abs(familyId - MARS_FAMILY) < .5) { // Mars: rusty dust hollows and lighter mineral ridges.
+        recess = vec3(.14, .17, .18); crest = vec3(.095, .075, .06); grain = vec2(.25, .35);
+    } else if (abs(familyId - VOLCANO_FAMILY) < .5) { // Cold basalt: ash in pores, cooler exposed edges.
+        recess = vec3(.17, .17, .16); crest = vec3(.11, .115, .12); grain = vec2(0.0, .05);
+    } else if (abs(familyId - TROPICAL_FAMILY) < .5) { // Tropical: organic hollows and restrained dry litter.
+        recess = vec3(.12, .23, .18); crest = vec3(.22, .12, .035); grain = vec2(.30, .65);
+    } else {
+        return vec3(0.0); // Active magma and cooling crust have their own surface treatment.
+    }
+    return crest * mix(wear.z, wear.w, grain.y) - recess * mix(wear.x, wear.y, grain.x);
 }
 
 // Competing covers retain their texture rather than becoming a muddy colour crossfade. All channels use the same
@@ -119,7 +174,8 @@ vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection
               : mix(materialTexel(colorMap, p.top / tile, p.topGradient / tile),
               materialTexel(colorMap, TURN * p.top / (tile * 2.37) + .31,
                     TURN * p.topGradient / (tile * 2.37)), variation);
-        if (farDetail > 0.0) {
+        // Keep resolved sand ripples and cap fractures; their explicit gradients already select filtered mips.
+        if (farDetail > 0.0 && !singleScale) {
             pigment = mix(pigment, materialTexel(colorMap, p.top / tile, p.topGradient * (4096.0 / tile)), farDetail);
         }
     }
@@ -185,6 +241,9 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
 #endif
     MaterialProjection projection = materialProjection(world, face);
     float up = clamp(face.z, 0.0, 1.0);
+    // Loose sand keeps its tile-cover behaviour. Weathering controls erosion of the supporting material;
+    // full intensity preserves the authored material mix, and zero keeps the slope's underlying geology.
+    float erosion = abs(familyId - 2.0) < .5 ? 1.0 : u_terrainWear;
     float pockets = texture(u_rainNoise, (world.xy + world.z * vec2(.43, .27)) / 92.0 + .57).g;
     float variation = broad * .4 + fine * .25 + pockets * .35;
     float foot = exp(-max(aboveFoot, 0.0) / (1.5 + 6.0 * variation));
@@ -197,22 +256,27 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     // Exposed rock shoulders lose loose cover, while sheltered patches retain it. Plateau and face use the
     // same rim distance and world field, so the weathered contact continues over the crest.
     float scour = (1.0 - smoothstep(.1, 3.0 + 4.0 * broad, belowRim))
-          * exposure * smoothstep(.30, .65, broad * .6 + pockets * .4);
+          * exposure * smoothstep(.30, .65, broad * .6 + pockets * .4) * erosion;
     // A sparse bank mesh carries its broad slope, not every eroded patch. Expose its mantle with the existing
     // world-space detail field, so sand and turf do not hide all the material detail when the mesh is simplified.
     // Level ground keeps its cover; hard cliffs already get their exposed rock from the existing material mix.
     float bank = (1.0 - exposure) * (1.0 - smoothstep(.87, .985, up));
-    float wear = bank * smoothstep(.32, .68, fine * .65 + pockets * .35);
+    float wear = bank * smoothstep(.32, .68, fine * .65 + pockets * .35) * erosion;
     float coverUp = up - .2 * wear;
     float cover = smoothstep(.4, .96, coverUp + (variation - .5) * .55);
     float soil = 0.0;
     float dust = 0.0;
     bool desert = abs(familyId - DESERT_FAMILY) < .5;
     bool arid = desert || abs(familyId - MARS_FAMILY) < .5 || abs(familyId - VOLCANO_FAMILY) < .5;
+    bool plates = desert || abs(familyId - VOLCANO_FAMILY) < .5;
     // A continuous exposure field crosses plateau interiors as well as their rims. Each material retains its
     // own substrate and response: this is not a new terrain type or the same pale patch painted on every biome.
     float thin = smoothstep(.50, .72, region * .6 + broad * .3 + fine * .1);
-    thin *= smoothstep(.82, .97, up) * (1.0 - deposit) * (1.0 - .75 * foot);
+    thin *= smoothstep(.82, .97, up) * (1.0 - deposit) * (1.0 - .75 * foot) * u_terrainWear;
+    // Organic weathering also opens the existing cover onto its own soil/tissue. A tint alone disappears
+    // in busy turf. Use continuous fields and existing material roles, not a separate decal or cut-out shape.
+    float aged = u_terrainWear * terrainNormalDetail * smoothstep(.45, .68, broad * .5 + region * .35 + fine * .15)
+          * smoothstep(.88, .98, up) * (1.0 - sediment);
     if (abs(familyId) < .5 || abs(familyId - TROPICAL_FAMILY) < .5) {
         // The two-level earth bank keeps a ragged turf lip and broken turf on its real intermediate shoulder.
         // Color remains legible from above when individual blades are too small to draw.
@@ -226,7 +290,10 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
         float shoulder = 1.0 - smoothstep(width * .25, width, middle);
         shoulder *= smoothstep(.35, .73, up) * smoothstep(.22, .55, pockets * .7 + fine * .3);
         cover = max(cover, max(lip, shoulder) * twoLevels * (1.0 - exposure));
+        float wornCover = cover * aged * .48;
+        cover -= wornCover;
         soil = (1.0 - cover) * ((1.0 - exposure) * .9 + rim * .5 * smoothstep(.25, .7, variation));
+        soil = max(soil, wornCover); // Worn organic cover reveals soil even on a tall plateau, not pale cliff rock.
         deposit *= mix(.25, 1.0, rock);
     } else if (abs(familyId - FUNGUS_FAMILY) < .5) {
         // Preserve the two fungal skins: mauve lowlands, cyan crust above level zero. Weather each in its own
@@ -238,6 +305,7 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
         float growth = max(raised, lip * rise);
         float colonies = smoothstep(.28, .69, region * .5 + broad * .3 + pockets * .2);
         deposit = smoothstep(.48, .88, up) * mix(.10 * colonies, .28 + .70 * colonies, growth);
+        deposit *= 1.0 - aged * .55;
         cover = smoothstep(.76, .97, up);
         cover *= 1.0 - .90 * thin * (1.0 - growth);
         soil = (1.0 - cover) * (1.0 - exposure) * (1.0 - smoothstep(.90, .99, up));
@@ -253,14 +321,17 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
         // Firm crust wears back to exposed rock on banks and a broken mineral shoulder at the crest.
         cover = smoothstep(.38, .96, coverUp + (variation - .5) * .22);
         float shoulder = (1.0 - smoothstep(.1, 1.3 + 1.6 * broad, belowRim))
-              * smoothstep(.28, .65, pockets) * smoothstep(.55, .94, up);
+              * smoothstep(.28, .65, pockets) * smoothstep(.55, .94, up) * u_terrainWear;
         // Thin hardpan/dust opens onto flush bedrock in broad connected patches, including plateau interiors.
         // Reuse the existing regional fields: no hex-local mask, new noise lookup or displaced playing surface.
         // Deposited material shelters the foot; small height-map detail breaks the final material contact.
         cover *= 1.0 - max(.90 * scour, max(.85 * shoulder, .92 * thin));
         // Horizontal cap maps show fractured plates; the wall maps keep their upright bedding or basalt columns.
-        // Reuse each family's mantle slot; native slopes blend back to the wall with the same height weights.
-        soil = (1.0 - cover) * smoothstep(.82, .97, up);
+        // Carry the cap around the shoulder, then fade with slope and depth below the rim. Distant faces keep
+        // their wall material; level interiors keep the cap. Reuse the existing metre-scale rim field.
+        float cap = smoothstep(.82, .97, up);
+        if (plates) cap = max(cap, rim * smoothstep(.25, .90, up));
+        soil = (1.0 - cover) * cap;
         // A light film of the local hardpan/ash remains on exposed horizontal stone. Keep its complete material,
         // rather than painting dark cliff patches onto a flat plain; submerged beds keep their sediment instead.
         dust = .24 * smoothstep(.88, .98, up) * (1.0 - sediment);
@@ -288,6 +359,10 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     // Submerged contacts exchange bed sediment and exposed stone, never living turf or windblown surface sand.
     float bedRock = rock * (1.0 - smoothstep(.2, .8, up)) * smoothstep(.05, 2.2, aboveFoot);
     roles = mix(roles, vec4(0.0, 0.0, 1.0 - bedRock, bedRock), sediment);
+    // Cap and wall are orientations of the same rock, not competing covers. Let their combined height compete
+    // with hardpan/deposits, then distribute the winning rock weight smoothly across all material channels.
+    float capShare = plates ? roles.y / max(roles.y + roles.w, .00001) : 0.0;
+    if (plates) roles = vec4(roles.x, 0.0, roles.z, roles.y + roles.w);
     // Height maps are in [0,1]. Even their largest possible score cannot rescue these layers, so avoid all
     // their texture work while retaining the original roles for the exact final blend calculation.
     float highestMinimum = max(max(roles.x, roles.y), max(roles.z, roles.w));
@@ -297,15 +372,15 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     bool sand = abs(familyId - 2.0) < .5;
     // These authored plates have one physical size. Reuse sand's translated sampling for color and normals;
     // mixing an enlarged copy makes overlapping fractures look like faint stains. Select across broad regions.
-    bool plates = desert || abs(familyId - VOLCANO_FAMILY) < .5;
     float mantleVariation = plates ? broad : fine;
     vec4 a = sampleMaterial(layers.x, tiles.x, roles.x * candidates.x, projection,
           world, broad, fine, region, true, sand, familyId, vec2(rim, foot));
-    vec4 b = sampleMaterial(layers.w, tiles.w, roles.y * candidates.y, projection,
+    float capAmount = plates ? roles.w * candidates.w * capShare : roles.y * candidates.y;
+    vec4 b = sampleMaterial(layers.w, tiles.w, capAmount, projection,
           world, mantleVariation, fine, region, false, plates, familyId, vec2(0.0));
     vec4 c = sampleMaterial(layers.y, tiles.y, roles.z * candidates.z, projection,
           world, fine, fine, region, false, false, familyId, vec2(0.0));
-    vec4 d = sampleMaterial(layers.z, tiles.z, roles.w * candidates.w, projection,
+    vec4 d = sampleMaterial(layers.z, tiles.z, roles.w * candidates.w * (1.0 - capShare), projection,
           world, broad, fine, region, false, false, familyId, vec2(0.0));
     d.rgb *= toLinear(bedTintFor(familyId, hardness));
     // Exposed horizontal mineral faces retain a legible pigment difference after fine normals fade out.
@@ -317,10 +392,12 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     }
     if (desert) {
         // Pale abraded sandstone at the actual rim reads from above; deeper faces retain their warm brown.
-        float abrasion = (1.0 - smoothstep(.15, 2.2, belowRim)) * smoothstep(.45, .95, up);
+        float abrasion = (1.0 - smoothstep(.15, 2.2, belowRim)) * smoothstep(.45, .95, up) * u_terrainWear;
         d.rgb *= toLinear(mix(vec3(.98, .91, .85), vec3(1.14, 1.15, 1.13), abrasion));
     }
-    vec4 weights = materialWeights(roles, vec4(a.a, b.a, c.a, d.a));
+    float rockHeight = plates ? mix(d.a, b.a, capShare) : d.a;
+    vec4 weights = materialWeights(roles, vec4(a.a, b.a, c.a, rockHeight));
+    if (plates) weights.yw = weights.w * vec2(capShare, 1.0 - capShare);
     vec2 coating = weights.yw * dust;
     weights += vec4(coating.x + coating.y, -coating.x, 0.0, -coating.y);
     bool fungus = abs(familyId - FUNGUS_FAMILY) < .5;
@@ -360,12 +437,12 @@ float coverPatch(vec3 world, float familyId) {
 
 void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float hardness, float sediment,
       float broad, float fine, float region,
-      inout vec3 color, inout vec3 normal, inout float cavity, out float height, inout float grass, inout float sand,
+      inout vec3 color, inout vec3 normal, inout float cavity, inout float height, inout float grass, inout float sand,
       inout vec3 bounce, inout float response, inout float rainCover,
-      out vec3 emission, out float roughness, out float volcanic) {
+      out vec3 emission, out float roughness, out float volcanic, out vec4 weights) {
     TerrainMaterial a;
     if (abs(u_coverFamilies.x - 4.0) < .5) {
-        a = TerrainMaterial(color, normal, cavity, .5, vec3(0.0), .9, 0.0);
+        a = TerrainMaterial(color, normal, cavity, height, vec3(0.0), .9, 0.0);
     } else {
         a = naturalMaterialFor(world, face, foot, rim, rock, hardness, broad, fine, region,
               u_coverFamilies.x, u_coverTiles0, u_coverLayers0, sediment);
@@ -392,7 +469,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     vec4 patches = vec4(coverPatch(world, u_coverFamilies.x), coverPatch(world, u_coverFamilies.y),
           coverPatch(world, u_coverFamilies.z), coverPatch(world, u_coverFamilies.w));
     float patchStrength = mix(1.5, 2.4, 1.0 - smoothstep(.35, .85, face.z));
-    vec4 weights = materialWeights(raw, vec4(a.height, b.height, c.height, d.height) * .45 + patches * patchStrength);
+    weights = materialWeights(raw, vec4(a.height, b.height, c.height, d.height) * .45 + patches * patchStrength);
     // Soften neighbouring covers without losing their interlocking texture. Authored tropical mixtures keep
     // their dark litter patches in the interior; fade that exception with its actual contribution, never the
     // triangle's palette membership, so a zero-weight tropical slot cannot introduce a material seam.

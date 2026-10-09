@@ -992,6 +992,34 @@ class GpuBoardSourceTest {
     }
 
     @Test
+    void deploymentPlacementsReachPlaybackImmediately() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.game.setPhase(GamePhase.DEPLOYMENT);
+                fixture.entity.setDeployed(false);
+                fixture.source.refresh();
+            });
+            var initial = fixture.source.takeFrame();
+            var playback = new UnitPlayback();
+            playback.accept(initial.animations(), initial.scene(), ignored -> false);
+            for (var destination : List.of(new Coords(6, 5), new Coords(12, 12), new Coords(12, 11), new Coords(12, 11))) {
+                SwingUtilities.invokeAndWait(() -> {
+                    fixture.entity.setPosition(destination);
+                    fixture.entity.setElevation(fixture.entity.getElevation() + 1);
+                    fixture.source.refresh();
+                });
+                var frame = fixture.source.takeFrame();
+                var placed = unit(frame.scene(), fixture.entity.getId());
+                assertEquals(destination, placed.location().coords());
+                assertTrue(frame.movements().isEmpty(), "Deployment must not queue travel or elevation animation");
+                playback.accept(frame.animations(), frame.scene(), ignored -> false);
+                assertEquals(placed.location(), unit(playback.present(frame.scene()), fixture.entity.getId()).location());
+                assertFalse(playback.busy(), "Deployment must reach its selected position without advancing the clock");
+            }
+        }
+    }
+
+    @Test
     void publishesForcedDisplacementAndFallsOnceWithoutAMovementPath() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             fixture.source.takeFrame();

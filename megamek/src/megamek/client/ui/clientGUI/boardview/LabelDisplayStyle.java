@@ -48,6 +48,11 @@ public enum LabelDisplayStyle {
 
     public final String description;
 
+    @Override
+    public String toString() {
+        return description;
+    }
+
     public LabelDisplayStyle next() {
         return switch (this) {
             case FULL -> ABBREV;

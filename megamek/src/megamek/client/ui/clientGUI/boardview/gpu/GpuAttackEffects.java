@@ -30,6 +30,7 @@ final class GpuAttackEffects implements Disposable {
     private final Vector3[] forwards = new Vector3[MAX_MUZZLES];
     private final Vector3[] endpoints = new Vector3[MAX_MUZZLES];
     private final String[] effects = new String[MAX_MUZZLES];
+    private final String[] emissionKeys = new String[MAX_MUZZLES];
     private final boolean[] arcs = new boolean[MAX_MUZZLES];
     private final boolean[] impacts = new boolean[MAX_MUZZLES];
     private final float[] flameSizes = new float[MAX_MUZZLES];
@@ -55,9 +56,15 @@ final class GpuAttackEffects implements Disposable {
     private final Vector3 flameSide = new Vector3(), flameUp = new Vector3();
     private final Vector3 sparkAxis = new Vector3(), sparkSide = new Vector3(), sparkUp = new Vector3(), sparkVelocity = new Vector3();
     private Camera camera;
-    record Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact) { }
+    record Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact, Vector3 aim, float progress) {
+        Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact) { this(origin, forward, target, impact, target, 1); }
+        Vector3 position(float at, boolean arc, Vector3 result) {
+            return at >= 1 ? result.set(target) : UnitAttack.projectile(origin, aim, at * progress, arc, result);
+        }
+    }
     private final Map<UnitAttack, Map<String, Trace>> traces = new HashMap<>();
     private final Map<UnitAttack, Map<String, GpuMissileEffects.Launch>> launches = new HashMap<>();
+    private final java.util.Set<UnitAttack> groundComplete = new java.util.HashSet<>();
     private int muzzleCount;
     private final java.util.List<Trace> interceptionBeams = new java.util.ArrayList<>();
     private int airbursts;
@@ -70,11 +77,18 @@ final class GpuAttackEffects implements Disposable {
     }
 
     void update(List<UnitAttack> next, GpuUnitModels library, Map<String, ModelInstance> instances) {
+        update(next, List.of(), library, instances);
+    }
+
+    void update(List<UnitAttack> next, List<UnitAttack> completed, GpuUnitModels library, Map<String, ModelInstance> instances) {
         this.volley = next;
         this.library = library;
         this.instances = instances;
-        launches.keySet().retainAll(next);
-        traces.keySet().retainAll(next);
+        var retained = new java.util.HashSet<>(next);
+        retained.addAll(completed);
+        launches.keySet().retainAll(retained);
+        traces.keySet().retainAll(retained);
+        groundComplete.retainAll(retained);
         missiles.begin();
         explosions.begin();
     }
@@ -189,7 +203,13 @@ final class GpuAttackEffects implements Disposable {
             boolean impact;
             if ("laser".equals(effect) || "ppc".equals(effect)) { impact = attack.beamEndpoint(victim, start, key.hashCode(), finish); }
             else { attack.endpoint(victim, start, !attack.event.result().hit(), key.hashCode(), finish); impact = true; }
-            trace = new Trace(start, forwards[muzzleCount].cpy(), finish, impact);
+            boolean missed = !attack.event.result().hit() && !attack.defensive();
+            boolean arc = profile != null && (profile.indirect() || profile.artillery());
+            var aim = finish.cpy();
+            var contact = missed && !"laser".equals(effect) && !"ppc".equals(effect)
+                  ? attack.landscapeContact(t -> UnitAttack.projectile(start, aim, (float) t, arc, new Vector3()), arc ? 32 : 1) : null;
+            trace = new Trace(start, forwards[muzzleCount].cpy(), contact == null ? finish : contact.point(), impact,
+                  aim, contact == null ? 1 : contact.progress());
             paths.put(key, trace);
         }
         origin(muzzleCount).set(trace == null ? muzzles[muzzleCount] : trace.origin());
@@ -200,6 +220,7 @@ final class GpuAttackEffects implements Disposable {
         arcs[muzzleCount] = profile != null && (profile.indirect() || profile.artillery());
         roundDelays[muzzleCount] = delay;
         profiles[muzzleCount] = profile;
+        emissionKeys[muzzleCount] = key;
         effects[muzzleCount++] = effect;
     }
 
@@ -217,7 +238,51 @@ final class GpuAttackEffects implements Disposable {
     int smokeCount() { return missiles.smokeCount(); }
     List<Trace> emissions(UnitAttack shot) { return List.copyOf(traces.getOrDefault(shot, Map.of()).values()); }
     List<GpuMissileEffects.Launch> missileLaunches(UnitAttack shot) { return List.copyOf(launches.getOrDefault(shot, Map.of()).values()); }
+
+    /** Reuse the captured projectile/beam endpoints, including missed members of a partially hitting salvo. */
+    void groundImpacts(List<UnitAttack> completed, java.util.function.Consumer<GpuGroundDamage.Impact> receiver) {
+        if (!GpuGroundDamage.COMBAT_SCARS) { return; }
+        for (var list : List.of(volley, completed)) {
+            for (var shot : list) {
+                if (!shot.shot() || shot.defensive() || shot.event.attacker().sensorContact()) { continue; }
+                if (groundComplete.contains(shot) || shot.seconds < UnitAttack.ANTICIPATION_SECONDS) { continue; }
+                prepare(shot);
+                for (int index = 0; index < muzzleCount; index++) {
+                    var profile = profiles[index];
+                    boolean unitHit = shot.event.result().hit() && shot.event.target() != null
+                          && (profile == null || profile.impact() == null);
+                    if (unitHit || !impacts[index] || shot.seconds < contactSeconds(index)) { continue; }
+                    String effect = effects[index];
+                    if (!List.of("bullet", "laser", "ppc", "energy", "missile", "cluster", "bomb", "flame").contains(effect)) { continue; }
+                    receiver.accept(new GpuGroundDamage.Impact(shot, emissionKeys[index], origins[index], endpoints[index], effect, profile));
+                }
+                for (var entry : launches.getOrDefault(shot, Map.of()).entrySet()) {
+                    var launch = entry.getValue();
+                    // Sample actual ground arrivals, so a single miss in a mostly hitting rack cannot be skipped.
+                    var arrivals = new java.util.ArrayList<Integer>();
+                    for (int index = 0; index < launch.missiles(); index++) {
+                        boolean unitHit = launch.hit(index) && shot.event.target() != null
+                              && (launch.profile() == null || launch.profile().impact() == null);
+                        if (!unitHit && !launch.intercepted(index) && shot.seconds >= launch.endSeconds(index)) { arrivals.add(index); }
+                    }
+                    int step = Math.max(1, (arrivals.size() + 11) / 12);
+                    for (int ordinal = 0; ordinal < arrivals.size(); ordinal += step) {
+                        int index = arrivals.get(ordinal);
+                        receiver.accept(new GpuGroundDamage.Impact(shot, entry.getKey() + ":missile-" + index,
+                              launch.origins()[index % launch.origins().length], launch.targets()[index], "missile", launch.profile()));
+                    }
+                }
+                if (shot.seconds >= shot.contactSeconds) { groundComplete.add(shot); }
+            }
+        }
+    }
     int flameParticleCount() { return flames.size(); }
+
+    private float contactSeconds(int index) {
+        float start = UnitAttack.ANTICIPATION_SECONDS + roundDelays[index];
+        return MathUtils.lerp(start, attack.roundContactSeconds(profiles[index], roundDelays[index]),
+              emitted[index] == null ? 1 : emitted[index].progress());
+    }
     int explosionCount() { return explosions.size(); }
 
     void setSmokeLight(Color light) {
@@ -376,7 +441,7 @@ final class GpuAttackEffects implements Disposable {
                 if (cannon > 0 && "bullet".equals(effect)) {
                     cannonMuzzle(muzzles[index], forwards[index], emitted[index], cannon, age, index * 31);
                 }
-                float contact = attack.roundContactSeconds(profiles[index], roundDelays[index]);
+                float contact = contactSeconds(index);
                 float flash = attack.contactFlash(contact);
                 if (impacts[index] && flash > 0) {
                     if ("bullet".equals(effect)) {
@@ -387,7 +452,7 @@ final class GpuAttackEffects implements Disposable {
                     else { impact(target, flash, profiles[index]); }
                 }
                 if (attack.seconds >= contact) { continue; }
-                float t = attack.flight();
+                float t = MathUtils.clamp(age / Math.max(.0001f, contact - UnitAttack.ANTICIPATION_SECONDS - roundDelays[index]), 0, 1);
                 switch (effect) {
                     case "laser" -> beam(muzzles[index], target, .65f, LASER, Math.min(1, t * 8));
                     case "energy" -> {
@@ -408,8 +473,8 @@ final class GpuAttackEffects implements Disposable {
                     }
                     default -> {
                         float travel = age / (contact - UnitAttack.ANTICIPATION_SECONDS - roundDelays[index]);
-                        UnitAttack.projectile(start, target, travel, arcs[index], point);
-                        UnitAttack.projectile(start, target, Math.max(0, travel - .07f), arcs[index], end);
+                        emitted[index].position(travel, arcs[index], point);
+                        emitted[index].position(Math.max(0, travel - .07f), arcs[index], end);
                         projectiles.ribbon(camera, end, point, .275f * Math.max(1, cannon), TRACER, 1);
                     }
                 }
@@ -419,12 +484,12 @@ final class GpuAttackEffects implements Disposable {
             var launched = launches.get(attack);
             if (launched != null) {
                 for (var launch : launched.values()) {
-                    float impact = attack.contactFlash(attack.roundContactSeconds(launch.profile(), 0));
-                    if (impact <= 0) { continue; }
                     // Nearby bursts merge visually; keep their cost bounded independently of rack size.
                     int step = Math.max(1, launch.missiles() / 12);
                     for (int index = 0; index < launch.missiles(); index += step) {
                         if (launch.intercepted(index)) { continue; }
+                        float impact = attack.contactFlash(launch.endSeconds(index));
+                        if (impact <= 0) { continue; }
                         var profile = launch.profile();
                         if (profile != null && profile.ballistic()) {
                             boolean targetHit = launch.hit(index) && attack.event.target() != null && profile.impact() == null;
@@ -633,6 +698,7 @@ final class GpuAttackEffects implements Disposable {
         library = null;
         launches.clear();
         traces.clear();
+        groundComplete.clear();
         missiles.dispose();
         explosions.dispose();
         flames.dispose();

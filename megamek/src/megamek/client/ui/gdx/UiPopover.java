@@ -4,7 +4,6 @@ package megamek.client.ui.gdx;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
-import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
@@ -44,11 +43,14 @@ public final class UiPopover extends Table {
     private final ScrollPane scroll;
     private final Cell<Table> headCell;
     private final Cell<Image> headRuleCell;
+    private final Runnable dismissed;
+    private Actor anchor;
+    private float anchoredWidth;
     /** Closes the popover on a press outside it and its submenus; on the stage's root while the popover is open. */
     private final InputListener outside = new InputListener() {
         @Override
         public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-            if (!holds(event.getTarget())) {
+            if (!holds(event.getTarget()) && (anchor == null || !event.getTarget().isDescendantOf(anchor))) {
                 cancel();
             }
             return false;
@@ -67,6 +69,12 @@ public final class UiPopover extends Table {
 
     /** A closed popover in the kit's style, without header or content. */
     public UiPopover(UiKit kit) {
+        this(kit, () -> { });
+    }
+
+    /** Runs {@code dismissed} after closing and releasing its input listeners and focus. */
+    public UiPopover(UiKit kit, Runnable dismissed) {
+        this.dismissed = dismissed;
         setBackground(kit.skin.getDrawable("panel-pop"));
         // The 2-unit rails and the popover's own 6 above and below; the side borders are 2 transparent units.
         pad(8, 2, 8, 2);
@@ -137,6 +145,7 @@ public final class UiPopover extends Table {
      * little as needed to stay 10 units inside its parent.
      */
     public void showAt(float x, float y) {
+        anchor = null;
         Vector2 corner = getParent().stageToLocalCoordinates(new Vector2(x, y));
         show(corner.x, corner.y, false);
     }
@@ -146,8 +155,31 @@ public final class UiPopover extends Table {
      * units right of the anchor's (the prototype's More opens 150 to the left), kept 10 units inside its parent.
      */
     public void showAbove(Actor anchor, float dx) {
+        this.anchor = null;
         Vector2 corner = anchor.localToActorCoordinates(getParent(), new Vector2(0, anchor.getHeight()));
         show(corner.x + dx, corner.y + ABOVE, true);
+    }
+
+    /**
+     * Opens above the trigger, right-aligned, or below it when there is more room there. Content scrolls if needed.
+     * Outside presses close without consuming the click; the trigger itself is left to the caller's toggle handler.
+     */
+    public void showAnchored(Actor trigger, float width) {
+        anchor = trigger;
+        anchoredWidth = width;
+        show(0, 0, true);
+    }
+
+    /** The trigger retained by {@link #showAnchored}, or null for a point-positioned or closed popover. */
+    public Actor anchor() {
+        return anchor;
+    }
+
+    /** Repositions open content after its text, trigger or parent bounds change. */
+    public void reposition() {
+        if (isVisible()) {
+            place();
+        }
     }
 
     /**
@@ -194,6 +226,21 @@ public final class UiPopover extends Table {
      * the prototype, one wider than the parent keeps its left edge in.
      */
     private void place() {
+        if (anchor != null) {
+            Vector2 point = anchor.localToActorCoordinates(getParent(), new Vector2());
+            float roomAbove = Math.max(0, parentHeight() - MARGIN - point.y - anchor.getHeight() - ABOVE);
+            float roomBelow = Math.max(0, point.y - ABOVE - MARGIN);
+            float room = Math.max(roomAbove, roomBelow);
+            setSize(Math.min(anchoredWidth, Math.max(0, parentWidth() - 2 * MARGIN)), room);
+            validate();
+            setHeight(Math.min(getPrefHeight(), room));
+            validate();
+            float x = point.x + anchor.getWidth() - getWidth();
+            float y = getHeight() <= roomAbove ? point.y + anchor.getHeight() + ABOVE
+                  : point.y - ABOVE - getHeight();
+            setPosition(MathUtils.clamp(x, MARGIN, Math.max(MARGIN, parentWidth() - getWidth() - MARGIN)), y);
+            return;
+        }
         setSize(getPrefWidth(), Math.min(getPrefHeight(), Math.max(0, parentHeight() - 2 * MARGIN)));
         validate();
         float bottom = above ? edge : edge - getHeight();
@@ -204,6 +251,17 @@ public final class UiPopover extends Table {
     // Stage's root group has no layout size; overlays added directly to it use the stage viewport.
     private float parentWidth() { return getParent() == getStage().getRoot() ? getStage().getWidth() : getParent().getWidth(); }
     private float parentHeight() { return getParent() == getStage().getRoot() ? getStage().getHeight() : getParent().getHeight(); }
+
+    @Override
+    protected void setStage(Stage stage) {
+        if (getStage() != null) {
+            getStage().removeCaptureListener(outside);
+        }
+        super.setStage(stage);
+        if (stage != null && isVisible()) {
+            stage.addCaptureListener(outside);
+        }
+    }
 
     /**
      * One Esc step: closes the deepest open submenu, whose menu takes the keyboard back, or this popover without one;
@@ -236,6 +294,7 @@ public final class UiPopover extends Table {
             owner.opener = null;
         }
         setVisible(false);
+        anchor = null;
         Stage stage = getStage();
         if (stage != null) {
             stage.removeCaptureListener(outside);
@@ -246,6 +305,7 @@ public final class UiPopover extends Table {
                 stage.setScrollFocus(null);
             }
         }
+        dismissed.run();
         return true;
     }
 }

@@ -27,7 +27,7 @@ final class BoardScatter {
     private static final BoardKit<Map<String, BoardShape>> KIT = new BoardKit<>(BoardScatter::load);
 
     private static Map<String, BoardShape> load() {
-        List<String> names = new ArrayList<>(List.of("grass", "plant", "plant-dry"));
+        List<String> names = new ArrayList<>(List.of("grass"));
         for (int variant = 0; variant < BUSHES; variant++) { names.add("bush-" + variant); }
         for (boolean block : new boolean[] { true, false }) {
             for (int variant = 0; variant < (block ? BoardRocks.BLOCKS : BoardRocks.BOULDERS); variant++) {
@@ -63,8 +63,9 @@ final class BoardScatter {
               + Math.floorMod(variant, BUSHES / 2)));
     }
 
+    /** The small scatter plant is its biome's first bush (the former plant meshes were byte-identical copies). */
     static BoardShape plant(BoardScene.Surface surface) {
-        return shape(surface == BoardScene.Surface.GRASS || surface == BoardScene.Surface.TROPICAL ? "plant" : "plant-dry");
+        return bush(surface, 0);
     }
 
     /** Bushes stand just above tall grass, with a level cap to keep unusually shallow boards readable. */
@@ -83,10 +84,11 @@ final class BoardScatter {
               && (!tile.liquid().present() || tile.waterDepth() == 0);
     }
 
-    /** A dry-bank placement must not spill underwater; shallow stones must visibly break the water surface. */
+    /** Scatter never enters a pit; dry-bank placements stay above water and shallow stones break its surface. */
     static boolean visible(BoardScene scene, BoardScene.Tile owner, Vector3 base, float height) {
         if (!allowed(owner)) { return false; }
         var receiving = BoardGeometry.tile(scene, base.x, base.y);
+        if (receiving != null && receiving.ultraSublevel()) { return false; }
         if (receiving == null || !receiving.liquid().present()) { return true; }
         float water = BoardGeometry.waterZ(receiving);
         if (!owner.liquid().present() && base.z >= water) { return true; }

@@ -34,8 +34,14 @@ public final class BoardEditorBlueprint {
     /** Local X/Y use hex width/height; Z uses board levels. Heading is the connector's outward XY direction. */
     public record Connector(double x, double y, double z, double heading) { }
     public record Snap(String set, List<Connector> connectors, double radius, double angleTolerance) { }
-    public record Asset(String id, String label, String kind, String thumbnail, String image, String group,
-          Snap snap, boolean palette) { }
+    /**
+     * A palette object. {@code layout}, when not null, makes it a stamp: painting places that scenery layout's
+     * objects as one new group, and no object of this id is ever created. Otherwise painting places {@code model} (the
+     * id, unless the entry names another model) in {@code colours}: a pond is the pool of its outline in pond colours.
+     * A decal's card shows its image by path convention ({@link BoardDecalArt#image}); {@code thumbnail} is a stamp's.
+     */
+    public record Asset(String id, String label, String kind, String thumbnail, String group,
+          Snap snap, boolean palette, String layout, String model, BoardDecoration.Colours colours) { }
 
     private final List<Component> components;
     private final Map<String, Variant> variants;
@@ -119,14 +125,21 @@ public final class BoardEditorBlueprint {
             }
         }
         for (JsonNode entry : root.withArray("assets")) {
-            Asset asset = new Asset(required(entry, "id"), required(entry, "label"), required(entry, "kind"),
-                  entry.path("thumbnail").asText(), entry.path("image").asText(), entry.path("group").asText("Other"),
-                  snap(entry), entry.path("palette").asBoolean(true));
-            // Reuse the document's key and transform validation; the catalog cannot escape the asset root.
+            Asset asset;
+            // Reuse the document's key, transform and colour validation; the catalog cannot escape the asset root.
             try {
+                List<String> colours = new ArrayList<>();
+                for (JsonNode colour : entry.withArray("colours")) { colours.add(colour.isNull() ? null : colour.asText()); }
+                asset = new Asset(required(entry, "id"), required(entry, "label"), required(entry, "kind"),
+                      entry.path("thumbnail").asText(), entry.path("group").asText("Other"),
+                      snap(entry), entry.path("palette").asBoolean(true),
+                      entry.hasNonNull("layout") ? entry.get("layout").asText() : null,
+                      entry.path("model").asText(entry.path("id").asText()), new BoardDecoration.Colours(colours));
                 new BoardDecoration("check", asset.kind(), asset.id(), null, 0, 0, 0, false, 1,
+                      BoardDecoration.Placement.ground(), 0).withColours(asset.colours());
+                new BoardDecoration("check", asset.kind(), asset.model(), null, 0, 0, 0, false, 1,
                       BoardDecoration.Placement.ground(), 0);
-            } catch (IllegalArgumentException failure) { throw new IOException("Invalid asset " + asset.id(), failure); }
+            } catch (IllegalArgumentException failure) { throw new IOException("Invalid asset " + entry.path("id"), failure); }
             if (assets.putIfAbsent(asset.id(), asset) != null) { throw new IOException("Duplicate asset " + asset.id()); }
         }
         return new BoardEditorBlueprint(components, variants, assets);

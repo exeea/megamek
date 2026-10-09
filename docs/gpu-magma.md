@@ -90,10 +90,10 @@ ambient, sunlight and shadowing. The molten heat ramp rises from red cooling ski
 through orange melt to bright yellow cores; exposed hot melt is smoother than its
 cooling rafts. Solid basalt retains its dimmer red fissures.
 
-Boards containing molten tiles capture the scene in RGBA16F, preserving radiance
-above diffuse white through the existing display-encoded material outputs. Other
-boards retain RGBA8 and do not run heat passes. The atmosphere composite separates
-strong warm HDR highlights from the usual clamped surface grade, so their energy
+All main 3D boards capture the scene in RGBA16F, preserving radiance above diffuse
+white through the existing display-encoded material outputs. Only boards containing
+molten tiles run heat passes. The atmosphere composite separates
+strong warm HDR highlights from ordinary surface lighting, so their energy
 does not inherit the night surface tint/desaturation. Fog, sand and exposure still
 affect their appearance before the common display shoulder and tactical FoV.
 
@@ -107,9 +107,10 @@ a visible neighbour. The final composite retains its normal FoV treatment.
 
 The halo models camera glare. Its warm-radiance selector is an approximation rather than a material
 mask: sufficiently bright warm fire may also glow on a molten board, while ordinary
-white reflections are excluded. Non-emissive opaque surfaces preserve the existing
-clamped lighting path, apart from buffer quantization. Blending translucent objects
-over HDR highlights can differ from the former per-draw LDR clipping.
+white reflections are excluded. Ordinary reflected highlights also retain values
+above one until shared exposure and tone mapping, whether or not lava is present.
+Scene alpha blending remains display-encoded; see the
+[scene color contract](gpu-atmosphere.md#scene-depth-fog-and-composition).
 
 Local illumination is a separate diffuse contribution in the existing lit shaders.
 `GpuLavaLighting` derives up to 32 disk-like emitters from the installed terrain

@@ -51,6 +51,9 @@ class GpuEmbeddedTexturesSmokeTest {
                                   .textureDescription.texture;
                             assertSame(texture, lod2.materials.first().get(TextureAttribute.class, TextureAttribute.Diffuse)
                                   .textureDescription.texture);
+                            assertSame(texture, lod0.materials.first().get(GpuModelMaterial.class, GpuModelMaterial.TYPE).map);
+                            assertSame(texture, lod2.materials.first().get(GpuModelMaterial.class, GpuModelMaterial.TYPE).map,
+                                  "Packed surface maps share the model library's image/sampler ownership");
                             assertEquals(2, texture.getWidth());
                             assertEquals(Texture.TextureWrap.ClampToEdge, texture.getUWrap());
                             assertEquals(Texture.TextureWrap.MirroredRepeat, texture.getVWrap());

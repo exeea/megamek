@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuHudKit.percent;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuHudKit.shown;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuHudKit.signed;
 import static megamek.client.ui.gdx.UiKit.onChange;
 import static megamek.client.ui.gdx.UiKit.text;
 
@@ -300,7 +299,6 @@ final class GpuTargetCards implements GpuHud.Component {
      */
     private Card build(CardView view) {
         TargetKey key = view.key();
-        Target target = view.target();
         Table table = ui.panel();
         table.setName("target-card-" + key.id());
         table.setTouchable(Touchable.enabled);
@@ -309,11 +307,8 @@ final class GpuTargetCards implements GpuHud.Component {
         Map<Integer, Grip> grips = new HashMap<>();
         UiList list = null;
         if (!view.expanded()) {
-            table.add(collapsed(view)).growX();
-        } else if (view.rows().isEmpty()) {
-            table.add(footer(text(view.selected() ? "GpuBoard.hud.cards.emptyHintArmed"
-                  : "GpuBoard.hud.cards.emptyHint"))).growX();
-        } else {
+            table.add(collapsed(view)).growX().row();
+        } else if (!view.rows().isEmpty()) {
             list = new UiList(ui);
             list.setName("card-rows");
             List<Row> rows = view.rows();
@@ -328,10 +323,8 @@ final class GpuTargetCards implements GpuHud.Component {
             // H29: a dropped row and Alt+Up/Down move the attack among its target's, in one requeue.
             list.reorderable((from, to) -> source.fire().move(rows.get(from).attack().eqNum(), to - from));
             table.add(list).growX().row();
-            table.add(footer(target != null && target.primary() ? text("GpuBoard.hud.cards.footPrimary")
-                  : text("GpuBoard.hud.cards.footSecondary", signed(target == null ? 0 : target.secondaryModifier()))))
-                  .growX();
         }
+        table.add(footer(view)).growX();
         table.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
@@ -358,7 +351,7 @@ final class GpuTargetCards implements GpuHud.Component {
         }
         Label name = ui.label(UiTheme.upper(view.name()), "hud-title", 14, UiTheme.TEXT);
         name.setName("card-name");
-        name.setEllipsis(true);
+        name.setWrap(true);
         header.add(name).growX().minWidth(0).left();
         Actor primary;
         if (target == null) {
@@ -489,13 +482,30 @@ final class GpuTargetCards implements GpuHud.Component {
         return line;
     }
 
-    /** The footer (.cf): 11-unit muted text that wraps on its CSS line boxes. */
-    private Container<UiFlow> footer(String text) {
-        UiFlow flow = new UiFlow(ui, FOOT_SIZE, FOOT_LINE);
-        // The face the paragraph measures its line boxes with (hud-body), at the footer's size.
-        flow.run(text, "hud-body", UiTheme.MUTED);
-        flow.setName("card-foot");
-        return new Container<>(flow).fillX().pad(6, 12, 7, 12);
+    /** The footer: a wrapped hint and, when attacks are assigned, a button to remove them from this target. */
+    private Table footer(CardView view) {
+        Table footer = new Table();
+        footer.setName("card-footer");
+        footer.pad(6, 12, 7, 12);
+        if (view.attacks() == 0 || view.expanded()) {
+            String hint = view.attacks() > 0 ? "GpuBoard.hud.cards.reorderHint"
+                  : view.selected() ? "GpuBoard.hud.cards.emptyHintArmed" : "GpuBoard.hud.cards.emptyHint";
+            UiFlow flow = new UiFlow(ui, FOOT_SIZE, FOOT_LINE);
+            flow.run(text(hint), "hud-body", UiTheme.MUTED);
+            flow.setName("card-foot");
+            footer.add(flow).growX().minWidth(0);
+        } else {
+            footer.add().expandX();
+        }
+        if (view.attacks() > 0) {
+            UiButton clear = ui.button("hud-mini", null, text("GpuBoard.hud.cards.clearAll"), null);
+            clear.setName("card-clear-all");
+            clear.setDisabled(!view.editable());
+            ui.tip(clear).getActor().setText(text("GpuBoard.hud.cards.clearAllTip"));
+            onChange(clear, () -> source.fire().removeTarget(view.key()));
+            footer.add(clear).padLeft(8);
+        }
+        return footer;
     }
 
     private Image rule() {

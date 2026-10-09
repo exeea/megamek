@@ -48,8 +48,7 @@ final class BoardNaturalBridge {
                 float reach = bankReach(scene, ground, surfaces, center, along, width, space, d);
                 gate.set(along).scl(Math.max(length + BoardRelief.metres(1), reach));
             }
-            var contact = bank ? ground.faces.stream().filter(f -> f.finish() != BoardSurface.Finish.OUTCROP
-                  && f.finish() != BoardSurface.Finish.DRESSING && f.finish() != BoardSurface.Finish.ICE).toList() : List.<BoardSurface.Face>of();
+            var contact = bank ? ground.foundation() : List.<BoardSurface.Face>of();
             // A straight two-corner mouth can miss a scalloped cliff between the corners. Fit the entire opening;
             // keep these contact samples at every LOD and never use a decorative boulder as the bank height.
             int sections = bank ? 4 : 1;

@@ -2807,8 +2807,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                 BufferedImage copy = new BufferedImage(marking.getWidth(), marking.getHeight(), BufferedImage.TYPE_INT_ARGB);
                 copy.setData(marking.getData()); marking = copy;
             }
-            result.add(new BoardArtwork.HexImage(hex.coords(), hex.terrain(), hex.normals(), hex.decals(),
-                  hex.decalsWithoutLimbs(), marking, hex.text(), hex.structureModels(), hex.tileset(), hex.bridge()));
+            result.add(hex.withTactical(marking));
         });
         result.sort(Comparator.comparingInt((BoardArtwork.HexImage hex) -> hex.coords().getX())
               .thenComparingInt(hex -> hex.coords().getY()));
@@ -2848,8 +2847,8 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                             BoardArtwork.HexImage art = artwork.capture(getBoard(), coords, includeArtwork);
                             Point point = getHexLocation(coords);
                             BufferedImage marking = includeTactical ? markingImage(tacticalChunk, point.x - pixels.x, point.y - pixels.y) : null;
-                            consumer.accept(new BoardArtwork.HexImage(coords, art.terrain(), art.normals(), art.decals(),
-                                  art.decalsWithoutLimbs(), marking, art.text(), art.structureModels(), art.tileset(), art.bridge()));
+                            // The game's 3D view gets exactly the preview's capture, plus its tactical marking.
+                            consumer.accept(art.withTactical(marking));
                         }
                     }
                 }

@@ -3,7 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -56,6 +56,7 @@ class GpuUnitScreenScaleSmokeTest {
             });
             var configuration = GpuBoardWindow.configuration(false);
             configuration.setWindowedMode(1920, 1080);
+            configuration.setInitialVisible(false);
             new Lwjgl3Application(new ApplicationAdapter() {
                 @Override public void create() {
                     GpuBattleView view = null;
@@ -104,7 +105,6 @@ class GpuUnitScreenScaleSmokeTest {
         zoomTo(view, threshold, scale);
         assertEquals(size, model.transform.getScale(new Vector3()), "At the threshold the Atlas keeps its size");
         Vector3 feet = model.transform.getTranslation(new Vector3());
-        float height = UnitBounds.world(model).max.z - feet.z;
         float tall = screenHeight(view, model);
         float head = screen(view, feet).y - screen(view, anchor(view)).y;
         System.out.printf("Hex %.0f HUD pixels wide: the Atlas is %.1f pixels tall, its anchor %.1f above its feet%n",
@@ -130,16 +130,16 @@ class GpuUnitScreenScaleSmokeTest {
                   "Its anchor, where labels hang, follows");
         }
 
-        // Grown to the maximum, a point above the head the Atlas has at its size picks it; at its size, the ground.
+        // Click the grown mesh outside the normal model's projected bounds and outline, then switch growth off.
         zoomTo(view, threshold / UnitScreenScale.MAX, scale);
         capture("unit-scale-zoomed-out.png");
-        Vector3 above = screen(view, new Vector3(feet).add(0, 0, 1.6f * height));
-        assertEquals(OWN, pick(view, above), "The grown Atlas takes the pick above its own size's head");
+        Vector3 grownPoint = grownPoint(view, model);
+        assertTrue(picksModel(view, grownPoint), "The grown Atlas takes the pick outside its normal bounds");
         scaling.setChecked(false);
         render(view);
         assertEquals(size, model.transform.getScale(new Vector3()), "Switched off, the Atlas keeps its size");
         capture("unit-scale-zoomed-out-off.png");
-        assertNotEquals(OWN, pick(view, above), "At its size the Atlas is not under that point");
+        assertFalse(picksModel(view, grownPoint), "At its size the Atlas is not under that point");
         scaling.setChecked(true);
 
         // The tuning controls change the growth on the next frame; Defaults restores the constants.
@@ -163,13 +163,10 @@ class GpuUnitScreenScaleSmokeTest {
         render(view);
         var icons = (GpuUnitIcons) field(view, "unitIcons");
         assertTrue(icons.active());
-        ModelInstance icon = icons.instance(scene.units().stream().filter(unit -> unit.id() == ATLAS).findFirst()
-              .orElseThrow());
-        float side = screen(view, new Vector3(-.5f, 0, 0).mul(icon.transform))
-              .dst(screen(view, new Vector3(.5f, 0, 0).mul(icon.transform)));
+        var tacticalUnit = scene.units().stream().filter(unit -> unit.id() == ATLAS).findFirst().orElseThrow();
+        ModelInstance icon = icons.instance(tacticalUnit);
         float hex = screen(view, BoardGeometry.corner(OWN, 0, 3)).dst(screen(view, BoardGeometry.corner(OWN, 0, 0)));
-        float share = GpuUnitIcons.SIZE_IN_HEXES * BoardGeometry.HEIGHT / BoardGeometry.WIDTH;
-        assertEquals(share, side / hex, .01f * share, "The icon keeps its share of the hex");
+        GpuTacticalViewSmokeTest.assertSpriteSize(view, tacticalUnit, icon, hex);
         GpuBoardTestUi.press(KeyCommandBind.TOGGLE_ISO);
         render(view);
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -229,16 +226,41 @@ class GpuUnitScreenScaleSmokeTest {
 
     /** The height on screen, in window pixels, of the instance's posed bounds. */
     private static float screenHeight(GpuBattleView view, ModelInstance instance) throws Exception {
+        return screenBounds(view, instance).height;
+    }
+
+    private static com.badlogic.gdx.math.Rectangle screenBounds(GpuBattleView view, ModelInstance instance) {
         BoundingBox bounds = UnitBounds.world(instance);
-        float low = Float.POSITIVE_INFINITY;
-        float high = Float.NEGATIVE_INFINITY;
+        float left = Float.POSITIVE_INFINITY, top = Float.POSITIVE_INFINITY;
+        float right = Float.NEGATIVE_INFINITY, bottom = Float.NEGATIVE_INFINITY;
         for (int corner = 0; corner < 8; corner++) {
-            float y = screen(view, new Vector3((corner & 1) == 0 ? bounds.min.x : bounds.max.x,
-                  (corner & 2) == 0 ? bounds.min.y : bounds.max.y, (corner & 4) == 0 ? bounds.min.z : bounds.max.z)).y;
-            low = Math.min(low, y);
-            high = Math.max(high, y);
+            Vector3 point = screen(view, new Vector3((corner & 1) == 0 ? bounds.min.x : bounds.max.x,
+                  (corner & 2) == 0 ? bounds.min.y : bounds.max.y, (corner & 4) == 0 ? bounds.min.z : bounds.max.z));
+            left = Math.min(left, point.x); right = Math.max(right, point.x);
+            top = Math.min(top, point.y); bottom = Math.max(bottom, point.y);
         }
-        return high - low;
+        return new com.badlogic.gdx.math.Rectangle(left, top, right - left, bottom - top);
+    }
+
+    /** A real pointer pixel on the grown mesh, clear of the normal mesh and its clickable outline. */
+    private static Vector3 grownPoint(GpuBattleView view, ModelInstance model) throws Exception {
+        var normal = new ModelInstance(model);
+        normal.transform.scale(1 / UnitScreenScale.MAX, 1 / UnitScreenScale.MAX, 1 / UnitScreenScale.MAX);
+        var excluded = screenBounds(view, normal);
+        float gap = 2 * GpuUnitVisibility.OUTLINE_STEP * (float) field(view, "layoutScale") + 2;
+        excluded.set(excluded.x - gap, excluded.y - gap, excluded.width + 2 * gap, excluded.height + 2 * gap);
+        var grown = screenBounds(view, model);
+        var picking = new UnitPicking();
+        var camera = view.boardCamera.camera;
+        for (int y = (int) Math.ceil(grown.y); y <= grown.y + grown.height; y++) {
+            for (int x = (int) Math.ceil(grown.x); x <= grown.x + grown.width; x++) {
+                if (!excluded.contains(x, y) && Float.isFinite(picking.distance(model, camera.getPickRay(x, y, 0, 0,
+                      camera.viewportWidth, camera.viewportHeight)))) {
+                    return new Vector3(x, y, 0);
+                }
+            }
+        }
+        throw new AssertionError("The grown model must extend beyond the normal model and outline");
     }
 
     /** Window coordinates (y down) of a world point. */
@@ -249,12 +271,17 @@ class GpuUnitScreenScaleSmokeTest {
         return point;
     }
 
-    /** The coordinates the view's own board input picks at a window point. */
-    private static Coords pick(GpuBattleView view, Vector3 point) throws Exception {
+    /** Distinguishes a direct model hit from a terrain hit, even when both return the unit's hex. */
+    private static boolean picksModel(GpuBattleView view, Vector3 point) throws Exception {
         Object input = field(view, "boardInput");
-        var pick = input.getClass().getDeclaredMethod("pick", int.class, int.class);
+        var pick = input.getClass().getDeclaredMethod("pickSelection", int.class, int.class);
         pick.setAccessible(true);
-        return (Coords) pick.invoke(input, Math.round(point.x), Math.round(point.y));
+        Object picked = pick.invoke(input, Math.round(point.x), Math.round(point.y));
+        var entityId = picked.getClass().getDeclaredMethod("entityId");
+        var onTerrain = picked.getClass().getDeclaredMethod("onTerrain");
+        entityId.setAccessible(true);
+        onTerrain.setAccessible(true);
+        return (int) entityId.invoke(picked) == ATLAS && !(boolean) onTerrain.invoke(picked);
     }
 
     private static void render(GpuBattleView view) {

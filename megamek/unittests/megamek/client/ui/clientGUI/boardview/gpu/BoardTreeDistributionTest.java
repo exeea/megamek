@@ -13,7 +13,6 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
-import com.badlogic.gdx.files.FileHandle;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
 import megamek.common.Hex;
@@ -128,7 +127,7 @@ class BoardTreeDistributionTest {
         var pigments = new HashSet<Integer>();
         for (String tree : BASIC_TREES) {
             String name = tree + (snow ? "-snow" : "");
-            var levels = RigidGlb.loadLods(new FileHandle(new File(root, name + ".glb")), root.toPath());
+            var levels = RigidGlb.loadLods(RigidGlb.source(root, name), root.toPath());
             assertEquals(4, levels.size(), name);
             var materials = new java.util.HashMap<String, String>();
             BoardFoliageTest.partMaterials(levels.getFirst().nodes, materials);

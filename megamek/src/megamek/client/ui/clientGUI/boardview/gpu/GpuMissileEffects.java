@@ -34,7 +34,7 @@ final class GpuMissileEffects implements Disposable {
     private static final int MISSILES_PER_BATCH = 512;
     private static final int STRIDE = 7;
     record Launch(UnitAttack attack, Vector3[] origins, Vector3[] targets, int missiles, int hits, boolean indirect, int seed,
-          ResolvedAttack.Shot profile, int intercepted) {
+          ResolvedAttack.Shot profile, int intercepted, Vector3[] aims, UnitAttack.Contact[] contacts) {
         boolean hit(int missile) { return Math.floorMod(seed - missile, missiles) < hits; }
         boolean intercepted(int missile) {
             int rank = Math.floorMod(seed - missile, missiles);
@@ -42,7 +42,8 @@ final class GpuMissileEffects implements Disposable {
         }
 
         float endProgress(int missile) {
-            return intercepted(missile) ? UnitAttack.interceptProgress(origins[missile % origins.length], targets[missile]) : 1;
+            return intercepted(missile) ? UnitAttack.interceptProgress(origins[missile % origins.length], targets[missile])
+                  : contacts[missile] == null ? 1 : contacts[missile].progress();
         }
 
         float endSeconds(int missile) {
@@ -66,7 +67,7 @@ final class GpuMissileEffects implements Disposable {
           boolean indirect, int seed, ResolvedAttack.Shot profile, int intercepted) {
         hits = MathUtils.clamp(hits, 0, missiles);
         var launch = new Launch(attack, origins, new Vector3[missiles], missiles, hits, indirect, seed, profile,
-              MathUtils.clamp(intercepted, 0, missiles - hits));
+              MathUtils.clamp(intercepted, 0, missiles - hits), new Vector3[missiles], new UnitAttack.Contact[missiles]);
         int hitOrdinal = 0;
         for (int missile = 0; missile < missiles; missile++) {
             Vector3 origin = origins[missile % origins.length];
@@ -74,6 +75,13 @@ final class GpuMissileEffects implements Disposable {
             launch.targets[missile] = launch.hit(missile) && !attack.defensive() && (profile == null || profile.impact() == null)
                   ? attack.hitEndpoint(target, origin, missile + seed, hitOrdinal++, launch.hits, new Vector3())
                   : attack.endpoint(target, origin, !launch.hit(missile) && !launch.intercepted(missile), missile + seed, new Vector3());
+            launch.aims[missile] = launch.targets[missile].cpy();
+            if (!launch.hit(missile) && !launch.intercepted(missile) && !attack.defensive()) {
+                int index = missile;
+                var contact = attack.landscapeContact(t -> position(launch, index, (float) t, new Vector3()), 32);
+                launch.contacts[missile] = contact;
+                if (contact != null) { launch.targets[missile] = contact.point(); }
+            }
         }
         return launch;
     }
@@ -112,8 +120,9 @@ final class GpuMissileEffects implements Disposable {
     /** Includes a small fan-out, then converges on the authorized hit or a shared safe miss area. */
     static Vector3 position(Launch launch, int missile, float progress, Vector3 result) {
         float t = MathUtils.clamp(progress, 0, 1);
+        if (launch.contacts[missile] != null && t >= launch.endProgress(missile)) { return result.set(launch.targets[missile]); }
         Vector3 origin = launch.origins[missile % launch.origins.length];
-        Vector3 target = launch.targets[missile];
+        Vector3 target = launch.aims[missile];
         float dx = target.x - origin.x, dy = target.y - origin.y;
         float horizontal = Math.max(.001f, (float) Math.hypot(dx, dy));
         float fan = (noise(launch.seed + missile * 31) - .5f) * 9 * MathUtils.sin(t * MathUtils.PI) * (1 - t);

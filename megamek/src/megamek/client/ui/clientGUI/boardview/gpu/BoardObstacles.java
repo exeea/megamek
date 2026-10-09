@@ -61,6 +61,18 @@ final class BoardObstacles {
     private void add(BoardScene scene, BoardScene.Tile tile) {
         for (var feature : tile.features()) {
             var object = feature.decoration();
+            if (feature.asset().equals("bridge") && object == null) {
+                // A pier stands from below the floor up to the deck: its whole column is solid wherever cover could grow.
+                for (int d = 0; d < 6; d++) {
+                    if (!BoardBridgeFooting.pier(scene, tile, d)) { continue; }
+                    var outline = BoardBridgeFooting.pierFootprint(tile, d);
+                    var bounds = new BoundingBox().inf();
+                    outline.forEach(bounds::ext);
+                    footprints.add(new Footprint(outline, -Float.MAX_VALUE, Float.MAX_VALUE, bounds));
+                }
+                deck(scene, tile, feature);
+                continue;
+            }
             // Paint has no model footprint. Structures already provide clearance for objects on their roofs/decks.
             if (object != null && (object.kind().equals("decal") || object.placement().receiver() != null
                   && !object.placement().receiver().terrain().equals("ground"))) { continue; }
@@ -73,8 +85,9 @@ final class BoardObstacles {
             boolean custom = object == null && !procedural && feature.asset().startsWith("buildings/")
                   && BoardArtwork.customBuildingFile(feature.asset()).isFile();
             File root = new File(Configuration.dataDir(), custom ? "models/buildings" : "models/board");
+            // A tree's winter form has the shape of its bare file's geometry.
             File file = custom ? BoardArtwork.customBuildingFile(feature.asset())
-                  : new File(root, feature.asset() + ".glb");
+                  : RigidGlb.source(root, feature.asset()).file();
             // Unresolved native references draw a renderer-owned placeholder and must remain editable.
             if (object != null && !file.isFile()) { continue; }
             var geometry = procedural ? null : MODELS.computeIfAbsent(file.getAbsoluteFile(), key -> new BoardKit<>(() -> {
@@ -102,9 +115,14 @@ final class BoardObstacles {
             float x = BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.hexScale();
             float y = BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.hexScale();
             BoundingBox bounds = new BoundingBox().inf();
+            var authored = object == null ? null : BoardFeatures.decorationTransform(tile.coords(), feature, 0);
             for (Vector3 p : points) {
-                float px = object != null && object.mirror() ? -p.x : p.x, py = p.y;
-                p.set(x + scale * (c * px - s * py), y + scale * (s * px + c * py), p.z);
+                if (authored != null) { p.mul(authored); }
+                else {
+                    // A layout row's stretch acts on the model's own axes before its turn, as in the drawn instance.
+                    float px = p.x * (float) feature.stretch().x(), py = p.y * (float) feature.stretch().y();
+                    p.set(x + scale * (c * px - s * py), y + scale * (s * px + c * py), p.z);
+                }
                 bounds.ext(p);
             }
             float ground = BoardGeometry.groundZ(tile), upperGround = ground;
@@ -132,7 +150,8 @@ final class BoardObstacles {
             }
             boolean fitHeight = custom || feature.kind() == BoardScene.FeatureKind.BUILDING
                   || feature.asset().startsWith("buildings/");
-            float verticalScale = object != null || feature.kind() == BoardScene.FeatureKind.SCENERY ? scale
+            float verticalScale = object != null ? 1 : feature.kind() == BoardScene.FeatureKind.SCENERY
+                  ? scale * (float) feature.stretch().z()
                   : custom ? BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT
                   : feature.height() * BoardGeometry.level() / (fitHeight ? bounds.getDepth() : 1);
             // Scenery grounds its lowest authored vertex, including models with an offset origin.
@@ -140,6 +159,30 @@ final class BoardObstacles {
                   + (feature.kind() == BoardScene.FeatureKind.SCENERY ? 0 : bounds.min.z * verticalScale);
             float height = custom ? feature.height() * BoardGeometry.level() : bounds.getDepth() * verticalScale;
             footprints.add(new Footprint(List.copyOf(points), low, low + height + upperGround - ground, bounds));
+        }
+    }
+
+    /**
+     * The deck's passage from the hex centre to each of its exit edges ({@link BoardBridge#PASSAGE_HALF_WIDTH} each
+     * side), from the slab's underside to the deck: cover tall enough to reach it, under a deck at or near the ground,
+     * does not grow through it. A raised deck leaves the ground beneath it as it is.
+     */
+    private void deck(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature bridge) {
+        float s = BoardGeometry.hexScale(), half = BoardBridge.PASSAGE_HALF_WIDTH * s, centreZ = BoardBridge.deckZ(tile);
+        var centre = BoardGeometry.center(tile.coords(), 0);
+        for (int d = 0; d < 6; d++) {
+            if ((bridge.bridgeExits() & (1 << d)) == 0) { continue; }
+            var edge = BoardGeometry.center(tile.coords().translated(d), 0).add(centre).scl(.5f);
+            var across = new Vector3(edge).sub(centre).nor();
+            across.set(-across.y, across.x, 0).scl(half);
+            var a = new Vector3(centre).add(across);
+            var b = new Vector3(centre).sub(across);
+            var c = new Vector3(edge).sub(across);
+            var e = new Vector3(edge).add(across);
+            var bounds = new BoundingBox().inf().ext(a).ext(b).ext(c).ext(e);
+            float edgeZ = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, scene.tile(tile.coords().translated(d)), d));
+            footprints.add(new Footprint(List.of(a, b, c, new Vector3(a), new Vector3(c), e),
+                  Math.min(centreZ, edgeZ) - BoardBridge.SLAB * s, Math.max(centreZ, edgeZ), bounds));
         }
     }
 

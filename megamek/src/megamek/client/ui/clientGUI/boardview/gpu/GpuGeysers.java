@@ -24,13 +24,13 @@ final class GpuGeysers implements Disposable {
     record Emitter(Vector3 origin, float scale, float phase, boolean active, boolean magma) { }
 
     static Emitter emitter(String asset, Matrix4 transform) {
-        if (!asset.equals("scenery/saxarba/misc/geyser_water_off")
-              && !asset.equals("scenery/saxarba/misc/geyser_water_on")
-              && !asset.equals("scenery/saxarba/misc/geyser_magma")) { return null; }
+        if (!asset.equals("scenery/geysers/water-dormant")
+              && !asset.equals("scenery/geysers/water-erupting")
+              && !asset.equals("scenery/geysers/magma")) { return null; }
         boolean magma = asset.endsWith("magma");
         Vector3 origin = new Vector3(0, 0, magma ? 1.85f : .84f).mul(transform);
         float scale = transform.getScale(new Vector3()).x;
-        return new Emitter(origin, scale, noise(origin.x * .17f + origin.y * .31f), asset.endsWith("_on"), magma);
+        return new Emitter(origin, scale, noise(origin.x * .17f + origin.y * .31f), asset.endsWith("-erupting"), magma);
     }
 
     void begin() { visible.clear(); }

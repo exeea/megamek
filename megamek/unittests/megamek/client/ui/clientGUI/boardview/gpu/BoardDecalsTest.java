@@ -2,15 +2,22 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.HashMap;
+import javax.imageio.ImageIO;
 
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.BoardDecalArt;
+import megamek.common.board.BoardDecoration;
+import megamek.common.board.BoardDecoration.Placement;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
@@ -141,6 +148,96 @@ class BoardDecalsTest {
         assertTrue(BoardDecals.project(COORDS, List.of(), paint).isEmpty());
         var outside = paint.transform(.45, 0, 0, false, 1, paint.placement());
         assertTrue(BoardDecals.project(COORDS, roof(40, 40), outside).isEmpty(), "Paint outside the deck must not land underneath it");
+    }
+
+    private static final String CROSS = "decal/emblems/red-cross";
+
+    /** A grass hex at {@link #COORDS}, with a legacy paint overlay or none. */
+    private static BoardScene.Tile grass(BoardScene.Pixels overlay) {
+        return new BoardScene.Tile(COORDS, 0, -1, false, 0, BoardScene.Surface.GRASS, null, null, overlay, null, null,
+              List.of(), List.of(), BoardLiquid.NONE, null, true);
+    }
+
+    private static BoardDecals.Opacity paint(BoardDecoration object) {
+        return BoardDecals.Opacity.of(grass(null), List.of(new BoardDecals.Stamp(COORDS, object)));
+    }
+
+    /** The world point that {@code object}, owned by {@link #COORDS}, paints with texture coordinates (u, v). */
+    private static float[] painted(BoardDecoration object, double u, double v) {
+        var uv = BoardDecals.paintUv(object);
+        double a = u - .5, b = v - .5, determinant = uv.ux() * uv.vy() - uv.uy() * uv.vx();
+        return new float[] { (float) (BoardGeometry.centerX(COORDS) + object.x() * BoardGeometry.width()
+              + (a * uv.vy() - b * uv.uy()) / determinant),
+              (float) (BoardGeometry.centerY(COORDS) + object.y() * BoardGeometry.height() + (b * uv.ux() - a * uv.vx()) / determinant) };
+    }
+
+    @Test
+    void groundCoverSeesPaintByItsImagesAlphaWhereverTheDecalIsDrawn() throws Exception {
+        BufferedImage image = ImageIO.read(BoardDecalArt.image(CROSS));
+        var plain = new BoardDecoration("cross", "decal", CROSS, null, .1, -.05, 0, false, .5, Placement.ground(), 0, false);
+        var turned = new BoardDecoration("cross", "decal", CROSS, null, .1, -.05, 35, true, .5, Placement.ground(), 0, false);
+        for (var object : List.of(plain, turned, plain.withStretch(new BoardDecoration.Stretch(1.4, .7, 1)))) {
+            var paint = paint(object);
+            int opaque = 0;
+            for (int i = 0; i < 400; i++) {
+                double u = (i % 20 + .5) / 20, v = (i / 20 + .5) / 20;
+                if (image.getRGB((int) (u * image.getWidth()), (int) (v * image.getHeight())) >>> 24 != 255) { continue; }
+                opaque++;
+                float[] point = painted(object, u, v);
+                assertTrue(paint.at(point[0], point[1]) >= .5f, "Opaque paint at " + u + ", " + v + " of " + object);
+            }
+            assertTrue(opaque > 20);
+            // The round emblem's square has transparent corners: they stay open to cover.
+            for (double[] corner : new double[][] { { .03, .03 }, { .97, .03 }, { .03, .97 }, { .97, .97 } }) {
+                float[] point = painted(object, corner[0], corner[1]);
+                assertEquals(0, paint.at(point[0], point[1]), "Transparent corner of " + object);
+            }
+        }
+    }
+
+    @Test
+    void clippedPaintEndsAtItsHexAndPaintOffTheGroundGrowsNothingAnyway() throws Exception {
+        BufferedImage image = ImageIO.read(BoardDecalArt.image(CROSS));
+        var unclipped = new BoardDecoration("cross", "decal", CROSS, null, 0, 0, 0, false, 1, Placement.ground(), 0, false);
+        var clipped = new BoardDecoration("cross", "decal", CROSS, null, 0, 0, 0, false, 1, Placement.ground(), 0, true);
+        // An opaque texel at least two model px outside the owner hex.
+        float[] outside = null;
+        float reach = 2 * BoardGeometry.hexScale();
+        for (int i = 0; i < 2500 && outside == null; i++) {
+            double u = (i % 50 + .5) / 50, v = (i / 50 + .5) / 50;
+            float[] point = painted(unclipped, u, v);
+            boolean beyond = true;
+            for (int d = 0; d < 5; d++) {
+                beyond &= !BoardGeometry.contains(COORDS, point[0] + (d == 1 ? reach : d == 2 ? -reach : 0),
+                      point[1] + (d == 3 ? reach : d == 4 ? -reach : 0));
+            }
+            if (beyond && image.getRGB((int) (u * image.getWidth()), (int) (v * image.getHeight())) >>> 24 == 255) { outside = point; }
+        }
+        assertNotNull(outside);
+        assertTrue(paint(unclipped).at(outside[0], outside[1]) >= .5f);
+        assertEquals(0, paint(clipped).at(outside[0], outside[1]), "Clipped paint ends at its hex");
+        float[] centre = painted(clipped, .5, .5);
+        assertTrue(paint(clipped).at(centre[0], centre[1]) >= .5f);
+        // Roofs, decks and ice grow no cover: paint there leaves the hex's ground unpainted.
+        for (var support : List.of("building", "bridge", "ice")) {
+            assertNull(paint(new BoardDecoration("cross", "decal", CROSS, null, 0, 0, 0, false, 1, Placement.on(support, 0), 0, true)));
+        }
+        assertNull(BoardDecals.Opacity.of(grass(null), List.of()), "Nothing paints a plain hex");
+    }
+
+    @Test
+    void theLegacyOverlayCountsWhereTheGroundsTopVerticesDrawIt() {
+        // Its north-west quarter opaque.
+        var image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 36; y++) {
+            for (int x = 0; x < 42; x++) { image.setRGB(x, y, 0xff808080); }
+        }
+        var paint = BoardDecals.Opacity.of(grass(new BoardScene.Pixels(image)), List.of());
+        float x = BoardGeometry.centerX(COORDS), y = BoardGeometry.centerY(COORDS);
+        float dx = BoardGeometry.width() / 5, dy = BoardGeometry.height() / 4;
+        assertEquals(1, paint.at(x - dx, y + dy), "North-west");
+        assertEquals(0, paint.at(x + dx, y + dy), "North-east");
+        assertEquals(0, paint.at(x - dx, y - dy), "South-west");
     }
 
     private static List<BoardSurface.Face> roof(float left, float right) {

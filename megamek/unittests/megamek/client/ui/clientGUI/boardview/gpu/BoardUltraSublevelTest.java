@@ -59,7 +59,7 @@ class BoardUltraSublevelTest {
                         }
                     }
                     var support = BoardTacticalGeometry.Surface.of(surface, scene, BoardGeometry.floor(scene));
-                    assertNull(BoardPlants.plant(scene, tile, support, lod));
+                    assertNull(BoardPlants.plant(scene, tile, support, lod, java.util.List.of()));
                 }
                 Vector3 center = BoardGeometry.center(PIT, 0);
                 assertEquals(PIT, BoardGeometry.pick(scene, new Ray(center.add(0, 0, 500), new Vector3(0, 0, -1))));
@@ -112,6 +112,62 @@ class BoardUltraSublevelTest {
                 }
             }
         });
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 1 })
+    void scatterFromNeighboringTilesCannotLandInAPit(int flag) {
+        BoardScene scene = scene(at -> new Hex(at.equals(PIT) ? -2 : 0,
+              at.equals(PIT) ? "ultra_sublevel:" + flag : "", "grass"));
+        var owner = scene.tile(PIT.translated(0));
+        assertTrue(BoardScatter.visible(scene, owner, BoardGeometry.center(owner.coords(), 0), 1));
+        for (int level : new int[] { -3, 0, 3 }) {
+            assertFalse(BoardScatter.visible(scene, owner, BoardGeometry.center(PIT, level), 1),
+                  "A neighboring tile cannot place scatter anywhere above the pit");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 1 })
+    void pitRimRocksStayOnSolidLandAtEveryDetail(int flag) {
+        for (String theme : List.of("grass", "mars", "fungus")) {
+            BoardScene scene = scene(at -> new Hex(at.equals(PIT) ? -2 : 0,
+                  at.equals(PIT) ? "ultra_sublevel:" + flag : "", theme));
+            for (TerrainLod lod : TerrainLod.values()) {
+                int rocks = 0;
+                for (int direction = 0; direction < 6; direction++) {
+                    var tile = scene.tile(PIT.translated(direction));
+                    int edge = Math.floorMod(1 - tile.coords().direction(PIT), 6);
+                    var surface = new BoardSurface(scene, tile, lod);
+                    var land = surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.TOP).toList();
+                    var rimRocks = surface.faces.stream().filter(face -> face.landEdge() == edge
+                          && face.finish() == BoardSurface.Finish.OUTCROP).toList();
+                    rocks += rimRocks.size();
+                    for (var face : rimRocks) {
+                        for (var point : List.of(face.a(), face.b(), face.c())) {
+                            assertTrue(Float.isFinite(BoardSurface.sampleHeight(land, point.x, point.y, Float.NaN)),
+                                  theme + " " + lod + ": every rock vertex must have solid land beneath it");
+                        }
+                    }
+                }
+                if (lod.dressing) { assertTrue(rocks > 0, "Solid land around the pit must retain rim rocks"); }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 1 })
+    void pitFacingWallsDoNotGrowFungalScatter(int flag) {
+        BoardScene scene = scene(at -> new Hex(at.equals(PIT) ? -2 : 0,
+              at.equals(PIT) ? "ultra_sublevel:" + flag : "", "fungus"));
+        for (int direction = 0; direction < 6; direction++) {
+            var tile = scene.tile(PIT.translated(direction));
+            var surface = new BoardSurface(scene, tile);
+            List<BoardSurface.Face> faces = new ArrayList<>(surface.faces);
+            faces.addAll(surface.walls(scene, BoardGeometry.floor(scene)));
+            assertTrue(BoardFungus.cliffs(scene, tile, faces).isEmpty(),
+                  "Fungal scatter must not grow into a pit from its neighboring walls");
+        }
     }
 
     @Test

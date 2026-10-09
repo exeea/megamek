@@ -242,7 +242,7 @@ class GpuBoardLabelsSmokeTest {
                 Rectangle tip = GpuHudTestStage.bounds(labels.tip());
                 assertEquals(Math.round(destination.x - 56), tip.x + tip.width, 1, "Flipped left of the destination");
                 assertFalse(tip.overlaps(GpuHudTestStage.bounds(labels.panel)), "The flipped tip leaves the column");
-                Vector2 pinHex = board.screen(ground(scene, run.pins().getFirst()));
+                Vector2 pinHex = board.screen(ground(scene, run.pins().getFirst().coords()));
                 assertCentred(labels.pin(1), pinHex.x, pinHex.y + 22, "Waypoint 1 sits 22 above its hex");
                 assertNull(labels.pin(2));
                 capture(hud, "labels-03", "03-waypoint-route.jpg", new Crop("tip", labels.tip(), 1140, 460),
@@ -371,7 +371,9 @@ class GpuBoardLabelsSmokeTest {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
             Labels labels = new Labels(hud, board.camera);
             try {
-                GpuMovePlan.Snapshot walk = facts(atlasMove(scene), "walk", 2, 3, 1, 0, List.of());
+                // An interior destination lets the camera reach each window edge without hitting its pan limit.
+                GpuMovePlan.Snapshot walk = facts(route(scene, List.of(new Coords(14, 9), new Coords(14, 8)),
+                      List.of()), "walk", 2, 3, 1, 0, List.of());
                 Coords destination = walk.destination();
                 assertFalse(scene.tile(destination).liquid().present(), "A dry destination: its surface is its level");
                 GpuBoardSource.Frame frame = frameOf(scene, GpuHudFixtures.status(), panels(walk,
@@ -455,6 +457,18 @@ class GpuBoardLabelsSmokeTest {
                 show(labels, hud, board, view, move(ATLAS, List.of(), pinned.route(), pinned.pins(), Map.of(), true));
                 assertFalse(labels.pin(1).isVisible(), "No numbers on a hover route");
 
+                // Two pins in the same hex on different floors must have distinct projected anchors.
+                float floor = scene.tile(atlas).elevation();
+                List<GpuMovePlan.Step> floors = List.of(
+                      new GpuMovePlan.Step(atlas, scene.boardId(), floor + 1, 0, GpuMovePlan.Band.WALK, false),
+                      new GpuMovePlan.Step(atlas, scene.boardId(), floor + 2, 0, GpuMovePlan.Band.WALK, false));
+                show(labels, hud, board, view, move(ATLAS, floors, List.of(), floors, Map.of(), true));
+                for (int number : new int[] { 1, 2 }) {
+                    Vector2 centre = board.screen(BoardGeometry.center(atlas, floor + number));
+                    assertCentred(labels.pin(number), centre.x, centre.y + 22,
+                          "Waypoint " + number + " follows its floor");
+                }
+
                 // The Tactical View: the badge above the hex, and the number on the hex's own disc as well.
                 frame(board, true, atlas, 60.8f, 960, 540);
                 GpuHud.HudView flat = new GpuHud.HudView(true, false, Map.of(ATLAS, new Rectangle(0, 0, 44, 44)),
@@ -489,8 +503,7 @@ class GpuBoardLabelsSmokeTest {
             Labels labels = new Labels(hud, null);
             try {
                 // The Warhammer, where it stands, against the Timber Wolf straight above it, which fires back: the
-                // outgoing guide runs up from its middle (420, 255) to the Timber Wolf's (420, 755), the incoming
-                // one back down.
+                // guides connect their centres, stopping outside both rectangles; the incoming one runs back down.
                 GpuHud.HudView view = view(false, Map.of(WARHAMMER, new Rectangle(400, 200, 40, 100), TIMBER_WOLF,
                       new Rectangle(400, 700, 40, 100)));
                 GpuBoardSource.Frame frame = frameOf(null, turn(GamePhase.MOVEMENT, false, TIMBER_WOLF,
@@ -501,19 +514,19 @@ class GpuBoardLabelsSmokeTest {
                 Pixmap still = draw(hud, "labels-guides");
                 // Side by side, 3 apart: outgoing right of the line from the shooter to the target, incoming left
                 // (probed above the Warhammer's own nameplate, which covers them at its head, 300).
-                assertEquals(.5f, share(still, 423, 320, 748, GpuBoardLabelsSmokeTest::mint), .06f,
+                assertEquals(.5f, share(still, 423, 320, 688, GpuBoardLabelsSmokeTest::mint), .06f,
                       "Outgoing dashes 7 on, 7 off");
-                assertEquals(.5f, share(still, 417, 320, 748, GpuBoardLabelsSmokeTest::coral), .06f);
-                assertEquals(0, share(still, 423, 320, 748, GpuBoardLabelsSmokeTest::coral));
-                assertEquals(0, share(still, 417, 320, 748, GpuBoardLabelsSmokeTest::mint));
+                assertEquals(.5f, share(still, 417, 320, 688, GpuBoardLabelsSmokeTest::coral), .06f);
+                assertEquals(0, share(still, 423, 320, 688, GpuBoardLabelsSmokeTest::coral));
+                assertEquals(0, share(still, 417, 320, 688, GpuBoardLabelsSmokeTest::mint));
                 // The dashes leave the shooter: the first one, 0-7 units up, has moved to 7-14 half a period later.
-                assertTrue(mint(still, 423, 258) && !mint(still, 423, 265), "The first outgoing dash");
-                assertTrue(coral(still, 417, 751) && !coral(still, 417, 744), "The first incoming dash");
+                assertTrue(mint(still, 423, 334) && !mint(still, 423, 341), "An outgoing dash clear of the nameplate");
+                assertTrue(coral(still, 417, 693) && !coral(still, 417, 686), "The first incoming dash");
                 hud.stage.act(.55f);
                 Pixmap later = draw(hud, "labels-guides-later");
-                assertTrue(!mint(later, 423, 258) && mint(later, 423, 265), "Outgoing flows toward the target");
-                assertTrue(!coral(later, 417, 751) && coral(later, 417, 744), "Incoming flows toward the shooter");
-                float thin = coverage(still, 258, 412, 434);
+                assertTrue(!mint(later, 423, 334) && mint(later, 423, 341), "Outgoing flows toward the target");
+                assertTrue(!coral(later, 417, 693) && coral(later, 417, 686), "Incoming flows toward the shooter");
+                float thin = coverage(still, 334, 412, 434);
                 still.dispose();
                 later.dispose();
 
@@ -522,7 +535,7 @@ class GpuBoardLabelsSmokeTest {
                 labels.update(hud, frame, view);
                 hud.stage.act(.55f);
                 Pixmap open = draw(hud, "labels-guides-open");
-                assertTrue(coverage(open, 258, 412, 434) > 1.2f * thin, "The open row's guide is wider");
+                assertTrue(coverage(open, 334, 412, 434) > 1.2f * thin, "The open row's guide is wider");
                 Rectangle badge = GpuHudTestStage.bounds(all(labels.root, "tn-badge").getFirst());
                 Color frameColor = new Color(open.getPixel(Math.round(badge.x + badge.width / 2),
                       Math.round(badge.y + badge.height - 1)));
@@ -534,15 +547,15 @@ class GpuBoardLabelsSmokeTest {
                 labels.click(hud, "contacts-outgoing");
                 labels.update(hud, frame, view);
                 Pixmap incoming = draw(hud, "labels-guides-incoming-only");
-                assertEquals(.5f, share(incoming, 420, 320, 748, GpuBoardLabelsSmokeTest::coral), .06f);
-                assertEquals(0, share(incoming, 423, 320, 748, GpuBoardLabelsSmokeTest::mint));
+                assertEquals(.5f, share(incoming, 420, 320, 688, GpuBoardLabelsSmokeTest::coral), .06f);
+                assertEquals(0, share(incoming, 423, 320, 688, GpuBoardLabelsSmokeTest::mint));
                 incoming.dispose();
                 labels.click(hud, "contacts-outgoing");
                 labels.click(hud, "contacts-incoming");
                 labels.update(hud, frame, view);
                 Pixmap outgoing = draw(hud, "labels-guides-outgoing-only");
-                assertEquals(.5f, share(outgoing, 420, 320, 748, GpuBoardLabelsSmokeTest::mint), .06f);
-                assertEquals(0, share(outgoing, 417, 320, 748, GpuBoardLabelsSmokeTest::coral));
+                assertEquals(.5f, share(outgoing, 420, 320, 688, GpuBoardLabelsSmokeTest::mint), .06f);
+                assertEquals(0, share(outgoing, 417, 320, 688, GpuBoardLabelsSmokeTest::coral));
                 outgoing.dispose();
                 labels.click(hud, "contacts-incoming");
 
@@ -551,8 +564,8 @@ class GpuBoardLabelsSmokeTest {
                       GpuFireOrders.Snapshot.EMPTY, inPlace(new Contact(TIMBER_WOLF, false, 9, Side.NONE,
                             Side.NONE))), GpuReportLog.Snapshot.EMPTY), view);
                 Pixmap none = draw(hud, "labels-guides-no-shot");
-                assertEquals(0, share(none, 423, 320, 748, GpuBoardLabelsSmokeTest::mint)
-                      + share(none, 417, 320, 748, GpuBoardLabelsSmokeTest::coral));
+                assertEquals(0, share(none, 423, 320, 688, GpuBoardLabelsSmokeTest::mint)
+                      + share(none, 417, 320, 688, GpuBoardLabelsSmokeTest::coral));
                 assertTrue(all(labels.root, "tn-badge").isEmpty(), "No badge without a shot");
                 none.dispose();
             } finally {
@@ -589,34 +602,86 @@ class GpuBoardLabelsSmokeTest {
         });
     }
 
-    /**
-     * The user's decision of 2026-10-03: a guide leaves its shooter at the side its weapons fire from, outside the
-     * shooter's rectangle: its front at a target ahead, its back at a target in its rear arc, which only rear-mounted
-     * weapons reach. Without a camera the board is north up: the Warhammer, facing north, fires out of its rectangle's
-     * top at the Timber Wolf three hexes north of it, and out of its bottom with the Timber Wolf three hexes south.
-     */
+    /** Both directions use the same centre line and clearance, independent of facing, twist and camera mode. */
     @Test
-    void aGuideLeavesItsShooterAtTheSideItsWeaponsFireFrom() throws Exception {
-        BoardScene scene = GpuBoardSpaceHarness.scene();
+    void guidesConnectCentresAndClearBothUnitsRegardlessOfFacing() {
         GpuHudTestStage.run(hud -> {
             Labels labels = new Labels(hud, null);
             try {
-                Coords wolf = scene.units().stream().filter(unit -> unit.id() == TIMBER_WOLF).findFirst()
-                      .orElseThrow().location().coords();
-                GpuHud.HudView view = view(false, Map.of(WARHAMMER, new Rectangle(400, 200, 40, 100), TIMBER_WOLF,
-                      new Rectangle(400, 700, 40, 100)));
-                // From three hexes south of the Timber Wolf it lies ahead; from three hexes north, behind.
-                for (int toward : new int[] { 3, 0 }) {
-                    Coords from = wolf.translated(toward).translated(toward).translated(toward);
-                    GpuFirePreview.Snapshot preview = new GpuFirePreview.Snapshot(true, true, WARHAMMER, false, from,
-                          scene.boardId(), 0, "None", 0, 0, "", false, 1, 0,
-                          List.of(new Contact(TIMBER_WOLF, false, 3, side(2, 6, 72.22), Side.NONE)));
-                    labels.update(hud, frameOf(scene, turn(GamePhase.MOVEMENT, false, TIMBER_WOLF,
-                          GpuHudFixtures.status().units()), panels(GpuMovePlan.Snapshot.EMPTY,
-                          GpuFireOrders.Snapshot.EMPTY, preview), GpuReportLog.Snapshot.EMPTY), view);
-                    assertEquals(new Vector2(420, toward == 3 ? 303 : 197), start(labels),
-                          toward == 3 ? "out of its front, the top" : "out of its back, the bottom");
+                for (boolean tactical : new boolean[] { false, true }) {
+                    GpuHud.HudView view = view(tactical, Map.of(WARHAMMER, new Rectangle(400, 200, 40, 100),
+                          TIMBER_WOLF, new Rectangle(400, 700, 40, 100)));
+                    for (int facing = 0; facing < 6; facing++) {
+                        Side salvo = new Side("", facing - 2, false, 2, 2, 6, 72.22, List.of());
+                        GpuFirePreview.Snapshot preview = new GpuFirePreview.Snapshot(true, true, WARHAMMER, false,
+                              new Coords(18, 12), 0, facing, "None", 0, 0, "", false, 1, 1,
+                              List.of(new Contact(TIMBER_WOLF, false, 3, salvo, salvo)));
+                        labels.update(hud, frameOf(null, GpuHudFixtures.status(), panels(GpuMovePlan.Snapshot.EMPTY,
+                              GpuFireOrders.Snapshot.EMPTY, preview), GpuReportLog.Snapshot.EMPTY), view);
+                        assertEquals(2, guides(labels));
+                        assertEquals(new Vector2(423, 303), endpoint(labels, 0, "from"));
+                        assertEquals(new Vector2(423, 697), endpoint(labels, 0, "to"));
+                        assertEquals(new Vector2(417, 697), endpoint(labels, 1, "from"));
+                        assertEquals(new Vector2(417, 303), endpoint(labels, 1, "to"));
+                    }
                 }
+            } finally {
+                labels.dispose();
+            }
+        });
+    }
+
+    @Test
+    void bothGuideDirectionsFollowTheDestinationFloorOrFlightHeight() throws Exception {
+        BoardScene scene = GpuBoardSpaceHarness.scene();
+        GpuHudTestStage.run(hud -> {
+            BoardCamera camera = new BoardCamera();
+            camera.resize(hud.width(), hud.height());
+            camera.setIsometric(true);
+            camera.fit(scene);
+            Labels labels = new Labels(hud, camera);
+            try {
+                Coords destination = new Coords(14, 9);
+                Rectangle current = new Rectangle(200, 100, 40, 100);
+                Vector2 ground = GpuNameplates.project(camera.camera,
+                      BoardGeometry.center(destination, scene.tile(destination).elevation()));
+                assertNotNull(ground);
+                GpuFirePreview.Snapshot preview = new GpuFirePreview.Snapshot(true, true, WARHAMMER, true,
+                      destination, scene.boardId(), 0, "Jump", 3, 1, "", false, 1, 1,
+                      List.of(new Contact(TIMBER_WOLF, false, 3, side(2, 6, 72.22), side(2, 6, 72.22))));
+                // Different floors, a rooftop/bridge deck, and an airborne destination use the same absolute level.
+                for (float level : new float[] { 2, 4, 8, 12 }) {
+                    GpuMovePlan.Step end = new GpuMovePlan.Step(destination, scene.boardId(), level, 0,
+                          GpuMovePlan.Band.JUMP, level == 12);
+                    GpuMovePlan.Snapshot plan = move(WARHAMMER, List.of(end), List.of(), List.of(), Map.of(), true);
+                    Vector2 foot = GpuNameplates.project(camera.camera, BoardGeometry.center(destination, level));
+                    assertNotNull(foot);
+                    Rectangle ghost = new Rectangle(foot.x - 20, foot.y, 40, 100);
+                    Rectangle enemy = new Rectangle(ground.x + 400, ground.y + 300, 80, 60);
+                    GpuHud.HudView view = view(false, Map.of(WARHAMMER, current, TIMBER_WOLF, enemy));
+                    labels.update(hud, frameOf(scene, GpuHudFixtures.status(), panels(plan,
+                          GpuFireOrders.Snapshot.EMPTY, preview), GpuReportLog.Snapshot.EMPTY), view);
+                    assertEquals(2, guides(labels));
+                    for (int index = 0; index < 2; index++) {
+                        Vector2 from = endpoint(labels, index, "from");
+                        Vector2 to = endpoint(labels, index, "to");
+                        Vector2 along = new Vector2(to).sub(from).nor();
+                        assertEquals(3, Math.abs(along.crs(ghost.getCenter(new Vector2()).sub(from))), .01f,
+                              "The guide passes beside the elevated ghost centre at level " + level);
+                        assertEquals(3, Math.abs(along.crs(enemy.getCenter(new Vector2()).sub(from))), .01f,
+                              "The guide passes beside the displayed target centre");
+                        assertFalse(Intersector.intersectSegmentRectangle(from, to, ghost));
+                        assertFalse(Intersector.intersectSegmentRectangle(from, to, enemy));
+                    }
+                }
+                // Selecting a movement mode can mark the preview as planned before it has any route or ghost.
+                GpuHud.HudView standing = view(false, Map.of(WARHAMMER, current, TIMBER_WOLF,
+                      new Rectangle(200, 600, 40, 100)));
+                GpuMovePlan.Snapshot unplotted = move(WARHAMMER, List.of(), List.of(), List.of(), Map.of(), true);
+                labels.update(hud, frameOf(scene, GpuHudFixtures.status(), panels(unplotted,
+                      GpuFireOrders.Snapshot.EMPTY, preview), GpuReportLog.Snapshot.EMPTY), standing);
+                assertEquals(new Vector2(223, 203), endpoint(labels, 0, "from"));
+                assertEquals(new Vector2(217, 203), endpoint(labels, 1, "to"));
             } finally {
                 labels.dispose();
             }
@@ -635,12 +700,11 @@ class GpuBoardLabelsSmokeTest {
         return strokes(labels).size();
     }
 
-    /** Where the first stroke starts. */
-    private static Vector2 start(Labels labels) throws ReflectiveOperationException {
-        Object stroke = strokes(labels).getFirst();
-        var from = stroke.getClass().getDeclaredMethod("from");
-        from.setAccessible(true);
-        return (Vector2) from.invoke(stroke);
+    private static Vector2 endpoint(Labels labels, int index, String name) throws ReflectiveOperationException {
+        Object stroke = strokes(labels).get(index);
+        var endpoint = stroke.getClass().getDeclaredMethod(name);
+        endpoint.setAccessible(true);
+        return (Vector2) endpoint.invoke(stroke);
     }
 
     /**
@@ -745,9 +809,9 @@ class GpuBoardLabelsSmokeTest {
                 assertEquals(Map.of(KING_CRAB, List.of("2+", "100%"), ENEMY_LOCUST, List.of(OUT_OF_ARC)),
                       labels.badges(view));
                 Pixmap solid = draw(hud, "labels-traces-3d");
-                // Traces from the attacker's middle (320, 155) to the targets' middles, the primary's brighter.
-                float primary = brightest(solid, new Vector2(320, 155), new Vector2(720, 655));
-                float secondary = brightest(solid, new Vector2(320, 155), new Vector2(1120, 355));
+                // Traces follow the units' centres, the primary's brighter.
+                float primary = brightest(solid, new Vector2(320, 150), new Vector2(720, 650));
+                float secondary = brightest(solid, new Vector2(320, 150), new Vector2(1120, 350));
                 assertTrue(secondary > 2.3f && primary > secondary + .2f, primary + " vs " + secondary);
                 // A leader only where the card leaves the head free: from the card's nearest point (1100, 450) to
                 // the BattleMaster's head (1120, 400), with the diamond there.
@@ -770,7 +834,7 @@ class GpuBoardLabelsSmokeTest {
                       GpuFireOrders.Snapshot.EMPTY, GpuFirePreview.Snapshot.NONE), GpuReportLog.Snapshot.EMPTY), view);
                 Pixmap empty = draw(hud, "labels-traces-none");
                 assertFalse(diamond(empty, 1120, 400));
-                assertTrue(brightest(empty, new Vector2(320, 155), new Vector2(720, 655)) < 1.5f, "No trace");
+                assertTrue(brightest(empty, new Vector2(320, 150), new Vector2(720, 650)) < 1.5f, "No trace");
                 assertTrue(labels.badges(view).isEmpty());
                 empty.dispose();
             } finally {
@@ -987,6 +1051,10 @@ class GpuBoardLabelsSmokeTest {
           GpuBoardSource.Frame frame, GpuHud.HudView view, Coords destination, float x, float y,
           Rectangle... panels) {
         frame(board, false, destination, 118, x, y);
+        Vector2 projected = board.screen(ground(board.scene, destination));
+        assertEquals(x, projected.x, 1, "The camera puts the destination at the requested x");
+        assertEquals(Gdx.graphics.getBackBufferHeight() - y, projected.y, 1,
+              "The camera puts the destination at the requested y");
         labels.update(hud, frame, view, panels);
         assertTrue(labels.tip().isVisible());
         return GpuHudTestStage.bounds(labels.tip());
@@ -1234,7 +1302,7 @@ class GpuBoardLabelsSmokeTest {
 
     /** The plan with the destination tip's facts of a shot: its movement word, MP, modifiers and pins. */
     private static GpuMovePlan.Snapshot facts(GpuMovePlan.Snapshot plan, String type, int cost, int budget, int heat,
-          int tmm, List<Coords> pins) {
+          int tmm, List<GpuMovePlan.Step> pins) {
         return new GpuMovePlan.Snapshot(plan.active(), plan.planner(), plan.external(), plan.entityId(), plan.mode(),
               plan.explicit(), plan.gearLabel(), plan.route(), plan.hover(), pins, plan.destination(), plan.facing(),
               cost, budget, plan.type(), type, plan.auto(), heat, tmm, plan.legal(), plan.warnings(), plan.canUndo(),
@@ -1244,7 +1312,8 @@ class GpuBoardLabelsSmokeTest {
     /** The Atlas's plotted route through {@code hexes} (facing north-east at the end) with {@code pins}. */
     private static GpuMovePlan.Snapshot route(BoardScene scene, List<Coords> hexes, List<Coords> pins) {
         List<GpuMovePlan.Step> steps = hexes.stream().map(hex -> step(scene, hex, 1, GpuMovePlan.Band.WALK)).toList();
-        return facts(move(ATLAS, steps, List.of(), pins, Map.of(), true), "walk", hexes.size(), 3, 1, 0, pins);
+        List<GpuMovePlan.Step> pinned = pins.stream().map(hex -> step(scene, hex, 1, GpuMovePlan.Band.WALK)).toList();
+        return facts(move(ATLAS, steps, List.of(), pinned, Map.of(), true), "walk", hexes.size(), 3, 1, 0, pinned);
     }
 
     /** The fire orders with other targets and TN badges. */

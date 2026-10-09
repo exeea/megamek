@@ -37,6 +37,8 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.BiConsumer;
 
 import com.badlogic.gdx.files.FileHandle;
@@ -52,6 +54,7 @@ import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.Configuration;
+import megamek.common.units.Entity;
 import megamek.logging.MMLogger;
 
 /**
@@ -97,11 +100,32 @@ final class UnitDamageDisplay implements Disposable {
         return armorLoss >= ARMOR_WORN_LOSS ? Stage.ARMOR_WORN : null;
     }
 
+    /** The tuning panel's damage preview: the whole-body stage of a share of the unit lost. */
     static Stage bodyStage(float loss) {
         if (loss >= BODY_DAMAGE_4) { return Stage.BODY_100; }
         if (loss >= BODY_DAMAGE_3) { return Stage.BODY_75; }
         if (loss >= BODY_DAMAGE_2) { return Stage.BODY_50; }
         return loss >= BODY_DAMAGE_1 ? Stage.BODY_25 : null;
+    }
+
+    /**
+     * The whole-body stage of a damage level ({@code Entity.getDamageLevel}), the state the board label's damage tile
+     * and the unit card show: light, moderate, heavy and crippled take the four stages in turn; undamaged none.
+     */
+    static Stage levelStage(int damageLevel) {
+        return switch (damageLevel) {
+            case Entity.DMG_LIGHT -> Stage.BODY_25;
+            case Entity.DMG_MODERATE -> Stage.BODY_50;
+            case Entity.DMG_HEAVY -> Stage.BODY_75;
+            case Entity.DMG_CRIPPLED -> Stage.BODY_100;
+            default -> null;
+        };
+    }
+
+    /** Whole-body damage: {@code stage} over every part, or none without a stage. */
+    static BoardScene.LocationDamage body(Stage stage) {
+        return stage == null ? BoardScene.LocationDamage.NONE
+              : new BoardScene.LocationDamage(Set.of(), Set.of(), Map.of("*", stage));
     }
 
     /** Render-thread preview only. Actual destroyed/detached locations retain priority over the slider. */

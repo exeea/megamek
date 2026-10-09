@@ -316,12 +316,13 @@ class GpuHudInteractionSmokeTest {
                     // Ctrl+click pins a waypoint.
                     Coords pin = start.translated(0);
                     play.click(pin, Input.Buttons.LEFT, InputEvent.CTRL_DOWN_MASK);
-                    assertEquals(List.of(pin), play.move().pins(), "One waypoint");
+                    assertEquals(List.of(pin), play.move().pins().stream().map(GpuMovePlan.Step::coords).toList(),
+                          "One waypoint");
                     // 50: the route continues from the waypoint with the cumulative cost.
                     Coords destination = pin.translated(1);
                     play.click(destination, Input.Buttons.LEFT, 0);
                     move = play.move();
-                    assertEquals(List.of(pin), move.pins());
+                    assertEquals(List.of(pin), move.pins().stream().map(GpuMovePlan.Step::coords).toList());
                     assertEquals(destination, move.destination());
                     assertEquals(pin, move.route().getFirst().coords(), "The route runs through the waypoint");
                     assertTrue(move.cost() >= 2, "The cost counts both legs: " + move.cost());
@@ -330,7 +331,7 @@ class GpuHudInteractionSmokeTest {
                     play.click(destination.translated((facing + 1) % 6), Input.Buttons.LEFT, InputEvent.SHIFT_DOWN_MASK);
                     assertEquals((facing + 1) % 6, play.move().facing());
                     assertEquals(destination, play.move().destination());
-                    assertEquals(List.of(pin), play.move().pins());
+                    assertEquals(List.of(pin), play.move().pins().stream().map(GpuMovePlan.Step::coords).toList());
                     play.press(KeyCommandBind.UNDO_LAST_STEP);
                     assertEquals(facing, play.move().facing());
                     // The turn button uses the same facing command; Shift+D is a boosted camera gesture.

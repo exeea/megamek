@@ -93,6 +93,8 @@ interface BoardSource extends AutoCloseable {
     boolean isClosed();
     void close();
     void setHover(Coords coords);
+    /** Walkable surface under the pointer in world units; NaN when no surface height was picked. */
+    default void setHover(Coords coords, float pointedZ) { setHover(coords); }
     void inspect(Coords coords);
     /**
      * Alt-click starts the native LOS ruler (including range); a plain click
@@ -133,6 +135,16 @@ interface BoardSource extends AutoCloseable {
           String receiver, long generation) {
         editorPointer(coords, x, y, drag, object, additive, generation);
     }
+    /** {@code invert}: Ctrl at the press, which swaps the Sculpt tool's raise and lower. */
+    default void editorPointer(Coords coords, double x, double y, boolean drag, String object, boolean additive,
+          String receiver, boolean invert, long generation) {
+        editorPointer(coords, x, y, drag, object, additive, receiver, generation);
+    }
+    /** A box selection of the objects and hexes the rectangle covered, or a Ctrl-click's item; the session chooses. */
+    default void editorSelect(List<megamek.client.ui.boardeditor.BoardEditorSession.Selection> items,
+          megamek.client.ui.boardeditor.BoardEditorSession.SelectMode mode, long generation) { }
+    /** The active tool's hint for the hovered hex, such as "Raise · 7 hexes"; empty when it has none. */
+    default String editorHint() { return ""; }
 
     default void editPlanetaryConditions(Consumer<BoardAtmosphere.Settings> completed) { atmosphere().edit(completed); }
     default BoardAtmosphere.Settings atmosphereFor(PlanetaryConditions conditions, boolean inSpace) {

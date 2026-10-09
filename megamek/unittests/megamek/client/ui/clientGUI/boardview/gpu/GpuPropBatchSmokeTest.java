@@ -88,6 +88,7 @@ class GpuPropBatchSmokeTest {
         image.dispose();
         texture.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
         Material material = new Material(ColorAttribute.createDiffuse(Color.WHITE));
+        material.set(new GpuModelMaterial(.6f, 0, null));
         if (textured) { material.set(TextureAttribute.createDiffuse(texture)); }
         Model small = model(20, material);
         Model large = model(25, material);

@@ -11,7 +11,7 @@ floor-kit contract. Board units are defined by `BoardGeometry`.
 | `BoardArtwork` | Resolve tileset artwork and its associated model reference. |
 | `GpuAssets` | Load/cache authored board models and fit legacy structures to their runtime dimensions. |
 | `BoardGeometry` | Convert game levels and model units to displayed board dimensions. |
-| `mm-data/tools/build_board_assets.py` | Build board assets offline and delegate manufactured bridge generation. |
+| `mm-data/tools/build_board_assets.py` | Build crops offline and delegate manufactured bridge generation. |
 | `BoardBridge`, `BoardBridgeFooting` | Select a span asset/material and fit terminal geometry to its banks. |
 
 Legacy building GLBs use an 84-by-72 hex footprint, with ground at local Z=0 and

@@ -1472,6 +1472,47 @@ public class MovePath implements Cloneable,
         }
     }
 
+    /**
+     * Finds a legal extension to a specific floor, using the ordinary hex pathfinder and then UP/DOWN steps at the
+     * destination. A roof/interior approach depends on climb mode, so retry the other existing approach if needed.
+     * This path is unchanged on success or failure; callers adopt the returned path, or retain their draft.
+     */
+    public @Nullable MovePath findPathToElevation(Coords dest, MoveStepType type, int targetElevation) {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            MovePath candidate = clone();
+            if (attempt != 0) {
+                candidate.addStep(getFinalClimbMode() ? MoveStepType.CLIMB_MODE_OFF : MoveStepType.CLIMB_MODE_ON);
+            }
+            candidate.findPathTo(dest, type);
+            if (dest.equals(candidate.getFinalCoords())) {
+                candidate.addElevationSteps(targetElevation);
+                if (candidate.getFinalElevation() == targetElevation && candidate.isMoveLegal()) {
+                    return candidate;
+                }
+            }
+            if (dest.equals(getFinalCoords()) || isJumping()) {
+                break; // Changing the approach cannot help an in-place floor change or a jump.
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Appends normal UP/DOWN steps towards a hex-relative elevation. The step compiler owns permissions and MP
+     * costs; stop at its first illegal step (or a step that changes altitude instead). Callers must check the final
+     * elevation and legality before accepting the path. This also supports changing floors without changing hexes.
+     */
+    private void addElevationSteps(int targetElevation) {
+        while (getFinalElevation() != targetElevation) {
+            int previous = getFinalElevation();
+            addStep(previous < targetElevation ? MoveStepType.UP : MoveStepType.DOWN);
+            if (getFinalElevation() == previous
+                  || getLastStep().getMovementType(false) == EntityMovementType.MOVE_ILLEGAL) {
+                break;
+            }
+        }
+    }
+
     public boolean isMoveLegal() {
         // Moves which end up off of the board are not legal.
         if (!getGame().getBoard(getFinalBoardId()).contains(getFinalCoords())) {

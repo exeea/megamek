@@ -34,6 +34,7 @@ package megamek.common.rules.core;
  */
 
 
+import megamek.common.Hex;
 import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
@@ -46,10 +47,19 @@ import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Mek;
 import megamek.common.units.QuadMek;
+import megamek.common.units.Terrains;
 
 import java.util.ArrayList;
 
 public class CoreRulesMovement extends RulesMovement {
+    /** CORE pp. 132, 134: Meks occupy the ground or roof, never upper interior floors. */
+    @Override
+    public boolean isBuildingElevationAllowed(Entity entity, Hex hex, int elevation) {
+        // Aerospace deployment uses altitude; below-ground positions can result from a basement collapse.
+        return !(entity instanceof Mek) || entity.isAero() || !hex.containsTerrain(Terrains.BUILDING)
+              || elevation <= 0 || elevation >= hex.terrainLevel(Terrains.BLDG_ELEV);
+    }
+
     /**
      * {@inheritDoc}
      * No skidding in Core Rules

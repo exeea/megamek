@@ -197,6 +197,12 @@ class GpuBoardTuningSmokeTest {
         assertTrue(mediumDetail.isDisabled());
         assertEquals(TerrainLod.FULL, TerrainLod.select(1, TerrainLod.DISTANT));
         assertEquals(lodRevision, BoardGeometry.terrainRevision(), "The checkbox must not trigger a whole-board rebuild");
+        assertTrue(tuning.waterEffects(), "Water effects are on by default");
+        press(tuning, "tuning-water-effects");
+        assertFalse(tuning.waterEffects());
+        assertTrue(tuning.objectLod(), "Object LoD is on by default");
+        press(tuning, "tuning-object-lod");
+        assertFalse(tuning.objectLod());
         int revision = BoardGeometry.revision();
         SelectBox<String> concrete = GpuBoardTestUi.tuning(tuning, "tuning-concrete-shapes");
         assertEquals(3, concrete.getItems().size);
@@ -258,6 +264,8 @@ class GpuBoardTuningSmokeTest {
         assertEquals(BoardRelief.DEFAULTS, BoardRelief.tuning());
         assertTrue(TerrainLod.enabled());
         assertTrue(terrainLod.isChecked(), "Defaults restore the terrain LoD checkbox");
+        assertTrue(tuning.waterEffects(), "Defaults turn water effects back on");
+        assertTrue(tuning.objectLod(), "Defaults turn Object LoD back on");
         assertFalse(fullDetail.isDisabled());
         assertFalse(mediumDetail.isDisabled());
         assertEquals(TerrainLod.DEFAULTS, TerrainLod.tuning());

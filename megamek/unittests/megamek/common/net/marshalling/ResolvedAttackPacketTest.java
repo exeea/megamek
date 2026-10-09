@@ -11,6 +11,7 @@ import java.util.UUID;
 
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
+import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.Mounted;
 import megamek.common.net.enums.PacketCommand;
@@ -19,8 +20,62 @@ import megamek.common.units.Tank;
 import megamek.common.units.Targetable;
 import megamek.common.units.UnitLocation;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class ResolvedAttackPacketTest {
+    @ParameterizedTest
+    @CsvSource({
+          "ISSmallLaser,       ,                      3,  0",
+          "ISLargeLaser,       ,                      8,  0",
+          "ISPPC,              ,                     10,  0",
+          "ISLightPlasmaRifle,  ISLightPlasmaRifleAmmo,  4,  0",
+          "ISPlasmaRifle,       ISPlasmaRifleAmmo,      10,  0",
+          "ISHeavyPlasmaRifle,  ISHeavyPlasmaRifleAmmo, 12,  0",
+          "CLPlasmaCannon,      CLPlasmaCannonAmmo,      0,  0",
+          "ISAC2,              ,                      2,  0",
+          "ISAC20,             ,                     20,  0",
+          "ISLRM5,             IS Ammo LRM-5,          1,  5",
+          "ISLRM15,            IS Ammo LRM-15,         1, 15",
+          "ISSRM2,             IS Ammo SRM-2,          2,  2",
+          "ISSRM6,             IS Ammo SRM-6,          2,  6",
+          "ISThunderbolt5,      IS Ammo Thunderbolt-5, 5,  1",
+          "ISThunderbolt20,     IS Ammo Thunderbolt-20,20,  1",
+          "ISThumper,          ,                     15,  0",
+          "ISSniper,           ,                     20,  0",
+          "ISLongTom,          ISLongTomAmmo,         25,  0",
+          "ISArrowIV,          ISArrowIVAmmo,         20,  1",
+          "ISCruiseMissile50,   ,                     50,  1",
+          "ISCruiseMissile120,  ,                    120,  1",
+          "Flamer,             ,                      2,  0",
+          "CLLightTAG,          ,                      0,  0"
+    })
+    void nominalDamageAndProjectileCountSurviveResolutionAndSerialization(String weapon, String ammoName,
+          double damage, int missiles) throws Exception {
+        var owner = new Tank();
+        var gun = Mounted.createMounted(owner, EquipmentType.get(weapon));
+        if (ammoName != null) { gun.setLinked(Mounted.createMounted(owner, EquipmentType.get(ammoName))); }
+        var shot = ResolvedAttack.Shot.capture(gun);
+        assertEquals(damage, shot.damagePerHit());
+        assertEquals(missiles, shot.missiles());
+        boolean plasma = weapon.contains("Plasma");
+        assertEquals(plasma, shot.plasma());
+        var origin = new UnitLocation(1, new Coords(2, 3), 0, 0, 0);
+        var landing = new UnitLocation(2, new Coords(2, 1), 0, 0, 0);
+        var ammo = ammoName == null ? null : (AmmoType) EquipmentType.get(ammoName);
+        shot = shot.withResolution(ammo, 0).withInterception(UUID.randomUUID(), 0)
+              .asDefensive().withTrajectory(origin, landing);
+        assertEquals(damage, shot.damagePerHit());
+        assertEquals(missiles, shot.missiles());
+        assertEquals(plasma, shot.plasma(), "Weapon identity survives every resolution copy");
+        var result = new ResolvedAttack(UUID.randomUUID(), ResolvedAttack.Kind.SHOT, origin, landing, Targetable.TYPE_ENTITY,
+              0, weapon, 0, false, List.of(new ResolvedAttack.Mount(1, 0, shot)), shot);
+        var bytes = new ByteArrayOutputStream();
+        var marshaller = new NativeSerializationMarshaller();
+        marshaller.marshall(new Packet(PacketCommand.ENTITY_ATTACK_RESOLVED, result), bytes);
+        assertEquals(result, marshaller.unmarshall(new ByteArrayInputStream(bytes.toByteArray())).getObject(0));
+    }
+
     @Test
     void machineGunRapidFireIsCapturedBeforePlaybackAndSurvivesTheNetworkFilter() throws Exception {
         var gun = Mounted.createMounted(new Tank(), EquipmentType.get("ISMG"));

@@ -23,7 +23,7 @@ import megamek.common.units.Entity;
  * applies an event, so damage, heat and ammunition stay as the client reports them.
  */
 final class GpuPlaybackHistory {
-    /** Replay shows each step at least this long at 1x (hud-v3 game.js replay: 900 / speed ms). */
+    /** Replay shows each step at least this long at 1x (replay: 900 / speed ms). */
     static final double STEP_SECONDS = .9;
 
     /**

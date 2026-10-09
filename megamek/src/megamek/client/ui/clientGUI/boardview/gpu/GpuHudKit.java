@@ -28,6 +28,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.Widget;
+import com.badlogic.gdx.scenes.scene2d.utils.BaseDrawable;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Disposable;
@@ -72,6 +73,12 @@ final class GpuHudKit implements Disposable {
           .toArray(Color[]::new);
     /** The letter on a target's colour (.pill i, .tcard .L). */
     private static final Color LETTER_INK = Color.valueOf("111111");
+    /** A unit's damage tile (UnitAnnotations' damage-level tile): its side on the nameplates and the unit card. */
+    static final float DAMAGE_TILE = 9;
+    /** The board label's light grey (java.awt.Color.lightGray): the damage tile's frame and the status bars' track. */
+    static final Color LABEL_GREY = Color.valueOf("C0C0C0");
+    /** The room between the unit card's damage tile and its words. */
+    private static final float DAMAGE_TILE_GAP = 5;
 
     /** The toolkit's widgets over the same skin; components build their generic widgets with it. */
     final UiKit ui;
@@ -101,6 +108,30 @@ final class GpuHudKit implements Disposable {
         label.setAlignment(Align.center);
         Container<Label> tile = new Container<>(label).size(card ? 24 : 19);
         tile.setBackground(background);
+        return tile;
+    }
+
+    /**
+     * A unit's damage tile of side {@link #DAMAGE_TILE} with its bottom-left corner at (x, y): the damage level's
+     * colour ({@link GpuBattleStatus.Marks#damageArgb}) inside a one-unit {@link #LABEL_GREY} frame, so that the
+     * crippled level's black reads on the dark HUD fill. It leaves the batch colour changed.
+     */
+    void damageTile(Batch batch, Color color, float alpha, float x, float y) {
+        ui.fill(batch, LABEL_GREY, alpha, x, y, DAMAGE_TILE, DAMAGE_TILE);
+        ui.fill(batch, color, alpha, x + 1, y + 1, DAMAGE_TILE - 2, DAMAGE_TILE - 2);
+    }
+
+    /** A label background with the damage tile of {@code color} left of the words, centred on their line. */
+    Drawable damageTile(Color color) {
+        BaseDrawable tile = new BaseDrawable() {
+            @Override
+            public void draw(Batch batch, float x, float y, float width, float height) {
+                float previous = batch.getPackedColor();
+                damageTile(batch, color, batch.getColor().a, x, y + Math.round((height - DAMAGE_TILE) / 2));
+                batch.setPackedColor(previous);
+            }
+        };
+        tile.setLeftWidth(DAMAGE_TILE + DAMAGE_TILE_GAP);
         return tile;
     }
 

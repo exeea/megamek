@@ -30,6 +30,8 @@ import com.badlogic.gdx.utils.ScreenUtils;
 /** Occluded parts of visible units and opted-in markers. Owns GL resources; never changes scene materials or depth. */
 final class GpuUnitVisibility implements Disposable {
     static final float DEFAULT_OUTLINE_INTENSITY = 0.55f;
+    /** Screen-pixel sample step, also used when picking the coloured edge outside a unit's mesh. */
+    static final float OUTLINE_STEP = 1.5f;
     private ShaderProgram shader;
     private final Mesh quad;
     private final ModelBatch colorBatch;
@@ -37,6 +39,9 @@ final class GpuUnitVisibility implements Disposable {
     private final Vector3 corner = new Vector3();
     private Texture unitDepth;
     private FrameBuffer unitColors;
+    /** Outline-only building depth; the scene keeps its cutaways for fog, effects and floor labels. */
+    private Texture buildingDepth;
+    private FrameBuffer buildings;
     private boolean depthCurrent;
 
     GpuUnitVisibility() {
@@ -80,6 +85,11 @@ final class GpuUnitVisibility implements Disposable {
 
     void render(Camera camera, List<ModelInstance> units, Texture sceneDepth, int bottom, float intensity, float scale,
           UnitBounds.Frame bounds, Texture effectOpacity) {
+        render(camera, units, sceneDepth, bottom, intensity, scale, bounds, effectOpacity, null);
+    }
+
+    void render(Camera camera, List<ModelInstance> units, Texture sceneDepth, int bottom, float intensity, float scale,
+          UnitBounds.Frame bounds, Texture effectOpacity, GpuTerrain terrain) {
         depthCurrent = false;
         if (intensity <= 0 || units.isEmpty()) {
             return;
@@ -107,6 +117,25 @@ final class GpuUnitVisibility implements Disposable {
         unitColors.end();
         depthCurrent = true;
 
+        boolean buildingCover = terrain != null && terrain.hasFadedBuildings();
+        if (buildingCover) {
+            if (buildings == null) {
+                buildings = GpuAtmosphere.buffer(width, height, false);
+                try {
+                    buildingDepth = GpuAtmosphere.attachDepthTexture(buildings);
+                } catch (RuntimeException failure) {
+                    disposeBuffers();
+                    throw failure;
+                }
+            }
+            buildings.begin();
+            try {
+                Gdx.gl.glDepthMask(true);
+                ScreenUtils.clear(0, 0, 0, 0, true);
+                terrain.renderOutlineDepth(camera);
+            } finally { buildings.end(); }
+        }
+
         HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight);
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         Gdx.gl.glDepthMask(false);
@@ -125,6 +154,8 @@ final class GpuUnitVisibility implements Disposable {
             shader.setUniformi("u_sceneDepth", 0);
             shader.setUniformi("u_unitDepth", 1);
             shader.setUniformi("u_unitColors", 2);
+            if (buildingCover) { buildingDepth.bind(4); }
+            shader.setUniformi("u_buildingDepth", buildingCover ? 4 : 0);
             shader.setUniformi("u_effectOpacity", 3);
             shader.setUniformf("u_effectSize", effectOpacity == null ? 0 : effectOpacity.getWidth(),
                   effectOpacity == null ? 0 : effectOpacity.getHeight());
@@ -136,7 +167,7 @@ final class GpuUnitVisibility implements Disposable {
             shader.setUniformMatrix("u_inverseView", camera.invProjectionView);
             shader.setUniformf("u_groundBoard", 0, 0, BoardGeometry.width(), BoardGeometry.height());
             shader.setUniformf("u_levelHeight", BoardGeometry.level());
-            shader.setUniformf("u_step", 1.5f * scale / camera.viewportWidth, 1.5f * scale / camera.viewportHeight);
+            shader.setUniformf("u_step", OUTLINE_STEP * scale / camera.viewportWidth, OUTLINE_STEP * scale / camera.viewportHeight);
             shader.setUniformf("u_intensity", MathUtils.clamp(intensity, 0, 1));
             quad.render(shader, GL20.GL_TRIANGLES);
         } finally {
@@ -184,7 +215,7 @@ final class GpuUnitVisibility implements Disposable {
                 maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
             }
         }
-        float margin = (float) Math.ceil(3 * scale) + 2;
+        float margin = (float) Math.ceil(2 * OUTLINE_STEP * scale) + 2;
         minX = Math.max(0, (float) Math.floor(minX - margin));
         minY = Math.max(0, (float) Math.floor(minY - margin));
         maxX = Math.min(camera.viewportWidth, (float) Math.ceil(maxX + margin));
@@ -196,6 +227,8 @@ final class GpuUnitVisibility implements Disposable {
         depthCurrent = false;
         if (unitDepth != null) { unitDepth.dispose(); unitDepth = null; }
         if (unitColors != null) { unitColors.dispose(); unitColors = null; }
+        if (buildingDepth != null) { buildingDepth.dispose(); buildingDepth = null; }
+        if (buildings != null) { buildings.dispose(); buildings = null; }
     }
 
     @Override

@@ -80,12 +80,15 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     /** The board supplies neighbouring roads, whose course through this hex its scenery keeps clear of. */
     static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
           java.util.function.Function<Coords, megamek.common.Hex> board) {
-        var liquid = BoardLiquid.capture(hex);
-        // The garden-lake source consumes WATER:0 and supplies a bounded basin, not a full-hex water surface.
-        boolean decorativeWater = hex.terrainLevel(Terrains.WATER) == 0 && !hex.containsTerrain(Terrains.ICE)
-              && liquid.kind() == BoardLiquid.Kind.WATER && pixels.scenery().modelTerrains().contains(Terrains.WATER);
+        return captureTile(hex, pixels, previous, terrainImages, board, new HashMap<>());
+    }
+
+    /** {@code bridgeTypes} keeps the type an untyped bridge was first decoded with ({@link BoardBridge#typed}). */
+    static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
+          java.util.function.Function<Coords, megamek.common.Hex> board,
+          Map<Coords, megamek.common.board.HexAppearance> bridgeTypes) {
         return new BoardScene.Tile(pixels.coords(), hex.getLevel(),
-              hex.containsTerrain(Terrains.WATER) && !decorativeWater ? Math.max(0, hex.terrainLevel(Terrains.WATER)) : -1,
+              hex.containsTerrain(Terrains.WATER) ? Math.max(0, hex.terrainLevel(Terrains.WATER)) : -1,
               hex.containsTerrain(Terrains.ICE),
               hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63
                     : pixels.scenery().cosmeticRoadExits(),
@@ -96,7 +99,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               terrainImages.capture(pixels.decalsWithoutLimbs(), previous == null ? null : previous.decalsWithoutLimbs()),
               terrainImages.capture(pixels.tactical(), previous == null ? null : previous.tactical()),
               BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), pixels.blankTerrains(), board, pixels.scenery()),
-              pixels.text(), decorativeWater ? BoardLiquid.NONE : liquid,
+              pixels.text(), BoardLiquid.capture(hex),
               terrainImages.capture(pixels.tileset(), previous == null ? null : previous.tileset()),
               BoardFeatures.detailedGround(hex, pixels.structureModels(), pixels.blankTerrains(), pixels.scenery()),
               !hex.containsTerrain(Terrains.ROAD) && pixels.scenery().cosmeticRoadExits() != 0
@@ -107,7 +110,9 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               terrainImages.captureOverlay(pixels.bridge(), previous == null ? null : previous.bridge()),
               hex.containsTerrain(Terrains.ULTRA_SUBLEVEL),
               terrainImages.captureOverlay(pixels.tilesetDecals(), previous == null ? null : previous.tilesetDecals()),
-              terrainImages.captureOverlay(pixels.tilesetScenery(), previous == null ? null : previous.tilesetScenery()), hex.getAppearance());
+              terrainImages.captureOverlay(pixels.tilesetScenery(), previous == null ? null : previous.tilesetScenery()),
+              BoardBridge.typed(hex, pixels.coords(), BoardSceneryLayouts.appearance(hex, pixels.scenery()), board,
+                    bridgeTypes));
     }
 
     /** Pit rims use the existing authored-cliff path. The source hex and its gameplay exits remain untouched. */
@@ -191,9 +196,20 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     /** Captured visual ground treatment; movement and cover modifiers remain in the game terrain. */
     enum Biome { NONE, FIELD, MARSH, QUICKSAND, MUD, TUNDRA }
 
-    /** Authored model or scatter shape, placement in tile pixels, and height/root lift in elevation levels. */
+    /**
+     * Authored model or scatter shape, placement in tile pixels, and height/root lift in elevation levels.
+     * {@code stretch} multiplies {@code scale} per model axis before the rotation, and {@code colours} replace the
+     * model's colour slots: a placed object's own, or a legacy layout row's.
+     */
     record Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
-          FeatureKind kind, int bridgeExits, boolean authoredPlacement, megamek.common.board.BoardDecoration decoration) {
+          FeatureKind kind, int bridgeExits, boolean authoredPlacement, megamek.common.board.BoardDecoration decoration,
+          megamek.common.board.BoardDecoration.Stretch stretch, megamek.common.board.BoardDecoration.Colours colours) {
+        Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
+              FeatureKind kind, int bridgeExits, boolean authoredPlacement, megamek.common.board.BoardDecoration decoration) {
+            this(asset, x, y, rotation, scale, height, elevation, kind, bridgeExits, authoredPlacement, decoration,
+                  decoration == null ? megamek.common.board.BoardDecoration.Stretch.NONE : decoration.stretch(),
+                  decoration == null ? megamek.common.board.BoardDecoration.Colours.NONE : decoration.colours());
+        }
         Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
               FeatureKind kind, int bridgeExits, boolean authoredPlacement) {
             this(asset, x, y, rotation, scale, height, elevation, kind, bridgeExits, authoredPlacement, null);
@@ -359,10 +375,13 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, null, decals, tactical, features, text);
         }
 
-        Tile withTactical(Pixels marking) {
-            if (marking == tactical) { return this; }
+        Tile withTactical(Pixels marking) { return withMarkings(marking, text); }
+
+        /** This tile with its tactical image and labels replaced; every captured terrain field is kept. */
+        Tile withMarkings(Pixels marking, List<BoardHexText> labels) {
+            if (marking == tactical && Objects.equals(labels, text)) { return this; }
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
-                  decalsWithoutLimbs, marking, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome,
+                  decalsWithoutLimbs, marking, features, labels, liquid, tileset, detailedGround, road, fireSmoke, biome,
                   impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance);
         }
 

@@ -268,6 +268,29 @@ class RigidGlbTest {
     }
 
     @Test
+    void retainsLinearSurfaceFactorsAndPackedMapWithGltfDefaults() throws Exception {
+        var document = document();
+        var pbr = (ObjectNode) document.get("materials").get(0).get("pbrMetallicRoughness");
+        pbr.put("roughnessFactor", .37).put("metallicFactor", .8);
+        document.putArray("images").addObject().put("uri", "surface.png");
+        document.putArray("textures").addObject().put("source", 0);
+        var map = pbr.putObject("metallicRoughnessTexture").put("index", 0);
+        Files.write(directory.resolve("surface.png"), encodedImage("png"));
+        var data = (RigidGlb.Data) RigidGlb.load(file(document, false));
+        var surface = data.surfaces.get("paint");
+        assertEquals(.37f, surface.roughness(), 1e-6);
+        assertEquals(.8f, surface.metallic(), 1e-6);
+        assertEquals(directory.resolve("surface.png").toString(), surface.map());
+        assertTrue(data.images.containsKey(surface.map()), "The texture library must be able to resolve the packed map");
+        map.put("texCoord", 1);
+        assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(file(document, false)));
+        pbr.remove(List.of("roughnessFactor", "metallicFactor", "metallicRoughnessTexture"));
+        var defaults = ((RigidGlb.Data) RigidGlb.load(file(document, false))).surfaces.get("paint");
+        assertEquals(1, defaults.roughness());
+        assertEquals(1, defaults.metallic());
+    }
+
+    @Test
     void retainsAuthoredNormalTextureAlongsideColorWithoutAllocatingGraphics() throws Exception {
         var textured = document();
         var images = textured.putArray("images");
@@ -337,8 +360,9 @@ class RigidGlbTest {
         document.putArray("samplers").addObject().put("wrapS", 33071).put("wrapT", 33648)
               .put("minFilter", 9987).put("magFilter", 9728);
         document.putArray("textures").addObject().put("source", 0).put("sampler", 0);
-        ((ObjectNode) document.get("materials").get(0).get("pbrMetallicRoughness"))
-              .putObject("baseColorTexture").put("index", 0);
+        var pbr = (ObjectNode) document.get("materials").get(0).get("pbrMetallicRoughness");
+        pbr.putObject("baseColorTexture").put("index", 0);
+        pbr.putObject("metallicRoughnessTexture").put("index", 0);
         return file(document, false, bytes);
     }
 
@@ -354,6 +378,112 @@ class RigidGlbTest {
             assertEquals(33071, image.wrapS());
             assertEquals(33648, image.wrapT());
             assertEquals(9728, image.magFilter());
+        }
+    }
+
+    /** The shipped car: one mesh whose paint slot takes each row's paint; nothing else changes colour. */
+    @Test
+    void aSharedMeshTakesItsReplacementColoursInItsSlotsOnly() {
+        var root = megamek.common.Configuration.dataDir().toPath().resolve("models/board");
+        var file = root.resolve("scenery/vehicles/car.glb").toFile();
+        var slots = RigidGlb.colourSlots(file);
+        assertEquals(List.of("Paint"), slots.stream().map(RigidGlb.ColourSlot::name).toList());
+        var own = (RigidGlb.Data) RigidGlb.loadLods(new FileHandle(file), root).getFirst();
+        var silver = (RigidGlb.Data) RigidGlb.loadLods(new FileHandle(file), root).getFirst();
+        RigidGlb.recolour(silver, megamek.common.board.BoardDecoration.Colours.of("#b8b8b8"));
+        float[] before = own.meshes.first().vertices, after = silver.meshes.first().vertices;
+        var paint = com.badlogic.gdx.graphics.Color.valueOf(slots.getFirst().colour());
+        int painted = 0;
+        for (int vertex = 0; vertex < own.slots.length; vertex++) {
+            int at = vertex * RigidGlb.STRIDE + 6;
+            if (own.slots[vertex] == 0) {
+                assertArrayEquals(java.util.Arrays.copyOfRange(before, at, at + 4), java.util.Arrays.copyOfRange(after, at, at + 4));
+            } else if (Math.abs(before[at] - paint.r) + Math.abs(before[at + 1] - paint.g) + Math.abs(before[at + 2] - paint.b) < .003f) {
+                // The default paint itself becomes the replacement, to within an 8-bit step.
+                assertEquals(0xb8 / 255f, after[at], .5f / 255); assertEquals(0xb8 / 255f, after[at + 2], .5f / 255);
+                painted++;
+            }
+        }
+        assertTrue(painted > 0, "The car has painted vertices");
+    }
+
+    /**
+     * The editor's one shared mesh (colourSlotMesh) and a placement's packed colours give, by the shader's rule
+     * (model-colour-slots.glsl), the vertex colours of the CPU copy recolour makes: the car, and a pool's four slots
+     * with one kept. A far colour checks the shade ratio; the rest of each vertex is unchanged.
+     */
+    @Test
+    void theSharedMeshAndPackedColoursGiveTheRecolouredCopysVertexColours() {
+        var root = megamek.common.Configuration.dataDir().toPath().resolve("models/board");
+        var cases = java.util.Map.of("scenery/vehicles/car", megamek.common.board.BoardDecoration.Colours.of("#1ee0f0"),
+              "scenery/pools/freeform", megamek.common.board.BoardDecoration.Colours.of("#63753d", null, "#200a04", "#123456"));
+        for (var entry : cases.entrySet()) {
+            var file = root.resolve(entry.getKey() + ".glb").toFile();
+            var own = (RigidGlb.Data) RigidGlb.loadLods(new FileHandle(file), root).getFirst();
+            var copy = (RigidGlb.Data) RigidGlb.loadLods(new FileHandle(file), root).getFirst();
+            RigidGlb.recolour(copy, entry.getValue());
+            var shared = RigidGlb.colourSlotMesh(own).meshes.first();
+            float[] packed = RigidGlb.packed(entry.getValue());
+            int stride = RigidGlb.STRIDE + 4, slotted = 0;
+            float[] ownVertices = own.meshes.first().vertices, expected = copy.meshes.first().vertices;
+            assertEquals(ownVertices.length / RigidGlb.STRIDE * stride, shared.vertices.length);
+            for (int vertex = 0; vertex < ownVertices.length / RigidGlb.STRIDE; vertex++) {
+                int at = vertex * stride;
+                assertArrayEquals(java.util.Arrays.copyOfRange(ownVertices, vertex * RigidGlb.STRIDE, (vertex + 1) * RigidGlb.STRIDE),
+                      java.util.Arrays.copyOfRange(shared.vertices, at, at + RigidGlb.STRIDE), "The shared mesh keeps the model's own vertex");
+                int slot = Math.round(shared.vertices[at + RigidGlb.STRIDE + 3]) - 1;
+                for (int channel = 0; channel < 3; channel++) {
+                    float colour = shared.vertices[at + 6 + channel];
+                    if (slot >= 0 && packed[slot] >= 0) {
+                        int rgb = Math.round(packed[slot]);
+                        colour = srgb(shared.vertices[at + RigidGlb.STRIDE + channel] * linear((rgb >> (16 - 8 * channel) & 255) / 255f));
+                        slotted++;
+                    }
+                    assertEquals(expected[vertex * RigidGlb.STRIDE + 6 + channel], colour, 1e-5f, entry.getKey() + " vertex " + vertex);
+                }
+            }
+            assertTrue(slotted > 0, entry.getKey() + " has recoloured vertices");
+        }
+        assertEquals(null, RigidGlb.packed(megamek.common.board.BoardDecoration.Colours.NONE), "Own colours pass nothing");
+    }
+
+    private static float linear(float display) {
+        return display <= .04045f ? display / 12.92f : (float) Math.pow((display + .055) / 1.055, 2.4);
+    }
+
+    private static float srgb(float linear) {
+        return linear <= .0031308f ? 12.92f * linear : (float) (1.055 * Math.pow(linear, 1 / 2.4) - .055);
+    }
+
+    /** A tree's winter form is its bare file read with the snow material variant: snow cards, untinted crown. */
+    @Test
+    void aWinterFormIsTheBareTreesSnowVariant() {
+        var root = megamek.common.Configuration.dataDir().toPath().resolve("models/board").toFile();
+        var source = RigidGlb.source(root, "pine-snow");
+        assertEquals(new java.io.File(root, "pine.glb"), source.file());
+        assertEquals("snow", source.variant());
+        var bare = RigidGlb.loadLods(RigidGlb.source(root, "pine"), root.toPath());
+        var snow = RigidGlb.loadLods(source, root.toPath());
+        com.badlogic.gdx.graphics.g3d.model.data.ModelMaterial crown = null;
+        for (var material : snow.getFirst().materials) { if (material.id.equals("canopy-snow-cutout")) { crown = material; } }
+        assertTrue(crown.textures.first().fileName.replace('\\', '/').contains("textures/foliage/conifer-snow-cutout.png"));
+        float[] bareVertices = bare.getFirst().meshes.first().vertices, snowVertices = snow.getFirst().meshes.first().vertices;
+        assertEquals(bareVertices.length, snowVertices.length, "The winter form keeps the bare geometry");
+        boolean tinted = false;
+        for (var part : snow.getFirst().meshes.first().parts) {
+            if (!part.id.contains("canopy")) { continue; }
+            for (short index : part.indices) {
+                int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE + 6;
+                // Snow cards keep the bare cards' shade without the species' pigment: grey.
+                assertEquals(snowVertices[at], snowVertices[at + 1], .01f);
+                assertEquals(snowVertices[at], snowVertices[at + 2], .01f);
+                tinted |= Math.abs(bareVertices[at] - bareVertices[at + 2]) > .05f;
+            }
+        }
+        assertTrue(tinted, "The bare crown is tinted");
+        // The distant cards: everything they show is snow, so all of it takes light as a hard surface (green 1).
+        for (int vertex = 0; vertex < snow.get(3).meshes.first().vertices.length / RigidGlb.STRIDE; vertex++) {
+            assertEquals(1, snow.get(3).meshes.first().vertices[vertex * RigidGlb.STRIDE + 7], 1e-4f);
         }
     }
 }

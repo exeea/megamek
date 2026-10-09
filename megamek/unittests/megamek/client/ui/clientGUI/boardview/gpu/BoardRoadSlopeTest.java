@@ -32,7 +32,7 @@ class BoardRoadSlopeTest {
         for (var lod : List.of(TerrainLod.FULL, TerrainLod.MEDIUM)) {
             var surface = new BoardSurface(scene, tile, lod);
             var support = BoardTacticalGeometry.Surface.of(surface, scene, BoardGeometry.floor(scene));
-            var roots = GpuGroundCover.plant(scene, tile, support);
+            var roots = GpuGroundCover.plant(scene, tile, support, null);
             assertTrue(roots.size > 0, "Grass remains on the untouched ground beside the approach");
             for (int i = 0; i < roots.size; i += 4) {
                 assertTrue(roots.get(i + 2) < .001f, "Grass must not grow from the raised concrete fill: " + lod);

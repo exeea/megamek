@@ -29,6 +29,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
@@ -83,8 +84,9 @@ final class GpuBiomeVegetation implements Disposable {
      * Plant a field hex on the finished support of its chunk. Terrain workers call this while preparing the chunk,
      * so crops are installed together with the ground they stand on and replaced with it at every detail change.
      */
-    static Crops plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface) {
-        var patch = new Patch(scene, tile, surface);
+    static Crops plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
+          BoardDecals.Opacity paint) {
+        var patch = new Patch(scene, tile, surface, paint);
         patch.prepare(scene, tile);
         // Installed and cached chunks keep these for their lifetime; drop the arrays' growth slack.
         patch.roots.shrink();
@@ -95,8 +97,9 @@ final class GpuBiomeVegetation implements Disposable {
     }
 
     /** Plant a marsh hex's reeds up to the share of the lattice its chunk's detail draws, as (x, y, z, seed). */
-    static FloatArray plantReeds(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface, float density) {
-        var patch = new Patch(scene, tile, surface);
+    static FloatArray plantReeds(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface, float density,
+          BoardDecals.Opacity paint) {
+        var patch = new Patch(scene, tile, surface, paint);
         patch.prepare(scene, tile, density);
         patch.roots.shrink();
         return patch.roots;
@@ -107,6 +110,8 @@ final class GpuBiomeVegetation implements Disposable {
         // Crops need this much of the shared coverage field; a furrow piece is (start, height, end, height, triangle).
         private static final float CULTIVATED = .60f;
         private static final int PIECE = 5;
+        // Obstacle clearance in metres: a reed clump's reach, and the tallest reed or crop with its sway.
+        private static final float REED_RADIUS = .3f, PLANT_HEIGHT = 2;
         final BoardVegetation.Key key;
         final List<BoardSurface.Face> ground;
         final Support support, water;
@@ -121,6 +126,11 @@ final class GpuBiomeVegetation implements Disposable {
         // Crop-only: the current furrow's strips as (start, end, start height, end height) in furrow metres.
         private final FloatArray furrow = new FloatArray();
         final BoardRoad road;
+        // The paint on this hex's ground, or null: no plant grows through it.
+        final BoardDecals.Opacity paint;
+        // Structures, objects, piers and low decks, which no plant grows through (as blades: GpuGroundCover); null: none.
+        final BoardObstacles obstacles;
+        private final Vector3 root = new Vector3();
         // Crop-only: per edge its origin, direction, and length where it borders other ground or another level.
         private final float[] edges = new float[30];
         private final List<BoardSurface.Face> crossed = new ArrayList<>();
@@ -130,7 +140,8 @@ final class GpuBiomeVegetation implements Disposable {
         int tier = 2;
         float prepared;
 
-        Patch(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface) {
+        Patch(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface, BoardDecals.Opacity paint) {
+            this.paint = paint;
             key = BoardVegetation.key(scene, tile);
             ground = support(tile, surface);
             kind = BoardBiome.plantKind(scene, tile);
@@ -141,6 +152,8 @@ final class GpuBiomeVegetation implements Disposable {
             uniform = key.sites().stream().allMatch(site -> site != null && site.biome() == kind
                   && site.elevation() == tile.elevation());
             road = BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
+            var nearby = new BoardObstacles(scene, tile);
+            obstacles = nearby.isEmpty() ? null : nearby;
             across = BoardBiome.ROW_METRES;
             along = kind == BoardScene.Biome.FIELD ? ROW_LENGTH : 1.15f;
             float cx = BoardGeometry.centerX(tile.coords()) / BoardRelief.metres(1);
@@ -194,12 +207,14 @@ final class GpuBiomeVegetation implements Disposable {
                 // An interior plateau has unit coverage. Boundary and sloping samples still use the shared field.
                 float cover = uniform && Math.abs(z - levelZ) <= .15f * metre ? 1
                       : BoardBiome.coverage(scene, kind, px, py, z);
+                if (paint != null && cover > 0) { cover *= 1 - paint.at(px, py); }
                 if (seed > .88f * BoardRelief.smooth(cover)) { continue; }
                 if (water != null) {
                     if (z <= water.height(px, py) + .015f * metre) { continue; }
                 }
                 if (road != null && road.distance((px - BoardGeometry.centerX(tile.coords())) / BoardGeometry.hexScale(),
                       (py - BoardGeometry.centerY(tile.coords())) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 1) { continue; }
+                if (obstructed(px, py, z, REED_RADIUS * metre)) { continue; }
                 float wet = BoardBiome.wetness(px / metre, py / metre);
                 if (wet < .48f || wet > .80f) { continue; }
                 roots.addAll(px, py, z - .018f * metre, seed);
@@ -321,7 +336,8 @@ final class GpuBiomeVegetation implements Disposable {
               float start, float end, float seed) {
             float metre = BoardRelief.metres(1);
             FloatArray points = new FloatArray();
-            if (road == null && inland(px, py, start, metre) && inland(px, py, end, metre) && level(pieces, start, end)) {
+            if (road == null && paint == null && obstacles == null && inland(px, py, start, metre) && inland(px, py, end, metre)
+                  && level(pieces, start, end)) {
                 // Cultivated everywhere on this strip: follow the exact triangle pieces.
                 float gap = .001f * BoardGeometry.hexScale() / metre, last = Float.NEGATIVE_INFINITY;
                 for (int i = 0; i < pieces.size; i += PIECE) {
@@ -378,13 +394,18 @@ final class GpuBiomeVegetation implements Disposable {
             float x = px - at * BoardBiome.ROW_Y * metre, y = py + at * BoardBiome.ROW_X * metre;
             float z = ground(pieces, at, x, y, metre);
             if (!Float.isFinite(z)) { return Float.NaN; }
-            if ((inland(px, py, at, metre) ? BoardBiome.sameLevel(z, levelZ) : BoardBiome.coverage(scene, kind, x, y, z))
-                  < CULTIVATED) { return Float.NaN; }
+            float cover = inland(px, py, at, metre) ? BoardBiome.sameLevel(z, levelZ) : BoardBiome.coverage(scene, kind, x, y, z);
+            if ((paint == null ? cover : cover * (1 - paint.at(x, y))) < CULTIVATED) { return Float.NaN; }
             // Include the horizontal canopy's reach in the road clearance.
             if (road != null && road.distance((x - BoardGeometry.centerX(tile.coords())) / BoardGeometry.hexScale(),
                   (y - BoardGeometry.centerY(tile.coords())) / BoardGeometry.hexScale())
                   < BoardRoad.SHOULDER + 1 + ROW_HALF_WIDTH * metre / BoardGeometry.hexScale()) { return Float.NaN; }
-            return z;
+            return obstructed(x, y, z, ROW_HALF_WIDTH * metre) ? Float.NaN : z;
+        }
+
+        /** Whether a plant rooted at (x, y, z), {@code radius} wide and {@link #PLANT_HEIGHT} tall, meets an obstacle. */
+        private boolean obstructed(float x, float y, float z, float radius) {
+            return obstacles != null && obstacles.obstructs(root.set(x, y, z), radius, PLANT_HEIGHT * BoardRelief.metres(1));
         }
 
         /** {@link BoardSurface#sampleHeight} over only the triangles this furrow crosses near the point. */
@@ -678,6 +699,12 @@ final class GpuBiomeVegetation implements Disposable {
               .replace("vec4 pos = u_worldTrans * vec4(a_position, 1.0);", "vec4 pos = vec4(coverPosition, 1.0);")
               .replace("vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = coverNormal;")
               .replace("v_color = a_color;", "v_color = coverColor;");
+    }
+
+    /** Orthographic detail has one scale everywhere: below the coarsest tier's start no hex grows crops or reeds. */
+    static boolean visibleAtScale(Camera camera) {
+        return camera.projection.val[Matrix4.M33] == 0
+              || BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera, camera.position) > START_PIXELS[2];
     }
 
     /**

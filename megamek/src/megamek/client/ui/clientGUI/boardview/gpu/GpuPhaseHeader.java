@@ -151,7 +151,7 @@ final class GpuPhaseHeader implements GpuHud.Component {
             name.setFontScale(nameScale * (narrow ? NARROW_NAME_SIZE / NAME_SIZE : 1));
             nameCell.height(narrow ? 21 : 24);
         }
-        name.setText(UiTheme.upper(name(phase)));
+        name.setText(UiTheme.upper(name(status)));
         speeds.select(SPEEDS.indexOf(state.history.speed()));
         GpuBattleStatus.Slot current = status.turnIndex() >= 0 && status.turnIndex() < status.turns().size()
               ? status.turns().get(status.turnIndex()) : null;
@@ -187,9 +187,10 @@ final class GpuPhaseHeader implements GpuHud.Component {
     }
 
     /** The mock's phase names (B2); MegaMek's own name for every other phase. */
-    private static String name(GamePhase phase) {
+    private static String name(GpuBattleStatus.Snapshot status) {
+        GamePhase phase = status.phase();
         String key = switch (phase) {
-            case INITIATIVE, INITIATIVE_REPORT -> "initiative";
+            case INITIATIVE, INITIATIVE_REPORT -> status.round() > 0 ? "initiative" : "deploymentOrder";
             case MOVEMENT -> "movement";
             case FIRING -> "firing";
             case FIRING_REPORT -> "firingReport";

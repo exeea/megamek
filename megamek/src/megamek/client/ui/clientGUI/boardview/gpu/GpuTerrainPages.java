@@ -14,7 +14,8 @@ import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
 
 /**
- * Small opaque ranges shared by nearby chunks. Large meshes keep their original storage. Partial pages select
+ * Small ranges shared by nearby chunks: opaque terrain, and authored paint, whose equal numbered draws
+ * ({@link GpuDecalOrder#layer}) merge. Large meshes keep their original storage. Partial pages select
  * visible ranges in their existing buffers, preserving chunk culling. Camera movement never rebuilds a page.
  * Only replacement source ranges invalidate it. Perspective passes retain the original projected-detail uniforms.
  */
@@ -23,17 +24,19 @@ final class GpuTerrainPages implements Disposable {
     private static final int MAX_PART_INDICES = 8192;
     private static final int MAX_PAGE_INDICES = 65536;
     private final Predicate<Renderable> eligible;
+    private final boolean perspective;
     private final Map<Integer, GpuMeshPage> pages = new HashMap<>();
     private final Array<Renderable> separate = new Array<>();
     private boolean enabled = true, active;
     private long rebuilds;
 
-    GpuTerrainPages(Predicate<Renderable> eligible) { this.eligible = eligible; }
+    GpuTerrainPages(Predicate<Renderable> eligible) { this(eligible, false); }
+    GpuTerrainPages(Predicate<Renderable> eligible, boolean perspective) { this.eligible = eligible; this.perspective = perspective; }
 
     void setEnabled(boolean value) { enabled = value; }
 
     void begin(Camera camera) {
-        active = enabled && camera.projection.val[Matrix4.M33] != 0;
+        active = enabled && (perspective || camera.projection.val[Matrix4.M33] != 0);
         separate.clear();
         if (active) { pages.values().forEach(GpuMeshPage::begin); }
     }
@@ -45,6 +48,8 @@ final class GpuTerrainPages implements Disposable {
         for (Renderable part : parts) {
             part.shader = null;
             part.environment = null;
+            // An empty part (a paint draw whose decal found no receiving face here) draws nothing and copies nothing.
+            if (part.meshPart.size == 0) { continue; }
             if (active && part.meshPart.mesh.getNumIndices() > 0 && part.meshPart.size % 3 == 0
                   && part.meshPart.size <= MAX_PART_INDICES
                   && page.indices + part.meshPart.size <= MAX_PAGE_INDICES && eligible.test(part)) {

@@ -2,16 +2,22 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
 
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 
-/** Concrete ramp blocks and bank landings, with authored entrance wedges seated on the road or actual bank. */
+/**
+ * Concrete ramp blocks and bank landings, with authored entrance wedges seated on the road or actual bank, and the
+ * concrete piers under the joints between a deck's hexes.
+ */
 record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bareExits, int solidExits) {
     static final float APRON_METRES = 7;
 
@@ -44,12 +50,233 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         return blocks;
     }
 
-    static void reload() { KIT.reload(); }
+    /**
+     * The pier kit ({@code bridges/bridge-pier.glb}) at two LODs: a cap that follows the deck's underside, a shaft
+     * stretched in Z only (kit Z 0 to 1) and a footing buried in the floor. Kit frame: the origin on the joint, X along
+     * the shared edge (across the deck), Y toward the neighbour; Z per part, as each joint places it. Each part is kept
+     * as its half on the near side of the joint (Y at most 0), cut once here and closed by its section on the joint
+     * ({@link #section}): each hex of a joint builds its own half.
+     * The soffit (the cap's bottom), the footing's lip (its top) and its half extents are the parts' own bounds.
+     */
+    private record Pier(List<List<Vector3[]>> cap, List<List<Vector3[]>> shaft, List<List<Vector3[]>> footing,
+          float soffit, float lip, float footX, float footY) { }
+
+    private static final BoardKit<Pier> PIER = new BoardKit<>(BoardBridgeFooting::loadPier);
+    /** A pier footing's corners in units of its half extents. */
+    private static final float[][] CORNERS = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };
+
+    private static Pier loadPier() {
+        var shapes = BoardShape.loadKit("bridges/bridge-pier");
+        for (String name : shapes.keySet()) {
+            if (!name.matches("bridge-pier-(cap|shaft|footing)-lod[01]")) {
+                throw new IllegalArgumentException("Unexpected bridge pier mesh: " + name);
+            }
+        }
+        Map<String, BoundingBox> bounds = new HashMap<>();
+        var cap = halves(shapes, "bridge-pier-cap", bounds);
+        var shaft = halves(shapes, "bridge-pier-shaft", bounds);
+        var footing = halves(shapes, "bridge-pier-footing", bounds);
+        var length = bounds.get("bridge-pier-shaft");
+        if (Math.abs(length.min.z) > .001f || Math.abs(length.max.z - 1) > .001f) {
+            throw new IllegalArgumentException("The bridge pier shaft must span Z 0 to 1");
+        }
+        var foot = bounds.get("bridge-pier-footing");
+        return new Pier(cap, shaft, footing, bounds.get("bridge-pier-cap").min.z, foot.max.z, foot.max.x, foot.max.y);
+    }
+
+    /** One part's near halves by LOD; records its LOD0 bounds. */
+    private static List<List<Vector3[]>> halves(Map<String, BoardShape> shapes, String part, Map<String, BoundingBox> bounds) {
+        return MeshLod.load(part, 2, name -> {
+            var shape = shapes.get(name);
+            if (shape == null) { return null; }
+            var box = new BoundingBox().inf();
+            shape.polygons().forEach(face -> { for (var p : face.points()) { box.ext(p); } });
+            // Both hexes of a joint place this same half: the part must be centred on the joint.
+            if (Math.abs(box.min.x + box.max.x) > .001f || Math.abs(box.min.y + box.max.y) > .001f) {
+                throw new IllegalArgumentException("Bridge pier parts must be centred on the joint: " + name);
+            }
+            bounds.putIfAbsent(part, box);
+            var near = new BoardSurface.Face(new Vector3(-100, 0, 0), new Vector3(0, -100, 0), new Vector3(100, 0, 0),
+                  BoardSurface.Finish.TOP, -1);
+            var clipper = new BoardTacticalGeometry.Clipper();
+            List<Vector3[]> result = new ArrayList<>();
+            for (var face : shape.polygons()) {
+                var p = face.points();
+                clipper.prepare(new BoardTacticalGeometry.Triangle(p[0], p[1], p[2], -1));
+                // A flat face of zero height keeps each vertex's own Z; the cut lands exactly on the joint.
+                clipper.displace(near, t -> result.add(new Vector3[] { seam(t.a()), seam(t.b()), seam(t.c()) }));
+            }
+            section(result);
+            return List.copyOf(result);
+        });
+    }
+
+    /**
+     * Closes a half with its section on the joint, facing the neighbour, so it reads as solid from every side, as in
+     * the editor's side view, which draws one hex. The parts are convex: the cut's points ring its centroid. In a
+     * whole pier the two sections lie back to back inside it.
+     */
+    private static void section(List<Vector3[]> half) {
+        List<Vector3> ring = new ArrayList<>();
+        for (var triangle : half) {
+            for (var p : triangle) {
+                if (p.y == 0 && ring.stream().noneMatch(q -> q.dst2(p) < 1e-8f)) { ring.add(p); }
+            }
+        }
+        if (ring.size() < 3) { return; }
+        var centre = new Vector3();
+        ring.forEach(centre::add);
+        centre.scl(1f / ring.size());
+        ring.sort(java.util.Comparator.comparingDouble(p -> Math.atan2(p.z - centre.z, p.x - centre.x)));
+        for (int i = 0; i < ring.size(); i++) {
+            var a = ring.get((i + 1) % ring.size());
+            var b = ring.get(i);
+            // Clockwise in X-Z, which faces +Y; a part that is not convex would fold its section over.
+            if ((a.z - centre.z) * (b.x - centre.x) - (a.x - centre.x) * (b.z - centre.z) <= 0) {
+                throw new IllegalArgumentException("Bridge pier parts must be convex");
+            }
+            half.add(new Vector3[] { new Vector3(centre), new Vector3(a), new Vector3(b) });
+        }
+    }
+
+    private static Vector3 seam(Vector3 point) {
+        if (Math.abs(point.y) < 1e-4f) { point.y = 0; }
+        return point;
+    }
+
+    static void reload() { KIT.reload(); PIER.reload(); }
 
     static float terminalLength() { return KIT.get().getFirst().size().y; }
 
     /** How far a banked span's terminal block rises above the deck surface. */
     static float terminalHeight() { return KIT.get().getFirst().size().z; }
+
+    /**
+     * Whether a pier stands under the joint of the tile's deck toward {@code d}, the edge it shares with the next hex of
+     * its deck: the decks are {@link BoardBridge#connected}, the Pillars toggle ({@link HexAppearance#PILLARS}) is on in
+     * either hex, no drawn ground road crosses that edge, and the deck is at least one whole level above both floors. The
+     * toggle is a built type, so its span is built ({@link BoardBridge#kind}): a rock arch has none. Never at a hex
+     * centre, a bank, ramp or road landing, an open or off-board end: a one-hex bridge rests on its landings. Scene data
+     * only, and the same from both hexes.
+     */
+    static boolean pier(BoardScene scene, BoardScene.Tile tile, int d) {
+        var next = scene.tile(tile.coords().translated(d));
+        if (!BoardBridge.connected(tile, next, d)
+              || !HexAppearance.pillars(tile.appearance()) && !HexAppearance.pillars(next.appearance())) { return false; }
+        // A road passing beneath the deck keeps its carriageway.
+        if (BoardRoad.rendered(tile) && (tile.roadExits() & 1 << d) != 0
+              || BoardRoad.rendered(next) && (next.roadExits() & 1 << (d + 3) % 6) != 0) { return false; }
+        float room = BoardBridge.edgeElevation(tile, next, d) * BoardGeometry.level()
+              - Math.max(BoardGeometry.groundZ(tile), BoardGeometry.groundZ(next));
+        return room >= BoardGeometry.level() - .001f * BoardGeometry.hexScale();
+    }
+
+    /**
+     * {@code shape}, the tile's deck, with the halves of its joints' piers ({@link #pier}) that stand in this hex, cut at
+     * the shared edge; the neighbour adds the other half from the same inputs, so the two meet exactly. {@code shape}
+     * itself when the tile has no pier.
+     */
+    static BoardBridge.Shape withPiers(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck, BoardBridge.Shape shape,
+          TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
+        List<BoardBridge.Facet> faces = null;
+        List<BoardSurface.Face> under = List.of();
+        for (int d = 0; d < 6; d++) {
+            if (!pier(scene, tile, d)) { continue; }
+            if (faces == null) {
+                faces = new ArrayList<>(shape.facets());
+                // What the cap follows: the deck's grade above its deck plane.
+                under = deck.sloped() ? BoardBridgeSlope.profile(tile, deck) : List.of();
+            }
+            pier(faces, scene, tile, under, d, lod, surfaces);
+        }
+        return faces == null ? shape : BoardBridge.shape(shape.surface(), shape.level(), faces);
+    }
+
+    /** The outline of the footing of the pier under the tile's joint {@code d} ({@link #pier}), world XY: two triangles. */
+    static List<Vector3> pierFootprint(BoardScene.Tile tile, int d) {
+        var kit = PIER.get();
+        var frame = joint(tile, d);
+        var corners = new Vector3[CORNERS.length];
+        for (int i = 0; i < corners.length; i++) {
+            corners[i] = local(frame, CORNERS[i][0] * kit.footX(), CORNERS[i][1] * kit.footY());
+        }
+        return List.of(corners[0], corners[1], corners[2], new Vector3(corners[0]), new Vector3(corners[2]), corners[3]);
+    }
+
+    /**
+     * Appends the half of the pier under joint {@code d} that lies in this tile, in its kit's three frames: the cap's
+     * Z 0 is the drawn deck underside above each of its points ({@link #underside}), so the cap follows the slab's
+     * grade; the footing's Z 0 is the lowest drawn floor under the footing (a 5 x 5 grid over it, the joint and
+     * its corners among them), in either hex (no loose rock; under ice the bed), lowered where needed to keep a 2 px
+     * shaft; under a liquid it sinks out of sight, since an uneven bed would break its lip into loose slivers; the
+     * shaft spans between them, overlapping each by half a px. The kit scales with the hex, never with the level height.
+     */
+    private static void pier(List<BoardBridge.Facet> faces, BoardScene scene, BoardScene.Tile tile,
+          List<BoardSurface.Face> under, int d, TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
+        var kit = PIER.get();
+        float s = BoardGeometry.hexScale();
+        var next = scene.tile(tile.coords().translated(d));
+        var frame = joint(tile, d);
+        // The underside at the joint, the same from both hexes.
+        float atJoint = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, next, d)) - BoardBridge.SLAB * s;
+        var near = surfaces.computeIfAbsent(tile.coords(), c -> new BoardSurface(scene, tile, lod)).foundation();
+        var far = surfaces.computeIfAbsent(next.coords(), c -> new BoardSurface(scene, next, lod)).foundation();
+        float floor = atJoint - (kit.lip() - kit.soffit() + 2) * s;
+        for (int i = 0; i < 25; i++) {
+            var p = local(frame, (i % 5 / 2f - 1) * kit.footX(), (i / 5 / 2f - 1) * kit.footY());
+            var owner = BoardGeometry.tile(scene, p.x, p.y);
+            if (owner == null) { continue; }
+            floor = Math.min(floor, BoardSurface.sampleHeight(owner.coords().equals(next.coords()) ? far : near, p.x, p.y,
+                  BoardGeometry.groundZ(owner)));
+        }
+        // Its top half a px under the lowest floor: never coplanar with a flat bed.
+        if (tile.liquid().present() || next.liquid().present()) { floor -= (kit.lip() + .5f) * s; }
+        int level = lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 0 : 1;
+        float bottom = floor + (kit.lip() - .5f) * s, top = (kit.soffit() + .5f) * s;
+        var parts = List.of(kit.cap().get(level), kit.shaft().get(level), kit.footing().get(level));
+        for (int part = 0; part < parts.size(); part++) {
+            for (var triangle : parts.get(part)) {
+                var points = new Vector3[3];
+                for (int i = 0; i < 3; i++) {
+                    var k = triangle[i];
+                    var p = local(frame, k.x, k.y);
+                    if (part == 2) {
+                        p.z = floor + k.z * s;
+                    } else {
+                        // On the joint the deck's grade is the same from both hexes.
+                        float deckUnder = underside(tile, under, p);
+                        p.z = part == 0 ? deckUnder + k.z * s : MathUtils.lerp(bottom, deckUnder + top, k.z);
+                    }
+                    points[i] = p;
+                }
+                BoardBridge.triangle(faces, points[0], points[1], points[2], BoardBridge.Part.PIER);
+            }
+        }
+    }
+
+    /** The drawn underside of the tile's own deck above {@code p}: its slab on its grade ({@code under}, relative to the deck plane). */
+    private static float underside(BoardScene.Tile tile, List<BoardSurface.Face> under, Vector3 p) {
+        return BoardBridge.deckZ(tile) + BoardSurface.sampleHeight(under, p.x, p.y, 0) - BoardBridge.SLAB * BoardGeometry.hexScale();
+    }
+
+    /**
+     * The tile's joint toward {@code d}: the shared edge's midpoint, the unit vector along the edge (kit X) and the one
+     * toward the neighbour (kit Y). The edge itself, not the centres' line, orients the pier on the slightly non-regular
+     * lattice; both hexes compute the same midpoint and opposite axes.
+     */
+    private static Vector3[] joint(BoardScene.Tile tile, int d) {
+        int edge = Math.floorMod(1 - d, 6);
+        var a = BoardGeometry.corner(tile.coords(), 0, edge);
+        var b = BoardGeometry.corner(tile.coords(), 0, edge + 1);
+        var across = new Vector3(a).sub(b).nor();
+        return new Vector3[] { a.add(b).scl(.5f), across, new Vector3(-across.y, across.x, 0) };
+    }
+
+    /** A kit point (model px) of a joint, in world XY; its Z is the caller's. */
+    private static Vector3 local(Vector3[] frame, float x, float y) {
+        float s = BoardGeometry.hexScale();
+        return new Vector3(frame[0]).mulAdd(frame[1], x * s).mulAdd(frame[2], y * s);
+    }
 
     /** Paint extends onto the existing bank after the structural footing has ended. */
     BoardRoad road(BoardBridge.Deck deck, Coords coords) {
@@ -66,7 +293,8 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         float level = tile.elevation() + BoardBridge.feature(tile).elevation();
         float scale = BoardGeometry.hexScale();
         var block = KIT.get().get(lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 0 : 1);
-        var center = BoardGeometry.center(tile.coords(), level).add(0, 0, GpuRoads.SURFACE_LIFT * scale);
+        var center = BoardGeometry.center(tile.coords(), 0);
+        center.z = BoardBridge.deckZ(level);
         var faces = new ArrayList<BoardBridge.Facet>();
         var lengths = new ArrayList<Float>();
         int bareExits = 0, solidExits = 0;
@@ -75,14 +303,13 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             var next = scene.tile(tile.coords().translated(d));
             if (!BoardBridge.bank(tile, next, d)) { lengths.add(0f); continue; }
             var bank = surfaces.computeIfAbsent(next.coords(), c -> new BoardSurface(scene, next, lod));
-            var ground = bank.faces.stream().filter(f -> f.finish() != BoardSurface.Finish.OUTCROP
-                  && f.finish() != BoardSurface.Finish.DRESSING && f.finish() != BoardSurface.Finish.ICE).toList();
+            var ground = bank.foundation();
             var along = BoardGeometry.center(next.coords(), level).sub(BoardGeometry.center(tile.coords(), level));
             float half = along.len() / 2;
             along.nor();
             var across = new Vector3(-along.y, along.x, 0);
             var gate = new Vector3(center).mulAdd(along, half);
-            gate.z = BoardBridge.edgeElevation(tile, next, d) * BoardGeometry.level() + GpuRoads.SURFACE_LIFT * scale;
+            gate.z = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, next, d));
             if (BoardBridge.road(tile, next, d) && next.elevation() < level) {
                 solidExits |= 1 << d;
                 lengths.add((half * .5f + block.size().y * scale) / scale);
@@ -105,7 +332,8 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             float supportedAt = reach;
             boolean bare = !BoardBridge.road(tile, next, d);
             boolean ramp = !bare && next.elevation() != level;
-            if (bare) { bareExits |= 1 << d; }
+            // A bare bank gets a loose apron (GpuRoads.deckPatches), never over pavement.
+            if (bare && next.surface() != BoardScene.Surface.CONCRETE) { bareExits |= 1 << d; }
             reach += block.size().y * scale;
             lengths.add(reach / scale);
             int edge = Math.floorMod(1 - d, 6);
@@ -134,7 +362,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 left.mulAdd(along, new Vector3(inner).sub(left).dot(normal) / along.dot(normal));
                 right.mulAdd(along, new Vector3(inner).sub(right).dot(normal) / along.dot(normal));
                 left.z = right.z = center.z;
-                support(faces, left, start[0], start[3], right, bottom, -1.5f * scale);
+                support(faces, left, start[0], start[3], right, bottom, -BoardBridge.SLAB * scale);
             }
             int steps = lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 4 : 2;
             var runs = new TreeSet<Float>();
@@ -148,7 +376,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 // A graded road already reaches this mouth on the same plane. A second slab and paint coat
                 // over that carrier z-fight; only the rails and their terminals need to continue onto the road.
                 if (!ramp) {
-                    prism(faces, previous[0], row[0], row[3], previous[3], -1.5f * scale, 0, BoardBridge.Part.TOP);
+                    prism(faces, previous[0], row[0], row[3], previous[3], -BoardBridge.SLAB * scale, 0, BoardBridge.Part.TOP);
                 }
                 if (t <= terminal) {
                     float rail = 2.5f * scale;
@@ -205,7 +433,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         var mouth = row(top, base, .5f, true);
         prism(faces, mouth[0], base[0], base[1], mouth[1], 0, 2.5f * scale, BoardBridge.Part.STRUCTURE);
         prism(faces, mouth[2], base[2], base[3], mouth[3], 0, 2.5f * scale, BoardBridge.Part.STRUCTURE);
-        prism(faces, base[0], end[0], end[3], base[3], -1.5f * scale, 0, BoardBridge.Part.TOP);
+        prism(faces, base[0], end[0], end[3], base[3], -BoardBridge.SLAB * scale, 0, BoardBridge.Part.TOP);
         for (int side : new int[] { -1, 1 }) {
             terminal(faces, block.shape(), base, end, 0, length, side, ground, true);
         }

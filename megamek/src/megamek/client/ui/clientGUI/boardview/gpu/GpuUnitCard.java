@@ -369,16 +369,16 @@ final class GpuUnitCard implements GpuHud.Component {
               : subtitle;
     }
 
-    /** The damage level (4.1) in its tier's colour, a destroyed unit's as a coral tag; the totals are its tooltip. */
+    /**
+     * The damage level (4.1) after the unit's damage tile, the mark its nameplate shows, so the board and the card
+     * read alike; no tile while the unit has none (undamaged, or the client hides damage levels). A destroyed unit's
+     * level is a coral tag. The totals are its tooltip.
+     */
     private Label damageLevel(GpuBattleStatus.UnitStatus unit, GpuUnitRecord.Snapshot record) {
         String text = record.damageLevel().isEmpty() ? "" : UiTheme.upper(record.damageLevel());
-        Color color = unit.destroyed() ? UiTheme.FILL_INK : switch (unit.damageLevel()) {
-            case Entity.DMG_NONE, Entity.DMG_LIGHT -> UiTheme.ACCENT;
-            case Entity.DMG_MODERATE -> UiTheme.AMBER;
-            default -> UiTheme.CORAL;
-        };
-        Label level = ui.label(text, "hud-name", 10.5f, color);
+        Label level = ui.label(text, "hud-name", 10.5f, unit.destroyed() ? UiTheme.FILL_INK : UiTheme.ACCENT);
         level.setName("unit-card-damage");
+        Label.LabelStyle style = level.getStyle();
         if (unit.destroyed()) {
             // A destroyed unit's level is a coral tag (4.1).
             Drawable tag = ui.skin.newDrawable("white", UiTheme.CORAL);
@@ -386,10 +386,13 @@ final class GpuUnitCard implements GpuHud.Component {
             tag.setRightWidth(5);
             tag.setTopHeight(1);
             tag.setBottomHeight(1);
-            Label.LabelStyle style = level.getStyle();
             style.background = tag;
-            level.setStyle(style);
+        } else if (unit.marks().damageArgb() != 0) {
+            Color tile = new Color();
+            Color.argb8888ToColor(tile, unit.marks().damageArgb());
+            style.background = kit.damageTile(tile);
         }
+        level.setStyle(style);
         int[] sums = totals(record);
         if (record.unitId() != Entity.NONE) {
             ui.tip(level).getActor().setText(sums[3] > 0 ? text("GpuBoard.hud.unit.totals", sums[0], sums[1],

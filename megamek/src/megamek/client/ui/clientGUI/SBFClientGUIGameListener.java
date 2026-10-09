@@ -33,6 +33,7 @@
 
 package megamek.client.ui.clientGUI;
 
+import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.event.board.GameBoardNewEvent;
@@ -70,6 +71,8 @@ public class SBFClientGUIGameListener extends GameListenerAdapter {
     @Override
     public void gameBoardNew(GameBoardNewEvent e) {
         clientGUI.bvGame.setBoard(e.getNewBoard());
+        // The SBF client only has the classic 2D board, so a .board2's 3D-only content is reported once per board load.
+        BoardView.warnIfThreeDOnly(clientGUI.getFrame(), e.getNewBoard(), false);
     }
 
     @Override

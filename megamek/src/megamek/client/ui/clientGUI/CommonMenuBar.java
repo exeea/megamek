@@ -519,18 +519,8 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         // Changes that are independent of the current state of MM
         // BoardView and others may listen to PreferenceChanges to detect these
         switch (event.getActionCommand()) {
-            case ClientGUI.VIEW_INC_GUI_SCALE -> {
-                float guiScale = GUIP.getGUIScale();
-                if (guiScale < ClientGUI.MAX_GUI_SCALE) {
-                    GUIP.setValue(GUIPreferences.GUI_SCALE, guiScale + 0.1);
-                }
-            }
-            case ClientGUI.VIEW_DEC_GUI_SCALE -> {
-                float guiScale = GUIP.getGUIScale();
-                if (guiScale > ClientGUI.MIN_GUI_SCALE) {
-                    GUIP.setValue(GUIPreferences.GUI_SCALE, guiScale - 0.1);
-                }
-            }
+            case ClientGUI.VIEW_INC_GUI_SCALE -> changeGUIScale(true);
+            case ClientGUI.VIEW_DEC_GUI_SCALE -> changeGUIScale(false);
             case ClientGUI.VIEW_PLANETARY_CONDITIONS_OVERLAY -> GUIP.togglePlanetaryConditionsOverlay();
             case VIEW_TRACE_OVERLAY -> GUIP.toggleTraceConditionsOverlay();
             case VIEW_KEYBINDS_OVERLAY -> GUIP.toggleKeybindsOverlay();
@@ -551,6 +541,14 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         } catch (ConcurrentModificationException e) {
             logger.warn(e, "Probable dialog open during Round Report handling");
             logger.info("Event causing this issue: " + event.getActionCommand());
+        }
+    }
+
+    /** The same scale step and bounds for Swing menus and standalone native map workspaces. */
+    public static void changeGUIScale(boolean increase) {
+        float scale = GUIP.getGUIScale();
+        if (increase ? scale < ClientGUI.MAX_GUI_SCALE : scale > ClientGUI.MIN_GUI_SCALE) {
+            GUIP.setValue(GUIPreferences.GUI_SCALE, scale + (increase ? 0.1 : -0.1));
         }
     }
 

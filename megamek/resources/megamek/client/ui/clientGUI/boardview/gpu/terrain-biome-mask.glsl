@@ -15,11 +15,15 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
     if (u_biomeBoard.x < 1.0) return;
     const float width = 30.0, height = 30.0 * 72.0 / 84.0;
     int column = int(floor(world.x / (width * .75)));
-    // Only ground within two rings of a biome or aqueous hex can receive coverage, and its own hex's texel says so
-    // (GpuBiomeSurface): every other fragment is spared the stencil below.
-    int home = int(floor(-world.y / height - mod(float(column), 2.0) * .5));
+    // Only the quarters of this cell (halves of the column and of the row) that a biome hex, or liquids of two
+    // palettes, can reach receive coverage, and R bits 4..7 of the own hex's texel say which (GpuBiomeSurface): every
+    // other fragment is spared the stencil below. The empty result is what the stencil computes there: no cover, and
+    // liquid callers fall back to their own water's palette. A point beyond the board edge keeps the stencil.
+    float rows = -world.y / height - mod(float(column), 2.0) * .5;
+    int home = int(floor(rows));
     ivec2 hex = clamp(ivec2(column, home), ivec2(0), ivec2(u_biomeBoard) - 1);
-    if (texelFetch(u_biomeHexes, hex, 0).r < .5) return;
+    int quarter = (fract(world.x / (width * .75)) < .5 ? 4 : 5) + (fract(rows) < .5 ? 0 : 2);
+    if (hex == ivec2(column, home) && ((int(texelFetch(u_biomeHexes, hex, 0).r * 255.0 + .5) >> quarter) & 1) == 0) return;
     bool aqueous = waterLevel > -1000.0;
     vec2 mixed = world.xy;
     if (aqueous) {

@@ -190,43 +190,52 @@ public final class UnitAnnotations {
                 return Messages.getString("BoardView1.multipleUnits");
             }
         } else {
-            switch (GUIP.getUnitLabelStyle()) {
-                case FULL:
-                    return standardLabelName();
-                case ABBREV:
-                    return (entity instanceof Mek) ? entity.getModel() : abbreviateUnitName(standardLabelName());
-                case CHASSIS:
+            return labelName(entity, GUIP.getUnitLabelStyle());
+        }
+    }
+
+    /**
+     * The unit's name in a label style, which the label shows unless the unit is only a sensor return or shares a
+     * crowded hex, and the native HUD's nameplates show as their name; empty for the style without names and for a
+     * unit without a nickname in the nickname-only style.
+     */
+    public static String labelName(Entity entity, LabelDisplayStyle style) {
+        switch (style) {
+            case FULL:
+                return standardLabelName(entity);
+            case ABBREV:
+                return (entity instanceof Mek) ? entity.getModel() : abbreviateUnitName(standardLabelName(entity));
+            case CHASSIS:
+                return reduceVehicleName(entity);
+            case NICKNAME:
+                if (!pilotNick(entity).isBlank()) {
+                    return "\"" + pilotNick(entity).toUpperCase() + "\"";
+                } else if (!unitNick(entity).isBlank()) {
+                    return "'" + unitNick(entity) + "'";
+                } else {
                     return reduceVehicleName(entity);
-                case NICKNAME:
-                    if (!pilotNick().isBlank()) {
-                        return "\"" + pilotNick().toUpperCase() + "\"";
-                    } else if (!unitNick().isBlank()) {
-                        return "'" + unitNick() + "'";
-                    } else {
-                        return reduceVehicleName(entity);
-                    }
-                case NICKNAME_AND_ABBREVIATED: {
-                    String abbreviated = (entity instanceof Mek) ? entity.getModel()
-                          : abbreviateUnitName(standardLabelName());
-                    if (!pilotNick().isBlank()) {
-                        return "\"" + pilotNick().toUpperCase() + "\" (" + abbreviated + ")";
-                    } else if (!unitNick().isBlank()) {
-                        return "'" + unitNick() + "' (" + abbreviated + ")";
-                    } else {
-                        return abbreviated;
-                    }
                 }
-                case ONLY_NICKNAME:
-                    if (!pilotNick().isBlank()) {
-                        return "\"" + pilotNick().toUpperCase() + "\"";
-                    } else if (!unitNick().isBlank()) {
-                        return "'" + unitNick() + "'";
-                    } else {
-                        return "";
-                    }
-                default: // ONLY_STATUS
-                    return "";
+            case NICKNAME_AND_ABBREVIATED: {
+                String abbreviated = (entity instanceof Mek) ? entity.getModel()
+                      : abbreviateUnitName(standardLabelName(entity));
+                if (!pilotNick(entity).isBlank()) {
+                    return "\"" + pilotNick(entity).toUpperCase() + "\" (" + abbreviated + ")";
+                } else if (!unitNick(entity).isBlank()) {
+                    return "'" + unitNick(entity) + "' (" + abbreviated + ")";
+                } else {
+                    return abbreviated;
+                }
             }
+            case ONLY_NICKNAME:
+                if (!pilotNick(entity).isBlank()) {
+                    return "\"" + pilotNick(entity).toUpperCase() + "\"";
+                } else if (!unitNick(entity).isBlank()) {
+                    return "'" + unitNick(entity) + "'";
+                } else {
+                    return "";
+                }
+            default: // ONLY_STATUS
+                return "";
         }
     }
 
@@ -278,7 +287,7 @@ public final class UnitAnnotations {
               .replace("Hover ", "Hov. ");
     }
 
-    private String pilotNick() {
+    private static String pilotNick(Entity entity) {
         if ((entity.getCrew().getSize() >= 1) && !entity.getCrew().getNickname().isBlank()) {
             return entity.getCrew().getNickname();
         } else {
@@ -286,7 +295,7 @@ public final class UnitAnnotations {
         }
     }
 
-    private String unitNick() {
+    private static String unitNick(Entity entity) {
         String name = entity.getShortName();
         int firstApo = name.indexOf('\'');
         int secondApo = name.indexOf('\'', name.indexOf('\'') + 1);
@@ -297,7 +306,7 @@ public final class UnitAnnotations {
         }
     }
 
-    private String standardLabelName() {
+    private static String standardLabelName(Entity entity) {
         return entity.getShortName();
     }
 
@@ -651,11 +660,9 @@ public final class UnitAnnotations {
             stStr.add(new Status(color(word.severity()), word.label(), false));
         }
 
-        if (GUIP.getShowDamageLevel()) {
-            Color damageColor = getDamageColor();
-            if (damageColor != null) {
-                stStr.add(new Status(damageColor, 0, SMALL));
-            }
+        Color damageColor = damageColor(entity);
+        if (damageColor != null) {
+            stStr.add(new Status(damageColor, 0, SMALL));
         }
 
         criticalStatus = stStr.stream().anyMatch(status -> !status.small && status.color.equals(GUIP.getWarningColor()));
@@ -928,15 +935,20 @@ public final class UnitAnnotations {
 
     private Bar armorBar() {
         double percent = entity.getArmorRemainingPercent();
-        return new Bar((int) (STATUS_BAR_LENGTH * percent), getStatusBarColor(percent));
+        return new Bar((int) (STATUS_BAR_LENGTH * percent), barColor(percent));
     }
 
     private Bar internalBar() {
-        if (isStaticEntity() || entity instanceof FighterSquadron) {
+        if (!hasStructureBar(entity)) {
             return null;
         }
         double percent = entity.getInternalRemainingPercent();
-        return new Bar((int) (STATUS_BAR_LENGTH * percent), getStatusBarColor(percent));
+        return new Bar((int) (STATUS_BAR_LENGTH * percent), barColor(percent));
+    }
+
+    /** Whether the label shows a structure bar under the armor bar: not for static units and fighter squadrons. */
+    public static boolean hasStructureBar(Entity entity) {
+        return !UnitStatusWords.isStaticEntity(entity) && !(entity instanceof FighterSquadron);
     }
 
     private Tmm tmm() {
@@ -988,7 +1000,15 @@ public final class UnitAnnotations {
               .anyMatch(e -> !e.isDone());
     }
 
-    private @Nullable Color getDamageColor() {
+    /**
+     * The colour of the label's damage-level tile, which the native HUD's nameplates and unit card show too: green
+     * for light damage, the caution colour for moderate, the warning colour for heavy and black for crippled; null for
+     * an undamaged unit or while the client hides damage levels.
+     */
+    public static @Nullable Color damageColor(Entity entity) {
+        if (!GUIP.getShowDamageLevel()) {
+            return null;
+        }
         return switch (entity.getDamageLevel()) {
             case Entity.DMG_CRIPPLED -> Color.black;
             case Entity.DMG_HEAVY -> GUIP.getWarningColor();
@@ -1014,7 +1034,8 @@ public final class UnitAnnotations {
         return EntityVisibilityUtils.onlyDetectedBySensors(bv.getLocalPlayer(), entity);
     }
 
-    private Color getStatusBarColor(double percentRemaining) {
+    /** The colour of an armor or structure bar with this share remaining, on the label and the native nameplates. */
+    public static Color barColor(double percentRemaining) {
         if (percentRemaining <= .25) {
             return GUIP.getWarningColor();
         } else if (percentRemaining <= .75) {

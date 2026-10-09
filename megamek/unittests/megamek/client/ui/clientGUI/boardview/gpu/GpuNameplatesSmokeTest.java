@@ -34,6 +34,7 @@ import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.gdx.UiTheme;
@@ -113,6 +114,10 @@ class GpuNameplatesSmokeTest {
             return root.findActor("pip-" + id);
         }
 
+        Actor marks(int id) {
+            return root.findActor("marks-" + id);
+        }
+
         /** The unit's marker: its tag's name and sub-line, {@link #PIP}, or null without one. */
         List<String> marker(int id) {
             return GpuNameplatesSmokeTest.marker(root, id);
@@ -157,7 +162,7 @@ class GpuNameplatesSmokeTest {
                       Entity.NONE);
                 assertEquals(10, heads.size(), "Every unit of the roster has a head in 3D");
                 Map<Integer, List<String>> expected = pips(roster);
-                expected.put(ATLAS, List.of("Atlas", DOT + " moving"));
+                expected.put(ATLAS, List.of("Atlas", ""));
                 expected.put(CONTACT, CONTACT_TAG);
                 assertEquals(expected, plates.markers(roster));
                 plates.assertOnHeads(heads);
@@ -187,7 +192,7 @@ class GpuNameplatesSmokeTest {
                 draw(hud, board, icons, plates, false, List.of(moving, status(moving, GamePhase.MOVEMENT, true,
                       PANTHER, roster)), none, Entity.NONE);
                 expected = pips(roster);
-                expected.put(PANTHER, List.of("Panther", DOT + " moving"));
+                expected.put(PANTHER, List.of("Panther", ""));
                 expected.put(CONTACT, CONTACT_TAG);
                 assertEquals(expected, plates.markers(roster));
                 capture(hud, "nameplates-03", SHOT_03, new Crop("tag", plates.tag(PANTHER), 1100, 611));
@@ -200,7 +205,7 @@ class GpuNameplatesSmokeTest {
                 draw(hud, board, icons, plates, false, List.of(moving, status(moving, GamePhase.MOVEMENT, false,
                       TIMBER_WOLF, moved)), none, Entity.NONE);
                 expected = pips(roster);
-                expected.put(WARHAMMER, List.of("Warhammer", DOT + " up next"));
+                expected.put(WARHAMMER, List.of("Warhammer", ""));
                 expected.put(CONTACT, CONTACT_TAG);
                 assertEquals(expected, plates.markers(roster));
                 assertEquals(.45f, plates.pip(ATLAS).getColor().a, 1e-6, "A moved unit's pip is dimmed");
@@ -212,7 +217,7 @@ class GpuNameplatesSmokeTest {
                 GpuBattleStatus.Snapshot firing = status(moving, GamePhase.FIRING, true, ATLAS, roster);
                 GpuHudData attacks = panels(fire(null), GpuPhysicalOptions.Snapshot.EMPTY);
                 expected = pips(roster);
-                expected.put(ATLAS, List.of("Atlas", DOT + " firing"));
+                expected.put(ATLAS, List.of("Atlas", ""));
                 expected.put(CONTACT, CONTACT_TAG);
                 expected.remove(TIMBER_WOLF);
                 expected.remove(BATTLEMASTER);
@@ -249,8 +254,8 @@ class GpuNameplatesSmokeTest {
                       roster)), panels(GpuFireOrders.Snapshot.EMPTY, new GpuPhysicalOptions.Snapshot(true, ATLAS,
                       TIMBER_WOLF, List.of(TIMBER_WOLF), List.of())), Entity.NONE);
                 expected = pips(roster);
-                expected.put(ATLAS, List.of("Atlas", DOT + " physical"));
-                expected.put(TIMBER_WOLF, List.of("Timber Wolf", "Prime"));
+                expected.put(ATLAS, List.of("Atlas", ""));
+                expected.put(TIMBER_WOLF, List.of("Timber Wolf", ""));
                 expected.put(CONTACT, CONTACT_TAG);
                 assertEquals(expected, plates.markers(roster));
                 assertEquals(UiTheme.CORAL, ((Label) plates.tag(TIMBER_WOLF).getChild(0)).getColor(),
@@ -286,7 +291,7 @@ class GpuNameplatesSmokeTest {
                 for (UnitStatus unit : units) {
                     List<String> marker = plates.marker(unit.id());
                     if (unit.id() == ATLAS) {
-                        assertEquals(List.of("Atlas", DOT + " moving"), marker);
+                        assertEquals(List.of("Atlas", ""), marker);
                     } else if (unit.sensorContact()) {
                         assertEquals(unit.id() == hovered ? CONTACT_TAG : List.of("?", ""), marker);
                     } else {
@@ -354,7 +359,7 @@ class GpuNameplatesSmokeTest {
             // The nameplate key held: every unit's tag, with its model and status words.
             plates.state.altHeld = true;
             plates.update(hud, moving, none, heads, false, Entity.NONE);
-            assertEquals(allTags(DOT + " moving"), plates.markers(roster));
+            assertEquals(allTags(), plates.markers(roster));
             plates.assertOnHeads(heads);
             hud.draw();
             opaque();
@@ -364,7 +369,7 @@ class GpuNameplatesSmokeTest {
             plates.state.altHeld = false;
             plates.update(hud, moving, none, heads, false, Entity.NONE);
             Map<Integer, List<String>> expected = pips(roster);
-            expected.put(ATLAS, List.of("Atlas", DOT + " moving"));
+            expected.put(ATLAS, List.of("Atlas", ""));
             expected.put(CONTACT, CONTACT_TAG);
             assertEquals(expected, plates.markers(roster));
             assertEquals(.3f, plates.pip(ENEMY_LOCUST).getColor().a, 1e-6, "A destroyed unit's pip is faint");
@@ -373,15 +378,15 @@ class GpuNameplatesSmokeTest {
 
             // Hovering an enemy in the movement phase gives its distance from the focus unit; a friend, its model.
             plates.update(hud, moving, none, heads, false, TIMBER_WOLF);
-            assertEquals(List.of("Timber Wolf", "Prime " + DOT + " 9 hex"), plates.marker(TIMBER_WOLF));
+            assertEquals(List.of("Timber Wolf", "9 hex"), plates.marker(TIMBER_WOLF));
             plates.update(hud, moving, none, heads, false, WARHAMMER);
-            assertEquals(List.of("Warhammer", "WHM-6R"), plates.marker(WARHAMMER));
+            assertEquals(List.of("Warhammer", ""), plates.marker(WARHAMMER));
             assertEquals(PIP, plates.marker(TIMBER_WOLF));
 
             // An inspected unit keeps its tag without the hover.
             plates.state.inspected = BATTLEMASTER;
             plates.update(hud, moving, none, heads, false, Entity.NONE);
-            assertEquals(List.of("BattleMaster", "BLR-1G"), plates.marker(BATTLEMASTER));
+            assertEquals(List.of("BattleMaster", ""), plates.marker(BATTLEMASTER));
             plates.state.inspected = Entity.NONE;
 
             // Declaring attacks: the hovered enemy shows the actor's best roll after its status words; an automatic
@@ -389,24 +394,24 @@ class GpuNameplatesSmokeTest {
             GpuBattleStatus.Snapshot firing = status(moving, GamePhase.FIRING, true, ATLAS, roster);
             plates.update(hud, firing, panels(fire(new GpuFireOrders.Badge(KING_CRAB, 7, 58.3, "")),
                   GpuPhysicalOptions.Snapshot.EMPTY), heads, false, KING_CRAB);
-            assertEquals(List.of("King Crab", "KGC-000 " + DOT + " PRONE " + DOT + " best 7+ " + DOT + " 58%"),
+            assertEquals(List.of("King Crab", "PRONE " + DOT + " best 7+ " + DOT + " 58%"),
                   plates.marker(KING_CRAB));
             roster.set(KING_CRAB - 1, unit(roster.get(KING_CRAB - 1), false, true, false, false, List.of()));
             firing = status(moving, GamePhase.FIRING, true, ATLAS, roster);
             plates.update(hud, firing, panels(fire(new GpuFireOrders.Badge(KING_CRAB, 7, 58.3, "")),
                   GpuPhysicalOptions.Snapshot.EMPTY), heads, false, KING_CRAB);
-            assertEquals(List.of("King Crab", "KGC-000 " + DOT + " best 7+ " + DOT + " 58%"),
+            assertEquals(List.of("King Crab", "best 7+ " + DOT + " 58%"),
                   plates.marker(KING_CRAB));
             plates.update(hud, firing, panels(fire(new GpuFireOrders.Badge(KING_CRAB, TargetRoll.AUTOMATIC_SUCCESS,
                   100, "")), GpuPhysicalOptions.Snapshot.EMPTY), heads, false, KING_CRAB);
-            assertEquals(List.of("King Crab", "KGC-000 " + DOT + " best 2+ " + DOT + " 100%"),
+            assertEquals(List.of("King Crab", "best 2+ " + DOT + " 100%"),
                   plates.marker(KING_CRAB));
             plates.update(hud, firing, panels(fire(new GpuFireOrders.Badge(KING_CRAB, TargetRoll.IMPOSSIBLE, 0,
                   "no shot")), GpuPhysicalOptions.Snapshot.EMPTY), heads, false, KING_CRAB);
-            assertEquals(List.of("King Crab", "KGC-000 " + DOT + " no shot"), plates.marker(KING_CRAB));
+            assertEquals(List.of("King Crab", "no shot"), plates.marker(KING_CRAB));
             plates.update(hud, firing, panels(fire(new GpuFireOrders.Badge(ENEMY_LOCUST, 9, 27.8, "")),
                   GpuPhysicalOptions.Snapshot.EMPTY), heads, false, KING_CRAB);
-            assertEquals(List.of("King Crab", "KGC-000"), plates.marker(KING_CRAB));
+            assertEquals(List.of("King Crab", ""), plates.marker(KING_CRAB));
 
             // The targets' cards replace their plates even under the hover.
             plates.update(hud, firing, panels(fire(null), GpuPhysicalOptions.Snapshot.EMPTY), heads, false,
@@ -419,22 +424,28 @@ class GpuNameplatesSmokeTest {
 
             plates.dispose();
 
-            // A firing phase that starts with the opponent's turn: the focus unit is up next, and a hovered enemy
-            // gives its distance from it.
+            // A firing phase that starts with the opponent's turn: the focus unit's tag names it without a phase
+            // word, and a hovered enemy gives its distance from the focus unit.
             plates = new Plates(hud);
             plates.update(hud, status(moving, GamePhase.FIRING, false, TIMBER_WOLF, roster), none, heads, false,
                   TIMBER_WOLF);
-            assertEquals(List.of("Atlas", DOT + " up next"), plates.marker(ATLAS));
-            assertEquals(List.of("Timber Wolf", "Prime " + DOT + " 9 hex"), plates.marker(TIMBER_WOLF));
+            assertEquals(List.of("Atlas", ""), plates.marker(ATLAS));
+            assertEquals(List.of("Timber Wolf", "9 hex"), plates.marker(TIMBER_WOLF));
 
-            // The off-board phase's own turn declares attacks as the firing phase does; another phase's turn, such
-            // as a deployment, reads "selected".
-            plates.update(hud, status(moving, GamePhase.OFFBOARD, true, ATLAS, roster), none, heads, false,
-                  Entity.NONE);
-            assertEquals(List.of("Atlas", DOT + " firing"), plates.marker(ATLAS));
-            plates.update(hud, status(moving, GamePhase.DEPLOYMENT, true, ATLAS, roster), none, heads, false,
-                  Entity.NONE);
-            assertEquals(List.of("Atlas", DOT + " selected"), plates.marker(ATLAS));
+            // The tag names the unit as the client's label style does; a style that names none leaves the tag its
+            // status words, and a unit without words its pip, even under the hover.
+            List<UnitStatus> named = new ArrayList<>(roster);
+            named.set(ATLAS - 1, labelled(roster.get(ATLAS - 1), "\"ACE\" (AS7-D)"));
+            named.set(WARHAMMER - 1, labelled(roster.get(WARHAMMER - 1), ""));
+            named.set(KING_CRAB - 1, labelled(unit(roster.get(KING_CRAB - 1), false, true, false, false,
+                  List.of(prone)), ""));
+            plates.state.inspected = KING_CRAB;
+            plates.update(hud, status(moving, GamePhase.MOVEMENT, true, ATLAS, named), none, heads, false,
+                  WARHAMMER);
+            assertEquals(List.of("\"ACE\" (AS7-D)", ""), plates.marker(ATLAS));
+            assertEquals(PIP, plates.marker(WARHAMMER), "Nothing to show: the hovered unit keeps its pip");
+            assertEquals(List.of("", "PRONE"), plates.marker(KING_CRAB));
+            plates.state.inspected = Entity.NONE;
 
             // A unit without a head (behind the camera, or not drawn) has no plate.
             Map<Integer, Vector2> fewer = new HashMap<>(heads);
@@ -512,7 +523,7 @@ class GpuNameplatesSmokeTest {
                 GpuBoardSource.UiPreferences preferences = GpuHudInputTest.preferences();
                 Group root = hud.stage.getRoot();
                 Map<Integer, List<String>> pips = pips(roster);
-                pips.put(WARHAMMER, List.of("Warhammer", DOT + " up next"));
+                pips.put(WARHAMMER, List.of("Warhammer", ""));
                 pips.put(CONTACT, CONTACT_TAG);
                 hud.update(frame, view, null, preferences);
                 assertEquals(pips, markers(root, roster));
@@ -522,11 +533,11 @@ class GpuNameplatesSmokeTest {
                 // SHOW_NAMEPLATES (Alt) held: every unit's tag from the next frame on, until it is released.
                 assertTrue(hud.keyDown(Input.Keys.ALT_LEFT, KeyEvent.VK_ALT, ALT_DOWN_MASK));
                 hud.update(frame, view, null, preferences);
-                Map<Integer, List<String>> all = allTags(DOT + " up next");
-                all.put(ATLAS, List.of("Atlas", "AS7-D"));
-                all.put(WARHAMMER, List.of("Warhammer", DOT + " up next"));
-                all.put(KING_CRAB, List.of("King Crab", "KGC-000"));
-                all.put(ENEMY_LOCUST, List.of("Locust", "LCT-1M"));
+                Map<Integer, List<String>> all = allTags();
+                all.put(ATLAS, List.of("Atlas", ""));
+                all.put(WARHAMMER, List.of("Warhammer", ""));
+                all.put(KING_CRAB, List.of("King Crab", ""));
+                all.put(ENEMY_LOCUST, List.of("Locust", ""));
                 assertEquals(all, markers(root, roster));
                 // The prototype's plates take no pointer events: a press on one reaches the board.
                 Rectangle tag = GpuHudTestStage.bounds(root.findActor("nameplate-" + KING_CRAB));
@@ -561,6 +572,97 @@ class GpuNameplatesSmokeTest {
                 batch.dispose();
             }
         });
+    }
+
+    /**
+     * The classic board label's marks (the user's request of 2026-10-07): every unit but the sensor contact and the
+     * destroyed Locust has its damage tile, if any, and its bars bottom-centred on its head, with its pip or tag 2
+     * above them; in 3D and in the Tactical View, beside a tag and the pips.
+     */
+    @Test
+    void marksSitOnTheHeadUnderTheMarker() throws Exception {
+        BoardScene scene = GpuBoardSpaceHarness.scene();
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        int green = new java.awt.Color(16, 196, 16).getRGB();
+        int caution = preferences.getCautionColor().getRGB();
+        int warning = preferences.getWarningColor().getRGB();
+        int black = java.awt.Color.BLACK.getRGB();
+        GpuHudTestStage.run(hud -> {
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            GpuUnitIcons icons = new GpuUnitIcons();
+            try {
+                List<UnitStatus> roster = new ArrayList<>(GpuHudFixtures.status().units());
+                Map<Integer, GpuBattleStatus.Marks> marks = Map.of(
+                      ATLAS, new GpuBattleStatus.Marks(caution, caution, green),
+                      WARHAMMER, new GpuBattleStatus.Marks(0, green, green),
+                      MARAUDER, new GpuBattleStatus.Marks(java.awt.Color.GREEN.getRGB(), green, green),
+                      PANTHER, new GpuBattleStatus.Marks(warning, warning, caution),
+                      LOCUST, new GpuBattleStatus.Marks(black, warning, warning),
+                      TIMBER_WOLF, new GpuBattleStatus.Marks(warning, warning, green),
+                      KING_CRAB, new GpuBattleStatus.Marks(0, green, green),
+                      BATTLEMASTER, new GpuBattleStatus.Marks(0, caution, 0),
+                      ENEMY_LOCUST, new GpuBattleStatus.Marks(black, warning, warning));
+                double[][] shares = { { .6, .95 }, { 1, 1 }, { .8, 1 }, { .2, .5 }, { .1, .2 }, { .2, .9 },
+                      { 1, 1 }, { .7, 1 }, { -1, -1 }, { 0, 0 } };
+                for (int index = 0; index < roster.size(); index++) {
+                    UnitStatus unit = roster.get(index);
+                    roster.set(index, labelled(unit, unit.label(), shares[index][0], shares[index][1],
+                          marks.getOrDefault(unit.id(), GpuBattleStatus.Marks.NONE), unit.id() == ENEMY_LOCUST));
+                }
+                GpuBattleStatus.Snapshot moving = status(GpuHudFixtures.status(), GamePhase.MOVEMENT, true, ATLAS,
+                      roster);
+                GpuHudData none = panels(GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY);
+                for (boolean tactical : new boolean[] { false, true }) {
+                    Plates plates = new Plates(hud);
+                    Map<Integer, Vector2> heads = draw(hud, board, icons, plates, tactical, List.of(moving), none,
+                          Entity.NONE);
+                    assertEquals(10, heads.size(), "Every unit has a head");
+                    for (UnitStatus unit : roster) {
+                        Vector2 head = heads.get(unit.id());
+                        Actor shown = plates.marks(unit.id());
+                        Actor marker = plates.tag(unit.id()) != null ? plates.tag(unit.id()) : plates.pip(unit.id());
+                        float markerBottom = GpuHudTestStage.bounds(marker).y;
+                        if (unit.sensorContact() || unit.destroyed()) {
+                            assertNull(shown, "No marks for unit " + unit.id());
+                            assertEquals(head.y, markerBottom, .5f, "The marker on the head of " + unit.id());
+                            continue;
+                        }
+                        Rectangle area = GpuHudTestStage.bounds(shown);
+                        assertEquals(head.x, area.x + area.width / 2, 1, "The marks centred on " + unit.id());
+                        assertEquals(head.y, area.y, .5f, "The marks on the head of " + unit.id());
+                        assertEquals(area.y + area.height + 2, markerBottom, .5f, "The marker over " + unit.id());
+                        boolean tile = unit.marks().damageArgb() != 0;
+                        boolean structure = unit.marks().structureArgb() != 0;
+                        assertEquals(tile ? 40 : 28, area.width, "The width of the marks of " + unit.id());
+                        assertEquals(tile ? 13 : structure ? 11 : 7, area.height, "The height of " + unit.id());
+                    }
+                    opaque();
+                    hud.capture(tactical ? "nameplates-marks-tactical" : "nameplates-marks").dispose();
+                    plates.dispose();
+                }
+            } finally {
+                icons.dispose();
+                board.dispose();
+            }
+        });
+    }
+
+    /** A unit with this label; everything else as captured. */
+    private static UnitStatus labelled(UnitStatus unit, String label) {
+        return labelled(unit, label, unit.armor(), unit.structure(), unit.marks(), unit.destroyed());
+    }
+
+    /** A unit with this label, these armor and structure shares, marks and destruction; everything else as captured. */
+    private static UnitStatus labelled(UnitStatus unit, String label, double armor, double structure,
+          GpuBattleStatus.Marks marks, boolean destroyed) {
+        return new UnitStatus(unit.id(), unit.side(), unit.sensorContact(), unit.name(), unit.chassis(), unit.model(),
+              unit.tons(), unit.weightClass(), unit.formation(), unit.pilot(), unit.gunnery(), unit.piloting(),
+              armor, structure, unit.heat(), unit.heatRgb(), unit.heatCapacity(), unit.walk(), unit.run(),
+              unit.jump(), unit.moved(), unit.mpUsed(), unit.hexesMoved(), unit.facing(), unit.tmm(),
+              unit.canActNow(), unit.pending(), unit.done(), destroyed, unit.damageLevel(),
+              unit.destroyedLocations(), unit.heatEffects(), unit.position(), unit.boardId(), unit.icon(),
+              unit.statusWords(), unit.weightClassIndex(), unit.declaredAttacks(), unit.ownerId(),
+              unit.statusTiles(), label, marks);
     }
 
     @Test
@@ -666,15 +768,14 @@ class GpuNameplatesSmokeTest {
     }
 
     /**
-     * Every roster unit's full tag as the nameplate key shows it, with the focus unit's phase word, the King Crab
-     * prone and the enemy Locust destroyed.
+     * Every roster unit's full tag as the nameplate key shows it: its label (the fixtures' chassis) over its status
+     * words, the King Crab prone and the enemy Locust destroyed.
      */
-    private static Map<Integer, List<String>> allTags(String focusWord) {
-        return new TreeMap<>(Map.of(ATLAS, List.of("Atlas", focusWord), WARHAMMER, List.of("Warhammer", "WHM-6R"),
-              MARAUDER, List.of("Marauder", "MAD-3R"), PANTHER, List.of("Panther", "PNT-9R"), LOCUST,
-              List.of("Locust", "LCT-1V"), TIMBER_WOLF, List.of("Timber Wolf", "Prime"), KING_CRAB,
-              List.of("King Crab", "KGC-000 " + DOT + " PRONE"), BATTLEMASTER, List.of("BattleMaster", "BLR-1G"),
-              CONTACT, CONTACT_TAG, ENEMY_LOCUST, List.of("Locust", "LCT-1M " + DOT + " destroyed")));
+    private static Map<Integer, List<String>> allTags() {
+        return new TreeMap<>(Map.of(ATLAS, List.of("Atlas", ""), WARHAMMER, List.of("Warhammer", ""),
+              MARAUDER, List.of("Marauder", ""), PANTHER, List.of("Panther", ""), LOCUST, List.of("Locust", ""),
+              TIMBER_WOLF, List.of("Timber Wolf", ""), KING_CRAB, List.of("King Crab", "PRONE"), BATTLEMASTER,
+              List.of("BattleMaster", ""), CONTACT, CONTACT_TAG, ENEMY_LOCUST, List.of("Locust", "destroyed")));
     }
 
     /** The number of marker pairs whose boxes overlap by more than half a unit each way. */

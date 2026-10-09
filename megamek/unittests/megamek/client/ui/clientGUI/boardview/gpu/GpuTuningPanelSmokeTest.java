@@ -128,6 +128,9 @@ class GpuTuningPanelSmokeTest {
             if (actor == null) {
                 actor = tuning.atmosphereRows().findActor(name);
             }
+            if (actor == null) {
+                actor = tuning.terrainRows().findActor(name);
+            }
             assertNotNull(actor, name);
             return actor;
         }
@@ -208,7 +211,7 @@ class GpuTuningPanelSmokeTest {
     }
 
     @Test
-    void theUtilityEndsTheRowAndOpensThePanelAtItsPlaceOneDialogAtATime() {
+    void theUtilityPrecedesHelpAndMenuAndOpensThePanelAtItsPlaceOneDialogAtATime() {
         GpuHudTestStage.run(harness -> {
             try (Hud hud = new Hud(harness)) {
                 for (int[] size : SIZES) {
@@ -220,10 +223,17 @@ class GpuTuningPanelSmokeTest {
                     UiButton utility = hud.find("tuning-button");
                     Rectangle button = GpuHudTestStage.bounds(utility);
                     Rectangle menu = GpuHudTestStage.bounds(hud.find("utility-menu"));
-                    assertEquals(size[0] - metrics.gap(), button.x + button.width, .5f, "last, at the right gap " + at);
-                    assertEquals(menu.x + menu.width + GpuUtilityBar.GAP, button.x, .5f, "one gap after Menu " + at);
+                    Rectangle help = GpuHudTestStage.bounds(hud.find("utility-help"));
+                    assertEquals(size[0] - metrics.gap(), menu.x + menu.width, .5f, "Menu is last at the right gap " + at);
+                    assertEquals(button.x + button.width + GpuUtilityBar.GAP, help.x, .5f, "Help follows Tuning " + at);
+                    assertEquals(help.x + help.width + GpuUtilityBar.GAP, menu.x, .5f, "Menu follows Help " + at);
+                    assertEquals("?", hud.<UiButton>find("utility-help").getText().toString());
+                    assertEquals("", hud.<UiButton>find("utility-menu").getText().toString());
+                    Rectangle phase = GpuHudTestStage.bounds(hud.find("phase-header"));
+                    assertFalse(phase.overlaps(GpuHudTestStage.bounds(hud.find("utility-bar"))),
+                          "The camera controls must stay clear of the phase header " + at);
                     assertEquals(menu.y, button.y, .5f, "on the row's line " + at);
-                    assertEquals(metrics.narrow() ? 54 : 62, button.width, .5f, "the utility's width " + at);
+                    assertEquals(34, button.height, .5f, "the compact utility's height " + at);
                     assertFalse(hud.find("tuning-panel").isVisible(), "closed at first");
 
                     hud.click(utility);
@@ -232,8 +242,9 @@ class GpuTuningPanelSmokeTest {
                     Rectangle panel = GpuHudTestStage.bounds(hud.find("tuning-frame"));
                     assertEquals(size[0] - metrics.gap(), panel.x + panel.width, .5f, "at the right gap " + at);
                     assertEquals(360, panel.width, .5f, at);
-                    assertEquals(90, size[1] - panel.y - panel.height, .5f, "90 below the top " + at);
-                    assertEquals(size[1] - 160, panel.height, .5f, "the long Board page fills H - 160 " + at);
+                    assertEquals(metrics.gap(), button.y - panel.y - panel.height, .5f,
+                          "one gap below the utilities " + at);
+                    assertEquals(70, panel.y, .5f, "the long Board page fills down to the bottom margin " + at);
                     assertTrue(hud.<ScrollPane>find("tuning-board").isScrollY(), "and scrolls " + at);
                     assertTrue(hud.hits(panel.x + 3, panel.y + panel.height - 3), "the panel takes its presses");
                     assertFalse(hud.hits(size[0] / 2f, size[1] / 2f), "presses beside it reach the board");
@@ -259,6 +270,35 @@ class GpuTuningPanelSmokeTest {
                     hud.click("tuning-close");
                     assertSame(GpuHudState.Dialog.NONE, hud.hud.state.dialog, "the close button closes it " + at);
                 }
+            }
+        });
+    }
+
+    @Test
+    void ambientWearSliderUpdatesImmediatelyAndDefaultsRestoreFullIntensity() {
+        GpuHudTestStage.run(harness -> {
+            try (Hud hud = new Hud(harness)) {
+                hud.show();
+                hud.click("tuning-button");
+                hud.click("tuning-terrain-tab");
+                Slider slider = hud.find("Ambient wear");
+                assertEquals(0, slider.getMinValue(), NEAR);
+                assertEquals(1, slider.getMaxValue(), NEAR);
+                assertEquals(1, hud.tuning.terrainWear(), NEAR, "Full weathering by default");
+                for (float intensity : new float[] { 0, .25f, .5f, .75f, 1 }) {
+                    hud.drag("Ambient wear", intensity);
+                    assertEquals(intensity, hud.tuning.terrainWear(), NEAR, "The next frame reads the slider value");
+                    assertEquals(String.format(java.util.Locale.ROOT, "%.2f", intensity), reading(hud, "Ambient wear"));
+                }
+                hud.drag("Ambient wear", .35f);
+                for (int[] size : SIZES) {
+                    harness.size(size[0], size[1]);
+                    hud.resize();
+                    hud.capture("tuning-weathering-" + size[0] + "x" + size[1]);
+                }
+                hud.click("tuning-defaults");
+                assertEquals(1, hud.tuning.terrainWear(), NEAR);
+                assertEquals("1.00", reading(hud, "Ambient wear"));
             }
         });
     }

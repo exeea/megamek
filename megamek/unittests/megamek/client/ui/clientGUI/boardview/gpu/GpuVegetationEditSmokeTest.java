@@ -79,7 +79,8 @@ class GpuVegetationEditSmokeTest {
                     var replanted = new HashMap<Coords, BoardPlants>();
                     for (var tile : scene.tiles()) {
                         if (terrain.planted(tile.coords()) != null) {
-                            replanted.put(tile.coords(), BoardPlants.plant(scene, tile, terrain.tacticalSurface(tile.coords()), TerrainLod.FULL));
+                            replanted.put(tile.coords(), BoardPlants.plant(scene, tile, terrain.tacticalSurface(tile.coords()),
+                                  TerrainLod.FULL, java.util.List.of()));
                         }
                     }
                     long grassUploads = grass.uploads(), plantUploads = plants.uploads();

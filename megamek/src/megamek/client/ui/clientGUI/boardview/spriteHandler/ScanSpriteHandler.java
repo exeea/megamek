@@ -54,7 +54,7 @@ import megamek.logging.MMLogger;
  * which of their units, or which hex, this player believes is worth knowing about, and that is worth more to them than
  * the reading is to the scout.</p>
  *
- * @author Claude Code (Opus 5)
+ * @author MegaMek Team (with Claude Code assistance)
  */
 public class ScanSpriteHandler extends BoardViewSpriteHandler {
 

@@ -25,6 +25,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.Widget;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiCursorCapture;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.board.Coords;
@@ -238,6 +239,8 @@ final class GpuMinimap implements GpuHud.Component {
                 private boolean orbiting;
                 private float lastX;
                 private float lastY;
+                /** An orbit holds the cursor still, as the board's does; a left drag follows the pointer. */
+                private final UiCursorCapture cursor = new UiCursorCapture();
 
                 @Override
                 public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
@@ -245,6 +248,7 @@ final class GpuMinimap implements GpuHud.Component {
                     if (orbiting) {
                         lastX = x;
                         lastY = y;
+                        cursor.capture(x, y);
                     } else if (button == Input.Buttons.LEFT) {
                         centre(x, y);
                     } else {
@@ -260,9 +264,16 @@ final class GpuMinimap implements GpuHud.Component {
                         return;
                     }
                     // As the board's middle drag: the stage's y points up, the screen's down.
-                    camera.orbit((x - lastX) * GpuBattleView.ORBIT_DEGREES, (lastY - y) * GpuBattleView.ORBIT_DEGREES);
-                    lastX = x;
-                    lastY = y;
+                    Vector2 at = cursor.trusted(x, y);
+                    camera.orbit((at.x - lastX) * GpuBattleView.ORBIT_DEGREES, (lastY - at.y) * GpuBattleView.ORBIT_DEGREES);
+                    lastX = at.x;
+                    lastY = at.y;
+                }
+
+                /** Also a cancelled touch focus, so every end of the press shows the cursor again. */
+                @Override
+                public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
+                    cursor.release();
                 }
 
                 @Override

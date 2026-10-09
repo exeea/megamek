@@ -69,6 +69,7 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.GifRecordingMode;
 import megamek.client.ui.clientGUI.UITheme;
 import megamek.client.ui.clientGUI.UnitDisplayOrderPreferences;
+import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
 import megamek.client.ui.comboBoxes.MMComboBox;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
@@ -257,6 +258,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
           new JCheckBox(Messages.getString("CommonSettingsDialog.useAverageSkills"));
     private final JCheckBox generateNames = new JCheckBox(Messages.getString("CommonSettingsDialog.generateNames"));
     private final JCheckBox showUnitId = new JCheckBox(Messages.getString("CommonSettingsDialog.showUnitId"));
+    private final MMComboBox<LabelDisplayStyle> unitLabelStyle =
+          new MMComboBox<>("unitLabelStyle", LabelDisplayStyle.values());
     private final JCheckBox showAutoResolvePanel = new JCheckBox(Messages.getString(
           "CommonSettingsDialog.showAutoResolvePanel"));
     private JComboBox<String> favoritePrincessBehaviorSetting;
@@ -1184,6 +1187,11 @@ public class CommonSettingsDialog extends AbstractButtonDialog
               maxPathfinderTimeLabel, maxPathfinderTime)));
 
         addLineSpacer(comps);
+
+        JLabel unitLabelStyleLabel = new JLabel(Messages.getString("CommonSettingsDialog.unitLabelStyle"));
+        unitLabelStyle.setToolTipText(Messages.getString("CommonSettingsDialog.unitLabelStyle.tooltip"));
+        comps.add(List.of(createGameBoardFieldGrid("CommonSettingsGameBoardUnitLabelStyleGrid",
+              unitLabelStyleLabel, unitLabelStyle)));
 
         List.of(showDamageLevel, showDamageDecal, showUnitId)
             .forEach(checkBox -> configureCheckBox(checkBox, null));
@@ -2851,6 +2859,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             chkHighQualityGraphics.setSelected(GUIP.getHighQualityGraphics());
             chkHighPerformanceGraphics.setSelected(GUIP.getHighPerformanceGraphics());
             showDamageLevel.setSelected(GUIP.getShowDamageLevel());
+            unitLabelStyle.setSelectedItem(GUIP.getUnitLabelStyle());
             showDamageDecal.setSelected(GUIP.getShowDamageDecal());
             aOHexShadows.setSelected(GUIP.getAOHexShadows());
             floatingIso.setSelected(GUIP.getFloatingIso());
@@ -3186,6 +3195,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     /** Update the settings from this dialog's values, then close it. */
     @Override
     protected void okAction() {
+        GUIP.setUnitLabelStyle(Objects.requireNonNull(unitLabelStyle.getSelectedItem()));
         GUIP.setShowDamageLevel(showDamageLevel.isSelected());
         GUIP.setShowDamageDecal(showDamageDecal.isSelected());
         GUIP.setUnitLabelBorder(entityOwnerColor.isSelected());

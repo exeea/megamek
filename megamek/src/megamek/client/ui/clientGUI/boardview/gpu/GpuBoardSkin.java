@@ -77,7 +77,7 @@ final class GpuBoardSkin implements Disposable {
 
     /**
      * The styles of the tuning model's controls, under the names GpuBoardTuning uses (the loading message's title
-     * takes "kicker" too). GpuTuningPanel shows the model in the hud-v3 look and never draws these widgets, so each
+     * takes "kicker" too). GpuTuningPanel shows the model in the hud look and never draws these widgets, so each
      * style only gives them the hud-small face and the parts their constructors and layout need.
      */
     private void tuningStyles() {

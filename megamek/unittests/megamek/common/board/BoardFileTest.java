@@ -19,10 +19,78 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardFileTest {
+    @Test void threeAxisRotationRoundTripsInVersionTwoAndOldObjectsDefaultToUpright() throws Exception {
+        Board board = Board.createEmptyBoard(1, 1);
+        var tilted = new BoardDecoration("tilted", "prop", "scenery/vehicles/car", null, .1, .2, 75,
+              true, 1.2, BoardDecoration.Placement.ground(), 0, false, 30, -45);
+        board.getHex(0, 0).setDecorations(List.of(tilted));
+        String saved = encode(board);
+        assertTrue(saved.contains("\"version\":2"));
+        assertEquals(tilted, BoardFile.readNative(saved).getHex(0, 0).getDecorations().getFirst());
+        assertEquals(30, tilted.duplicate().rotationX());
+        assertEquals(-45, tilted.transform(.2, .3, 90, false, 2, tilted.placement()).rotationY());
+        board.getHex(0, 0).setDecorations(List.of(prop("old", BoardDecoration.Placement.ground())));
+        saved = encode(board);
+        assertFalse(saved.contains("rotationX")); assertFalse(saved.contains("rotationY"));
+        assertEquals(0, BoardFile.readNative(saved).getHex(0, 0).getDecorations().getFirst().rotationX());
+    }
+    @Test void stretchRoundTripsOnlyWhenSetAndEveryCopyOrTransformKeepsIt() throws Exception {
+        Board board = Board.createEmptyBoard(1, 1);
+        var stretch = new BoardDecoration.Stretch(.805556, 1, 1.5);
+        var roof = prop("roof", BoardDecoration.Placement.ground()).withStretch(stretch).withGroup("g");
+        board.getHex(0, 0).setDecorations(List.of(roof, prop("plain", BoardDecoration.Placement.ground())));
+        String saved = encode(board);
+        assertTrue(saved.contains("\"stretch\":[0.805556,1.0,1.5]"), saved);
+        assertEquals(1, saved.split("\"stretch\"", -1).length - 1, "An unstretched object omits the field");
+        assertEquals(board.getHex(0, 0).getDecorations(), BoardFile.readNative(saved).getHex(0, 0).getDecorations());
+        assertEquals(BoardDecoration.Stretch.NONE, BoardFile.readNative(saved).getHex(0, 0).getDecorations().get(1).stretch());
+        for (String invalid : List.of("[0.805556,1.0]", "[0.805556,0,1.5]", "[0.805556,-1,1.5]", "1.5")) {
+            assertThrows(java.io.IOException.class, () -> BoardFile.readNative(saved.replace("[0.805556,1.0,1.5]", invalid)), invalid);
+        }
+        assertEquals(stretch, BoardFile.fromClipboard(BoardFile.clipboard(board.getHex(0, 0))).getDecorations().getFirst().stretch());
+        assertEquals(stretch, roof.duplicate().stretch());
+        assertEquals(stretch, BoardDecoration.copies(List.of(roof)).getFirst().stretch());
+        assertEquals(stretch, roof.transform(.2, .3, 90, true, 2, roof.placement()).stretch());
+        assertEquals(stretch, roof.withGroup(null).stretch());
+        assertEquals(stretch, roof.flip(true, true).stretch(), "A reflection is the mirror flag; the local axes keep their factors");
+        Board combined = megamek.common.util.BoardUtilities.combine(1, 1, 1, 2, new Board[] { board, board },
+              megamek.common.loaders.MapSettings.MEDIUM_GROUND);
+        var second = combined.getHex(0, 1).getDecorations().getFirst();
+        assertNotEquals(roof.id(), second.id(), "The second sheet's copy has a fresh identity");
+        assertEquals(stretch, second.stretch(), "Combining sheets keeps it");
+    }
+    @Test void slotColoursRoundTripOnlyWhenSetAndEveryCopyOrTransformKeepsThem() throws Exception {
+        Board board = Board.createEmptyBoard(1, 1);
+        var colours = BoardDecoration.Colours.of(null, "#63753D", null, null);
+        assertEquals(java.util.Arrays.asList(null, "#63753d"), colours.slots(), "Lower case, trailing defaults dropped");
+        var pond = prop("pond", BoardDecoration.Placement.ground()).withColours(colours).withGroup("g");
+        board.getHex(0, 0).setDecorations(List.of(pond, prop("plain", BoardDecoration.Placement.ground())));
+        String saved = encode(board);
+        assertTrue(saved.contains("\"colours\":[null,\"#63753d\"]"), saved);
+        assertEquals(1, saved.split("\"colours\"", -1).length - 1, "An object in its model's own colours omits the field");
+        assertEquals(board.getHex(0, 0).getDecorations(), BoardFile.readNative(saved).getHex(0, 0).getDecorations());
+        for (String invalid : List.of("[null,\"#63753\"]", "[null,\"red\"]", "[1,2]", "\"#63753d\"",
+              "[null,null,null,null,\"#63753d\"]")) {
+            assertThrows(Exception.class, () -> BoardFile.readNative(saved.replace("[null,\"#63753d\"]", invalid)), invalid);
+        }
+        assertEquals(colours, BoardFile.fromClipboard(BoardFile.clipboard(board.getHex(0, 0))).getDecorations().getFirst().colours());
+        assertEquals(colours, pond.duplicate().colours());
+        assertEquals(colours, BoardDecoration.copies(List.of(pond)).getFirst().colours());
+        assertEquals(colours, pond.transform(.2, .3, 90, true, 2, pond.placement()).colours());
+        assertEquals(colours, pond.withStretch(new BoardDecoration.Stretch(2, 1, 1)).withGroup(null).colours());
+        assertEquals(colours, pond.flip(true, true).colours());
+        Board combined = megamek.common.util.BoardUtilities.combine(1, 1, 1, 2, new Board[] { board, board },
+              megamek.common.loaders.MapSettings.MEDIUM_GROUND);
+        assertEquals(colours, combined.getHex(0, 1).getDecorations().getFirst().colours(), "Combining sheets keeps them");
+        assertEquals(BoardDecoration.Colours.NONE, colours.with(1, null), "Every slot back to its own colour stores nothing");
+        assertThrows(IllegalArgumentException.class, () -> new BoardDecoration("paint", "decal", "decal/car-park/straight-4", null,
+              0, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0).withColours(colours), "A decal has no colour slots");
+    }
+
     @TempDir Path directory;
 
     private static BoardDecoration prop(String id, BoardDecoration.Placement placement) {
-        return new BoardDecoration(id, "prop", "scenery/components/car-silver", "Car", -.24, .18, 30,
+        return new BoardDecoration(id, "prop", "scenery/vehicles/car", "Car", -.24, .18, 30,
               false, .8, placement, 0);
     }
 
@@ -46,12 +114,31 @@ class BoardFileTest {
               prop("car-b", BoardDecoration.Placement.absolute(4)),
               new BoardDecoration("decal-a", "decal", "hexes/marking.png", null, 0, 0, 15, true, 1,
                     BoardDecoration.Placement.surface("bridge", "deck", 0), 2)));
-        hex.setAppearance(Map.of("building", new HexAppearance(null, "buildings/missing-but-retained", null, null)));
+        hex.setAppearance(Map.of("building", new HexAppearance(null, "buildings/missing-but-retained", null, null),
+              "bridge", HexAppearance.PILLARS));
         board.setHex(0, 0, hex);
         String serialized = encode(board);
         assertEquals(2, serialized.lines().filter(line -> line.contains("\"at\"") && line.contains("\"elevation\"")).count());
+        assertTrue(serialized.contains("\"bridge\":{\"variant\":\"bridge/pillars\"}"), serialized);
         Board loaded = BoardFile.readNative(serialized);
         assertEquals(serialized, encode(loaded));
+        assertTrue(HexAppearance.pillars(loaded.getHex(0, 0).getAppearance()), "The bridge's Pillars toggle round-trips");
+        assertTrue(HexAppearance.pillars(BoardFile.fromClipboard(BoardFile.clipboard(hex)).getAppearance()), "and copies");
+        // The other two bridge types round-trip the same way; only the 3D board reads them.
+        for (var type : List.of(HexAppearance.BUILT_BRIDGE, HexAppearance.NATURAL_BRIDGE)) {
+            Board typed = Board.createEmptyBoard(1, 1);
+            Hex bridge = new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:1", "");
+            bridge.setAppearance(Map.of("bridge", type));
+            typed.setHex(0, 0, bridge);
+            String text = encode(typed);
+            assertTrue(text.contains("\"bridge\":{\"variant\":\"" + type.variant() + "\"}"), text);
+            Board back = BoardFile.readNative(text);
+            assertEquals(type, back.getHex(0, 0).getAppearance().get("bridge"));
+            assertEquals(type == HexAppearance.BUILT_BRIDGE, HexAppearance.bridgeBuilt(back.getHex(0, 0).getAppearance()));
+        }
+        // A bridge appearance is a plain variant: an asset or a material belongs to another owner.
+        assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, "buildings/a", null, null).validateOwner("bridge"));
+        assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, "asphalt", null).validateOwner("bridge"));
         assertEquals(hex.getDecorations(), loaded.getHex(0, 0).getDecorations());
         assertEquals(board.getAnnotations(), loaded.getAnnotations());
         assertEquals(board.getSourceHeader(), loaded.getSourceHeader());
@@ -158,6 +245,12 @@ class BoardFileTest {
         assertTrue(bridge.getDecorations().stream().anyMatch(d -> d.placement().receiver().terrain().equals("bridge")));
         var elevated = example.getHex(1, 3).getDecorations();
         assertEquals(java.util.Set.of(4.0, 5.0), elevated.stream().map(d -> d.placement().level()).collect(java.util.stream.Collectors.toSet()));
+        // The route marker keeps its N/S sides; a board flip reflects them as terrain exits are.
+        var route = MaglevRoute.find(example.getHex(1, 3));
+        assertEquals(9, route.connections());
+        assertEquals(9, route.flip(true, false).connections());
+        assertEquals(2 | 16, route.withConnections(4 | 32).flip(true, false).connections());
+        assertEquals(4 | 32, route.withConnections(2 | 16).flip(false, true).connections());
         var paint = example.getHex(4, 4).getDecorations().getFirst();
         assertEquals(2.2, paint.scale()); assertFalse(paint.clipToHex());
         assertEquals(encode(example), encode(BoardFile.readNative(encode(example))));
@@ -165,7 +258,7 @@ class BoardFileTest {
 
     @Test void versionTwoPreservesOlderClippingAndRoundTripsScaledSpanningPaint() throws Exception {
         Board board = Board.createEmptyBoard(2, 2);
-        BoardDecoration decal = new BoardDecoration("paint", "decal", "decal/saxarba/rubble_light_path", null,
+        BoardDecoration decal = new BoardDecoration("paint", "decal", "decal/damage/rubble-light-path", null,
               1.2, -.4, 35, true, 3, BoardDecoration.Placement.ground(), 2, false);
         board.getHex(0, 0).setDecorations(List.of(decal));
         String text = encode(board);
@@ -175,5 +268,36 @@ class BoardFileTest {
               .getHex(0, 0).getDecorations().getFirst().clipToHex(), "Earlier development maps retain owner clipping");
         assertFalse(BoardFile.fromClipboard(BoardFile.clipboard(board.getHex(0, 0))).getDecorations().getFirst().clipToHex());
         assertEquals(decal.clipToHex(), decal.duplicate().clipToHex());
+    }
+
+    @Test void groupsRoundTripAndCopiesFormFreshGroups() throws Exception {
+        Board board = Board.createEmptyBoard(2, 1);
+        var table = prop("table", BoardDecoration.Placement.ground()).withGroup("L1_1_g0");
+        var bench = prop("bench", BoardDecoration.Placement.ground()).withGroup("L1_1_g0");
+        var loose = prop("loose", BoardDecoration.Placement.ground());
+        board.getHex(0, 0).setDecorations(List.of(table, bench, loose));
+        board.getHex(1, 0).setDecorations(List.of(prop("other", BoardDecoration.Placement.ground()).withGroup("L1_1_g0")));
+        String saved = encode(board);
+        assertTrue(saved.contains("\"group\":\"L1_1_g0\""));
+        Board loaded = BoardFile.readNative(saved);
+        assertEquals(board.getHex(0, 0).getDecorations(), loaded.getHex(0, 0).getDecorations());
+        assertEquals("L1_1_g0", loaded.getHex(1, 0).getDecorations().getFirst().group(), "A group may span hexes");
+        assertThrows(java.io.IOException.class, () -> BoardFile.readNative(saved.replace("\"L1_1_g0\"", "\" \"")));
+        Hex ungrouped = board.getHex(0, 0).duplicate();
+        ungrouped.setDecorations(List.of(table.withGroup(null), bench, loose));
+        assertNotEquals(BoardFile.hexNode(board.getHex(0, 0)), BoardFile.hexNode(ungrouped),
+              "The editor records an edit only when the serialized hex changes");
+
+        assertNull(table.duplicate().group());
+        assertEquals("L1_1_g0", table.transform(.1, .1, 90, true, 2, table.placement()).group());
+        List<BoardDecoration> copies = BoardDecoration.copies(List.of(table, bench, loose));
+        assertNotEquals("L1_1_g0", copies.get(0).group());
+        assertEquals(copies.get(0).group(), copies.get(1).group());
+        assertNull(copies.get(2).group());
+        assertTrue(copies.stream().noneMatch(copy -> List.of("table", "bench", "loose").contains(copy.id())));
+        var pasted = BoardFile.fromClipboard(BoardFile.clipboard(board.getHex(0, 0))).getDecorations();
+        assertNotEquals("L1_1_g0", pasted.get(0).group());
+        assertEquals(pasted.get(0).group(), pasted.get(1).group());
+        assertNull(pasted.get(2).group());
     }
 }

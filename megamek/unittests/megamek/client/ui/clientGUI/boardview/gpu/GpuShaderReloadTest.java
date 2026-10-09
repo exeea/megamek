@@ -76,7 +76,8 @@ class GpuShaderReloadTest {
     private static Stream<Arguments> shaderFiles() {
         return Stream.of("resources", "megamek/resources").flatMap(root -> Stream.of("light-model.glsl",
               "tree-instances.glsl", "water-spray.glsl", "cloud-lighting.glsl", "cloud-surface.glsl",
-              "linear-ambient.glsl", "linear-material.glsl", "linear-output.glsl", "road-mask.vert", "terrain-blend.vert",
+              "linear-ambient.glsl", "linear-material.glsl", "linear-output.glsl", "model-surface.glsl", "model-colour-slots.glsl",
+              "road-mask.vert", "terrain-blend.vert",
               "ground-surface.glsl", "water-uniforms.glsl", "water-lighting.glsl", "water-pool.glsl", "water-interactions.glsl",
               "terrain-road.frag", "water-fall.frag", "water-spray.frag", "water-cut.frag",
               "weather-particles.vert", "weather-particles.frag", "weather-rain.glsl", "weather-snow.glsl",
@@ -115,7 +116,7 @@ class GpuShaderReloadTest {
             case "terrain-magma-solid.frag", "terrain-magma-flow.frag" -> GpuTerrain.litFragment(name);
             case "ocean-finish.glsl" -> GpuOcean.fragment("ocean-water-finish.frag") + GpuOcean.fragment("ocean-lava-finish.frag");
             case "ocean-water-finish.frag", "ocean-lava-finish.frag" -> GpuOcean.fragment(name);
-            case "linear-material.glsl", "linear-output.glsl" ->
+            case "linear-material.glsl", "linear-output.glsl", "model-surface.glsl" ->
                   GpuUnitShader.linearFragment(DefaultShader.getDefaultFragmentShader());
             default -> unitVertex();
         };

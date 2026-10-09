@@ -2030,21 +2030,31 @@ final class BoardRelief {
         shades.put(center, groundShade(center));
         // Every top is planar: an ordinary hex needs six triangles at every detail level.
         // Keep the real cliff/coast outline; deep notches and narrow necks need the fallback below.
-        if (canFan(center, boundary)) {
-            for (int j = 0; j < boundary.size(); j++) {
-                addTriangle(destination, center, boundary.get(j), boundary.get((j + 1) % boundary.size()), BoardSurface.Finish.TOP);
+        boolean fan = canFan(center, boundary);
+        boolean rounded = false;
+        for (Vector3 point : boundary) {
+            if (shades.get(point).normal().dst2(Vector3.Z) > .0001f) {
+                rounded = true;
+                break;
             }
-            rocks(destination, center);
-            field(destination, center);
-            pits(destination);
-            return;
         }
-        // A concave rim can reverse its bearing around the hex centre. Radial inset rings then fold too.
-        // Triangulate the real outline with the same planar-polygon helper as shores. Interior diagonals need
-        // shared ground samples: a centre sample in each ear leaves rim normals along its long edges and draws
-        // alternating lit spokes across an otherwise flat plateau.
-        List<BoardSurface.Face> top = new ArrayList<>();
-        BoardSurface.polygon(boundary.toArray(Vector3[]::new), BoardSurface.Finish.TOP, top);
+        List<BoardSurface.Face> top = fan && !rounded ? destination : new ArrayList<>();
+        if (fan) {
+            for (int j = 0; j < boundary.size(); j++) {
+                addTriangle(top, center, boundary.get(j), boundary.get((j + 1) % boundary.size()), BoardSurface.Finish.TOP);
+            }
+            if (!rounded) {
+                rocks(destination, center);
+                field(destination, center);
+                pits(destination);
+                return;
+            }
+        } else {
+            BoardSurface.polygon(boundary.toArray(Vector3[]::new), BoardSurface.Finish.TOP, top);
+        }
+        // Rounded rims need interior shading samples even when a centre fan is geometrically valid. Otherwise
+        // their normals and rock coverage extend across the flat top. Concave rims use the shore triangulator;
+        // both paths refine shared diagonals without changing the outline or the playing height.
         Map<TopEdge, Vector3> splits = new HashMap<>();
         for (int i = 0; i < boundary.size(); i++) {
             Vector3 a = boundary.get(i), b = boundary.get((i + 1) % boundary.size());
@@ -2052,10 +2062,12 @@ final class BoardRelief {
             splits.put(new TopEdge(b, a), null);
         }
         // Work in shared passes so a new diagonal cannot recursively chase an unsplit boundary into slivers.
+        float coordinateScale = Math.max(Math.abs(center.x), Math.abs(center.y)) + BoardGeometry.width();
+        float minimumWidth = Math.max(metres(.0001f), 4 * Math.ulp(coordinateScale));
         for (int pass = 0; pass < 12; pass++) {
-            // Thin ears need no extra shading samples across their width. Lock both sides of their edges before
-            // planning any splits, so refinement cannot collapse a sliver and leave its neighbour's edge unpaired.
-            float minimumWidth = metres(.25f);
+            // Protect only near-degenerate ears from rounding collapse. A narrow, metres-long interior triangle
+            // still needs samples along its length, or it carries rim normals/material distances across the top.
+            // Lock both sides before planning splits so an unsafe sliver cannot leave its neighbour unpaired.
             for (BoardSurface.Face face : top) {
                 Vector3 a = face.a(), b = face.b(), c = face.c();
                 float area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
@@ -3025,11 +3037,21 @@ final class BoardRelief {
         }
         boolean road = BoardRoad.rendered(tile);
         if (obstacles == null) { obstacles = new BoardObstacles(scene, tile); }
+        Site adjoining = landEdge < 0 ? null : neighbor(self, landEdge);
+        boolean pitBoundary = adjoining != null && adjoining.ultraSublevel();
         float radius = 0;
-        if (road || !tunnels.isEmpty() || !bridgeApproaches.isEmpty() || !obstacles.isEmpty()) {
+        if (pitBoundary || road || !tunnels.isEmpty() || !bridgeApproaches.isEmpty() || !obstacles.isEmpty()) {
             for (var polygon : rock.polygons()) {
                 for (var p : polygon.points()) { radius = Math.max(radius, (float) Math.hypot(p.x * sx, p.y * sy)); }
             }
+        }
+        if (pitBoundary) {
+            // Keep the rock on the finished land rim, with its whole footprint supported above the opening.
+            float[] spot = settle(base.x, base.y, radius);
+            float burial = self.level() * BoardGeometry.level() - base.z;
+            base = new Vector3(spot[0], spot[1], topHeight(destination, spot[0], spot[1]) - burial);
+            if (clearance(base.x, base.y) < radius || Math.hypot(base.x - self.x(), base.y - self.y()) - radius
+                  < BoardGeometry.width() * .2f) { return; }
         }
         for (var tunnel : tunnels) {
             if (tunnel.obstructs(base, radius, height)) { return; }
@@ -3068,7 +3090,8 @@ final class BoardRelief {
             base = new Vector3(base.x, base.y, foundation);
             sz = height / rock.height();
         }
-        if (cosmetic && !visibleScatter(base, height) || obstructed(base, radius, height)) { return; }
+        if (pitBoundary && clearance(base.x, base.y) < radius
+              || cosmetic && !visibleScatter(base, height) || obstructed(base, radius, height)) { return; }
         for (BoardShape.Polygon polygon : rock.polygons()) {
             Vector3 n = polygon.normal();
             float nx = n.x / sx, ny = n.y / sy;

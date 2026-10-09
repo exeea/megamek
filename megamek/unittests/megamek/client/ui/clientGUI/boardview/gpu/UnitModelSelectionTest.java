@@ -18,26 +18,47 @@ import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
 import megamek.common.units.Mek;
+import megamek.common.units.Tank;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class UnitModelSelectionTest {
+    /**
+     * The whole-body overlay follows the damage level that the board label's damage tile and the unit card show, not
+     * the share of armor and structure lost (the user's decision of 2026-10-07).
+     */
     @Test
-    void wholeBodyDamageIncludesRearArmorAndStructureAndSurvivesCapture() {
+    void wholeBodyDamageFollowsTheDamageLevelAndSurvivesCapture() {
         var mek = new megamek.common.units.BipedMek();
         for (int location = 0; location < mek.locations(); location++) {
             mek.initializeArmor(20, location);
             mek.initializeInternal(10, location);
             if (mek.hasRearArmor(location)) { mek.initializeRearArmor(10, location); }
         }
-        assertEquals(0, UnitModelState.capture(mek).appearance().bodyLoss());
+        assertNull(UnitModelState.capture(mek).appearance().bodyStage());
         mek.setArmor(0, Mek.LOC_CENTER_TORSO);
         mek.setArmor(0, Mek.LOC_CENTER_TORSO, true);
         mek.setInternal(5, Mek.LOC_CENTER_TORSO);
-        assertEquals(35f / 270, UnitModelState.capture(mek).appearance().bodyLoss(), .00001f);
+        assertEquals(Entity.DMG_HEAVY, mek.getDamageLevel(), "Torso structure damage, though only 35 of 270 points");
+        assertEquals(UnitDamageDisplay.Stage.BODY_75, UnitModelState.capture(mek).appearance().bodyStage());
         mek.setDoomed(true);
-        assertEquals(1, UnitModelState.capture(mek).appearance().bodyLoss(), "A lethal result reaches the final damage band");
+        assertEquals(UnitDamageDisplay.Stage.BODY_100, UnitModelState.capture(mek).appearance().bodyStage(),
+              "A lethal result reaches the final damage band");
+    }
+
+    @Test
+    void aWholeBodyModelShowsItsDamageLevel() {
+        Tank tank = mock(Tank.class);
+        int[] levels = { Entity.DMG_NONE, Entity.DMG_LIGHT, Entity.DMG_MODERATE, Entity.DMG_HEAVY, Entity.DMG_CRIPPLED };
+        UnitDamageDisplay.Stage[] stages = { null, UnitDamageDisplay.Stage.BODY_25, UnitDamageDisplay.Stage.BODY_50,
+              UnitDamageDisplay.Stage.BODY_75, UnitDamageDisplay.Stage.BODY_100 };
+        for (int index = 0; index < levels.length; index++) {
+            when(tank.getDamageLevel()).thenReturn(levels[index]);
+            assertEquals(UnitDamageDisplay.body(stages[index]), UnitModelSelection.damage(tank),
+                  "damage level " + levels[index]);
+        }
+        assertSame(BoardScene.LocationDamage.NONE, UnitModelSelection.damage(new ConvInfantry()));
     }
 
     @Test
@@ -137,7 +158,7 @@ class UnitModelSelectionTest {
     }
 
     @Test
-    void anIntactMekAndAnythingThatIsNotAMekShowNoDamage() {
+    void anIntactMekAndInfantryShowNoDamage() {
         assertSame(BoardScene.LocationDamage.NONE, UnitModelSelection.damage(bipedWithLocations()));
         assertSame(BoardScene.LocationDamage.NONE, UnitModelSelection.damage(new ConvInfantry()));
         assertTrue(BoardScene.LocationDamage.NONE.isNone());

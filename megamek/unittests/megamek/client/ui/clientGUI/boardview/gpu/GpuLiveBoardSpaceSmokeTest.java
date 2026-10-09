@@ -114,7 +114,7 @@ class GpuLiveBoardSpaceSmokeTest {
                 live.publish();
                 live.draw(20, .1f);
                 GpuMovePlan.Snapshot move = live.frame.get().panels().move();
-                assertEquals(List.of(WAYPOINT), move.pins());
+                assertEquals(List.of(WAYPOINT), move.pins().stream().map(GpuMovePlan.Step::coords).toList());
                 assertEquals(DESTINATION, move.destination());
                 assertFalse(move.envelope().isEmpty(), "The plan has its envelope");
                 assertSame(move, field(live.overlay, "move"), "The overlay draws the published plan");

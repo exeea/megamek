@@ -78,8 +78,7 @@ class GpuTargetCardsSmokeTest {
     private static final int LASER_LA = 4;
     private static final int LASER_RA = 5;
     private static final int REAR = 7;
-    private static final String FOOT_PRIMARY = "Drag or Alt+↑/↓ to reorder · primary target";
-    private static final String FOOT_SECONDARY = "Drag or Alt+↑/↓ to reorder · secondary +1";
+    private static final String REORDER_HINT = "Drag or Alt+↑/↓ to reorder";
     /** Shot 05's HUD panels at 1920 x 1080 (r1 section 2): x, top, width, height. */
     private static final int[][] PANELS_05 = { { 20, 20, 300, 84 }, { 20, 116, 300, 507 }, { 20, 808, 300, 252 },
           { 1535, 18, 365, 56 }, { 1590, 90, 310, 208 }, { 1590, 312, 310, 556 }, { 1590, 880, 310, 130 },
@@ -178,10 +177,10 @@ class GpuTargetCardsSmokeTest {
                     assertEquals(List.of("A", "TIMBER WOLF", "PRIMARY", "AC/20", "[RT] AC/20  (8)", "7+", "58%",
                           "SRM 6", "[LT] SRM 6  (9)", "7+", "58%", "MEDIUM LASER", "LA · Energy", "7+", "58%",
                           "MEDIUM LASER", "RA · Energy", "7+", "58%"), rows(wolf));
-                    assertEquals(FOOT_PRIMARY, line(wolf, "card-foot"));
+                    assertEquals(REORDER_HINT, line(wolf, "card-foot"));
                     assertEquals(List.of("B", "BATTLEMASTER", "SET PRIMARY", "LRM 20", "[LT] LRM 20  (11)", "8+",
                           "42%"), rows(master));
-                    assertEquals(FOOT_SECONDARY, line(master, "card-foot"));
+                    assertEquals(REORDER_HINT, line(master, "card-foot"));
                     assertEquals(300, wolf.getWidth(), .01f, "an expanded card is 300 wide at 1920");
                     assertPlaced(hud, layer, view, panels(hud, PANELS_05));
                     String shot = tactical ? "07-tactical-view.jpg" : "05-weapon-declaration.jpg";
@@ -261,6 +260,8 @@ class GpuTargetCardsSmokeTest {
             verify(fire).remove(LASER_LA);
             click(hud, master.findActor("card-primary"));
             verify(fire).setPrimary(TargetKey.unit(BATTLEMASTER));
+            click(hud, wolf.findActor("card-clear-all"));
+            verify(fire).removeTarget(TargetKey.unit(TIMBER_WOLF));
             verify(fire, never()).focusTarget(any(TargetKey.class));
 
             // A click on the card focuses its enemy and assigns the armed weapon there once (H28, H16).
@@ -301,6 +302,8 @@ class GpuTargetCardsSmokeTest {
             hud.draw();
             Table crab = layer.card(KING_CRAB);
             assertNull(crab.findActor("card-row-5"), "collapsed");
+            click(hud, crab.findActor("card-clear-all"));
+            verify(fire).removeTarget(TargetKey.unit(KING_CRAB));
             click(hud, crab.findActor("card-show"));
             verify(fire).focusTarget(TargetKey.unit(KING_CRAB));
             verify(fire, never()).assign(anyInt(), any(TargetKey.class));
@@ -475,9 +478,8 @@ class GpuTargetCardsSmokeTest {
     }
 
     /**
-     * The user's report of 2026-10-03: a terrain target kept "Hold fire". A wooded hex with an attack has its card as
-     * a unit has, against the area below the anchor the view gives its hex; a click on the card focuses the hex by
-     * its key.
+     * A terrain target with an attack has its card against the anchor the view gives its hex, with its full name
+     * wrapped in the header; a click on the card focuses the hex by its key.
      */
     @Test
     void aHexTargetsCardStandsAtItsHex() {
@@ -486,27 +488,32 @@ class GpuTargetCardsSmokeTest {
             GpuFireOrders orders = mock(GpuFireOrders.class);
             when(source.fire()).thenReturn(orders);
             Layer layer = new Layer(hud, source, null);
-            TargetKey woods = new TargetKey(Targetable.TYPE_HEX_CLEAR, 20007);
+            TargetKey building = new TargetKey(Targetable.TYPE_BUILDING, 20007);
+            String targetName = "Hex 0803 of Medium Building Building #20007 (Collapse)";
             GpuFireOrders.Snapshot fire = orders(List.of(target(TIMBER_WOLF, 'A', "Timber Wolf", true, 0),
-                        new GpuFireOrders.Target(woods, 'B', "Hex: 0803 (Clear)", false, 1, true, new Coords(7, 2))),
+                        new GpuFireOrders.Target(building, 'B', targetName, false, 1, true, new Coords(7, 2))),
                   List.of(attack(AC20, TIMBER_WOLF, "AC/20", "RT", "Ballistic", "[RT] AC/20  (8)", 8, 7, 58.3),
-                        new GpuFireOrders.Attack(LRM, woods, "LRM 20", "LT", "Missile", "[LT] LRM 20  (11)", 11, 2,
+                        new GpuFireOrders.Attack(LRM, building, "LRM 20", "LT", "Missile", "[LT] LRM 20  (11)", 11, 2,
                               100, "")));
             Map<Integer, Rectangle> units = Map.of(ATLAS, new Rectangle(900, 200, 60, 110), TIMBER_WOLF,
                   new Rectangle(1100, 520, 60, 110));
             Map<Integer, Vector2> heads = new HashMap<>();
             units.forEach((id, rect) -> heads.put(id, new Vector2(rect.x + rect.width / 2, rect.y + rect.height)));
             GpuHud.HudView view = new GpuHud.HudView(false, false, units, heads, Map.of(), null, Entity.NONE, 118,
-                  Map.of(woods, new Vector2(500, 500)));
+                  Map.of(building, new Vector2(500, 500)));
             layer.update(hud, firing(fire), view, List.of());
             hud.draw();
-            Rectangle card = layer.cards.placed().get(woods);
+            Rectangle card = layer.cards.placed().get(building);
             assertNotNull(card, "The hex's card is placed");
             assertEquals(500 - card.width / 2, card.x, 1, "centred over the hex's anchor");
             assertEquals(500 + 26, card.y, 1, "26 above it, as above a head");
-            assertEquals(List.of("B", "HEX: 0803 (CLEAR)"), rows(layer.card(woods.id())).subList(0, 2));
-            click(hud, layer.card(woods.id()).findActor("card-name"));
-            verify(orders).focusTarget(woods);
+            assertEquals(List.of("B", UiTheme.upper(targetName)), rows(layer.card(building.id())).subList(0, 2));
+            Label name = layer.card(building.id()).findActor("card-name");
+            assertTrue(name.getGlyphLayout().height > name.getStyle().font.getLineHeight() * name.getFontScaleY());
+            assertTrue(name.getGlyphLayout().width <= name.getWidth(), "the full name fits inside the header");
+            hud.capture("cards-hex").dispose();
+            click(hud, name);
+            verify(orders).focusTarget(building);
             layer.dispose();
         });
     }
@@ -764,7 +771,7 @@ class GpuTargetCardsSmokeTest {
     /** The shown texts of a card's header and rows (not its footer's words), in drawing order. */
     private static List<String> rows(Actor actor) {
         List<String> texts = new ArrayList<>();
-        if (!actor.isVisible() || "card-foot".equals(actor.getName())) {
+        if (!actor.isVisible() || "card-footer".equals(actor.getName())) {
             return texts;
         }
         if (actor instanceof Label label && label.getText().length() > 0) {

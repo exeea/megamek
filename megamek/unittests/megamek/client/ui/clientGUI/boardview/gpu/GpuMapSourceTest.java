@@ -15,6 +15,12 @@ import java.util.concurrent.FutureTask;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.boardeditor.BoardEditorSession;
+import megamek.client.ui.boardeditor.BoardEditorSession.Action;
+import megamek.client.ui.boardeditor.BoardEditorSession.Command;
+import megamek.client.ui.boardeditor.BoardEditorSession.Tool;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -23,9 +29,116 @@ import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuMapSourceTest {
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void viewCommandsUseSharedPreferencesWithoutChangingTheDocument(boolean editing) throws Exception {
+        onEdt(() -> {
+            GUIPreferences preferences = GUIPreferences.getInstance();
+            boolean coordinates = preferences.getCoordsEnabled();
+            float scale = preferences.getGUIScale();
+            BoardEditorSession editor = editing ? new BoardEditorSession() : null;
+            Game game = editor == null ? new Game() : editor.game();
+            game.setBoard(Board.createEmptyBoard(4, 4));
+            boolean dirty = editor != null && editor.dirty();
+            try {
+                preferences.setValue(GUIPreferences.SHOW_COORDS, true);
+                preferences.setValue(GUIPreferences.GUI_SCALE, 1.0);
+                BoardScene.Command stale;
+                try (var source = new GpuMapSource(game, null, editor);
+                      var other = new GpuMapSource(game, null, null)) {
+                    long generation = source.takeFrame().boardGeneration();
+                    Coords at = new Coords(2, 2);
+                    assertTrue(source.takeFrame().scene().tile(at).text().stream()
+                          .anyMatch(label -> label.text().equals(at.getBoardNum())));
+                    stale = viewCommand(source, ClientGUI.VIEW_TOGGLE_HEX_COORDS);
+                    assertEquals(Boolean.TRUE, stale.selected());
+                    assertEquals(editing ? "" : KeyCommandBind.getDesc(KeyCommandBind.HEX_COORDS), stale.shortcut());
+                    stale.action().run();
+                    source.refresh(); other.refresh();
+                    assertFalse(preferences.getCoordsEnabled());
+                    for (var workspace : List.of(source, other)) {
+                        assertEquals(Boolean.FALSE, viewCommand(workspace, ClientGUI.VIEW_TOGGLE_HEX_COORDS).selected());
+                        assertTrue(workspace.takeFrame().scene().tile(at).text().stream()
+                              .noneMatch(label -> label.text().equals(at.getBoardNum())), "The toggle removes rendered coordinate labels");
+                    }
+                    source.key(KeyCommandBind.HEX_COORDS.key, true, KeyCommandBind.HEX_COORDS.modifiers);
+                    assertEquals(!editing, preferences.getCoordsEnabled(), "The editor keeps Ctrl+G for Group");
+                    source.key(KeyCommandBind.LOS_SETTING.key, true, KeyCommandBind.LOS_SETTING.modifiers);
+                    assertTrue(source.takeFrame().panels().los().open());
+                    viewCommand(source, ClientGUI.VIEW_INC_GUI_SCALE).action().run();
+                    assertEquals(1.1f, source.uiPreferences().scale(), .001f);
+                    source.key(KeyCommandBind.DEC_GUI_SCALE.key, true, KeyCommandBind.DEC_GUI_SCALE.modifiers);
+                    assertEquals(1f, source.uiPreferences().scale(), .001f);
+                    assertEquals(generation, source.takeFrame().boardGeneration());
+                    if (editor != null) {
+                        assertEquals(dirty, editor.dirty());
+                        assertFalse(editor.snapshot().canUndo(), "View commands do not edit the board");
+                    }
+                }
+                boolean before = preferences.getCoordsEnabled();
+                stale.action().run();
+                assertEquals(before, preferences.getCoordsEnabled(), "A closed workspace cannot toggle shared preferences");
+            } finally {
+                preferences.setValue(GUIPreferences.SHOW_COORDS, coordinates);
+                preferences.setValue(GUIPreferences.GUI_SCALE, scale);
+            }
+            return null;
+        });
+    }
+
+    private static BoardScene.Command viewCommand(GpuMapSource source, String id) {
+        return source.takeFrame().globalCommands().stream().filter(command -> command.id().equals("view"))
+              .flatMap(command -> command.children().stream()).filter(command -> command.id().equals(id))
+              .findFirst().orElseThrow();
+    }
+
+    @ParameterizedTest
+    @EnumSource(Tool.class)
+    void elevationWheelChangesOnlyHoveredHexInEveryTool(Tool tool) throws Exception {
+        Coords center = new Coords(4, 4);
+        for (int delta : new int[] { -3, 3 }) {
+            var editor = onEdt(() -> {
+                var session = new BoardEditorSession();
+                session.game().setBoard(Board.createEmptyBoard(9, 9));
+                session.command(new Command(Action.TOOL, "", "SCULPT"), null);
+                session.command(new Command(Action.BRUSH, "", "2"), null);
+                return session;
+            });
+            var source = onEdt(() -> new GpuMapSource(editor.game(), null, editor));
+            try {
+                onEdt(() -> {
+                    long generation = source.takeFrame().boardGeneration();
+                    source.editorCommand(new Command(Action.TOOL, "", tool.name()), generation);
+                    source.adjustEditorElevation(center, delta, generation);
+                    return null;
+                });
+                // The wheel input is queued on Swing; finish after it has been accepted.
+                onEdt(() -> {
+                    source.endEditorStroke();
+                    for (int x = 0; x < 9; x++) {
+                        for (int y = 0; y < 9; y++) {
+                            Coords at = new Coords(x, y);
+                            int expected = at.equals(center) ? delta : 0;
+                            assertEquals(expected, editor.board().getHex(at).getLevel(), tool + " at " + at);
+                        }
+                    }
+                    source.editorCommand(new Command(Action.UNDO, "", ""), source.takeFrame().boardGeneration());
+                    for (int x = 0; x < 9; x++) {
+                        for (int y = 0; y < 9; y++) { assertEquals(0, editor.board().getHex(x, y).getLevel()); }
+                    }
+                    assertFalse(editor.snapshot().canUndo(), "A wheel gesture is one undo step");
+                    return null;
+                });
+            } finally {
+                onEdt(() -> { source.close(); return null; });
+            }
+        }
+    }
+
     @Test
     void previewUsesOnlyTheModelAndReleasesItsListeners() throws Exception {
         onEdt(() -> {

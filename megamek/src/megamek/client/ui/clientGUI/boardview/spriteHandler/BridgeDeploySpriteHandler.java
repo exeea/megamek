@@ -53,7 +53,7 @@ import megamek.common.units.Entity;
  * {@link BridgeBuildSprite} the infantry bridge build uses, so the in-progress deployment is visible just like an
  * engineer-built bridge. The pending state is read from the synced entities' bridgelayer mounts.
  *
- * @author Claude Code (Opus 4.8)
+ * @author MegaMek Team (with Claude Code assistance)
  */
 public class BridgeDeploySpriteHandler extends BoardViewSpriteHandler {
 

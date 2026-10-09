@@ -16,16 +16,16 @@ class GpuGeysersTest {
     @Test
     void followsInstalledAssetStateAndItsGroundTransform() {
         Matrix4 transform = new Matrix4().setToTranslation(120, -90, 18).scale(2, 2, 2);
-        var active = GpuGeysers.emitter("scenery/saxarba/misc/geyser_water_on", transform);
+        var active = GpuGeysers.emitter("scenery/geysers/water-erupting", transform);
         assertNotNull(active);
         assertTrue(active.active());
         assertFalse(active.magma());
         assertEquals(new Vector3(120, -90, 19.68f), active.origin());
         assertEquals(2, active.scale());
-        var dormant = GpuGeysers.emitter("scenery/saxarba/misc/geyser_water_off", transform);
+        var dormant = GpuGeysers.emitter("scenery/geysers/water-dormant", transform);
         assertFalse(dormant.active());
         assertEquals(active.origin(), dormant.origin());
-        var magma = GpuGeysers.emitter("scenery/saxarba/misc/geyser_magma", transform);
+        var magma = GpuGeysers.emitter("scenery/geysers/magma", transform);
         assertTrue(magma.magma());
         assertFalse(magma.active());
         assertNull(GpuGeysers.emitter("scenery/fluff/pool", transform));
@@ -33,7 +33,7 @@ class GpuGeysersTest {
 
     @Test
     void dropletsAdvanceOnTheSharedClockAndStayWithinTheCullingEnvelope() {
-        var source = GpuGeysers.emitter("scenery/saxarba/misc/geyser_water_on", new Matrix4());
+        var source = GpuGeysers.emitter("scenery/geysers/water-erupting", new Matrix4());
         Vector3 first = GpuGeysers.droplet(source, 4, .5f, 9.8f, Vector3.Zero, new Vector3());
         assertEquals(first, GpuGeysers.droplet(source, 4, .5f, 9.8f, Vector3.Zero, new Vector3()));
         assertNotEquals(first, GpuGeysers.droplet(source, 4, .9f, 9.8f, Vector3.Zero, new Vector3()));

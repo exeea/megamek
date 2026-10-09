@@ -41,6 +41,7 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords.Severity;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
@@ -195,6 +196,7 @@ class GpuBattleStatusTest {
             assertEquals(new Coords(12, 12), contact.position());
             assertEquals(Player.PLAYER_NONE, contact.ownerId(), "Not even its owner is disclosed");
             assertTrue(contact.statusTiles().isEmpty());
+            assertEquals(GpuBattleStatus.Marks.NONE, contact.marks(), "Nor its damage, armor or structure");
             assertSame(frame.scene().units().stream().filter(unit -> unit.id() == 44).findFirst().orElseThrow().image(),
                   contact.icon(), "A contact shows the same radar blip as the board");
         }
@@ -656,6 +658,80 @@ class GpuBattleStatusTest {
                 assertEquals(List.of(hidden), UnitStatusWords.statusTiles(fighter, true, local),
                       "A space map shows no altitude");
             });
+        }
+    }
+
+    /**
+     * The marks of the classic board label, which the nameplates and the unit card show: the damage tile in its
+     * level's colour (none while undamaged or while the client hides damage levels) and the armor and structure bars
+     * in the colours of their remaining shares.
+     */
+    @Test
+    void unitsCarryTheirBoardLabelMarks() throws Exception {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        boolean showDamageLevel = preferences.getShowDamageLevel();
+        int green = new java.awt.Color(16, 196, 16).getRGB();
+        int caution = preferences.getCautionColor().getRGB();
+        int warning = preferences.getWarningColor().getRGB();
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            preferences.setShowDamageLevel(true);
+            Entity atlas = fixture.entity;
+            List<Runnable> changes = List.of(() -> { }, () -> atlas.setArmor(5, Mek.LOC_HEAD),
+                  () -> preferences.setShowDamageLevel(false), () -> {
+                      preferences.setShowDamageLevel(true);
+                      for (int location = 0; location < atlas.locations(); location++) {
+                          if (location != Mek.LOC_HEAD) {
+                              atlas.setArmor(0, location);
+                              if (atlas.hasRearArmor(location)) {
+                                  atlas.setArmor(0, location, true);
+                              }
+                          }
+                      }
+                      atlas.setInternal(1, Mek.LOC_CENTER_TORSO);
+                      atlas.setInternal(11, Mek.LOC_LEFT_TORSO);
+                  });
+            List<Integer> levels = new ArrayList<>();
+            List<GpuBattleStatus.Marks> marks = new ArrayList<>();
+            for (Runnable change : changes) {
+                SwingUtilities.invokeAndWait(() -> {
+                    change.run();
+                    levels.add(atlas.getDamageLevel());
+                    fixture.source.refresh();
+                });
+                marks.add(unit(fixture.source.takeFrame().status(), 1).marks());
+            }
+            assertEquals(List.of(Entity.DMG_NONE, Entity.DMG_MODERATE, Entity.DMG_MODERATE, Entity.DMG_CRIPPLED),
+                  levels, "Undamaged; head armor 5 of 9; the same; two torsos with internal damage");
+            assertEquals(List.of(new GpuBattleStatus.Marks(0, green, green),
+                  new GpuBattleStatus.Marks(caution, green, green), new GpuBattleStatus.Marks(0, green, green),
+                  new GpuBattleStatus.Marks(java.awt.Color.BLACK.getRGB(), warning, caution)), marks,
+                  "5 of 304 armor points is at most a quarter, 112 of 152 structure points at most three quarters");
+        } finally {
+            preferences.setShowDamageLevel(showDamageLevel);
+        }
+    }
+
+    /** The name of the classic board label, which the nameplates show: the unit in the client's label style. */
+    @Test
+    void unitsCarryTheirLabelInTheClientsLabelStyle() throws Exception {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        LabelDisplayStyle style = preferences.getUnitLabelStyle();
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            List<LabelDisplayStyle> styles = List.of(LabelDisplayStyle.FULL, LabelDisplayStyle.ABBREV,
+                  LabelDisplayStyle.CHASSIS, LabelDisplayStyle.NICKNAME_AND_ABBREVIATED,
+                  LabelDisplayStyle.ONLY_NICKNAME, LabelDisplayStyle.ONLY_STATUS);
+            List<String> labels = new ArrayList<>();
+            for (LabelDisplayStyle shown : styles) {
+                SwingUtilities.invokeAndWait(() -> {
+                    fixture.entity.getCrew().setNickname("Ace", 0);
+                    preferences.setUnitLabelStyle(shown);
+                    fixture.source.refresh();
+                });
+                labels.add(unit(fixture.source.takeFrame().status(), 1).label());
+            }
+            assertEquals(List.of("Atlas AS7-D", "AS7-D", "Atlas", "\"ACE\" (AS7-D)", "\"ACE\"", ""), labels);
+        } finally {
+            preferences.setUnitLabelStyle(style);
         }
     }
 

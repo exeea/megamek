@@ -44,9 +44,9 @@ import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
 
 /**
- * The hud-v3 board overlay (rebuild plan C.1 G7; overlay.js in 3D, flat.js in the Tactical View): the route and its
- * ghost, the front arc or the displayed weapon's arc and the physical-attack neighbours as world meshes, with the
- * plotted route's {@link GpuRoutePulse} over them; and the marks of the units and the target hexes (side rings,
+ * The board overlay: the route and its ghost, the front arc or the displayed weapon's arc and the
+ * physical-attack neighbours as world meshes, with the plotted route's {@link GpuRoutePulse}
+ * over them; and the marks of the units and the target hexes (side rings,
  * glows, the other targets' rings, the hovered unit's ring), drawn every frame
  * where the units stand, level as selection bands, so that the pointer lays no mark on the terrain
  * again. MegaMek's own movement envelope belongs to the tactical capture (GpuTactical), the displayed weapon's range
@@ -99,6 +99,7 @@ final class GpuBoardOverlay implements Disposable {
     /** Light for the 3D ghost: enough ambient to keep it bright, one light from above to show its shape. */
     private final Environment ghostLight = new Environment();
     private ModelInstance overlay;
+    private ModelInstance movementMarkers;
     private long builds;
     /** The marks' bands by unit and by hex, in drawing order. */
     private Map<Integer, List<Band>> unitMarks = Map.of();
@@ -194,6 +195,10 @@ final class GpuBoardOverlay implements Disposable {
         mover = null;
         arrival = null;
         pulse.begin(tactical, BoardGeometry.WIDTH / 2);
+        if (movementMarkers != null) {
+            movementMarkers.model.dispose();
+            movementMarkers = null;
+        }
         if (overlay != null) {
             overlay.model.dispose();
             overlay = null;
@@ -328,18 +333,22 @@ final class GpuBoardOverlay implements Disposable {
     }
 
     /**
-     * Draws over the terrain and units with the board camera: depth-tested in 3D, flat on top in the Tactical View;
-     * the route's pulse last, over the route.
+     * Draws the route, pulse and movement markers through scene geometry. Other overlays retain their depth policy.
      */
     void render(Camera camera) {
-        if (scene == null || overlay == null) {
+        if (scene == null) {
             return;
         }
         batch.begin(camera);
-        batch.render(overlay);
+        if (overlay != null) {
+            batch.render(overlay);
+        }
         Renderable pulsing = pulse.renderable(camera);
         if (pulsing != null) {
             batch.render(pulsing);
+        }
+        if (movementMarkers != null) {
+            batch.render(movementMarkers);
         }
         batch.end();
     }
@@ -347,8 +356,8 @@ final class GpuBoardOverlay implements Disposable {
     /**
      * The plotted route's ghost (rebuild plan A.7 G4): a copy of the instance the view draws for the moving unit
      * ({@code shown} gives it for a scene unit, or null), sharing its meshes, at the route's destination in the final
-     * facing. In 3D a translucent cyan copy of the model, drawn before {@link #render} so that the marks under it stay
-     * hidden, as in the prototype; in the Tactical View the unit's icon at half strength, drawn after the icons.
+     * facing. In 3D a translucent cyan copy of the model; in the Tactical View the unit's icon at half strength.
+     * Both show through scenery without writing scene depth, drawn after the route and the units.
      * When the route's pulse lands, the ghost surges. Nothing without a plotted route of the planner.
      */
     void renderGhost(Camera camera, Function<BoardScene.Unit, ModelInstance> shown) {
@@ -378,11 +387,6 @@ final class GpuBoardOverlay implements Disposable {
         if (tactical) {
             batch.render(ghost);
         } else {
-            // Depth first, then colour only where the copy is nearest: one translucent surface.
-            Gdx.gl.glColorMask(false, false, false, false);
-            batch.render(ghost, ghostLight);
-            batch.flush();
-            Gdx.gl.glColorMask(true, true, true, true);
             batch.render(ghost, ghostLight);
         }
         batch.end();
@@ -420,7 +424,7 @@ final class GpuBoardOverlay implements Disposable {
             } else {
                 blending.opacity *= GHOST_ICON_OPACITY;
             }
-            material.set(ColorAttribute.createEmissive(Color.BLACK));
+            material.set(ColorAttribute.createEmissive(Color.BLACK), new DepthTestAttribute(GL20.GL_ALWAYS, false));
             return;
         }
         Attribute alphaTest = material.get(FloatAttribute.AlphaTest);
@@ -428,7 +432,7 @@ final class GpuBoardOverlay implements Disposable {
         Attribute cullFace = material.get(IntAttribute.CullFace);
         material.clear();
         material.set(ColorAttribute.createDiffuse(GHOST), ColorAttribute.createEmissive(GHOST_GLOW),
-              new BlendingAttribute(GHOST_OPACITY), new DepthTestAttribute(GL20.GL_LEQUAL, true));
+              new BlendingAttribute(GHOST_OPACITY), new DepthTestAttribute(GL20.GL_ALWAYS, false));
         if (cutOut != null) {
             material.set(alphaTest, cutOut);
         }
@@ -440,11 +444,14 @@ final class GpuBoardOverlay implements Disposable {
     /** The prototype's layers that lie on hexes, in its drawing order; the batch keeps that order. */
     private ModelInstance build() {
         Sink sink = new Sink(material(tactical));
+        Sink markers = new Sink(material(true));
         Map<Integer, BoardScene.Unit> shown = new HashMap<>();
         scene.units().forEach(unit -> shown.putIfAbsent(unit.id(), unit));
         BoardScene.Unit moving = shown.get(move.entityId());
         if (move.active() && move.planner() && moving != null) {
-            route(sink, moving);
+            sink.material(material(true));
+            route(sink, markers, moving);
+            sink.material(material(tactical));
         }
         if (fire.active() && !tactical) {
             if (fire.frontArc() != null) {
@@ -465,6 +472,7 @@ final class GpuBoardOverlay implements Disposable {
                 }
             }
         }
+        movementMarkers = markers.end();
         return sink.end();
     }
 
@@ -577,12 +585,12 @@ final class GpuBoardOverlay implements Disposable {
 
     /**
      * The plotted route, else the hover preview at half strength while no unit is hovered (overlay.js:40-47,
-     * flat.js:43-47). It runs from the unit's hex through every hex a step enters, coloured by the band of that
-     * step, and ends in the destination ring or outline, the facing arrow and the waypoints. A jump is one arc from
+     * flat.js:43-47). It follows each step's hex and floor, including vertical steps in one hex, coloured by that
+     * step's band, and ends in the destination ring, facing arrow and waypoints. A jump is one arc from
      * where it starts to where it lands, as in the prototype, although MegaMek's jump path lists every hex it passes.
      * A plotted route also places the ghost and hands the pulse its line and marks.
      */
-    private void route(Sink sink, BoardScene.Unit moving) {
+    private void route(Sink sink, Sink markers, BoardScene.Unit moving) {
         Coords origin = moving.location().coords();
         boolean plotted = !move.route().isEmpty();
         List<GpuMovePlan.Step> steps = plotted ? move.route()
@@ -591,54 +599,61 @@ final class GpuBoardOverlay implements Disposable {
             return;
         }
         float strength = plotted ? 1 : .5f;
-        List<Coords> points = new ArrayList<>(List.of(origin));
+        List<BoardScene.Waypoint> points = new ArrayList<>(List.of(moving.location()));
         List<GpuMovePlan.Band> bands = new ArrayList<>();
         bands.add(null);
         for (GpuMovePlan.Step step : steps) {
-            if (step.boardId() != scene.boardId() || step.coords().equals(points.getLast())
+            if (step.boardId() != scene.boardId()
+                  || step.coords().equals(points.getLast().coords())
+                        && (tactical || step.level() == points.getLast().elevation())
                   || scene.tile(step.coords()) == null) {
                 continue;
             }
+            BoardScene.Waypoint point = new BoardScene.Waypoint(step.coords(), step.level(), step.facing());
             if (step.band() == GpuMovePlan.Band.JUMP && bands.getLast() == GpuMovePlan.Band.JUMP) {
-                points.set(points.size() - 1, step.coords());
+                points.set(points.size() - 1, point);
             } else {
-                points.add(step.coords());
+                points.add(point);
                 bands.add(step.band());
             }
         }
         GpuMovePlan.Step end = steps.getLast();
         int facing = plotted && move.facing() >= 0 ? move.facing() : end.facing();
-        BoardScene.Tile destination = scene.tile(points.getLast());
+        BoardScene.Waypoint destination = points.getLast();
         if (plotted && end.boardId() == scene.boardId() && scene.tile(end.coords()) != null) {
             mover = moving;
             arrival = new BoardScene.Waypoint(end.coords(), end.level(), facing);
             // The pulse runs to the ghost; it keeps its rhythm while the plan stays the same.
             int hexes = 0;
             for (int i = 1; i < points.size(); i++) {
-                hexes += points.get(i - 1).distance(points.get(i));
+                hexes += Math.max(points.get(i - 1).coords().distance(points.get(i).coords()),
+                      Math.round(Math.abs(points.get(i - 1).elevation() - points.get(i).elevation())));
             }
             pulse.arrive(List.of(moving.id(), origin, steps), hexes,
-                  on(destination, BoardGeometry.center(points.getLast(), 0), 0),
+                  markerCenter(destination, 0),
                   moveColor(bands.getLast() == null ? end.band() : bands.getLast()));
         }
         if (points.size() == 1) {
-            arrow(sink, destination, facing, 1);
+            arrow(markers, destination, facing, 1);
             return;
         }
         boolean pulsing = mover != null;
         List<Vector3> at = new ArrayList<>();
-        for (Coords coords : points) {
-            at.add(on(scene.tile(coords), BoardGeometry.center(coords, 0), .07f));
+        for (BoardScene.Waypoint point : points) {
+            Vector3 center = BoardGeometry.center(point.coords(), point.elevation());
+            at.add(tactical || onGround(point) ? on(scene.tile(point.coords()), center, .07f)
+                  : center.add(0, 0, .07f * radius));
         }
         float travelled = 0;
         for (int i = 1; i < at.size(); i++) {
             Color color = alpha(moveColor(bands.get(i)), strength);
             Vector3 a = at.get(i - 1);
             Vector3 b = at.get(i);
-            float length = Vector3.dst(a.x, a.y, 0, b.x, b.y, 0) / radius;
+            float length = a.dst(b) / radius;
             boolean jump = !tactical && bands.get(i) == GpuMovePlan.Band.JUMP;
+            boolean draped = tactical || onGround(points.get(i - 1)) && onGround(points.get(i));
             if (pulsing) {
-                trace(a, b, jump, travelled, length, color);
+                trace(a, b, jump, draped, travelled, length, color);
             }
             if (tactical) {
                 // flat.js:44: one 3-pixel line dashed 7 on, 5 off along the whole route.
@@ -648,7 +663,8 @@ final class GpuBoardOverlay implements Disposable {
                     float from = Math.max(start, travelled);
                     float to = Math.min(start + 7 * PIXEL, travelled + length);
                     if (to > from) {
-                        dash(sink, above(a, b, (from - travelled) / length), above(a, b, (to - travelled) / length),
+                        dash(sink, above(a, b, (from - travelled) / length, draped),
+                              above(a, b, (to - travelled) / length, draped),
                               1.5f * PIXEL, (from + to) / 2, color, pulsing);
                     }
                 }
@@ -663,7 +679,8 @@ final class GpuBoardOverlay implements Disposable {
                 }
             } else {
                 for (float d = .12f; d < length - .1f; d += .42f) {
-                    dash(sink, above(a, b, d / length), above(a, b, Math.min(1, (d + .24f) / length)), .04f,
+                    dash(sink, above(a, b, d / length, draped),
+                          above(a, b, Math.min(1, (d + .24f) / length), draped), .04f,
                           travelled + d + .12f, color, pulsing);
                 }
             }
@@ -675,34 +692,37 @@ final class GpuBoardOverlay implements Disposable {
         }
         Color last = moveColor(bands.getLast());
         if (tactical) {
-            ring(sink, destination, 3 * PIXEL, .06f - 1.5f * PIXEL, 0, last);
+            ring(markers, scene.tile(destination.coords()), 3 * PIXEL, .06f - 1.5f * PIXEL, 0, last,
+                  markerCenter(destination, 0).z);
         } else {
             for (int i = 1; i < at.size(); i++) {
                 disc(sink, at.get(i), .085f, 16, alpha(moveColor(bands.get(i)), strength));
             }
-            ring(sink, destination, .05f, .02f, .02f, alpha(last, strength));
+            ring(markers, scene.tile(destination.coords()), .05f, .02f, .02f, alpha(last, strength),
+                  markerCenter(destination, 0).z);
         }
-        arrow(sink, destination, facing, strength);
-        for (Coords pin : move.pins()) {
-            BoardScene.Tile tile = scene.tile(pin);
-            if (tile == null) {
+        arrow(markers, destination, facing, strength);
+        for (GpuMovePlan.Step pin : move.pins()) {
+            BoardScene.Tile tile = scene.tile(pin.coords());
+            if (tile == null || pin.boardId() != scene.boardId()) {
                 continue;
             }
+            BoardScene.Waypoint point = new BoardScene.Waypoint(pin.coords(), pin.level(), pin.facing());
             if (tactical) {
-                disc(sink, on(tile, BoardGeometry.center(pin, 0), 0), 8 * PIXEL, 24, FLAT_PIN);
+                disc(markers, markerCenter(point, 0), 8 * PIXEL, 24, FLAT_PIN);
             } else {
-                ring(sink, tile, .06f, .2f, .02f, alpha(Color.WHITE, .95f));
-                disc(sink, on(tile, BoardGeometry.center(pin, 0), .1f), .16f, 20, alpha(Color.WHITE, .9f));
+                ring(markers, tile, .06f, .2f, .02f, alpha(Color.WHITE, .95f), markerCenter(point, 0).z);
+                disc(markers, markerCenter(point, .1f), .16f, 20, alpha(Color.WHITE, .9f));
             }
         }
     }
 
     /**
      * The facing arrow at the destination: overlay.js:48, a notched white head in 3D; flat.js:101, a plain
-     * triangle in the Tactical View, always at full strength.
+     * triangle in the Tactical View, always at full strength. Terrain must never hide the facing cue.
      */
-    private void arrow(Sink sink, BoardScene.Tile tile, int facing, float strength) {
-        Vector3 center = on(tile, BoardGeometry.center(tile.coords(), 0), .09f);
+    private void arrow(Sink sink, BoardScene.Waypoint point, int facing, float strength) {
+        Vector3 center = markerCenter(point, .09f);
         float angle = facing * 60 * MathUtils.degreesToRadians;
         Vector3 ahead = new Vector3(MathUtils.sin(angle), MathUtils.cos(angle), 0).scl(radius);
         Vector3 across = new Vector3(ahead.y, -ahead.x, 0);
@@ -719,11 +739,12 @@ final class GpuBoardOverlay implements Disposable {
     }
 
     /**
-     * A point of the route between two hex centres, kept at the route's lift above the ground it crosses, so a step
-     * up a cliff runs over the higher hex rather than inside it.
+     * Interpolates between the actual step heights. Ground routes follow the terrain they cross; building floors
+     * and other elevated or underground routes retain their levels instead of snapping to the ground.
      */
-    private Vector3 above(Vector3 a, Vector3 b, float t) {
+    private Vector3 above(Vector3 a, Vector3 b, float t, boolean draped) {
         Vector3 point = lerp(a, b, t);
+        if (!draped) { return point; }
         float ground = UnitLandingSupports.surface(scene, point.x, point.y, surfaces);
         if (Float.isFinite(ground)) {
             point.z = Math.max(point.z, ground + .07f * radius);
@@ -749,12 +770,13 @@ final class GpuBoardOverlay implements Disposable {
      * Hands the pulse the route's line from {@code a} to {@code b} as the route is drawn, kept over the ground or along
      * the jump's arc, from {@code from} hex radii along the route.
      */
-    private void trace(Vector3 a, Vector3 b, boolean jump, float from, float length, Color color) {
+    private void trace(Vector3 a, Vector3 b, boolean jump, boolean draped, float from, float length, Color color) {
         int steps = jump ? 24 : Math.max(1, MathUtils.ceil(length / .25f));
         for (int step = 0; step <= steps; step++) {
             float t = step / (float) steps;
-            Vector3 point = jump ? arc(a, b, t) : above(a, b, t);
-            float ground = UnitLandingSupports.surface(scene, point.x, point.y, surfaces);
+            Vector3 point = jump ? arc(a, b, t) : above(a, b, t, draped);
+            float ground = draped ? UnitLandingSupports.surface(scene, point.x, point.y, surfaces)
+                  : lerp(a, b, t).z - .07f * radius;
             pulse.point(point, Float.isFinite(ground) ? ground : point.z - .07f * radius, from + t * length, color);
         }
     }
@@ -806,8 +828,12 @@ final class GpuBoardOverlay implements Disposable {
 
     /** Engine.js hexRing: {@code width} radii wide, its outer edge {@code inset} radii inside the hex edge. */
     private void ring(Sink sink, BoardScene.Tile tile, float width, float inset, float dy, Color color) {
-        Vector3[] outer = corners(tile, 1 - inset, dy);
-        Vector3[] inner = corners(tile, 1 - inset - width, dy);
+        ring(sink, tile, width, inset, dy, color, Float.NaN);
+    }
+
+    private void ring(Sink sink, BoardScene.Tile tile, float width, float inset, float dy, Color color, float plane) {
+        Vector3[] outer = corners(tile, 1 - inset, dy, plane);
+        Vector3[] inner = corners(tile, 1 - inset - width, dy, plane);
         for (int corner = 0; corner < 6; corner++) {
             int next = (corner + 1) % 6;
             sink.quad(outer[corner], outer[next], inner[next], inner[corner], color);
@@ -853,12 +879,19 @@ final class GpuBoardOverlay implements Disposable {
         }
     }
 
-    /** A flat band from {@code a} to {@code b}, {@code halfWidth} radii to each side (engine.js seg). */
+    /** A band from a to b; vertical floor changes use crossed ribbons so every camera bearing can see them. */
     private void segment(Sink sink, Vector3 a, Vector3 b, float halfWidth, Color color) {
         float dx = b.x - a.x;
         float dy = b.y - a.y;
         float length = (float) Math.hypot(dx, dy);
         if (length < .001f) {
+            if (Math.abs(a.z - b.z) >= .001f) {
+                float width = halfWidth * radius;
+                sink.quad(a.cpy().add(width, 0, 0), a.cpy().add(-width, 0, 0),
+                      b.cpy().add(-width, 0, 0), b.cpy().add(width, 0, 0), color);
+                sink.quad(a.cpy().add(0, width, 0), a.cpy().add(0, -width, 0),
+                      b.cpy().add(0, -width, 0), b.cpy().add(0, width, 0), color);
+            }
             return;
         }
         float scale = halfWidth * radius / length;
@@ -880,13 +913,32 @@ final class GpuBoardOverlay implements Disposable {
 
     /** The six corners of a hex scaled by {@code fraction} about its centre, on its surface. */
     private Vector3[] corners(BoardScene.Tile tile, float fraction, float dy) {
+        return corners(tile, fraction, dy, Float.NaN);
+    }
+
+    private Vector3[] corners(BoardScene.Tile tile, float fraction, float dy, float plane) {
         Vector3 center = BoardGeometry.center(tile.coords(), 0);
         Vector3[] corners = new Vector3[6];
         for (int corner = 0; corner < 6; corner++) {
-            corners[corner] = on(tile, BoardGeometry.inset(BoardGeometry.corner(tile.coords(), 0, corner), center,
-                  1 - fraction), dy);
+            Vector3 point = BoardGeometry.inset(BoardGeometry.corner(tile.coords(), 0, corner), center, 1 - fraction);
+            if (Float.isFinite(plane)) {
+                point.z = plane + dy * radius;
+            } else {
+                on(tile, point, dy);
+            }
+            corners[corner] = point;
         }
         return corners;
+    }
+
+    private boolean onGround(BoardScene.Waypoint point) {
+        return point.elevation() == scene.tile(point.coords()).elevation();
+    }
+
+    private Vector3 markerCenter(BoardScene.Waypoint point, float dy) {
+        float z = tactical || onGround(point) ? BoardTacticalGeometry.floatingZ(scene, point.coords())
+              : point.elevation() * BoardGeometry.level() + BoardTacticalGeometry.HEX_PLANE_CLEARANCE;
+        return BoardGeometry.center(point.coords(), 0).add(0, 0, z + dy * radius);
     }
 
     /**
@@ -917,17 +969,21 @@ final class GpuBoardOverlay implements Disposable {
 
     /**
      * Unlit vertex colours blended in drawing order, without writing depth: depth-tested against the terrain and
-     * models in 3D, over everything in the flat Tactical View, where the unit icons are drawn after it.
+     * models by default, or always visible for movement previews and the flat Tactical View.
      */
-    private static Material material(boolean flat) {
+    private static Material material(boolean alwaysVisible) {
         return new Material(ColorAttribute.createDiffuse(Color.WHITE),
               new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA),
-              new DepthTestAttribute(flat ? GL20.GL_ALWAYS : GL20.GL_LEQUAL, false),
+              new DepthTestAttribute(alwaysVisible ? GL20.GL_ALWAYS : GL20.GL_LEQUAL, false),
               IntAttribute.createCullFace(GL20.GL_NONE));
     }
 
     @Override
     public void dispose() {
+        if (movementMarkers != null) {
+            movementMarkers.model.dispose();
+            movementMarkers = null;
+        }
         if (overlay != null) {
             overlay.model.dispose();
             overlay = null;
@@ -946,7 +1002,7 @@ final class GpuBoardOverlay implements Disposable {
         /** ModelBuilder starts a new mesh once one holds 32768 vertices, so a part may add this many more. */
         private static final int PART_VERTICES = 30000;
         private final ModelBuilder builder = new ModelBuilder();
-        private final Material material;
+        private Material material;
         private MeshPartBuilder part;
         private int vertices;
         private int parts;
@@ -954,6 +1010,12 @@ final class GpuBoardOverlay implements Disposable {
         Sink(Material material) {
             this.material = material;
             builder.begin();
+        }
+
+        /** Starts a separate mesh part so changing depth policy cannot affect earlier triangles. */
+        void material(Material next) {
+            material = next;
+            part = null;
         }
 
         void triangle(Vector3 a, Vector3 b, Vector3 c, Color color) {

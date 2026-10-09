@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.gdx.UiKit.text;
 import static megamek.client.ui.gdx.UiTheme.rgba;
 
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -30,16 +31,19 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.gdx.UiTheme.EdgeBox;
-import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
 
 /**
- * Unit nameplates and pips over the board, the lowest HUD layer (rebuild plan C.1 G8a, A.16 P1-P4, hud-v3
- * overlay.js buildLabels). Every unit with a head anchor gets a team pip, or a tag with its name while it is the focus
- * unit, hovered, inspected, the physical target or a sensor contact, and every unit while the nameplate key is held.
- * The weapon target cards replace their targets' plates, and a unit whose head lies behind the camera has none. The
- * hovered unit's marker and the marker of the unit the card shows are drawn over the others. It reads the presented
- * snapshots only, on the render thread, and takes no presses.
+ * Unit nameplates and pips over the board, the lowest HUD layer
+ * Every unit with a head anchor gets a team pip, or a tag while it is the focus unit, hovered,
+ * inspected, the physical target or a sensor contact, and every unit while the nameplate key is held. A tag names the
+ * unit as the client's label style does (the classic board label's name) before its status words; a tag with neither
+ * stays a pip (the user's decision of 2026-10-07: no phase words, no model repeated after the name).
+ * Every unit but a sensor contact or a destroyed unit also gets its board label's marks on its head, under the pip or
+ * tag: the classic board's damage tile and armor and structure bars ({@link GpuBattleStatus.Marks}). The weapon target
+ * cards replace their targets' plates, and a unit whose head lies behind the camera has none. The hovered unit's
+ * plate and the plate of the unit the card shows are drawn over the others. It reads the presented snapshots only, on
+ * the render thread, and takes no presses.
  */
 final class GpuNameplates implements GpuHud.Component {
     /** Beyond this many units an unhovered sensor contact shows only "?". */
@@ -70,12 +74,17 @@ final class GpuNameplates implements GpuHud.Component {
      */
     private static final float[] SHADOW = { .5f, .2f };
     private static final Color FILL = rgba(23, 35, 35, .88f);
+    /**
+     * The marks: the classic label's bars, 24 long and 3 tall, the structure bar 1 under the armor bar, 3 right of the
+     * damage tile, all 2 inside the tags' fill; the pip or tag stands 2 above them.
+     */
+    private static final float BAR_LENGTH = 24;
+    private static final float BAR_HEIGHT = 3;
+    private static final float BAR_GAP = 1;
+    private static final float TILE_GAP = 3;
+    private static final float MARKS_PAD = 2;
+    private static final float MARKS_GAP = 2;
     private static final Color SELECTED_TEXT = Color.valueOf("EAF9F1");
-    private static final String MOVING = "GpuBoard.hud.plate.moving";
-    private static final String UP_NEXT = "GpuBoard.hud.plate.upNext";
-    private static final String FIRING = "GpuBoard.hud.plate.firing";
-    private static final String PHYSICAL = "GpuBoard.hud.plate.physical";
-    private static final String SELECTED = "GpuBoard.hud.plate.selected";
     private static final String BEST = "GpuBoard.hud.plate.best";
     private static final String DISTANCE = "GpuBoard.hud.plate.distance";
     private static final String STATUS = "GpuBoard.hud.plate.status";
@@ -104,11 +113,13 @@ final class GpuNameplates implements GpuHud.Component {
         }
     }
 
+    private final GpuHudKit kit;
     private final UiKit ui;
     private final GpuHudState state;
     private final Texture white;
     private final Table root = new Table();
-    /** Pips below tags, as tags carry the names the player asked to see. */
+    /** Marks, then pips, then tags, as tags carry the names the player asked to see. */
+    private final Group marks = new Group();
     private final Group pips = new Group();
     private final Group tags = new Group();
     /** Each look's tag box: its fill under a one-unit border, solid or dashed (.plate .tag and .tag.blip). */
@@ -116,6 +127,7 @@ final class GpuNameplates implements GpuHud.Component {
     private final Map<Integer, Plate> plates = new HashMap<>();
 
     GpuNameplates(GpuHudKit kit, GpuBoardSource source, GpuHudState state) {
+        this.kit = kit;
         ui = kit.ui;
         this.state = state;
         white = ui.skin.get("white", Texture.class);
@@ -124,10 +136,10 @@ final class GpuNameplates implements GpuHud.Component {
             boxes.put(look, look.dashed ? box.dashed(DASH) : box);
         }
         root.setName("nameplates");
-        pips.setTransform(false);
-        tags.setTransform(false);
-        root.addActor(pips);
-        root.addActor(tags);
+        for (Group layer : List.of(marks, pips, tags)) {
+            layer.setTransform(false);
+            root.addActor(layer);
+        }
     }
 
     @Override
@@ -169,21 +181,19 @@ final class GpuNameplates implements GpuHud.Component {
             Plate plate = plates.computeIfAbsent(unit.id(), Plate::new);
             boolean hovered = view.hoveredUnit() == unit.id();
             boolean enemy = unit.side() == GpuBattleStatus.Side.ENEMY;
+            boolean tagged = unit.id() == state.focus() || hovered || state.altHeld || unit.id() == state.inspected
+                  || unit.id() == physicalTarget;
+            String sub = tagged && !unit.sensorContact() ? sub(unit, hovered && enemy ? focus : null, fire) : "";
             if (unit.sensorContact()) {
                 plate.tag(Look.CONTACT, hovered || !many ? text(SENSOR_CONTACT) : CONTACT_UNKNOWN, "");
-            } else if (unit.id() == state.focus()) {
-                String name = name(unit);
-                String line = text(focusKey(status), name);
-                // The name keeps the tag's weight; the phase word is the lighter sub-line.
-                boolean leading = line.startsWith(name);
-                plate.tag(Look.FOCUS, leading ? name : line, leading ? line.substring(name.length()).strip() : "");
-            } else if (hovered || state.altHeld || unit.id() == state.inspected || unit.id() == physicalTarget) {
-                plate.tag(enemy ? Look.ENEMY : Look.FRIEND, name(unit),
-                      sub(unit, hovered && enemy ? focus : null, fire));
+            } else if (tagged && !(unit.label().isEmpty() && sub.isEmpty())) {
+                plate.tag(unit.id() == state.focus() ? Look.FOCUS : enemy ? Look.ENEMY : Look.FRIEND, unit.label(),
+                      sub);
             } else {
                 plate.pip(enemy ? UiTheme.CORAL : UiTheme.MINT, unit.destroyed() ? DESTROYED_OPACITY
                       : unit.done() && status.phase().isMovement() ? MOVED_OPACITY : 1);
             }
+            plate.marks(unit);
             plate.place(head);
             shown.add(unit.id());
         }
@@ -192,66 +202,60 @@ final class GpuNameplates implements GpuHud.Component {
             if (!shown.contains(plate.id)) {
                 plate.tag.remove();
                 plate.pip.remove();
+                plate.marks.remove();
                 iterator.remove();
             }
         }
-        // Each layer keeps the units' order with the hovered unit's marker and then the card unit's last, so the
+        // Each layer keeps the units' order with the hovered unit's actors and then the card unit's last, so the
         // highlighted unit's plate is never buried under another (the user's decision of 2026-10-02).
-        List<Actor> markers = units.stream().map(unit -> plates.get(unit.id())).filter(Objects::nonNull)
-              .map(Plate::marker).toList();
+        List<Plate> ordered = units.stream().map(unit -> plates.get(unit.id())).filter(Objects::nonNull).toList();
         Plate hovered = plates.get(view.hoveredUnit());
         Plate card = plates.get(state.cardUnit());
+        List<Actor> markers = ordered.stream().map(Plate::marker).toList();
         for (Group layer : List.of(pips, tags)) {
             GpuHudKit.stack(markers.stream().filter(marker -> marker.getParent() == layer).toList(),
                   hovered == null ? null : hovered.marker(), card == null ? null : card.marker());
         }
+        GpuHudKit.stack(ordered.stream().map(plate -> plate.marks).filter(Actor::hasParent).toList(),
+              hovered == null ? null : hovered.marks, card == null ? null : card.marks);
     }
 
     /**
-     * The focus unit's phase word: its own turn's action, or "up next" while it waits (C.5). The targeting and
-     * off-board phases declare attacks as the firing phase does.
-     */
-    private static String focusKey(GpuBattleStatus.Snapshot status) {
-        GamePhase phase = status.phase();
-        return !status.myTurn() ? UP_NEXT : phase.isMovement() ? MOVING
-              : phase.isFiring() || phase.isTargeting() || phase.isOffboard() ? FIRING
-              : phase.isPhysical() ? PHYSICAL : SELECTED;
-    }
-
-    private static String name(UnitStatus unit) {
-        return unit.chassis().isEmpty() ? unit.name() : unit.chassis();
-    }
-
-    /**
-     * A full tag's lighter part: the model, then "destroyed", or the board label's status words in their order and,
-     * for an enemy hovered while the focus unit {@code from} acts, the actor's best roll of the weapons phase (or why
-     * there is none), else the distance from the focus unit.
+     * A tag's lighter part: "destroyed", or the board label's status words in their order and, for an enemy hovered
+     * while the focus unit {@code from} acts, the actor's best roll of the weapons phase (or why there is none), else
+     * the distance from the focus unit; empty without any of these.
      */
     private static String sub(UnitStatus unit, UnitStatus from, GpuFireOrders.Snapshot fire) {
         if (unit.destroyed()) {
-            return text(DESTROYED, unit.model());
+            return text(DESTROYED);
         }
-        String sub = unit.model();
-        for (UnitStatusWords.StatusWord word : unit.statusWords()) {
-            sub = text(STATUS, sub, word.label());
+        List<String> parts = new ArrayList<>(unit.statusWords().stream().map(UnitStatusWords.StatusWord::label)
+              .toList());
+        if (from != null) {
+            parts.add(hoverDetail(unit, from, fire));
         }
-        if (from == null) {
-            return sub;
-        }
+        return parts.stream().filter(part -> !part.isEmpty()).reduce((line, part) -> text(STATUS, line, part))
+              .orElse("");
+    }
+
+    /** The hovered enemy's part: the focus unit's best roll on it while it declares fire, else its distance, or "". */
+    private static String hoverDetail(UnitStatus unit, UnitStatus from, GpuFireOrders.Snapshot fire) {
         if (fire.editable()) {
             GpuFireOrders.Badge best = fire.hoverBest();
             if (best == null || best.targetId() != unit.id()) {
-                return sub;
+                return "";
             }
             return best.reason() == null || best.reason().isEmpty()
-                  ? text(BEST, sub, GpuHudKit.shown(best.value()), Math.round(best.odds()))
-                  : text(STATUS, sub, best.reason());
+                  ? text(BEST, GpuHudKit.shown(best.value()), Math.round(best.odds())) : best.reason();
         }
         boolean measured = from.position() != null && unit.position() != null && from.boardId() == unit.boardId();
-        return measured ? text(DISTANCE, sub, from.position().distance(unit.position())) : sub;
+        return measured ? text(DISTANCE, from.position().distance(unit.position())) : "";
     }
 
-    /** One unit's marker: its tag (.plate .tag) or its pip (.plate .pip), both bottom-centred on the unit's head. */
+    /**
+     * One unit's plate: its marker, the tag (.plate .tag) or the pip (.plate .pip), and its marks; the marks sit
+     * bottom-centred on the unit's head with the marker centred above them, or the marker alone on the head.
+     */
     private final class Plate {
         final int id;
         final Table tag = new Table();
@@ -259,6 +263,7 @@ final class GpuNameplates implements GpuHud.Component {
         final Label sub = ui.label("", "hud-body", TEXT_SIZE, Color.WHITE);
         final Cell<Label> subCell;
         final Pip pip = new Pip();
+        final UnitMarks marks = new UnitMarks();
         private Look look;
 
         Plate(int id) {
@@ -269,6 +274,19 @@ final class GpuNameplates implements GpuHud.Component {
             tag.add(name).height(LINE_HEIGHT);
             subCell = tag.add(sub).height(LINE_HEIGHT);
             pip.setName("pip-" + id);
+            marks.setName("marks-" + id);
+        }
+
+        /** Shows the unit's marks, or none for a sensor contact (it has none) or a destroyed unit. */
+        void marks(UnitStatus unit) {
+            if (unit.destroyed() || !unit.marks().shown()) {
+                marks.remove();
+                return;
+            }
+            if (marks.getParent() == null) {
+                GpuNameplates.this.marks.addActor(marks);
+            }
+            marks.set(unit);
         }
 
         void tag(Look look, String nameText, String subText) {
@@ -285,7 +303,7 @@ final class GpuNameplates implements GpuHud.Component {
             name.setColor(look.text);
             sub.setText(subText);
             sub.setColor(look.sub);
-            subCell.padLeft(subText.isEmpty() ? 0 : GAP);
+            subCell.padLeft(nameText.isEmpty() || subText.isEmpty() ? 0 : GAP);
             tag.pack();
             // Whole units keep the one-unit border on the pixel grid, as the browser snaps the box's edges.
             tag.setSize(Math.round(tag.getWidth()), Math.round(tag.getHeight()));
@@ -300,8 +318,13 @@ final class GpuNameplates implements GpuHud.Component {
         }
 
         void place(Vector2 head) {
+            float bottom = Math.round(head.y);
+            if (marks.hasParent()) {
+                marks.setPosition(Math.round(head.x - marks.getWidth() / 2), bottom);
+                bottom += marks.getHeight() + MARKS_GAP;
+            }
             Actor shown = marker();
-            shown.setPosition(Math.round(head.x - shown.getWidth() / 2), Math.round(head.y));
+            shown.setPosition(Math.round(head.x - shown.getWidth() / 2), bottom);
         }
 
         /** The shown marker: the tag, else the pip. */
@@ -349,6 +372,66 @@ final class GpuNameplates implements GpuHud.Component {
             vertices[offset + 2] = color;
             vertices[offset + 3] = .5f;
             vertices[offset + 4] = .5f;
+        }
+    }
+
+    /**
+     * A unit's marks on the tags' fill, as the classic board label draws them (UnitAnnotations): the damage tile, if
+     * any, then the armor bar over the structure bar, if the unit has one, each on the label's grey track.
+     */
+    private final class UnitMarks extends Actor {
+        private final Color damage = new Color();
+        private final Color armor = new Color();
+        private final Color structure = new Color();
+        private boolean tile;
+        private boolean structureBar;
+        private float armorShare;
+        private float structureShare;
+
+        UnitMarks() {
+            setTouchable(Touchable.disabled);
+        }
+
+        void set(UnitStatus unit) {
+            GpuBattleStatus.Marks marks = unit.marks();
+            tile = marks.damageArgb() != 0;
+            structureBar = marks.structureArgb() != 0;
+            Color.argb8888ToColor(damage, marks.damageArgb());
+            Color.argb8888ToColor(armor, marks.armorArgb());
+            Color.argb8888ToColor(structure, marks.structureArgb());
+            // A unit without armor at all (ARMOR_NA) shows an empty bar, as the classic label does.
+            armorShare = Math.max(0, (float) unit.armor());
+            structureShare = Math.max(0, (float) unit.structure());
+            float content = tile ? Math.max(GpuHudKit.DAMAGE_TILE, bars()) : bars();
+            setSize(2 * MARKS_PAD + (tile ? GpuHudKit.DAMAGE_TILE + TILE_GAP : 0) + BAR_LENGTH,
+                  2 * MARKS_PAD + content);
+        }
+
+        private float bars() {
+            return structureBar ? 2 * BAR_HEIGHT + BAR_GAP : BAR_HEIGHT;
+        }
+
+        @Override
+        public void draw(Batch batch, float parentAlpha) {
+            float previous = batch.getPackedColor();
+            float alpha = getColor().a * parentAlpha;
+            ui.fill(batch, FILL, alpha, getX(), getY(), getWidth(), getHeight());
+            float x = getX() + MARKS_PAD;
+            if (tile) {
+                kit.damageTile(batch, damage, alpha, x, getY() + (getHeight() - GpuHudKit.DAMAGE_TILE) / 2);
+                x += GpuHudKit.DAMAGE_TILE + TILE_GAP;
+            }
+            float top = getY() + (getHeight() + bars()) / 2;
+            bar(batch, alpha, x, top - BAR_HEIGHT, armorShare, armor);
+            if (structureBar) {
+                bar(batch, alpha, x, top - 2 * BAR_HEIGHT - BAR_GAP, structureShare, structure);
+            }
+            batch.setPackedColor(previous);
+        }
+
+        private void bar(Batch batch, float alpha, float x, float y, float share, Color fill) {
+            ui.fill(batch, GpuHudKit.LABEL_GREY, alpha, x, y, BAR_LENGTH, BAR_HEIGHT);
+            ui.fill(batch, fill, alpha, x, y, BAR_LENGTH * Math.min(share, 1), BAR_HEIGHT);
         }
     }
 }

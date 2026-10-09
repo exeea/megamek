@@ -35,7 +35,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 @Tag("on-demand")
 class GpuEditorLatencySmokeTest {
     @ParameterizedTest
-    @ValueSource(strings = { "scenery/components/car-red", "scenery/fluff/garden1" })
+    @ValueSource(strings = { "scenery/vehicles/car", "scenery/construction/bulldozer" })
     void reportsWarmObjectAndTerrainEditLatency(String asset) throws Exception {
         Coords at = new Coords(8, 8);
         var setup = new FutureTask<GpuMapSource>(() -> {
@@ -43,7 +43,7 @@ class GpuEditorLatencySmokeTest {
             Board board = Board.createEmptyBoard(16, 17);
             Hex hex = new Hex(0, "road:1:9", "grass");
             hex.setDecorations(List.of(new BoardDecoration("car", "prop", asset, null,
-                  0, 0, 0, asset.endsWith("garden1"), 1, BoardDecoration.Placement.ground(), 0)));
+                  0, 0, 0, asset.endsWith("bulldozer"), 1, BoardDecoration.Placement.ground(), 0)));
             board.setHex(at, hex); editor.game().setBoard(board); editor.pointer(at, 0, 0, false, "car");
             return new GpuMapSource(editor.game(), null, editor);
         });
@@ -55,7 +55,7 @@ class GpuEditorLatencySmokeTest {
               new Command(Action.OBJECT_VALUE, "x", ".35"), new Command(Action.UNDO),
               new Command(Action.OBJECT_VALUE, "offset", "2"), new Command(Action.OBJECT_VALUE, "level", "4"),
               new Command(Action.OBJECT_VALUE, "receiver", "ground/top")));
-        if (asset.endsWith("garden1")) {
+        if (asset.endsWith("bulldozer")) {
             edits.add(new Command(Action.OBJECT_VALUE, "mirror", "false"));
             edits.add(new Command(Action.OBJECT_VALUE, "mirror", "true"));
         }
@@ -109,11 +109,8 @@ class GpuEditorLatencySmokeTest {
                                 shownTransforms = transforms;
                                 if (objectEdit) {
                                     assertTrue(terrain.busy(), "An object edit should be visible before terrain installation");
-                                    // The garden's parent anchor is an empty path; pick a tree trunk within it.
                                     var feature = source.takeFrame().scene().tile(at).features().stream()
-                                          .filter(f -> f.decoration() != null && (asset.endsWith("garden1")
-                                                ? f.asset().equals("tree-broad") : f.asset().equals(asset)))
-                                          .findFirst().orElseThrow();
+                                          .filter(f -> f.decoration() != null && f.asset().equals(asset)).findFirst().orElseThrow();
                                     float x = BoardGeometry.centerX(at) + feature.x() * BoardGeometry.hexScale();
                                     float y = BoardGeometry.centerY(at) + feature.y() * BoardGeometry.hexScale();
                                     Ray ray = new Ray(new Vector3(x, y, 300), new Vector3(0, 0, -1));

@@ -6,9 +6,9 @@ uniform float u_saturation;
 
 // One highlight shoulder for every surface and the sky, replacing the plain clip (the user's decision of 2026-09-24):
 // the identity up to KNEE (display 202), so mid-tones and the tileset palette keep their authored values, then a
-// smooth roll-off towards white per channel, so bright orange sand turns cream instead of clipping flat. The RGBA8
-// scene target clips at 1 before exposure. The light arrives pre-exposed (BoardAtmosphere), so at the default exposure
-// of one the curve's input tops out at 1 (display 237); only a positive exposure compensation reaches further up.
+// smooth roll-off towards white per channel, so bright orange sand turns cream instead of clipping flat. The floating
+// scene target preserves values above one: exposure can recover bright surface detail before this display conversion.
+// BoardAtmosphere already supplies adapted light; the composite applies only user EV compensation and lightning.
 const float KNEE = 0.6;
 vec3 shoulder(vec3 c) {
     c = max(c, vec3(0.0));

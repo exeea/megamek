@@ -104,14 +104,25 @@ void main() {
     float backlight = pow(max(0.0, dot(-light, view)), 4.0);
     float transmitted = leaves * surface.b * backlight * .65;
     direct = u_dirLights[0].color * visibility * (incidence + transmitted);
-    if (leaves > 0.0) {
-        sheen = u_dirLights[0].color * visibility * leaves
-              * dielectricSheen(face, light, view, u_wetness * .15, surface.g);
-    }
+    // Bark and snow scatter a broad reflection; leaves keep their authored roughness. The same mixture applies to
+    // distant cards. Rain smooths bark and leaves; separately marked snow keeps its dry response like the ground.
+    float roughness = mix(snow ? .95 : .90, surface.g, leaves);
+    sheen = u_dirLights[0].color * visibility
+          * dielectricSheen(face, light, view, snow ? 0.0 : u_wetness * .15, roughness);
 #endif
 #if defined(normalTextureFlag) && !defined(ambientTextureFlag)
     // Opaque cactus skin has a broad waxy highlight, using the terrain's existing dielectric light model.
     surfaceLighting(face, u_wetness * .15, .65, ambient, direct, sheen);
+#else
+    // Match the board's local light without evaluating the emitter loop on transparent leaf texels.
+    // Keep derivative-dependent normal/shadow work above this branch; cactus already receives the light above.
+    bool covered = true;
+#if defined(blendedFlag) && defined(alphaTestFlag)
+    covered = diffuse.a * v_opacity > v_alphaTest;
+#endif
+    if (covered) {
+        ambient += lavaIrradiance(v_cloudPosition, face);
+    }
 #endif
     // Cloud shadows attenuate direct light here (inserted by GpuCloudShadow).
     albedo *= ambient + direct;

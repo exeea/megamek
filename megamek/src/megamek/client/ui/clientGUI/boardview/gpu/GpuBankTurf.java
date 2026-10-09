@@ -37,7 +37,8 @@ final class GpuBankTurf implements Disposable {
     private ModelInstance instance;
 
     /** Cosmetic foliage uses the finished surface, including corner blends and road grades, never another bank profile. */
-    static FloatArray plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface) {
+    static FloatArray plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
+          BoardDecals.Opacity paint) {
         if (!BoardGeometry.tuning().stepsBetweenTops() || !BoardSurfaceBlend.natural(tile)
               || tile.surface() != BoardScene.Surface.GRASS || BoardBiome.kind(tile) != BoardScene.Biome.NONE) { return null; }
         int edges = 0;
@@ -90,6 +91,8 @@ final class GpuBankTurf implements Disposable {
                     var cover = boundary ? sampler.sampleCliff(root.x, root.y, root.z)
                           : BoardSurfaceBlend.solid(BoardScene.Surface.GRASS);
                     float grass = cover.grass();
+                    // No turf grows through paint (null when nothing paints the hex).
+                    if (paint != null && grass > 0) { grass *= 1 - paint.at(root.x, root.y); }
                     if (chance > grass * BoardRelief.smooth((grass - .55f) / .35f)) { continue; }
                     if (road != null && road.distance((root.x - center.x) / BoardGeometry.hexScale(),
                           (root.y - center.y) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 2) { continue; }

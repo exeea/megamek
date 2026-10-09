@@ -13,3 +13,20 @@ const vec3 GROUND_ALBEDO = vec3(0.2);
 vec3 hemisphere(vec3 sky, vec3 sunOnGround, vec3 groundAlbedo, float up) {
     return mix(groundAlbedo * (sky + sunOnGround), sky, up * 0.5 + 0.5);
 }
+
+// GGX direct reflection, including the incident cosine. Terrain, foliage and imported models share this response.
+// Roughness is perceptual; callers bound it to avoid subpixel highlights at board viewing distances.
+vec3 surfaceReflectance(vec3 normal, vec3 light, vec3 view, float roughness, vec3 f0) {
+    float incidence = max(0.0, dot(normal, light));
+    if (incidence <= 0.0) return vec3(0.0);
+    vec3 halfway = light + view;
+    vec3 halfVector = halfway * inversesqrt(max(dot(halfway, halfway), 1e-8));
+    float nv = max(.001, dot(normal, view)), nh = max(0.0, dot(normal, halfVector));
+    float a2 = roughness * roughness * roughness * roughness;
+    float denominator = nh * nh * (a2 - 1.0) + 1.0;
+    float distribution = a2 / max(3.14159265 * denominator * denominator, .0001);
+    float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+    float visibility = nv / (nv * (1.0 - k) + k) * incidence / (incidence * (1.0 - k) + k);
+    vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - max(0.0, dot(view, halfVector)), 5.0);
+    return distribution * visibility * fresnel / (4.0 * nv);
+}

@@ -373,7 +373,7 @@ class GpuBoardPerformanceSmokeTest {
                             setPages(this, frame / scenarioFrames % variants == 1);
                         }
                         if (frame == 1) {
-                            boardCamera.setIsometric(true);
+                            boardCamera.setIsometric(!Boolean.getBoolean("megamek.gpu.performanceTopView"));
                             boardCamera.fit(fixture.source.takeFrame().scene());
                         }
                         if (frame == scenarioFrames * variants || comparePages && view == 2 && phase == 0) {

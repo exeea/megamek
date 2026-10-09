@@ -179,6 +179,9 @@ void main() {
     float materialHeight = .5;
     vec3 emission = vec3(0.0);
     float roughness = .9, volcanic = 0.0;
+#ifdef terrainBlendFlag
+    vec4 materialCoverage = vec4(1.0, 0.0, 0.0, 0.0);
+#endif
     float caustic = 0.0;
     float grass = family(0.0) ? 1.0 : 0.0;
     float sand = family(2.0) ? 1.0 : 0.0;
@@ -217,7 +220,13 @@ void main() {
             bool steep = shore && face.z < .6;
             vec2 q = !steep ? p : abs(face.x) > abs(face.y) ? vec2(world.y * sign(face.x), -world.z)
                   : vec2(-world.x * sign(face.y), -world.z);
-            vec4 top = planar(u_sculptLayers.x, q, u_sculptTiles.x, broad);
+            // Pavement has no directional grain to preserve. Translate both aligned maps through a continuous
+            // world field instead of repeating the same concrete cloud at two fixed scales (two reads either way).
+            float concreteVariation = broad * .45 + fine * .55;
+            mat2 concreteGradient = mat2(dFdx(q), dFdy(q)) / u_sculptTiles.x;
+            vec4 top = family(4.0)
+                  ? translatedTexel(u_sculptLayers.x, q / u_sculptTiles.x, concreteGradient, concreteVariation)
+                  : planar(u_sculptLayers.x, q, u_sculptTiles.x, broad);
             vec4 rubble = planar(u_sculptLayers.y, q, u_sculptTiles.y, fine);
             vec4 weights = debrisWeights();
             float rim = 1.0 - smoothstep(.3, 2.2 + 1.5 * fine, v_diffuseUV.x);
@@ -234,13 +243,18 @@ void main() {
             if (shore) want = max(want, 1.0 - smoothstep(-.25, .05, above));
             float w = heightBlend(top.a, rubble.a, want);
             albedo = mix(top.rgb, rubble.rgb, w);
+            materialHeight = mix(top.a, rubble.a, w);
             // In patches only: most of a bank's lip keeps its turf.
             if (family(0.0)) {
                 float wear = max(rim * .55, foot * .75) * (1.0 - rock) * smoothstep(.35, .7, fine);
                 albedo = mix(albedo, worn(albedo, top.a, wear), 1.0 - w);
             }
             if (u_normalMaps > .5 && terrainNormalDetail > 0.0 && !steep) {
-                detail = mix(planarNormal(u_sculptLayers.x + 1.0, p, u_sculptTiles.x, broad),
+                vec4 topNormal = family(4.0)
+                      ? translatedTexel(u_sculptLayers.x + 1.0, q / u_sculptTiles.x, concreteGradient, concreteVariation)
+                      : planarNormal(u_sculptLayers.x + 1.0, p, u_sculptTiles.x, broad);
+                if (family(4.0)) topNormal.rgb = mix(topNormal.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail);
+                detail = mix(topNormal,
                       planarNormal(u_sculptLayers.y + 1.0, p, u_sculptTiles.y, fine), w);
             }
             albedo = groundTone(albedo, world, broad, fine, region, rim, foot);
@@ -383,7 +397,7 @@ void main() {
             // A bank blend must use sediment below the waterline, never repaint the bed with neighbouring turf.
             blendCovers(materialWorld, face, foot, rim, rock, ground ? .5 : hardness, sediment,
                   broad, fine, region, albedo, normal, cavity, materialHeight, grass, sand, bounce, response, rainCover,
-                  emission, roughness, volcanic);
+                  emission, roughness, volcanic, materialCoverage);
         }
 #endif
         if (ground || cliff || bedrock) {
@@ -429,6 +443,28 @@ void main() {
     }
     // 1 above the water, 0 on a submerged bed: the water surface draws the grid and takes the rain for it.
     float exposed = watered ? 1.0 - smoothstep(0.0, 1.0, depth * u_metre - u_waterLine) : 1.0;
+    if (ground && u_clay < .5 && volcanic < .01) {
+        // Follow the final material weights, including sand windows and authored mixtures. Reuse the blended
+        // relief once; no extra maps or stamped motifs. Wetland pools suppress dry surface abrasion.
+        if (u_terrainWear > 0.0 && terrainNormalDetail > 0.0) {
+            vec4 wear = terrainWear(fields, materialHeight, cavity, face, normal);
+#ifdef terrainBlendFlag
+            vec3 pigment = materialWeathering(u_coverFamilies.x, wear, fields, cavity) * materialCoverage.x
+                  + materialWeathering(u_coverFamilies.y, wear, fields, cavity) * materialCoverage.y
+                  + materialWeathering(u_coverFamilies.z, wear, fields, cavity) * materialCoverage.z
+                  + materialWeathering(u_coverFamilies.w, wear, fields, cavity) * materialCoverage.w;
+#else
+            vec3 pigment = materialWeathering(u_sculptFamily, wear, fields, cavity);
+#endif
+            pigment *= u_terrainWear * exposed * (1.0 - biomePool) * (1.0 - biomeDamp * .65);
+            albedo *= vec3(1.0) + pigment;
+            roughness = mix(roughness, .98, max(max(abs(pigment.r), abs(pigment.g)), abs(pigment.b)));
+        }
+        groundDamage(world, face, grass, sand, exposed, albedo, normal, cavity, roughness);
+    }
+    #ifdef surfaceScarFlag
+    if (!ground) groundDamage(world, face, 0.0, sand, exposed, albedo, normal, cavity, roughness);
+    #endif
     if (ground) albedo *= mix(1.0, terrainGrid(v_cloudPosition.xy * u_rainScale), exposed * (1.0 - volcanic));
     // Rain darkens exposed ground and rock, and gathers in puddles on level ground.
     float wet = u_wetness * rainCover * exposed;

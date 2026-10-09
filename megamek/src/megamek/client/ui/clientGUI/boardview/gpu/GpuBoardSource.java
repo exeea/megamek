@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -50,6 +51,7 @@ import megamek.common.actions.EntityAction;
 import megamek.common.actions.WeaponAttackAction;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.enums.GamePhase;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.board.BoardEvent;
@@ -99,6 +101,11 @@ final class GpuBoardSource implements BoardSource {
     private volatile int focusUnit = Entity.NONE;
     private final GpuAtmosphereControls atmosphere;
     private final BoardScene.PixelPool terrainImages = new BoardScene.PixelPool();
+    /**
+     * EDT-owned: each board's untyped bridges keep the type decoded on its first capture until it gets new data, so a
+     * building collapsing beside a span, a board switch or a full recapture does not retype it.
+     */
+    private final Map<Board, Map<Coords, HexAppearance>> bridgeTypes = new WeakHashMap<>();
     private final List<BoardScene.Animation> pendingEvents = new ArrayList<>();
     private final Timer timer;
     private final GameListenerAdapter gameListener;
@@ -124,7 +131,9 @@ final class GpuBoardSource implements BoardSource {
     private long dialogSequence;
     private Frame frame;
     private Coords contextCoords;
-    private volatile Coords hoverCoords;
+    /** One pointer sample from the GL thread, captured together on the EDT. */
+    private record HoverPoint(Coords coords, float pointedZ) { }
+    private volatile HoverPoint hoverPoint = new HoverPoint(null, Float.NaN);
     private long boardGeneration;
     private volatile Rectangle visibleArea = new Rectangle(0, 0, 16, 16);
     private Rectangle capturedArea;
@@ -136,7 +145,12 @@ final class GpuBoardSource implements BoardSource {
     }
 
     public void setHover(Coords coords) {
-        hoverCoords = coords;
+        setHover(coords, Float.NaN);
+    }
+
+    @Override
+    public void setHover(Coords coords, float pointedZ) {
+        hoverPoint = new HoverPoint(coords, pointedZ);
     }
 
     BoardClientState currentView() {
@@ -158,6 +172,7 @@ final class GpuBoardSource implements BoardSource {
         boardListener = new BoardListenerAdapter() {
             @Override
             public void boardNewBoard(BoardEvent event) {
+                onSwing(() -> bridgeTypes.remove(event.getSource()));
                 boardChangedAllHexes(event);
             }
 
@@ -511,6 +526,8 @@ final class GpuBoardSource implements BoardSource {
                 if (UnitConversion.changes(old, unit)) {
                     queueAnimation(new BoardScene.Conversion(next.scene().boardId(), old, unit));
                 }
+                // Deployment chooses a position and elevation; it is never a movement or takeoff.
+                if (next.status().phase().isDeployment()) { continue; }
                 if (old != null && !unit.sensorContact() && UnitMotion.changesGear(old.location(), unit.location())) {
                     Entity entity = view.game.getEntity(unit.id());
                     queueAnimation(new BoardScene.Movement(unit.id(), next.scene().boardId(),
@@ -739,10 +756,11 @@ final class GpuBoardSource implements BoardSource {
                   ? new ArrayList<>(Collections.nCopies(board.getWidth() * board.getHeight(), null))
                   : new ArrayList<>(tiles);
             Rectangle area = terrainDirty ? new Rectangle(0, 0, board.getWidth(), board.getHeight()) : dirtyHexes;
+            var decoded = bridgeTypes.computeIfAbsent(board, key -> new HashMap<>());
             view.capturePlanarHexes(area, false, hex -> {
                 int index = hex.coords().getX() * board.getHeight() + hex.coords().getY();
                 nextTiles.set(index, BoardScene.captureTile(board.getHex(hex.coords()), hex, nextTiles.get(index), terrainImages,
-                      board::getHex));
+                      board::getHex, decoded));
             });
             tiles = List.copyOf(nextTiles);
             terrainDirty = false;
@@ -775,11 +793,7 @@ final class GpuBoardSource implements BoardSource {
             for (Rectangle region : exposed) { view.capturePlanarTactical(region, hex -> {
                 int index = hex.coords().getX() * board.getHeight() + hex.coords().getY();
                 BoardScene.Tile old = tiles.get(index);
-                BoardScene.Tile next = new BoardScene.Tile(old.coords(), old.elevation(), old.waterDepth(), old.frozen(),
-                      old.roadExits(), old.surface(), old.ground(), old.normals(), old.decals(), old.decalsWithoutLimbs(),
-                      terrainImages.capture(hex.tactical(), old.tactical()), old.features(), hex.text(), old.liquid(),
-                      old.tileset(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome(), old.impassable(),
-                      old.blackIce(), old.cliffTopExits(), old.bare(), old.groundCover(), old.bridge(), old.ultraSublevel());
+                BoardScene.Tile next = old.withMarkings(terrainImages.capture(hex.tactical(), old.tactical()), hex.text());
                 if (!next.equals(old)) {
                     painted.set(index, next);
                 }
@@ -867,10 +881,11 @@ final class GpuBoardSource implements BoardSource {
                   }))).toList();
             nextGlobal.add(new BoardScene.Command("boards", "Maps", "", true, false, boards, () -> { }));
         }
-        String nextTooltip = GpuBoardActions.plainText(view.getHexTooltip(contextCoords == null ? hoverCoords : contextCoords));
+        HoverPoint pointer = hoverPoint;
+        String nextTooltip = GpuBoardActions.plainText(view.getHexTooltip(contextCoords == null ? pointer.coords() : contextCoords));
         // The movement plan before the tactical capture, which leaves out what the plan draws (G4).
-        Coords hover = hoverCoords;
-        GpuMovePlan.Snapshot move = moves.capture(panel, hover);
+        Coords hover = pointer.coords();
+        GpuMovePlan.Snapshot move = moves.capture(panel, hover, pointer.pointedZ());
         Point light = view.getTerrainLightDirection();
         var rulerSnapshot = los.capture();
         BoardScene scene = new BoardScene(view.getBoardId(), board.getWidth(), board.getHeight(), tiles, units,

@@ -469,8 +469,9 @@ class GpuLogPanelSmokeTest {
                 assertEquals(List.of("MOVEMENT"), texts(header.actor()), "A game before its first initiative");
 
                 showRound(hud, panel, slot, phase(deployed, GamePhase.INITIATIVE_REPORT, 0), header, card);
-                assertEquals(List.of("INITIATIVE", "TURN ORDER"), texts(header.actor()), "The deployment's initiative");
-                assertEquals("INITIATIVE", texts(card.actor()).getFirst());
+                assertEquals(List.of("DEPLOYMENT ORDER", "TURN ORDER"), texts(header.actor()),
+                      "The deployment's initiative");
+                assertEquals("DEPLOYMENT ORDER", texts(card.actor()).getFirst());
                 showRound(hud, panel, slot, phase(deployed, GamePhase.DEPLOYMENT, 0), header);
                 assertEquals(List.of("DEPLOYMENT"), texts(header.actor()));
                 assertEquals(List.of("ROUND 01 \u00B7 COMBAT LOG"), texts(panel.find("log-header")));
@@ -556,7 +557,7 @@ class GpuLogPanelSmokeTest {
         hud.stage.touchUp((int) point.x, (int) point.y, 0, Input.Buttons.LEFT);
     }
 
-    /** The texts of the visible, non-empty labels under {@code actor}, button captions included. */
+    /** The visible, non-empty label texts, including buttons except the header's playback-speed controls. */
     private static List<String> texts(Actor actor) {
         List<String> texts = new ArrayList<>();
         collect(actor, texts);
@@ -564,7 +565,8 @@ class GpuLogPanelSmokeTest {
     }
 
     private static void collect(Actor actor, List<String> texts) {
-        if (actor == null || !actor.isVisible()) {
+        if (actor == null || !actor.isVisible()
+              || (actor.getName() != null && actor.getName().startsWith("phase-speed-"))) {
             return;
         }
         if (actor instanceof Label label && label.getText().length() > 0) {

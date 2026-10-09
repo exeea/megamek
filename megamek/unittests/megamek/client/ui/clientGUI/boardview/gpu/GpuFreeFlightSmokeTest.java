@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -56,6 +57,8 @@ class GpuFreeFlightSmokeTest {
                             GpuBoardTestUi.click("tuning-free-flight");
                             assertTrue(boardCamera.firstPerson());
                             assertTrue(boardCamera.perspective());
+                            assertEquals(45, boardCamera.fieldOfView());
+                            assertEquals(45, GpuBoardTestUi.<Slider>tuning(this, "tuning-camera-fov").getValue());
                             eye = boardCamera.camera.position.cpy();
                             setFov(20);
                             assertEquals(eye, boardCamera.camera.position);
@@ -65,12 +68,12 @@ class GpuFreeFlightSmokeTest {
                             assertEquals(eye, boardCamera.camera.position);
                         } else if (frames() == 30) {
                             GpuBoardTestUi.capture(new File(output, "free-flight-fov-100.png"));
-                            setFov(60);
+                            setFov(BoardCamera.DEFAULT_FIELD_OF_VIEW);
                             GpuBoardTestUi.click("tuning-button");
-                            assertDrag(Input.Buttons.RIGHT, false, false);
-                            assertDrag(Input.Buttons.MIDDLE, false, true);
-                            assertDrag(Input.Buttons.RIGHT, true, true);
-                            assertDrag(Input.Buttons.MIDDLE, true, false);
+                            assertDrag(Input.Buttons.RIGHT, false, true);
+                            assertDrag(Input.Buttons.MIDDLE, false, false);
+                            assertDrag(Input.Buttons.RIGHT, true, false);
+                            assertDrag(Input.Buttons.MIDDLE, true, true);
                             boardCamera.look(0, 90 - boardCamera.tilt());
                         } else if (frames() == 34) {
                             GpuBoardTestUi.capture(new File(output, "free-flight-horizon.png"));
@@ -121,7 +124,8 @@ class GpuFreeFlightSmokeTest {
                             GpuBoardTestUi.click("tuning-defaults");
                             assertFalse(boardCamera.firstPerson());
                             assertFalse(boardCamera.perspective());
-                            assertEquals(BoardCamera.DEFAULT_FIELD_OF_VIEW, boardCamera.fieldOfView());
+                            assertEquals(45, boardCamera.fieldOfView());
+                            assertEquals(45, GpuBoardTestUi.<Slider>tuning(this, "tuning-camera-fov").getValue());
                             boardCamera.reset(fixture.source.takeFrame().scene());
                         } else if (frames() == 52) {
                             GpuBoardTestUi.capture(new File(output, "free-flight-restored-tactical.png"));
@@ -150,11 +154,16 @@ class GpuFreeFlightSmokeTest {
                     Gdx.input = input;
                     try {
                         processor.touchDown(300, 300, 0, button);
+                        // A gesture keeps the Shift state from its press even when the modifier changes mid-drag.
+                        when(input.isKeyPressed(Input.Keys.SHIFT_LEFT)).thenReturn(!shift);
                         processor.touchDragged(360, 340, 0);
                         processor.touchUp(360, 340, 0, button);
                     } finally {
                         Gdx.input = original;
                     }
+                    // Only a look or an orbit holds the cursor, and its release shows it again; a pan never does.
+                    verify(input, pan ? never() : times(1)).setCursorCatched(true);
+                    verify(input, pan ? never() : times(1)).setCursorCatched(false);
                     String gesture = "Button " + button + ", Shift " + shift;
                     if (pan) {
                         assertTrue(position.dst(boardCamera.camera.position) > .01f, gesture + " must pan the eye");

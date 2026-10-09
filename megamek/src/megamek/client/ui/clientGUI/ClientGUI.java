@@ -393,6 +393,8 @@ public class ClientGUI extends AbstractClientGUI
     private ForceDisplayDialog forceDisplayDialog;
     private MapMenu popup;
     private final Map<Integer, RulerDialog> rulers = new HashMap<>();
+    /** Boards whose 3D-only content was already reported in 2D since they were last loaded. */
+    private final java.util.Set<Integer> warnedBoards = new java.util.HashSet<>();
     protected JComponent curPanel;
     /** Open the default board once per game; later phase changes preserve a manual choice or rendering fallback. */
     private boolean boardViewChosen;
@@ -3855,6 +3857,7 @@ public class ClientGUI extends AbstractClientGUI
             if (oldState != null) { oldState.close(); }
             var oldMinimap = miniMaps.remove(boardId);
             if (oldMinimap != null) { oldMinimap.dispose(); }
+            warnedBoards.remove(boardId);
             if (e.getNewBoard() != null) {
                 try {
                     BoardClientState state = new BoardClientState(client.getGame(), controller, ClientGUI.this, boardId, tilesetManager);
@@ -4528,7 +4531,7 @@ public class ClientGUI extends AbstractClientGUI
         }
 
         if (game.getBoard().requiresNativeFormat() || megamek.common.board.BoardFile.isNativeName(curFileBoard.getName())) {
-            try { megamek.common.board.BoardFile.save(game.getBoard(), curFileBoard.toPath()); }
+            try { saveNative(game.getBoard(), curFileBoard.toPath()); }
             catch (IOException failure) { logger.error(failure, "Failed to save native board"); }
             return;
         }
@@ -4539,6 +4542,24 @@ public class ClientGUI extends AbstractClientGUI
         } catch (Exception ex) {
             logger.error(ex, "Failed to save board!");
         }
+    }
+
+    /**
+     * Saves {@code board} as a .board2 file. A legacy game board is saved as an imported copy, with its scenery decoded
+     * into objects as the 3D editor would open it; the live game board stays legacy.
+     */
+    static void saveNative(Board board, java.nio.file.Path target) throws IOException {
+        Board saved = board;
+        if (!board.isNativeFormat()) {
+            var bytes = new java.io.ByteArrayOutputStream();
+            board.save(bytes, false);
+            saved = new Board();
+            saved.load(new java.io.ByteArrayInputStream(bytes.toByteArray()));
+            // Legacy text has no name, description, notes, type or source header; the import marks the copy native.
+            saved.copyMetadataFrom(board);
+            megamek.client.ui.clientGUI.boardview.gpu.BoardSceneryLayouts.importBoard(saved);
+        }
+        megamek.common.board.BoardFile.save(saved, target);
     }
 
     /**
@@ -4589,7 +4610,7 @@ public class ClientGUI extends AbstractClientGUI
             }
             if (java.nio.file.Files.exists(target) && JOptionPane.showConfirmDialog(frame,
                   "Replace " + target.getFileName() + "?", "Save board", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) { return; }
-            try { megamek.common.board.BoardFile.save(game.getBoard(), target); curFileBoard = target.toFile(); }
+            try { saveNative(game.getBoard(), target); curFileBoard = target.toFile(); }
             catch (IOException failure) { logger.error(failure, "Failed to save native board"); }
             return;
         }
@@ -5172,6 +5193,10 @@ public class ClientGUI extends AbstractClientGUI
             boardViews.put(state.getBoardId(), view);
             rulers.computeIfAbsent(state.getBoardId(), id -> new RulerDialog(frame, state, client.getGame()));
             view.redrawAllEntities();
+            // Lounge boards are previews (ChatLounge warns there); in a game, warn once per board load, not per 3D/2D switch.
+            if (!client.getGame().getPhase().isLounge() && warnedBoards.add(state.getBoardId())) {
+                BoardView.warnIfThreeDOnly(frame, state.getBoard(), false);
+            }
         } catch (IOException exception) { throw new IllegalStateException("Could not open the classic board", exception); }
     }
 

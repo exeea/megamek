@@ -28,7 +28,7 @@ final class BoardCamera {
     static final float ENTRANCE_SECONDS = 1.2f;
     private static final float ENTRANCE_ZOOM = 1.35f;
     static final float MAX_TILT = 80;
-    static final float DEFAULT_FIELD_OF_VIEW = 60;
+    static final float DEFAULT_FIELD_OF_VIEW = 45;
     static final float MIN_FIELD_OF_VIEW = 1;
     static final float MAX_FIELD_OF_VIEW = 100;
     /** One keyboard turn. Hex rows line up again every sixth of a circle, so each turn lands on a matching view. */
@@ -297,6 +297,22 @@ final class BoardCamera {
     void viewableArea(float left, float availableWidth) {
         viewLeftPixels = left;
         viewableWidth(availableWidth);
+    }
+
+    /**
+     * The unobstructed area between the UI's panels on all four sides; a later explicit framing centres its target in
+     * it. The displayed board stays where it is: only the orbit pivot moves to the area's centre.
+     */
+    void viewableArea(float left, float availableWidth, float bottom, float top) {
+        float offset = (top - bottom) / 2;
+        if (!firstPerson && !MathUtils.isEqual(viewVerticalOffset, offset)) {
+            focus.mulAdd(camera.up, (viewVerticalOffset - offset) * camera.zoom);
+        }
+        viewBottomPixels = bottom;
+        viewTopPixels = top;
+        viewVerticalOffset = offset;
+        viewableArea(left, availableWidth);
+        update();
     }
 
     private float viewHeight() { return Math.max(1, camera.viewportHeight - viewBottomPixels - viewTopPixels); }
@@ -975,24 +991,18 @@ final class BoardCamera {
             float base = tile.elevation(), height = feature.height();
             var object = feature.decoration();
             if (object != null) {
-                var placement = object.placement();
-                if (placement.mode().equals("absolute")) {
-                    base = placement.level().floatValue();
-                } else {
-                    String receiver = placement.receiver().terrain();
+                // The placement's support rule on the supports' nominal tops; a missing support leaves the ground.
+                base = (float) object.placement().level(tile.elevation(), receiver -> {
+                    float supportTop = tile.elevation();
                     for (var support : tile.features()) {
-                        if (support.decoration() != null) { continue; }
-                        boolean matches = switch (receiver) {
-                            case "bridge" -> support.asset().equals("bridge");
-                            case "building" -> support.kind() == BoardScene.FeatureKind.BUILDING;
-                            case "industrial" -> support.kind() == BoardScene.FeatureKind.INDUSTRIAL;
-                            default -> false;
-                        };
-                        if (matches) { base = Math.max(base, tile.elevation() + support.elevation() + support.height()); }
+                        boolean matches = support.decoration() == null && receiver.equals(support.asset().equals("bridge")
+                              ? "bridge" : BoardFeatures.receiver(support));
+                        if (matches) { supportTop = Math.max(supportTop, tile.elevation() + support.elevation() + support.height()); }
                     }
-                    base += placement.offset().floatValue();
-                }
-                height *= feature.scale();
+                    return supportTop;
+                });
+                // An object is one level tall at its scale and stretch.
+                height *= feature.scale() * (float) feature.stretch().z();
             }
             top = Math.max(top, base + feature.elevation() + height);
         }
@@ -1098,9 +1108,10 @@ final class BoardCamera {
     private Vector3 pointOnPlane(float x, float y, float plane) {
         Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
         // The perspective ray uses the exact camera basis; inverting a very deep frustum loses anchor precision.
+        // Keep it unnormalized: normalization can add sideways rounding error that blocks a drag along an edge.
         Vector3 direction = new Vector3(camera.direction)
               .mulAdd(right, (2 * x / camera.viewportWidth - 1) / camera.projection.val[Matrix4.M00])
-              .mulAdd(camera.up, (2 * y / camera.viewportHeight - 1) / camera.projection.val[Matrix4.M11]).nor();
+              .mulAdd(camera.up, (2 * y / camera.viewportHeight - 1) / camera.projection.val[Matrix4.M11]);
         if (direction.z >= -.00001f) { return null; }
         float distance = (plane - camera.position.z) / direction.z;
         return distance >= 0 ? new Vector3(camera.position).mulAdd(direction, distance) : null;

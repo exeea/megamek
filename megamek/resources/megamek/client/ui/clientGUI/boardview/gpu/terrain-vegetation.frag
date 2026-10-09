@@ -76,13 +76,12 @@ void main() {
 #ifdef lightingFlag
     albedo = toLinear(albedo);
     vec3 ambient, direct, sheen;
-    // Rain leaves a water film on the leaves: sunlit glints appear with the surface wetness. Dry plants stay matte and
-    // skip the specular term.
-    surfaceLighting(normal, .6 * u_wetness, ambient, direct, sheen);
+    // Dry blades have a broad, rough reflection; rain smooths the same dielectric response into brighter glints.
+    surfaceLighting(normal, .6 * u_wetness, .86, ambient, direct, sheen);
     // Thin leaves transmit a little back light, while still receiving the world's shadows and cloud cover.
     ambient += skyLight(-normal, GROUND_ALBEDO) * .15;
     albedo *= ambient + direct;
-    albedo += sheen * u_wetness;
+    albedo += sheen;
     albedo = toDisplay(albedo);
 #endif
     fragColor = vec4(albedo * terrainGrid(v_coverRoot * .2), 1.0);

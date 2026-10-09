@@ -33,11 +33,12 @@ import com.badlogic.gdx.utils.Pool;
 import com.badlogic.gdx.utils.ShortArray;
 
 /**
- * Trees and modular building parts drawn with OpenGL instancing. Each model at each detail level is held once; a
- * placement adds only its place, turn and size, so the geometry in memory does not grow with the number of trees.
+ * Trees, modular building parts and the editor's placed objects drawn with OpenGL instancing. Each model at each
+ * detail level is held once; a placement adds only its place, turn and size, so the geometry in memory does not grow
+ * with the number of trees.
  * Every chunk's trees stay uploaded in one buffer per species and detail level, in board order; each pass draws the
  * ranges of the chunks it sees, so panning, zooming and a change of detail upload nothing. A chunk's trees upload
- * again only when the chunk is replaced with different trees. Building parts still gather per pass.
+ * again only when the chunk is replaced with different trees. Building and object parts still gather per pass.
  */
 final class GpuTreeInstances implements RenderableProvider, Disposable {
     /** Marks the materials of instanced renderables, so the shader providers pick the instanced shaders. */
@@ -67,11 +68,14 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         final FloatArray data = new FloatArray();
         /** What the instance buffer holds. */
         final FloatArray uploaded = new FloatArray();
+        /** Floats per instance: {@link #STRIDE}, and a recolourable model's four slot colours after them. */
+        final int stride;
         int capacity = 64;
 
         Batch(Model model) {
             mesh = new GpuInstancedMesh(model.meshes.first());
-            mesh.enableInstancedRendering(false, capacity, attributes());
+            stride = STRIDE;
+            mesh.enableInstancedRendering(false, capacity, attributes(false));
             for (Node node : model.nodes) { collect(node); }
         }
 
@@ -86,7 +90,9 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             builder.addMesh(vertices.items, indices.items, 0, indices.size);
             mesh = new GpuInstancedMesh(builder.getNumVertices(), builder.getNumIndices(), builder.getAttributes());
             builder.end(mesh);
-            mesh.enableInstancedRendering(false, capacity, attributes());
+            boolean colours = RigidGlb.colourSlotted(mesh.getVertexAttributes());
+            stride = colours ? STRIDE + 4 : STRIDE;
+            mesh.enableInstancedRendering(false, capacity, attributes(colours));
             Renderable part = new Renderable();
             part.meshPart.set(source.meshPart);
             part.meshPart.mesh = mesh;
@@ -116,11 +122,11 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         }
 
         void upload(FloatArray instances) {
-            int count = instances.size / STRIDE;
+            int count = instances.size / stride;
             if (count > capacity) {
                 capacity = Math.max(count, capacity * 2);
                 mesh.disableInstancedRendering();
-                mesh.enableInstancedRendering(false, capacity, attributes());
+                mesh.enableInstancedRendering(false, capacity, attributes(stride > STRIDE));
             }
             mesh.setInstanceData(instances.items, 0, instances.size);
             uploads++;
@@ -131,12 +137,15 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     /**
-     * libGDX tells a mesh's attributes apart by usage and unit, and adds the unit to the shader location, so the two
-     * instance attributes differ by usage: the place and horizontal scale, and the turn and vertical scale.
+     * libGDX tells a mesh's attributes apart by usage and unit, and adds the unit to the shader location, so the
+     * instance attributes differ by usage: the place and horizontal scale, the turn and vertical scale, and for a
+     * recolourable model's shared mesh ({@code colours}) its placement's slot colours (float, not normalised).
      */
-    private static VertexAttribute[] attributes() {
-        return new VertexAttribute[] { new VertexAttribute(VertexAttributes.Usage.Position, 4, "a_instance0"),
-              new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_instance1") };
+    private static VertexAttribute[] attributes(boolean colours) {
+        VertexAttribute place = new VertexAttribute(VertexAttributes.Usage.Position, 4, "a_instance0");
+        VertexAttribute turn = new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_instance1");
+        return colours ? new VertexAttribute[] { place, turn, new VertexAttribute(VertexAttributes.Usage.ColorUnpacked, 4, "a_instance2") }
+              : new VertexAttribute[] { place, turn };
     }
 
     /** One chunk's trees, grouped by species; each tree as {@link #STRIDE} floats. */
@@ -264,17 +273,42 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         if (!level.gathered) { level.gathered = true; stands.add(level); }
     }
 
-    /** Static building ranges borrow module meshes; placements add only transforms, using the same draw path as trees. */
+    /**
+     * Building module ranges and editor object parts borrow their meshes; placements add only transforms, using the
+     * same draw path as trees. Each transform must be {@link #placeable}.
+     */
     void add(Array<Renderable> parts) {
-        for (Renderable source : parts) {
-            Batch[] passes = sharedLookups.computeIfAbsent(source, value -> sharedParts.computeIfAbsent(
-                  new Part(value.meshPart.mesh, value.meshPart.offset, value.meshPart.size, value.material),
-                  ignored -> new Batch[Pass.values().length]));
-            Batch batch = passes[pass.ordinal()];
-            if (batch == null) { passes[pass.ordinal()] = batch = new Batch(source); }
-            if (batch.data.isEmpty()) { gathered.add(batch); }
-            append(batch.data, source.worldTransform);
-        }
+        for (Renderable source : parts) { add(source); }
+    }
+
+    /** One part's placement; a part that gathers no placement in a pass costs no draw. */
+    void add(Renderable source) {
+        Batch[] passes = sharedLookups.computeIfAbsent(source, value -> sharedParts.computeIfAbsent(
+              new Part(value.meshPart.mesh, value.meshPart.offset, value.meshPart.size, value.material),
+              ignored -> new Batch[Pass.values().length]));
+        Batch batch = passes[pass.ordinal()];
+        if (batch == null) { passes[pass.ordinal()] = batch = new Batch(source); }
+        if (batch.data.isEmpty()) { gathered.add(batch); }
+        append(batch.data, source.worldTransform);
+        // Every colouring of a recolourable model shares this batch: each placement adds its colours.
+        if (batch.stride > STRIDE) { batch.data.addAll(RigidGlb.slotColours(source.userData)); }
+    }
+
+    /**
+     * Whether the instance data can hold this transform: a place, a turn about z, one positive scale along x and y
+     * and a positive vertical scale. Tilted, mirrored, sheared or unevenly stretched placements cannot be instanced.
+     */
+    static boolean placeable(Matrix4 transform) {
+        float[] m = transform.val;
+        double x = Math.hypot(m[Matrix4.M00], m[Matrix4.M10]), y = Math.hypot(m[Matrix4.M01], m[Matrix4.M11]);
+        double tolerance = 1e-4 * Math.max(x, Math.abs(m[Matrix4.M22]));
+        return x > 0 && m[Matrix4.M22] > 0 && Math.abs(x - y) <= tolerance
+              && Math.abs(m[Matrix4.M02]) <= tolerance && Math.abs(m[Matrix4.M12]) <= tolerance
+              && Math.abs(m[Matrix4.M20]) <= tolerance && Math.abs(m[Matrix4.M21]) <= tolerance
+              // Perpendicular x and y columns of a positive determinant: a turn, not a shear or a reflection.
+              && Math.abs(m[Matrix4.M00] * m[Matrix4.M01] + m[Matrix4.M10] * m[Matrix4.M11]) <= tolerance * x
+              && m[Matrix4.M00] * m[Matrix4.M11] - m[Matrix4.M01] * m[Matrix4.M10] > 0
+              && m[Matrix4.M30] == 0 && m[Matrix4.M31] == 0 && m[Matrix4.M32] == 0 && m[Matrix4.M33] == 1;
     }
 
     private static void append(FloatArray data, Matrix4 transform) {
@@ -328,7 +362,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         for (Batch[] passes : sharedParts.values()) { for (Batch batch : passes) { if (batch != null) { all.add(batch); } } }
         for (Batch batch : all) {
             total += (long) batch.mesh.getNumVertices() * batch.mesh.getVertexSize()
-                  + (long) batch.mesh.getNumIndices() * Short.BYTES + (long) batch.capacity * STRIDE * Float.BYTES;
+                  + (long) batch.mesh.getNumIndices() * Short.BYTES + (long) batch.capacity * batch.stride * Float.BYTES;
         }
         return total;
     }
@@ -354,6 +388,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         source = insert(source, "vec4 pos = u_worldTrans * vec4(a_position, 1.0);",
               "vec4 pos = vec4(instancePosition(a_position), 1.0);\n#ifdef impostorFlag\n"
                     + "v_impostorLift = u_impostorLift * a_instance0.w;\n#endif\n");
+        // A recolourable model's placement passes its colours in the instance data instead of the uniform.
+        source = insert(source, "slotColour(a_color.rgb, a_colourSlot, u_slotColours)", "slotColour(a_color.rgb, a_colourSlot, a_instance2)");
         return insert(source, "vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = instanceNormal(a_normal);");
     }
 

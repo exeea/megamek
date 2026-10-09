@@ -3,6 +3,7 @@ layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 in vec2 v_uv;
 uniform sampler2D u_sceneDepth;
+uniform sampler2D u_buildingDepth;
 uniform sampler2D u_unitDepth;
 uniform sampler2D u_unitColors;
 uniform sampler2D u_effectOpacity;
@@ -61,7 +62,8 @@ float surfaceSpan(vec2 uv, float unit) {
 // markers, which have no such exemption), so only what stands in another hex, or rises above it, hides a unit.
 float hiddenAt(vec2 uv) {
     if (min(uv.x, uv.y) < 0.0 || max(uv.x, uv.y) > 1.0) return 0.0;
-    float unit = depthAt(u_unitDepth, uv), scene = depthAt(u_sceneDepth, uv);
+    // Faded buildings remain occluders here without changing the scene depth used by fog and floor labels.
+    float unit = depthAt(u_unitDepth, uv), scene = min(depthAt(u_sceneDepth, uv), depthAt(u_buildingDepth, uv));
     if (unit >= 1.0) return 0.0;
     // The cheap test first: only an apparent occluder pays for the unit's own depth span.
     if (behind(scene, unit, u_bias) < 0.5 || behind(scene, unit, max(u_bias, surfaceSpan(uv, unit))) < 0.5) {

@@ -14,10 +14,10 @@ import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Disposable;
+import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Board;
-import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
@@ -31,7 +31,7 @@ final class GpuEditorTerrainPreviews implements Disposable {
     private static final int WIDTH = 256, HEIGHT = 160, CACHE_SIZE = 48;
     /** The cliff behind two adjacent level-zero hexes; each of these three hexes touches both of the others. */
     private static final List<Coords> THEME_HEXES = List.of(new Coords(0, 0), new Coords(0, 1), new Coords(1, 0));
-    record Sample(String theme, String component, String variant, String asset) { }
+    private record Sample(String theme, String component, String variant, BoardEditorSession.Brush stamp) { }
     private record Cached(FrameBuffer buffer, List<Image> targets) { }
     private final Map<Sample, List<Image>> queue = new LinkedHashMap<>();
     private final Map<Sample, Cached> cache = new LinkedHashMap<>(16, .75f, true);
@@ -46,13 +46,16 @@ final class GpuEditorTerrainPreviews implements Disposable {
     private GpuTerrain terrain;
     private GpuAtmosphere atmosphere;
     private final BoardCamera camera = new BoardCamera();
-    private int rendered;
+    private GpuTerrain lender;
 
     void add(String theme, String component, String variant, Image target) {
-        add(new Sample(theme.isEmpty() ? "grass" : theme, component, variant, ""), target);
+        add(new Sample(theme.isEmpty() ? "grass" : theme, component, variant, null), target);
     }
 
-    void addObject(String theme, String asset, Image target) { add(new Sample(theme, "ground", "", asset), target); }
+    /** The EDT's immutable brush snapshot, including its objects; never the currently inspected, mutable hex. */
+    void add(BoardEditorSession.Brush stamp, Image target) {
+        add(new Sample(stamp.theme(), "ground", "", stamp), target);
+    }
 
     private void add(Sample sample, Image target) {
         cache.values().forEach(value -> value.targets().remove(target));
@@ -62,28 +65,25 @@ final class GpuEditorTerrainPreviews implements Disposable {
         else { queue.computeIfAbsent(sample, ignored -> new ArrayList<>()).add(target); }
     }
 
-    /** No waiting on the UI thread, and at most one completed image per frame. */
-    void update() {
+    /**
+     * No waiting on the UI thread, and at most one completed image per frame. The samples draw with {@code board}'s
+     * decoded models and textures, so a first sample never decodes them again on the render thread; without a board
+     * renderer they wait, and a new one (an asset reload) replaces the sample renderer.
+     */
+    void update(GpuTerrain board) {
+        if (board != lender) {
+            disposeRenderer();
+            lender = board;
+        }
+        if (lender == null) { return; }
         cache.values().forEach(value -> value.targets().removeIf(image -> image.getStage() == null));
         queue.values().forEach(targets -> targets.removeIf(image -> image.getStage() == null));
         queue.entrySet().removeIf(entry -> entry.getValue().isEmpty() && !entry.getKey().equals(current));
         try {
             if (pending != null && pending.isDone()) {
                 scene = pending.get(); pending = null;
-                if (terrain == null) {
-                    terrain = new GpuTerrain(); atmosphere = new GpuAtmosphere();
-                    atmosphere.configure(BoardAtmosphere.DEFAULTS);
-                    camera.resize(WIDTH, HEIGHT);
-                }
-                camera.setIsometric(true);
-                if (current.component().isEmpty()) {
-                    camera.orbit(-15, 0);
-                    camera.fit(scene, THEME_HEXES.stream().map(scene::tile).toList());
-                } else { camera.fit(scene); }
-                atmosphere.updateLight(camera.camera); terrain.setAtmosphere(atmosphere.lighting());
-                atmosphere.configureClouds(terrain, scene);
-                terrain.update(scene, camera.camera);
-            }
+                show();
+            } else if (scene != null && terrain == null) { show(); }
             if (scene != null) {
                 terrain.refine(camera.camera);
                 if (!terrain.busy() && terrain.ready(scene)) {
@@ -99,8 +99,9 @@ final class GpuEditorTerrainPreviews implements Disposable {
                 }
             }
             if (current == null && !queue.isEmpty()) {
-                current = queue.keySet().stream().filter(sample -> sample.component().isEmpty()).findFirst()
-                      .orElseGet(() -> queue.keySet().iterator().next());
+                current = queue.keySet().stream().filter(sample -> sample.stamp() != null).findFirst()
+                      .orElseGet(() -> queue.keySet().stream().filter(sample -> sample.component().isEmpty()).findFirst()
+                            .orElseGet(() -> queue.keySet().iterator().next()));
                 Sample sample = current;
                 pending = worker.submit(() -> capture(sample));
             }
@@ -110,6 +111,29 @@ final class GpuEditorTerrainPreviews implements Disposable {
             if (targets != null) { targets.forEach(target -> target.setUserObject("Preview unavailable")); }
             current = null; scene = null; pending = null;
         }
+    }
+
+    /** Starts building {@link #scene}, the current sample, in the sample renderer. */
+    private void show() {
+        if (terrain == null) {
+            terrain = new GpuTerrain(lender); atmosphere = new GpuAtmosphere();
+            atmosphere.configure(BoardAtmosphere.DEFAULTS);
+            camera.resize(WIDTH, HEIGHT);
+        }
+        camera.setIsometric(true);
+        if (current.component().isEmpty()) {
+            camera.orbit(-15, 0);
+            camera.fit(scene, THEME_HEXES.stream().map(scene::tile).toList());
+        } else { camera.fit(scene); }
+        atmosphere.updateLight(camera.camera); terrain.setAtmosphere(atmosphere.lighting());
+        atmosphere.configureClouds(terrain, scene);
+        terrain.update(scene, camera.camera);
+    }
+
+    /** The sample renderer goes before the board renderer whose assets it borrows. */
+    private void disposeRenderer() {
+        if (terrain != null) { terrain.dispose(); terrain = null; }
+        if (atmosphere != null) { atmosphere.dispose(); atmosphere = null; }
     }
 
     private FrameBuffer render() {
@@ -133,8 +157,21 @@ final class GpuEditorTerrainPreviews implements Disposable {
         BoardEditorBlueprint blueprint = BoardEditorBlueprint.get();
         boolean theme = sample.component().isEmpty();
         Board board = Board.createEmptyBoard(theme ? 2 : 1, theme ? 2 : 1);
+        // Samples show editor choices, so road level 2 is the native Alley finish, as in the edited board.
+        board.setNativeFormat(true);
         for (int x = 0; x < board.getWidth(); x++) {
             for (int y = 0; y < board.getHeight(); y++) {
+                if (sample.stamp() != null) {
+                    // Reconstruct only the worker's private preview. Keep captured exits, including derived ones,
+                    // rather than recalculating them against the preview's missing neighbours.
+                    var stamp = sample.stamp();
+                    Hex hex = board.getHex(x, y);
+                    hex.setLevel(stamp.elevation()); hex.setTheme(stamp.theme());
+                    stamp.properties().forEach(property -> hex.addTerrain(new Terrain(Terrains.getType(property.terrain()),
+                          property.value(), property.explicit(), property.exits())));
+                    hex.setAppearance(stamp.appearance()); hex.setDecorations(stamp.objects());
+                    continue;
+                }
                 String componentId = theme ? x == 0 ? y == 0 ? "cliff" : "vegetation" : "ground" : sample.component();
                 var component = blueprint.component(componentId);
                 Hex hex = new Hex(component.previewLevel(), component.preview(), sample.theme());
@@ -151,10 +188,6 @@ final class GpuEditorTerrainPreviews implements Disposable {
                     // their exposed skirts; only the three touching hexes are framed and rendered, using native meshes.
                     if (x == 1 && y == 1) { hex.setLevel(-1); }
                     else { hex.addTerrain(new Terrain(Terrains.CLIFF_TOP, 1, true, 63)); }
-                }
-                if (!sample.asset().isEmpty()) {
-                    hex.setDecorations(List.of(new BoardDecoration("preview", "prop", sample.asset(), null, 0, 0, 0, false, 1,
-                          BoardDecoration.Placement.ground(), 0)));
                 }
                 if (!sample.variant().isEmpty() && !sample.variant().startsWith("preset:")) {
                     var variant = blueprint.variant(sample.variant());
@@ -188,10 +221,6 @@ final class GpuEditorTerrainPreviews implements Disposable {
             // Never dispose a texture still displayed by a card or the selected theme's face.
             if (entry.getValue().targets().isEmpty()) { entry.getValue().buffer().dispose(); entries.remove(); }
         }
-        // A terrain renderer also owns decoded models; retire that cache between batches of many different samples.
-        if (++rendered >= CACHE_SIZE) {
-            terrain.dispose(); terrain = null; atmosphere.dispose(); atmosphere = null; rendered = 0;
-        }
     }
 
     @Override public void dispose() {
@@ -200,7 +229,6 @@ final class GpuEditorTerrainPreviews implements Disposable {
         worker.submit(() -> { if (artwork != null) { artwork.close(); artwork = null; } });
         worker.shutdown();
         cache.values().forEach(value -> value.buffer().dispose()); cache.clear();
-        if (terrain != null) { terrain.dispose(); }
-        if (atmosphere != null) { atmosphere.dispose(); }
+        disposeRenderer();
     }
 }

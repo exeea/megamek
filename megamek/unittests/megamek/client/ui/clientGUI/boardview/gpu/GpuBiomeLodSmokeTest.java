@@ -125,7 +125,8 @@ class GpuBiomeLodSmokeTest {
         for (var tile : scene.tiles()) {
             var planted = terrain.planted(tile.coords());
             if (planted != null) {
-                replanted.put(tile.coords(), BoardPlants.plant(scene, tile, terrain.tacticalSurface(tile.coords()), TerrainLod.FULL));
+                replanted.put(tile.coords(), BoardPlants.plant(scene, tile, terrain.tacticalSurface(tile.coords()), TerrainLod.FULL,
+                      java.util.List.of()));
             }
         }
         plants.visible(scene, camera.camera, scene.tiles(), terrain::planted);

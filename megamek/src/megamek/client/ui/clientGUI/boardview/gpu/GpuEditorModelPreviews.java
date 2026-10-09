@@ -31,7 +31,7 @@ import megamek.common.Configuration;
 
 /** A page-sized, disposable preview queue: CPU model decoding off-thread; one upload/render per UI frame. */
 final class GpuEditorModelPreviews implements Disposable {
-    private record Request(String asset, Image target) { }
+    private record Request(String asset, megamek.common.board.BoardDecoration.Colours colours, Image target) { }
     private final java.util.concurrent.ExecutorService worker = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "board-editor-previews"); thread.setDaemon(true); return thread;
     });
@@ -41,7 +41,12 @@ final class GpuEditorModelPreviews implements Disposable {
     private Request current;
     private ModelBatch batch;
 
-    void add(String asset, Image target) { queue.add(new Request(asset, target)); }
+    void add(String asset, Image target) { add(asset, megamek.common.board.BoardDecoration.Colours.NONE, target); }
+
+    /** A preview of the model in these colours, as a palette entry places it. */
+    void add(String asset, megamek.common.board.BoardDecoration.Colours colours, Image target) {
+        queue.add(new Request(asset, colours, target));
+    }
 
     void update() {
         queue.removeIf(request -> request.target().getStage() == null);
@@ -59,15 +64,18 @@ final class GpuEditorModelPreviews implements Disposable {
             } finally { pending = null; current = null; }
         }
         if (pending == null && !queue.isEmpty()) {
-            current = queue.removeFirst(); String asset = current.asset();
+            current = queue.removeFirst(); String asset = current.asset(); var colours = current.colours();
             pending = worker.submit(() -> {
                 File root = new File(Configuration.dataDir(), "models/board");
-                File file = new File(root, asset + ".glb");
                 if (asset.startsWith("buildings/")) {
                     File custom = megamek.client.ui.clientGUI.boardview.BoardArtwork.customBuildingFile(asset);
-                    if (custom.isFile()) { file = custom; root = new File(Configuration.dataDir(), "models/buildings"); }
+                    if (custom.isFile()) {
+                        return RigidGlb.loadLods(new FileHandle(custom), new File(Configuration.dataDir(), "models/buildings").toPath()).getFirst();
+                    }
                 }
-                return RigidGlb.loadLods(new FileHandle(file), root.toPath()).getFirst();
+                var data = RigidGlb.loadLods(RigidGlb.source(root, asset), root.toPath()).getFirst();
+                RigidGlb.recolour(data, colours);
+                return data;
             });
         }
     }

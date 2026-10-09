@@ -106,7 +106,6 @@ final class GpuAtmosphere implements Disposable {
     private GpuHeatGlow heatGlow;
     private List<BoardScene.Tile> heatTiles;
     private boolean molten;
-    private boolean sceneHdr;
     private GpuWeatherParticles particles;
     private GpuClouds clouds;
     private boolean cloudsActive;
@@ -300,8 +299,8 @@ final class GpuAtmosphere implements Disposable {
     /** Publish material flags before warmup, without advancing wind or rendering with an unfinished camera. */
     void configureClouds(GpuTerrain terrain, BoardScene board) {
         if (heatTiles != board.tiles()) {
+            molten = molten(heatTiles, board.tiles(), molten);
             heatTiles = board.tiles();
-            molten = heatTiles.stream().anyMatch(tile -> tile.liquid().molten());
         }
         terrain.setWetness(BoardAtmosphere.wetness(settings));
         terrain.setWind(settings.effects());
@@ -312,6 +311,23 @@ final class GpuAtmosphere implements Disposable {
         } else {
             terrain.environment().remove(GpuCloudShadow.TYPE);
         }
+    }
+
+    /**
+     * Whether any tile is molten. The map source keeps unchanged tile objects, so an edit reads only the tiles that
+     * differ by identity; the whole board only when a molten tile changed or the board was replaced.
+     */
+    private static boolean molten(List<BoardScene.Tile> before, List<BoardScene.Tile> after, boolean wasMolten) {
+        if (before != null && before.size() == after.size()) {
+            boolean lost = false;
+            for (int index = 0; index < after.size(); index++) {
+                if (before.get(index) == after.get(index)) { continue; }
+                if (after.get(index).liquid().molten()) { return true; }
+                lost |= before.get(index).liquid().molten();
+            }
+            if (!lost) { return wasMolten; }
+        }
+        return after.stream().anyMatch(tile -> tile.liquid().molten());
     }
 
     /** Prepare clouds after the final camera/light update; cameras share their field and wind timeline. */
@@ -325,11 +341,11 @@ final class GpuAtmosphere implements Disposable {
     void begin(int width, int height, float delta) {
         int pixelsWide = Math.max(1, HdpiUtils.toBackBufferX(width));
         int pixelsHigh = Math.max(1, HdpiUtils.toBackBufferY(height));
-        if (sceneColor == null || sceneColor.getWidth() != pixelsWide || sceneColor.getHeight() != pixelsHigh
-              || sceneHdr != molten) {
+        if (sceneColor == null || sceneColor.getWidth() != pixelsWide || sceneColor.getHeight() != pixelsHigh) {
             disposeBuffers();
-            sceneHdr = molten;
-            sceneColor = sceneHdr ? GpuHeatGlow.buffer(pixelsWide, pixelsHigh) : buffer(pixelsWide, pixelsHigh, false);
+            // Preserve reflected highlights as well as emission until the shared exposure and display shoulder.
+            // Surfaces still supply display-encoded radiance; the composite decodes it before grading.
+            sceneColor = GpuHeatGlow.buffer(pixelsWide, pixelsHigh);
             sceneColor.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
             try {
                 sceneDepth = attachDepthTexture(sceneColor);
@@ -408,7 +424,7 @@ final class GpuAtmosphere implements Disposable {
         if (hasScattering()) {
             renderFog(camera, terrain, board);
         }
-        boolean glowActive = sceneHdr;
+        boolean glowActive = molten;
         if (glowActive) {
             if (heatGlow == null) { heatGlow = new GpuHeatGlow(quad); }
             heatGlow.render(sceneColor.getColorBufferTexture(), sceneDepth,
@@ -438,7 +454,7 @@ final class GpuAtmosphere implements Disposable {
         compositeShader.setUniformi("u_fog", hasScattering() ? 2 : 0);
         if (glowActive) { heatGlow.texture().bind(5); }
         compositeShader.setUniformi("u_heatGlow", glowActive ? 5 : 0);
-        compositeShader.setUniformf("u_heatEnabled", sceneHdr ? 1 : 0);
+        compositeShader.setUniformf("u_heatEnabled", molten ? 1 : 0);
         compositeShader.setUniformf("u_heatGlowStrength", glowActive ? 0.12f : 0);
         compositeShader.setUniformf("u_fogEnabled", hasScattering() ? 1 : 0);
         if (hasScattering()) {

@@ -9,6 +9,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 final class TreeLod {
     private static final float[] PIXELS = { 80, 48, 24 };
     static final float[] PROPS = { 80, 24 };
+    /** Placed decorative objects whose world-box diagonal is under this many hex widths are small (GpuTerrain.Prop.small). */
+    static final float SMALL_OBJECT = .25f;
+    /** Small objects hide while a hex is narrower than this on screen, in framebuffer pixels; {@link #level} adds ±10 %. */
+    static final float[] SMALL_OBJECTS = { 12 };
     static final int LEVELS = PIXELS.length + 1;
     private static final float HYSTERESIS = 0.1f;
 

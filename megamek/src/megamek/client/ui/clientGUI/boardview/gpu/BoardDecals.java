@@ -4,6 +4,9 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.geom.Area;
 import java.awt.geom.Path2D;
 import java.awt.geom.Rectangle2D;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -11,15 +14,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import javax.imageio.ImageIO;
 
 import com.badlogic.gdx.math.Vector3;
-import megamek.common.board.Coords;
+import megamek.common.board.BoardDecalArt;
 import megamek.common.board.BoardDecoration;
+import megamek.common.board.Coords;
 
 /** Artwork on the first solid support, clipped at drops; shared by both terrain presentations. */
 final class BoardDecals {
     static final float LIFT = .08f;
     private static final float EPSILON = .0001f;
+    /** Each decal image's alpha ({@link Opacity}), read once per id on any thread, headless too. */
+    private static final Map<String, BoardKit<Alpha>> ALPHA = new ConcurrentHashMap<>();
 
     private record Receiver(BoardSurface.Face face, Vector3 normal, Area footprint, Rectangle2D bounds, boolean ground) {
         float height(Vector3 point) {
@@ -129,20 +137,172 @@ final class BoardDecals {
     }
 
     private static Area footprint(Coords owner, BoardDecoration object) {
-        Vector3 anchor = anchor(owner, object);
-        List<Vector3> corners = new ArrayList<>();
-        for (int[] corner : new int[][] { {-1, -1}, {1, -1}, {1, 1}, {-1, 1} }) {
-            corners.add(new Vector3(corner[0] * BoardGeometry.width() / 2, corner[1] * BoardGeometry.height() / 2, 0)
-                  .scl((float) object.scale()).rotate(Vector3.Z, (float) object.rotation()).add(anchor));
-        }
-        Area result = area(corners);
+        Area result = area(paintRectangle(owner, object));
         if (object.clipToHex()) { result.intersect(hex(owner)); }
         return result;
+    }
+
+    /** A tilted decal is a rotated stamp projected onto its receiving surface, not a floating quad. */
+    private static List<Vector3> paintRectangle(Coords owner, BoardDecoration object) {
+        Vector3 anchor = anchor(owner, object);
+        double[] size = size(object);
+        List<Vector3> corners = new ArrayList<>();
+        for (int[] corner : new int[][] { {-1, -1}, {1, -1}, {1, 1}, {-1, 1} }) {
+            double[] point = object.rotateVector(corner[0] * size[0] / 2, corner[1] * size[1] / 2, 0);
+            corners.add(new Vector3((float) point[0], (float) point[1], 0).add(anchor));
+        }
+        Vector3 a = corners.get(0), b = corners.get(1), c = corners.get(2);
+        float cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        if (Math.abs(cross) < .0001f) { return List.of(); }
+        if (cross < 0) { java.util.Collections.reverse(corners); }
+        return corners;
+    }
+
+    /** Inverse of the stamp's projected XY basis; shared by rendering and footprint clipping. */
+    static PaintUv paintUv(BoardDecoration object) {
+        double[] size = size(object);
+        double[] x = object.rotateVector(size[0], 0, 0);
+        double[] y = object.rotateVector(0, size[1], 0);
+        double determinant = x[0] * y[1] - x[1] * y[0];
+        double mirror = object.mirror() ? -1 : 1;
+        return new PaintUv(y[1] / determinant * mirror, -y[0] / determinant * mirror,
+              x[1] / determinant, -x[0] / determinant);
+    }
+
+    /** The stamp's width and length in world units: its art's footprint ({@link BoardDecalArt}) times scale and stretch. */
+    private static double[] size(BoardDecoration object) {
+        var art = BoardDecalArt.footprint(object.asset());
+        return new double[] { art.width() * BoardGeometry.hexScale() * object.scale() * object.stretch().x(),
+              art.height() * BoardGeometry.hexScale() * object.scale() * object.stretch().y() };
+    }
+
+    record PaintUv(double ux, double uy, double vx, double vy) {
+        float u(double x, double y) { return (float) (.5 + ux * x + uy * y); }
+        float v(double x, double y) { return (float) (.5 + vx * x + vy * y); }
     }
 
     private static Vector3 anchor(Coords coords, BoardDecoration object) {
         return BoardGeometry.center(coords, 0).add((float) object.x() * BoardGeometry.width(),
               (float) object.y() * BoardGeometry.height(), 0);
+    }
+
+    /**
+     * The legacy paint overlay the full 3D render draws on a hex (its layer of legacy emblems, rubble paths, gravel,
+     * deposits and transitions): without the limbs where the scene draws those as models.
+     */
+    static BoardScene.Pixels legacyPaint(BoardScene.Tile tile) {
+        return tile.decalsWithoutLimbs() != null ? tile.decalsWithoutLimbs() : tile.decals();
+    }
+
+    /** Drop the decal images' alpha with the other board kits on an asset reload. */
+    static void reload() { ALPHA.clear(); }
+
+    /** An image's alpha by texel, row 0 at the top as the paint texture samples it; empty for a missing image. */
+    private record Alpha(int width, int height, byte[] values) {
+        static final Alpha NONE = new Alpha(0, 0, new byte[0]);
+
+        static Alpha of(String id) {
+            File file = BoardDecalArt.image(id);
+            try {
+                BufferedImage image = file.isFile() ? ImageIO.read(file) : null;
+                if (image == null) { return NONE; }
+                int width = image.getWidth(), height = image.getHeight();
+                int[] argb = image.getRGB(0, 0, width, height, null, 0, width);
+                byte[] values = new byte[argb.length];
+                for (int i = 0; i < argb.length; i++) { values[i] = (byte) (argb[i] >>> 24); }
+                return new Alpha(width, height, values);
+            } catch (IOException error) {
+                // Paint that cannot be read draws nothing (GpuAssets.decorationPaint), so it clears no cover either.
+                return NONE;
+            }
+        }
+
+        /** The nearest texel's alpha (0..1) at texture coordinates (u, v); 0 outside the image. */
+        float at(float u, float v) {
+            if (!(u >= 0 && u < 1 && v >= 0 && v < 1)) { return 0; }
+            return (values[(int) (v * height) * width + (int) (u * width)] & 255) / 255f;
+        }
+    }
+
+    /**
+     * How opaque the paint on one hex's ground is at a world point: the placed decals that paint its ground (each
+     * image's alpha at its drawn transform, so a round emblem leaves no square patch) and the hex's legacy paint overlay,
+     * composited. Every 3D view's ground cover grows by one minus this ({@link BoardPlants}), so nothing grows through
+     * paint. Each paint counts with its largest alpha within one model px of the point, the margin cover keeps from a
+     * road's shoulder. Built once per hex on the terrain worker; roofs, decks, industrial tops, fuel tanks and ice grow
+     * no cover, so only paint on the ground counts.
+     */
+    static final class Opacity {
+        /** One paint's alpha (0..1) at a world point, and whether a point lies within its reach plus the margin. */
+        private interface Paint {
+            float alpha(float x, float y);
+
+            default boolean near(float x, float y) { return true; }
+        }
+
+        /** A placed decal at its drawn transform ({@link #paintUv}); {@code du}, {@code dv} are the margin in u and v. */
+        private record Placed(BoardDecoration object, Coords owner, float x, float y, PaintUv uv, float du, float dv,
+              Alpha image) implements Paint {
+            @Override public boolean near(float px, float py) {
+                float u = uv.u(px - x, py - y), v = uv.v(px - x, py - y);
+                return u >= -du && u <= 1 + du && v >= -dv && v <= 1 + dv;
+            }
+
+            @Override public float alpha(float px, float py) {
+                if (object.clipToHex() && !BoardGeometry.contains(owner, px, py)) { return 0; }
+                return image.at(uv.u(px - x, py - y), uv.v(px - x, py - y));
+            }
+        }
+
+        /** The legacy overlay, mapped as the ground's top vertices map it ({@code GpuTerrain.topVertex}). */
+        private record Legacy(Coords coords, BoardScene.Pixels pixels) implements Paint {
+            @Override public float alpha(float x, float y) {
+                float u = .5f + (x - BoardGeometry.centerX(coords)) / BoardGeometry.width() * BoardRim.GROUND_UV_SCALE;
+                float v = .5f - (y - BoardGeometry.centerY(coords)) / BoardGeometry.height() * BoardRim.GROUND_UV_SCALE;
+                if (!(u >= 0 && u < 1 && v >= 0 && v < 1)) { return 0; }
+                return (pixels.rgba((int) (v * pixels.height()) * pixels.width() + (int) (u * pixels.width())) & 255) / 255f;
+            }
+        }
+
+        private final List<Paint> paints;
+
+        private Opacity(List<Paint> paints) { this.paints = paints; }
+
+        /** The paint on {@code tile}'s ground from its stamps ({@link #index}), or null when nothing paints it. */
+        static Opacity of(BoardScene.Tile tile, List<Stamp> stamps) {
+            float margin = BoardGeometry.hexScale();
+            List<Paint> paints = new ArrayList<>();
+            for (Stamp stamp : stamps) {
+                var object = stamp.object();
+                var receiver = object.placement().receiver();
+                if (receiver == null || !receiver.terrain().equals("ground")) { continue; }
+                Alpha image = ALPHA.computeIfAbsent(object.asset(), id -> new BoardKit<>(() -> Alpha.of(id))).get();
+                if (image.width() == 0) { continue; }
+                PaintUv uv = paintUv(object);
+                Vector3 anchor = anchor(stamp.owner(), object);
+                paints.add(new Placed(object, stamp.owner(), anchor.x, anchor.y, uv,
+                      (float) Math.hypot(uv.ux(), uv.uy()) * margin, (float) Math.hypot(uv.vx(), uv.vy()) * margin, image));
+            }
+            BoardScene.Pixels legacy = legacyPaint(tile);
+            if (legacy != null) { paints.add(new Legacy(tile.coords(), legacy)); }
+            return paints.isEmpty() ? null : new Opacity(List.copyOf(paints));
+        }
+
+        /** The paint's opacity (0..1) at world (x, y): each paint's largest alpha within the margin, composited. */
+        float at(float x, float y) {
+            float margin = BoardGeometry.hexScale(), clear = 1;
+            for (Paint paint : paints) {
+                // Most roots lie outside a decal and its margin: one transform and a bounds test.
+                if (!paint.near(x, y)) { continue; }
+                float largest = paint.alpha(x, y);
+                for (int i = 0; i < 4 && largest < 1; i++) {
+                    largest = Math.max(largest, paint.alpha(x + (i == 0 ? margin : i == 1 ? -margin : 0),
+                          y + (i == 2 ? margin : i == 3 ? -margin : 0)));
+                }
+                clear *= 1 - largest;
+            }
+            return 1 - clear;
+        }
     }
 
     /** Finished ground is a height field; roofs and decks can overlap it and each other. Liquids are never supplied. */
@@ -176,12 +336,8 @@ final class BoardDecals {
     /** Ground is a height field: its triangles do not occlude each other. Clip each once, without pairwise Areas. */
     private static List<BoardSurface.Face> projectGround(Coords owner, Coords recipient, List<BoardSurface.Face> faces,
           BoardDecoration object) {
-        Vector3 anchor = anchor(owner, object);
-        List<Vector3> rectangle = new ArrayList<>(), hex = new ArrayList<>();
-        for (int[] corner : new int[][] { {-1, -1}, {1, -1}, {1, 1}, {-1, 1} }) {
-            rectangle.add(new Vector3(corner[0] * BoardGeometry.width() / 2, corner[1] * BoardGeometry.height() / 2, 0)
-                  .scl((float) object.scale()).rotate(Vector3.Z, (float) object.rotation()).add(anchor));
-        }
+        List<Vector3> rectangle = paintRectangle(owner, object), hex = new ArrayList<>();
+        if (rectangle.isEmpty()) { return List.of(); }
         for (int i = 0; i < 6; i++) { hex.add(BoardGeometry.corner(recipient, 0, i)); }
         List<BoardSurface.Face> result = new ArrayList<>();
         for (var face : faces) {
@@ -313,6 +469,7 @@ final class BoardDecals {
     }
 
     private static Area area(List<Vector3> points) {
+        if (points.isEmpty()) { return new Area(); }
         Path2D.Float path = new Path2D.Float();
         path.moveTo(points.getFirst().x, points.getFirst().y);
         for (int i = 1; i < points.size(); i++) { path.lineTo(points.get(i).x, points.get(i).y); }

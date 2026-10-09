@@ -306,6 +306,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String GUI_SCALE = "GUIScale";
     public static final String BOARD_VIEW_3D = "BoardView3D";
     public static final String BOARD_VIEW_3D_GRAPHICS_CARD = "BoardView3DGraphicsCard";
+    /** The 3D board editor's Layers share of its right column; negative: their natural height. */
+    public static final String BOARD_EDITOR_LAYERS_SPLIT = "BoardEditorLayersSplit";
+    /** Whether the 3D board editor's side view is open, as the user last left it. */
+    public static final String BOARD_EDITOR_SIDE_VIEW = "BoardEditorSideView";
     public static final String LOBBY_MEK_TABLE_UNIT_WIDTH = "LobbyMekTableUnitWidth";
     public static final String LOBBY_MEK_TABLE_PILOT_WIDTH = "LobbyMekTablePilotWidth";
     public static final String LOBBY_MEK_TABLE_PLAYER_WIDTH = "LobbyMekTablePlayerWidth";
@@ -848,6 +852,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(GUI_SCALE, 1);
         store.setDefault(BOARD_VIEW_3D, true);
         store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "SYSTEM");
+        store.setDefault(BOARD_EDITOR_LAYERS_SPLIT, -1f);
+        store.setDefault(BOARD_EDITOR_SIDE_VIEW, true);
         store.setDefault(LOBBY_MEK_TABLE_UNIT_WIDTH, 170);
         store.setDefault(LOBBY_MEK_TABLE_PILOT_WIDTH, 80);
         store.setDefault(LOBBY_MEK_TABLE_PLAYER_WIDTH, 50);
@@ -1882,6 +1888,22 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setBoardGraphicsCard(String card) {
         store.setValue(BOARD_VIEW_3D_GRAPHICS_CARD, card);
+    }
+
+    public float getBoardEditorLayersSplit() {
+        return store.getFloat(BOARD_EDITOR_LAYERS_SPLIT);
+    }
+
+    public void setBoardEditorLayersSplit(float split) {
+        store.setValue(BOARD_EDITOR_LAYERS_SPLIT, split);
+    }
+
+    public boolean getBoardEditorSideView() {
+        return store.getBoolean(BOARD_EDITOR_SIDE_VIEW);
+    }
+
+    public void setBoardEditorSideView(boolean open) {
+        store.setValue(BOARD_EDITOR_SIDE_VIEW, open);
     }
 
     public int getWindowPosX() {

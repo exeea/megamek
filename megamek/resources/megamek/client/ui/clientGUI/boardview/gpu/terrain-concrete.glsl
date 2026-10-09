@@ -14,13 +14,13 @@ float joint(float x, float w) {
 // map and takes its own tone and grime, so the map's repeat never shows. u runs along the face and z up it; h and d
 // are the height above the wall's foot and the depth below its rim, all in metres. Returns the map coordinates (V down
 // the face) and writes the slab's colour factor, joints included, to shade.
-vec2 slab(float u, float z, float h, float d, float projection, out float shade) {
+vec2 slab(float u, float z, float h, float d, out float shade) {
     float levelMetres = u_levelHeight / u_metre;
     float course = floor(z / levelMetres + .001);
     float up = z / levelMetres + .001 - course;
     float width = 4.8;
-    float along = u / width + .5 * mod(course, 2.0) + projection * .37;
-    vec3 id = vec3(floor(along), course, projection);
+    float along = u / width + .5 * mod(course, 2.0);
+    vec3 id = vec3(floor(along), course, 0.0);
     vec2 window = vec2(hash(id), hash(id + 17.3));
     // Each slab's own tone, grime settling toward its foot and run-off stains hanging from its top edge.
     shade = mix(.9, 1.07, hash(id + 5.1)) * mix(.84, 1.0, smoothstep(0.0, .3, up));
@@ -34,20 +34,22 @@ vec2 slab(float u, float z, float h, float d, float projection, out float shade)
 
 void concreteSlab(vec3 world, vec3 face, vec3 projection, float h, float d,
       inout vec3 albedo, inout vec3 normal, inout float occlusion, inout float cavity) {
-    vec3 axes = pow(abs(projection), vec3(4.0));
     // Evaluate contact shading per fragment so it stays at the foot and rim of a large planar panel.
     float shelterDistance = (d - 2.2) / 1.6;
     float shelter = max(0.0, 1.0 - shelterDistance * shelterDistance);
     occlusion = (1.0 - .4 * exp(-h / 1.6)) * (1.0 - .25 * shelter * shelter);
-    float along = clamp((axes.x / max(axes.x + axes.y, 1e-4) - .5) * 6.0 + .5, 0.0, 1.0);
-    float shadeX, shadeY;
-    vec2 sx = slab(world.y * sign(projection.x), world.z, h, d, 1.0, shadeX);
-    vec2 sy = slab(-world.x * sign(projection.y), world.z, h, d, 0.0, shadeY);
-    albedo = mix(mapTexel(u_sculptLayers.w, sy).rgb * shadeY,
-          mapTexel(u_sculptLayers.w, sx).rgb * shadeX, along);
+    // Follow the rim's fixed azimuth. Blending world XZ/YZ projections shears diagonal slopes' slab joints and grain.
+    // Keep courses at their actual elevations and the same coordinates across the wall's lighting facets.
+    vec3 tangent = normalize(vec3(-projection.y, projection.x, 0.0));
+    float shade;
+    vec2 uv = slab(dot(world, tangent), world.z, h, d, shade);
+    albedo = mapTexel(u_sculptLayers.w, uv).rgb * shade;
     if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
-        normal = wallNormal(u_sculptLayers.w + 1.0, sx, sy, face, along);
-        float pores = mix(mapTexel(u_sculptLayers.w + 1.0, sy).a, mapTexel(u_sculptLayers.w + 1.0, sx).a, along);
-        cavity = pores * .5 + .5;
+        vec4 texel = mapTexel(u_sculptLayers.w + 1.0, uv);
+        vec3 detail = texel.rgb * 2.0 - 1.0;
+        vec3 down = normalize(cross(tangent, face));
+        vec3 across = cross(face, down);
+        normal = normalize(across * detail.x + down * detail.y + face * detail.z);
+        cavity = texel.a * .5 + .5;
     }
 }

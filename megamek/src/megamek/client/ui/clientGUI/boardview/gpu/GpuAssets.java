@@ -41,9 +41,14 @@ final class GpuAssets implements Disposable {
     private final File root = new File(Configuration.dataDir(), "models/board");
     private final Map<String, Model> models = new HashMap<>();
     private final Map<String, List<Model>> modelLods = new HashMap<>();
+    /** Each recoloured model's decoded near mesh, in the model's own colours. */
+    private final Map<String, ModelData> recolourable = new HashMap<>();
+    /** Whether each placed model has colour slots, read from its file's JSON once. */
+    private final Map<String, Boolean> hasSlots = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
     private final Map<String, GpuBuilding> buildings = new HashMap<>();
     private final Map<BoardIndustrial.Layout, Model> industrial = new HashMap<>();
+    private final Map<BoardMaglev.Layout, Model> maglev = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
     private final Map<String, Cliff> cliffs = new HashMap<>();
     private final Map<Boolean, TextureArray> magmas = new HashMap<>();
@@ -209,19 +214,120 @@ final class GpuAssets implements Disposable {
         return lodModel(name, 0);
     }
 
+    /**
+     * The model in {@code colours} (a placed object's or a layout row's): the model itself, or one copy per set of
+     * colours with its colour slots replaced ({@link RigidGlb#recolour}). Objects of one colour share their copy, so they
+     * still batch and instance together.
+     */
+    Model model(String name, megamek.common.board.BoardDecoration.Colours colours) {
+        if (colours.slots().isEmpty()) { return model(name); }
+        return models.computeIfAbsent(name + colours.slots(), key -> {
+            // The file is decoded once; each set of colours recolours a copy of its vertices for its own GPU mesh.
+            ModelData data = decoded(name);
+            var mesh = data.meshes.first();
+            float[] own = mesh.vertices;
+            mesh.vertices = own.clone();
+            try {
+                RigidGlb.recolour(data, colours);
+                return createModel(data);
+            } finally { mesh.vertices = own; }
+        });
+    }
+
+    /** A recolourable model's decoded near mesh, in its own colours; decoded once. */
+    private ModelData decoded(String name) {
+        return recolourable.computeIfAbsent(name, shape -> RigidGlb.loadLods(RigidGlb.source(root, shape), root.toPath()).getFirst());
+    }
+
+    /**
+     * The editor's form of a placed model: a model with colour slots is one shared mesh whose placements pass their
+     * colours per draw ({@link RigidGlb#colourSlotMesh}); another model is the model itself, a missing file the marked box.
+     */
+    Model slotted(String name) {
+        var source = RigidGlb.source(root, name);
+        if (!source.file().isFile()) { return decoration(name, megamek.common.board.BoardDecoration.Colours.NONE); }
+        if (!hasSlots.computeIfAbsent(name, key -> !RigidGlb.colourSlots(source.file()).isEmpty())) { return model(name); }
+        // The key cannot meet a detail level's name or a colour copy's "name[...]".
+        return models.computeIfAbsent(name + "#slots", key -> createModel(RigidGlb.colourSlotMesh(decoded(name))));
+    }
+
     /** Missing authored references remain editable and visibly marked instead of aborting the board renderer. */
-    Model decoration(String name) {
-        if (new File(root, name + ".glb").isFile()) { return model(name); }
+    Model decoration(String name, megamek.common.board.BoardDecoration.Colours colours) {
+        if (RigidGlb.source(root, name).file().isFile()) { return model(name, colours); }
         return models.computeIfAbsent("missing-decoration", key -> new com.badlogic.gdx.graphics.g3d.utils.ModelBuilder()
               .createBox(8, 8, 8, new com.badlogic.gdx.graphics.g3d.Material(ColorAttribute.createDiffuse(1, .25f, .1f, 1)),
                     com.badlogic.gdx.graphics.VertexAttributes.Usage.Position | com.badlogic.gdx.graphics.VertexAttributes.Usage.Normal));
     }
 
+    /**
+     * A decal's image by path convention ({@link megamek.common.board.BoardDecalArt#image}): one mipmapped texture per
+     * image, clamped at its edges, so no neighbour's texels bleed into any mip level (paint draws are grouped per image
+     * by {@code Layer.paintGroups} instead). Its mip levels are averaged by alpha ({@link #paintTexture}).
+     */
     Texture decorationPaint(String asset) {
-        var entry = megamek.common.board.BoardEditorBlueprint.get().asset(asset);
-        if (entry == null || entry.image().isEmpty()) { return null; }
-        FileHandle file = new FileHandle(new File(Configuration.dataDir(), entry.image()));
-        return file.exists() ? texture(file) : null;
+        File file = megamek.common.board.BoardDecalArt.image(asset);
+        if (!file.isFile()) { return null; }
+        return materials.computeIfAbsent(file.toPath().toAbsolutePath().normalize().toString(), key -> paintTexture(file));
+    }
+
+    /**
+     * Straight-alpha mip levels whose colours are averaged by alpha, as premultiplied filtering would average them:
+     * glGenerateMipmap would weigh the colour of transparent texels equally and tint multi-coloured edges at distance.
+     * A level's fully transparent texels keep the plain average of the level above, the image's own edge colour.
+     */
+    private static Texture paintTexture(File file) {
+        Pixmap source = new Pixmap(new FileHandle(file));
+        Pixmap image = new Pixmap(source.getWidth(), source.getHeight(), Pixmap.Format.RGBA8888);
+        try {
+            image.setBlending(Pixmap.Blending.None);
+            image.drawPixmap(source, 0, 0);
+            Texture texture = new Texture(image, false);
+            int width = image.getWidth(), height = image.getHeight();
+            float[] weighted = new float[width * height * 4], plain = new float[width * height * 3];
+            var bytes = image.getPixels();
+            for (int texel = 0; texel < width * height; texel++) {
+                float alpha = (bytes.get(texel * 4 + 3) & 255) / 255f;
+                for (int c = 0; c < 3; c++) {
+                    plain[texel * 3 + c] = (bytes.get(texel * 4 + c) & 255) / 255f;
+                    weighted[texel * 4 + c] = plain[texel * 3 + c] * alpha;
+                }
+                weighted[texel * 4 + 3] = alpha;
+            }
+            texture.bind();
+            for (int level = 1; width > 1 || height > 1; level++) {
+                int w = Math.max(1, width / 2), h = Math.max(1, height / 2);
+                float[] nextWeighted = new float[w * h * 4], nextPlain = new float[w * h * 3];
+                var upload = com.badlogic.gdx.utils.BufferUtils.newByteBuffer(w * h * 4);
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        int texel = y * w + x;
+                        for (int dy = 0; dy < 2; dy++) {
+                            for (int dx = 0; dx < 2; dx++) {
+                                int from = Math.min(height - 1, 2 * y + dy) * width + Math.min(width - 1, 2 * x + dx);
+                                for (int c = 0; c < 4; c++) { nextWeighted[texel * 4 + c] += weighted[from * 4 + c] / 4; }
+                                for (int c = 0; c < 3; c++) { nextPlain[texel * 3 + c] += plain[from * 3 + c] / 4; }
+                            }
+                        }
+                        float alpha = nextWeighted[texel * 4 + 3];
+                        for (int c = 0; c < 3; c++) {
+                            if (alpha > 0) { nextPlain[texel * 3 + c] = Math.min(1, nextWeighted[texel * 4 + c] / alpha); }
+                            upload.put(texel * 4 + c, (byte) Math.round(nextPlain[texel * 3 + c] * 255));
+                        }
+                        upload.put(texel * 4 + 3, (byte) Math.round(alpha * 255));
+                    }
+                }
+                Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, level, GL20.GL_RGBA, w, h, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, upload);
+                weighted = nextWeighted; plain = nextPlain; width = w; height = h;
+            }
+            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+            texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
+            // Ground paint is seen at grazing angles; keep its lines sharp along the view direction.
+            texture.setAnisotropicFilter(8);
+            return texture;
+        } finally {
+            source.dispose();
+            image.dispose();
+        }
     }
 
     /** Custom kits override the exact tileset path for buildings, fuel tanks and industrial structures. */
@@ -240,9 +346,42 @@ final class GpuAssets implements Disposable {
         return building == null ? null : building.assemble(levels, seed, withInterior);
     }
 
-    void retainBuildings(java.util.Set<GpuBuilding.Assembly> live) {
-        buildings.values().stream().filter(java.util.Objects::nonNull).forEach(building -> building.retain(live));
+    /**
+     * What each terrain sharing these assets draws: its installed chunks at its last commit, plus whatever its builds
+     * took since ({@link #take}) and have not installed yet.
+     */
+    private record Live(java.util.Set<GpuBuilding.Assembly> buildings, java.util.Set<Model> models) { }
+    private final Map<Object, Live> users = new java.util.IdentityHashMap<>();
+
+    /**
+     * Records the generated buildings, industrial plants and maglev routes that {@code user}'s installed chunks draw,
+     * then retires those no user of these assets draws or is still building with. On the GL thread, at a scene commit,
+     * when {@code user} has no chunk build in flight.
+     */
+    void retain(Object user, java.util.Set<GpuBuilding.Assembly> buildings, java.util.Set<Model> industrial, java.util.Set<Model> maglev) {
+        java.util.Set<Model> models = new java.util.HashSet<>(industrial);
+        models.addAll(maglev);
+        users.put(user, new Live(new java.util.HashSet<>(buildings), models));
+        java.util.Set<GpuBuilding.Assembly> liveBuildings = new java.util.HashSet<>();
+        java.util.Set<Model> liveModels = new java.util.HashSet<>();
+        for (Live live : users.values()) { liveBuildings.addAll(live.buildings()); liveModels.addAll(live.models()); }
+        this.buildings.values().stream().filter(java.util.Objects::nonNull).forEach(building -> building.retain(liveBuildings));
+        retain(this.industrial, liveModels);
+        retain(this.maglev, liveModels);
     }
+
+    /**
+     * Keeps what one of {@code user}'s chunk builds took until {@code user}'s own next {@link #retain}, so another
+     * user's commit cannot retire it between collection and installation.
+     */
+    void take(Object user, GpuBuilding.Assembly building, Model model) {
+        Live live = users.computeIfAbsent(user, key -> new Live(new java.util.HashSet<>(), new java.util.HashSet<>()));
+        if (building != null) { live.buildings().add(building); }
+        if (model != null) { live.models().add(model); }
+    }
+
+    /** A disposed borrower draws nothing; the next {@link #retain} retires what only it drew. */
+    void release(Object user) { users.remove(user); }
 
     Model industrial(BoardIndustrial.Layout layout) {
         return industrial.computeIfAbsent(layout, key -> {
@@ -268,8 +407,12 @@ final class GpuAssets implements Disposable {
     }
 
     /** Procedural models belong to this renderer and survive while installed or cached chunks use them. */
-    void retainIndustrial(java.util.Set<Model> live) {
-        industrial.values().removeIf(model -> {
+    Model maglev(BoardMaglev.Layout layout) {
+        return maglev.computeIfAbsent(layout, key -> new Model(BoardMaglev.model(key)));
+    }
+
+    private static void retain(Map<?, Model> models, java.util.Set<Model> live) {
+        models.values().removeIf(model -> {
             if (live.contains(model)) { return false; }
             model.dispose();
             return true;
@@ -282,11 +425,12 @@ final class GpuAssets implements Disposable {
 
     Model lodModel(String name, int level) {
         return modelLods.computeIfAbsent(name, shape -> {
-            FileHandle file = new FileHandle(new File(root, shape + ".glb"));
-            if (!file.exists()) {
-                throw new IllegalArgumentException("Missing board model " + file.path());
+            // A tree's winter form may be its bare file's snow variant.
+            var source = RigidGlb.source(root, shape);
+            if (!source.file().isFile()) {
+                throw new IllegalArgumentException("Missing board model " + source.file().getPath());
             }
-            var data = RigidGlb.loadLods(file, root.toPath());
+            var data = RigidGlb.loadLods(source, root.toPath());
             List<Model> levels = new ArrayList<>();
             for (int index = 0; index < data.size(); index++) {
                 int previous = data.indexOf(data.get(index));
@@ -609,6 +753,8 @@ final class GpuAssets implements Disposable {
 
     @Override
     public void dispose() {
+        maglev.values().forEach(Model::dispose);
+        maglev.clear();
         industrial.values().forEach(Model::dispose);
         industrial.clear();
         buildings.values().stream().filter(java.util.Objects::nonNull).forEach(GpuBuilding::dispose);
@@ -636,6 +782,7 @@ final class GpuAssets implements Disposable {
             flatNormal = null;
         }
         liquids.clear();
+        users.clear();
         incline = null;
         highIncline = null;
     }

@@ -203,6 +203,10 @@ class GpuDamageTuningSmokeTest {
         SelectBox<UnitDamageDisplay.Location> location = GpuBoardTestUi.tuning(view, "tuning-damage-location");
         assertTrue(location.isDisabled());
         assertEquals(UnitDamageDisplay.Location.ALL, location.getSelected());
+        // Meks show as meeples by default; per-location damage is the location model's.
+        SelectBox<UnitDisplayMode> display = GpuBoardTestUi.tuning(view, "tuning-unit-display");
+        display.setSelected(UnitDisplayMode.MODELS);
+        view.render();
         var actual = displayedDamage(view, 1);
         assertFalse(override.isChecked());
         assertTrue(slider.isDisabled());
@@ -293,6 +297,9 @@ class GpuDamageTuningSmokeTest {
         assertEquals(UnitDamageDisplay.Location.ALL, location.getSelected());
         assertTrue(slider.isDisabled());
         assertEquals(0, slider.getValue());
+        // Defaults also brings back the Mek meeple.
+        display.setSelected(UnitDisplayMode.MODELS);
+        view.render();
         assertEquals(actual, displayedDamage(view, 1), "Defaults restores actual damage after the destroyed preview");
         SwingUtilities.invokeAndWait(() -> assertEquals(actual, UnitModelSelection.damage(fixture.entity)));
         SwingUtilities.invokeAndWait(() -> assertEquals(28, ((ConvInfantry) fixture.game.getEntity(3)).getActiveTroopers()));

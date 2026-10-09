@@ -47,6 +47,7 @@ class GpuUnitShaderTest {
           fragment, void main() {
           fragment, #if defined(emissiveTextureFlag) && defined(emissiveColorFlag)
           vertex, #endif // sphericalHarmonicsFlag
+          vertex, v_color = a_color;
           fragment, #if (!defined(lightingFlag))
           fragment, #endif // end fogFlag
           """)

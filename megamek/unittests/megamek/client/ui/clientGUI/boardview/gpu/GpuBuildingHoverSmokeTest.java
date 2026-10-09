@@ -377,7 +377,8 @@ class GpuBuildingHoverSmokeTest {
                 terrain.renderTransparent(camera);
                 Pixmap opened = Pixmap.createFromFrameBuffer(0, 0, width, height);
                 try {
-                    int changedInside = 0, visibleWalls = 0, unchangedOutside = 0, changedOutside = 0;
+                    int changedInside = 0, visibleWalls = 0, changedRoof = 0, visibleRoof = 0;
+                    int unchangedOutside = 0, changedOutside = 0;
                     String outsideSample = "";
                     for (int x = 0; x < width; x += 4) {
                         for (int y = 0; y < 0 + camera.viewportHeight; y += 4) {
@@ -386,17 +387,22 @@ class GpuBuildingHoverSmokeTest {
                                   depth.get(y * width + x) * 2 - 1).prj(camera.invProjectionView);
                             if (!buildingBounds.contains(point) || point.z <= buildingBounds.min.z + .01f) { continue; }
                             float z = point.z / BoardGeometry.level();
-                            if (Math.abs(z - level) < .04f || Math.abs(z - level - 1) < .04f) { continue; }
+                            if (Math.abs(z - level) < .04f || level != 4 && Math.abs(z - level - 1) < .04f) { continue; }
                             int a = baseline.getPixel(x, y), b = opened.getPixel(x, y);
                             int difference = Math.abs((a >>> 24) - (b >>> 24))
                                   + Math.abs((a >>> 16 & 255) - (b >>> 16 & 255)) + Math.abs((a >>> 8 & 255) - (b >>> 8 & 255));
-                            if (level < 5 && level != 1 && z > level && z < level + 1) {
-                                if (difference > 10) { changedInside++; }
+                            if (level < 5 && level != 1 && z > level && (z < level + 1 || level == 4)) {
                                 int hidden = hiddenWalls.getPixel(x, y);
                                 int wallContribution = Math.abs((hidden >>> 24) - (b >>> 24))
                                       + Math.abs((hidden >>> 16 & 255) - (b >>> 16 & 255))
                                       + Math.abs((hidden >>> 8 & 255) - (b >>> 8 & 255));
-                                if (wallContribution > 10) { visibleWalls++; }
+                                if (level == 4 && z >= 5 - .002f) {
+                                    if (difference > 10) { changedRoof++; }
+                                    if (wallContribution > 10) { visibleRoof++; }
+                                } else {
+                                    if (difference > 10) { changedInside++; }
+                                    if (wallContribution > 10) { visibleWalls++; }
+                                }
                             } else {
                                 if (difference > 10) {
                                     changedOutside++;
@@ -410,13 +416,19 @@ class GpuBuildingHoverSmokeTest {
                         PixmapIO.writePNG(new FileHandle(
                               "build/gpu-board-review/hover-floor-" + (camera.projection.val[Matrix4.M33] == 0) + ".png"), opened, -1, true);
                     }
-                    assertTrue(unchangedOutside > 100, "Other storeys and roof must remain visible");
+                    if (level == 4) {
+                        PixmapIO.writePNG(new FileHandle(
+                              "build/gpu-board-review/hover-top-floor-" + (camera.projection.val[Matrix4.M33] == 0) + ".png"), opened, -1, true);
+                        assertTrue(changedRoof > 10, "Hovering the top storey must also fade the roof: " + changedRoof);
+                        assertTrue(visibleRoof > 10, "The faded roof must remain visible: " + visibleRoof);
+                    }
+                    assertTrue(unchangedOutside > 100, "Storeys outside the cutaway must remain visible");
                     assertEquals(0, changedOutside, "Hover must not alter walls outside the highlighted storey: " + level + outsideSample);
                     if (level < 5 && level != 1) {
                         assertTrue(changedInside > 10, "The highlighted storey's walls must become translucent: " + level);
                         assertTrue(visibleWalls > 10, "Hovered walls must remain visible rather than disappearing: " + level);
                     }
-                    if (level == 2) { checkDepth(view, terrain, ui); }
+                    if (level == 2 || level == 4) { checkDepth(view, terrain, ui); }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } finally { opened.dispose(); hiddenWalls.dispose(); }
             }

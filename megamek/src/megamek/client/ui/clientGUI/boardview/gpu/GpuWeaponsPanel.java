@@ -47,7 +47,8 @@ import megamek.common.units.Entity;
  * target pills in letter order, the assign line, one row per weapon of the acting unit with its roll and slot button,
  * and the heat if the queued weapons fire. A weapon's name selects and arms it, a pill focuses its target (a unit, a
  * hex, a building or a minefield), and the slots assign, remove or retarget; every order goes through the fire orders.
- * On another player's firing turn it shows the own focus unit's draft read-only (H33).
+ * The fixed footer's Alpha Strike assigns all available weapons to the focus. On another player's firing turn it
+ * shows the own focus unit's draft read-only (H33).
  */
 final class GpuWeaponsPanel implements GpuHud.Component {
     private static final String SEPARATOR = " · ";
@@ -98,6 +99,9 @@ final class GpuWeaponsPanel implements GpuHud.Component {
     private final GpuHudKit.HeatBar heatBar;
     private final Cell<GpuHudKit.HeatBar> barCell;
     private final Label heatStatus;
+    private final Table footer = new Table();
+    private final Cell<Actor> footerCell;
+    private final UiButton alphaStrike;
     private final Drawable rowPlain;
     private final Drawable rowSelected;
     private final Drawable pillPlain;
@@ -186,12 +190,29 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         heatSection.setName("weapons-heat");
         heatSection.add(new Image(ui.skin.getDrawable("rule"))).growX().height(1).row();
         heatSection.add(heat).growX();
-        heatCell = root.add((Actor) null).growX();
+        heatCell = footer.add((Actor) null).growX();
+        footer.row();
+        alphaStrike = ui.button("hud", null, text("GpuBoard.hud.weapons.alphaStrike"), null);
+        alphaStrike.setName("weapons-alpha-strike");
+        ui.tip(alphaStrike).getActor().setText(text("GpuBoard.hud.weapons.alphaStrikeTip"));
+        onChange(alphaStrike, () -> {
+            state.armedWeapon = -1;
+            source.fire().assignAll(fire.focus().key());
+        });
+        footer.setName("weapons-footer");
+        ui.footer(footer).add(alphaStrike).growX();
+        footerCell = root.add((Actor) null).growX();
     }
 
     @Override
     public Actor actor() {
         return root;
+    }
+
+    /** The fixed controls and at least one weapon row must fit below the minimap. */
+    float minimumHeight() {
+        return root.getMinHeight() + (list.hasChildren()
+              ? ((Table) list.getChildren().first()).getPrefHeight() + ROW_GAP : 0);
     }
 
     @Override
@@ -305,6 +326,14 @@ final class GpuWeaponsPanel implements GpuHud.Component {
             }
         }
         showHeat(view.editable() ? view.heat() : null);
+        footerCell.setActor(view.editable() ? footer : null);
+        TargetKey focus = view.focus().key();
+        alphaStrike.setDisabled(!view.editable() || focus.equals(TargetKey.NONE)
+              || view.weapons().stream().noneMatch(weapon -> {
+                  Attack attack = attack(view.attacks(), weapon.eqNum());
+                  return attack != null ? !attack.target().equals(focus)
+                        : weapon.usable() && weapon.target().equals(focus) && weapon.reason().isEmpty();
+              }));
     }
 
     /**
@@ -322,7 +351,11 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         // A target's letter in its colour; the focused enemy without attacks shows the new assignment's "+".
         pill.add(target == null ? kit.square("+", Color.WHITE, newLetter, false) : kit.letter(target.letter(), false));
         String name = name(view, key);
-        pill.add(ui.label(name, "hud-medium", 11.5f, focused ? ON_INK : UiTheme.TEXT)).padLeft(6);
+        Label label = ui.label(name, "hud-medium", 11.5f, focused ? ON_INK : UiTheme.TEXT);
+        // Keep short pills at their natural width; let the group shrink long ones and wrap their names.
+        float nameWidth = label.getPrefWidth();
+        label.setWrap(true);
+        pill.add(label).growX().minWidth(0).prefWidth(nameWidth).padLeft(6);
         if (target != null && target.primary()) {
             pill.add(ui.icon("star", 11, UiTheme.AMBER)).padLeft(6);
         }

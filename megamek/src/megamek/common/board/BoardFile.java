@@ -221,12 +221,30 @@ public final class BoardFile {
             require(entry.get("decorations").isArray(), "decorations must be an array");
             List<BoardDecoration> values = new ArrayList<>();
             for (JsonNode object : entry.get("decorations")) {
-                only(object, "id", "kind", "asset", "name", "position", "rotation", "mirror", "scale", "placement", "drawOrder", "clipToHex");
+                only(object, "id", "kind", "asset", "name", "position", "rotation", "rotationX", "rotationY", "mirror", "scale", "placement", "drawOrder", "clipToHex", "group", "bare",
+                      "connections", "stretch", "colours");
                 double x = 0, y = 0;
                 if (object.has("position")) {
                     JsonNode position = object.get("position");
                     require(position.isArray() && position.size() == 2, "position must contain X and Y");
                     x = finite(position.get(0)); y = finite(position.get(1));
+                }
+                var stretch = BoardDecoration.Stretch.NONE;
+                if (object.has("stretch")) {
+                    JsonNode factors = object.get("stretch");
+                    require(factors.isArray() && factors.size() == 3, "stretch must contain X, Y and Z");
+                    stretch = new BoardDecoration.Stretch(finite(factors.get(0)), finite(factors.get(1)), finite(factors.get(2)));
+                }
+                var colours = BoardDecoration.Colours.NONE;
+                if (object.has("colours")) {
+                    JsonNode slots = object.get("colours");
+                    require(slots.isArray(), "colours must be an array of #rrggbb values or null");
+                    List<String> replacements = new ArrayList<>();
+                    for (JsonNode slot : slots) {
+                        require(slot.isNull() || slot.isTextual(), "colours must be an array of #rrggbb values or null");
+                        replacements.add(slot.isNull() ? null : slot.asText());
+                    }
+                    colours = new BoardDecoration.Colours(replacements);
                 }
                 String kind = string(object, "kind", null);
                 require(!"prop".equals(kind) || !object.has("drawOrder"), "Props cannot have paint order");
@@ -243,7 +261,9 @@ public final class BoardFile {
                       number(object, "scale", 1), new BoardDecoration.Placement(string(placement, "mode", null),
                             placement.has("level") ? number(placement, "level", 0) : null, receiver,
                             placement.has("offset") ? number(placement, "offset", 0) : null), integer(object, "drawOrder", 0),
-                      bool(object, "clipToHex", "decal".equals(kind))));
+                      bool(object, "clipToHex", "decal".equals(kind)), number(object, "rotationX", 0), number(object, "rotationY", 0),
+                      string(object, "group", null), bool(object, "bare", false), integer(object, "connections", 0), stretch,
+                      colours));
             }
             hex.setDecorations(values);
         }
@@ -328,10 +348,22 @@ public final class BoardFile {
             hex.getDecorations().forEach(value -> {
                 ObjectNode object = objects.addObject().put("id", value.id()).put("kind", value.kind()).put("asset", value.asset());
                 put(object, "name", value.name());
+                put(object, "group", value.group());
                 if (value.x() != 0 || value.y() != 0) { object.putArray("position").add(value.x()).add(value.y()); }
                 if (value.rotation() != 0) { object.put("rotation", value.rotation()); }
+                if (value.rotationX() != 0) { object.put("rotationX", value.rotationX()); }
+                if (value.rotationY() != 0) { object.put("rotationY", value.rotationY()); }
                 if (value.mirror()) { object.put("mirror", true); }
+                if (value.bare()) { object.put("bare", true); }
+                if (value.connections() != 0) { object.put("connections", value.connections()); }
                 if (value.scale() != 1) { object.put("scale", value.scale()); }
+                if (!value.stretch().equals(BoardDecoration.Stretch.NONE)) {
+                    object.putArray("stretch").add(value.stretch().x()).add(value.stretch().y()).add(value.stretch().z());
+                }
+                if (!value.colours().slots().isEmpty()) {
+                    ArrayNode slots = object.putArray("colours");
+                    value.colours().slots().forEach(slot -> { if (slot == null) { slots.addNull(); } else { slots.add(slot); } });
+                }
                 if (value.kind().equals("decal")) { object.put("clipToHex", value.clipToHex()); }
                 if (value.drawOrder() != 0) { object.put("drawOrder", value.drawOrder()); }
                 ObjectNode placement = object.putObject("placement").put("mode", value.placement().mode());

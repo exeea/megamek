@@ -11,6 +11,7 @@ import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -31,7 +32,9 @@ import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -217,6 +220,44 @@ class GpuUnitVisibilitySmokeTest {
                 assertTrue(difference(opaque, outlined) > 1000, "Opaque canopies must allow unit outlines in both views");
                 capture("see-through-trees-" + (top ? "top" : "iso") + ".png");
             }
+            // Faded walls still cover an occupant visually, so opening the building must retain its team outline.
+            Coords indoors = new Coords(3, 2);
+            var building = new Hex(0, "building:2;bldg_elev:5;bldg_cf:40", "");
+            List<BoardScene.Tile> buildingTiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
+                  0, -1, false, 0, tile.surface(), tile.ground(), null, null,
+                  tile.coords().equals(indoors) ? BoardFeatures.capture(building, indoors,
+                        Map.of(Terrains.BUILDING, GpuBuildingTest.ASSET)) : List.of(), List.of())).toList();
+            BoardScene city = new BoardScene(0, scene.width(), scene.height(), buildingTiles,
+                  List.of(), List.of(), -1, "", List.of());
+            terrain.update(city);
+            ((Color) unit.userData).a = GpuUnitVisibility.ownHex(city.tile(indoors));
+            for (boolean top : new boolean[] { false, true }) {
+                if (top) { camera.resize(820, 460); }
+                camera.setIsometric(!top);
+                camera.fit(city);
+                for (int floor : new int[] { 0, 2 }) {
+                    atlas.place(unit, camera.camera, BoardGeometry.center(indoors, floor), 0, 2, false);
+                    for (float opacity : new float[] { 1, .5f, .25f }) {
+                        atmosphere.configure(new BoardAtmosphere.Settings(13, 0, opacity == .25f ? .3f : 0,
+                              2.5f, 0, 0));
+                        Pixmap faded = draw(terrain, atmosphere, visibility, batch, camera, city, units, 0, captures,
+                              false, 1, opacity);
+                        Pixmap outlined = draw(terrain, atmosphere, visibility, batch, camera, city, units, .75f,
+                              captures, false, 1, opacity);
+                        assertTrue(coloredPixels(faded, outlined, 8) > 100,
+                              "The occupant retains its blue outline: top=" + top + ", floor=" + floor + ", opacity=" + opacity);
+                        capture("see-through-building-" + (top ? "top" : "iso") + "-" + floor + "-" + opacity + ".png");
+                    }
+                }
+                float aboveRoof = terrain.roofBounds(indoors).max.z / BoardGeometry.level() + .5f;
+                atlas.place(unit, camera.camera, BoardGeometry.center(indoors, aboveRoof), 0, 2, false);
+                Pixmap roof = draw(terrain, atmosphere, visibility, batch, camera, city, units, 0, captures,
+                      false, 1, .5f);
+                assertEquals(0, difference(roof, draw(terrain, atmosphere, visibility, batch, camera, city, units, .75f,
+                      captures, false, 1, .5f)), "A unit standing above the roof remains exposed");
+            }
+            atmosphere.configure(new BoardAtmosphere.Settings(13, 0, 0, 2.5f, 0, 0));
+
             // The unit's own hex: its uneven ground, grass and scatter never count as hiding it. The soles stand a little
             // into the relief, so without that exemption the ground itself would outline them.
             Coords meadowHex = new Coords(3, 2);
@@ -261,9 +302,15 @@ class GpuUnitVisibilitySmokeTest {
     private Pixmap draw(GpuTerrain terrain, GpuAtmosphere atmosphere, GpuUnitVisibility visibility, ModelBatch batch,
           BoardCamera camera, BoardScene scene, List<ModelInstance> units, float intensity, List<Pixmap> captures,
           boolean fullViewport, float scale) {
+        return draw(terrain, atmosphere, visibility, batch, camera, scene, units, intensity, captures, fullViewport,
+              scale, 1);
+    }
+
+    private Pixmap draw(GpuTerrain terrain, GpuAtmosphere atmosphere, GpuUnitVisibility visibility, ModelBatch batch,
+          BoardCamera camera, BoardScene scene, List<ModelInstance> units, float intensity, List<Pixmap> captures,
+          boolean fullViewport, float scale, float buildingOpacity) {
         terrain.setAtmosphere(atmosphere.lighting());
-        // The effect must work with opaque terrain and the building cutaway disabled.
-        terrain.animate(0, units, 1);
+        terrain.animate(0, units, buildingOpacity);
         terrain.renderShadows(camera.camera, units);
         ScreenUtils.clear(0.02f, 0.03f, 0.04f, 1, true);
         atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
@@ -289,9 +336,10 @@ class GpuUnitVisibilitySmokeTest {
                   catch (InvocationTargetException error) { throw error.getCause(); }
               });
         try {
-            visibility.render(camera.camera, units, atmosphere.depthTexture(), 60, intensity, scale);
+            visibility.render(camera.camera, units, atmosphere.depthTexture(), 60, intensity, scale, null, null, terrain);
             if (capturesAndScissor[1] > 0) {
-                assertEquals(1, capturesAndScissor[0], "Outline depth and team colors must share one geometry capture");
+                assertEquals(terrain.hasFadedBuildings() ? 2 : 1, capturesAndScissor[0],
+                      "Units share one depth/color capture; only faded buildings need an additional depth capture");
                 if (units.size() == 1 && scale == 1) {
                     assertTrue(capturesAndScissor[1] < atmosphere.depthTexture().getWidth() * atmosphere.depthTexture().getHeight() / 2,
                           "A single unit must not scan most of the viewport");

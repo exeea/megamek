@@ -136,7 +136,7 @@ final class GpuInitiativeCard implements GpuHud.Component {
         // The start-of-game deployment's initiative belongs to no round.
         caption.setText(UiTheme.upper(shown.round() > 0
               ? Messages.getString("GpuBoard.hud.initiative.caption", shown.round())
-              : Messages.getString("GpuBoard.hud.phase.initiative")));
+              : Messages.getString("GpuBoard.hud.phase.deploymentOrder")));
         boxes.clear();
         GpuBattleStatus.InitiativeSide winner = GpuBattleStatus.winner(shown.sides());
         // Under double blind the turn order stays hidden, including who moves first (plan D4).
@@ -195,10 +195,11 @@ final class GpuInitiativeCard implements GpuHud.Component {
         return die;
     }
 
-    /** The result tag (.res): "Wins" filled, else "Moves first" outlined. */
+    /** The result tag (.res): "Wins" filled, else "Deploys first" or "Moves first" outlined. */
     private Label tag(boolean winner) {
         Label tag = ui.label(UiTheme.upper(Messages.getString(winner ? "GpuBoard.hud.initiative.wins"
-              : "GpuBoard.hud.initiative.movesFirst")), "hud-main", 11, winner ? DARK : UiTheme.MUTED);
+              : shown.round() > 0 ? "GpuBoard.hud.initiative.movesFirst" : "GpuBoard.hud.initiative.deploysFirst")),
+              "hud-main", 11, winner ? DARK : UiTheme.MUTED);
         Label.LabelStyle style = tag.getStyle();
         // padding 4 8 inside a 1-unit border; the label's line box is a unit taller than the browser's
         style.background = UiTheme.pad(new EdgeBox(white, winner ? UiTheme.MAIN : null,

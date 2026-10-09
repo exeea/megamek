@@ -33,6 +33,9 @@
 
 package megamek.common.board;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import megamek.common.Hex;
 import megamek.common.annotations.Nullable;
 import megamek.common.enums.BasementType;
@@ -400,6 +403,13 @@ public final class BridgeConstruction {
         targetHex.addTerrain(new Terrain(Terrains.BRIDGE, bridgeType, true, exits & 63));
         targetHex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, bridgeElevation));
         targetHex.addTerrain(new Terrain(Terrains.BRIDGE_CF, cf));
+        // Engineers build artificial bridges: the 3D board draws a built deck (HexAppearance.bridgeBuilt), rules ignore it.
+        // A repaired section that was built keeps its piers.
+        if (!Boolean.TRUE.equals(HexAppearance.bridgeBuilt(targetHex.getAppearance()))) {
+            Map<String, HexAppearance> appearance = new HashMap<>(targetHex.getAppearance());
+            appearance.put("bridge", HexAppearance.BUILT_BRIDGE);
+            targetHex.setAppearance(appearance);
+        }
         board.initializeAround(target.getX(), target.getY());
 
         IBuilding bridge = new BuildingTerrain(target, board, Terrains.BRIDGE, BasementType.NONE);

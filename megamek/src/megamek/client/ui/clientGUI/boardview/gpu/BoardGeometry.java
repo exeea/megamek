@@ -240,7 +240,8 @@ final class BoardGeometry {
         return null;
     }
 
-    record Hit(Coords coords, float distance, boolean hardSurface, String receiver) {
+    record Hit(Coords coords, float distance, boolean hardSurface, String receiver, BoardSurface.Face face) {
+        Hit(Coords coords, float distance, boolean hardSurface, String receiver) { this(coords, distance, hardSurface, receiver, null); }
         Hit(Coords coords, float distance, boolean hardSurface) { this(coords, distance, hardSurface, "ground"); }
         Hit(Coords coords, float distance) { this(coords, distance, false); }
     }
@@ -320,6 +321,7 @@ final class BoardGeometry {
         Coords result = null;
         float nearest = Float.POSITIVE_INFINITY;
         boolean hardSurface = false;
+        BoardSurface.Face struck = null;
         Vector3 hit = new Vector3();
         var ordered = new ArrayList<PickCandidate>();
         var bounds = new BoundingBox();
@@ -360,6 +362,7 @@ final class BoardGeometry {
                     result = face.finish() == BoardSurface.Finish.OUTCROP || face.finish() == BoardSurface.Finish.BED
                           ? foot(scene, tile.coords(), hit) : footprint(scene, tile.coords(), hit);
                     hardSurface = hardSurface(tile, face);
+                    struck = face;
                 }
             }
             for (BoardSurface.Face face : finished == null ? surface.waterFaces : finished.water()) {
@@ -369,6 +372,7 @@ final class BoardGeometry {
                     nearestOrder = candidate.order();
                     result = footprint(scene, tile.coords(), hit);
                     hardSurface = false;
+                    struck = null;
                 }
             }
             for (BoardSurface.Face face : finished == null ? surface.walls(scene, floor) : finished.walls()) {
@@ -380,6 +384,7 @@ final class BoardGeometry {
                     // past the logical edge, lies on the lower hex whose footprint contains it.
                     result = foot(scene, tile.coords(), hit);
                     hardSurface = hardSurface(tile, face);
+                    struck = face;
                 }
             }
             for (BoardSurface.Side side : finished == null ? surface.waterfalls : finished.waterfalls()) {
@@ -397,10 +402,11 @@ final class BoardGeometry {
                     nearestOrder = candidate.order();
                     result = tile.coords();
                     hardSurface = false;
+                    struck = null;
                 }
             }
         }
-        return result == null ? null : new Hit(result, nearest, hardSurface);
+        return result == null ? null : new Hit(result, nearest, hardSurface, "ground", struck);
     }
 
     /** Preserve the original candidate order when shared-edge triangles have exactly the same hit distance. */

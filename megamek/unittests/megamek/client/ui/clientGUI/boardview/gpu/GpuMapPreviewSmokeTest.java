@@ -167,10 +167,10 @@ class GpuMapPreviewSmokeTest {
                     assertTrue(GpuBoardTestUi.stage().getRoot().findActor("map-context-menu").isVisible());
                     assertEquals(new Coords(5, 3), source.get().takeFrame().context().coords(), "The open menu pins its hex");
                     GpuBoardTestUi.capture(new File(output, "map-preview-context.png"));
-                    assertTrue(((megamek.client.ui.gdx.UiButton) GpuBoardTestUi.stage().getRoot()
-                          .findActor("map-view-top")).icons.isEmpty(), "Camera presets are actions, not checkboxes");
-                    assertTrue(((megamek.client.ui.gdx.UiButton) GpuBoardTestUi.stage().getRoot()
-                          .findActor("map-view-isometric")).icons.isEmpty());
+                    assertFalse(((megamek.client.ui.gdx.UiButton) GpuBoardTestUi.stage().getRoot()
+                          .findActor("map-view-top")).isChecked(), "Camera presets are actions, not checkboxes");
+                    assertFalse(((megamek.client.ui.gdx.UiButton) GpuBoardTestUi.stage().getRoot()
+                          .findActor("map-view-isometric")).isChecked());
                     GpuBoardTestUi.click("map-view-top"); settle(view, source.get());
                     assertTrue(view.boardCamera.isTopDown());
                     assertFalse(view.boardCamera.tactical(), "Top view must preserve the renderer mode");

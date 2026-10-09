@@ -13,7 +13,7 @@ import megamek.client.ui.gdx.UiTheme;
 import megamek.common.ResolvedAttack;
 
 /**
- * A playback event's who and what (r1 3.15, hud-v3 ui.js evText), from its report entry and step: the combat log's
+ * A playback event's who and what, from its report entry and step: the combat log's
  * cards show them as two lines, the dock's playback foot as one plain line (r2 2.4, ui.js evLine).
  */
 final class GpuEventLine {

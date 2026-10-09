@@ -27,11 +27,17 @@ interface GpuBoardHud extends Disposable {
     /** True where the HUD takes a press at these window coordinates, so the board does not get it. */
     boolean hit(int x, int y);
 
+    /** Cliff direction under the inspector pointer, clockwise from north, or -1. Render-thread UI state only. */
+    default int cliffEdgeAt(int x, int y) { return -1; }
+
     /** True where a drag moves the camera (the minimap), for the pointer shape. */
     boolean dragsCamera(int x, int y);
 
     /** True while a text field has the keys; the camera keys pause then. */
     boolean isTextEditing();
+
+    /** True while a modal owns input, including camera keys already held when it opened. */
+    default boolean isModal() { return false; }
 
     /** A key press before the board's camera keys; true when the HUD used it. */
     boolean keyDown(int key, int awt, int modifiers);

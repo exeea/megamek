@@ -30,7 +30,7 @@ final class GpuHeatGlow implements Disposable {
         }
     }
 
-    /** Also used for the scene on molten boards, so radiance survives the existing display-encoded outputs. */
+    /** Shared floating-point target for the scene and heat halo; preserves values above one in either encoding. */
     static FrameBuffer buffer(int width, int height) {
         var builder = new GLFrameBuffer.FrameBufferBuilder(width, height);
         builder.addFloatAttachment(GL30.GL_RGBA16F, GL20.GL_RGBA, GL20.GL_FLOAT, true);

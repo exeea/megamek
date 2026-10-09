@@ -24,7 +24,8 @@ final class BoardBridgeSlope {
         var clipper = new BoardTacticalGeometry.Clipper();
         float level = tile.elevation() + BoardBridge.feature(tile).elevation();
         float scale = BoardGeometry.hexScale();
-        var center = BoardGeometry.center(tile.coords(), level).add(0, 0, GpuRoads.SURFACE_LIFT * scale);
+        var center = BoardGeometry.center(tile.coords(), 0);
+        center.z = BoardBridge.deckZ(level);
         for (var face : authored.polygons()) {
             var points = face.points();
             var part = face.normal().z > .99f && Math.abs(points[0].z) < .001f
@@ -43,8 +44,11 @@ final class BoardBridgeSlope {
         return BoardBridge.shape(BoardScene.Surface.CONCRETE, level, faces);
     }
 
-    /** A level central hub and broad planar approaches, with a constant height across each complete mouth. */
-    private static List<BoardSurface.Face> profile(BoardScene.Tile tile, BoardBridge.Deck deck) {
+    /**
+     * A level central hub and broad planar approaches, with a constant height across each complete mouth: the grade the
+     * deck's slab is displaced onto, relative to its deck plane (world XY). The piers' caps follow it too.
+     */
+    static List<BoardSurface.Face> profile(BoardScene.Tile tile, BoardBridge.Deck deck) {
         var result = new ArrayList<BoardSurface.Face>();
         var center = BoardGeometry.center(tile.coords(), 0);
         for (int edge = 0; edge < 6; edge++) {

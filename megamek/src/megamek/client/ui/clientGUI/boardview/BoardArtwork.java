@@ -73,14 +73,41 @@ public final class BoardArtwork implements AutoCloseable {
                   Set.of());
         }
         public HexImage { blankTerrains = Set.copyOf(blankTerrains); }
+        /** This capture with its tactical marking replaced; every other field is kept. */
+        public HexImage withTactical(BufferedImage marking) {
+            return marking == tactical ? this : new HexImage(coords, terrain, normals, decals, decalsWithoutLimbs, marking,
+                  text, structureModels, tileset, bridge, blankTerrains, scenery, tilesetDecals, tilesetScenery);
+        }
     }
-    /** Selected cosmetic layers, captured on Swing; no terrain matching or game objects reach the GL thread. */
-    public record Scenery(List<String> models, Set<Integer> terrains, Set<Integer> modelTerrains, int cosmeticRoadExits) {
-        public static final Scenery EMPTY = new Scenery(List.of(), Set.of(), Set.of(), 0);
+    /**
+     * Selected cosmetic layers, captured on Swing; no terrain matching or game objects reach the GL thread. Each model
+     * keeps the terrains its artwork matched, which tell import which legacy token it decodes. {@code decals} are the
+     * painted layers that are legacy decal ids ({@link megamek.common.board.BoardDecalArt#legacy}): the legacy render
+     * still paints them, and import turns them into decal objects.
+     */
+    public record Scenery(List<Model> sources, Set<Integer> terrains, int cosmeticRoadExits, List<Model> decals) {
+        /** A 3D scenery key and the hex terrains its tileset image matched. */
+        public record Model(String key, Set<Integer> terrains) {
+            public Model { terrains = Set.copyOf(terrains); }
+        }
+        public static final Scenery EMPTY = new Scenery(List.of(), Set.of(), 0);
         public Scenery {
-            models = List.copyOf(models);
+            sources = List.copyOf(sources);
             terrains = Set.copyOf(terrains);
-            modelTerrains = Set.copyOf(modelTerrains);
+            decals = List.copyOf(decals);
+        }
+        public Scenery(List<Model> sources, Set<Integer> terrains, int cosmeticRoadExits) {
+            this(sources, terrains, cosmeticRoadExits, List.of());
+        }
+        /** Fixtures name their models directly; each one matched all of {@code modelTerrains}. */
+        public Scenery(List<String> models, Set<Integer> terrains, Set<Integer> modelTerrains, int cosmeticRoadExits) {
+            this(models.stream().map(key -> new Model(key, modelTerrains)).toList(), terrains, cosmeticRoadExits);
+        }
+        public List<String> models() { return sources.stream().map(Model::key).toList(); }
+        public Set<Integer> modelTerrains() {
+            Set<Integer> result = new HashSet<>();
+            sources.forEach(model -> result.addAll(model.terrains()));
+            return result;
         }
     }
     private record GroundArtwork(BufferedImage color, BufferedImage normal) { }
@@ -89,9 +116,10 @@ public final class BoardArtwork implements AutoCloseable {
     private final Map<Coords, GroundArtwork> groundArtwork = new HashMap<>();
     private final Map<Coords, DecalArtwork> featureArtwork = new HashMap<>();
     private final Map<String, Image> groundNormals = new HashMap<>();
-    private final Map<String, Boolean> sceneryModels = new HashMap<>();
     private HexTileset gpuTileset;
     private Image hexMask;
+    /** Import resolves scenery without keeping its paint; this receives it. */
+    private BufferedImage sceneryScratch;
     private static final Font LABEL_FONT = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 10);
 
     /** Printable whole-board image, independent of either viewport, its zoom, or a live GL context. */
@@ -166,7 +194,6 @@ public final class BoardArtwork implements AutoCloseable {
         gpuTileset = replacement;
         clear();
         groundNormals.clear();
-        sceneryModels.clear();
         hexMask = null;
     }
 
@@ -186,6 +213,18 @@ public final class BoardArtwork implements AutoCloseable {
               models, decals == null ? null : decals.tileset(), decals == null ? null : decals.bridge(), blank,
               decals == null ? Scenery.EMPTY : decals.scenery(), decals == null ? null : decals.tilesetDecals(),
               decals == null ? null : decals.tilesetScenery());
+    }
+
+    /** The hex's 3D scenery models as the board's render resolves them, for the editor's legacy import. */
+    public Scenery scenery(Board board, Coords coords) {
+        Hex hex = board.getHex(coords);
+        if (sceneryScratch == null) { sceneryScratch = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB); }
+        try {
+            return drawScenery(hex, structureModels(hex), gpuTileset.blankTerrainTypes(hex), sceneryScratch, null, null,
+                  null, board.isNativeFormat());
+        } finally {
+            gpuTileset.clearHex(hex);
+        }
     }
 
     public void invalidate(Coords coords) {
@@ -443,14 +482,15 @@ public final class BoardArtwork implements AutoCloseable {
             BufferedImage tilesetDecals = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
             BufferedImage tilesetScenery = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
             Set<String> placedSources = new HashSet<>();
-            Scenery scenery = drawScenery(board.getHex(key), structures, blank, full, tilesetDecals, tilesetScenery, placedSources);
+            Scenery scenery = drawScenery(board.getHex(key), structures, blank, full, tilesetDecals, tilesetScenery, placedSources,
+                  board.isNativeFormat());
             BufferedImage tileset = drawTileset(board.getHex(key), structures, placedSources);
             BufferedImage withoutLimbs = null;
             if (flat.containsAnyTerrainOf(Terrains.ARMS, Terrains.LEGS)) {
                 flat.removeTerrain(Terrains.ARMS);
                 flat.removeTerrain(Terrains.LEGS);
                 withoutLimbs = drawDecals(flat);
-                drawScenery(board.getHex(key), structures, blank, withoutLimbs, null, null, null);
+                drawScenery(board.getHex(key), structures, blank, withoutLimbs, null, null, null, board.isNativeFormat());
             }
             // The GPU chooses the filtered image only after successfully loading the replacement mesh.
             return new DecalArtwork(full, withoutLimbs, tileset, bridge, scenery, tilesetDecals, tilesetScenery);
@@ -461,12 +501,14 @@ public final class BoardArtwork implements AutoCloseable {
      * Resolve from the original selected layers. Matching a hex after removing roads/woods/buildings loses composite
      * rules (parked cars, port containers, gardens, etc.). A sibling scenery GLB replaces only that layer; flat
      * artwork stays an alpha decal on the existing surface. Original images remain available to Tactical View.
+     * On a native board, ROAD level 2 is the Alley finish, not the legacy road-with-trees art.
      */
     private Scenery drawScenery(Hex hex, Map<Integer, String> structures, Set<Integer> blank,
-          BufferedImage decals, BufferedImage tilesetDecals, BufferedImage tilesetScenery, Set<String> placedSources) {
-        List<String> models = new ArrayList<>();
+          BufferedImage decals, BufferedImage tilesetDecals, BufferedImage tilesetScenery, Set<String> placedSources,
+          boolean nativeBoard) {
+        List<Scenery.Model> models = new ArrayList<>(), legacyDecals = new ArrayList<>();
         List<Image> paint = new ArrayList<>();
-        Set<Integer> covered = new HashSet<>(), modeled = new HashSet<>();
+        Set<Integer> covered = new HashSet<>();
         int cosmeticRoadExits = 0;
         List<Image> layers = new ArrayList<>(appearanceLayers(hex, true));
         layers.add(gpuTileset.getBase(hex));
@@ -493,7 +535,7 @@ public final class BoardArtwork implements AutoCloseable {
                 }
                 boolean decoration = false;
                 for (int type : SCENERY_TERRAINS) { decoration |= types.contains(type); }
-                decoration |= types.contains(Terrains.ROAD) && hex.terrainLevel(Terrains.ROAD) == 2;
+                decoration |= !nativeBoard && types.contains(Terrains.ROAD) && hex.terrainLevel(Terrains.ROAD) == 2;
                 // Pavement variants belong to the ground; repainting them as scenery hides the native concrete.
                 if (!decoration) { continue; }
                 covered.addAll(types);
@@ -511,17 +553,15 @@ public final class BoardArtwork implements AutoCloseable {
                 }
                 int extension = source.lastIndexOf('.');
                 String asset = extension < 0 ? "" : "scenery/" + source.substring(0, extension);
-                boolean model = !asset.isEmpty() && sceneryModels.computeIfAbsent(asset,
-                      name -> BoardSceneryLayouts.hasLayout(name)
-                            || new File(Configuration.dataDir(), "models/board/" + name + ".glb").isFile());
+                // layouts.json is the one legacy key -> mesh table; no mesh sits at a legacy key.
+                boolean model = !asset.isEmpty() && BoardSceneryLayouts.hasLayout(asset);
                 // Keep ground paint in the tileset's authored order, below structured pavement edges.
                 if (original != null && (model || !types.contains(Terrains.GROUND_FLUFF))) {
                     (model ? objects : original).drawImage(layer, 0, 0, null);
                     placedSources.add(source);
                 }
                 if (model) {
-                    models.add(asset);
-                    modeled.addAll(types);
+                    models.add(new Scenery.Model(asset, types));
                     // The selected parking sprite specifies a visual route even without gameplay ROAD terrain.
                     // These are ordinary hex-direction bits consumed by the existing road engine.
                     cosmeticRoadExits |= switch (source) {
@@ -535,9 +575,11 @@ public final class BoardArtwork implements AutoCloseable {
                     // Road-fluff surface variants use the same material, joins and relief as every other road.
                 } else {
                     paint.add(layer);
+                    String decal = extension < 0 ? "" : "decal/" + source.substring(0, extension);
+                    if (megamek.common.board.BoardDecalArt.legacy(decal) != null) { legacyDecals.add(new Scenery.Model(decal, types)); }
                 }
             }
-            Scenery scenery = new Scenery(models, covered, modeled, cosmeticRoadExits);
+            Scenery scenery = new Scenery(models, covered, cosmeticRoadExits, legacyDecals);
             boolean nativeTransition = BoardSurfaceBlend.replacesTransition(hex, structures, blank, scenery);
             for (Image layer : paint) {
                 if (!nativeTransition || !gpuTileset.imageHasTerrain(layer, Terrains.GROUND_FLUFF)) {
@@ -672,13 +714,13 @@ public final class BoardArtwork implements AutoCloseable {
           Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED,
           Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.INDUSTRIAL, Terrains.ROUGH,
           Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
-          Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.FIRE, Terrains.SMOKE, Terrains.IMPASSABLE };
+          Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.FIRE, Terrains.SMOKE, Terrains.IMPASSABLE,
+          Terrains.ULTRA_SUBLEVEL };
 
     @Override
     public void close() {
         clear();
         groundNormals.clear();
-        sceneryModels.clear();
         if (gpuTileset != null) { gpuTileset.close(); gpuTileset = null; }
         hexMask = null;
     }

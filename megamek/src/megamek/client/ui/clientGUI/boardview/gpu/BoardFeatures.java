@@ -51,6 +51,14 @@ final class BoardFeatures {
           "mars/antler-crown", "mars/plate-terraces", "mars/brain-lobes",
           "mars/finger-crown", "mars/fan-folded", "mars/tube-crown",
           "mars/organ-pipes", "mars/spiral-whorls", "mars/lattice-spires");
+    /** Every species that snow turns into its {@code -snow} form: the lists {@link #species} maps on snow. */
+    private static final Set<String> SNOW_FORMS = java.util.stream.Stream.of(TEMPERATE, HIGHLAND, ROCKY, WETLAND,
+          BARREN, PARK, ORCHARD).flatMap(List::stream).collect(java.util.stream.Collectors.toUnmodifiableSet());
+    /**
+     * The vegetation design that draws no trees while the woods stay for the rules, as on legacy art that paints its
+     * own scenery over woods (seaport container yards and cranes).
+     */
+    static final String NO_TREES = "woods/no-trees";
     private BoardFeatures() { }
 
     /** The tileset's orchard marker changes woods appearance, never creates cover by itself. */
@@ -175,15 +183,11 @@ final class BoardFeatures {
           boolean natural) {
         if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return decorations(hex); }
         List<BoardScene.Feature> result = new ArrayList<>();
+        // Every scenery model is a layouts.json key (BoardArtwork counts nothing else as a model). Pillar art on a
+        // bridge is its Pillars toggle, drawn as the bridge's piers (BoardScene.captureTile), not as posts.
         for (String asset : scenery.models()) {
-            var layout = BoardSceneryLayouts.layout(asset);
-            if (layout != null) {
-                result.addAll(layout.features(coords, layoutSpecies(hex), natural));
-                continue;
-            }
-            // Nominal roof elevation bounds CPU decoration clearance. Rendering settles onto the actual solid mesh.
-            int roof = structureModels.containsKey(Terrains.BUILDING) ? Math.max(1, hex.terrainLevel(Terrains.BLDG_ELEV)) : 0;
-            result.add(new BoardScene.Feature(asset, 0, 0, 0, 1, 1, roof, BoardScene.FeatureKind.SCENERY));
+            if (BoardSceneryLayouts.bridgePillars(hex, asset)) { continue; }
+            result.addAll(BoardSceneryLayouts.layout(asset).features(coords, hex, natural));
         }
         int variant = Math.floorMod(coords.getX() * 31 + coords.getY() * 17, 4);
         // Terrain levels are the game's collectable limb counts, not damage inferred from nearby units.
@@ -232,7 +236,9 @@ final class BoardFeatures {
         boolean jungle = vegetation.containsTerrain(Terrains.JUNGLE);
         BoardRoad road = BoardRoad.capture(vegetation) == BoardRoad.Kind.NONE ? null
               : BoardRoad.clearance(coords, vegetation, board);
-        if ((jungle || vegetation.containsTerrain(Terrains.WOODS)) && !scenery.modelTerrains().contains(Terrains.WOODS)) {
+        var design = hex.getAppearance().get("vegetation");
+        boolean noTrees = design != null && NO_TREES.equals(design.variant());
+        if ((jungle || vegetation.containsTerrain(Terrains.WOODS)) && !noTrees && !scenery.modelTerrains().contains(Terrains.WOODS)) {
             // Snow/pavement change the ground, not the planet's vegetation (including low cover and jungle).
             boolean mars = vegetation.getTheme() != null && vegetation.getTheme().toLowerCase(Locale.ROOT).contains("mars");
             boolean volcano = vegetation.getTheme() != null && vegetation.getTheme().toLowerCase(Locale.ROOT).contains("volcan");
@@ -307,47 +313,58 @@ final class BoardFeatures {
         return List.copyOf(result);
     }
 
-    /** The park species a layout's broad tree slots grow on this hex, in their winter form on snow. */
-    static List<String> layoutSpecies(Hex hex) {
-        return surface(hex) == BoardScene.Surface.SNOW ? PARK.stream().map(tree -> tree + "-snow").toList() : PARK;
+    /** The park species of a layout's broad tree slots, as placed objects store them; snow is chosen when drawn. */
+    static List<String> parkSpecies() { return PARK; }
+
+    /** Whether a placed tree of this species turns to its {@code -snow} form on snow. */
+    static boolean hasSnowForm(String asset) { return SNOW_FORMS.contains(asset); }
+
+    /** The one snow rule: a tree on a snow surface takes its winter form unless it is kept {@code bare}. */
+    static String snowForm(Hex hex, String asset, boolean bare) {
+        return !bare && hasSnowForm(asset) && surface(hex) == BoardScene.Surface.SNOW ? asset + "-snow" : asset;
+    }
+
+    /** A placed object's drawn asset, by {@link #snowForm}. */
+    static String drawnAsset(Hex hex, megamek.common.board.BoardDecoration object) {
+        return snowForm(hex, object.asset(), object.bare());
+    }
+
+    /** A fuel tank: the only structure model drawn as a plain prop rather than a building or an industrial plant. */
+    static boolean fuelTank(BoardScene.Feature feature) {
+        return feature.decoration() == null && feature.kind() == BoardScene.FeatureKind.PROP
+              && feature.asset().startsWith("buildings/");
+    }
+
+    /**
+     * The receiving surface a drawn structure offers placed objects (see {@link
+     * megamek.common.board.BoardDecoration.Receiver}): a building's roof, an industrial top or a fuel tank's top, or
+     * null. A bridge offers its deck through its own shape.
+     */
+    static String receiver(BoardScene.Feature feature) {
+        return feature.decoration() != null ? null
+              : feature.kind() == BoardScene.FeatureKind.BUILDING ? "building"
+              : feature.kind() == BoardScene.FeatureKind.INDUSTRIAL ? "industrial"
+              : fuelTank(feature) ? "fuelTank" : null;
     }
 
     /** The same authored frame drives the drawn model, picking, shadows and ground-cover clearance. */
     static com.badlogic.gdx.math.Matrix4 decorationTransform(Coords coords, BoardScene.Feature feature, float z) {
         var object = feature.decoration();
         float scale = feature.scale() * BoardGeometry.hexScale();
-        float partRotation = (feature.rotation() - (float) object.rotation()) * (object.mirror() ? -1 : 1);
         return new com.badlogic.gdx.math.Matrix4().setToTranslation(
                     BoardGeometry.centerX(coords) + feature.x() * BoardGeometry.hexScale(),
                     BoardGeometry.centerY(coords) + feature.y() * BoardGeometry.hexScale(), z)
               .rotate(com.badlogic.gdx.math.Vector3.Z, (float) object.rotation())
               .rotate(com.badlogic.gdx.math.Vector3.Y, (float) object.rotationY())
               .rotate(com.badlogic.gdx.math.Vector3.X, (float) object.rotationX())
-              .scale(object.mirror() ? -scale : scale, scale, scale)
-              .rotate(com.badlogic.gdx.math.Vector3.Z, partRotation);
+              .scale(scale * (float) feature.stretch().x() * (object.mirror() ? -1 : 1), scale * (float) feature.stretch().y(),
+                    scale * (float) feature.stretch().z());
     }
 
     private static List<BoardScene.Feature> decorations(Hex hex) {
-        List<BoardScene.Feature> result = new ArrayList<>();
-        for (var object : hex.getDecorations()) {
-            // A prop whose asset is a layouts.json key expands into parts. Only the maglev compositions still place
-            // such props; this branch goes with them when legacy maglev decodes into routes.
-            var layout = object.kind().equals("prop") ? BoardSceneryLayouts.layout(object.asset()) : null;
-            var parts = layout == null ? List.of(new BoardSceneryLayouts.Component(object.asset(),
-                  BoardScene.FeatureKind.PROP, 0, 0, 0, 0, 1)) : layout.components();
-            for (var part : parts) {
-                double x = part.x() * object.scale() * (object.mirror() ? -1 : 1), y = part.y() * object.scale();
-                double[] offset = object.rotateVector(x, y, part.z() * object.scale());
-                result.add(new BoardScene.Feature(part.asset(),
-                      (float) (object.x() * BoardGeometry.TILE_WIDTH + offset[0]),
-                      (float) (object.y() * BoardGeometry.TILE_HEIGHT + offset[1]),
-                      (float) (object.rotation() + (object.mirror() ? -part.rotation() : part.rotation())),
-                      (float) (object.scale() * part.scale()), 1,
-                      (float) (offset[2] / BoardGeometry.MODEL_LEVEL_HEIGHT),
-                      BoardScene.FeatureKind.PROP, 0, false, object));
-            }
-        }
-        return List.copyOf(result);
+        return hex.getDecorations().stream().map(object -> new BoardScene.Feature(drawnAsset(hex, object),
+              (float) (object.x() * BoardGeometry.TILE_WIDTH), (float) (object.y() * BoardGeometry.TILE_HEIGHT),
+              (float) object.rotation(), (float) object.scale(), 1, 0, BoardScene.FeatureKind.PROP, 0, false, object)).toList();
     }
 
     /** Rough is actual terrain cover, independent of cosmetic scatter density, with larger cover for ultra rough. */

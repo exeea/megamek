@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 class BoardSceneryStructureTest {
     @Test
     void parkingBarrierPaintIsPartOfItsLowConcreteSurface() {
-        var data = load("scenery/components/parking-barrier");
+        var data = load("scenery/vehicles/parking-barrier");
         assertEquals(1, data.materials.size);
         assertEquals(1, data.meshes.first().parts.length);
         assertTrue(data.meshes.first().parts[0].indices.length / 3 <= 80);
@@ -66,14 +66,13 @@ class BoardSceneryStructureTest {
             }
         }
         var grandstand = BoardSceneryLayouts.layout("scenery/fluff/suburb1").components().stream()
-              .filter(c -> c.asset().equals("scenery/components/grandstand")).toList();
+              .filter(c -> c.asset().equals("scenery/parks/grandstand")).toList();
         assertEquals(1, grandstand.size());
         assertTrue(load(grandstand.getFirst().asset()).meshes.first().parts[0].indices.length / 3 <= 400);
         var courtyard = BoardSceneryLayouts.layout("scenery/fluff/suburb2").components();
-        assertEquals(1, courtyard.stream().filter(c -> c.asset().equals("scenery/components/table-frame")).count());
-        assertEquals(2, courtyard.stream().filter(c -> c.asset().equals("scenery/components/bench")).count());
+        assertEquals(1, courtyard.stream().filter(c -> c.asset().equals("scenery/parks/picnic-table")).count());
         var pipes = BoardSceneryLayouts.layout("scenery/fluff/suburb3").components().stream()
-              .filter(c -> c.asset().equals("scenery/components/concrete-pipe")).toList();
+              .filter(c -> c.asset().equals("scenery/construction/concrete-pipe")).toList();
         assertEquals(3, pipes.size());
         for (int i = 0; i < pipes.size(); i++) {
             assertEquals(10 + i * 4, pipes.get(i).x());

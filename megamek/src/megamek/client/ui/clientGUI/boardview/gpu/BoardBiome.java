@@ -51,6 +51,16 @@ final class BoardBiome {
         return 1 - BoardRelief.smooth((Math.abs(z - floor) / BoardRelief.metres(1) - .15f) / 1.1f);
     }
 
+    /**
+     * The coverage stencil's distance from a hex outline (biomeHexDistance in terrain-hexes.glsl), for absolute offsets
+     * {@code px, py} from the hex centre; negative inside.
+     */
+    static float hexDistance(float px, float py) {
+        float a = BoardGeometry.height() / 2, b = BoardGeometry.width() / 4;
+        return Math.max(py - a, (a * px + b * py - BoardGeometry.width() * BoardGeometry.height() / 4)
+              / (float) Math.sqrt(a * a + b * b));
+    }
+
     /** All candidates, including ordinary land, compete. Adjacent matching tiles have no internal fade. */
     static float coverage(BoardScene scene, BoardScene.Biome kind, float x, float y, float z) {
         boolean marsh = kind == BoardScene.Biome.MARSH;
@@ -69,10 +79,8 @@ final class BoardBiome {
             int row = (int) Math.floor(-y / BoardGeometry.height() - (cx & 1) * .5f);
             for (int dy = -1; dy <= 1; dy++) {
                 var coords = new Coords(cx, row + dy);
-                float px = Math.abs(x - BoardGeometry.centerX(coords)), py = Math.abs(y - BoardGeometry.centerY(coords));
-                float a = BoardGeometry.height() / 2, b = BoardGeometry.width() / 4;
-                float distance = Math.max(py - a, (a * px + b * py - BoardGeometry.width() * BoardGeometry.height() / 4)
-                      / (float) Math.sqrt(a * a + b * b));
+                float distance = hexDistance(Math.abs(x - BoardGeometry.centerX(coords)),
+                      Math.abs(y - BoardGeometry.centerY(coords)));
                 float w = 1 - BoardRelief.smooth((distance + width) / (2 * width));
                 float fw = marsh ? 1 - BoardRelief.smooth((distance + fieldWidth) / (2 * fieldWidth)) : 0;
                 sum += w;

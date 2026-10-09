@@ -12,13 +12,19 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import megamek.common.Configuration;
+import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -35,6 +41,9 @@ class BoardBridgeFootingTest {
         var target = Files.createDirectories(directory.resolve("models/board"));
         Files.createDirectories(target.resolve("textures/sculpt"));
         Files.copy(source.resolve("textures/sculpt/concrete.png"), target.resolve("textures/sculpt/concrete.png"));
+        // The reload also rereads the pier kit.
+        Files.createDirectories(target.resolve("bridges"));
+        Files.copy(source.resolve("bridges/bridge-pier.glb"), target.resolve("bridges/bridge-pier.glb"));
         byte[] bytes = Files.readAllBytes(source.resolve("bridge-terminal.glb"));
         int jsonLength = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt(12);
         var mapper = new ObjectMapper();
@@ -168,6 +177,175 @@ class BoardBridgeFootingTest {
         var footing = BoardBridgeFooting.build(scene, middle, TerrainLod.FULL, new HashMap<>());
         assertTrue(footing.shape().facets().isEmpty());
         assertTrue(footing.lengths().stream().allMatch(length -> length == 0));
+    }
+
+    @Test
+    void piersStandOnlyUnderDeckJointsAndBothHexesBuildTheirOwnHalf() {
+        // A paved span of three over water, toggled: two joints; the middle hex holds a half of each, an end hex one.
+        var scene = span(3, true, 0, Set.of(0, 1, 2));
+        var halves = new HashMap<Coords, List<BoardBridge.Facet>>();
+        for (int i = 0; i < 3; i++) {
+            Coords at = START.translated(3, i);
+            halves.put(at, piers(scene, at));
+            for (var facet : halves.get(at)) {
+                for (var p : List.of(facet.a(), facet.b(), facet.c())) {
+                    for (var tile : scene.tiles()) {
+                        assertTrue(Vector3.dst(p.x, p.y, 0, BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()), 0)
+                              >= 29.5f * BoardGeometry.hexScale() - .01f, "No pier near a hex centre, where a unit stands");
+                    }
+                    var owner = BoardGeometry.tile(scene, p.x - (p.x - BoardGeometry.centerX(at)) * .001f,
+                          p.y - (p.y - BoardGeometry.centerY(at)) * .001f);
+                    assertEquals(at, owner.coords(), "Each hex builds only the half on its own side");
+                }
+            }
+        }
+        assertEquals(List.of(1, 2, 1), List.of(joints(halves.get(START), START),
+              joints(halves.get(START.translated(3)), START.translated(3)),
+              joints(halves.get(START.translated(3, 2)), START.translated(3, 2))));
+        for (int i = 0; i < 2; i++) {
+            Coords near = START.translated(3, i), far = near.translated(3);
+            var edge = BoardGeometry.center(near, 0).lerp(BoardGeometry.center(far, 0), .5f);
+            var toward = BoardGeometry.center(far, 0).sub(BoardGeometry.center(near, 0)).nor();
+            var mine = vertices(halves.get(near), edge);
+            var theirs = vertices(halves.get(far), edge);
+            assertFalse(mine.isEmpty());
+            var bounds = new com.badlogic.gdx.math.collision.BoundingBox().inf();
+            for (var p : mine) {
+                bounds.ext(p);
+                // The neighbour's half is this half's mirror image across the shared edge.
+                var mirror = new Vector3(p).mulAdd(toward, -2 * new Vector3(p).sub(edge).dot(toward));
+                assertTrue(theirs.stream().anyMatch(q -> q.dst(mirror.x, mirror.y, p.z) < .01f), "Mirrored: " + p);
+            }
+            theirs.forEach(bounds::ext);
+            assertEquals(edge.x, bounds.getCenterX(), .01f, "The pier is centred on the joint");
+            assertEquals(edge.y, bounds.getCenterY(), .01f);
+            // Closed on the joint: from every side, as the side view draws this hex alone, the half shows its outside.
+            var inside = new Vector3(edge).mulAdd(toward, -.5f * BoardGeometry.hexScale());
+            inside.z = bounds.getCenterZ();
+            for (int angle = 0; angle < 360; angle += 30) {
+                var look = new Vector3(com.badlogic.gdx.math.MathUtils.cosDeg(angle), com.badlogic.gdx.math.MathUtils.sinDeg(angle), 0);
+                var ray = new Ray(new Vector3(inside).mulAdd(look, -200), look);
+                BoardBridge.Facet first = null;
+                float nearest = Float.POSITIVE_INFINITY;
+                var hit = new Vector3();
+                for (var facet : halves.get(near)) {
+                    if (com.badlogic.gdx.math.Intersector.intersectRayTriangle(ray, facet.a(), facet.b(), facet.c(), hit)
+                          && hit.dst2(ray.origin) < nearest) {
+                        nearest = hit.dst2(ray.origin);
+                        first = facet;
+                    }
+                }
+                assertTrue(first != null && first.normal().dot(look) < 0, near + " looking at " + angle + " degrees sees its outside");
+            }
+        }
+
+        // Either hex's toggle carries the joint; untoggled, one-hex and ground-level spans and a road beneath have none.
+        var either = span(2, true, 0, Set.of(1));
+        assertEquals(1, joints(piers(either, START), START));
+        assertEquals(1, joints(piers(either, START.translated(3)), START.translated(3)));
+        assertTrue(piers(span(3, true, 0, Set.of()), START.translated(3)).isEmpty(), "Off");
+        assertTrue(piers(span(1, true, 0, Set.of(0)), START).isEmpty(), "A one-hex bridge rests on its landings");
+        assertTrue(piers(span(3, false, 0, Set.of(0, 1, 2)), START.translated(3)).isEmpty(), "No room under a ground-level deck");
+        var raised = span(3, false, 2, Set.of(0, 1, 2));
+        assertEquals(2, joints(piers(raised, START.translated(3)), START.translated(3)), "Two levels above dry ground");
+        var road = BoardNaturalBridgeTest.replace(raised, withRoad(raised.tile(START.translated(3)), 9));
+        assertTrue(piers(road, START.translated(3)).isEmpty() && piers(road, START).isEmpty(), "The road beneath keeps its lane");
+        var across = BoardNaturalBridgeTest.replace(raised, withRoad(raised.tile(START.translated(3)), 18));
+        assertEquals(2, joints(piers(across, START.translated(3)), START.translated(3)), "A road crossing beneath, not along");
+    }
+
+    @Test
+    void aJunctionHasAHalfPierOnEachConnectedEdgeAndItsCentreStaysOpen() {
+        Coords centre = new Coords(4, 4);
+        Map<Coords, BoardScene.Tile> tiles = new HashMap<>();
+        tiles.put(centre, pillared(deckTile(centre, 1 | 4 | 16, true, 0)));
+        for (int d : new int[] { 0, 2, 4 }) {
+            Coords at = centre.translated(d);
+            tiles.put(at, pillared(deckTile(at, 1 << (d + 3) % 6, true, 0)));
+        }
+        var scene = BoardSurfaceBlendTest.scene(at -> tiles.getOrDefault(at,
+              BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
+        assertEquals(3, joints(piers(scene, centre), centre));
+        for (int d : new int[] { 0, 2, 4 }) { assertEquals(1, joints(piers(scene, centre.translated(d)), centre.translated(d))); }
+    }
+
+    static final Coords START = new Coords(4, 2);
+
+    /**
+     * A N-S span of {@code length} hexes from {@link #START}, its deck {@code deck} levels above water:1 or dry ground,
+     * between paved roads (a built deck); the hexes at the indices in {@code toggled} have the Pillars toggle on.
+     */
+    static BoardScene span(int length, boolean water, int deck, Set<Integer> toggled) {
+        Map<Coords, BoardScene.Tile> route = new HashMap<>();
+        for (int i = 0; i < length; i++) {
+            Coords at = START.translated(3, i);
+            var tile = deckTile(at, 9, water, deck);
+            route.put(at, toggled.contains(i) ? pillared(tile) : tile);
+        }
+        Coords entrance = START.translated(0), exit = START.translated(3, length);
+        route.put(entrance, BoardRoadTest.tile(entrance, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
+        route.put(exit, BoardRoadTest.tile(exit, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
+        return BoardSurfaceBlendTest.scene(at -> route.getOrDefault(at,
+              BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
+    }
+
+    private static BoardScene.Tile deckTile(Coords at, int exits, boolean water, int deck) {
+        Hex bridge = new Hex(0);
+        bridge.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, exits));
+        bridge.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, deck));
+        bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
+        var ground = BoardSurfaceBlendTest.tile(at, BoardScene.Surface.GRASS, 0, water ? 1 : -1, 0).ground();
+        return new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, ground, null, null, null, null,
+              BoardFeatures.capture(bridge, at, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true,
+              BoardRoad.Kind.NONE);
+    }
+
+    /** The tile with its bridge's Pillars toggle on. */
+    static BoardScene.Tile pillared(BoardScene.Tile t) {
+        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(),
+              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.tileset(),
+              t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
+              t.groundCover(), t.bridge(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(),
+              Map.of("bridge", HexAppearance.PILLARS));
+    }
+
+    private static BoardScene.Tile withRoad(BoardScene.Tile t, int exits) {
+        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), exits, t.surface(), t.ground(),
+              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.tileset(),
+              t.detailedGround(), BoardRoad.Kind.PAVED, t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(),
+              t.bare(), t.groundCover(), t.bridge(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), t.appearance());
+    }
+
+    /** The tile's pier facets, built as the terrain's roads stage builds its bridge shape. */
+    static List<BoardBridge.Facet> piers(BoardScene scene, Coords at) {
+        var tile = scene.tile(at);
+        var surfaces = new HashMap<Coords, BoardSurface>();
+        var deck = BoardBridge.deck(scene, tile);
+        BoardBridge.Shape shape;
+        if (deck.natural()) {
+            shape = BoardNaturalBridge.build(scene, tile, deck, TerrainLod.FULL, surfaces);
+        } else {
+            var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, surfaces);
+            shape = deck.sloped() ? BoardBridgeSlope.build(tile, deck, footing) : footing.shape();
+        }
+        return BoardBridgeFooting.withPiers(scene, tile, deck, shape, TerrainLod.FULL, surfaces).facets().stream()
+              .filter(facet -> facet.part() == BoardBridge.Part.PIER).toList();
+    }
+
+    /** How many of the hex's edges have pier facets beside their midpoint. */
+    private static int joints(List<BoardBridge.Facet> piers, Coords at) {
+        int count = 0;
+        for (int d = 0; d < 6; d++) {
+            var edge = BoardGeometry.center(at, 0).lerp(BoardGeometry.center(at.translated(d), 0), .5f);
+            if (!vertices(piers, edge).isEmpty()) { count++; }
+        }
+        return count;
+    }
+
+    /** The pier vertices within a pier's reach of a joint. */
+    private static List<Vector3> vertices(List<BoardBridge.Facet> piers, Vector3 edge) {
+        return piers.stream().flatMap(f -> java.util.stream.Stream.of(f.a(), f.b(), f.c()))
+              .filter(p -> Vector3.dst(p.x, p.y, 0, edge.x, edge.y, 0) < 12 * BoardGeometry.hexScale()).toList();
     }
 
     @Test

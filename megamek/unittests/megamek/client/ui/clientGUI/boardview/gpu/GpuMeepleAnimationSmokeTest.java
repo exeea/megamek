@@ -61,7 +61,7 @@ class GpuMeepleAnimationSmokeTest {
                 fixture.source.refresh();
             });
             var damaged = fixture.source.takeFrame().scene().units().getFirst();
-            assertTrue(damaged.model().state().appearance().bodyLoss() > 0);
+            assertTrue(damaged.model().state().appearance().bodyStage() != null, "Lost armor shows on the walls");
             assertEquals(unit.image(), damaged.image(), "Damage changes wall appearance but never bakes scars into the top artwork");
             new Lwjgl3Application(new ApplicationAdapter() {
                 @Override

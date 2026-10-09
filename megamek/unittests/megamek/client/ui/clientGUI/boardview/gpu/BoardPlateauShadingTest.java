@@ -41,7 +41,8 @@ class BoardPlateauShadingTest {
     @EnumSource(TerrainLod.class)
     void boxCanyonKeepsCliffLightingNearTheRim(TerrainLod detail) {
         var scene = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"));
-        for (Coords at : List.of(new Coords(11, 12), new Coords(14, 13), new Coords(14, 14))) {
+        for (Coords at : List.of(new Coords(13, 1), new Coords(12, 1), new Coords(11, 12), new Coords(14, 13),
+              new Coords(14, 14))) {
             var tile = scene.tile(at);
             var surface = new BoardSurface(scene, tile, detail);
             var top = surface.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.TOP).toList();
@@ -59,11 +60,9 @@ class BoardPlateauShadingTest {
             long vertices = edges.keySet().stream().flatMap(Set::stream).distinct().count();
             assertEquals(1, vertices - edges.size() + top.size(),
                   "The plateau remains a disc with no holes or unmatched interior subdivisions at " + at + ", " + detail);
-            if (detail == TerrainLod.FULL) {
-                List<List<Vector3>> boundary = edges.entrySet().stream().filter(e -> e.getValue() == 1)
-                      .map(e -> List.copyOf(e.getKey())).toList();
-                assertFlatInterior(surface, top, boundary, at);
-            }
+            List<List<Vector3>> boundary = edges.entrySet().stream().filter(e -> e.getValue() == 1)
+                  .map(e -> List.copyOf(e.getKey())).toList();
+            assertFlatInterior(surface, top, boundary, at);
 
             // The top keeps every boundary segment used by the cliff: refinement must not open cracks there.
             for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
@@ -83,6 +82,7 @@ class BoardPlateauShadingTest {
           List<List<Vector3>> boundary, Coords at) {
         int checked = 0;
         float worstTilt = 0;
+        BoardSurface.Face worstFace = null;
         for (var face : top) {
             for (int u = 0; u <= 4; u++) {
                 for (int v = 0; v <= 4 - u; v++) {
@@ -98,13 +98,14 @@ class BoardPlateauShadingTest {
                     Vector3 normal = new Vector3(surface.relief.shade(face.a()).normal()).scl(a)
                           .mulAdd(surface.relief.shade(face.b()).normal(), b)
                           .mulAdd(surface.relief.shade(face.c()).normal(), c).nor();
-                    worstTilt = Math.max(worstTilt, new Vector3(normal).sub(Vector3.Z).len());
+                    float tilt = new Vector3(normal).sub(Vector3.Z).len();
+                    if (tilt > worstTilt) { worstTilt = tilt; worstFace = face; }
                     checked++;
                 }
             }
         }
         assertTrue(checked > 10, "Exercise the plateau interior at " + at);
-        assertEquals(0, worstTilt, .02f, "Cliff rim lighting must not cross the flat interior at " + at);
+        assertEquals(0, worstTilt, .02f, "Cliff rim lighting must not cross the flat interior at " + at + ": " + worstFace);
     }
 
     private static void count(Map<Set<Vector3>, Integer> edges, Vector3 a, Vector3 b) {

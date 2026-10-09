@@ -186,7 +186,7 @@ public class Hex implements Serializable {
 
     /** Use on paste/stamp/merge, not on snapshots for undo or movement. */
     public void duplicateDecorationIds() {
-        setDecorations(getDecorations().stream().map(BoardDecoration::duplicate).toList());
+        setDecorations(BoardDecoration.copies(getDecorations()));
     }
     //endregion Getters/Setters
 

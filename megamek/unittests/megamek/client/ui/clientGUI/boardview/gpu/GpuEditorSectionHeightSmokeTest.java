@@ -17,7 +17,6 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.math.Vector2;
-import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
@@ -49,9 +48,9 @@ class GpuEditorSectionHeightSmokeTest {
             }
             Hex hex = new Hex(2, "pavement:1;bridge:1:9;bridge_cf:40;bridge_elev:4", "lunar");
             hex.setDecorations(List.of(
-                  new BoardDecoration("deck-car", "prop", "scenery/components/car-red", null, 0, 0, 0, false, .4,
+                  new BoardDecoration("deck-car", "prop", "scenery/vehicles/car", null, 0, 0, 0, false, .4,
                         BoardDecoration.Placement.surface("bridge", "deck", 0), 0),
-                  new BoardDecoration("ground-car", "prop", "scenery/components/car-silver", null, 0, 0, 0, false, .4,
+                  new BoardDecoration("ground-car", "prop", "scenery/vehicles/car", null, 0, 0, 0, false, .4,
                         BoardDecoration.Placement.surface("ground", "top", .24), 0)));
             board.setHex(bridge, hex);
             for (Fixture fixture : fixtures) {
@@ -122,7 +121,7 @@ class GpuEditorSectionHeightSmokeTest {
                             }
                             case 3 -> {
                                 GpuHexSection section = showSection();
-                                drag(section, new Vector2(section.getWidth() - 18, height(section, 2)), 1, false); next();
+                                drag(section, pill(section, "ground"), 1, false); next();
                             }
                             case 4 -> {
                                 assertEquals(3, source.editorState().elevation());
@@ -141,8 +140,7 @@ class GpuEditorSectionHeightSmokeTest {
                                 Fixture fixture = fixtures.get(fixtureIndex);
                                 assertEquals(fixture.component(), source.editorState().component());
                                 GpuHexSection section = showSection();
-                                drag(section, new Vector2(section.getWidth() - 18,
-                                      height(section, fixture.ground() + fixture.value())), 1, fixture.component().equals("industry"));
+                                drag(section, pill(section, fixture.component()), 1, fixture.component().equals("industry"));
                                 next();
                             }
                             case 7 -> {
@@ -166,8 +164,7 @@ class GpuEditorSectionHeightSmokeTest {
                             case 9 -> {
                                 GpuHexSection section = showSection();
                                 var stage = GpuBoardTestUi.stage();
-                                Vector2 point = stage.stageToScreenCoordinates(section.localToStageCoordinates(
-                                      new Vector2(section.getWidth() - 18, height(section, anchor("ground-car")))));
+                                Vector2 point = stage.stageToScreenCoordinates(section.localToStageCoordinates(pill(section, "ground-car")));
                                 var input = Gdx.input.getInputProcessor();
                                 input.touchDown(Math.round(point.x), Math.round(point.y), 0, Input.Buttons.LEFT);
                                 input.touchUp(Math.round(point.x), Math.round(point.y), 0, Input.Buttons.LEFT);
@@ -188,27 +185,27 @@ class GpuEditorSectionHeightSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Section height controls failed", failure.get()); }
     }
 
+    /** The side view's section, opening the side view when it is collapsed. */
     private static GpuHexSection showSection() {
         var stage = GpuBoardTestUi.stage();
+        if (stage.getRoot().findActor("editor-hex-section") == null) { GpuBoardTestUi.click("editor-side-view-toggle"); }
         var section = (GpuHexSection) stage.getRoot().findActor("editor-hex-section");
-        var scroll = (ScrollPane) stage.getRoot().findActor("editor-inspector-scroll");
-        assertNotNull(section); scroll.validate();
-        Vector2 position = section.localToAscendantCoordinates(scroll.getActor(), new Vector2());
-        scroll.scrollTo(position.x, position.y, section.getWidth(), section.getHeight(), false, true);
-        scroll.updateVisualScroll(); stage.draw();
+        assertNotNull(section); stage.draw();
         return section;
     }
 
-    private static float height(GpuHexSection section, float level) throws ReflectiveOperationException {
-        var method = GpuHexSection.class.getDeclaredMethod("height", float.class); method.setAccessible(true);
-        return (float) method.invoke(section, level);
+    /** The label pill of a section level, which a drag moves. */
+    private static Vector2 pill(GpuHexSection section, String key) {
+        Vector2 pill = section.pill(key);
+        assertNotNull(pill, () -> "The side view shows a pill for " + key);
+        return pill;
     }
 
     private static Vector2 componentPoint(GpuHexSection section, GpuTerrain terrain, Coords coords,
           String component, float level) throws ReflectiveOperationException {
         var field = GpuHexSection.class.getDeclaredField("camera"); field.setAccessible(true);
         var camera = (OrthographicCamera) field.get(section);
-        float target = height(section, level);
+        float target = section.y(level);
         for (int dy = 0; dy <= 12; dy++) {
             for (int sign : new int[] { -1, 1 }) {
                 float y = target + sign * dy;
@@ -222,14 +219,14 @@ class GpuEditorSectionHeightSmokeTest {
         throw new AssertionError("The installed section geometry must offer a " + component + " pick");
     }
 
-    private static void drag(GpuHexSection section, Vector2 local, float levels, boolean cancel) throws ReflectiveOperationException {
+    private static void drag(GpuHexSection section, Vector2 local, float levels, boolean cancel) {
         var stage = GpuBoardTestUi.stage();
-        float pixels = height(section, levels) - height(section, 0);
+        float pixels = section.y(levels) - section.y(0);
         Vector2 start = stage.stageToScreenCoordinates(section.localToStageCoordinates(local.cpy()));
         Vector2 finish = stage.stageToScreenCoordinates(section.localToStageCoordinates(local.cpy().add(0, pixels)));
         var input = Gdx.input.getInputProcessor();
         input.touchDown(Math.round(start.x), Math.round(start.y), 0, Input.Buttons.LEFT);
-        assertTrue(section.dragging(), "Clicking a height handle or surface starts its section gesture");
+        assertTrue(section.dragging(), "Pressing a pill or a surface starts its section gesture");
         input.touchDragged(Math.round(start.x), Math.round((start.y + finish.y) / 2), 0);
         input.touchDragged(Math.round(finish.x), Math.round(finish.y), 0);
         if (cancel) { stage.cancelTouchFocus(); }

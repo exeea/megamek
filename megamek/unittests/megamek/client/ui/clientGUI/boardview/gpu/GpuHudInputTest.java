@@ -474,7 +474,7 @@ class GpuHudInputTest {
         GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, actor, ready, foe);
         update(moving, panels(move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
         click(HEX, Entity.NONE, CTRL_DOWN_MASK);
-        verify(moves).planTo(HEX, 0, true);
+        verify(moves).planTo(HEX, 0, true, Float.NaN);
         click(HEX, SECOND, 0);
         verify(source).selectUnit(SECOND);
         click(HEX, FOE, 0);
@@ -490,7 +490,7 @@ class GpuHudInputTest {
         // Ctrl on an own unit pins a waypoint in its hex instead of selecting it.
         update(moving, panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
         click(HEX, SECOND, CTRL_DOWN_MASK);
-        verify(moves, times(3)).planTo(HEX, 0, true);
+        verify(moves, times(3)).planTo(HEX, 0, true, Float.NaN);
         verify(source, times(1)).selectUnit(anyInt());
 
         update(status(3, GamePhase.FIRING, true, FIRST, 1, actor, ready, foe, blip), GpuHudData.EMPTY, null);
@@ -540,9 +540,20 @@ class GpuHudInputTest {
             click(HEX, target, SHIFT_DOWN_MASK);
         }
         verify(moves, times(3)).faceToward(HEX, 0);
-        verify(moves, never()).planTo(any(), anyInt(), anyBoolean());
+        verify(moves, never()).planTo(any(), anyInt(), anyBoolean(), anyFloat());
         verify(source, never()).selectUnit(anyInt());
         verify(source, never()).measure(any(), anyInt(), anyFloat());
+    }
+
+    @Test
+    void movementClicksCarryThePickedFloorForRoutesAndWaypoints() {
+        update(status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true)),
+              panels(move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        float floor = 21 * BoardGeometry.level();
+        hud.boardClick(HEX, Entity.NONE, Input.Buttons.LEFT, 0, 100, 100, floor);
+        verify(moves).planTo(HEX, 0, false, floor);
+        hud.boardClick(HEX, Entity.NONE, Input.Buttons.LEFT, CTRL_DOWN_MASK, 100, 100, floor);
+        verify(moves).planTo(HEX, 0, true, floor);
     }
 
     /**
@@ -617,7 +628,7 @@ class GpuHudInputTest {
         verifyNoInteractions(moves);
         update(moving, panels(move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
         click(HEX, Entity.NONE, 0);
-        verify(moves).planTo(HEX, 0, false);
+        verify(moves).planTo(HEX, 0, false, Float.NaN);
     }
 
     /**

@@ -248,7 +248,7 @@ class GpuTerrainReliefSmokeTest {
         var surfaces = BoardTacticalGeometry.surfaces(scene);
         var cache = new HashMap<Coords, BoardPlants>();
         return coords -> cache.computeIfAbsent(coords,
-              key -> BoardPlants.plant(scene, scene.tile(key), surfaces.apply(key), TerrainLod.FULL));
+              key -> BoardPlants.plant(scene, scene.tile(key), surfaces.apply(key), TerrainLod.FULL, List.of()));
     }
 
     private static List<ModelInstance> prepareCover(GpuGroundCover cover, BoardScene scene, BoardCamera camera,

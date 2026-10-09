@@ -2847,6 +2847,12 @@ final class BoardSurface {
         return faces.subList(0, faces.size() - rough.size());
     }
 
+    /** The ground or bed a structure can stand on: loose rocks are no foundation, and under ice the floor is the bed. */
+    List<Face> foundation() {
+        return faces.stream().filter(f -> f.finish() != Finish.OUTCROP && f.finish() != Finish.DRESSING
+              && f.finish() != Finish.ICE).toList();
+    }
+
     private float height(List<Face> geometry, float x, float y) {
         return sampleHeight(geometry, x, y, BoardGeometry.groundZ(tile));
     }

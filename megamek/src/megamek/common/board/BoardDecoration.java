@@ -2,21 +2,130 @@
 package megamek.common.board;
 
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.ToDoubleFunction;
 
-/** A visual-only instance owned by one Hex. Heights are board levels; XY uses hex width/height units. */
+/**
+ * A visual-only instance owned by one Hex. Heights are board levels; XY uses hex width/height units. The model's local
+ * scale is the uniform {@code scale} times {@code stretch} per axis, applied in object space before the rotations.
+ * {@code colours} replace the model's colour slots.
+ */
 public record BoardDecoration(String id, String kind, String asset, String name, double x, double y,
-      double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex) implements Serializable {
+      double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
+      double rotationX, double rotationY, String group, boolean bare, int connections, Stretch stretch, Colours colours)
+      implements Serializable {
+    /** An object in its model's own colours. */
+    public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
+          double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
+          double rotationX, double rotationY, String group, boolean bare, int connections, Stretch stretch) {
+        this(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX,
+              rotationY, group, bare, connections, stretch, Colours.NONE);
+    }
+    /** An unstretched object. */
+    public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
+          double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
+          double rotationX, double rotationY, String group, boolean bare, int connections) {
+        this(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX,
+              rotationY, group, bare, connections, Stretch.NONE);
+    }
+    /**
+     * An object without route connections. {@code connections} is a maglev route marker's sides as a mask, N=1, NE=2,
+     * SE=4, S=8, SW=16, NW=32 (the order of {@link Coords#translated(int)}).
+     */
+    public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
+          double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
+          double rotationX, double rotationY, String group, boolean bare) {
+        this(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX,
+              rotationY, group, bare, 0);
+    }
+    /**
+     * An object without a winter override: a tree with a snow form shows it on snow unless {@code bare} keeps it bare.
+     */
+    public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
+          double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
+          double rotationX, double rotationY, String group) {
+        this(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX,
+              rotationY, group, false);
+    }
+    /** An ungrouped object. Group membership is stored only on members; {@code null} means ungrouped. */
+    public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
+          double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
+          double rotationX, double rotationY) {
+        this(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX,
+              rotationY, null);
+    }
+    /** The original rotation is the turn about the board's vertical Z axis. */
+    public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
+          double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex) {
+        this(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, 0, 0);
+    }
     /** Historical instances clipped paint to their owner. New editor brushes explicitly allow overflow. */
     public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
           double rotation, boolean mirror, double scale, Placement placement, int drawOrder) {
         this(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, "decal".equals(kind));
     }
+    /** Positive object-space factors along the model's own X, Y and Z axes; a mirror stays a separate flag. */
+    public record Stretch(double x, double y, double z) implements Serializable {
+        public static final Stretch NONE = new Stretch(1, 1, 1);
+
+        public Stretch {
+            if (!(Double.isFinite(x) && Double.isFinite(y) && Double.isFinite(z) && x > 0 && y > 0 && z > 0)) {
+                throw new IllegalArgumentException("Stretch factors must be finite and positive");
+            }
+        }
+    }
+
+    /**
+     * Replacement colours for the model's colour slots, in slot order: an sRGB {@code #rrggbb} value, or null where the
+     * slot keeps the model's own colour. A model marks up to {@link #SLOTS} slots and names their default colours (the
+     * renderer keeps each slot vertex's shade relative to that default). Trailing defaults are dropped, so an object in
+     * its model's own colours has none.
+     */
+    public record Colours(List<String> slots) implements Serializable {
+        public static final int SLOTS = 4;
+        public static final Colours NONE = new Colours(List.of());
+
+        public Colours {
+            List<String> values = new ArrayList<>(slots);
+            if (values.size() > SLOTS) { throw new IllegalArgumentException("A model has at most " + SLOTS + " colour slots"); }
+            for (int slot = 0; slot < values.size(); slot++) {
+                String value = values.get(slot);
+                if (value == null) { continue; }
+                value = value.toLowerCase(Locale.ROOT);
+                if (!value.matches("#[0-9a-f]{6}")) { throw new IllegalArgumentException("A colour is #rrggbb: " + value); }
+                values.set(slot, value);
+            }
+            while (!values.isEmpty() && values.getLast() == null) { values.removeLast(); }
+            slots = Collections.unmodifiableList(values);
+        }
+
+        public static Colours of(String... slots) { return new Colours(Arrays.asList(slots)); }
+
+        /** The slot's replacement colour, or null for the model's own. */
+        public String slot(int index) { return index < slots.size() ? slots.get(index) : null; }
+
+        /** These colours with one slot replaced; null returns it to the model's own colour. */
+        public Colours with(int index, String colour) {
+            if (index < 0 || index >= SLOTS) { throw new IllegalArgumentException("No colour slot " + index); }
+            List<String> values = new ArrayList<>(slots);
+            while (values.size() <= index) { values.add(null); }
+            values.set(index, colour);
+            return new Colours(values);
+        }
+    }
+
     public record Receiver(String terrain, String surface) implements Serializable {
         public Receiver {
-            if (!Set.of("ground/top", "bridge/deck", "building/roof", "industrial/top")
+            if (!Set.of("ground/top", "bridge/deck", "building/roof", "industrial/top", "fuelTank/top", "ice/top")
                   .contains(terrain + "/" + surface)) {
                 throw new IllegalArgumentException("Unsupported receiving surface: " + terrain + "/" + surface);
             }
@@ -38,10 +147,25 @@ public record BoardDecoration(String id, String kind, String asset, String name,
             }
         }
 
+        /**
+         * The one support rule, in levels: an absolute placement stands at its level; a surface placement at the
+         * {@code ground}, or at the top of its receiver ({@code top} of the receiver's terrain name), plus its offset.
+         * The caller measures those tops: nominal levels from the hex's rules terrain, or the drawn support settled on
+         * beneath the anchor. A {@code top} of NaN (no such support) gives NaN.
+         */
+        public double level(double ground, ToDoubleFunction<String> top) {
+            if (mode.equals("absolute")) { return level; }
+            return (receiver.terrain().equals("ground") ? ground : top.applyAsDouble(receiver.terrain())) + offset;
+        }
+
         public static Placement ground() { return surface("ground", "top", 0); }
         public static Placement absolute(double level) { return new Placement("absolute", level, null, null); }
         public static Placement surface(String terrain, String surface, double offset) {
             return new Placement("surface", null, new Receiver(terrain, surface), offset);
+        }
+        /** On a support's one receiving surface: a bridge's deck, a building's roof, any other support's top. */
+        public static Placement on(String terrain, double offset) {
+            return surface(terrain, terrain.equals("bridge") ? "deck" : terrain.equals("building") ? "roof" : "top", offset);
         }
     }
 
@@ -53,7 +177,7 @@ public record BoardDecoration(String id, String kind, String asset, String name,
             throw new IllegalArgumentException("An object requires a logical asset key");
         }
         if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(rotation)
-              || !Double.isFinite(scale) || scale <= 0) {
+              || !Double.isFinite(rotationX) || !Double.isFinite(rotationY) || !Double.isFinite(scale) || scale <= 0) {
             throw new IllegalArgumentException("Object transforms must be finite; scale must be positive");
         }
         Objects.requireNonNull(placement, "placement");
@@ -63,24 +187,90 @@ public record BoardDecoration(String id, String kind, String asset, String name,
         if (kind.equals("prop") && drawOrder != 0) {
             throw new IllegalArgumentException("Only decals have paint order");
         }
+        if (group != null && group.isBlank()) {
+            throw new IllegalArgumentException("A group name cannot be blank");
+        }
+        if (connections < 0 || connections > 63 || connections != 0 && !(kind.equals("prop") && asset.equals(MaglevRoute.ASSET))) {
+            throw new IllegalArgumentException("Only a maglev route marker has connections, a mask of its six sides");
+        }
+        // Java serialization of an object saved before stretch or colours existed supplies neither.
+        if (stretch == null) { stretch = Stretch.NONE; }
+        if (colours == null) { colours = Colours.NONE; }
+        if (kind.equals("decal") && !colours.slots().isEmpty()) {
+            throw new IllegalArgumentException("Only a model has colour slots");
+        }
     }
 
+    /** A copy with a fresh ID that belongs to no group. */
     public BoardDecoration duplicate() {
         return new BoardDecoration(UUID.randomUUID().toString(), kind, asset, name, x, y, rotation, mirror,
-              scale, placement, drawOrder, clipToHex);
+              scale, placement, drawOrder, clipToHex, rotationX, rotationY, null, bare, connections, stretch, colours);
+    }
+
+    public BoardDecoration withGroup(String group) {
+        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours);
+    }
+
+    public BoardDecoration withConnections(int connections) {
+        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours);
+    }
+
+    public BoardDecoration withStretch(Stretch stretch) {
+        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours);
+    }
+
+    public BoardDecoration withColours(Colours colours) {
+        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours);
+    }
+
+    /** Fresh IDs; members that shared a group share one fresh group, ungrouped objects stay ungrouped. */
+    public static List<BoardDecoration> copies(List<BoardDecoration> source) {
+        Map<String, String> groups = new HashMap<>();
+        return source.stream().map(object -> object.duplicate().withGroup(object.group() == null ? null
+              : groups.computeIfAbsent(object.group(), ignored -> UUID.randomUUID().toString()))).toList();
     }
 
     public BoardDecoration transform(double x, double y, double rotation, boolean mirror, double scale,
           Placement placement) {
-        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex);
+        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours);
     }
 
-    /** Reflection in board space, not in anisotropic normalized XY. */
+    /** Right-handed XYZ Euler angles in degrees: apply X, then Y, then Z (the board's up axis). */
+    public double[] rotateVector(double px, double py, double pz) {
+        double a = Math.toRadians(rotationX), b = Math.toRadians(rotationY), c = Math.toRadians(rotation);
+        double yy = py * Math.cos(a) - pz * Math.sin(a), zz = py * Math.sin(a) + pz * Math.cos(a);
+        double xx = px * Math.cos(b) + zz * Math.sin(b);
+        return new double[] {xx * Math.cos(c) - yy * Math.sin(c), xx * Math.sin(c) + yy * Math.cos(c),
+              -px * Math.sin(b) + zz * Math.cos(b)};
+    }
+
+    /**
+     * Reflection in board space, not in anisotropic normalized XY; route sides reflect as terrain exits do. The stretch
+     * stays on the same local axes: a reflection of the board is the mirror flag in object space, which commutes with it.
+     */
     public BoardDecoration flip(boolean horizontal, boolean vertical) {
         double angle = rotation;
         boolean reflected = mirror;
         if (horizontal) { angle = -angle; reflected = !reflected; }
         if (vertical) { angle = 180 - angle; reflected = !reflected; }
-        return transform(horizontal ? -x : x, vertical ? -y : y, angle, reflected, scale, placement);
+        return new BoardDecoration(id, kind, asset, name, horizontal ? -x : x, vertical ? -y : y,
+              angle, reflected, scale, placement, drawOrder, clipToHex, rotationX,
+              horizontal != vertical ? -rotationY : rotationY, group, bare, flipSides(connections, horizontal, vertical),
+              stretch, colours);
+    }
+
+    private static int flipSides(int sides, boolean horizontal, boolean vertical) {
+        int result = 0;
+        for (int side = 0; side < 6; side++) {
+            if ((sides & 1 << side) == 0) { continue; }
+            int flipped = horizontal ? (6 - side) % 6 : side;
+            if (vertical) { flipped = (9 - flipped) % 6; }
+            result |= 1 << flipped;
+        }
+        return result;
     }
 }

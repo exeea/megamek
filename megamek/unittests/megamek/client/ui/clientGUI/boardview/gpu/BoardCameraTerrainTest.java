@@ -123,7 +123,7 @@ class BoardCameraTerrainTest {
         view.rotateStep(1);
         assertEquals(10 * BoardGeometry.level(), view.focus.z, .01f);
         scene.set(scene(-5, -5));
-        view.terrainChanged();
+        view.terrainChanged(scene.get());
         view.rotateStep(1);
         assertEquals(-5 * BoardGeometry.level(), view.focus.z, .01f);
     }

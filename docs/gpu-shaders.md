@@ -30,6 +30,13 @@ inserted into a larger program, so editing a helper can affect several materials
 
 Unit materials are configured by `GpuUnitShader`, including the linear-light
 adaptation of libGDX's base shader, normal maps and per-unit material inputs.
+Imported model materials use `model-surface.glsl`, with factors/maps carried by
+`GpuModelMaterial`; terrain and foliage share its direct GGX helper in
+`light-model.glsl`. Roughness/metalness and normal/AO channels are linear data.
+Normal/AO/surface maps use mesh UVs rather than the projected unit camouflage
+coordinates. The same model path is used for ordinary imported buildings and
+props. Custom terrain, foliage and water programs retain their own surface
+composition. See the [model material contract](unit-models.md).
 Do not assume every program starts from a standalone vertex file: some extend
 the libGDX source with injected attributes and functions.
 libGDX binds only the instance attributes of the renderable a material program was
@@ -103,8 +110,11 @@ standalone compilable shader.
 
 Material programs share lighting, world projection and contact fields. A surface
 blend needs matching color, normal, height/roughness and occlusion weights.
-Wetness must affect the intended receiving materials, and emission belongs after
-ordinary lighting. Changes to alpha/cutouts may also require the shadow/depth path.
+Wetness must affect the intended receiving materials. Decode authored albedo and
+emission, add emission to reflected light in linear space, then encode their sum
+for the scene target. Retain values above one until the atmosphere's shared
+exposure and highlight shoulder. Changes to alpha/cutouts may also require the
+shadow/depth path; scene alpha blending is still display-encoded.
 
 macOS's OpenGL gives each shader stage only 16 texture units, and a program that
 samples more fails to link there, so the board does not draw on a Mac although

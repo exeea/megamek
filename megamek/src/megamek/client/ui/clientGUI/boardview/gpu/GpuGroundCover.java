@@ -70,9 +70,11 @@ final class GpuGroundCover implements Disposable {
      * order. Candidates are drawn in the hex's plane and dropped onto the finished ground, so a root keeps its place
      * and rank at every terrain detail level and only its height follows the installed ground: a medium-detail
      * chunk's grass carries over to its full-detail replacement without a blade moving. Density selects a prefix by
-     * rank, so zooming never moves an existing blade either.
+     * rank, so zooming never moves an existing blade either. No blade grows through {@code paint} (null when nothing
+     * paints the hex): adding or removing a decal keeps every other root's place and rank.
      */
-    static FloatArray plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface) {
+    static FloatArray plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
+          BoardDecals.Opacity paint) {
         List<BoardSurface.Face> ground = new ArrayList<>(surface.top().stream()
               .filter(face -> face.finish() == BoardSurface.Finish.TOP).toList());
         if (BoardGeometry.tuning().stepsBetweenTops()) { ground.addAll(surface.slopes()); }
@@ -86,6 +88,10 @@ final class GpuGroundCover implements Disposable {
         float halfWidth = BoardGeometry.width() / 2, halfHeight = BoardGeometry.height() / 2;
         var random = new Random(coords.getX() * 0x9E3779B97F4A7C15L ^ coords.getY() * 0xC2B2AE3D27D4EB4FL);
         boolean boundary = BoardSurfaceBlend.boundary(scene, tile);
+        boolean tundraEdge = BoardBiome.kind(tile) == BoardScene.Biome.TUNDRA;
+        for (int direction = 0; direction < 6; direction++) {
+            tundraEdge |= BoardBiome.kind(scene.neighbor(tile, direction)) == BoardScene.Biome.TUNDRA;
+        }
         BoardRoad road = BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
         float sink = BoardGeometry.width() * .001f;
         // Frozen land's jagged border reaches across a shared edge (terrain-ice.glsl); no blade grows through it.
@@ -129,6 +135,8 @@ final class GpuGroundCover implements Disposable {
             if (iced) { continue; }
             float grass = boundary ? BoardSurfaceBlend.grass(tile, cover.sample(x, y, z), x, y)
                   : tile.surface() == BoardScene.Surface.GRASS ? 1 : 0;
+            if (tundraEdge) { grass *= 1 - BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, x, y, z); }
+            if (paint != null && grass > 0) { grass *= 1 - paint.at(x, y); }
             if (chance <= grass * BoardRelief.smooth((grass - .55f) / .35f)) {
                 roots.addAll(x, y, z - sink, rank);
             }
@@ -289,7 +297,8 @@ final class GpuGroundCover implements Disposable {
         String wind = GpuShaderSource.read("terrain-vegetation-wind.glsl");
         String blade = "#define GRASS_START_PIXELS " + START_PIXELS + "\n#define GRASS_FULL_PIXELS " + FULL_PIXELS
               + "\n#define GRASS_ROOTS_PER_HEX " + ROOTS_PER_HEX
-              + "\n#define GRASS_MAX_HEIGHT " + MAX_HEIGHT_FRACTION + "\n" + GpuShaderSource.read("terrain-grass.glsl");
+              + "\n#define GRASS_MAX_HEIGHT " + MAX_HEIGHT_FRACTION + "\n"
+              + GpuGroundDamage.shaderSource() + GpuShaderSource.read("terrain-grass.glsl");
         // A root beyond its density leaves every vertex of its blade outside the clip volume.
         return source.replace("void main() {", wind + meadow + blade + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
                     + "if (!grassBlade(a_position, coverPosition, coverNormal, coverColor)) {\n"

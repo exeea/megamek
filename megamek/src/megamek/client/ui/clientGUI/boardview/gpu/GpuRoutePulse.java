@@ -119,7 +119,6 @@ final class GpuRoutePulse implements Disposable {
     private float clock;
     private Texture glow;
     private Mesh mesh;
-    private DepthTestAttribute depth;
     private final Renderable renderable = new Renderable();
     private float[] vertices;
     private int quads;
@@ -144,7 +143,7 @@ final class GpuRoutePulse implements Disposable {
     }
 
     /**
-     * The build has a plotted route with a ghost: {@code key} names it, {@code hexes} is its length in hexes,
+     * The build has a plotted route with a ghost: {@code key} names it, {@code hexes} counts hexes or vertical levels,
      * {@code centre} the destination's centre on its surface and {@code colour} its last band's colour. The pulse keeps
      * its rhythm for the route of the last build and starts from the unit for any other.
      */
@@ -184,7 +183,7 @@ final class GpuRoutePulse implements Disposable {
         }
     }
 
-    /** The route's length along the ground in hex radii; 0 without a route or for one that stays in its hex. */
+    /** The route's spatial length in hex radii; 0 without a route or for a turn without translation. */
     float length() {
         return samples.size == 0 ? 0 : samples.items[samples.size - SAMPLE + 4];
     }
@@ -307,7 +306,6 @@ final class GpuRoutePulse implements Disposable {
         }
         mesh.setVertices(vertices, 0, vertex);
         renderable.meshPart.size = quads * 6;
-        depth.depthFunc = tactical ? GL20.GL_ALWAYS : GL20.GL_LEQUAL;
         return renderable;
     }
 
@@ -553,11 +551,12 @@ final class GpuRoutePulse implements Disposable {
         float dx = bx - ax;
         float dy = by - ay;
         float length = (float) Math.sqrt(dx * dx + dy * dy);
-        if (quads == QUADS || length < .001f) {
+        if (quads == QUADS || length < .001f && Math.abs(bz - az) < .001f) {
             return;
         }
-        float nx = -dy / length;
-        float ny = dx / length;
+        // A vertical floor segment has no ground direction; give it the camera's horizontal width.
+        float nx = length < .001f ? right.x : -dy / length;
+        float ny = length < .001f ? right.y : dx / length;
         float side = soft ? 0 : .5f;
         vertex(ax + nx * halfA, ay + ny * halfA, az, colourA, .5f, side);
         vertex(ax - nx * halfA, ay - ny * halfA, az, colourA, .5f, 1 - side);
@@ -589,7 +588,7 @@ final class GpuRoutePulse implements Disposable {
 
     /**
      * The glow texture (a soft white disc, premultiplied), the quad mesh and its material: premultiplied blending (see
-     * {@link #glow}), depth-tested against the board in 3D without writing depth, both faces.
+     * {@link #glow}), visible through scene geometry without writing depth, both faces.
      */
     private void create() {
         Pixmap pixmap = new Pixmap(GLOW_TEXELS, GLOW_TEXELS, Pixmap.Format.RGBA8888);
@@ -622,9 +621,9 @@ final class GpuRoutePulse implements Disposable {
         mesh = new Mesh(false, QUADS * 4, indices.length, VertexAttribute.Position(), VertexAttribute.ColorPacked(),
               VertexAttribute.TexCoords(0));
         mesh.setIndices(indices);
-        depth = new DepthTestAttribute(GL20.GL_LEQUAL, false);
         renderable.material = new Material(TextureAttribute.createDiffuse(glow),
-              new BlendingAttribute(GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA), depth,
+              new BlendingAttribute(GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA),
+              new DepthTestAttribute(GL20.GL_ALWAYS, false),
               IntAttribute.createCullFace(GL20.GL_NONE));
         renderable.meshPart.set("route-pulse", mesh, 0, 0, GL20.GL_TRIANGLES);
     }

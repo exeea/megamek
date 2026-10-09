@@ -47,7 +47,7 @@ class BoardCameraPanTest {
     }
 
     @Test
-    void blockedPanningSlidesAlongTheEdgeAndReversesImmediately() {
+    void blockedPanningStopsWithoutRedirectingAndReversesImmediately() {
         BoardScene scene = scene(16, 17);
         for (boolean perspective : new boolean[] { false, true }) {
             BoardCamera view = camera(scene, perspective);
@@ -58,12 +58,50 @@ class BoardCameraPanTest {
             assertTrue(edge.epsilonEquals(view.focus, .01f), "Held input must not accumulate beyond the boundary");
 
             view.pan(100, 20);
+            assertTrue(edge.epsilonEquals(view.focus, .01f), "A blocked diagonal drag must not turn into a slide");
+            view.pan(0, 20);
             assertEquals(edge.x, view.focus.x, .01f);
-            assertEquals(edge.y + 20, view.focus.y, .01f, "The unblocked axis keeps moving");
+            assertEquals(edge.y + 20, view.focus.y, .01f, "Dragging along the edge still works");
             assertEquals(edge.z, view.focus.z);
             view.pan(-10, 0);
             assertEquals(edge.x + 10, view.focus.x, .01f, "Moving back responds on the first input");
             assertBoardAtCenter(view, scene);
+        }
+    }
+
+    @Test
+    void rotatedPanLimitsNeverRedirectTheDrag() {
+        for (boolean perspective : new boolean[] { false, true }) {
+            for (int height : new int[] { 0, 100 }) {
+                BoardScene scene = scene(16, 17, 0, height, List.of());
+                for (float bearing : new float[] { 25, 45, 135, 250 }) {
+                    BoardCamera view = camera(scene, perspective);
+                    view.orbit(bearing, 70);
+                    view.zoom((perspective ? 5 : 1) / view.camera.zoom);
+                    for (float[] drag : new float[][] { { 0, 20 }, { 0, -20 }, { 20, 0 }, { -20, 0 }, { 12, 20 } }) {
+                        view.center(BoardGeometry.center(new Coords(8, 8), 0));
+                        Vector3 screen = project(view, view.focus);
+                        view.pan(600 - screen.x, screen.y - 400); // Start with the board at the full viewport center.
+                        Vector3 start = view.focus.cpy();
+                        view.pan(drag[0], drag[1]);
+                        Vector3 direction = view.focus.cpy().sub(start).nor();
+                        assertTrue(direction.len2() > .9f, "The first step must move inside the board");
+                        for (int step = 0; step < 600; step++) {
+                            view.pan(drag[0], drag[1]);
+                            Vector3 travel = view.focus.cpy().sub(start);
+                            assertEquals(0, travel.crs(direction).len(), .05f,
+                                  "Clipping must shorten the drag, never change its direction");
+                        }
+                        Vector3 edge = view.focus.cpy();
+                        view.pan(drag[0], drag[1]);
+                        assertTrue(edge.epsilonEquals(view.focus, .01f), "Continued dragging must stop at the edge");
+                        view.pan(-drag[0], -drag[1]);
+                        assertTrue(view.focus.cpy().sub(edge).dot(direction) < -1,
+                              "Reversing a blocked drag must respond immediately");
+                        if (height == 0) { assertBoardAtCenter(view, scene); }
+                    }
+                }
+            }
         }
     }
 
@@ -108,6 +146,87 @@ class BoardCameraPanTest {
             Vector3 zoomed = project(view, anchor);
             assertEquals(panned.x, zoomed.x, .05f);
             assertEquals(panned.y, zoomed.y, .05f);
+        }
+    }
+
+    @Test
+    void tallTerrainCanBePannedToTheViewportCenterAtDifferentBearings() {
+        for (boolean perspective : new boolean[] { false, true }) {
+            for (float bearing : new float[] { 0, 45, 135, 270 }) {
+                BoardScene scene = scene(16, 17, 0, 100, List.of());
+                BoardCamera view = camera(scene, perspective);
+                view.orbit(bearing, 70);
+                view.setFieldOfView(20);
+                view.zoom((perspective ? 20 : 1) / view.camera.zoom);
+                Coords pillar = new Coords(8, 8);
+                view.center(BoardGeometry.center(pillar, 0));
+                Vector3 peak = BoardGeometry.center(pillar, 100);
+                for (int step = 0; step < 100; step++) {
+                    Vector3 screen = project(view, peak);
+                    view.pan((600 - screen.x) * .25f, (screen.y - 400) * .25f);
+                }
+                Vector3 screen = project(view, peak);
+                assertEquals(600, screen.x, .1f, "A rotated pillar must remain horizontally reachable");
+                assertEquals(400, screen.y, .1f, "Panning up must reach the peak even when the base leaves the center");
+                assertTrue(screen.z > 0 && screen.z < 1, "The peak must be in front of the camera");
+            }
+        }
+    }
+
+    @Test
+    void liveTerrainEditsRefreshTheVerticalLimitWithoutRefitting() {
+        BoardScene flat = scene(16, 17);
+        BoardCamera view = camera(flat, false);
+        view.orbit(0, 70);
+        view.zoom(1 / view.camera.zoom);
+        view.pan(0, 100000);
+        Vector3 flatLimit = view.focus.cpy();
+        view.terrainChanged(scene(16, 17, 0, 100, List.of()));
+        assertEquals(flatLimit, view.focus, "An edit updates the boundary without moving the camera");
+        view.pan(0, 100000);
+        assertTrue(view.focus.y > flatLimit.y + 100 * BoardGeometry.level(), "A new pillar opens room above the base");
+        Vector3 raisedLimit = view.focus.cpy();
+        view.pan(0, 100);
+        assertTrue(raisedLimit.epsilonEquals(view.focus, .01f), "The raised limit must still stop further panning");
+        view.pan(0, -10);
+        assertTrue(view.focus.y < raisedLimit.y, "Reversing at the raised limit moves immediately");
+        view.terrainChanged(flat);
+        view.pan(0, 0);
+        assertTrue(flatLimit.epsilonEquals(view.focus, .01f), "Lowering terrain restores the original limit");
+    }
+
+    @Test
+    void structuresUseTheSameHeightAllowanceAsRaisedGround() {
+        var tower = new BoardScene.Feature("building", 0, 0, 0, 1, 100, 0, BoardScene.FeatureKind.BUILDING);
+        for (int base : new int[] { -1000, 0, 1000 }) {
+            BoardCamera terrain = camera(scene(16, 17, base, 100, List.of()), false);
+            BoardCamera structure = camera(scene(16, 17, base, 0, List.of(tower)), false);
+            for (var view : List.of(terrain, structure)) {
+                view.orbit(45, 70);
+                view.center(BoardGeometry.center(new Coords(8, 8), base));
+                view.zoom(1 / view.camera.zoom);
+                view.pan(-100000, 100000);
+            }
+            assertTrue(terrain.focus.epsilonEquals(structure.focus, .05f), "Framing and panning share feature heights");
+        }
+    }
+
+    @Test
+    void topDownAndHorizontalLimitsDoNotGrowWithTerrainHeight() {
+        BoardCamera flat = camera(scene(16, 17), false);
+        BoardCamera raised = camera(scene(16, 17, 0, 100, List.of()), false);
+        for (float tilt : new float[] { 0, 70 }) {
+            for (var view : List.of(flat, raised)) {
+                view.setIsometric(false);
+                view.tilt(tilt);
+                view.center(BoardGeometry.center(new Coords(8, 8), 0));
+                view.zoom(1 / view.camera.zoom);
+                view.pan(100000, 0);
+            }
+            assertTrue(flat.focus.epsilonEquals(raised.focus, .01f), "Height must not loosen sideways panning");
+            flat.pan(0, -100000);
+            raised.pan(0, -100000);
+            assertTrue(flat.focus.epsilonEquals(raised.focus, .01f), "The lower boundary stays where it was");
         }
     }
 
@@ -176,11 +295,16 @@ class BoardCameraPanTest {
     }
 
     private static BoardScene scene(int width, int height) {
+        return scene(width, height, 0, 0, List.of());
+    }
+
+    private static BoardScene scene(int width, int height, int base, int raised, List<BoardScene.Feature> features) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+                boolean pillar = x == width / 2 && y == height / 2;
+                tiles.add(new BoardScene.Tile(new Coords(x, y), base + (pillar ? raised : 0), -1, false, 0,
+                      BoardScene.Surface.GRASS, null, null, null, pillar ? features : List.of(), List.of()));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());

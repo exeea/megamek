@@ -226,8 +226,10 @@ looking towards the sun. Air/water Fresnel uses a 0.02037 normal-incidence
 reflectance and a fifth-power angular response.
 
 The FFT targets belong to the renderer, rather than individual hexes. Rapids keep
-their existing current-driven patches. Disabled water effects skip the
-simulation. If setup fails, water keeps its static ripple fallback. Game
+their existing current-driven patches. The **Water effects** control under Tuning →
+Terrain (on by default) disables water effects: the simulation stops, waves no
+longer displace the surface, and currents, foam, ripples, glints, wakes and bed
+caustics no longer draw. If setup fails, water keeps its static ripple fallback. Game
 elevation, picking and unit support remain canonical.
 
 Water first establishes its nearest boundary, displaced surface or board-edge

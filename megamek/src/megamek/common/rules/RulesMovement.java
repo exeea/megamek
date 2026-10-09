@@ -34,6 +34,7 @@ package megamek.common.rules;
  */
 
 
+import megamek.common.Hex;
 import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
@@ -45,6 +46,14 @@ import megamek.common.units.EntityMovementType;
 import megamek.common.units.Mek;
 
 public abstract class RulesMovement {
+    /**
+     * Whether the ruleset permits this building elevation, relative to the underlying hex. Other terrain, unit and
+     * movement restrictions still apply. Total Warfare adds no restriction here.
+     */
+    public boolean isBuildingElevationAllowed(Entity entity, Hex hex, int elevation) {
+        return true;
+    }
+
     /**
      * Can units skid?
      *

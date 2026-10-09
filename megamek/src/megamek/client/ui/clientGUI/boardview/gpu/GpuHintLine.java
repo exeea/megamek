@@ -4,7 +4,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.gdx.UiKit.onChange;
 import static megamek.client.ui.gdx.UiKit.text;
 
-import java.awt.event.InputEvent;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -19,10 +18,9 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
-import megamek.common.enums.GamePhase;
 
 /**
- * Hint line under the dock: the mouse gestures of the phase and the view, with the current keys (C.1 G4, L11). In
+ * Hint line above the dock: the mouse gestures of the phase and the view, with the current keys (C.1 G4, L11). In
  * windows too narrow for the line (W <= 1350) a bot order's hex pick shows in its chip instead, with its Done and
  * Cancel buttons.
  */
@@ -129,7 +127,6 @@ final class GpuHintLine implements GpuHud.Component {
      * picker dialog shows them.
      */
     static List<String> items(GpuHud.Inputs inputs) {
-        GpuBattleStatus.Snapshot status = inputs.frame().status();
         boolean planning = GpuHud.planning(inputs);
         GpuBoardSource.UiPreferences preferences = inputs.preferences();
         GpuPlayers.Pick pick = inputs.frame().panels().players().pick();
@@ -142,7 +139,7 @@ final class GpuHintLine implements GpuHud.Component {
         // A measurement waiting for its second point takes the next left click (GpuHud.boardClick).
         int pending = inputs.frame().panels().los().pending();
         List<String> items = new ArrayList<>(List.of(text("GpuBoard.hud.mouse.leftClick"),
-              text(pending != 0 ? "GpuBoard.hud.hint.completeLos" : leftClick(status, planning))));
+              text(pending != 0 ? "GpuBoard.hud.hint.completeLos" : "GpuBoard.hud.hint.select")));
         if (planning && pending == 0) {
             items.addAll(List.of(text("GpuBoard.hud.mouse.ctrlClick"), text("GpuBoard.hud.hint.waypoint"),
                   text("GpuBoard.hud.mouse.shiftClick"), text("GpuBoard.hud.hint.orientation")));
@@ -170,24 +167,6 @@ final class GpuHintLine implements GpuHud.Component {
         int colon = help.indexOf(": ");
         return colon < 0 ? List.of(text("GpuBoard.firstPerson"), help)
               : List.of(help.substring(0, colon), help.substring(colon + 2));
-    }
-
-    /**
-     * What a left click on the board does now, as GpuHud routes it: the HUD's own gestures in the local movement,
-     * firing and physical turns, MegaMek's board tool in every other local turn; outside the local turn an own unit's
-     * click selects it and any other unit's inspects it (user item 29c).
-     */
-    private static String leftClick(GpuBattleStatus.Snapshot status, boolean planning) {
-        GamePhase phase = status.phase();
-        if (status.myTurn()) {
-            if (planning) {
-                return "GpuBoard.hud.hint.selectPlan";
-            } else if (phase.isFiring() || phase.isTargeting()) {
-                return "GpuBoard.hud.hint.selectTarget";
-            }
-            return phase.isPhysical() ? "GpuBoard.hud.hint.selectPhysicalTarget" : "GpuBoard.hud.hint.useTool";
-        }
-        return "GpuBoard.hud.hint.selectInspect";
     }
 
     /** The current key text of a bind ({@code KeyCommandBind.getDesc}), as the settings dialog shows it. */

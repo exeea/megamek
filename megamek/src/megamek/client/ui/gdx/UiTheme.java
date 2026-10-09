@@ -39,12 +39,11 @@ import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Disposable;
 
 /**
- * The hud-v3 design system (proto3.css) for every native view: its color tokens, the Roboto type scale, the icon sheet
- * and a skin of hud-* styles and drawables, whose textures and fonts the theme owns. A window creates one on its GL
+ * Theme for every native view: its color tokens, the Roboto type scale, the icon sheet
+ * and a skin styles and drawables, whose textures and fonts the theme owns. A window creates one on its GL
  * thread and disposes it there, after its stage; the tokens are shared and read-only.
  */
 public final class UiTheme implements Disposable {
-    // hud-v3 tokens (docs/design/claude-ui-concepts/hud-v3/src/proto3.css); TEXT, ACCENT, DISABLED = ink, ink2, dim.
     public static final Color TEXT = Color.valueOf("F1F4F0");
     public static final Color ACCENT = Color.valueOf("CBD3D0");
     public static final Color MUTED = Color.valueOf("9AA6A3");
@@ -68,7 +67,7 @@ public final class UiTheme implements Disposable {
     public static final Color MAIN = Color.valueOf("F1F3F2");
     public static final Color QUIET = rgba(174, 187, 180, .24f);
     public static final Color HOVER = Color.valueOf("E8F1EB");
-    /** A bar's track (.meter .bar). */
+    /** A bar's track. */
     public static final Color TRACK = new Color(1, 1, 1, .1f);
 
     public static final String ROBOTO = "Roboto/Roboto-VariableFont_wdth,wght.ttf";
@@ -79,10 +78,10 @@ public final class UiTheme implements Disposable {
     public static final int CONDENSED_SEMIBOLD = 15;
     public static final int CONDENSED_BOLD = 16;
 
-    /** One step of the hud-v3 type scale: Roboto instance, size in stage units, CSS tracking (em), label color. */
+    /** One step of the type scale: Roboto instance, size in stage units, CSS tracking (em), label color. */
     public record HudFont(String name, int instance, float size, float tracking, Color color) { }
 
-    /** The single hud-v3 font table; each entry is also registered as a Label style of the same name. */
+    /** The single font table; each entry is also registered as a Label style of the same name. */
     public static final List<HudFont> HUD_FONTS = List.of(
           new HudFont("hud-body", REGULAR, 13, 0, TEXT),
           new HudFont("hud-small", REGULAR, 11.5f, 0, MUTED),
@@ -130,7 +129,13 @@ public final class UiTheme implements Disposable {
           Map.entry("arrow-right", 0xE941), Map.entry("arrow-up", 0xE986), Map.entry("arrow-down", 0xE984),
           Map.entry("triangle-left", 0xE5DE), Map.entry("wireframe", 0xF016),
           Map.entry("tool-select", 0xF82F), Map.entry("tool-paint", 0xE3AE), Map.entry("tool-erase", 0xE6D0),
-          Map.entry("tool-sculpt", 0xE3F7), Map.entry("object-group", 0xE65B));
+          Map.entry("tool-sculpt", 0xE3F7),
+          // Board editor layer types: domain, factory, nature, format_paint, stacks, train, water, signpost,
+          // table_restaurant (the shipped font has no bridge; a deck on legs), propane_tank, rule, directions_car, pets.
+          Map.entry("building", 0xE7EE), Map.entry("factory", 0xEBBC), Map.entry("tree", 0xE406),
+          Map.entry("decal", 0xE243), Map.entry("stack", 0xF500), Map.entry("train", 0xE570), Map.entry("water", 0xF084),
+          Map.entry("road", 0xEB91), Map.entry("bridge", 0xEAC6), Map.entry("fuel-tank", 0xEC13), Map.entry("rules", 0xF1C2),
+          Map.entry("car", 0xE531), Map.entry("animal", 0xE91D));
     /**
      * Icons the prototype draws filled. The shipped font has no filled named instance, so their outlines are closed:
      * every texel that the glyph's outline encloses becomes opaque.
@@ -283,7 +288,7 @@ public final class UiTheme implements Disposable {
         icons();
     }
 
-    /** hud-v3 upper-cases titles, captions and buttons at display time, so source strings stay searchable. */
+    /** Upper-cases titles, captions and buttons at display time, so source strings stay searchable. */
     public static String upper(String text) {
         return text.toUpperCase(Locale.ROOT);
     }
@@ -337,7 +342,7 @@ public final class UiTheme implements Disposable {
         return drawable;
     }
 
-    /** The hud-v3 frames, buttons, rows, fields, selects, chips, the badge and the rule, all owned by the skin. */
+    /** The frames, buttons, rows, fields, selects, chips, the badge and the rule, all owned by the skin. */
     private void hudDrawables() {
         Texture white = skin.get("white", Texture.class);
         skin.add("panel", pad(new HudFrame(white, PANEL, RAIL, CORNER, 13, null), 12, 14), Drawable.class);
@@ -374,6 +379,16 @@ public final class UiTheme implements Disposable {
         Drawable rule = skin.newDrawable("white", LINE);
         rule.setMinHeight(1);
         skin.add("rule", rule, Drawable.class);
+        // A vertical split pane's divider ("hud-split"): the rule across a 9-unit grab band, with a short grip.
+        Drawable grip = skin.newDrawable("white", QUIET);
+        Drawable divider = new BaseDrawable() {
+            @Override public void draw(Batch batch, float x, float y, float width, float height) {
+                rule.draw(batch, x, y + (height - 1) / 2, width, 1);
+                grip.draw(batch, x + (width - 28) / 2, y + (height - 3) / 2, 28, 3);
+            }
+        };
+        divider.setMinHeight(9);
+        skin.add("hud-split", new com.badlogic.gdx.scenes.scene2d.ui.SplitPane.SplitPaneStyle(divider));
     }
 
     /** Pads a drawable: {@code vertical} units above and below its content, {@code horizontal} beside it. */
@@ -414,7 +429,7 @@ public final class UiTheme implements Disposable {
     /**
      * The styles only the toolkit's widgets use: the 30-unit icon button (.b.ib), the normal-case buttons (.brow .b),
      * list rows (.row), drop-down faces (.fsel, .amsel), underline tabs (.tabs, .ltabs), the search field, the dot,
-     * and UiList's flying row, its shadow and its slot.
+     * UiList's flying row, its shadow and its slot, and UiAngleDial's parts.
      */
     private void kitStyles(TextButton.TextButtonStyle hud) {
         Texture white = skin.get("white", Texture.class);
@@ -504,6 +519,15 @@ public final class UiTheme implements Disposable {
         box("row-lifted", rgba(31, 46, 46, .96f), MINT, 1, 3, MINT, 0, 0, 0);
         shadow("shadow", 9, 3, .5f);
         box("row-slot", rgba(0, 0, 0, .22f), alpha(MINT, .5f), 1, 3, null, 0, 0, 0);
+
+        // UiAngleDial, after MekBay's dials: a raised scale around a recessed well, a dark hub for the value, the
+        // needle's grip, and a white round-ended stroke that the dial tints for its ticks, needle and turn.
+        float dial = UiAngleDial.SIZE, well = UiAngleDial.WELL, hub = UiAngleDial.HUB, grip = UiAngleDial.KNOB;
+        box("dial-face", rgba(255, 255, 255, .06f), rgba(255, 255, 255, .14f), 1, dial / 2, null, 0, 0, dial);
+        box("dial-well", rgba(0, 0, 0, .32f), LINE, 1, well / 2, null, 0, 0, well);
+        box("dial-hub", rgba(8, 12, 13, .96f), alpha(MINT, .5f), 1.5f, hub / 2, null, 0, 0, hub);
+        box("dial-knob", MINT, POP, 2, grip / 2, null, 0, 0, grip);
+        box("dial-stroke", Color.WHITE, null, 0, UiAngleDial.STROKE / 2, null, 0, 0, UiAngleDial.STROKE);
     }
 
     /**
@@ -954,7 +978,7 @@ public final class UiTheme implements Disposable {
         return Math.round(value * scale) / scale;
     }
 
-    /** A hud-v3 frame: flat fill, optional 2-unit rails top and bottom, corner strokes or an outline, pixel-snapped. */
+    /** A frame: flat fill, optional 2-unit rails top and bottom, corner strokes or an outline, pixel-snapped. */
     public static final class HudFrame extends BaseDrawable {
         private static final float STROKE = 2;
         private final Texture white;

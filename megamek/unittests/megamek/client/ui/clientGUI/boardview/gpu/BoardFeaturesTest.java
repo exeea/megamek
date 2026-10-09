@@ -21,21 +21,22 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFeaturesTest {
     @Test
-    void authoredCompositionsKeepTheirPlacementAndTransformEveryPartTogether() {
-        String asset = "scenery/saxarba/SMV_Fluff/FluffSystem-07-Garden-02-Table-1-01";
-        var layout = BoardSceneryLayouts.layout(asset);
-        assertTrue(layout.components().size() > 1);
+    void aPlacedObjectIsOneFeatureWithItsOwnTransform() {
+        String asset = "scenery/parks/picnic-table";
         var placement = megamek.common.board.BoardDecoration.Placement.absolute(4);
         var object = new megamek.common.board.BoardDecoration("picnic", "prop", asset, null, .1, -.2, 90, true, .5, placement, 0);
         Hex hex = new Hex(); hex.setDecorations(java.util.List.of(object));
         var features = BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
               .filter(f -> f.decoration() != null).toList();
-        assertEquals(layout.components().size(), features.size());
-        var first = features.getFirst(); var part = layout.components().getFirst();
-        assertEquals(.1 * 84 - part.y() * .5, first.x(), .0001);
-        assertEquals(-.2 * 72 - part.x() * .5, first.y(), .0001);
-        assertEquals(.5 * part.scale(), first.scale(), .0001);
-        assertTrue(features.stream().allMatch(f -> f.decoration().equals(object)));
+        assertEquals(1, features.size());
+        var feature = features.getFirst();
+        assertEquals(asset, feature.asset());
+        assertEquals(.1 * BoardGeometry.TILE_WIDTH, feature.x(), .0001);
+        assertEquals(-.2 * BoardGeometry.TILE_HEIGHT, feature.y(), .0001);
+        assertEquals(90, feature.rotation(), .0001);
+        assertEquals(.5, feature.scale(), .0001);
+        assertEquals(0, feature.elevation(), .0001);
+        assertEquals(object, feature.decoration());
         hex.addTerrain(new Terrain(Terrains.ULTRA_SUBLEVEL, 1));
         assertEquals(features, BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
               .filter(f -> f.decoration() != null).toList(), "Absolute objects remain available above a chasm");
@@ -183,8 +184,10 @@ class BoardFeaturesTest {
         var before = BoardFeatures.capture(hex, coords, Map.of()).stream()
               .filter(feature -> feature.kind() == BoardScene.FeatureKind.LIMB).toList();
         assertEquals(3, before.size());
-        assertTrue(before.stream().allMatch(feature -> feature.kind() == BoardScene.FeatureKind.LIMB
-              && feature.asset().equals("Limb Club")));
+        assertEquals(2, before.stream().filter(feature -> feature.asset().equals("salvage/arm")).count());
+        assertEquals(1, before.stream().filter(feature -> feature.asset().equals("salvage/leg")).count());
+        assertFalse(before.equals(BoardFeatures.capture(hex, new Coords(6, 3), Map.of()).stream()
+              .filter(feature -> feature.kind() == BoardScene.FeatureKind.LIMB).toList()), "Hexes no longer repeat every four columns");
         assertEquals(3, before.stream().map(BoardScene.Feature::rotation).distinct().count());
         assertEquals(before, BoardFeatures.capture(hex, coords, Map.of()).stream()
               .filter(feature -> feature.kind() == BoardScene.FeatureKind.LIMB).toList());

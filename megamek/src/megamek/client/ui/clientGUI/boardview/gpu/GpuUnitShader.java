@@ -5,10 +5,11 @@ import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
+import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.g3d.utils.DefaultShaderProvider;
 
-/** Unit paint and damage over libGDX's lighting/shadows. The ModelBatch owns the provider and its shaders. */
+/** Unit paint, damage and imported surface lighting. The ModelBatch owns the provider and its shaders. */
 final class GpuUnitShader extends DefaultShader {
     private static final String MAIN = "void main() {";
 
@@ -29,6 +30,11 @@ final class GpuUnitShader extends DefaultShader {
               config.vertexShader, config.fragmentShader));
         GpuCloudShadow.register(this);
         GpuLavaLighting.register(this);
+        GpuModelMaterial.register(this);
+        register("u_normalMaps", new BaseShader.GlobalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable part, Attributes attributes) { target.set(id, 1f); }
+        });
     }
 
     static DefaultShaderProvider provider() {
@@ -41,8 +47,8 @@ final class GpuUnitShader extends DefaultShader {
         };
     }
 
-    // These four insertion points are the source contract with the pinned libGDX version.
-    // Keep lighting/shadow code upstream, and fail explicitly if an upgrade changes this contract.
+    // These insertion points are the source contract with the pinned libGDX version.
+    // Reuse upstream material/shadow plumbing, and fail explicitly if an upgrade changes this contract.
     static String vertexSource(String source) {
         String declarations = GpuShaderSource.read("unit-material.vert");
         source = replaceOnce(source, MAIN, declarations + "\n" + MAIN + "\n    unitMaterialCoordinates();\n", "vertex");
@@ -64,20 +70,34 @@ final class GpuUnitShader extends DefaultShader {
      */
     static String linearVertex(String source) {
         source = GpuGlsl.libGdx(source, true);
+        source = replaceOnce(source, "#if defined(diffuseTextureFlag) || defined(specularTextureFlag) || defined(emissiveTextureFlag)",
+              "#if defined(diffuseTextureFlag) || defined(specularTextureFlag) || defined(emissiveTextureFlag) || defined(modelSurfaceFlag)",
+              "vertex");
+        source = replaceOnce(source, MAIN,
+              "#ifdef modelSurfaceFlag\nout vec2 v_modelUV;\n#endif\n" + MAIN
+                    + "\n#ifdef modelSurfaceFlag\nv_modelUV = a_texCoord0;\n#endif\n", "vertex");
         source = replaceOnce(source, MAIN, lightModel() + "\nout vec3 v_groundBounce;\n" + MAIN, "vertex");
+        // A recolourable model's shared mesh takes its placement's colours before any lighting (RigidGlb.recolour).
+        source = replaceOnce(source, MAIN, GpuShaderSource.read("model-colour-slots.glsl") + "\n" + MAIN, "vertex");
+        String color = "v_color = a_color;";
+        source = replaceOnce(source, color, color
+              + "\n#ifdef colourSlotsFlag\nv_color.rgb = slotColour(a_color.rgb, a_colourSlot, u_slotColours);\n#endif\n", "vertex");
         String ambient = "#endif // sphericalHarmonicsFlag";
         return replaceOnce(source, ambient, ambient + "\n" + GpuShaderSource.read("linear-ambient.glsl") + "\n", "vertex");
     }
 
     /**
-     * libGDX's lit fragment on the one light model: linear albedo times the linear light, encoded for display.
-     * Emission stays display-encoded and is added after the encode, as authored; unlit draws are untouched.
+     * libGDX's lit fragment on the one light model: linear albedo times linear light, plus decoded emission, then
+     * one display encode. This matches the terrain's radiance sum. Unlit draws are untouched.
      */
     static String linearFragment(String source) {
         source = GpuGlsl.libGdx(source, false);
-        source = replaceOnce(source, MAIN, lightModel() + GpuShaderSource.read("lava-lighting.glsl") + "\n" + MAIN, "fragment");
+        source = replaceOnce(source, MAIN, "// model-lighting-functions\n" + lightModel()
+              + GpuShaderSource.read("lava-lighting.glsl") + GpuShaderSource.read("model-surface.glsl") + "\n" + MAIN, "fragment");
         String lit = "#if (!defined(lightingFlag))";
-        source = replaceOnce(source, lit, GpuShaderSource.read("linear-material.glsl") + "\n" + lit, "fragment");
+        source = replaceOnce(source, lit, GpuShaderSource.read("linear-material.glsl")
+              + "\n#if defined(modelSurfaceFlag) && defined(lightingFlag)\n"
+              + "fragColor.rgb = modelSurface(diffuse.rgb, emissive.rgb);\n#elif (!defined(lightingFlag))", "fragment");
         String fog = "#endif // end fogFlag";
         return replaceOnce(source, fog, fog + "\n" + GpuShaderSource.read("linear-output.glsl") + "\n", "fragment");
     }

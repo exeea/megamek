@@ -25,10 +25,10 @@ class BoardGrassBankTest {
         var tile = scene.tile(new Coords(3, 4));
         var surface = new BoardSurface(scene, tile, lod);
         var finished = BoardTacticalGeometry.Surface.of(surface, scene, BoardGeometry.floor(scene));
-        var roots = GpuGroundCover.plant(scene, tile, finished);
-        var turf = GpuBankTurf.plant(scene, tile, finished);
+        var roots = GpuGroundCover.plant(scene, tile, finished, null);
+        var turf = GpuBankTurf.plant(scene, tile, finished, null);
         assertNotNull(turf, "Both contour bands need attached turf geometry");
-        assertEquals(turf, GpuBankTurf.plant(scene, tile, finished), "Rebuilding the same bank keeps the same variants");
+        assertEquals(turf, GpuBankTurf.plant(scene, tile, finished, null), "Rebuilding the same bank keeps the same variants");
         assertTrue(checkTurf(turf) > 10, "The visible bank has multiple distinct clumps");
         float level = BoardGeometry.level();
         int middle = 0;
@@ -53,7 +53,7 @@ class BoardGrassBankTest {
                 var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, family, c.getX() < 4 ? levels : 0, -1, 0));
                 var tile = scene.tile(new Coords(3, 4));
                 var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
-                var turf = GpuBankTurf.plant(scene, tile, surface);
+                var turf = GpuBankTurf.plant(scene, tile, surface, null);
                 if (family != BoardScene.Surface.GRASS || levels != 2) { assertNull(turf); continue; }
                 assertNotNull(turf);
                 var variants = new HashSet<Integer>();
@@ -71,7 +71,7 @@ class BoardGrassBankTest {
               c.getX() < 4 ? 2 : 0, c.getX() < 4 ? -1 : 1, 0));
         var tile = wet.tile(new Coords(3, 4));
         assertNull(GpuBankTurf.plant(wet, tile,
-              BoardTacticalGeometry.Surface.of(new BoardSurface(wet, tile), wet, BoardGeometry.floor(wet))));
+              BoardTacticalGeometry.Surface.of(new BoardSurface(wet, tile), wet, BoardGeometry.floor(wet)), null));
     }
 
     @Test
@@ -87,7 +87,7 @@ class BoardGrassBankTest {
             });
             var tile = scene.tile(new Coords(3, 4));
             var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
-            var turf = GpuBankTurf.plant(scene, tile, surface);
+            var turf = GpuBankTurf.plant(scene, tile, surface, null);
             assertNotNull(turf);
             for (int at = 0; at < turf.size; at += GpuBankTurf.STRIDE) {
                 for (int material = 0; material < BoardScene.Surface.values().length; material++) {

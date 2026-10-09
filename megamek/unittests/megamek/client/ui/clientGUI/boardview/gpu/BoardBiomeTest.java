@@ -49,7 +49,7 @@ class BoardBiomeTest {
             var scene = BoardSurfaceBlendTest.scene(c -> tile(c, kind, 0));
             var tile = scene.tile(new Coords(4, 4));
             var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-            var progressive = new GpuBiomeVegetation.Patch(scene, tile, surface);
+            var progressive = new GpuBiomeVegetation.Patch(scene, tile, surface, null);
             progressive.prepare(scene, tile, .08f);
             if (kind == BoardScene.Biome.MARSH) {
                 for (int i = 3; i < progressive.roots.size; i += 4) { assertTrue(progressive.roots.items[i] < .08f); }
@@ -61,7 +61,7 @@ class BoardBiomeTest {
                 assertEquals(distant, progressive.roots.size, "Zooming must not fill holes left by missing crop strips");
             } else { assertTrue(progressive.roots.size > distant); }
             progressive.prepare(scene, tile, 1);
-            var full = new GpuBiomeVegetation.Patch(scene, tile, surface);
+            var full = new GpuBiomeVegetation.Patch(scene, tile, surface, null);
             full.prepare(scene, tile);
             assertEquals(full.roots, progressive.roots, "LOD preparation order must keep one deterministic lattice");
             if (kind == BoardScene.Biome.FIELD) {
@@ -138,7 +138,7 @@ class BoardBiomeTest {
             for (var coords : List.of(center, center.translated(2))) {
                 var tile = scene.tile(coords);
                 var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-                var patch = new GpuBiomeVegetation.Patch(scene, tile, surface);
+                var patch = new GpuBiomeVegetation.Patch(scene, tile, surface, null);
                 patch.prepare(scene, tile);
                 for (int i = 0; i < patch.roots.size; i += 4) {
                     float x = patch.roots.items[i], y = patch.roots.items[i + 1], z = patch.roots.items[i + 2];
@@ -182,7 +182,7 @@ class BoardBiomeTest {
             });
             var tile = scene.tile(center);
             var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-            var patch = new GpuBiomeVegetation.Patch(scene, tile, surface);
+            var patch = new GpuBiomeVegetation.Patch(scene, tile, surface, null);
             patch.prepare(scene, tile);
             assertTrue(patch.roots.size > 0);
             assertEquals(patch.roots.size, patch.rowSpans.size);
@@ -223,7 +223,7 @@ class BoardBiomeTest {
         for (var coords : List.of(new Coords(3, 3), new Coords(3, 4), new Coords(4, 3), new Coords(4, 4))) {
             var tile = scene.tile(coords);
             var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-            var crops = GpuBiomeVegetation.plant(scene, tile, surface);
+            var crops = GpuBiomeVegetation.plant(scene, tile, surface, null);
             for (boolean canopy : new boolean[] { false, true }) {
                 var roots = canopy ? crops.canopy() : crops.roots();
                 var spans = canopy ? crops.canopySpans() : crops.spans();
@@ -256,7 +256,7 @@ class BoardBiomeTest {
         for (var coords : List.of(new Coords(3, 4), new Coords(5, 4))) {
             var tile = scene.tile(coords);
             var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-            var crops = GpuBiomeVegetation.plant(scene, tile, surface);
+            var crops = GpuBiomeVegetation.plant(scene, tile, surface, null);
             assertTrue(crops.canopy().size * 2 < crops.roots().size, coords + ": runs must replace multiple strips each");
             float strips = 0, runs = 0;
             for (int i = 0; i < crops.spans().size; i += 4) { strips += crops.spans().items[i]; }
@@ -298,7 +298,7 @@ class BoardBiomeTest {
                     var owner = scene.tile(new Coords(x, y));
                     var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, owner), scene, -1);
                     if (BoardBiome.plantKind(scene, owner) != BoardScene.Biome.MARSH) { continue; }
-                    var patch = new GpuBiomeVegetation.Patch(scene, owner, surface);
+                    var patch = new GpuBiomeVegetation.Patch(scene, owner, surface, null);
                     patch.prepare(scene, owner);
                     for (int i = 0; i < patch.roots.size; i += 4) {
                         float px = patch.roots.items[i], py = patch.roots.items[i + 1], z = patch.roots.items[i + 2] + .018f * metre;

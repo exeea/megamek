@@ -48,6 +48,24 @@ class BoardObstaclesTest {
         assertTrue(occupied > 0, "The actual elevated footprint still provides clearance");
     }
 
+    @Test
+    void aBridgePierKeepsGroundCoverOutOfItsFootingAtAnyHeight() {
+        Coords near = BoardBridgeFootingTest.START, far = near.translated(3);
+        var joint = BoardGeometry.center(near, 0).lerp(BoardGeometry.center(far, 0), .5f);
+        for (boolean toggled : new boolean[] { true, false }) {
+            var scene = BoardBridgeFootingTest.span(2, true, 0, toggled ? java.util.Set.of(0, 1) : java.util.Set.of());
+            for (Coords at : List.of(near, far)) {
+                var obstacles = new BoardObstacles(scene, scene.tile(at));
+                for (float z : new float[] { -60, -18 }) {
+                    assertEquals(toggled, obstacles.obstructs(new Vector3(joint.x, joint.y, z), .1f, 1), "At the joint, z " + z);
+                    assertFalse(obstacles.obstructs(BoardGeometry.center(at, 0).add(0, 0, z), .1f, 1), "Not at a hex centre");
+                }
+                // The deck itself lies at the water's level here: nothing grows through it, piers or not.
+                assertTrue(obstacles.obstructs(BoardGeometry.center(at, 0), .1f, 1), "The deck at its own level");
+            }
+        }
+    }
+
     private static final Coords CENTER = new Coords(2, 2);
     private static final String TANK = "buildings/saxarba/fuel_tanks/fuel_tank_hard_15";
 
@@ -250,13 +268,13 @@ class BoardObstaclesTest {
 
     @Test
     void everyGeyserClearsGrassFromItsBasinAndKeepsSurroundingMeadow() {
-        for (String state : List.of("water_off", "water_on", "magma")) {
-            var feature = new BoardScene.Feature("scenery/saxarba/misc/geyser_" + state,
+        for (String state : List.of("water-dormant", "water-erupting", "magma")) {
+            var feature = new BoardScene.Feature("scenery/geysers/" + state,
                   7, -3, 27, .8f, 0, 0, BoardScene.FeatureKind.SCENERY);
             BoardScene scene = scene(CENTER, feature, 0, BoardScene.Surface.GRASS);
             var tile = scene.tile(CENTER);
             var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
-            var roots = GpuGroundCover.plant(scene, tile, surface);
+            var roots = GpuGroundCover.plant(scene, tile, surface, null);
             assertTrue(roots.size / 4 > 1500, "The surrounding meadow must remain planted: " + state);
             float scale = BoardGeometry.hexScale();
             float x = BoardGeometry.centerX(CENTER) + 7 * scale, y = BoardGeometry.centerY(CENTER) - 3 * scale;

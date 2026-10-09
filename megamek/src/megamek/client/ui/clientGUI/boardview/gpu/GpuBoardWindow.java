@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.AWTEvent;
+import java.awt.BorderLayout;
 import java.awt.Dialog;
 import java.awt.Frame;
 import java.awt.Toolkit;
@@ -12,6 +13,7 @@ import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowEvent;
+import java.awt.event.WindowAdapter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -22,6 +24,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 import javax.swing.JComponent;
+import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -38,9 +41,11 @@ import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.boardeditor.BoardEditorSession;
+import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.common.annotations.Nullable;
 import megamek.common.units.Entity;
@@ -329,11 +334,77 @@ public final class GpuBoardWindow {
             return;
         }
         try {
-            BoardEditorSession editor = new BoardEditorSession();
+            BoardEditorSession editor = new BoardEditorSession(megamek.common.board.BoardEditorBlueprint.get(),
+                  BoardSceneryLayouts.DECODER);
             if (file != null) { editor.open(file.toPath()); }
             else if (chooseFile && !editor.chooseOpen(owner)) { return; }
             start(new GpuBoardWindow(null, null, () -> null, owner, editor, editor.game()));
         } catch (IOException | RuntimeException failure) {
+            reportPreviewFailure(owner, failure);
+        }
+    }
+
+    /** Resume the same document after a 2D view; opening a view never loads a file or resets undo history. */
+    private static synchronized boolean openEditor(Window owner, BoardEditorSession editor) {
+        if (active != null) {
+            JOptionPane.showMessageDialog(owner, Messages.getString("GpuBoard.alreadyOpen"));
+            return false;
+        }
+        start(new GpuBoardWindow(null, null, () -> null, owner, editor, editor.game()));
+        return active != null;
+    }
+
+    /** Change map presentation only, after the native renderer has released its resources. */
+    private void requestClassic() {
+        if (closing) { return; }
+        if (source != null) { source.endEditorStroke(); }
+        close(false);
+        afterClose = () -> {
+            if (editor != null) { showClassicEditor(classicWindow, editor); }
+            else { showClassicPreview(classicWindow, mapGame); }
+        };
+    }
+
+    private static void showClassicEditor(Window owner, BoardEditorSession session) {
+        BoardEditorPanel classic = new BoardEditorPanel(null, session);
+        classic.getFrame().setName("board-editor-2d");
+        classic.setSwitchTo3D(() -> { if (openEditor(owner, session)) { classic.dispose(); } });
+        classic.getFrame().addWindowListener(new WindowAdapter() {
+            @Override public void windowClosed(WindowEvent event) {
+                if (active == null && owner != null && owner.isDisplayable()) { showClassicWindow(null, owner); }
+            }
+        });
+        classic.showClassicEditor();
+        if (classic.hasClassicView()) { showClassicWindow(null, classic.getFrame()); }
+        else { classic.dispose(); openEditor(owner, session); }
+    }
+
+    /** A file-browser or lobby preview returns to this exact board, including a randomly generated one. */
+    private static void showClassicPreview(Window owner, Game game) {
+        JDialog dialog = new JDialog(owner, previewTitle(game.getBoard()), Dialog.ModalityType.MODELESS);
+        dialog.setName("board-preview-2d");
+        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        try {
+            BoardView view = new BoardView(game, null, null, 0);
+            view.setUseLosTool(false);
+            view.setDisplayInvalidFields(false);
+            JButton return3D = new JButton(Messages.getString("CommonMenuBar.viewGpuBoard"));
+            return3D.setName("preview-view-3d");
+            return3D.addActionListener(event -> {
+                openPreview(owner, game.getBoard());
+                if (active != null && active.preview && active.classicWindow == owner
+                      && active.mapGame.getBoard() == game.getBoard()) { dialog.dispose(); }
+            });
+            dialog.add(return3D, BorderLayout.NORTH);
+            dialog.add(view.getComponent(true), BorderLayout.CENTER);
+            dialog.addWindowListener(new WindowAdapter() {
+                @Override public void windowClosed(WindowEvent event) { view.dispose(); }
+            });
+            dialog.setSize(1000, 750);
+            dialog.setLocationRelativeTo(owner);
+            showClassicWindow(null, dialog);
+        } catch (IOException failure) {
+            dialog.dispose();
             reportPreviewFailure(owner, failure);
         }
     }
@@ -588,7 +659,8 @@ public final class GpuBoardWindow {
         if (mapGame == null && view == null) { return; }
         if (mapGame != null && (mapGame.getBoard().getWidth() < 1 || mapGame.getBoard().getHeight() < 1)) { return; }
         try {
-            source = mapGame == null ? new GpuBoardSource(view, panel) : new GpuMapSource(mapGame, classicWindow, editor);
+            source = mapGame == null ? new GpuBoardSource(view, panel)
+                  : new GpuMapSource(mapGame, classicWindow, editor, this::requestExit, this::requestClassic);
             startupTimer.stop();
         } catch (RuntimeException | LinkageError failure) {
             startupFailure = failure;

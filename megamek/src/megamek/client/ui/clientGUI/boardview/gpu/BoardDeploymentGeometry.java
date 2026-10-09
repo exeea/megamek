@@ -30,6 +30,14 @@ final class BoardDeploymentGeometry {
 
     private BoardDeploymentGeometry() { }
 
+    /** The authoring view shares deployment's animated perimeter, without tinting its editable surfaces. */
+    static BoardTactical editorOutlines(BoardScene scene) {
+        var tactical = scene.tactical();
+        var perimeter = perimeter(scene, zoneFills(scene));
+        return new BoardTactical(tactical.fills().stream().filter(fill -> !isZone(fill)).toList(),
+              tactical.labels(), walls(scene, perimeter), perimeter, tactical.ruler());
+    }
+
     static boolean isZone(BoardTactical.Fill fill) {
         return fill.border() != null && fill.border().zone();
     }

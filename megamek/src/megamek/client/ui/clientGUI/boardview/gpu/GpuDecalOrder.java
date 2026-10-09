@@ -16,6 +16,15 @@ final class GpuDecalOrder extends Attribute {
         super(TYPE); this.order = order; this.owner = owner; this.id = id;
     }
 
+    /**
+     * The n-th draw of one chunk's grouped paint. Chunks never paint the same hex, so equal layers of different chunks
+     * may share a draw and need no order between them.
+     */
+    static GpuDecalOrder layer(int layer) { return new GpuDecalOrder(layer, new Coords(0, 0), ""); }
+
+    /** The same layer continued in another mesh: drawn after the part it continues, before the next layer. */
+    GpuDecalOrder continued() { return new GpuDecalOrder(order, owner, id + "+"); }
+
     @Override public Attribute copy() { return new GpuDecalOrder(order, owner, id); }
 
     @Override public int compareTo(Attribute other) {

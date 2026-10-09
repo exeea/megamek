@@ -37,8 +37,8 @@ import megamek.client.ui.gdx.UiTheme;
 
 /**
  * The developer GPU tuning utility (user correction 5, C.1 G17), which goes before release: its bracket utility
- * button, last in the utility row, and its panel at the right gap, 90 below the window's top, 360 wide and at most the
- * window's height less 160, whose pages scroll. The Board and Atmosphere pages show the two pages of the
+ * button, before Help and Menu in gameplay, and its panel below that row, 360 wide and ending at least 70 above the
+ * window's bottom, whose pages scroll. The Board and Atmosphere pages show the two pages of the
  * {@link GpuBoardTuning} model row by row in the hud-v3 look: captions, sliders with their readings, checkboxes,
  * choices, the mode, preset and weather buttons, notes, and "Planetary conditions…", whose model button opens the Swing
  * editor through {@link GpuBoardSource#editPlanetaryConditions}. The Camera page holds the fixed sun and the board
@@ -47,10 +47,9 @@ import megamek.client.ui.gdx.UiTheme;
  * block in GpuHud removes the tool; the model keeps its defaults.
  */
 final class GpuTuningPanel implements GpuHud.Component {
-    private static final float TOP = 90;
     private static final float WIDTH = 360;
     /** The panel ends at least 70 above the window's bottom. */
-    private static final float MARGIN = 160;
+    private static final float BOTTOM = 70;
     /** A page's columns: a control's name or weather switch, its slider, the slider's reading. */
     private static final float NAME_WIDTH = 136;
     private static final float READING_WIDTH = 40;
@@ -65,8 +64,6 @@ final class GpuTuningPanel implements GpuHud.Component {
     /** The window-sized root that places the panel; presses beside the panel reach the board. */
     private final Table root = new Table();
     private final UiButton button;
-    private final TextButton.TextButtonStyle wide;
-    private final TextButton.TextButtonStyle narrow;
     /** Each copies the model's state into one shown widget; they run every frame while the panel is open. */
     private final List<Runnable> shows = new ArrayList<>();
     /** The panel's cell in the root, built when the panel first opens: until then the model costs nothing here. */
@@ -75,7 +72,6 @@ final class GpuTuningPanel implements GpuHud.Component {
     private UiPopover choices;
     private Slider.SliderStyle sliders;
     private GpuHud.Metrics sized;
-    private boolean narrowShown;
     /** The frame rate the header shows. */
     private int fpsShown = -1;
 
@@ -90,12 +86,8 @@ final class GpuTuningPanel implements GpuHud.Component {
         this.tuning = tuning;
         root.setName("tuning-panel");
         root.top().right();
-        button = ui.button("hud-utility", "tune", text("GpuBoard.hud.tuning.title"), null);
-        button.setName("tuning-button");
+        button = GpuUtilityBar.utility(ui, "tune", "GpuBoard.hud.tuning.title", "tuning-button");
         onChange(button, () -> state.toggle(GpuHudState.Dialog.TUNING));
-        wide = ui.skin.get("hud-utility", TextButton.TextButtonStyle.class);
-        // At W <= 1350, as the other utilities.
-        narrow = ui.skin.get("hud-utility-narrow", TextButton.TextButtonStyle.class);
     }
 
     @Override
@@ -103,7 +95,7 @@ final class GpuTuningPanel implements GpuHud.Component {
         return root;
     }
 
-    /** The developer's Tuning utility, last in the utility row. */
+    /** The developer's Tuning utility. */
     Actor button() {
         return button;
     }
@@ -117,10 +109,6 @@ final class GpuTuningPanel implements GpuHud.Component {
         GpuHud.Metrics metrics = inputs.metrics();
         boolean open = state.dialog == GpuHudState.Dialog.TUNING;
         button.pressed(open);
-        if (narrowShown != metrics.narrow()) {
-            narrowShown = metrics.narrow();
-            button.setStyle(narrowShown ? narrow : wide);
-        }
         root.setVisible(open);
         if (!open) {
             if (choices != null) {
@@ -133,9 +121,10 @@ final class GpuTuningPanel implements GpuHud.Component {
         }
         if (!metrics.equals(sized)) {
             sized = metrics;
-            root.pad(TOP, 0, 0, metrics.gap());
+            float top = GpuUtilityBar.HEIGHT + 2 * metrics.gap();
+            root.pad(top, 0, 0, metrics.gap());
             panelCell.width(Math.min(WIDTH, metrics.width() - 2 * metrics.gap()))
-                  .maxHeight(metrics.height() - MARGIN);
+                  .maxHeight(metrics.height() - top - BOTTOM);
             root.invalidate();
         }
         shows.forEach(Runnable::run);

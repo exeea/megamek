@@ -855,8 +855,6 @@ tasks.register('gpuBoardSmoke', Test) {
     // Native frame timings must not include bytecode coverage overhead; regular tests supply coverage.
     jacoco.enabled = false
     systemProperty 'java.awt.headless', 'false'
-    systemProperty 'megamek.gpu.referenceFoliage', new File(gradle.includedBuild('mm-data').projectDir,
-            'tools/board-models/foliage').absolutePath
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
     outputs.upToDateWhen { false }
 }
@@ -876,8 +874,6 @@ tasks.register('gpuBoardBenchmark', Test) {
     jvmArgs = mmJvmOptions
     jacoco.enabled = false
     systemProperty 'java.awt.headless', 'false'
-    systemProperty 'megamek.gpu.referenceFoliage', new File(gradle.includedBuild('mm-data').projectDir,
-            'tools/board-models/foliage').absolutePath
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
     systemProperties System.properties.findAll { it.key.toString().startsWith('megamek.gpu.') }
     testLogging { showStandardStreams = true }

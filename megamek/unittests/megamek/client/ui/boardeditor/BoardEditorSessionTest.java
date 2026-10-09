@@ -20,6 +20,35 @@ class BoardEditorSessionTest {
     @TempDir Path directory;
     private final Coords at = new Coords(1, 1);
 
+    @Test void classicNoOpStrokeKeepsTheDocumentCleanAndRedoAvailable() {
+        var session = session();
+        send(session, Action.ELEVATION, "", "2");
+        send(session, Action.UNDO, "", "");
+        assertFalse(session.dirty());
+        session.beginHexEdit(at);
+        session.finishClassicStroke();
+        assertFalse(session.dirty());
+        assertTrue(session.snapshot().canRedo());
+        send(session, Action.REDO, "", "");
+        assertEquals(2, session.board().getHex(at).getLevel());
+    }
+
+    @Test void classicBoardSettingsRemainUnsavedAcrossHexUndoAndSaveTogether() throws Exception {
+        var session = session();
+        Path file = directory.resolve("classic-settings.board2");
+        session.save(file);
+        send(session, Action.ELEVATION, "", "2");
+        session.board().addTag("Arena");
+        session.board().setRoadsAutoExit(!session.board().getRoadsAutoExit());
+        send(session, Action.UNDO, "", "");
+        assertTrue(session.dirty(), "Undoing a hex cannot hide unsaved board settings");
+        session.save(file);
+        assertFalse(session.dirty());
+        var loaded = BoardFile.read(file);
+        assertEquals(session.board().getTags(), loaded.getTags());
+        assertEquals(session.board().getRoadsAutoExit(), loaded.getRoadsAutoExit());
+    }
+
     private BoardEditorSession session() {
         var session = new BoardEditorSession(); session.pointer(at, 0, 0, false); return session;
     }
@@ -30,9 +59,9 @@ class BoardEditorSessionTest {
     @Test void contentsReorderingUpdatesPaintAndSurvivesUndoAndSave() throws Exception {
         var session = session();
         var ground = megamek.common.board.BoardDecoration.Placement.ground();
-        var car = new megamek.common.board.BoardDecoration("car", "prop", "scenery/components/car-red", null, 0, 0, 0, false, 1, ground, 0);
-        var a = new megamek.common.board.BoardDecoration("a", "decal", "decal/saxarba/rubble_light_path", null, 0, 0, 0, false, 1, ground, 4);
-        var b = new megamek.common.board.BoardDecoration("b", "decal", "decal/saxarba/rubble_light_path", null, .2, 0, 0, false, 1, ground, 2);
+        var car = new megamek.common.board.BoardDecoration("car", "prop", "scenery/vehicles/car", null, 0, 0, 0, false, 1, ground, 0);
+        var a = new megamek.common.board.BoardDecoration("a", "decal", "decal/damage/rubble-light-path", null, 0, 0, 0, false, 1, ground, 4);
+        var b = new megamek.common.board.BoardDecoration("b", "decal", "decal/damage/rubble-light-path", null, .2, 0, 0, false, 1, ground, 2);
         var original = java.util.List.of(car, a, b);
         session.board().getHex(at).setDecorations(original);
         send(session, Action.SELECT_OBJECT, "", "car");
@@ -75,7 +104,7 @@ class BoardEditorSessionTest {
     @Test void composesThreeCarsAndTreeWithIndependentTransformsAndHeights() throws Exception {
         var session = session();
         for (int i = 0; i < 3; i++) {
-            send(session, Action.ASSET, "", "scenery/components/car-silver");
+            send(session, Action.ASSET, "", "scenery/vehicles/car");
             session.pointer(at, -.25 + i * .2, .15, false); session.finishStroke();
             send(session, Action.OBJECT_VALUE, "rotation", Integer.toString(i * 45));
             send(session, Action.OBJECT_VALUE, "scale", "0.8");
@@ -102,9 +131,10 @@ class BoardEditorSessionTest {
     @Test void strokeHistoryAndFailedLoadsCannotLoseTheCurrentDocument() throws Exception {
         var session = session();
         long revision = session.snapshot().revision();
-        session.adjustElevation(Map.of()); session.adjustElevation(Map.of(at, 0));
+        session.adjustElevation(null, 1); session.adjustElevation(at, 0);
         assertEquals(revision, session.snapshot().revision(), "Empty wheel captures must not rebuild the inspector during another drag");
-        session.adjustElevation(Map.of(at, 3, new Coords(2, 2), 4)); session.finishStroke();
+        session.adjustElevation(at, 3); session.adjustElevation(new Coords(2, 2), 4);
+        session.finishStroke();
         assertEquals(3, session.board().getHex(at).getLevel());
         send(session, Action.UNDO, "", "");
         assertEquals(0, session.board().getHex(at).getLevel());
@@ -173,7 +203,7 @@ class BoardEditorSessionTest {
         assertEquals(3, session.board().getHex(at).terrainLevel(Terrains.FOLIAGE_ELEV));
         assertTrue(session.board().getHex(at).isValid(null));
         assertEquals(1, session.board().getHex(another).terrainLevel(Terrains.WOODS));
-        send(session, Action.ASSET, "", "scenery/components/car-red");
+        send(session, Action.ASSET, "", "scenery/vehicles/car");
         send(session, Action.BRUSH_VALUE, "object:scale", "1.5");
         send(session, Action.BRUSH_VALUE, "object:rotation", "75");
         assertTrue(session.snapshot().objects().isEmpty());
@@ -188,7 +218,7 @@ class BoardEditorSessionTest {
 
     @Test void movingAnObjectGroupPreservesRelativeTransformsAndOneUndoRestoresEverything() {
         var session = session();
-        send(session, Action.ASSET, "", "scenery/components/car-red");
+        send(session, Action.ASSET, "", "scenery/vehicles/car");
         send(session, Action.BRUSH_VALUE, "precision", "true");
         session.pointer(at, -.2, .1, false); session.finishStroke();
         String first = session.snapshot().object();
@@ -248,9 +278,9 @@ class BoardEditorSessionTest {
 
     @Test void clickingAndTransformingObjectsPreserveContentsOrderWithoutNoOpHistory() {
         var session = session();
-        var first = new megamek.common.board.BoardDecoration("z", "prop", "scenery/components/car-red", null,
+        var first = new megamek.common.board.BoardDecoration("z", "prop", "scenery/vehicles/car", null,
               -.1, .1, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
-        var middle = new megamek.common.board.BoardDecoration("a", "prop", "scenery/components/car-silver", null,
+        var middle = new megamek.common.board.BoardDecoration("a", "prop", "scenery/vehicles/car", null,
               0, -.1, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
         var last = new megamek.common.board.BoardDecoration("x", "prop", "birch-young", null,
               .1, .2, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
@@ -277,19 +307,45 @@ class BoardEditorSessionTest {
         assertFalse(session.snapshot().canUndo(), "The move remains a single undo operation");
     }
 
+    @Test void objectEditsKeepTheirGroupAndPastedGroupsAreFresh() {
+        var session = session();
+        var ground = megamek.common.board.BoardDecoration.Placement.ground();
+        var table = new megamek.common.board.BoardDecoration("table", "prop", "scenery/vehicles/car", null,
+              -.1, .1, 0, false, 1, ground, 0).withGroup("picnic");
+        var bench = new megamek.common.board.BoardDecoration("bench", "prop", "scenery/vehicles/car", null,
+              .1, .1, 0, false, 1, ground, 0).withGroup("picnic");
+        var loose = new megamek.common.board.BoardDecoration("loose", "prop", "birch-young", null,
+              0, -.2, 0, false, 1, ground, 0);
+        session.board().getHex(at).setDecorations(java.util.List.of(table, bench, loose));
+        send(session, Action.SELECT_OBJECT, "", "table");
+        send(session, Action.OBJECT_VALUE, "rotation", "30");
+        assertEquals("picnic", session.board().getHex(at).getDecorations().getFirst().group());
+        send(session, Action.COPY, "", "");
+        send(session, Action.TOOL, "", "SELECT");
+        session.pointer(new Coords(2, 1), 0, 0, false);
+        send(session, Action.PASTE, "", "");
+        var pasted = session.board().getHex(new Coords(2, 1)).getDecorations();
+        assertEquals(3, pasted.size());
+        assertNotEquals("picnic", pasted.get(0).group(), "A pasted group never joins its original");
+        assertEquals(pasted.get(0).group(), pasted.get(1).group());
+        assertNull(pasted.get(2).group());
+    }
+
     @Test void draggingOffASupportFallsBackToGroundAndKeepsItsHeightOffset() {
-        for (String receiver : java.util.List.of("bridge", "building", "industrial")) {
+        for (String receiver : java.util.List.of("bridge", "building", "industrial", "fuelTank", "ice")) {
             var session = session();
             String terrain = switch (receiver) {
                 case "bridge" -> "bridge:1:9;bridge_cf:40;bridge_elev:4";
                 case "building" -> "building:1;bldg_cf:15;bldg_elev:4";
+                case "fuelTank" -> "fuel_tank:1;fuel_tank_cf:15;fuel_tank_elev:4;fuel_tank_magn:100";
+                case "ice" -> "water:1;ice:1";
                 default -> "heavy_industrial:4";
             };
             session.board().setHex(at, new megamek.common.Hex(0, terrain, ""));
             Coords destination = new Coords(at.getX() + 2, at.getY());
             session.board().setHex(destination, new megamek.common.Hex(2));
             String surface = receiver.equals("bridge") ? "deck" : receiver.equals("building") ? "roof" : "top";
-            var prop = new megamek.common.board.BoardDecoration("prop", "prop", "scenery/components/car-red", null,
+            var prop = new megamek.common.board.BoardDecoration("prop", "prop", "scenery/vehicles/car", null,
                   0, 0, 0, false, 1, megamek.common.board.BoardDecoration.Placement.surface(receiver, surface, .4), 0);
             var decal = new megamek.common.board.BoardDecoration("decal", "decal", "scenery/decals/scorch", null,
                   0, 0, 0, false, 1, megamek.common.board.BoardDecoration.Placement.surface(receiver, surface, 0), 0);
@@ -312,35 +368,51 @@ class BoardEditorSessionTest {
         }
     }
 
+    @Test void aPropPutDownOnIceStandsOnTheIce() {
+        var session = session();
+        session.board().setHex(at, new megamek.common.Hex(0, "water:1;ice:1", ""));
+        send(session, Action.ASSET, "", "birch-young"); session.pointer(at, 0, 0, false); session.finishStroke();
+        assertEquals(megamek.common.board.BoardDecoration.Placement.surface("ice", "top", 0),
+              session.snapshot().objects().getFirst().placement());
+    }
+
     @Test void magneticConnectorsNeedMatchingSetOrientationScaleAndHeight() {
         var blueprint = BoardEditorBlueprint.get();
         var board = megamek.common.board.Board.createEmptyBoard(12, 12);
-        Coords target = new Coords(5, 5), owner = new Coords(5, 4);
-        var fixed = new megamek.common.board.BoardDecoration("fixed", "prop", "scenery/fluff/maglevstation1", null,
+        Coords target = new Coords(5, 5);
+        String barrier = "scenery/vehicles/parking-barrier";
+        var fixed = new megamek.common.board.BoardDecoration("fixed", "prop", barrier, null,
               0, 0, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
         board.getHex(target).setDecorations(java.util.List.of(fixed));
-        var moving = new megamek.common.board.BoardDecoration("moving", "prop", "scenery/fluff/maglevtrack1", null,
-              .06, .04, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
-        var snapped = BoardEditorSnapping.snap(board, blueprint, owner, moving, java.util.Set.of());
-        assertEquals(0, snapped.x(), .000001); assertEquals(0, snapped.y(), .000001);
+        // A barrier's ends lie half its length north and south of its anchor: the next barrier joins one length north.
+        double join = 2 * blueprint.asset(barrier).snap().connectors().getFirst().y();
+        var moving = new megamek.common.board.BoardDecoration("moving", "prop", barrier, null,
+              .02, join + .03, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
+        var snapped = BoardEditorSnapping.snap(board, blueprint, target, moving, java.util.Set.of());
+        assertEquals(0, snapped.x(), .000001); assertEquals(join, snapped.y(), .000001);
         assertEquals(moving.id(), snapped.id()); assertEquals(moving.rotation(), snapped.rotation());
-        for (var invalid : java.util.List.of(moving.transform(.06, .04, 30, false, 1, moving.placement()),
-              moving.transform(.06, .04, 0, false, 2, moving.placement()),
-              moving.transform(.06, .04, 0, false, 1, megamek.common.board.BoardDecoration.Placement.surface("ground", "top", 1)),
-              moving.transform(.4, .04, 0, false, 1, moving.placement()))) {
-            assertEquals(invalid, BoardEditorSnapping.snap(board, blueprint, owner, invalid, java.util.Set.of()));
+        for (var invalid : java.util.List.of(moving.transform(.02, join + .03, 30, false, 1, moving.placement()),
+              new megamek.common.board.BoardDecoration(moving.id(), moving.kind(), moving.asset(), null, .02, join + .03, 0,
+                    false, 1, moving.placement(), 0, false, 12, 0),
+              moving.transform(.02, join + .03, 0, false, 2, moving.placement()),
+              moving.transform(.02, join + .03, 0, false, 1, megamek.common.board.BoardDecoration.Placement.surface("ground", "top", 1)),
+              moving.transform(.4, join + .03, 0, false, 1, moving.placement()))) {
+            assertEquals(invalid, BoardEditorSnapping.snap(board, blueprint, target, invalid, java.util.Set.of()));
         }
-        assertEquals(moving, BoardEditorSnapping.snap(board, blueprint, owner, moving, java.util.Set.of("fixed")), "A moving group never snaps to itself");
-        // The second authored track points at -60 degrees; a +60 user rotation restores a vertical join.
-        var diagonal = new megamek.common.board.BoardDecoration("moving", "prop", "scenery/fluff/maglevtrack2", null,
-              .06, .04, 60, false, 1, moving.placement(), 0);
-        var aligned = BoardEditorSnapping.snap(board, blueprint, owner, diagonal, java.util.Set.of());
-        assertEquals(0, aligned.x(), .000001); assertEquals(0, aligned.y(), .000001);
-        var mirrored = moving.transform(.06, .04, 180, true, 1, moving.placement());
-        var mirrorSnap = BoardEditorSnapping.snap(board, blueprint, owner, mirrored, java.util.Set.of());
-        assertEquals(0, mirrorSnap.x(), .000001); assertEquals(0, mirrorSnap.y(), .000001);
-        assertNotNull(blueprint.asset("scenery/components/parking-barrier").snap());
-        assertNull(blueprint.asset("scenery/components/concrete-pipe").snap(), "A vertical pipe is not a horizontal rail connector");
+        assertEquals(moving, BoardEditorSnapping.snap(board, blueprint, target, moving, java.util.Set.of("fixed")), "A moving group never snaps to itself");
+        // Turned half round and mirrored, the barrier's ends are where they were.
+        var mirrored = moving.transform(.02, join + .03, 180, true, 1, moving.placement());
+        var mirrorSnap = BoardEditorSnapping.snap(board, blueprint, target, mirrored, java.util.Set.of());
+        assertEquals(0, mirrorSnap.x(), .000001); assertEquals(join, mirrorSnap.y(), .000001);
+        assertNull(blueprint.asset("scenery/construction/concrete-pipe").snap(), "A vertical pipe is not a horizontal rail connector");
+        // Stretched twice as long, both barriers' ends lie a whole length from their anchors; a plain one does not join them.
+        var longer = new megamek.common.board.BoardDecoration.Stretch(1, 2, 1);
+        var longMoving = moving.transform(.02, 2 * join + .03, 0, false, 1, moving.placement()).withStretch(longer);
+        assertEquals(longMoving, BoardEditorSnapping.snap(board, blueprint, target, longMoving, java.util.Set.of()));
+        board.getHex(target).setDecorations(java.util.List.of(fixed.withStretch(longer)));
+        var longSnap = BoardEditorSnapping.snap(board, blueprint, target, longMoving, java.util.Set.of());
+        assertEquals(0, longSnap.x(), .000001); assertEquals(2 * join, longSnap.y(), .000001);
+        assertEquals(longer, longSnap.stretch());
     }
 
     @Test void roadChoicesAlwaysCarryTheirDefinedFinishAndRemovingAnotherObjectKeepsSelection() {
@@ -359,6 +431,299 @@ class BoardEditorSessionTest {
         String first = session.snapshot().object(); session.pointer(at, 0, 0, false); session.finishStroke();
         String second = session.snapshot().object(); send(session, Action.REMOVE_OBJECT, first, "");
         assertEquals(second, session.snapshot().object()); assertEquals(1, session.snapshot().objects().size());
+    }
+
+    private static megamek.common.board.BoardDecoration prop(String id, double x, double y) {
+        return new megamek.common.board.BoardDecoration(id, "prop", "scenery/vehicles/car", null, x, y, 0, false, 1,
+              megamek.common.board.BoardDecoration.Placement.ground(), 0);
+    }
+    private static java.util.Set<String> ids(BoardEditorSession session) {
+        return session.snapshot().selection().stream().map(BoardEditorSession.Selection::object).collect(java.util.stream.Collectors.toSet());
+    }
+    private void click(BoardEditorSession session, Coords coords, String id, boolean shift) {
+        session.pointer(coords, 0, 0, false, id, shift); session.finishStroke(); session.release();
+    }
+    /** Board-global metric (pixel) position of an object, as the renderer places it. */
+    private double[] metric(BoardEditorSession session, String id) {
+        var entry = placedObjects(session).entrySet().stream().filter(e -> e.getKey().object().equals(id)).findFirst().orElseThrow();
+        Coords owner = entry.getKey().coords();
+        return new double[] { (owner.getX() * .75 + entry.getValue().x()) * 84, (-owner.getY() - (owner.getX() & 1) * .5 + entry.getValue().y()) * 72 };
+    }
+    private String group(BoardEditorSession session, String id) {
+        return placedObjects(session).entrySet().stream().filter(e -> e.getKey().object().equals(id)).findFirst().orElseThrow().getValue().group();
+    }
+
+    @Test void groupsAreOneUndoStepAndClicksSelectWholeGroupsWithDrillDown() {
+        var session = session();
+        Coords east = new Coords(2, 1);
+        session.board().getHex(at).setDecorations(java.util.List.of(prop("a", -.2, .1), prop("loose", .2, -.2)));
+        session.board().getHex(east).setDecorations(java.util.List.of(prop("c", 0, 0)));
+        session.select(java.util.List.of(new BoardEditorSession.Selection(at, "a"), new BoardEditorSession.Selection(east, "c"),
+              new BoardEditorSession.Selection(at, "missing")), BoardEditorSession.SelectMode.REPLACE);
+        assertEquals(java.util.Set.of("a", "c"), ids(session), "A box selection ignores unknown objects");
+        session.key(java.awt.event.KeyEvent.VK_G, java.awt.event.InputEvent.CTRL_DOWN_MASK, null);
+        String group = group(session, "a");
+        assertNotNull(group); assertEquals(group, group(session, "c")); assertNull(group(session, "loose"));
+        assertEquals(java.util.List.of(group), session.snapshot().groups()); assertEquals(group, session.snapshot().group());
+        send(session, Action.UNDO, "", "");
+        assertNull(group(session, "a")); assertNull(group(session, "c"));
+        assertFalse(session.snapshot().canUndo(), "Grouping members in two hexes is one undo step");
+        send(session, Action.REDO, "", "");
+        assertEquals(group, group(session, "c"));
+
+        send(session, Action.CLEAR_SELECTION, "", "");
+        click(session, at, "a", false);
+        assertEquals(java.util.Set.of("a", "c"), ids(session), "Clicking a member selects its whole group");
+        assertEquals("a", session.snapshot().object());
+        click(session, at, "a", false);
+        assertEquals(java.util.Set.of("a"), ids(session), "A second click without a drag drills down to the member");
+        assertEquals("", session.snapshot().group());
+        click(session, east, "c", false);
+        assertEquals(java.util.Set.of("c"), ids(session), "While drilled in, a sibling's click selects only the sibling");
+        click(session, at, "loose", false);
+        assertEquals(java.util.Set.of("loose"), ids(session));
+        click(session, at, "a", true);
+        assertEquals(java.util.Set.of("loose", "a", "c"), ids(session), "Shift adds the whole group");
+        assertEquals(java.util.List.of("", group), session.snapshot().groups().stream().sorted().toList());
+        assertEquals("", session.snapshot().group(), "A group plus a loose object is not one group");
+        click(session, east, "c", true);
+        assertEquals(java.util.Set.of("loose"), ids(session), "Shift removes the whole group");
+        session.select(java.util.List.of(new BoardEditorSession.Selection(east, "c")), BoardEditorSession.SelectMode.ADD);
+        assertEquals(java.util.Set.of("loose", "a", "c"), ids(session), "An additive box selection expands to the group");
+        session.select(java.util.List.of(new BoardEditorSession.Selection(east, "c")), BoardEditorSession.SelectMode.REPLACE);
+        assertEquals(java.util.Set.of("a", "c"), ids(session));
+
+        double[] a = metric(session, "a"), c = metric(session, "c");
+        session.pointer(at, -.2, .1, false, "a");
+        session.pointer(at, .8, .1, true, "a");
+        session.finishStroke(); session.release();
+        assertEquals(java.util.Set.of("a", "c"), ids(session), "A press that drags moves the group instead of drilling down");
+        double[] movedA = metric(session, "a"), movedC = metric(session, "c");
+        assertEquals(84, movedA[0] - a[0], 1e-6); assertEquals(84, movedC[0] - c[0], 1e-6);
+        assertEquals(a[1], movedA[1], 1e-6); assertEquals(c[1], movedC[1], 1e-6);
+        assertEquals(group, group(session, "a"), "A move keeps membership across owner hexes");
+
+        session.key(java.awt.event.KeyEvent.VK_G, java.awt.event.InputEvent.CTRL_DOWN_MASK | java.awt.event.InputEvent.SHIFT_DOWN_MASK, null);
+        assertNull(group(session, "a")); assertNull(group(session, "c"));
+        send(session, Action.CLEAR_SELECTION, "", "");
+        Coords ownerA = placedObjects(session).keySet().stream().filter(s -> s.object().equals("a")).findFirst().orElseThrow().coords();
+        click(session, ownerA, "a", false);
+        assertEquals(java.util.Set.of("a"), ids(session), "The group index follows ungrouping");
+        send(session, Action.UNDO, "", "");
+        assertEquals(group, group(session, "a"), "Undoing ungroup is one step");
+        click(session, ownerA, "a", false);
+        assertEquals(java.util.Set.of("a", "c"), ids(session), "The group index is rebuilt after undo");
+        session.key(java.awt.event.KeyEvent.VK_G, java.awt.event.InputEvent.CTRL_DOWN_MASK, null);
+        assertEquals("The selection is already one group.", session.snapshot().message());
+        assertEquals(group, group(session, "a"));
+    }
+
+    @Test void groupTransformsPivotAboutTheCentroidAndDuplicateIntoAFreshGroup() {
+        var session = session();
+        Coords east = new Coords(2, 1);
+        session.board().getHex(at).setDecorations(java.util.List.of(prop("a", -.2, .1).withGroup("g")));
+        session.board().getHex(east).setDecorations(java.util.List.of(prop("b", .1, -.1).withGroup("g")));
+        send(session, Action.SELECT_OBJECT, "g", "");
+        assertEquals("g", session.snapshot().group());
+        assertEquals("a", session.snapshot().object(), "The inspected hex's member is the primary");
+        double[] a = metric(session, "a"), b = metric(session, "b");
+        double[] centre = { (a[0] + b[0]) / 2, (a[1] + b[1]) / 2 };
+        double distance = Math.hypot(a[0] - b[0], a[1] - b[1]);
+
+        send(session, Action.GROUP_VALUE, "rotation", "90");
+        double[] turnedA = metric(session, "a"), turnedB = metric(session, "b");
+        assertEquals(distance, Math.hypot(turnedA[0] - turnedB[0], turnedA[1] - turnedB[1]), 1e-6, "Yaw keeps metric distances");
+        assertEquals(centre[0], (turnedA[0] + turnedB[0]) / 2, 1e-6); assertEquals(centre[1], (turnedA[1] + turnedB[1]) / 2, 1e-6);
+        assertEquals(centre[0] - (a[1] - centre[1]), turnedA[0], 1e-6, "Counter-clockwise like an object's yaw");
+        assertEquals(90, placedObjects(session).values().stream().filter(o -> o.id().equals("b")).findFirst().orElseThrow().rotation(), 1e-9);
+        send(session, Action.UNDO, "", "");
+        assertArrayEquals(a, metric(session, "a"), 1e-9); assertFalse(session.snapshot().canUndo(), "A group turn is one undo step");
+
+        send(session, Action.SELECT_OBJECT, "g", "");
+        send(session, Action.GROUP_VALUE, "scale", "2");
+        assertEquals(2 * distance, Math.hypot(metric(session, "a")[0] - metric(session, "b")[0], metric(session, "a")[1] - metric(session, "b")[1]), 1e-6);
+        send(session, Action.UNDO, "", "");
+
+        send(session, Action.SELECT_OBJECT, "g", "");
+        send(session, Action.GROUP_VALUE, "mirror", "true");
+        assertEquals(2 * centre[0] - a[0], metric(session, "a")[0], 1e-6, "Mirror reflects about the centroid");
+        assertEquals(a[1], metric(session, "a")[1], 1e-6);
+        assertTrue(placedObjects(session).values().stream().allMatch(megamek.common.board.BoardDecoration::mirror));
+        send(session, Action.UNDO, "", "");
+
+        session.pointer(at, 0, 0, false); session.finishStroke(); // The mirror moved the inspected hex to b's owner.
+        send(session, Action.SELECT_OBJECT, "g", "");
+        assertEquals("a", session.snapshot().object());
+        send(session, Action.GROUP_VALUE, "x", "0.3");
+        assertEquals(a[0] + .3 * 84, metric(session, "a")[0], 1e-6); assertEquals(b[0] + .3 * 84, metric(session, "b")[0], 1e-6);
+        send(session, Action.UNDO, "", "");
+
+        // Values are relative to the group as it is (yaw 0, scale 1): a live drag's values are its total change, and
+        // the next edit starts from the result.
+        send(session, Action.SELECT_OBJECT, "g", "");
+        for (String value : java.util.List.of("10", "20", "30")) { session.command(new Command(Action.GROUP_VALUE, "rotation", value), null, true); }
+        session.finishStroke();
+        assertEquals(30, placedObjects(session).values().stream().filter(o -> o.id().equals("b")).findFirst().orElseThrow().rotation(), 1e-9);
+        send(session, Action.GROUP_VALUE, "rotation", "30");
+        assertEquals(60, placedObjects(session).values().stream().filter(o -> o.id().equals("b")).findFirst().orElseThrow().rotation(), 1e-9);
+        assertEquals(distance, Math.hypot(metric(session, "a")[0] - metric(session, "b")[0], metric(session, "a")[1] - metric(session, "b")[1]), 1e-6);
+        send(session, Action.UNDO, "", ""); send(session, Action.UNDO, "", "");
+        assertArrayEquals(a, metric(session, "a"), 1e-9); assertFalse(session.snapshot().canUndo(), "The live drag was one undo step");
+
+        send(session, Action.SELECT_OBJECT, "g", "");
+        send(session, Action.DUPLICATE_OBJECT, "", "");
+        assertEquals(4, placedObjects(session).size());
+        assertEquals(2, session.snapshot().selection().size());
+        assertFalse(ids(session).contains("a") || ids(session).contains("b"), "The copies become the selection");
+        String copy = session.snapshot().group();
+        assertFalse(copy.isEmpty()); assertNotEquals("g", copy);
+        assertEquals("g", group(session, "a"), "The original group is unchanged");
+        send(session, Action.UNDO, "", "");
+        assertEquals(2, placedObjects(session).size(), "A whole-group duplicate is one undo step");
+    }
+
+    @Test void groupingADrilledMemberWithALooseObjectSelectsAndTransformsTheWholeMergedGroup() {
+        var session = session();
+        Coords east = new Coords(2, 1);
+        session.board().getHex(at).setDecorations(java.util.List.of(prop("a", -.2, .1).withGroup("g"), prop("c", .2, -.2)));
+        session.board().getHex(east).setDecorations(java.util.List.of(prop("b", .1, -.1).withGroup("g")));
+        click(session, at, "a", false);
+        click(session, at, "a", false);
+        assertEquals(java.util.Set.of("a"), ids(session), "Drilled into a");
+        click(session, at, "c", true);
+        assertEquals(java.util.Set.of("a", "c"), ids(session));
+        session.key(java.awt.event.KeyEvent.VK_G, java.awt.event.InputEvent.CTRL_DOWN_MASK, null);
+        String merged = group(session, "b");
+        assertNotEquals("g", merged); assertEquals(merged, group(session, "a")); assertEquals(merged, group(session, "c"));
+        assertEquals(java.util.Set.of("a", "b", "c"), ids(session), "The selection becomes the whole merged group");
+        assertEquals(merged, session.snapshot().group());
+
+        send(session, Action.GROUP_VALUE, "rotation", "90");
+        assertTrue(placedObjects(session).values().stream().allMatch(o -> Math.abs(o.rotation() - 90) < 1e-9),
+              "A group turn reaches the member that was outside the selection");
+
+    }
+
+    @Test void aGroupWithOneMemberLeftIsReportedAsUngrouped() {
+        var session = session();
+        var solo = prop("x", 0, 0).withGroup("solo");
+        var pair = prop("y", .2, 0).withGroup("pair");
+        session.board().getHex(at).setDecorations(java.util.List.of(solo, pair));
+        session.board().getHex(new Coords(2, 1)).setDecorations(java.util.List.of(prop("z", 0, 0).withGroup("pair")));
+        var snapshot = session.snapshot();
+        assertEquals(Map.of("solo", 1, "pair", 2), snapshot.groupSizes(), "Sizes count members board-wide");
+        assertFalse(snapshot.grouped(solo)); assertTrue(snapshot.grouped(pair));
+    }
+
+    @Test void onlyASelectedItemMovesAndABoxTakesObjectsBeforeHexes() {
+        var session = session();
+        Coords east = new Coords(2, 1), far = new Coords(6, 6);
+        send(session, Action.ELEVATION, "", "3");
+        session.board().getHex(east).setDecorations(java.util.List.of(prop("car", 0, 0)));
+        session.board().getHex(far).setDecorations(java.util.List.of(prop("van", 0, 0)));
+        send(session, Action.CLEAR_SELECTION, "", "");
+
+        // A press on an unselected hex selects it; its drag moves nothing (the view boxes such drags).
+        session.pointer(at, 0, 0, false); session.pointer(far, 0, 0, true); session.finishStroke(); session.release();
+        assertEquals(3, session.board().getHex(at).getLevel()); assertEquals(0, session.board().getHex(far).getLevel());
+        assertEquals(java.util.List.of(new BoardEditorSession.Selection(at, "")), session.snapshot().selection());
+        // Dragging the now selected hex moves it, as one undo step.
+        session.pointer(at, 0, 0, false); session.pointer(far, 0, 0, true); session.finishStroke(); session.release();
+        assertEquals(0, session.board().getHex(at).getLevel()); assertEquals(3, session.board().getHex(far).getLevel());
+        send(session, Action.UNDO, "", "");
+        assertEquals(3, session.board().getHex(at).getLevel()); assertEquals(0, session.board().getHex(far).getLevel());
+
+        // The same for an object: the first press selects it in place, a press on the selected object drags it.
+        send(session, Action.CLEAR_SELECTION, "", "");
+        session.pointer(east, 0, 0, false, "car"); session.pointer(east, .9, 0, true, "car"); session.finishStroke(); session.release();
+        assertEquals(0, placedObjects(session).get(new BoardEditorSession.Selection(east, "car")).x());
+        assertEquals(java.util.Set.of("car"), ids(session));
+        session.pointer(east, 0, 0, false, "car"); session.pointer(east, .9, 0, true, "car"); session.finishStroke(); session.release();
+        assertFalse(placedObjects(session).containsKey(new BoardEditorSession.Selection(east, "car")), "The selected car moved east");
+
+        // A box takes the objects it covers, or the hexes when it covers none; Shift adds and Ctrl removes the
+        // selection's own kind.
+        send(session, Action.UNDO, "", "");
+        BoardEditorSession.Selection car = new BoardEditorSession.Selection(east, "car"), van = new BoardEditorSession.Selection(far, "van");
+        BoardEditorSession.Selection hexAt = new BoardEditorSession.Selection(at, ""), hexFar = new BoardEditorSession.Selection(far, "");
+        session.select(java.util.List.of(hexAt, hexFar, car), BoardEditorSession.SelectMode.REPLACE);
+        assertEquals(java.util.List.of(car), session.snapshot().selection());
+        session.select(java.util.List.of(hexAt, hexFar), BoardEditorSession.SelectMode.REPLACE);
+        assertEquals(java.util.List.of(hexAt, hexFar), session.snapshot().selection(), "A box over no object selects its hexes");
+        session.select(java.util.List.of(car), BoardEditorSession.SelectMode.ADD);
+        assertEquals(java.util.List.of(hexAt, hexFar), session.snapshot().selection(), "Shift adds only hexes to hexes");
+        session.select(java.util.List.of(hexAt, van), BoardEditorSession.SelectMode.REMOVE);
+        assertEquals(java.util.List.of(hexFar), session.snapshot().selection(), "Ctrl removes the covered hexes");
+        assertEquals(far, session.snapshot().selected(), "The inspector follows what stays selected");
+        session.select(java.util.List.of(car), BoardEditorSession.SelectMode.REPLACE);
+        session.select(java.util.List.of(hexFar, van), BoardEditorSession.SelectMode.ADD);
+        assertEquals(java.util.Set.of("car", "van"), ids(session));
+        session.select(java.util.List.of(car), BoardEditorSession.SelectMode.REMOVE);
+        assertEquals(java.util.List.of(van), session.snapshot().selection());
+        session.select(java.util.List.of(van), BoardEditorSession.SelectMode.REMOVE);
+        assertTrue(session.snapshot().selection().isEmpty()); assertEquals("", session.snapshot().object());
+
+        // Shift drags never move; a Shift click still toggles.
+        session.pointer(east, 0, 0, false, "car", true); session.pointer(east, .9, 0, true, "car", true); session.finishStroke();
+        assertEquals(java.util.Set.of("car"), ids(session));
+        assertEquals(0, placedObjects(session).get(car).x());
+    }
+
+    @Test void issuesFollowCommittedEditsUndoAndRedoAndAnIssueSelectsItsHex() throws Exception {
+        var session = session();
+        assertTrue(session.snapshot().issues().isEmpty(), "A new board has no issues");
+        Coords east = new Coords(2, 1);
+        int toward = java.util.stream.IntStream.range(0, 6).filter(d -> east.translated(d).equals(at)).findFirst().orElseThrow();
+        // Set directly, without an edit: only the neighbour re-validation of the later edits can find east's issue.
+        session.board().setHex(east, new megamek.common.Hex(0, "building:1:" + (1 << toward) + ";bldg_elev:1;bldg_cf:15", ""));
+
+        send(session, Action.TERRAIN, "building", "2");
+        assertEquals(java.util.Set.of(at, east), session.snapshot().issues().stream().map(BoardEditorSession.Issue::coords)
+              .collect(java.util.stream.Collectors.toSet()), "The edited hex and its re-validated neighbour");
+        assertTrue(session.snapshot().issues().stream().filter(issue -> issue.coords().equals(at)).findFirst().orElseThrow()
+              .text().startsWith("Incomplete Building"), "The game's own rule text");
+        send(session, Action.TERRAIN, "bldg_elev", "1");
+        send(session, Action.TERRAIN, "bldg_cf", "40");
+        assertEquals(java.util.List.of(new BoardEditorSession.Issue(east, "",
+              "Building has an exit to a building of another Building Type (Light, Medium...).")), session.snapshot().issues(),
+              "Completing the building leaves the neighbour's exit issue");
+        var published = session.snapshot().issues();
+        session.pointer(new Coords(9, 9), 0, 0, false); session.finishStroke();
+        assertSame(published, session.snapshot().issues(), "Selection and other non-edits publish the same list");
+
+        send(session, Action.UNDO, "", "");
+        assertEquals(java.util.Set.of(at, east), session.snapshot().issues().stream().map(BoardEditorSession.Issue::coords)
+              .collect(java.util.stream.Collectors.toSet()), "Undo re-validates");
+        send(session, Action.UNDO, "", ""); send(session, Action.UNDO, "", "");
+        assertTrue(session.snapshot().issues().isEmpty());
+        send(session, Action.REDO, "", ""); send(session, Action.REDO, "", ""); send(session, Action.REDO, "", "");
+        assertEquals(published, session.snapshot().issues(), "Redo re-validates");
+
+        // An issue selects its hex, and the object when it is about one: a deck object whose bridge was removed.
+        Coords deck = new Coords(5, 5);
+        session.pointer(deck, 0, 0, false); session.finishStroke();
+        send(session, Action.ADD_COMPONENT, "", "bridge");
+        send(session, Action.ASSET, "", "birch-young");
+        session.pointer(deck, 0, 0, false, null, false, "bridge"); session.finishStroke();
+        String tree = session.snapshot().object();
+        assertTrue(session.snapshot().issues().stream().noneMatch(issue -> issue.coords().equals(deck)));
+        send(session, Action.REMOVE_COMPONENT, "", "bridge");
+        var issue = session.snapshot().issues().stream().filter(found -> found.coords().equals(deck)).findFirst().orElseThrow();
+        assertEquals(new BoardEditorSession.Issue(deck, tree, "Object on deck but no bridge"), issue);
+        send(session, Action.CLEAR_SELECTION, "", ""); send(session, Action.TOOL, "", "PAINT");
+        send(session, Action.SELECT_AT, deck.getX() + "," + deck.getY(), issue.object());
+        assertEquals(deck, session.snapshot().selected()); assertEquals(tree, session.snapshot().object());
+        assertEquals(java.util.List.of(new BoardEditorSession.Selection(deck, tree)), session.snapshot().selection());
+        assertEquals(BoardEditorSession.Tool.SELECT, session.snapshot().tool());
+
+        // Opening a document validates all of it: here an object whose art is missing.
+        var board = megamek.common.board.Board.createEmptyBoard(4, 4);
+        board.getHex(2, 3).setDecorations(java.util.List.of(new megamek.common.board.BoardDecoration("gone", "prop", "scenery/no-such-art",
+              null, 0, 0, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0)));
+        Path file = directory.resolve("missing.board2"); BoardFile.save(board, file);
+        session.open(file);
+        assertEquals(java.util.List.of(new BoardEditorSession.Issue(new Coords(2, 3), "gone", "Object art not found: scenery/no-such-art")),
+              session.snapshot().issues());
     }
 
     private Map<BoardEditorSession.Selection, megamek.common.board.BoardDecoration> placedObjects(BoardEditorSession session) {
@@ -458,6 +823,72 @@ class BoardEditorSessionTest {
         assertTrue(session.snapshot().object().isEmpty(), "Undoing placement clears the removed selection");
     }
 
+    @Test void stretchIsALiveObjectValueThatGroupEditsDuplicatesAndSavingKeep() throws Exception {
+        var session = session();
+        send(session, Action.ASSET, "", "scenery/vehicles/car"); session.pointer(at, .2, .1, false); session.finishStroke();
+        var original = session.snapshot().objects().getFirst();
+        for (String value : java.util.List.of("1.2", "1.6", "2")) {
+            session.command(new Command(Action.OBJECT_VALUE, "stretchX", value), null, true);
+        }
+        session.finishStroke();
+        send(session, Action.OBJECT_VALUE, "stretchZ", "0.5");
+        var stretched = session.snapshot().objects().getFirst();
+        assertEquals(new megamek.common.board.BoardDecoration.Stretch(2, 1, .5), stretched.stretch());
+        assertEquals(original.scale(), stretched.scale(), "Stretch multiplies the uniform scale, it does not replace it");
+        send(session, Action.OBJECT_VALUE, "stretchY", "0");
+        assertEquals(stretched, session.snapshot().objects().getFirst(), "A stretch factor must be positive");
+        send(session, Action.UNDO, "", "");
+        assertEquals(new megamek.common.board.BoardDecoration.Stretch(2, 1, 1), session.snapshot().objects().getFirst().stretch());
+        send(session, Action.UNDO, "", "");
+        assertEquals(original, session.snapshot().objects().getFirst(), "The live stretch drag was one undo step");
+        send(session, Action.REDO, "", ""); send(session, Action.REDO, "", "");
+        assertEquals(stretched, session.snapshot().objects().getFirst());
+
+        // Group edits keep each member's stretch on its own axes; a group's scale stays uniform.
+        session.board().getHex(at).setDecorations(java.util.List.of(stretched.withGroup("g"), prop("other", -.2, -.1).withGroup("g")));
+        send(session, Action.SELECT_OBJECT, "g", "");
+        send(session, Action.GROUP_VALUE, "scale", "2");
+        send(session, Action.GROUP_VALUE, "rotation", "90");
+        send(session, Action.GROUP_VALUE, "mirror", "true");
+        var member = placedObjects(session).values().stream().filter(o -> o.id().equals(stretched.id())).findFirst().orElseThrow();
+        assertEquals(stretched.stretch(), member.stretch());
+        assertEquals(2 * stretched.scale(), member.scale(), 1e-9);
+        send(session, Action.SELECT_OBJECT, "g", "");
+        send(session, Action.DUPLICATE_OBJECT, "", "");
+        assertEquals(2, placedObjects(session).values().stream().filter(o -> o.stretch().equals(stretched.stretch())).count());
+
+        Path target = directory.resolve("stretch.board2"); session.save(target);
+        var saved = placedObjects(session).values().stream().filter(o -> o.id().equals(stretched.id())).findFirst().orElseThrow();
+        var loaded = BoardFile.read(target);
+        assertEquals(saved.stretch(), java.util.stream.IntStream.range(0, loaded.getWidth()).boxed()
+              .flatMap(x -> java.util.stream.IntStream.range(0, loaded.getHeight()).mapToObj(y -> loaded.getHex(x, y)))
+              .flatMap(hex -> hex.getDecorations().stream()).filter(o -> o.id().equals(saved.id())).findFirst().orElseThrow()
+              .stretch());
+    }
+
+    @Test void slotColoursAreObjectValuesThatPalettePresetsDuplicatesAndUndoKeep() {
+        var session = session();
+        // A palette pond is the freeform pool placed in the pond colours.
+        send(session, Action.ASSET, "", "scenery/parks/pond-1"); session.pointer(at, .2, .1, false); session.finishStroke();
+        var pond = session.snapshot().objects().getFirst();
+        assertEquals("scenery/pools/freeform", pond.asset());
+        assertEquals(java.util.List.of("#63753d", "#63753d", "#63753d", "#94c7ab"), pond.colours().slots());
+        send(session, Action.OBJECT_VALUE, "colour3", "#E0F2FA");
+        var clear = session.snapshot().objects().getFirst();
+        assertEquals("#e0f2fa", clear.colours().slot(3));
+        assertEquals(pond.colours().slot(0), clear.colours().slot(0), "Other slots keep their colours");
+        send(session, Action.OBJECT_VALUE, "colour0", "teal");
+        assertEquals(clear, session.snapshot().objects().getFirst(), "A colour is #rrggbb");
+        send(session, Action.DUPLICATE_OBJECT, "", "");
+        assertEquals(2, session.snapshot().objects().stream().filter(o -> o.colours().equals(clear.colours())).count());
+        send(session, Action.UNDO, "", ""); send(session, Action.UNDO, "", "");
+        assertEquals(pond, session.snapshot().objects().getFirst(), "Each colour choice is one undo step");
+        send(session, Action.SELECT_OBJECT, "", pond.id());
+        for (int slot = 0; slot < 4; slot++) { send(session, Action.OBJECT_VALUE, "colour" + slot, ""); }
+        assertEquals(megamek.common.board.BoardDecoration.Colours.NONE, session.snapshot().objects().getFirst().colours(),
+              "Empty returns a slot to the model's own colour");
+    }
+
     @Test void globalThemeIsUndoableWithoutLosingHexOverridesOrObjects() {
         var session = session();
         send(session, Action.ASSET, "", "birch-young"); session.pointer(at, .2, .1, false); session.finishStroke();
@@ -470,5 +901,89 @@ class BoardEditorSessionTest {
         assertEquals("snow", session.board().getHex(at).getTheme());
         assertNotEquals("desert", session.board().getHex(0, 0).getTheme());
         assertEquals(objects, session.snapshot().objects());
+    }
+
+    @Test void sculptStrokeMovesEachEnteredHexOnceAsOneUndoStepAndCtrlInverts() {
+        var session = session();
+        Coords first = new Coords(4, 4), second = new Coords(6, 4);
+        send(session, Action.TOOL, "", "SCULPT");
+        session.pointer(first, 0, 0, false);
+        session.pointer(second, 0, 0, true); session.pointer(second, 0, 0, true); session.pointer(first, 0, 0, true);
+        session.finishStroke();
+        assertEquals(1, session.board().getHex(first).getLevel());
+        assertEquals(1, session.board().getHex(second).getLevel(), "Re-entering a hex in one stroke does not raise it again");
+        assertEquals("Raise · 1 hex", session.sculptHint(first, 1));
+        send(session, Action.UNDO, "", "");
+        assertEquals(0, session.board().getHex(first).getLevel());
+        assertEquals(0, session.board().getHex(second).getLevel());
+        assertFalse(session.snapshot().canUndo(), "The whole drag is a single undo step");
+        session.pointer(first, 0, 0, false, null, false, "ground", true); session.finishStroke();
+        assertEquals(-1, session.board().getHex(first).getLevel(), "Ctrl lowers in Raise mode");
+        send(session, Action.BRUSH_VALUE, "sculpt", "LEVEL");
+        assertEquals("Level to L0", session.sculptHint(second, 1));
+        session.pointer(first, 0, 0, false); session.pointer(second, 0, 0, true); session.finishStroke();
+        assertEquals(-1, session.board().getHex(second).getLevel(), "Level mode uses the first hex of the stroke");
+    }
+
+    @Test void ctrlWheelIgnoresSculptSlope() {
+        var session = session();
+        send(session, Action.TOOL, "", "SCULPT");
+        Coords centre = new Coords(6, 6);
+        for (int notch = 0; notch < 3; notch++) { session.adjustElevation(centre, 1); }
+        session.finishStroke();
+        assertEquals(3, session.board().getHex(centre).getLevel());
+        centre.allAdjacent().forEach(at -> assertEquals(0, session.board().getHex(at).getLevel()));
+        centre.allAtDistance(2).forEach(at -> assertEquals(0, session.board().getHex(at).getLevel()));
+        centre.allAtDistance(3).forEach(at -> assertEquals(0, session.board().getHex(at).getLevel()));
+        send(session, Action.UNDO, "", "");
+        centre.allAtDistanceOrLess(2).forEach(at -> assertEquals(0, session.board().getHex(at).getLevel()));
+        send(session, Action.BRUSH_VALUE, "slope", "false");
+        session.adjustElevation(centre, 2); session.finishStroke();
+        assertEquals(2, session.board().getHex(centre).getLevel());
+        centre.allAdjacent().forEach(at -> assertEquals(0, session.board().getHex(at).getLevel()));
+    }
+
+    @Test void ctrlWheelDirectionIgnoresSculptMode() {
+        Coords centre = new Coords(6, 6);
+        for (var mode : LevelSculpt.Mode.values()) {
+            var session = session();
+            send(session, Action.TOOL, "", "SCULPT");
+            send(session, Action.BRUSH_VALUE, "sculpt", mode.name());
+            session.adjustElevation(centre, -3); session.finishStroke();
+            assertEquals(-3, session.board().getHex(centre).getLevel(), mode.name());
+            centre.allAdjacent().forEach(at -> assertEquals(0, session.board().getHex(at).getLevel()));
+            session.adjustElevation(centre, 6); session.finishStroke();
+            assertEquals(3, session.board().getHex(centre).getLevel(), mode.name());
+            centre.allAdjacent().forEach(at -> assertEquals(0, session.board().getHex(at).getLevel()));
+        }
+    }
+
+    @Test void fastSculptDragCoversSkippedHexes() {
+        var session = session();
+        Coords from = new Coords(2, 4), to = new Coords(7, 4);
+        send(session, Action.TOOL, "", "SCULPT");
+        send(session, Action.BRUSH_VALUE, "slope", "false");
+        session.pointer(from, 0, 0, false); session.pointer(to, 0, 0, true); session.finishStroke();
+        Coords.intervening(from, to).forEach(at -> assertEquals(1, session.board().getHex(at).getLevel(), "Ridge at " + at));
+    }
+
+    @Test void sculptKeepsWaterBridgeAndBuildingTerrainAndUndoRestoresSlopedNeighbours() {
+        var session = session();
+        send(session, Action.TOOL, "", "SCULPT");
+        Coords centre = new Coords(4, 4), water = centre.translated(0), bridge = centre.translated(2), building = centre.translated(4);
+        var board = session.board();
+        board.setHex(centre, new megamek.common.Hex(0, "water:1", ""));
+        board.setHex(bridge, new megamek.common.Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:1", ""));
+        board.setHex(building, new megamek.common.Hex(0, "building:1;bldg_cf:15;bldg_elev:1", ""));
+        board.setHex(water, new megamek.common.Hex(0, "water:1", ""));
+        session.pointer(centre, 0, 0, false); session.finishStroke();
+        session.pointer(centre, 0, 0, false); session.finishStroke();
+        assertEquals(1, session.board().getHex(water).getLevel(), "Slope moves a neighbouring water surface too");
+        assertEquals(1, session.board().getHex(centre).terrainLevel(Terrains.WATER));
+        assertEquals(1, session.board().getHex(bridge).terrainLevel(Terrains.BRIDGE_ELEV));
+        assertEquals(1, session.board().getHex(building).terrainLevel(Terrains.BLDG_ELEV));
+        send(session, Action.UNDO, "", "");
+        send(session, Action.UNDO, "", "");
+        for (Coords hex : java.util.List.of(centre, water, bridge, building)) { assertEquals(0, session.board().getHex(hex).getLevel()); }
     }
 }

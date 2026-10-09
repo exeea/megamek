@@ -176,12 +176,15 @@ cover portals and cliff clipping.
 
 `BoardBridge` follows reciprocal span connections and connected approaches. Manufactured
 spans inherit the best connected road surface: marked asphalt, unmarked asphalt, gravel,
-then dirt. A co-located road below a deck is not an explicit deck-surface override.
-Spans with no attached road use [natural bridge geometry](gpu-natural-bridges.md).
+then dirt; without an approach the deck is plain unmarked asphalt. A co-located road below
+a deck is not an explicit deck-surface override. The span's stored type, or for an untyped
+bridge the legacy decode `BoardBridge.built`, makes it built or natural; natural spans use
+[natural bridge geometry](gpu-natural-bridges.md).
 
 `BoardBridgeFooting` extends terminal decks to actual bank support. Road-connected
 ends retain the ordinary material transition. At a bare bank, rails taper after they
-are supported and the material apron blends into the existing bank triangles.
+are supported and the material apron blends into the existing bank triangles, except on
+a bank drawn as pavement.
 The physical span remains opaque.
 
 Changing a road's kind, exits or supporting geometry must invalidate the ground and

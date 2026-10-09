@@ -11,17 +11,23 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
+import megamek.client.ui.dialogs.MMAboutDialog;
+import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
 import megamek.client.ui.util.UIUtil;
+import megamek.client.ui.util.KeyCommandBind;
 import megamek.codeUtilities.StringUtility;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -49,14 +55,16 @@ final class GpuMapSource implements BoardSource {
     /** EDT-owned measurement; map previews and battles share the same model and native panel. */
     private RulerModel ruler;
     private final BoardEditorSession editor;
+    private final Runnable requestClose;
+    private final Runnable requestClassic;
     /** Only Swing owns the active brush stroke; render input carries the board generation it picked. */
     private Board editorStrokeBoard;
-    /** Swing combines wheel ticks between captures; releasing Ctrl commits the shared editor undo entry. */
-    private final Map<Coords, Integer> pendingElevation = new HashMap<>();
+    /** Swing queues wheel notches (hex, levels) in arrival order until a capture; releasing Ctrl commits the undo entry. */
+    private final List<Map.Entry<Coords, Integer>> pendingElevation = new ArrayList<>();
     private boolean editorElevationStroke;
     /** Swing-owned brush settings are published only as a preview, never read directly by the render thread. */
-    private record EditorBrush(Coords center, long generation, List<Coords> hexes) { }
-    private volatile EditorBrush editorBrush = new EditorBrush(null, -1, List.of());
+    private record EditorBrush(Coords center, long generation, List<Coords> hexes, String hint) { }
+    private volatile EditorBrush editorBrush = new EditorBrush(null, -1, List.of(), "");
 
     private final BoardArtwork artwork = new BoardArtwork();
     private volatile List<String> editorThemes = artwork.themes();
@@ -108,11 +116,21 @@ final class GpuMapSource implements BoardSource {
     private Coords contextCoords;
     private volatile boolean closed;
     GpuMapSource(Game game, Window owner, BoardEditorSession editor) {
+        this(game, owner, editor, null);
+    }
+
+    GpuMapSource(Game game, Window owner, BoardEditorSession editor, Runnable requestClose) {
+        this(game, owner, editor, requestClose, null);
+    }
+
+    GpuMapSource(Game game, Window owner, BoardEditorSession editor, Runnable requestClose, Runnable requestClassic) {
         if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
         if (editor != null && editor.game() != game) { throw new IllegalArgumentException("The editor owns its Game"); }
         this.game = game;
         this.owner = owner;
         this.editor = editor;
+        this.requestClose = requestClose;
+        this.requestClassic = requestClassic;
         atmosphere = new GpuAtmosphereControls(() -> owner, game::getBoard, game::getPlanetaryConditions, () -> closed);
         timer = new Timer(33, event -> refresh());
         try {
@@ -174,26 +192,92 @@ final class GpuMapSource implements BoardSource {
             editorTerrain = editor == null ? BoardTactical.EMPTY : new BoardTactical(
                   terrainMarkers.values().stream().flatMap(value -> value.fills().stream()).toList(),
                   terrainMarkers.values().stream().flatMap(value -> value.labels().stream()).toList());
+            if (editor != null) {
+                // Recompute boundaries only when their terrain changes, not on every hover/inspector refresh.
+                editorTerrain = BoardDeploymentGeometry.editorOutlines(mapScene(editorTerrain));
+            }
             images.retain(tiles);
             terrainDirty = false;
             dirtyHexes = null;
 
         }
         Coords hover = hoverCoords;
-        if (editor != null) { editorBrush = new EditorBrush(hover, boardGeneration, editor.brush(hover)); }
+        if (editor != null) {
+            List<Coords> footprint = editor.brush(hover);
+            editorBrush = new EditorBrush(hover, boardGeneration, footprint, editor.sculptHint(hover, footprint.size()));
+        }
         RulerModel.Snapshot measurement = ruler == null ? RulerModel.Snapshot.NONE : ruler.capture();
         phaseStatus = new PhaseStatus(editor == null ? measuringStatus(measurement) : editor.title(), false);
         Coords inspected = contextCoords == null ? hover : contextCoords;
         String tooltip = inspected == null || !board.contains(inspected) ? "" : hexCard(board.getHex(inspected));
-        BoardScene scene = new BoardScene(0, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(),
-              Entity.NONE, "", List.of(), null, List.of(), List.of(), List.of(),
-              editorTerrain.withRuler(measurement.ruler()));
+        BoardScene scene = mapScene(editorTerrain.withRuler(measurement.ruler()));
         Frame nextFrame = new Frame(scene, List.of(), contextCoords == null ? null : new BoardScene.Context(contextCoords, List.of()),
-              List.of(), tooltip,
+              menuCommands(), tooltip,
               new BoardFocus(0, null), boardGeneration, "",
               atmosphere.settings(game.getPlanetaryConditions(), board.isSpace()),
               GpuReportLog.Snapshot.EMPTY, GpuBattleStatus.Snapshot.EMPTY, GpuHudData.EMPTY.withLos(measurement));
-        publication = new Publication(nextFrame, editor == null ? null : editor.snapshot());
+        // An unchanged editor state keeps its instance, so the views' identity checks mean a real change.
+        var previous = publication == null ? null : publication.editor();
+        var state = editor == null ? null : editor.snapshot();
+        publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state);
+    }
+
+    /** Map workspaces expose their existing document and application actions without requiring a game client. */
+    private List<BoardScene.Command> menuCommands() {
+        List<BoardScene.Command> commands = new ArrayList<>();
+        if (requestClassic != null) {
+            commands.add(menuCommand("viewClassicBoard", editor == null ? "CommonMenuBar.viewClassicBoard"
+                  : "BoardEditor.edit2D", requestClassic));
+        }
+        if (editor != null) {
+            long generation = boardGeneration;
+            for (var action : List.of(BoardEditorSession.Action.OPEN, BoardEditorSession.Action.SAVE,
+                  BoardEditorSession.Action.SAVE_AS)) {
+                String key = switch (action) {
+                    case OPEN -> "fileBoardOpen";
+                    case SAVE -> "fileBoardSave";
+                    default -> "fileBoardSaveAs";
+                };
+                commands.add(menuCommand(key, "CommonMenuBar." + key,
+                      () -> editorCommand(new BoardEditorSession.Command(action), generation)));
+            }
+        }
+        GUIPreferences gui = GUIPreferences.getInstance();
+        List<BoardScene.Command> view = List.of(
+              viewCommand(ClientGUI.VIEW_TOGGLE_HEX_COORDS, editor == null ? KeyCommandBind.HEX_COORDS : null,
+                    gui.getCoordsEnabled(), gui::toggleCoords),
+              viewCommand(ClientGUI.VIEW_INC_GUI_SCALE, KeyCommandBind.INC_GUI_SCALE, null,
+                    () -> CommonMenuBar.changeGUIScale(true)),
+              viewCommand(ClientGUI.VIEW_DEC_GUI_SCALE, KeyCommandBind.DEC_GUI_SCALE, null,
+                    () -> CommonMenuBar.changeGUIScale(false)));
+        commands.add(new BoardScene.Command("view", Messages.getString("CommonMenuBar.ViewMenu"), "", true,
+              false, view, () -> { }));
+        commands.add(menuCommand("viewClientSettings", "CommonMenuBar.viewClientSettings", () -> {
+            Window parent = owner;
+            while (parent != null && !(parent instanceof JFrame)) { parent = parent.getOwner(); }
+            CommonSettingsDialog settings = new CommonSettingsDialog((JFrame) parent);
+            try { settings.setVisible(true); } finally { settings.dispose(); }
+        }));
+        commands.add(menuCommand("helpAbout", "CommonMenuBar.helpAbout", () -> new MMAboutDialog(owner).show()));
+        if (requestClose != null) { commands.add(menuCommand("close", "Close", requestClose)); }
+        return List.copyOf(commands);
+    }
+
+    private BoardScene.Command menuCommand(String id, String label, Runnable action) {
+        return new BoardScene.Command(id, Messages.getString(label), "", true, false, false, List.of(),
+              () -> onSwing(() -> { if (!closed) { action.run(); } }));
+    }
+
+    /** Preference state is captured on the EDT; native menu clicks return here to invoke the existing action. */
+    private BoardScene.Command viewCommand(String id, KeyCommandBind shortcut, Boolean selected, Runnable action) {
+        BoardScene.Command command = menuCommand(id, "CommonMenuBar." + id, action);
+        return new BoardScene.Command(id, command.label(), "", true, false, false, List.of(), command.action(),
+              shortcut == null ? "" : KeyCommandBind.getDesc(shortcut), selected);
+    }
+
+    private BoardScene mapScene(BoardTactical tactical) {
+        return new BoardScene(0, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(),
+              Entity.NONE, "", List.of(), null, List.of(), List.of(), List.of(), tactical);
     }
 
     @Override
@@ -223,13 +307,23 @@ final class GpuMapSource implements BoardSource {
 
     public void key(int keyCode, boolean down, int modifiers) {
         onSwing(() -> {
-            if (!closed && editor != null && down
-                  && keyCode != KeyEvent.VK_SHIFT && keyCode != KeyEvent.VK_CONTROL
+            if (closed || !down) { return; }
+            var binds = KeyCommandBind.getAllBindsByKey(keyCode, modifiers);
+            // Ctrl+G belongs to Group in the editor; the preview keeps the gameplay Hex Coords shortcut.
+            if (editor == null && binds.contains(KeyCommandBind.HEX_COORDS)) {
+                GUIPreferences.getInstance().toggleCoords();
+            } else if (binds.contains(KeyCommandBind.LOS_SETTING)) {
+                changeRuler(boardGeneration, RulerModel::open);
+            } else if (binds.contains(KeyCommandBind.INC_GUI_SCALE)) {
+                CommonMenuBar.changeGUIScale(true);
+            } else if (binds.contains(KeyCommandBind.DEC_GUI_SCALE)) {
+                CommonMenuBar.changeGUIScale(false);
+            } else if (editor != null && keyCode != KeyEvent.VK_SHIFT && keyCode != KeyEvent.VK_CONTROL
                   && keyCode != KeyEvent.VK_ALT && keyCode != KeyEvent.VK_META) {
                 finishEditorStroke();
                 editor.key(keyCode, modifiers, owner);
-                refresh();
             }
+            refresh();
         });
     }
     public void stopKeys() { endEditorStroke(); }
@@ -340,12 +434,29 @@ final class GpuMapSource implements BoardSource {
     }
 
     public void editorPointer(Coords coords, double x, double y, boolean drag, String object, boolean additive, String receiver, long generation) {
+        editorPointer(coords, x, y, drag, object, additive, receiver, false, generation);
+    }
+
+    @Override
+    public void editorPointer(Coords coords, double x, double y, boolean drag, String object, boolean additive, String receiver,
+          boolean invert, long generation) {
         onSwing(() -> {
             if (!closed && editor != null && generation == boardGeneration && board == game.getBoard()
                   && coords != null && board.contains(coords)) {
                 if (editorElevationStroke) { finishEditorStroke(); }
                 editorStrokeBoard = board;
-                editor.pointer(coords, x, y, drag, object, additive, receiver);
+                editor.pointer(coords, x, y, drag, object, additive, receiver, invert);
+            }
+        });
+    }
+
+    @Override
+    public void editorSelect(List<BoardEditorSession.Selection> items, BoardEditorSession.SelectMode mode, long generation) {
+        onSwing(() -> {
+            if (!closed && editor != null && generation == boardGeneration && board == game.getBoard()) {
+                finishEditorStroke();
+                editor.select(items, mode);
+                refresh();
             }
         });
     }
@@ -360,30 +471,25 @@ final class GpuMapSource implements BoardSource {
               ? preview.hexes() : List.of();
     }
 
+    @Override public String editorHint() { return editorBrush.hint(); }
+
     public void adjustEditorElevation(Coords coords, int levels, long generation) {
         SwingUtilities.invokeLater(() -> {
             if (!closed && editor != null && generation == boardGeneration && board == game.getBoard()
                   && coords != null && board.contains(coords) && levels != 0) {
-                List<Coords> brush = editor.brush(coords);
-                if (brush.isEmpty()) {
-                    return;
-                }
                 if (!editorElevationStroke) {
                     finishEditorStroke();
                     editorStrokeBoard = board;
                     editorElevationStroke = true;
                 }
-                // Capture the brush now, so a later palette change cannot retarget accepted wheel input.
-                for (Coords hex : brush) {
-                    pendingElevation.merge(hex, levels, Integer::sum);
-                }
+                pendingElevation.add(Map.entry(coords, levels));
             }
         });
     }
 
     private void flushEditorElevation() {
         if (editorStrokeBoard != null && editorStrokeBoard == game.getBoard()) {
-            editor.adjustElevation(pendingElevation);
+            pendingElevation.forEach(notch -> editor.adjustElevation(notch.getKey(), notch.getValue()));
         }
         pendingElevation.clear();
     }
@@ -392,6 +498,8 @@ final class GpuMapSource implements BoardSource {
         onSwing(() -> {
             finishEditorStroke();
             if (!closed) {
+                // The pointer's release, not an earlier key that finished the stroke, completes a click's drill-down.
+                if (editor != null) { editor.release(); }
                 refresh();
             }
         });

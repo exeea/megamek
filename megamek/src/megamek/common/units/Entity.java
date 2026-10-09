@@ -3212,6 +3212,9 @@ public abstract class Entity extends TurnOrdered
      */
     public boolean isElevationValid(int assumedElevation,
                                     Hex hex) {
+        if (!Game.rulesManager.getRulesMovement().isBuildingElevationAllowed(this, hex, assumedElevation)) {
+            return false;
+        }
         int assumedAlt = assumedElevation + hex.getLevel();
         if (getMovementMode() == EntityMovementMode.VTOL) {
             if ((this instanceof Infantry) &&

@@ -235,8 +235,10 @@ public class Board implements Serializable {
     private String sourceHeader;
 
     public boolean isNativeFormat() { return nativeFormat; }
-    public boolean requiresNativeFormat() {
-        return nativeFormat || Arrays.stream(data).filter(Objects::nonNull).anyMatch(Hex::hasAppearance);
+    public boolean requiresNativeFormat() { return nativeFormat || hasThreeDOnlyContent(); }
+    /** True when a hex has placed objects (including groups and maglev routes) or appearance the 2D board ignores. */
+    public boolean hasThreeDOnlyContent() {
+        return Arrays.stream(data).filter(Objects::nonNull).anyMatch(Hex::hasAppearance);
     }
     public void setNativeFormat(boolean value) { nativeFormat = value; }
     public String getDocumentName() { return documentName; }
@@ -1355,6 +1357,48 @@ public class Board implements Serializable {
         return isValid(data, width, height, errors);
     }
 
+    /**
+     * The rule errors of one hex as the board validation reports them: its own terrain rules and its building exits to
+     * adjacent hexes. Editors re-validate changed hexes and their neighbours with it.
+     */
+    public List<String> hexErrors(Coords coords) {
+        return hexErrors(getHex(coords), coords.getX(), coords.getY());
+    }
+
+    private List<String> hexErrors(Hex hex, int x, int y) {
+        List<String> hexErrors = new ArrayList<>();
+        hex.isValid(hexErrors);
+
+        // Multi-hex problems
+        // A building hex must only have exits to other building hexes of the same
+        // Building Type and Class
+        if (hex.containsTerrain(Terrains.BUILDING) && hex.getTerrain(Terrains.BUILDING).hasExitsSpecified()) {
+            for (int dir = 0; dir < 6; dir++) {
+                Hex adjHex = getHexInDir(x, y, dir);
+                if ((adjHex != null)
+                    && adjHex.containsTerrain(Terrains.BUILDING)
+                    && hex.containsTerrainExit(Terrains.BUILDING, dir)) {
+                    if (adjHex.getTerrain(Terrains.BUILDING).getLevel() != hex.getTerrain(Terrains.BUILDING)
+                                                                              .getLevel()) {
+                        hexErrors.add("Building has an exit to a building of another Building Type " +
+                                      "(Light, Medium...).");
+                    }
+                    int thisClass = hex.containsTerrain(Terrains.BLDG_CLASS)
+                                    ? hex.getTerrain(Terrains.BLDG_CLASS).getLevel()
+                                    : 0;
+                    int adjClass = adjHex.containsTerrain(Terrains.BLDG_CLASS)
+                                   ? adjHex.getTerrain(Terrains.BLDG_CLASS).getLevel()
+                                   : 0;
+                    if (thisClass != adjClass) {
+                        hexErrors.add("Building has an exit in direction " + dir + " to a building of " +
+                                      "another Building Class.");
+                    }
+                }
+            }
+        }
+        return hexErrors;
+    }
+
     private boolean isValid(Hex[] data,
                             int width,
                             int height,
@@ -1371,36 +1415,7 @@ public class Board implements Serializable {
                     // A null hex must never happen. No need to process the rest of the board.
                     return false;
                 }
-                List<String> hexErrors = new ArrayList<>();
-                hex.isValid(hexErrors);
-
-                // Multi-hex problems
-                // A building hex must only have exits to other building hexes of the same
-                // Building Type and Class
-                if (hex.containsTerrain(Terrains.BUILDING) && hex.getTerrain(Terrains.BUILDING).hasExitsSpecified()) {
-                    for (int dir = 0; dir < 6; dir++) {
-                        Hex adjHex = getHexInDir(x, y, dir);
-                        if ((adjHex != null)
-                            && adjHex.containsTerrain(Terrains.BUILDING)
-                            && hex.containsTerrainExit(Terrains.BUILDING, dir)) {
-                            if (adjHex.getTerrain(Terrains.BUILDING).getLevel() != hex.getTerrain(Terrains.BUILDING)
-                                                                                      .getLevel()) {
-                                hexErrors.add("Building has an exit to a building of another Building Type " +
-                                              "(Light, Medium...).");
-                            }
-                            int thisClass = hex.containsTerrain(Terrains.BLDG_CLASS)
-                                            ? hex.getTerrain(Terrains.BLDG_CLASS).getLevel()
-                                            : 0;
-                            int adjClass = adjHex.containsTerrain(Terrains.BLDG_CLASS)
-                                           ? adjHex.getTerrain(Terrains.BLDG_CLASS).getLevel()
-                                           : 0;
-                            if (thisClass != adjClass) {
-                                hexErrors.add("Building has an exit in direction " + dir + " to a building of " +
-                                              "another Building Class.");
-                            }
-                        }
-                    }
-                }
+                List<String> hexErrors = hexErrors(hex, x, y);
 
                 if (!hexErrors.isEmpty() && (errors == null)) {
                     // Return early if we aren't logging errors
@@ -1445,6 +1460,14 @@ public class Board implements Serializable {
             catch (IOException failure) { throw new UncheckedIOException(failure); }
             return;
         }
+        saveLegacy(os, includeLicense);
+    }
+
+    /**
+     * Writes the legacy .board text even for a native board. 3D-only content (placed objects and appearance) is not
+     * written; this is the classic 2D editor's save.
+     */
+    public void saveLegacy(OutputStream os, boolean includeLicense) {
         try (Writer w = new OutputStreamWriter(os)) {
             if (includeLicense) {
                 int currentYear = Calendar.getInstance().get(Calendar.YEAR);

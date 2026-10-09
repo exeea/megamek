@@ -119,15 +119,15 @@ class GpuEditorVisualSmokeTest {
                             Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE);
                             Gdx.input.getInputProcessor().keyUp(Input.Keys.ESCAPE);
                             assertFalse(root.findActor("editor-settings").isVisible());
-                            GpuBoardTestUi.click("editor-library-Vehicles");
-                            ((TextField) root.findActor("editor-search")).setText("car-red"); next();
+                            GpuBoardTestUi.category("Vehicles");
+                            ((TextField) root.findActor("editor-search")).setText("vehicles/car"); next();
                         } else if (step == 7) {
-                            if (!ready(root.findActor("editor-asset-strip"))) { return; }
+                            if (!ready(root.findActor("editor-library"))) { return; }
                             assertTrue(GpuBoardTestUi.shown(root.findActor("editor-search")), "The active filter must remain clearable");
                             GpuBoardTestUi.capture(new File(output, "editor-visual-props.png"));
-                            GpuBoardTestUi.click("editor-library-scenery/components/car-red"); next();
+                            GpuBoardTestUi.click("editor-library-scenery/vehicles/car"); next();
                         } else if (step == 8) {
-                            assertEquals("scenery/components/car-red", source.editorState().asset());
+                            assertEquals("scenery/vehicles/car", source.editorState().asset());
                             assertEquals(BoardEditorSession.Tool.PAINT, source.editorState().tool());
                             assertTrue(source.editorState().objects().isEmpty(), "Choosing a card does not place an object");
                             Gdx.app.exit();

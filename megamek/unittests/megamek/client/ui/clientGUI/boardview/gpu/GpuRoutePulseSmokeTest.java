@@ -400,7 +400,7 @@ class GpuRoutePulseSmokeTest {
         List<GpuMovePlan.Step> route = List.of(step(scene, first, 0, GpuMovePlan.Band.WALK),
               step(scene, second, 0, GpuMovePlan.Band.WALK), step(scene, third, 1, GpuMovePlan.Band.RUN),
               step(scene, fourth, 1, GpuMovePlan.Band.RUN), step(scene, fifth, 0, GpuMovePlan.Band.RUN));
-        return GpuBoardOverlaySmokeTest.move(ATLAS, route, List.of(), List.of(second),
+        return GpuBoardOverlaySmokeTest.move(ATLAS, route, List.of(), List.of(route.get(1)),
               GpuBoardOverlaySmokeTest.envelope(scene, from, 3, 5), true);
     }
 

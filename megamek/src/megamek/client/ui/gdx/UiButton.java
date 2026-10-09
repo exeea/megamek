@@ -25,7 +25,7 @@ public class UiButton extends TextButton {
     /** The sub-labels and details, muted, darker on a filled face. */
     public final List<Label> details = new ArrayList<>();
     private final UiKit kit;
-    private boolean pressed;
+    private boolean pressed, hovered;
     private Label badge;
     private Image dot;
     private Actor trailing;
@@ -48,6 +48,17 @@ public class UiButton extends TextButton {
     public UiButton pressed(boolean value) {
         pressed = value;
         return this;
+    }
+
+    /** Shows the hover look while another view hovers the same item, without an event. */
+    public UiButton hovered(boolean value) {
+        hovered = value;
+        return this;
+    }
+
+    @Override
+    public boolean isOver() {
+        return hovered || super.isOver();
     }
 
     /** The same as {@link #pressed}: a view's own change fires no event. */

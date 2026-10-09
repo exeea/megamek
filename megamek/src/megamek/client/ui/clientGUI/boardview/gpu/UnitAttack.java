@@ -42,9 +42,13 @@ final class UnitAttack {
     float approachTurn;
     final float approachSeconds;
     java.util.function.Function<Ray, BoardGeometry.Hit> landscape;
+    java.util.function.BiFunction<Ray, Float, BoardGeometry.Hit> landscapeSegment;
     private final Map<Integer, Vector3> misses = new HashMap<>();
     private final Map<Vector3, Boolean> hardImpacts = new HashMap<>();
     private final Map<Integer, Vector3> beamMisses = new HashMap<>();
+    private final Map<Vector3, Contact> landscapeContacts = new HashMap<>();
+    /** Captured cosmetic contact. Progress belongs to the original flight curve, which is never bent after a hit. */
+    record Contact(Vector3 point, Vector3 incoming, BoardGeometry.Hit surface, float progress) { }
     private UnitPicking surfaces;
     private record HitPoint(ModelInstance target, String location, int seed) { }
     private final Map<HitPoint, UnitPicking.SurfacePoint> hitPoints = new HashMap<>();
@@ -236,8 +240,36 @@ final class UnitAttack {
         var ray = new Ray(origin, result.cpy().sub(origin).nor());
         var hit = landscape == null ? null : landscape.apply(ray);
         result.set(origin).mulAdd(ray.direction, hit == null ? BoardGeometry.height() * 200 : (float) Math.sqrt(hit.distance()));
+        if (hit != null) { landscapeContacts.put(result.cpy(), new Contact(result.cpy(), ray.direction.cpy(), hit, 1)); }
         return hit != null;
     }
+
+    /** Resolve a missed flight once against the same installed geometry as beams and picking. */
+    Contact landscapeContact(java.util.function.DoubleFunction<Vector3> path, int segments) {
+        if (landscape == null) { return null; }
+        Vector3 from = path.apply(0);
+        for (int segment = 1; segment <= segments; segment++) {
+            Vector3 to = path.apply((double) segment / segments);
+            Vector3 direction = to.cpy().sub(from);
+            float length = direction.len();
+            if (length > .0001f) {
+                var ray = new Ray(from, direction.scl(1 / length));
+                var hit = landscapeSegment == null ? landscape.apply(ray) : landscapeSegment.apply(ray, length);
+                if (hit != null && hit.distance() <= length * length + .001f) {
+                    float distance = (float) Math.sqrt(hit.distance());
+                    Vector3 point = ray.getEndPoint(new Vector3(), distance);
+                    var contact = new Contact(point, ray.direction.cpy(), hit,
+                          (segment - 1 + Math.min(1, distance / length)) / segments);
+                    landscapeContacts.put(point.cpy(), contact);
+                    return contact;
+                }
+            }
+            from = to;
+        }
+        return null;
+    }
+
+    Contact landscapeContact(Vector3 point) { return landscapeContacts.get(point); }
 
     Vector3 beamAim(ModelInstance target, Vector3 origin, int ordinal, Vector3 result) {
         if (beamMisses.containsKey(ordinal)) { return result.set(beamMisses.get(ordinal)); }
@@ -248,6 +280,8 @@ final class UnitAttack {
 
     /** Capture the struck material once from the same installed geometry that placed the impact. */
     boolean hardImpact(Vector3 point) {
+        Contact contact = landscapeContacts.get(point);
+        if (contact != null) { return contact.surface().hardSurface(); }
         if (landscape == null) { return false; }
         Boolean captured = hardImpacts.get(point);
         if (captured != null) { return captured; }

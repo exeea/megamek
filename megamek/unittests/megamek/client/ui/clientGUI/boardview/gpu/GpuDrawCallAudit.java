@@ -210,7 +210,7 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
                     for (Mesh mesh : ((ModelInstance) value).model.meshes) { addOrigin(mesh, category, index); }
                 }
             }
-            for (String cache : List.of("propRenderables", "shadowPropRenderables")) {
+            for (String cache : List.of("propRenderables", "shadowPropRenderables", "smallPropRenderables", "smallShadowRenderables")) {
                 for (Object value : (Array<?>) field(chunk, cache)) {
                     addOrigin(((Renderable) value).meshPart.mesh, "props", index);
                 }

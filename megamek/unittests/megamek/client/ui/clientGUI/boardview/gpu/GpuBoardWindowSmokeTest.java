@@ -42,6 +42,7 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
@@ -61,6 +62,7 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorPanel;
+import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.BoardViewsContainer;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -82,6 +84,8 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Hex;
 import megamek.common.Report;
 import megamek.common.board.Board;
+import megamek.common.board.BoardDecoration;
+import megamek.common.board.BoardFile;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -298,14 +302,16 @@ class GpuBoardWindowSmokeTest {
             Coords first = new Coords(3, 3), second = new Coords(3, 4);
             onSwing(() -> {
                 editor.command(new megamek.client.ui.boardeditor.BoardEditorSession.Command(
-                      megamek.client.ui.boardeditor.BoardEditorSession.Action.COMPONENT, "vegetation"), launcher);
+                      megamek.client.ui.boardeditor.BoardEditorSession.Action.CHOOSE_BRUSH, "vegetation", "woods-1"), launcher);
                 editor.command(new megamek.client.ui.boardeditor.BoardEditorSession.Command(
                       megamek.client.ui.boardeditor.BoardEditorSession.Action.TOOL, "PAINT"), launcher);
                 source.refresh(); return null;
             });
+            awaitNavigation();
             input(() -> editorStroke(List.of(first, second), 0, true));
             onSwing(() -> {
-                assertTrue(editor.board().getHex(first).containsTerrain(Terrains.WOODS));
+                assertTrue(editor.board().getHex(first).containsTerrain(Terrains.WOODS),
+                      () -> "Expected woods at the press: " + editor.snapshot());
                 assertTrue(editor.board().getHex(second).containsTerrain(Terrains.WOODS));
                 assertTrue(editor.dirty()); return null;
             });
@@ -396,6 +402,9 @@ class GpuBoardWindowSmokeTest {
                 // Pick against the frame actually on screen, not a newer Swing snapshot awaiting rendering.
                 Vector3 point = battle.screenPosition(coords);
                 Point screen = new Point(Math.round(point.x), Math.round(point.y));
+                var stage = GpuBoardTestUi.stage();
+                var stagePoint = stage.screenToStageCoordinates(new com.badlogic.gdx.math.Vector2(screen.x, screen.y));
+                assertNull(stage.hit(stagePoint.x, stagePoint.y, true), "Paint gesture must reach the board at " + coords);
                 if (last == null) {
                     original.getInputProcessor().touchDown(screen.x, screen.y, 0, Input.Buttons.LEFT);
                 } else {
@@ -543,6 +552,164 @@ class GpuBoardWindowSmokeTest {
                 });
             }
         }
+    }
+
+    @Test
+    void previewMenuSwitchesBothWaysWithoutRegeneratingTheBoard() throws Exception {
+        JFrame launcher = onSwing(() -> { var frame = new JFrame("Preview launcher"); frame.setSize(400, 300); frame.setVisible(true); return frame; });
+        Board board = Board.createEmptyBoard(7, 9);
+        board.setHex(3, 4, new Hex(3));
+        try {
+            Application previous = Gdx.app;
+            onSwing(() -> { GpuBoardWindow.openPreview(launcher, board); return null; });
+            await(() -> Gdx.app != null && Gdx.app != previous);
+            for (int round = 0; round < 2; round++) {
+                await(() -> previewSource() != null);
+                BoardSource source = previewSource();
+                await(() -> previewReady(source)); awaitNavigation();
+                input(() -> GpuBoardTestUi.click("utility-menu"));
+                captureMenu("preview-view-switch-menu.png");
+                onGl(() -> { GpuBoardTestUi.click("/viewClassicBoard"); return null; });
+                await(() -> onSwing(() -> mapWindow("board-preview-2d") != null));
+                assertTrue(source.isClosed());
+                JDialog classic = onSwing(() -> (JDialog) mapWindow("board-preview-2d"));
+                captureClassic(classic, "preview-view-3d", "preview-view-switch-2d.png");
+                Application nativeView = Gdx.app;
+                onSwing(() -> { namedButton(classic, "preview-view-3d").doClick(0); return null; });
+                await(() -> Gdx.app != null && Gdx.app != nativeView);
+                await(() -> previewSource() != null);
+                BoardSource resumed = previewSource();
+                await(() -> previewReady(resumed));
+                assertFalse(onSwing(classic::isDisplayable), "Each switch releases the old classic renderer");
+                var field = GpuMapSource.class.getDeclaredField("game"); field.setAccessible(true);
+                assertSame(board, ((megamek.common.game.Game) field.get(resumed)).getBoard(), "Switching keeps the exact preview board");
+                assertEquals(3, resumed.takeFrame().scene().tile(new Coords(3, 4)).elevation());
+            }
+        } finally {
+            onSwing(() -> { GpuBoardWindow.closeFor((ClientGUI) null); launcher.dispose(); return null; });
+        }
+    }
+
+    @Test
+    void editorMenuSwitchesBothWaysWithSharedEditsUndoAndNativeSave() throws Exception {
+        var file = Files.createTempFile("editor-view-switch-", ".board2");
+        Board board = Board.createEmptyBoard(8, 8);
+        Coords at = new Coords(3, 3);
+        var car = new BoardDecoration("kept-car", "prop", "scenery/vehicles/car", null, 0, 0, 0, false, 1,
+              BoardDecoration.Placement.ground(), 0);
+        board.getHex(at).setDecorations(List.of(car));
+        BoardFile.save(board, file);
+        byte[] saved = Files.readAllBytes(file);
+        JFrame launcher = onSwing(() -> { var frame = new JFrame("Editor launcher"); frame.setSize(400, 300); frame.setVisible(true); return frame; });
+        try {
+            Application previous = Gdx.app;
+            onSwing(() -> { GpuBoardWindow.openEditor(launcher, file.toFile(), false); return null; });
+            await(() -> Gdx.app != null && Gdx.app != previous);
+            await(() -> previewSource() != null);
+            var editorField = GpuMapSource.class.getDeclaredField("editor"); editorField.setAccessible(true);
+            BoardEditorSession session = (BoardEditorSession) editorField.get(previewSource());
+            onSwing(() -> {
+                session.pointer(at, 0, 0, false);
+                session.command(new BoardEditorSession.Command(BoardEditorSession.Action.ELEVATION, "2"), launcher);
+                return null;
+            });
+            for (int round = 0; round < 2; round++) {
+                BoardSource source = previewSource();
+                await(() -> previewReady(source)); awaitNavigation();
+                input(() -> GpuBoardTestUi.click("utility-menu"));
+                captureMenu("editor-view-switch-menu.png");
+                onGl(() -> { GpuBoardTestUi.click("/viewClassicBoard"); return null; });
+                await(() -> onSwing(() -> mapWindow("board-editor-2d") != null));
+                assertTrue(source.isClosed());
+                JFrame classicFrame = onSwing(() -> (JFrame) mapWindow("board-editor-2d"));
+                BoardEditorPanel classic = onSwing(() -> Arrays.stream(classicFrame.getContentPane().getComponents())
+                      .filter(BoardEditorPanel.class::isInstance).map(BoardEditorPanel.class::cast).findFirst().orElseThrow());
+                assertSame(session.game(), classic.getGame());
+                assertTrue(classic.hasClassicView());
+                captureClassic(classicFrame, "editor-view-3d", "editor-view-switch-2d.png");
+                if (round == 0) {
+                    assertArrayEquals(saved, Files.readAllBytes(file), "Switching unsaved edits must not save or reload a file");
+                    onSwing(() -> {
+                        classic.actionPerformed(new java.awt.event.ActionEvent(classic, 0, ClientGUI.BOARD_UNDO));
+                        assertEquals(0, session.board().getHex(at).getLevel(), "2D Undo includes the preceding 3D edit");
+                        classic.actionPerformed(new java.awt.event.ActionEvent(classic, 0, ClientGUI.BOARD_REDO));
+                        classic.adjustElevation(Map.of(at, 1)); classic.finishBrushStroke();
+                        assertEquals(3, session.board().getHex(at).getLevel());
+                        setField(BoardEditorPanel.class, classic, "curHex", new Hex(0, "woods:1;foliage_elev:2", "grass"));
+                        classic.paintIn3D(at, 0); classic.finishBrushStroke();
+                        assertEquals(List.of(car), session.board().getHex(at).getDecorations(), "2D terrain painting preserves native objects");
+                        assertTrue(session.dirty());
+                        return null;
+                    });
+                } else {
+                    onSwing(() -> {
+                        classic.actionPerformed(new java.awt.event.ActionEvent(classic, 0, ClientGUI.BOARD_SAVE));
+                        assertFalse(session.dirty());
+                        return null;
+                    });
+                    assertEquals(List.of(car), BoardFile.read(file).getHex(at).getDecorations(), "2D Save uses the native document format");
+                }
+                Application nativeView = Gdx.app;
+                onSwing(() -> { namedButton(classicFrame, "editor-view-3d").doClick(0); return null; });
+                await(() -> Gdx.app != null && Gdx.app != nativeView);
+                await(() -> previewSource() != null);
+                BoardSource resumed = previewSource();
+                assertSame(session, editorField.get(resumed));
+                await(() -> previewReady(resumed));
+                assertFalse(onSwing(classicFrame::isDisplayable));
+                assertFalse(classic.hasClassicView());
+                assertEquals(3, resumed.takeFrame().scene().tile(at).elevation());
+                onSwing(() -> {
+                    session.command(new BoardEditorSession.Command(BoardEditorSession.Action.UNDO), launcher);
+                    assertFalse(session.board().getHex(at).containsTerrain(Terrains.WOODS), "3D Undo includes the preceding 2D brush");
+                    session.command(new BoardEditorSession.Command(BoardEditorSession.Action.REDO), launcher);
+                    assertTrue(session.board().getHex(at).containsTerrain(Terrains.WOODS));
+                    return null;
+                });
+            }
+        } finally {
+            onSwing(() -> {
+                GpuBoardWindow.closeFor((ClientGUI) null);
+                Window classic = mapWindow("board-editor-2d");
+                if (classic instanceof JFrame frame) {
+                    Arrays.stream(frame.getContentPane().getComponents()).filter(BoardEditorPanel.class::isInstance)
+                          .map(BoardEditorPanel.class::cast).forEach(BoardEditorPanel::dispose);
+                }
+                launcher.dispose(); return null;
+            });
+            Files.deleteIfExists(file);
+        }
+    }
+
+    private static Window mapWindow(String name) {
+        return Arrays.stream(Window.getWindows()).filter(window -> name.equals(window.getName()) && window.isShowing())
+              .findFirst().orElse(null);
+    }
+
+    private static void captureClassic(Window window, String buttonName, String filename) throws Exception {
+        onSwing(() -> {
+            AbstractButton button = namedButton(window, buttonName);
+            assertTrue(button.isShowing(), "The return control is visible in the classic view");
+            assertTrue(button.getVisibleRect().width > 0 && button.getVisibleRect().height > 0);
+            var image = new BufferedImage(window.getWidth(), window.getHeight(), BufferedImage.TYPE_INT_RGB);
+            var graphics = image.createGraphics();
+            try { window.printAll(graphics); } finally { graphics.dispose(); }
+            File output = new File("build/gpu-board-review");
+            output.mkdirs();
+            ImageIO.write(image, "png", new File(output, filename));
+            return null;
+        });
+    }
+
+    private static AbstractButton namedButton(java.awt.Container parent, String name) {
+        for (var component : parent.getComponents()) {
+            if (component instanceof AbstractButton button && name.equals(button.getName())) { return button; }
+            if (component instanceof java.awt.Container child) {
+                AbstractButton button = namedButton(child, name);
+                if (button != null) { return button; }
+            }
+        }
+        return null;
     }
 
     private static boolean previewReady(BoardSource source) throws Exception {

@@ -100,6 +100,10 @@ class GpuEditorWheelSmokeTest {
                                 boardWheel(0, 1);
                                 assertTrue(boardCamera.camera.zoom > zoom, "Releasing Ctrl restores zoom");
                                 var pane = (ScrollPane) root.findActor("editor-inspector-scroll");
+                                // Give Layers most of the column, so the Edit region below them overflows and can scroll.
+                                var split = (com.badlogic.gdx.scenes.scene2d.ui.SplitPane) root.findActor("editor-split");
+                                split.setSplitAmount(split.getMaxSplitAmount()); split.validate(); pane.validate();
+                                assertTrue(pane.getMaxY() > 0, "Edit overflows its region");
                                 pane.setScrollY(0); pane.updateVisualScroll();
                                 var point = pane.localToStageCoordinates(new Vector2(pane.getWidth() / 2, pane.getHeight() / 2));
                                 stage.stageToScreenCoordinates(point);

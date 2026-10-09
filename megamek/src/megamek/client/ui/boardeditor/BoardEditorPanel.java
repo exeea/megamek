@@ -139,8 +139,11 @@ public class BoardEditorPanel extends JPanel
 
     // Components
     private final JFrame frame = new JFrame();
-    private final Game game = new Game();
-    private Board board = game.getBoard();
+    private final Game game;
+    private Board board;
+    /** Optional shared document when this is the 2D view of the standalone editor. */
+    private final BoardEditorSession session;
+    private boolean syncingSession;
     private BoardView bv;
     boolean isDragging = false;
     private Component bvc;
@@ -276,7 +279,15 @@ public class BoardEditorPanel extends JPanel
      * Creates and lays out a new Board Editor frame.
      */
     public BoardEditorPanel(MegaMekController c) {
+        this(c, null);
+    }
+
+    public BoardEditorPanel(MegaMekController c, BoardEditorSession session) {
         controller = c;
+        this.session = session;
+        syncingSession = session != null;
+        game = session == null ? new Game() : session.game();
+        board = game.getBoard();
         try {
             tileset = new TilesetManager(game);
         } catch (IOException failure) {
@@ -287,7 +298,8 @@ public class BoardEditorPanel extends JPanel
         setupFrame();
         // Keep the 2D window hidden while 3D starts, but create its peer so disposal still notifies the main menu.
         frame.addNotify();
-        if (GUIPreferences.getInstance().getNagForMapEdReadme()) {
+        if (session != null) { syncSession(); }
+        if (session == null && GUIPreferences.getInstance().getNagForMapEdReadme()) {
             String title = Messages.getString("BoardEditor.readme.title");
             String body = Messages.getString("BoardEditor.readme.message");
             ConfirmDialog confirm = new ConfirmDialog(frame, title, body, true);
@@ -470,6 +482,10 @@ public class BoardEditorPanel extends JPanel
     /** Close either editor view through the same unsaved-changes prompt. */
     public void handleExit() {
         finishBrushStroke();
+        if (session != null) {
+            if (session.confirmDiscard(frame)) { dispose(); }
+            return;
+        }
         // When the board has changes, ask the user
         if (hasChanges && (showSavePrompt() == DialogResult.CANCELLED)) {
             return;
@@ -500,6 +516,9 @@ public class BoardEditorPanel extends JPanel
      * @return DialogResult.CANCELLED (cancel action) or CONFIRMED (continue action)
      */
     private DialogResult showSavePrompt() {
+        if (session != null) {
+            return session.confirmDiscard(frame) ? DialogResult.CONFIRMED : DialogResult.CANCELLED;
+        }
         ignoreHotKeys = true;
         int savePrompt = JOptionPane.showConfirmDialog(frame,
               Messages.getString("BoardEditor.exitprompt"),
@@ -1154,6 +1173,7 @@ public class BoardEditorPanel extends JPanel
      * Save the hex at c into the current undo Set
      */
     private void saveToUndo(Coords c) {
+        if (session != null) { session.beginHexEdit(c); return; }
         // Create a new set of hexes to save for undoing
         // This will be filled as long as the mouse is dragged
         if (currentUndoSet == null) {
@@ -1203,6 +1223,7 @@ public class BoardEditorPanel extends JPanel
         if (deploymentZone != null) {
             newHex.addTerrain(deploymentZone);
         }
+        preserveNativeContents(c, newHex);
         board.setHex(c, newHex);
     }
 
@@ -1219,6 +1240,7 @@ public class BoardEditorPanel extends JPanel
                 newHex.addTerrain(deploymentZone);
             }
             board.resetStoredElevation();
+            preserveNativeContents(c, newHex);
             board.setHex(c, newHex);
         }
     }
@@ -1239,7 +1261,16 @@ public class BoardEditorPanel extends JPanel
             }
             newHex.setTheme(oldHex.getTheme());
             board.resetStoredElevation();
+            preserveNativeContents(c, newHex);
             board.setHex(c, newHex);
+        }
+    }
+
+    /** A classic terrain brush cannot erase the native objects and finishes it does not display. */
+    private void preserveNativeContents(Coords coords, Hex next) {
+        if (session != null) {
+            next.setAppearance(board.getHex(coords).getAppearance());
+            next.setDecorations(board.getHex(coords).getDecorations());
         }
     }
 
@@ -1507,6 +1538,7 @@ public class BoardEditorPanel extends JPanel
     }
 
     public void boardNew(boolean showDialog) {
+        if (session != null && showDialog && !session.confirmDiscard(frame)) { return; }
         boolean userCancel = false;
         if (showDialog) {
             RandomMapDialog rmd = new RandomMapDialog(frame, this, null, mapSettings);
@@ -1516,7 +1548,8 @@ public class BoardEditorPanel extends JPanel
             board = BoardUtilities.generateRandom(mapSettings);
             // "Initialize" all hexes to add internally handled terrains
             correctExits();
-            game.setBoard(board);
+            if (session == null) { game.setBoard(board); }
+            else { session.replaceBoard(board); }
             curBoardFile = null;
             choTheme.setSelectedItem(mapSettings.getTheme());
             setupUiFreshBoard();
@@ -1536,7 +1569,8 @@ public class BoardEditorPanel extends JPanel
             int south = emd.getExpandSouth();
             board = implantOldBoard(game, west, north, east, south);
 
-            game.setBoard(board);
+            if (session == null) { game.setBoard(board); }
+            else { session.replaceBoard(board); }
             curBoardFile = null;
             setupUiFreshBoard();
         }
@@ -1553,6 +1587,10 @@ public class BoardEditorPanel extends JPanel
                 int newY = y + north + odd;
                 if (oldBoard.contains(x, y) && board.contains(newX, newY)) {
                     Hex oldHex = oldBoard.getHex(x, y);
+                    if (session != null) {
+                        board.setHex(newX, newY, oldHex.duplicate());
+                        continue;
+                    }
                     Hex hex = board.getHex(newX, newY);
                     hex.removeAllTerrains();
                     hex.setLevel(oldHex.getLevel());
@@ -1591,13 +1629,16 @@ public class BoardEditorPanel extends JPanel
     }
 
     public void loadBoard(File file) {
+        if (session != null) {
+            if (!session.confirmDiscard(frame)) { return; }
+            try {
+                session.open(file.toPath());
+                syncSession();
+            } catch (IOException | IllegalArgumentException ex) { showBoardLoadError(ex); }
+            return;
+        }
         try (InputStream is = new FileInputStream(file)) {
-            if (megamek.common.board.BoardFile.isNativeName(file.getName())
-                  || megamek.common.board.BoardFile.looksNative(java.nio.file.Files.readString(file.toPath()))) {
-                JOptionPane.showMessageDialog(frame, "This document requires the standalone 3D board editor.");
-                return;
-            }
-            // tell the board to load!
+            // tell the board to load! (.board2 too; its 3D-only content is ignored and not saved from here)
             board.load(is, null, true);
             Set<String> boardTags = board.getTags();
             // Board generation in a game always calls BoardUtilities.combine
@@ -1627,7 +1668,8 @@ public class BoardEditorPanel extends JPanel
             validateBoard(false);
             refreshTerrainList();
             setupUiFreshBoard();
-        } catch (IOException ex) {
+            BoardView.warnIfThreeDOnly(frame, board, true);
+        } catch (IOException | IllegalArgumentException ex) {
             LOGGER.error(ex, "loadBoard");
             showBoardLoadError(ex);
             initializeBoardIfEmpty();
@@ -1694,21 +1736,28 @@ public class BoardEditorPanel extends JPanel
      * Save As...
      */
     private boolean boardSave(boolean saveAs) {
+        if (session != null) {
+            finishBrushStroke();
+            boolean saved = session.chooseSave(frame, saveAs);
+            syncSession();
+            return saved;
+        }
         // Correct connection issues and do a validation.
         correctExits();
         validateBoard(false);
 
         // Choose a board file to save to if this was
-        // called as "Save As..." or there is no current filename
-        if ((curBoardFile == null) || saveAs) {
+        // called as "Save As..." or there is no current filename (an opened .board2 is never overwritten from here)
+        if ((curBoardFile == null) || saveAs
+              || megamek.common.board.BoardFile.isNativeName(curBoardFile.getName())) {
             if (!chooseSaveBoardFile()) {
                 return false;
             }
         }
 
-        // write the board
+        // write the board; always legacy text, 3D-only content is dropped
         try (OutputStream os = new FileOutputStream(curBoardFile)) {
-            board.save(os);
+            board.saveLegacy(os, guip.getBoardSaveIncludeLicense());
 
             // Adapt to successful save
             butSourceFile.setEnabled(true);
@@ -1732,17 +1781,18 @@ public class BoardEditorPanel extends JPanel
         setDialogSize(fc);
         fc.setLocation(frame.getLocation().x + 150, frame.getLocation().y + 100);
         fc.setDialogTitle(Messages.getString("BoardEditor.saveBoardAs"));
-        fc.setFileFilter(new BoardFileFilter());
+        // The classic editor writes only legacy .board text, so its save dialog offers only that type.
+        fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("MegaMek board (*.board)", "board"));
         int returnVal = fc.showSaveDialog(frame);
         saveDialogSize(fc);
         if ((returnVal != JFileChooser.APPROVE_OPTION) || (fc.getSelectedFile() == null)) {
             return false;
         }
         File choice = fc.getSelectedFile();
-        // make sure the file ends in board
+        // make sure the file ends in board (a chosen .board2 name becomes .board)
         if (!choice.getName().toLowerCase().endsWith(".board")) {
             try {
-                choice = new File(choice.getCanonicalPath() + ".board");
+                choice = new File(megamek.common.board.BoardFile.withoutExtension(choice.getCanonicalPath()) + ".board");
             } catch (IOException ignored) {
                 return false;
             }
@@ -1796,6 +1846,7 @@ public class BoardEditorPanel extends JPanel
     //
     @Override
     public void itemStateChanged(ItemEvent ie) {
+        if (syncingSession) { return; }
         if (ie.getSource().equals(cheRoadsAutoExit)) {
             // Set the new value for the option, and refresh the board.
             board.setRoadsAutoExit(cheRoadsAutoExit.isSelected());
@@ -1889,6 +1940,7 @@ public class BoardEditorPanel extends JPanel
      * Adjusts some UI and internal settings for a freshly loaded or freshly generated board.
      */
     private void setupUiFreshBoard() {
+        if (session != null) { syncSession(); return; }
         // Reset the Undo stack and the board has no changes
         savedUndoStackSize = 0;
         canReturnToSaved = true;
@@ -1944,8 +1996,16 @@ public class BoardEditorPanel extends JPanel
     //
     @Override
     public void actionPerformed(ActionEvent ae) {
+        if (session != null && (ae.getActionCommand().equals(ClientGUI.BOARD_UNDO)
+              || ae.getActionCommand().equals(ClientGUI.BOARD_REDO))) {
+            finishBrushStroke();
+            session.command(new BoardEditorSession.Command(ae.getActionCommand().equals(ClientGUI.BOARD_UNDO)
+                  ? BoardEditorSession.Action.UNDO : BoardEditorSession.Action.REDO), frame);
+            syncSession();
+            return;
+        }
         if (ae.getActionCommand().startsWith(ClientGUI.BOARD_RECENT)) {
-            if (hasChanges && (showSavePrompt() == DialogResult.CANCELLED)) {
+            if (session == null && hasChanges && (showSavePrompt() == DialogResult.CANCELLED)) {
                 return;
             }
             String recentBoard = ae.getActionCommand().substring(ClientGUI.BOARD_RECENT.length() + 1);
@@ -2323,6 +2383,11 @@ public class BoardEditorPanel extends JPanel
      * finished.
      */
     private void endCurrentUndoSet() {
+        if (session != null) {
+            session.finishClassicStroke();
+            syncSession();
+            return;
+        }
         if ((currentUndoSet != null) && !currentUndoSet.isEmpty()) {
             undoStack.push(currentUndoSet);
             currentUndoSet = null;
@@ -2466,6 +2531,30 @@ public class BoardEditorPanel extends JPanel
     }
 
     public Game getGame() { return game; }
+
+    /** The return action keeps this document alive; switching is not a close or a save operation. */
+    public void setSwitchTo3D(Runnable action) {
+        editorViewButton.setName("editor-view-3d");
+        editorViewButton.setVisible(true);
+        editorViewButton.addActionListener(event -> { finishBrushStroke(); action.run(); });
+    }
+
+    private void syncSession() {
+        if (session == null) { return; }
+        syncingSession = true;
+        try {
+            board = session.board();
+            curBoardFile = session.path() == null ? null : session.path().toFile();
+            mapSettings.setBoardSize(board.getWidth(), board.getHeight());
+            cheRoadsAutoExit.setSelected(board.getRoadsAutoExit());
+            cheArena.setSelected(board.getTags().contains(BoardClassifier.ARENA_TAG));
+            var state = session.snapshot();
+            buttonUndo.setEnabled(state.canUndo());
+            buttonRedo.setEnabled(state.canRedo());
+            butSourceFile.setEnabled(curBoardFile != null);
+            setFrameTitle();
+        } finally { syncingSession = false; }
+    }
     public boolean hasClassicView() { return bv != null; }
     public long overlayRevision() { return overlayRevision; }
     public BoardFocus focusRequest() { return focusRequest; }
@@ -2613,6 +2702,7 @@ public class BoardEditorPanel extends JPanel
      * changes.
      */
     private void setFrameTitle() {
+        if (session != null) { frame.setTitle(session.title()); return; }
         String title = (curBoardFile == null) ?
               Messages.getString("BoardEditor.title") :
               Messages.getString("BoardEditor.title0", curBoardFile);

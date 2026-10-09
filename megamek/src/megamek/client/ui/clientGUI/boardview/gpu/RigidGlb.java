@@ -1,7 +1,9 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -28,7 +30,9 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelTexture;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.ByteArray;
 import com.badlogic.gdx.utils.FloatArray;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import de.javagl.jgltf.model.AccessorByteData;
 import de.javagl.jgltf.model.AccessorData;
 import de.javagl.jgltf.model.AccessorFloatData;
@@ -45,6 +49,7 @@ import de.javagl.jgltf.model.io.GltfAssetReader;
 import de.javagl.jgltf.model.io.v2.GltfAssetV2;
 import de.javagl.jgltf.model.v2.GltfModelCreatorV2;
 import de.javagl.jgltf.model.v2.MaterialModelV2;
+import megamek.common.board.BoardDecoration;
 
 /**
  * CPU-only importer for the rigid GLB kits. JglTF decodes buffers/accessors; this adapter preserves named parts
@@ -53,6 +58,14 @@ import de.javagl.jgltf.model.v2.MaterialModelV2;
  */
 final class RigidGlb {
     static final int STRIDE = 12;
+    /** The shared recolourable mesh's extra vertex attribute ({@link #colourSlotMesh}). */
+    static final String COLOUR_SLOT = "a_colourSlot";
+    /** A placement passes its colours as one vec4 (model-colour-slots.glsl): one float per slot, -1 for its own. */
+    private static final float[] OWN_COLOURS = { -1, -1, -1, -1 };
+
+    static {
+        require(BoardDecoration.Colours.SLOTS == OWN_COLOURS.length, "A placement's colours are one vec4 of slots");
+    }
     private static final Matrix4 Z_UP = new Matrix4(new float[] {
           1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1 });
     private static final Matrix4 Y_UP = new Matrix4(Z_UP).tra();
@@ -62,9 +75,177 @@ final class RigidGlb {
     /** Encoded bytes are retained for managed GPU texture recreation; external files keep a shared path key. */
     record Image(String key, byte[] encoded, String file, int minFilter, int magFilter, int wrapS, int wrapT) { }
 
+    record Surface(float roughness, float metallic, String map) { }
+
     static final class Data extends ModelData {
         final Map<String, Image> images = new HashMap<>();
         final Map<String, Float> alphaTests = new HashMap<>();
+        final Map<String, Surface> surfaces = new HashMap<>();
+        /** Each vertex's colour slot (0 none, n the n-th of {@link #colourSlots}), in the geometry's vertex order. */
+        byte[] slots = new byte[0];
+        List<ColourSlot> colourSlots = List.of();
+    }
+
+    /**
+     * One of a model's colour slots (the file's extras {@code mmColourSlots}): its name, its default sRGB colour and
+     * named preset colours. Vertices mark their slot with the {@code _COLOUR_SLOT} attribute.
+     */
+    record ColourSlot(String name, String colour, List<Preset> presets) {
+        record Preset(String label, String colour) { }
+    }
+
+    /**
+     * The GLB that holds {@code asset} and the material variant to read from it: the asset's own file, or for a tree's
+     * winter form without one ({@code <species>-snow}), the bare species' file and its {@code snow} variant.
+     */
+    record Source(File file, String variant) { }
+
+    static Source source(File root, String asset) {
+        File own = new File(root, asset + ".glb");
+        File bare = asset.endsWith("-snow") ? new File(root, asset.substring(0, asset.length() - "-snow".length()) + ".glb") : null;
+        return !own.isFile() && bare != null && bare.isFile() ? new Source(bare, "snow") : new Source(own, null);
+    }
+
+    static List<ModelData> loadLods(Source source, Path textureRoot) {
+        var asset = read(new FileHandle(source.file()), textureRoot);
+        return loadLods(new FileHandle(source.file()), asset, source.variant());
+    }
+
+    /** A model's colour slots, from its file's JSON alone. */
+    static List<ColourSlot> colourSlots(File file) {
+        try (var input = java.nio.file.Files.newInputStream(file.toPath())) {
+            byte[] header = input.readNBytes(20);
+            int length = ByteBuffer.wrap(header, 12, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt();
+            var document = new ObjectMapper().readValue(input.readNBytes(length), Map.class);
+            return colourSlots(document.get("extras"));
+        } catch (IOException | RuntimeException error) {
+            throw new IllegalArgumentException("Cannot read the colour slots of " + file + ": " + error.getMessage(), error);
+        }
+    }
+
+    private static List<ColourSlot> colourSlots(Object extras) {
+        Object slots = extras instanceof Map<?, ?> values ? values.get("mmColourSlots") : null;
+        if (slots == null) { return List.of(); }
+        List<ColourSlot> result = new ArrayList<>();
+        for (Object slot : (List<?>) slots) {
+            var entry = (Map<?, ?>) slot;
+            List<ColourSlot.Preset> presets = new ArrayList<>();
+            for (Object preset : (List<?>) entry.get("presets")) {
+                var pair = (List<?>) preset;
+                presets.add(new ColourSlot.Preset((String) pair.get(0), colour(pair.get(1))));
+            }
+            result.add(new ColourSlot((String) entry.get("name"), colour(entry.get("colour")), List.copyOf(presets)));
+        }
+        require(result.size() <= BoardDecoration.Colours.SLOTS, "At most " + BoardDecoration.Colours.SLOTS + " colour slots");
+        return List.copyOf(result);
+    }
+
+    private static String colour(Object value) {
+        // The same rule as a placed object's colours.
+        return BoardDecoration.Colours.of((String) value).slot(0);
+    }
+
+    /**
+     * Replace the colours of {@code data}'s slot vertices with {@code colours} (a placed object's or a layout row's).
+     * Each channel keeps its ratio to the slot's default colour in linear light, so the shaded parts of a slot stay
+     * shaded; tools/glb_geometry.py recolour() applies the same rule offline.
+     */
+    static void recolour(ModelData data, BoardDecoration.Colours colours) {
+        var model = (Data) data;
+        if (model.slots.length == 0) { return; }
+        float[] vertices = model.meshes.first().vertices;
+        for (int vertex = 0; vertex < model.slots.length; vertex++) {
+            int slot = model.slots[vertex] - 1;
+            String colour = slot < 0 || slot >= model.colourSlots.size() ? null : colours.slot(slot);
+            if (colour == null) { continue; }
+            Color from = Color.valueOf(model.colourSlots.get(slot).colour()), to = Color.valueOf(colour);
+            float[] defaults = { from.r, from.g, from.b }, replacements = { to.r, to.g, to.b };
+            for (int channel = 0; channel < 3; channel++) {
+                int at = vertex * STRIDE + 6 + channel;
+                vertices[at] = display(shade(vertices[at], defaults[channel]) * linear(replacements[channel]));
+            }
+        }
+    }
+
+    /**
+     * A slot vertex's colour channel relative to its slot's default, in linear light; 1 where the default is black, so
+     * that vertex takes the replacement itself. The one factor of {@link #recolour} and of {@link #colourSlotMesh}.
+     */
+    private static float shade(float vertex, float slotDefault) {
+        float d = linear(slotDefault);
+        return d > 1e-6f ? linear(vertex) / d : 1;
+    }
+
+    /**
+     * The editor's one mesh for every colouring of a recolourable model: {@code data} with one more vertex attribute,
+     * {@link #COLOUR_SLOT}, holding each vertex's shade per channel ({@link #shade}) and its slot (w, 0 for none). The
+     * vertex shader applies a placement's colours ({@link #packed}) by {@link #recolour}'s rule
+     * (model-colour-slots.glsl). A copy: materials, nodes, parts and images are shared with {@code data}.
+     */
+    static ModelData colourSlotMesh(ModelData data) {
+        var source = (Data) data;
+        var result = new Data();
+        result.id = source.id;
+        result.materials.addAll(source.materials);
+        result.nodes.addAll(source.nodes);
+        result.animations.addAll(source.animations);
+        result.images.putAll(source.images);
+        result.alphaTests.putAll(source.alphaTests);
+        result.surfaces.putAll(source.surfaces);
+        result.slots = source.slots;
+        result.colourSlots = source.colourSlots;
+        ModelMesh mesh = source.meshes.first(), slotted = new ModelMesh();
+        slotted.id = mesh.id;
+        slotted.parts = mesh.parts;
+        slotted.attributes = java.util.Arrays.copyOf(mesh.attributes, mesh.attributes.length + 1);
+        slotted.attributes[mesh.attributes.length] = new VertexAttribute(
+              com.badlogic.gdx.graphics.VertexAttributes.Usage.Generic, 4, COLOUR_SLOT);
+        int count = mesh.vertices.length / STRIDE, stride = STRIDE + 4;
+        slotted.vertices = new float[count * stride];
+        for (int vertex = 0; vertex < count; vertex++) {
+            System.arraycopy(mesh.vertices, vertex * STRIDE, slotted.vertices, vertex * stride, STRIDE);
+            int at = vertex * stride + STRIDE;
+            int slot = vertex < source.slots.length ? source.slots[vertex] - 1 : -1;
+            if (slot < 0 || slot >= source.colourSlots.size()) {
+                slotted.vertices[at] = slotted.vertices[at + 1] = slotted.vertices[at + 2] = 1;
+                continue;
+            }
+            Color from = Color.valueOf(source.colourSlots.get(slot).colour());
+            float[] defaults = { from.r, from.g, from.b };
+            for (int channel = 0; channel < 3; channel++) {
+                slotted.vertices[at + channel] = shade(mesh.vertices[vertex * STRIDE + 6 + channel], defaults[channel]);
+            }
+            slotted.vertices[at + 3] = slot + 1;
+        }
+        result.meshes.add(slotted);
+        return result;
+    }
+
+    /** Whether a mesh is a recolourable model's shared mesh ({@link #colourSlotMesh}). */
+    static boolean colourSlotted(com.badlogic.gdx.graphics.VertexAttributes attributes) {
+        for (VertexAttribute attribute : attributes) {
+            if (attribute.alias.equals(COLOUR_SLOT)) { return true; }
+        }
+        return false;
+    }
+
+    /**
+     * A placement's colours for the shared mesh: each slot's 0xRRGGBB as a float (exact below 2^24), or -1 where the
+     * slot keeps the model's own colour; null for an object in its model's own colours.
+     */
+    static float[] packed(BoardDecoration.Colours colours) {
+        if (colours.slots().isEmpty()) { return null; }
+        float[] result = new float[OWN_COLOURS.length];
+        for (int slot = 0; slot < result.length; slot++) {
+            String colour = colours.slot(slot);
+            result[slot] = colour == null ? -1 : Integer.parseInt(colour.substring(1), 16);
+        }
+        return result;
+    }
+
+    /** The colours a renderable's placement passes to the shared mesh ({@link #packed}, its userData), or its own. */
+    static float[] slotColours(Object userData) {
+        return userData instanceof float[] colours ? colours : OWN_COLOURS;
     }
 
     static ModelData load(FileHandle file) {
@@ -74,7 +255,7 @@ final class RigidGlb {
     static ModelData load(FileHandle file, Path textureRoot) {
         var asset = read(file, textureRoot);
         var source = asset.model();
-        return convert(file, file.nameWithoutExtension(), asset, source.getSceneModels().get(asset.scene()).getNodeModels());
+        return convert(file, file.nameWithoutExtension(), asset, source.getSceneModels().get(asset.scene()).getNodeModels(), null);
     }
 
     /** Levels a file may hold: the near mesh, two simpler meshes and a plant's impostor cards. */
@@ -86,7 +267,10 @@ final class RigidGlb {
     }
 
     static List<ModelData> loadLods(FileHandle file, Path textureRoot) {
-        var asset = read(file, textureRoot);
+        return loadLods(file, read(file, textureRoot), null);
+    }
+
+    private static List<ModelData> loadLods(FileHandle file, Asset asset, String variant) {
         var source = asset.model();
         var roots = source.getSceneModels().get(asset.scene()).getNodeModels();
         String shape = file.nameWithoutExtension();
@@ -104,10 +288,11 @@ final class RigidGlb {
                   "LOD group transforms must be identity; transform the child rig instead");
         }
         return MeshLod.load(shape, LEVELS, name -> groups.containsKey(name)
-              ? convert(file, name, asset, groups.get(name).getChildren()) : null);
+              ? convert(file, name, asset, groups.get(name).getChildren(), variant) : null);
     }
 
-    private record Asset(GltfModel model, int scene, Map<TextureModel, Image> images) { }
+    private record Asset(GltfModel model, int scene, Map<TextureModel, Image> images, Path textureRoot,
+          List<ColourSlot> colourSlots) { }
 
     private static Asset read(FileHandle file, Path textureRoot) {
         try (var input = file.read()) {
@@ -160,7 +345,7 @@ final class RigidGlb {
                 }
                 images.put(texture, new Image(key, encoded, path, min, mag, wrapS, wrapT));
             }
-            return new Asset(model, document.getScene(), images);
+            return new Asset(model, document.getScene(), images, textureRoot, colourSlots(document.getExtras()));
         } catch (IOException | RuntimeException error) {
             throw new IllegalArgumentException("Cannot read rigid GLB " + file + ": " + error.getMessage(), error);
         }
@@ -173,19 +358,30 @@ final class RigidGlb {
         return UnitModelDescriptor.contained(root, file.file().toPath().toAbsolutePath().getParent().resolve(uri.getPath()));
     }
 
-    private static ModelData convert(FileHandle file, String id, Asset asset, List<NodeModel> roots) {
+    /**
+     * {@code variant}, when not null, reads each material's {@code mmVariants.<variant>} extras instead of its own
+     * values where they name them: {@code name}, {@code textures} by role ({@code baseColor}, {@code normal},
+     * {@code occlusion}), {@code colourScale} (linear factors on its triangles' vertex colours) and {@code colours}
+     * (its one primitive's linear vertex colours). tools/merge_snow_trees.py writes them.
+     */
+    private static ModelData convert(FileHandle file, String id, Asset asset, List<NodeModel> roots, String variant) {
         try {
             Data result = new Data();
             var source = asset.model();
             result.id = id;
             Map<MaterialModel, String> materials = new IdentityHashMap<>();
+            Map<MaterialModel, Map<?, ?>> variants = new IdentityHashMap<>();
             Set<String> materialNames = new HashSet<>();
             for (var sourceMaterial : source.getMaterialModels()) {
                 var material = (MaterialModelV2) sourceMaterial;
                 require(material.getAlphaMode() != MaterialModelV2.AlphaMode.BLEND,
                       "Rigid kits use opaque or alpha-tested materials");
+                Map<?, ?> changes = variant == null || !(material.getExtras() instanceof Map<?, ?> extras)
+                      || !(extras.get("mmVariants") instanceof Map<?, ?> all) || !(all.get(variant) instanceof Map<?, ?> own)
+                      ? Map.of() : own;
+                variants.put(material, changes);
                 var target = new ModelMaterial();
-                target.id = material.getName();
+                target.id = changes.containsKey("name") ? (String) changes.get("name") : material.getName();
                 require(target.id != null && materialNames.add(target.id), "Material names must be unique");
                 if (material.getAlphaMode() == MaterialModelV2.AlphaMode.MASK) {
                     float cutoff = material.getAlphaCutoff();
@@ -194,6 +390,18 @@ final class RigidGlb {
                 }
                 float[] color = material.getBaseColorFactor();
                 target.diffuse = new Color(display(color[0]), display(color[1]), display(color[2]), color[3]);
+                float roughness = material.getRoughnessFactor(), metallic = material.getMetallicFactor();
+                require(Float.isFinite(roughness) && roughness >= 0 && roughness <= 1
+                      && Float.isFinite(metallic) && metallic >= 0 && metallic <= 1, "Invalid metallic-roughness factors");
+                String surfaceMap = null;
+                if (material.getMetallicRoughnessTexture() != null) {
+                    Integer coordinate = material.getMetallicRoughnessTexcoord();
+                    require(coordinate == null || coordinate == 0, "Only TEXCOORD_0 is supported");
+                    var image = asset.images().get(material.getMetallicRoughnessTexture());
+                    result.images.put(image.key(), image);
+                    surfaceMap = image.key();
+                }
+                result.surfaces.put(target.id, new Surface(roughness, metallic, surfaceMap));
                 for (int usage : new int[] { ModelTexture.USAGE_DIFFUSE, ModelTexture.USAGE_NORMAL, ModelTexture.USAGE_AMBIENT }) {
                     var sourceTexture = switch (usage) {
                         case ModelTexture.USAGE_NORMAL -> material.getNormalTexture();
@@ -213,6 +421,13 @@ final class RigidGlb {
                     require(usage != ModelTexture.USAGE_AMBIENT || material.getOcclusionStrength() == 1,
                           "Bake occlusion strength into the map");
                     var image = asset.images().get(sourceTexture);
+                    String role = usage == ModelTexture.USAGE_NORMAL ? "normal" : usage == ModelTexture.USAGE_AMBIENT ? "occlusion" : "baseColor";
+                    if (changes.get("textures") instanceof Map<?, ?> textures && textures.get(role) instanceof String uri) {
+                        // The variant's image, sampled as the one it replaces.
+                        String path = imagePath(file, asset.textureRoot(), uri).toString();
+                        String sampler = image.file() == null ? "" : image.key().substring(image.file().length());
+                        image = new Image(path + sampler, null, path, image.minFilter(), image.magFilter(), image.wrapS(), image.wrapT());
+                    }
                     result.images.put(image.key(), image);
                     var texture = new ModelTexture();
                     texture.id = target.id;
@@ -230,6 +445,8 @@ final class RigidGlb {
             Set<String> names = new HashSet<>();
             List<ModelMeshPart> parts = new ArrayList<>();
             FloatArray vertices = new FloatArray();
+            ByteArray slots = new ByteArray();
+            Set<Integer> painted = new HashSet<>();
             Set<MeshModel> meshes = new java.util.LinkedHashSet<>();
             Set<NodeModel> collected = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
             for (var root : roots) { collectMeshes(root, meshes, collected); }
@@ -238,7 +455,7 @@ final class RigidGlb {
                     require(primitive.getMode() == GL20.GL_TRIANGLES && primitive.getTargets().isEmpty(),
                           "Expected rigid triangle primitives");
                     var attributes = primitive.getAttributes();
-                    int base = offsets.computeIfAbsent(attributes, key -> append(vertices, key));
+                    int base = offsets.computeIfAbsent(attributes, key -> append(vertices, slots, key));
                     var positions = attributes.get("POSITION");
                     var index = primitive.getIndices();
                     int count = index == null ? positions.getCount() : index.getCount();
@@ -257,8 +474,10 @@ final class RigidGlb {
                         require(value >= 0 && value < positions.getCount(), "Vertex index outside primitive");
                         part.indices[i] = (short) (value + base);
                     }
+                    paint(vertices, part.indices, base, positions.getCount(), variants.getOrDefault(primitive.getMaterialModel(), Map.of()),
+                          painted);
                     if (primitive.getMaterialModel() instanceof MaterialModelV2 material && material.isDoubleSided()) {
-                        part.indices = doubleSided(vertices, part.indices, backVertices);
+                        part.indices = doubleSided(vertices, slots, part.indices, backVertices);
                     }
                     parts.add(part);
                     partIds.put(primitive, part.id);
@@ -272,6 +491,8 @@ final class RigidGlb {
                 mesh.vertices = vertices.toArray();
                 mesh.parts = parts.toArray(ModelMeshPart[]::new);
                 result.meshes.add(mesh);
+                result.slots = slots.toArray();
+                result.colourSlots = asset.colourSlots();
             }
             Set<NodeModel> visited = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
             Set<String> nodeNames = new HashSet<>();
@@ -279,8 +500,36 @@ final class RigidGlb {
                 result.nodes.add(node(node, partIds, materials, visited, nodeNames));
             }
             return result;
-        } catch (RuntimeException error) {
+        } catch (IOException | RuntimeException error) {
             throw new IllegalArgumentException("Cannot read rigid GLB " + file + ": " + error.getMessage(), error);
+        }
+    }
+
+    /**
+     * A material variant's vertex colours on one primitive, before its reverse faces copy them: {@code colourScale} on
+     * the vertices its triangles use (each once), or {@code colours} for all of its vertices.
+     */
+    private static void paint(FloatArray vertices, short[] indices, int base, int count, Map<?, ?> changes, Set<Integer> painted) {
+        if (changes.get("colourScale") instanceof List<?> scale) {
+            for (short index : indices) {
+                int vertex = Short.toUnsignedInt(index);
+                if (!painted.add(vertex)) { continue; }
+                for (int channel = 0; channel < 3; channel++) {
+                    int at = vertex * STRIDE + 6 + channel;
+                    vertices.items[at] = display(linear(vertices.items[at]) * ((Number) scale.get(channel)).floatValue());
+                }
+            }
+        }
+        if (changes.get("colours") instanceof List<?> colours) {
+            require(colours.size() == count, "A variant's colours need one value per vertex");
+            for (int vertex = 0; vertex < count; vertex++) {
+                var value = (List<?>) colours.get(vertex);
+                int at = (base + vertex) * STRIDE + 6;
+                for (int channel = 0; channel < 4; channel++) {
+                    float component = ((Number) value.get(channel)).floatValue();
+                    vertices.items[at + channel] = channel < 3 ? display(component) : component;
+                }
+            }
         }
     }
 
@@ -289,7 +538,7 @@ final class RigidGlb {
      * All existing colour, shadow, instancing and cutaway paths then use the same ordinary single-sided geometry.
      * Shared front vertices also share their reverse vertices, including across material primitives.
      */
-    private static short[] doubleSided(FloatArray vertices, short[] front, Map<Integer, Integer> backVertices) {
+    private static short[] doubleSided(FloatArray vertices, ByteArray slots, short[] front, Map<Integer, Integer> backVertices) {
         short[] indices = java.util.Arrays.copyOf(front, Math.multiplyExact(front.length, 2));
         for (int triangle = 0; triangle < front.length; triangle += 3) {
             for (int corner = 0; corner < 3; corner++) {
@@ -300,6 +549,7 @@ final class RigidGlb {
                     // Reserve before copying from the same array: growing it must not invalidate the source.
                     vertices.ensureCapacity(STRIDE);
                     vertices.addAll(vertices.items, key * STRIDE, STRIDE);
+                    slots.add(slots.get(key));
                     for (int axis = 3; axis < 6; axis++) { vertices.items[index * STRIDE + axis] *= -1; }
                     return index;
                 });
@@ -315,8 +565,8 @@ final class RigidGlb {
         for (var child : node.getChildren()) { collectMeshes(child, meshes, visited); }
     }
 
-    private static int append(FloatArray vertices, Map<String, AccessorModel> attributes) {
-        require(attributes.keySet().stream().allMatch(Set.of("POSITION", "NORMAL", "COLOR_0", "TEXCOORD_0")::contains),
+    private static int append(FloatArray vertices, ByteArray slots, Map<String, AccessorModel> attributes) {
+        require(attributes.keySet().stream().allMatch(Set.of("POSITION", "NORMAL", "COLOR_0", "TEXCOORD_0", "_COLOUR_SLOT")::contains),
               "Unsupported rigid vertex attribute");
         var positions = attributes.get("POSITION");
         require(positions != null && attributes.containsKey("NORMAL"), "Positions and normals are required");
@@ -329,7 +579,10 @@ final class RigidGlb {
         require(channels == 3 || channels == 4, "Expected RGB or RGBA colors");
         float[] c = colors == null ? null : attribute(colors, count, channels);
         float[] uv = attributes.containsKey("TEXCOORD_0") ? attribute(attributes.get("TEXCOORD_0"), count, 2) : null;
+        float[] slot = attributes.containsKey("_COLOUR_SLOT") ? attribute(attributes.get("_COLOUR_SLOT"), count, 1) : null;
         for (int i = 0; i < count; i++) {
+            require(slot == null || slot[i] >= 0 && slot[i] <= BoardDecoration.Colours.SLOTS, "Invalid colour slot");
+            slots.add((byte) (slot == null ? 0 : Math.round(slot[i])));
             vertices.addAll(p[i * 3], -p[i * 3 + 2], p[i * 3 + 1]);
             vertices.addAll(n[i * 3], -n[i * 3 + 2], n[i * 3 + 1]);
             vertices.addAll(c == null ? 1 : display(c[i * channels]), c == null ? 1 : display(c[i * channels + 1]),
@@ -414,6 +667,10 @@ final class RigidGlb {
 
     private static float display(float linear) {
         return linear <= .0031308f ? 12.92f * linear : (float) (1.055 * Math.pow(linear, 1 / 2.4) - .055);
+    }
+
+    private static float linear(float display) {
+        return display <= .04045f ? display / 12.92f : (float) Math.pow((display + .055) / 1.055, 2.4);
     }
 
     private static void require(boolean condition, String message) {

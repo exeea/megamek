@@ -275,6 +275,21 @@ class GpuWeaponsPanelSmokeTest {
             Rectangle list = GpuHudTestStage.bounds(scroll);
             Rectangle heat = GpuHudTestStage.bounds(column.find("weapons-heat"));
             assertTrue(heat.y + heat.height <= list.y + .5f);
+            UiButton alphaStrike = column.find("weapons-alpha-strike");
+            Rectangle footer = GpuHudTestStage.bounds(alphaStrike);
+            Actor footerSection = column.find("weapons-footer");
+            assertEquals("ALPHA STRIKE", alphaStrike.getText().toString());
+            assertNull(footerSection.firstAscendant(ScrollPane.class));
+            assertTrue(alphaStrike.isDescendantOf(footerSection));
+            assertTrue(column.find("weapons-heat").isDescendantOf(footerSection));
+            assertTrue(footer.y >= GpuHudTestStage.bounds(column.weapons.actor()).y
+                  && footer.y + footer.height <= heat.y);
+            scroll.setScrollY(scroll.getMaxY());
+            scroll.updateVisualScroll();
+            hud.draw();
+            assertEquals(footer, GpuHudTestStage.bounds(alphaStrike), "the footer stays put while weapons scroll");
+            assertEquals(heat, GpuHudTestStage.bounds(column.find("weapons-heat")),
+                  "HEAT IF FIRED stays in the footer while weapons scroll");
         });
     }
 
@@ -321,6 +336,7 @@ class GpuWeaponsPanelSmokeTest {
                 Column column = new Column(hud, mock(GpuBoardSource.class)).update(hud, firing(), shot06());
                 float x = size[0] - metrics.gap() - metrics.right();
                 float minimap = metrics.lowHeight() ? 178 : 208;
+                minimap = Math.min(minimap, size[1] - MINIMAP_TOP - 12 - 70 - column.weapons.minimumHeight());
                 float top = MINIMAP_TOP + minimap + 12;
                 float card = column.solutionSlot.getPrefHeight();
                 // GpuHud.layout: beside the column when the column would keep less than 430 units under the card.
@@ -330,6 +346,8 @@ class GpuWeaponsPanelSmokeTest {
                 Rectangle map = new Rectangle(x, size[1] - MINIMAP_TOP - minimap, metrics.right(), minimap);
                 hud.assertLayout(column.weapons.actor(), map, GpuHudTestStage.bounds(column.solution.actor()));
                 hud.assertLayout(column.solution.actor(), map, GpuHudTestStage.bounds(column.weapons.actor()));
+                assertTrue(visible(column.find("weapons-list"), column.find("weapons-row-" + AC20)),
+                      "the fixed footer leaves room for a complete weapon row at " + size[0] + "x" + size[1]);
                 hud.capture("weapons-layout-" + size[0] + "x" + size[1]).dispose();
             }
         });
@@ -415,6 +433,7 @@ class GpuWeaponsPanelSmokeTest {
             assertFalse(column.solution.actor().isVisible(), "a draft has no solution");
             assertNull(((Group) column.weapons.actor()).findActor("weapons-heat"));
             assertNull(((Group) column.weapons.actor()).findActor("weapons-pills"));
+            assertNull(((Group) column.weapons.actor()).findActor("weapons-alpha-strike"));
             assertFalse(column.weapons.cancel(), "Esc goes on: nothing is armed or selected in a draft");
             hud.capture("weapons-read-only").dispose();
         });
@@ -448,6 +467,10 @@ class GpuWeaponsPanelSmokeTest {
             assertEquals("+", plus.getText().toString());
             click(hud, plus);
             verify(fire).assign(REAR_2, TargetKey.unit(KING_CRAB));
+            column.state.armedWeapon = SRM;
+            click(hud, column.find("weapons-alpha-strike"));
+            verify(fire).assignAll(TargetKey.unit(KING_CRAB));
+            assertEquals(-1, column.state.armedWeapon);
 
             // With the Timber Wolf focused, its letter removes the attack.
             column.update(hud, firing(), shot05()).place(hud, COLUMN_X, COLUMN_TOP, 310, -1);
@@ -597,6 +620,8 @@ class GpuWeaponsPanelSmokeTest {
             int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
             GpuHudTestStage.run(hud -> {
                 Column column = new Column(hud, firing.board.source);
+                show(hud, column, settled(firing));
+                assertTrue(((UiButton) column.find("weapons-alpha-strike")).isDisabled(), "no target yet");
                 firing.board.source.fire().clickHex(woods, 0, -1);
                 show(hud, column, settled(firing));
                 Targetable hex = onSwing(firing.display::getTarget);
@@ -606,6 +631,14 @@ class GpuWeaponsPanelSmokeTest {
                 show(hud, column, settled(firing));
                 assertEquals(List.of("AC/20 RT@" + hex.getId()), GpuFireOrdersTest.queue(firing));
                 assertEquals(List.of("A", hex.getDisplayName()), column.texts("weapons-pills"));
+                click(hud, column.find("weapons-alpha-strike"));
+                GpuBoardSource.Frame assigned = settled(firing);
+                show(hud, column, assigned);
+                assertEquals(5, assigned.panels().fire().attacks().size());
+                assertTrue(assigned.panels().fire().attacks().stream()
+                      .allMatch(attack -> attack.target().equals(TargetKey.of(hex))));
+                assertTrue(((UiButton) column.find("weapons-alpha-strike")).isDisabled(),
+                      "all available weapons already assigned");
             });
         }
     }

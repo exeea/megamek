@@ -35,14 +35,18 @@ package megamek.server.totalWarfare;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Vector;
 import java.util.stream.Stream;
 
@@ -55,13 +59,21 @@ import megamek.common.board.Coords;
 import megamek.common.board.CubeCoords;
 import megamek.common.enums.BasementType;
 import megamek.common.enums.BuildingType;
+import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
+import megamek.common.game.GameTurn;
+import megamek.common.net.enums.PacketCommand;
+import megamek.common.net.packets.Packet;
+import megamek.common.options.OptionsConstants;
+import megamek.common.rules.RulesManager;
+import megamek.common.units.BipedMek;
 import megamek.common.units.BuildingEntity;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
 import megamek.common.units.IBuilding;
 import megamek.common.units.SupportTank;
 import megamek.common.units.Terrains;
+import megamek.server.GameManagerPacketHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -123,6 +135,35 @@ public class DeploymentProcessorTest extends GameBoardTestCase {
                                        Coords coords) throws Exception {
         DeploymentServerHelper deploymentServerHelper = new DeploymentServerHelper(mockTWGameManager);
         deploymentServerHelper.processDeployment(entity, coords, 0, 0, 0, new Vector<>(), false, true);
+    }
+
+    @Test
+    void coreRejectsInteriorFloorDeploymentBeforePlacingMek() throws Exception {
+        RulesManager previousRules = Game.rulesManager;
+        try {
+            game.initializeRulesManager(OptionsConstants.RULES_CORE);
+            game.setPhase(GamePhase.DEPLOYMENT);
+            Coords position = new Coords(1, 1);
+            board.setHex(position, new Hex(3, "building:2;bldg_elev:4;bldg_cf:120", ""));
+            BipedMek unit = new BipedMek();
+            unit.setId(1);
+            unit.setOwner(game.getPlayer(0));
+            game.addEntity(unit);
+            game.setTurnVector(List.of(new GameTurn(0)));
+            game.setTurnIndex(0, 0);
+            when(mockTWGameManager.getPacketHelper()).thenReturn(mock(GameManagerPacketHelper.class));
+            assertTrue(game.getTurn().isValid(0, unit, game), "The packet is otherwise on the correct turn");
+            assertTrue(new DeploymentServerHelper(mockTWGameManager).isLegalDeployment(position, 0, unit, 0));
+
+            deploymentProcessor.receiveDeployment(new Packet(PacketCommand.ENTITY_DEPLOY,
+                  unit.getId(), position, 0, 0, 2, 0, false), 0);
+
+            assertNull(unit.getPosition(), "A direct packet cannot bypass the CORE floor restriction");
+            assertFalse(unit.isDeployed());
+            verify(mockTWGameManager, never()).endCurrentTurn(unit);
+        } finally {
+            Game.rulesManager = previousRules;
+        }
     }
 
     static {

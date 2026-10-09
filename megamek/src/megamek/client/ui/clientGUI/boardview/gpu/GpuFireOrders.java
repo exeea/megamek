@@ -589,6 +589,34 @@ final class GpuFireOrders implements AutoCloseable {
         command((fd, actor) -> declare(fd, actor, eqNum, key));
     }
 
+    /** Assigns all available weapons to the target through the same declaration path as an individual slot. */
+    void assignAll(TargetKey key) {
+        command((fd, actor) -> {
+            Targetable target = target(fd, actor, key);
+            if (target == null) {
+                return;
+            }
+            // Retarget existing attacks in fire order before a new last weapon can auto-end the turn.
+            List<EntityAction> before = fd.getAttacks();
+            List<WeaponMounted> weapons = WeaponDisplayData.listedWeapons(actor).stream()
+                  .filter(weapon -> weapon.getEntity() == actor)
+                  .sorted(Comparator.comparingInt(weapon -> {
+                      WeaponAttackAction attack = queued(before, actor, actor.getEquipmentNum(weapon));
+                      return attack == null ? before.size() : before.indexOf(attack);
+                  })).toList();
+            for (WeaponMounted weapon : weapons) {
+                if ((acting(fd) != actor) || fd.isIgnoringEvents()) {
+                    break;
+                }
+                if ((queued(fd.getAttacks(), actor, actor.getEquipmentNum(weapon)) != null)
+                      || (actor.isWeaponValidForPhase(weapon)
+                            && (fd.toHitFor(weapon, target).getValue() != TargetRoll.IMPOSSIBLE))) {
+                    declare(fd, actor, weapon, target);
+                }
+            }
+        });
+    }
+
     /**
      * A click on a hex in which the pointer picked no unit (H15, H16): the target MegaMek's board click chooses there
      * (FiringDisplay.hexSelected: a unit, a building or a wooded hex, by its dialog among several; Shift twists the

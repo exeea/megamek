@@ -89,7 +89,7 @@ class GpuIndustrialSmokeTest {
                     int fanIndices = 0;
                     for (var part : model.meshParts) { if (part.id.equals("fan")) { fanIndices += part.size; } }
                     assertEquals(family == 0 ? 12 : 0, fanIndices, "Each of the two generators needs only one fan quad");
-                    assets.retainIndustrial(java.util.Set.of(model));
+                    assets.retain(assets, java.util.Set.of(), java.util.Set.of(model), java.util.Set.of());
                 }
             }
         } finally { assets.dispose(); }

@@ -94,8 +94,8 @@ class BoardAridSurfaceTest {
         for (var at : List.of(new Coords(2, 2), new Coords(2, 3), new Coords(3, 2))) {
             var tile = scene.tile(at);
             var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-            var planted = GpuGroundCover.plant(scene, tile, surface);
-            assertEquals(planted, GpuGroundCover.plant(scene, tile, surface), "Rebuilding must not move the tufts");
+            var planted = GpuGroundCover.plant(scene, tile, surface, null);
+            assertEquals(planted, GpuGroundCover.plant(scene, tile, surface, null), "Rebuilding must not move the tufts");
             for (int i = 0; i < planted.size; i += 4) {
                 float x = planted.items[i], y = planted.items[i + 1];
                 assertTrue(BoardSurfaceBlend.sandExposure(x / metre, y / metre) > .5f,

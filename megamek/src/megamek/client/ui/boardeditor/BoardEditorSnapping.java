@@ -12,22 +12,24 @@ import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
 
 /** Translation-only joins between explicitly authored, compatible connector ends. No model loading or ID guessing. */
-final class BoardEditorSnapping {
+public final class BoardEditorSnapping {
     private BoardEditorSnapping() { }
 
     private record End(double x, double y, double z, double heading) { }
 
     static BoardDecoration snap(Board board, BoardEditorBlueprint blueprint, Coords owner, BoardDecoration moving, Set<String> excluded) {
         var asset = blueprint.asset(moving.asset());
-        if (asset == null || asset.snap() == null) { return moving; }
+        // The catalog's rail/barrier connectors describe level runs. A tilted part cannot join their horizontal ends.
+        if (asset == null || asset.snap() == null || tilted(moving)) { return moving; }
         var definition = asset.snap();
         var ends = ends(board, owner, moving, definition);
-        double centreX = owner.getX() * .75 + moving.x();
-        double centreY = -owner.getY() - (owner.getX() & 1) * .5 + moving.y();
-        // Equal-scale targets cannot have a connector outside this catalog-derived neighbourhood.
+        double centreX = globalX(owner, moving.x());
+        double centreY = globalY(owner, moving.y());
+        // Equal-size targets (scale and stretch) cannot have a connector outside this catalog-derived neighbourhood.
         double reach = blueprint.assets().stream().filter(a -> a.snap() != null && a.snap().set().equals(definition.set()))
               .flatMap(a -> a.snap().connectors().stream()).mapToDouble(end -> Math.hypot(end.x(), end.y())).max().orElse(0)
-              * moving.scale() * 2 * HexTileset.HEX_W / HexTileset.HEX_H + definition.radius();
+              * moving.scale() * Math.max(moving.stretch().x(), moving.stretch().y()) * 2 * HexTileset.HEX_W / HexTileset.HEX_H
+              + definition.radius();
         int left = Math.max(0, (int) Math.floor((centreX - reach) / .75));
         int right = Math.min(board.getWidth() - 1, (int) Math.ceil((centreX + reach) / .75));
         int top = Math.max(0, (int) Math.floor(-centreY - reach - .5));
@@ -37,7 +39,10 @@ final class BoardEditorSnapping {
             for (int row = top; row <= bottom; row++) {
                 Coords at = new Coords(col, row);
                 for (var target : board.getHex(at).getDecorations()) {
-                    if (excluded.contains(target.id()) || target.id().equals(moving.id()) || Math.abs(target.scale() - moving.scale()) > .000001) { continue; }
+                    if (excluded.contains(target.id()) || target.id().equals(moving.id()) || tilted(target)
+                          || Math.abs(target.scale() - moving.scale()) > .000001 || !target.stretch().equals(moving.stretch())) {
+                        continue;
+                    }
                     var targetAsset = blueprint.asset(target.asset());
                     if (targetAsset == null || targetAsset.snap() == null || !targetAsset.snap().set().equals(definition.set())) { continue; }
                     var targetDefinition = targetAsset.snap();
@@ -63,15 +68,26 @@ final class BoardEditorSnapping {
         return moving.transform(moving.x() + dx, moving.y() + dy, moving.rotation(), moving.mirror(), moving.scale(), moving.placement());
     }
 
+    /** Board-global east of an owner-relative offset, in hex widths; metric space scales it by {@code HEX_W}. */
+    static double globalX(Coords owner, double x) { return owner.getX() * .75 + x; }
+
+    /** Board-global north of an owner-relative offset, in hex heights; metric space scales it by {@code HEX_H}. */
+    static double globalY(Coords owner, double y) { return -owner.getY() - (owner.getX() & 1) * .5 + y; }
+
+    private static boolean tilted(BoardDecoration object) {
+        return Math.abs(Math.IEEEremainder(object.rotationX(), 360)) > .000001
+              || Math.abs(Math.IEEEremainder(object.rotationY(), 360)) > .000001;
+    }
+
     private static List<End> ends(Board board, Coords owner, BoardDecoration object, BoardEditorBlueprint.Snap definition) {
         double radians = Math.toRadians(object.rotation()), cos = Math.cos(radians), sin = Math.sin(radians);
         double base = height(board, owner, object);
         return definition.connectors().stream().map(end -> {
-            double x = end.x() * HexTileset.HEX_W * object.scale() * (object.mirror() ? -1 : 1);
-            double y = end.y() * HexTileset.HEX_H * object.scale();
-            return new End(owner.getX() * .75 + object.x() + (x * cos - y * sin) / HexTileset.HEX_W,
-                  -owner.getY() - (owner.getX() & 1) * .5 + object.y() + (x * sin + y * cos) / HexTileset.HEX_H,
-                  base + end.z() * object.scale(), object.rotation() + (object.mirror() ? 180 - end.heading() : end.heading()));
+            double x = end.x() * HexTileset.HEX_W * object.scale() * object.stretch().x() * (object.mirror() ? -1 : 1);
+            double y = end.y() * HexTileset.HEX_H * object.scale() * object.stretch().y();
+            return new End(globalX(owner, object.x()) + (x * cos - y * sin) / HexTileset.HEX_W,
+                  globalY(owner, object.y()) + (x * sin + y * cos) / HexTileset.HEX_H,
+                  base + end.z() * object.scale() * object.stretch().z(), object.rotation() + (object.mirror() ? 180 - end.heading() : end.heading()));
         }).toList();
     }
 
@@ -81,15 +97,45 @@ final class BoardEditorSnapping {
         // During a drag the anchor may be over another hex while the owning record deliberately stays put.
         double q = owner.toCube().q() + object.x() / .75, r = owner.toCube().r() - object.y() - object.x() / 1.5;
         Coords at = new megamek.common.board.CubeCoords(q, r, -q - r).roundToNearestHex().toOffset();
-        var hex = board.getHex(at);
-        if (hex == null) { return Double.NaN; }
-        int type = switch (placement.receiver().terrain()) {
-            case "bridge" -> Terrains.BRIDGE_ELEV;
-            case "building" -> Terrains.BLDG_ELEV;
-            case "industrial" -> Terrains.INDUSTRIAL;
-            default -> 0;
-        };
-        if (type != 0 && !hex.containsTerrain(type)) { return Double.NaN; }
-        return hex.getLevel() + (type == 0 ? 0 : hex.terrainLevel(type)) + placement.offset();
+        return level(board.getHex(at), placement);
+    }
+
+    /**
+     * The nominal level {@code placement} puts an object's anchor at on {@code hex}, by {@link
+     * BoardDecoration.Placement#level(double, java.util.function.ToDoubleFunction)}: each support's top from the hex's
+     * rules terrain, or NaN where the hex lacks that support.
+     */
+    public static double level(megamek.common.Hex hex, BoardDecoration.Placement placement) {
+        return placement.level(hex == null ? Double.NaN : hex.getLevel(), receiver -> {
+            int type = switch (receiver) {
+                case "bridge" -> Terrains.BRIDGE_ELEV;
+                case "building" -> Terrains.BLDG_ELEV;
+                case "industrial" -> Terrains.INDUSTRIAL;
+                case "fuelTank" -> Terrains.FUEL_TANK_ELEV;
+                case "ice" -> Terrains.ICE;
+                default -> throw new IllegalArgumentException("Unknown receiver " + receiver);
+            };
+            if (hex == null || !hex.containsTerrain(type)) { return Double.NaN; }
+            // Ice lies at the hex's own level, on its water or ground.
+            return hex.getLevel() + (type == Terrains.ICE ? 0 : hex.terrainLevel(type));
+        });
+    }
+
+    /**
+     * The lowest level an object's anchor may take on {@code hex}: one level below its floor (its ground, or the bed
+     * under water), deep enough to bury a foot in uneven ground. The side view and the inspector stop there.
+     */
+    public static double lowestLevel(megamek.common.Hex hex) { return hex.floor() - 1; }
+
+    /** {@code placement} on {@code hex}, raised to {@link #lowestLevel} if it lies below it; its support is kept. */
+    public static BoardDecoration.Placement clamp(megamek.common.Hex hex, BoardDecoration.Placement placement) {
+        double at = level(hex, placement);
+        // An object whose support is missing stands on the ground, where the editor draws it.
+        if (Double.isNaN(at)) { at = hex.getLevel() + placement.offset(); }
+        double lowest = lowestLevel(hex);
+        if (at >= lowest) { return placement; }
+        return placement.mode().equals("absolute") ? BoardDecoration.Placement.absolute(lowest)
+              : BoardDecoration.Placement.surface(placement.receiver().terrain(), placement.receiver().surface(),
+                    placement.offset() + lowest - at);
     }
 }

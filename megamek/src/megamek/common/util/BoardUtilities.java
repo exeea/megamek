@@ -181,6 +181,17 @@ public class BoardUtilities {
                 }
 
                 copyBoardInto(resultData, resultWidth, xOffset, i * height, b);
+                if (boards.length > 1) {
+                    // Sheets are separate documents, so equal group names on two sheets must stay two groups.
+                    String sheet = (i * sheetWidth + j) + ":";
+                    for (int y = i * height; y < (i + 1) * height; y++) {
+                        for (int x = xOffset; x < xOffset + width; x++) {
+                            Hex hex = resultData[y * resultWidth + x];
+                            hex.setDecorations(hex.getDecorations().stream().map(object -> object.group() == null
+                                  ? object : object.withGroup(sheet + object.group())).toList());
+                        }
+                    }
+                }
 
                 // Copy in the other board's options.
                 if (!b.getRoadsAutoExit()) {
@@ -217,7 +228,7 @@ public class BoardUtilities {
         for (Hex hex : resultData) {
             hex.setDecorations(hex.getDecorations().stream().map(object -> {
                 var copy = object;
-                while (!identities.add(copy.id())) { copy = copy.duplicate(); }
+                while (!identities.add(copy.id())) { copy = copy.duplicate().withGroup(object.group()); }
                 return copy;
             }).toList());
         }

@@ -2,6 +2,10 @@
 // Shared by the colour and depth vertex shaders. Fixed instance locations keep their vertex array compatible.
 layout(location = 14) in vec4 a_instance0;
 layout(location = 15) in vec4 a_instance1;
+#ifdef colourSlotsFlag
+// A recolourable model's placement colours (model-colour-slots.glsl).
+layout(location = 13) in vec4 a_instance2;
+#endif
 #ifdef impostorFlag
 // An impostor card's plant crown radius in model units; at this tree's scale it lifts the card's shadow lookup.
 uniform float u_impostorLift;

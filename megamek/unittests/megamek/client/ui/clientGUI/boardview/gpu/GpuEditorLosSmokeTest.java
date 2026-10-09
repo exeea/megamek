@@ -44,8 +44,7 @@ class GpuEditorLosSmokeTest {
                     var view = new GpuBattleView(source);
                     try {
                         view.create(); GpuBoardTestUi.present(view);
-                        var section = GpuBoardTestUi.stage().getRoot().findActor("editor-section-panel");
-                        assertTrue(section.isVisible());
+                        assertTrue(GpuBoardTestUi.stage().getRoot().findActor("editor-side-view").isVisible());
                         settle(view, source);
                         view.boardCamera.setIsometric(false);
                         view.boardCamera.fit(source.takeFrame().scene());

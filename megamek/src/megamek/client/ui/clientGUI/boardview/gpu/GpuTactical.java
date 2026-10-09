@@ -515,14 +515,20 @@ final class GpuTactical implements Disposable {
         hexMasks.submit(batch, camera);
         renderPages(camera, presentation -> presentation == 0 || presentation == (tacticalView ? 2 : 1));
         batch.end();
-        // The hex planes' markings: the camera's depth row is moved nearer for their pass alone, then restored.
+        renderPlanes(camera, () -> {
+            batch.begin(camera);
+            renderPages(camera, presentation -> presentation == 3 || presentation == PLANES.presentation());
+            batch.end();
+        });
+    }
+
+    /** Draws annotations on the shared hex planes through local slopes without changing their position. */
+    static void renderPlanes(Camera camera, Runnable draw) {
         float[] combined = camera.combined.val;
         float depth = combined[Matrix4.M23];
         combined[Matrix4.M23] += camera.projection.val[Matrix4.M22] * PLANE_SEE_THROUGH_LEVELS * BoardGeometry.level();
         try {
-            batch.begin(camera);
-            renderPages(camera, presentation -> presentation == 3 || presentation == PLANES.presentation());
-            batch.end();
+            draw.run();
         } finally {
             combined[Matrix4.M23] = depth;
         }

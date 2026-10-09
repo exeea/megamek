@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,15 +17,20 @@ import java.util.Set;
 import java.util.function.Function;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.tileset.MekTileset;
 import megamek.common.Configuration;
+import megamek.common.Hex;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeArc;
@@ -60,6 +66,232 @@ class GpuBoardOverlaySmokeTest {
     private record Shot(String name, String mock, boolean tactical, BoardScene scene, GpuBattleStatus.Snapshot status,
           GpuHudData panels, Coords focus, float hexPixels, int x, int y, int[] crop,
           Function<BoardScene.Unit, ModelInstance> shown) { }
+
+    @Test
+    void floorRoutesAndMeepleGhostShowThroughOpaqueBuildingsInBothProjections() throws Exception {
+        Coords origin = new Coords(3, 3);
+        Coords adjacent = origin.translated(1);
+        Board map = Board.createEmptyBoard(7, 7);
+        for (Coords hex : List.of(origin, adjacent)) {
+            map.setHex(hex, new Hex(3, "building:2;bldg_elev:8;bldg_cf:120", ""));
+        }
+        BoardScene scene;
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(map)) {
+            scene = onSwing(() -> {
+                fixture.entity.setPosition(origin);
+                fixture.entity.setElevation(2);
+                fixture.source.refresh();
+                return fixture.source.takeFrame().scene();
+            });
+        }
+        GpuHudTestStage.run(hud -> {
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            GpuBoardOverlay overlay = new GpuBoardOverlay();
+            GpuTextures<BoardScene.Pixels> textures = new GpuTextures<>();
+            BoardScene.Unit moving = unit(scene, ATLAS);
+            textures.update(Map.of(moving.image(), moving.image()));
+            GpuUnitModel meeple = GpuUnitModel.meeple(moving.image(), textures.region(moving.image()));
+            ModelInstance model = new ModelInstance(meeple.instance.model);
+            List<Pixmap> images = new ArrayList<>();
+            try {
+                // With no displayed units supplied to the terrain, both building shells remain opaque.
+                board.units = false;
+                List<GpuMovePlan.Step> route = List.of(
+                      new GpuMovePlan.Step(origin, 0, 6, 1, GpuMovePlan.Band.WALK, false),
+                      new GpuMovePlan.Step(adjacent, 0, 6, 1, GpuMovePlan.Band.WALK, false),
+                      new GpuMovePlan.Step(adjacent, 0, 5, 1, GpuMovePlan.Band.WALK, false));
+                GpuMovePlan.Snapshot planned = move(ATLAS, route, List.of(), route.subList(0, 2), Map.of(), true);
+                GpuMovePlan.Snapshot hovered = withRoute(planned, List.of(), route, true);
+                for (boolean perspective : List.of(false, true)) {
+                    frame(board, false, origin, 230, 850, 600);
+                    board.camera.setPerspective(perspective);
+                    board.camera.center(BoardGeometry.center(origin, 5.5f));
+                    meeple.place(model, board.camera.camera, BoardGeometry.center(origin, 5), 0, moving);
+                    board.draw(camera -> { });
+                    Pixmap bare = hud.captureBackBuffer("floor-route-bare-" + perspective);
+                    images.add(bare);
+                    for (GpuMovePlan.Snapshot plan : List.of(planned, hovered)) {
+                        overlay.update(frame(scene, GpuHudFixtures.status(), panels(plan, GpuFireOrders.Snapshot.EMPTY)),
+                              view(false, null, Entity.NONE), preferences(), state(GpuHudFixtures.status()));
+                        board.draw(camera -> {
+                            hideBehindDepth();
+                            overlay.render(camera);
+                        });
+                        String name = "floor-route-" + perspective + (plan == planned ? "-planned" : "-hover");
+                        Pixmap path = hud.captureBackBuffer(name);
+                        images.add(path);
+                        Vector3 vertical = BoardGeometry.center(origin, 5.5f).add(0, 0, .07f * RADIUS);
+                        assertTrue(peak(bare, path, board.screen(vertical), 12) > 20,
+                              "The vertical floor segment must be visible through scene depth");
+                        assertElevatedMesh(overlay, "overlay", 5 * BoardGeometry.level());
+                        assertElevatedMesh(overlay, "movementMarkers", 5 * BoardGeometry.level());
+                        if (plan == planned) {
+                            board.draw(camera -> {
+                                hideBehindDepth();
+                                overlay.render(camera);
+                                overlay.renderGhost(camera, unit -> model);
+                            });
+                            Pixmap ghost = hud.captureBackBuffer(name + "-ghost");
+                            images.add(ghost);
+                            var field = GpuBoardOverlay.class.getDeclaredField("ghost");
+                            field.setAccessible(true);
+                            ModelInstance hologram = (ModelInstance) field.get(overlay);
+                            Vector3 center = hologram.calculateBoundingBox(new BoundingBox()).mul(hologram.transform)
+                                  .getCenter(new Vector3());
+                            assertTrue(peak(path, ghost, board.screen(center), 25) > 30,
+                                  "The meeple hologram must be visible through opaque floors and walls");
+                        }
+                    }
+                    GpuMovePlan.Snapshot vertical = move(ATLAS, route.subList(0, 1), List.of(), List.of(), Map.of(), true);
+                    overlay.update(frame(scene, GpuHudFixtures.status(), panels(vertical, GpuFireOrders.Snapshot.EMPTY)),
+                          view(false, null, Entity.NONE), preferences(), state(GpuHudFixtures.status()));
+                    assertTrue(overlay.pulse().length() > 0, "A floor change has a vertical pulse path");
+                    board.draw(camera -> { hideBehindDepth(); overlay.render(camera); });
+                    Pixmap resting = hud.captureBackBuffer("floor-pulse-start-" + perspective);
+                    images.add(resting);
+                    overlay.pulse().advance(.1f);
+                    overlay.pulse().advance(.1f);
+                    Vector3 head = new Vector3();
+                    assertTrue(overlay.pulse().headAt(head));
+                    assertTrue(head.z > 5 * BoardGeometry.level() && head.z < 6 * BoardGeometry.level(),
+                          "The pulse climbs between the actual floors");
+                    board.draw(camera -> { hideBehindDepth(); overlay.render(camera); });
+                    Pixmap pulse = hud.captureBackBuffer("floor-pulse-moving-" + perspective);
+                    images.add(pulse);
+                    assertTrue(peak(resting, pulse, board.screen(head), 8) > 30,
+                          "The animated pulse must show through scene depth too");
+                }
+            } finally {
+                images.forEach(Pixmap::dispose);
+                overlay.dispose();
+                meeple.dispose();
+                textures.dispose();
+                board.dispose();
+            }
+        });
+    }
+
+    private static void hideBehindDepth() {
+        Gdx.gl.glDepthMask(true);
+        Gdx.gl.glClearDepthf(0);
+        Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+        Gdx.gl.glClearDepthf(1);
+    }
+
+    private static void assertElevatedMesh(GpuBoardOverlay overlay, String name, float minimum) throws Exception {
+        var field = GpuBoardOverlay.class.getDeclaredField(name);
+        field.setAccessible(true);
+        ModelInstance instance = (ModelInstance) field.get(overlay);
+        assertNotNull(instance);
+        for (var mesh : instance.model.meshes) {
+            int stride = mesh.getVertexSize() / Float.BYTES;
+            int z = mesh.getVertexAttribute(VertexAttributes.Usage.Position).offset / Float.BYTES + 2;
+            float[] vertices = new float[mesh.getNumVertices() * stride];
+            mesh.getVertices(vertices);
+            for (int i = z; i < vertices.length; i += stride) {
+                assertTrue(vertices[i] >= minimum, "Route and waypoint markers must not drop to the ground");
+            }
+        }
+    }
+
+    @Test
+    void destinationMarkersStayOnTheHexPlaneBesideHigherTerrain() throws Exception {
+        BoardScene scene = GpuBoardSpaceHarness.scene();
+        Coords destination = scene.tiles().stream().filter(tile -> {
+            for (int direction = 0; direction < 6; direction++) {
+                BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
+                if (neighbor != null && neighbor.elevation() > tile.elevation()) {
+                    return true;
+                }
+            }
+            return false;
+        }).map(BoardScene.Tile::coords).findFirst().orElseThrow();
+        GpuHudTestStage.run(hud -> {
+            GpuBoardOverlay overlay = new GpuBoardOverlay();
+            try {
+                GpuMovePlan.Snapshot plan = move(ATLAS, List.of(),
+                      List.of(step(scene, destination, 3, GpuMovePlan.Band.WALK)), List.of(), Map.of(), true);
+                var field = GpuBoardOverlay.class.getDeclaredField("movementMarkers");
+                field.setAccessible(true);
+                for (boolean tactical : List.of(false, true)) {
+                    overlay.update(frame(scene, GpuHudFixtures.status(), panels(plan, GpuFireOrders.Snapshot.EMPTY)),
+                          view(tactical, null, Entity.NONE), preferences(), state(GpuHudFixtures.status()));
+                    ModelInstance markers = (ModelInstance) field.get(overlay);
+                    assertNotNull(markers);
+                    float plane = BoardTacticalGeometry.floatingZ(scene, destination);
+                    float ringZ = plane + (tactical ? 0 : .02f * RADIUS);
+                    float arrowZ = plane + .09f * RADIUS;
+                    int ringVertices = 0;
+                    for (var mesh : markers.model.meshes) {
+                        int stride = mesh.getVertexSize() / Float.BYTES;
+                        int position = mesh.getVertexAttribute(VertexAttributes.Usage.Position).offset / Float.BYTES;
+                        float[] vertices = new float[mesh.getNumVertices() * stride];
+                        mesh.getVertices(vertices);
+                        for (int i = position + 2; i < vertices.length; i += stride) {
+                            float z = vertices[i];
+                            assertTrue(Math.abs(z - ringZ) < .001f || Math.abs(z - arrowZ) < .001f,
+                                  "Destination geometry stays on its hex plane instead of climbing adjacent terrain");
+                            if (Math.abs(z - ringZ) < .001f) { ringVertices++; }
+                        }
+                    }
+                    assertTrue(ringVertices >= 24, "Every side of the destination ring lies on the plane");
+                }
+            } finally {
+                overlay.dispose();
+            }
+        });
+    }
+
+    @Test
+    void movementPreviewRemainsVisibleBehindSceneDepth() throws Exception {
+        BoardScene scene = GpuBoardSpaceHarness.scene();
+        GpuHudTestStage.run(hud -> {
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            GpuBoardOverlay overlay = new GpuBoardOverlay();
+            List<Pixmap> images = new ArrayList<>();
+            try {
+                board.units = false;
+                Coords origin = unit(scene, ATLAS).location().coords();
+                frame(board, false, origin, 240, 960, 700);
+                GpuMovePlan.Snapshot plotted = atlasMove(scene);
+                GpuMovePlan.Snapshot hover = withRoute(plotted, List.of(), plotted.route(), true);
+                GpuMovePlan.Snapshot turn = move(ATLAS,
+                      List.of(step(scene, origin, 0, GpuMovePlan.Band.WALK)), List.of(), List.of(), Map.of(), true);
+                board.draw(camera -> { });
+                Pixmap baseline = hud.captureBackBuffer("g7-arrow-depth-baseline");
+                images.add(baseline);
+                int index = 0;
+                for (GpuMovePlan.Snapshot plan : List.of(plotted, hover, turn)) {
+                    overlay.update(frame(scene, GpuHudFixtures.status(), panels(plan, GpuFireOrders.Snapshot.EMPTY)),
+                          view(false, null, Entity.NONE), preferences(), state(GpuHudFixtures.status()));
+                    board.draw(camera -> {
+                        // Put an occluder in front of every overlay fragment, independent of terrain artwork.
+                        Gdx.gl.glDepthMask(true);
+                        Gdx.gl.glClearDepthf(0);
+                        Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+                        Gdx.gl.glClearDepthf(1);
+                        overlay.render(camera);
+                    });
+                    Pixmap hidden = hud.captureBackBuffer("g7-arrow-depth-" + index++);
+                    images.add(hidden);
+                    Coords destination = (plan.route().isEmpty() ? plan.hover() : plan.route()).getLast().coords();
+                    Vector3 arrow = BoardGeometry.center(destination, 0).add(.08f * RADIUS, .7f * RADIUS,
+                          BoardTacticalGeometry.floatingZ(scene, destination) + .09f * RADIUS);
+                    assertTrue(difference(baseline, hidden, board.screen(arrow)) > 20,
+                          "The facing arrow stays visible even behind scene depth");
+                    if (plan != turn) {
+                        Vector3 dot = lifted(scene, plotted.route().getFirst().coords(), .07f);
+                        assertTrue(difference(baseline, hidden, board.screen(dot)) > 5,
+                              "Plotted and hover routes remain visible behind scene depth");
+                    }
+                }
+            } finally {
+                images.forEach(Pixmap::dispose);
+                overlay.dispose();
+                board.dispose();
+            }
+        });
+    }
 
     @Test
     void overlaysBesideTheMockInBothViews() throws Exception {
@@ -670,7 +902,7 @@ class GpuBoardOverlaySmokeTest {
         List<GpuMovePlan.Step> route = List.of(step(scene, pin, 1, GpuMovePlan.Band.WALK),
               step(scene, second, 0, GpuMovePlan.Band.WALK), step(scene, third, 1, GpuMovePlan.Band.RUN),
               step(scene, last, 1, GpuMovePlan.Band.RUN));
-        return move(PANTHER, route, List.of(), List.of(pin), envelope(scene, pin, 3, 5), true);
+        return move(PANTHER, route, List.of(), List.of(route.getFirst()), envelope(scene, pin, 3, 5), true);
     }
 
     static GpuMovePlan.Step step(BoardScene scene, Coords coords, int facing, GpuMovePlan.Band band) {
@@ -678,7 +910,7 @@ class GpuBoardOverlaySmokeTest {
     }
 
     static GpuMovePlan.Snapshot move(int unit, List<GpuMovePlan.Step> route, List<GpuMovePlan.Step> hover,
-          List<Coords> pins, Map<Coords, GpuMovePlan.Band> envelope, boolean planner) {
+          List<GpuMovePlan.Step> pins, Map<Coords, GpuMovePlan.Band> envelope, boolean planner) {
         GpuMovePlan.Step last = route.isEmpty() ? null : route.getLast();
         return new GpuMovePlan.Snapshot(true, planner, false, unit, GpuMovePlan.Mode.AUTO, false, "", route, hover,
               pins, last == null ? null : last.coords(), last == null ? -1 : last.facing(), route.size(), 5,
