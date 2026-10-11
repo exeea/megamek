@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -92,16 +93,17 @@ class BoardSceneryMaglevTest {
         assertTrue(train.stream().allMatch(row -> row.z() == 0));
 
         // The cars' suspension shoes wrap the route's 4 px beam down to 1.3 px (the coupler to 2.3); the platform and
-        // route stand on the ground.
-        assertEquals(0, low(RailRoute.Kind.MAGLEV.asset), 1e-4);
-        assertEquals(4, high(RailRoute.Kind.MAGLEV.asset), 1e-4);
+        // route stand on the ground. The route has no model file: its beam is generated.
+        var beam = bounds(BoardRail.model(BoardRail.flat(RailRoute.Kind.MAGLEV, RailRoute.side(0) | RailRoute.side(3), 0)), 7);
+        assertEquals(0, beam[0], 1e-4);
+        assertEquals(4, beam[1], 1e-4);
         assertEquals(0, low(PLATFORM), 1e-4);
         assertEquals(1.3, low(WAGON), 1e-4);
         assertEquals(1.3, low(CAB), 1e-4);
         assertEquals(2.3, low("scenery/maglev/coupler"), 1e-4);
 
         var root = Configuration.dataDir().toPath().resolve("models/board/scenery");
-        assertFalse(Files.exists(root.resolve("maglev/track.glb")), "The route marker is the only rail mesh");
+        assertFalse(Files.exists(root.resolve("maglev/track.glb")), "The generated route is the only beam");
         assertFalse(Files.exists(root.resolve("maglev/reference")), "No baked legacy maglev composite remains");
         for (String name : SPRITES.keySet()) { assertFalse(Files.exists(root.resolve("fluff/maglev" + name + ".glb")), name); }
     }
@@ -296,15 +298,16 @@ class BoardSceneryMaglevTest {
 
     private static float low(String asset) { return bounds(asset)[0]; }
 
-    private static float high(String asset) { return bounds(asset)[1]; }
-
-    /** The lowest and highest Z of a mesh, in model pixels. */
     private static float[] bounds(String asset) {
         var root = Configuration.dataDir().toPath().resolve("models/board");
-        var model = RigidGlb.loadLods(new FileHandle(root.resolve(asset + ".glb").toFile()), root).getFirst();
+        return bounds(RigidGlb.loadLods(new FileHandle(root.resolve(asset + ".glb").toFile()), root).getFirst(), RigidGlb.STRIDE);
+    }
+
+    /** The lowest and highest Z of a mesh with {@code stride} floats per vertex, in model pixels. */
+    private static float[] bounds(ModelData model, int stride) {
         float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
         for (var mesh : model.meshes) {
-            for (int at = 2; at < mesh.vertices.length; at += RigidGlb.STRIDE) {
+            for (int at = 2; at < mesh.vertices.length; at += stride) {
                 low = Math.min(low, mesh.vertices[at]);
                 high = Math.max(high, mesh.vertices[at]);
             }
