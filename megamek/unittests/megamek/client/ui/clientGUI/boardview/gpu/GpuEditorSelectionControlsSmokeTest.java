@@ -85,6 +85,8 @@ class GpuEditorSelectionControlsSmokeTest {
                     GpuBoardTestUi.stage().setKeyboardFocus(field); field.setText(text); GpuBoardTestUi.stage().setKeyboardFocus(null);
                 }
                 private void selected(String name) {
+                    assertTrue(GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("editor-inspector")),
+                          "An object selection shows the inspector");
                     assertFalse(brush().isVisible(), "Select has no brush options");
                     assertTrue(GpuBoardTestUi.texts(edit()).contains(megamek.client.ui.gdx.UiTheme.upper(name)));
                     assertNull(edit().findActor("editor-precision"));
@@ -110,6 +112,8 @@ class GpuEditorSelectionControlsSmokeTest {
                         switch (step) {
                             case 0 -> {
                                 assertNull(source.editorState().selected()); assertFalse(brush().isVisible()); noObject();
+                                assertFalse(GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("editor-inspector")),
+                                      "The inspector starts hidden without a selection");
                                 assertNull(GpuBoardTestUi.stage().getRoot().findActor("editor-section-panel"),
                                       "At 1280x800 the board area is too narrow for both corner panels: the side view starts collapsed");
                                 GpuBoardTestUi.category("Vehicles");
@@ -117,6 +121,8 @@ class GpuEditorSelectionControlsSmokeTest {
                             }
                             case 1 -> {
                                 noObject();
+                                assertTrue(GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("editor-inspector")),
+                                      "A hex selection shows the inspector");
                                 GpuBoardTestUi.click("editor-content-car");
                             }
                             case 2 -> {
@@ -167,9 +173,21 @@ class GpuEditorSelectionControlsSmokeTest {
                                 GpuBoardTestUi.capture(new File(output, "editor-selected-decal-controls.png"));
                                 command(Action.CLEAR_SELECTION, "", "");
                             }
-                            case 13 -> { noObject(); GpuBoardTestUi.click("editor-content-car"); }
+                            case 13 -> {
+                                noObject();
+                                assertFalse(GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("editor-inspector")),
+                                      "Clearing the selection hides the inspector");
+                                source.editorPointer(owner, -.2, 0, false, "car", source.takeFrame().boardGeneration());
+                                source.endEditorStroke();
+                            }
                             case 14 -> { selected("Red car"); GpuBoardTestUi.click("editor-remove-car"); }
-                            case 15 -> { noObject(); unchangedBrush(4); GpuBoardTestUi.click("editor-content-route"); }
+                            case 15 -> {
+                                noObject(); unchangedBrush(4);
+                                assertFalse(GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("editor-inspector")),
+                                      "Removing the selected object hides the inspector");
+                                source.editorPointer(owner, 0, 0, false, "route", false, source.takeFrame().boardGeneration());
+                                source.endEditorStroke();
+                            }
                             case 16 -> {
                                 selected("Maglev"); assertNull(edit().findActor("editor-Scale")); assertNull(edit().findActor("editor-X"));
                                 value("Height above ground", 1); type("Height above ground", "2");

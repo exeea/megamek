@@ -117,6 +117,7 @@ final class GpuAtmosphere implements Disposable {
     private float clock;
     private float stormClock;
     private Options options = Options.DEFAULTS;
+    private boolean transparentBackground;
     private List<BoardScene.Tile> groundTiles;
     private float groundLevel;
     private float groundBase;
@@ -302,6 +303,9 @@ final class GpuAtmosphere implements Disposable {
         this.options = options;
     }
 
+    /** Printable board exports preserve coverage instead of adding a viewport-relative sky gradient. */
+    void setTransparentBackground(boolean enabled) { transparentBackground = enabled; }
+
     /** Publish material flags before warmup, without advancing wind or rendering with an unfinished camera. */
     void configureClouds(GpuTerrain terrain, BoardScene board) {
         if (heatTiles != board.tiles()) {
@@ -345,8 +349,11 @@ final class GpuAtmosphere implements Disposable {
     }
 
     void begin(int width, int height, float delta) {
-        int pixelsWide = Math.max(1, HdpiUtils.toBackBufferX(width));
-        int pixelsHigh = Math.max(1, HdpiUtils.toBackBufferY(height));
+        beginPixels(Math.max(1, HdpiUtils.toBackBufferX(width)), Math.max(1, HdpiUtils.toBackBufferY(height)), delta);
+    }
+
+    /** Offscreen exports specify physical pixels, independently of the window's display scaling. */
+    void beginPixels(int pixelsWide, int pixelsHigh, float delta) {
         if (sceneColor == null || sceneColor.getWidth() != pixelsWide || sceneColor.getHeight() != pixelsHigh) {
             disposeBuffers();
             // Preserve reflected highlights as well as emission until the shared exposure and display shoulder.
@@ -476,6 +483,7 @@ final class GpuAtmosphere implements Disposable {
         compositeShader.setUniformf("u_saturation", lighting.saturation());
         compositeShader.setUniformf("u_sky", lighting.sky().r, lighting.sky().g, lighting.sky().b);
         compositeShader.setUniformf("u_horizon", lighting.horizon().r, lighting.horizon().g, lighting.horizon().b);
+        compositeShader.setUniformf("u_transparentBackground", transparentBackground ? 1 : 0);
         compositeShader.setUniformMatrix("u_inverseView", camera.invProjectionView);
         compositeShader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.width(), BoardGeometry.height());
         bindSand(camera, board);

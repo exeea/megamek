@@ -250,13 +250,12 @@ final class GpuMinimap implements GpuHud.Component {
 
                 @Override
                 public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-                    // The Tactical View holds its angle: there a middle press centres as a left one does.
-                    orbiting = button == Input.Buttons.MIDDLE && !camera.rotationLocked();
+                    orbiting = button == Input.Buttons.MIDDLE;
                     if (orbiting) {
                         lastX = x;
                         lastY = y;
                         cursor.capture(x, y);
-                    } else if (button == Input.Buttons.LEFT || button == Input.Buttons.MIDDLE) {
+                    } else if (button == Input.Buttons.LEFT) {
                         centre(x, y);
                     } else {
                         return false;

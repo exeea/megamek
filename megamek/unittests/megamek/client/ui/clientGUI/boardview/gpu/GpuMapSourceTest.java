@@ -4,15 +4,21 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.event.InputEvent;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicInteger;
+import javax.imageio.ImageIO;
+import javax.imageio.metadata.IIOMetadataNode;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.boardeditor.BoardEditorSession;
@@ -37,6 +43,103 @@ import org.junit.jupiter.params.provider.ValueSource;
 class GpuMapSourceTest {
     @TempDir
     Path temporary;
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void printCapturesEveryLabelWithoutChangingTheViewOrDocument(boolean editing) throws Exception {
+        onEdt(() -> {
+            GUIPreferences preferences = GUIPreferences.getInstance();
+            boolean coordinates = preferences.getCoordsEnabled();
+            boolean types = preferences.getHexTypesEnabled();
+            boolean outline = preferences.getHexLabelOutline();
+            try {
+                preferences.setValue(GUIPreferences.SHOW_COORDS, false);
+                preferences.setValue(GUIPreferences.SHOW_HEX_TYPES, false);
+                preferences.setValue(GUIPreferences.HEX_LABEL_OUTLINE, false);
+                BoardEditorSession editor = editing ? new BoardEditorSession() : null;
+                Game game = editor == null ? new Game() : editor.game();
+                Board board = Board.createEmptyBoard(3, 2);
+                Coords woods = new Coords(1, 1);
+                board.setHex(woods, new Hex(2, "woods:1;foliage_elev:2;rough:1", "", woods));
+                game.setBoard(board);
+                AtomicInteger completions = new AtomicInteger();
+                try (var source = new GpuMapSource(game, null, editor)) {
+                    boolean dirty = editor != null && editor.dirty();
+                    var displayed = source.takeFrame().scene();
+                    assertTrue(command(source, "fileBoardPrint").enabled());
+                    source.requestPrint(image -> {
+                        assertTrue(SwingUtilities.isEventDispatchThread());
+                        completions.incrementAndGet();
+                    }, failure -> { throw new AssertionError(failure); });
+                    assertFalse(command(source, "fileBoardPrint").enabled());
+                    var request = source.takePrintRequest();
+                    assertNotNull(request);
+                    assertNull(source.takePrintRequest(), "The GL thread consumes a request only once");
+                    assertEquals(6, request.scene().tiles().size());
+                    for (var tile : request.scene().tiles()) {
+                        assertTrue(tile.text().stream().anyMatch(label -> label.text().equals(tile.coords().getBoardNum())));
+                        assertTrue(tile.text().stream().allMatch(label -> label.argb() == 0xFF000000));
+                        assertSame(displayed.tile(tile.coords()).ground(), tile.ground(), "The print borrows captured 3D art");
+                        assertNull(tile.tactical(), "Editor/game annotations are not printed");
+                    }
+                    var labels = request.scene().tile(woods).text().stream().map(label -> label.text()).toList();
+                    assertTrue(labels.contains("LIGHT"));
+                    assertTrue(labels.contains("ROUGH"));
+                    assertSame(displayed.tiles(), source.takeFrame().scene().tiles(), "Print labels do not replace view labels");
+                    assertFalse(preferences.getCoordsEnabled());
+                    assertFalse(preferences.getHexTypesEnabled());
+                    assertFalse(preferences.getHexLabelOutline());
+                    if (editor != null) { assertEquals(dirty, editor.dirty()); }
+                    source.requestPrint(image -> { throw new AssertionError("A second print was queued"); },
+                          failure -> { throw new AssertionError(failure); });
+                    assertNull(source.takePrintRequest(), "Only one print runs at a time");
+                    request.completed().accept(new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB));
+                    assertEquals(1, completions.get());
+                    assertTrue(command(source, "fileBoardPrint").enabled());
+                    source.requestPrint(image -> completions.incrementAndGet(), failure -> { throw new AssertionError(failure); });
+                    var cancelled = source.takePrintRequest();
+                    source.close();
+                    cancelled.completed().accept(new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB));
+                    assertEquals(1, completions.get(), "A closed workspace cannot start saving a completed capture");
+                    assertNull(source.takePrintRequest());
+                }
+            } finally {
+                preferences.setValue(GUIPreferences.SHOW_COORDS, coordinates);
+                preferences.setValue(GUIPreferences.SHOW_HEX_TYPES, types);
+                preferences.setValue(GUIPreferences.HEX_LABEL_OUTLINE, outline);
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void printablePngKeepsItsPhysicalResolutionAndTransparency() throws Exception {
+        Path output = temporary.resolve("print.png");
+        var image = new BufferedImage(GpuBoardPrint.HEX_WIDTH_PIXELS, GpuBoardPrint.PIXELS_PER_HEX,
+              BufferedImage.TYPE_INT_ARGB);
+        image.setRGB(5, 7, 0x804A719A);
+        GpuMapSource.writePrint(image, output, GpuBoardPrint.PIXELS_PER_METRE);
+        var reader = ImageIO.getImageReadersByFormatName("png").next();
+        try (var input = ImageIO.createImageInputStream(output.toFile())) {
+            reader.setInput(input);
+            var root = (IIOMetadataNode) reader.getImageMetadata(0).getAsTree("javax_imageio_png_1.0");
+            var resolution = (IIOMetadataNode) root.getElementsByTagName("pHYs").item(0);
+            assertNotNull(resolution);
+            assertEquals(Integer.toString(GpuBoardPrint.PIXELS_PER_METRE), resolution.getAttribute("pixelsPerUnitXAxis"));
+            assertEquals(Integer.toString(GpuBoardPrint.PIXELS_PER_METRE), resolution.getAttribute("pixelsPerUnitYAxis"));
+            assertEquals("meter", resolution.getAttribute("unitSpecifier"));
+            var saved = reader.read(0);
+            double pixelsPerMetreX = Double.parseDouble(resolution.getAttribute("pixelsPerUnitXAxis"));
+            double pixelsPerMetreY = Double.parseDouble(resolution.getAttribute("pixelsPerUnitYAxis"));
+            assertEquals(1.5, saved.getWidth() / pixelsPerMetreX / .0254, .00001,
+                  "Printed hex width matches official mapsheets without fit-to-page scaling");
+            assertEquals(1.3, saved.getHeight() / pixelsPerMetreY / .0254, .00001,
+                  "Printed hex height matches official mapsheets without fit-to-page scaling");
+            assertTrue(saved.getColorModel().hasAlpha(), "The printable PNG retains transparency");
+            assertEquals(0, saved.getRGB(0, 0), "The empty background remains transparent");
+            assertEquals(image.getRGB(5, 7), saved.getRGB(5, 7));
+        } finally { reader.dispose(); }
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = { false, true })

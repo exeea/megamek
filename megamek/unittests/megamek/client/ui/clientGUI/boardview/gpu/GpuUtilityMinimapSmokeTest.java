@@ -299,7 +299,10 @@ class GpuUtilityMinimapSmokeTest {
         show(hud, board, parts, scene, status, move(), true);
         assertTrue(parts.utilities.chip().isVisible());
         Button isometric = hud.stage.getRoot().findActor("map-view-isometric");
-        assertTrue(isometric.isDisabled(), "The Tactical View holds its top view: no isometric preset");
+        assertTrue(isometric.isDisabled(), "The Tactical View keeps its top-down angle");
+        click(hud, "map-view-isometric");
+        assertTrue(board.camera.isTopDown(), "The disabled preset cannot incline the Tactical View");
+        assertTrue(board.camera.tactical(), "Camera presets keep the Tactical View active");
         // The chip names the mode only (the user's decision of 2026-10-02): the pressed utility switches back.
         List<String> chip = new ArrayList<>();
         boolean button = false;
@@ -365,15 +368,18 @@ class GpuUtilityMinimapSmokeTest {
             assertEquals(tilt, board.camera.tilt(), "The drag pans only");
             assertEquals(z, board.camera.focus.z, "The drag keeps the focus plane");
             assertFalse(Gdx.input.isCursorCatched(), "The left drag follows the visible pointer");
-            // A middle drag orbits with the cursor held still, as the board's does; the Tactical View holds its
-            // angle, so there a middle press centres the camera as a left one does.
+            // A middle drag rotates both views, with inclination only in 3D, as the board's does.
             assertTrue(hud.stage.touchDown(x, y, 0, Input.Buttons.MIDDLE), "The canvas takes the middle press");
-            assertEquals(!tactical, Gdx.input.isCursorCatched(), "Only an orbit holds the cursor");
+            assertTrue(Gdx.input.isCursorCatched(), "An orbit holds the cursor");
+            assertTrue(hud.stage.touchDragged(x + 40, y + 20, 0), "The canvas consumes the orbit drag");
+            assertNotEquals(azimuth, board.camera.azimuth(), "A middle drag rotates in both views");
             if (tactical) {
-                assertTrue(centre.epsilonEquals(board.camera.focus, 2 * units), "A middle press centres the camera");
-                assertEquals(0, board.camera.azimuth(), "and turns nothing");
+                assertTrue(board.camera.isTopDown(), "The Tactical View rotates without inclining");
+            } else {
+                assertTrue(board.camera.tilt() > tilt, "A middle drag also tilts in 3D");
             }
-            hud.stage.touchUp(x, y, 0, Input.Buttons.MIDDLE);
+            assertEquals(tactical, board.camera.tactical(), "Orbiting keeps the renderer mode");
+            hud.stage.touchUp(x + 40, y + 20, 0, Input.Buttons.MIDDLE);
             assertFalse(Gdx.input.isCursorCatched(), "Releasing the orbit shows the cursor again");
             // The wheel over the map zooms the camera by the board's step, about the view's centre (the user's
             // decision of 2026-10-03); off the map the wheel is not the map's.
@@ -535,7 +541,8 @@ class GpuUtilityMinimapSmokeTest {
         GpuHud.Inputs tactical = parts.update(scene, status(fixture, GamePhase.FIRING, true, GpuHudFixtures.ATLAS),
               move(), GpuReportLog.Snapshot.EMPTY, true, 1920, 1080);
         assertEquals(List.of(text("GpuBoard.hud.mouse.leftClick"), text("GpuBoard.hud.hint.select"),
-              text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.panMap"), text("GpuBoard.hud.mouse.wheel"),
+              text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.panMap"),
+              text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.rotate"), text("GpuBoard.hud.mouse.wheel"),
               text("GpuBoard.hud.hint.zoom"), "H", text("GpuBoard.hud.hint.overlays"), "T",
               text("GpuBoard.hud.util.backTo3d")), GpuHintLine.items(tactical));
         GpuHud.Inputs planning = parts.update(scene, fixture, move(), GpuReportLog.Snapshot.EMPTY, false, 1920, 1080);

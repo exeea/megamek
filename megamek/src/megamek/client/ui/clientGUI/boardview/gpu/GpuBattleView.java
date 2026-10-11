@@ -155,6 +155,7 @@ class GpuBattleView extends ApplicationAdapter {
     private BoardScene scene;
     private GpuHexText hexText;
     private GpuHexGrid hexGrid;
+    private GpuBoardPrint boardPrint;
     /** The board editor's reference image over its top view. */
     private GpuTraceOverlay traceOverlay;
     /** The board editor's Paint and Erase preview at the pointer. */
@@ -224,7 +225,7 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /**
-     * GL thread. Enters the Tactical View's locked top view, whose next frame shows every unit as its meeple on its
+     * GL thread. Enters the Tactical View looking straight down, whose next frame shows every unit as its meeple on its
      * base, with the ground layer over the terrain the graphics setting chose, or returns to the exact 3D pose it
      * replaced. The {@code TOGGLE_ISO} key (T by default) calls this.
      */
@@ -365,6 +366,7 @@ class GpuBattleView extends ApplicationAdapter {
 
     /** Render-thread only. Null released owners so a failed shader compile can be retried safely. */
     private void disposeSceneRenderers() {
+        if (boardPrint != null) { boardPrint.dispose(); boardPrint = null; }
         // Join the terrain worker before releasing the model buffers it borrows.
         if (terrain != null) { terrain.dispose(); terrain = null; }
         if (fireControl != null) { fireControl.dispose(); fireControl = null; }
@@ -602,6 +604,14 @@ class GpuBattleView extends ApplicationAdapter {
             loadingTheme = null;
         }
         if (source.isEditor()) { terrain.previewEditorObjects(scene); }
+        if (boardPrint == null) {
+            var request = source.takePrintRequest();
+            if (request != null) {
+                boardPrint = new GpuBoardPrint(request, terrain, theme.skin.getFont("default-font"),
+                      theme.skin.getFont(GpuBoardSkin.OUTLINE_FONT), atmosphereSettings, tuning.atmosphereOptions());
+            }
+        }
+        if (boardPrint != null && boardPrint.update()) { boardPrint = null; }
         scene = terrain.presentation(scene);
         boolean changedTiles = previousTiles != scene.tiles();
         if (changedTiles || cameraTerrainRevision != BoardGeometry.revision()) {
@@ -2250,9 +2260,8 @@ class GpuBattleView extends ApplicationAdapter {
             dragged = false;
             panning = button == Input.Buttons.RIGHT || button == Input.Buttons.MIDDLE;
             boolean shiftDown = (gestureModifiers & InputEvent.SHIFT_DOWN_MASK) != 0;
-            // Right drags pan and middle drags orbit or look around; Shift at the press swaps them in every mode. The
-            // Tactical View holds its angle, so there both pan.
-            orbiting = panning && (button == Input.Buttons.MIDDLE) != shiftDown && !boardCamera.rotationLocked();
+            // Right drags pan and middle drags orbit or look around; Shift at the press swaps them in every mode.
+            orbiting = panning && (button == Input.Buttons.MIDDLE) != shiftDown;
             ui.boardPress();
             if (button == Input.Buttons.LEFT && source.isEditor() && !measurementGesture) {
                 // A press on the selection's rotation handle turns the selection.

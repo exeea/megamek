@@ -1,20 +1,31 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.Font;
 import java.awt.Window;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageTypeSpecifier;
+import javax.imageio.metadata.IIOMetadataNode;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
+import megamek.MMConstants;
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.BoardGraphics;
@@ -24,6 +35,7 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.RecentBoardList;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
+import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.dialogs.MMAboutDialog;
@@ -34,6 +46,8 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.codeUtilities.StringUtility;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.board.BoardEvent;
@@ -127,6 +141,11 @@ final class GpuMapSource implements BoardSource {
     private volatile Coords hoverCoords;
     private Coords contextCoords;
     private volatile boolean closed;
+    /** EDT-owned job state; only the immutable request crosses to the render thread. */
+    private boolean printing;
+    private boolean savingPrint;
+    private boolean choosingPrint;
+    private final AtomicReference<GpuBoardPrint.Request> printRequest = new AtomicReference<>();
     /** EDT-owned: the board tagger runs ({@link #runBoardTagger}). */
     private boolean tagging;
     GpuMapSource(Game game, Window owner, BoardEditorSession editor) {
@@ -252,6 +271,8 @@ final class GpuMapSource implements BoardSource {
             commands.add(new BoardScene.Command("boardRunBoardTagger", Messages.getString("CommonMenuBar.boardRunBoardTagger"),
                   "", !tagging, false, false, List.of(), () -> onSwing(() -> { if (!closed) { runBoardTagger(); } })));
         }
+        commands.add(new BoardScene.Command("fileBoardPrint", Messages.getString("CommonMenuBar.PrintMenu"), "",
+              !printing && !savingPrint && !choosingPrint, false, false, List.of(), () -> onSwing(this::choosePrint)));
         GUIPreferences gui = GUIPreferences.getInstance();
         // The 3D board's graphics, as CommonMenuBar's 3D Graphics submenu; a choice applies at once.
         BoardGraphics graphics = gui.getBoardGraphics();
@@ -336,6 +357,119 @@ final class GpuMapSource implements BoardSource {
     private BoardScene mapScene(BoardTactical tactical) {
         return new BoardScene(0, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(),
               Entity.NONE, "", List.of(), null, List.of(), List.of(), List.of(), tactical);
+    }
+
+    /** Captures print labels from the board without changing any view preference or its published tiles. */
+    BoardScene printScene() {
+        if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
+        finishEditorStroke();
+        refresh();
+        Font font = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 10);
+        return mapScene(BoardTactical.EMPTY).withTiles(tiles.stream().map(tile -> {
+            Hex hex = BoardSceneryLayouts.withoutTakenTokens(board.getHex(tile.coords()));
+            var labels = BoardHexText.capture(tile.coords(), hex, board, 1, font, font, true, true, true).stream()
+                  .map(label -> new BoardHexText(label.text(), label.baseline(), label.font(), 0xFF000000,
+                        label.fromTop(), label.elevation())).toList();
+            return tile.withMarkings(null, labels);
+        }).toList());
+    }
+
+    /** EDT entry point; completion and failure return to that same owner after the GL thread finishes its snapshot. */
+    void requestPrint(Consumer<BufferedImage> completed, Consumer<Exception> failed) {
+        if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
+        if (closed || printing || savingPrint) { return; }
+        printing = true;
+        try {
+            printRequest.set(new GpuBoardPrint.Request(printScene(), image -> onSwing(() -> {
+                printing = false;
+                if (!closed) { completed.accept(image); refresh(); }
+            }), failure -> onSwing(() -> {
+                printing = false;
+                if (!closed) { failed.accept(failure); refresh(); }
+            })));
+        } catch (RuntimeException failure) {
+            printing = false;
+            failed.accept(failure);
+            refresh();
+        }
+    }
+
+    @Override public GpuBoardPrint.Request takePrintRequest() { return printRequest.getAndSet(null); }
+
+    /** Print follows the board's existing printable-PNG workflow, using the 3D snapshot instead of 2D tiles. */
+    private void choosePrint() {
+        if (closed || printing || savingPrint || choosingPrint) { return; }
+        choosingPrint = true;
+        refresh();
+        try {
+            Path near = editor == null ? null : editor.path();
+            JFileChooser chooser = new JFileChooser(near == null ? new File(".") : near.toFile().getParentFile());
+            chooser.setDialogTitle(Messages.getString("CommonMenuBar.PrintMenu"));
+            chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("PNG (*.png)", "png"));
+            chooser.setAccessory(new JLabel("<html><body style='width: 220px'>"
+                  + Messages.getString("GpuBoard.print.scale") + "</body></html>"));
+            String name = near == null ? board.getBoardName() : BoardFile.withoutExtension(near.getFileName().toString());
+            if (name == null || name.isBlank()) { name = "board"; }
+            chooser.setSelectedFile(new File(name + "-3d.png"));
+            if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION || closed) { return; }
+            Path target = chooser.getSelectedFile().toPath();
+            if (!target.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".png")) {
+                target = target.resolveSibling(target.getFileName() + ".png");
+            }
+            Path output = target;
+            requestPrint(image -> savePrint(image, output), this::printFailed);
+        } catch (RuntimeException failure) { printFailed(failure); }
+        finally { choosingPrint = false; refresh(); }
+    }
+
+    private void savePrint(BufferedImage image, Path target) {
+        savingPrint = true;
+        Thread worker = new Thread(() -> {
+            Exception failure = null;
+            try {
+                writePrint(image, target, GpuBoardPrint.PIXELS_PER_METRE);
+            } catch (IOException | RuntimeException error) { failure = error; }
+            Exception result = failure;
+            onSwing(() -> {
+                savingPrint = false;
+                if (!closed) {
+                    if (result != null) { printFailed(result); }
+                    refresh();
+                }
+            });
+        }, "board-print-image");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /** The PNG's physical pixel density preserves hex size in print programs that honor its resolution metadata. */
+    static void writePrint(BufferedImage image, Path target, int pixelsPerMetre) throws IOException {
+        if (pixelsPerMetre <= 0) { throw new IllegalArgumentException("Print resolution must be positive"); }
+        var writers = ImageIO.getImageWritersByFormatName("png");
+        if (!writers.hasNext()) { throw new IOException("No PNG writer"); }
+        var writer = writers.next();
+        try (var output = ImageIO.createImageOutputStream(target.toFile())) {
+            if (output == null) { throw new IOException("Cannot write " + target); }
+            writer.setOutput(output);
+            var parameters = writer.getDefaultWriteParam();
+            var metadata = writer.getDefaultImageMetadata(ImageTypeSpecifier.createFromRenderedImage(image), parameters);
+            var root = new IIOMetadataNode("javax_imageio_png_1.0");
+            var resolution = new IIOMetadataNode("pHYs");
+            resolution.setAttribute("pixelsPerUnitXAxis", Integer.toString(pixelsPerMetre));
+            resolution.setAttribute("pixelsPerUnitYAxis", Integer.toString(pixelsPerMetre));
+            resolution.setAttribute("unitSpecifier", "meter");
+            root.appendChild(resolution);
+            metadata.mergeTree("javax_imageio_png_1.0", root);
+            writer.write(null, new javax.imageio.IIOImage(image, null, metadata), parameters);
+        } finally { writer.dispose(); }
+    }
+
+    private void printFailed(Exception failure) {
+        LOGGER.error(failure, "Unable to save printable 3D board");
+        String message = failure.getMessage();
+        if (message == null || message.isBlank()) { message = failure.toString(); }
+        JOptionPane.showMessageDialog(owner, message, Messages.getString("ClientGUI.errorSavingFile"),
+              JOptionPane.ERROR_MESSAGE);
     }
 
     @Override
@@ -602,6 +736,7 @@ final class GpuMapSource implements BoardSource {
         if (!SwingUtilities.isEventDispatchThread()) { SwingUtilities.invokeLater(this::close); return; }
         if (closed) { return; }
         closed = true;
+        printRequest.set(null);
         finishEditorStroke();
         timer.stop();
         closeMeasuring();

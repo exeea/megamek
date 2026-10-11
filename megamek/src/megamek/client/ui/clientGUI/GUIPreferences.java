@@ -626,7 +626,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(ADVANCED_SHOW_FPS, false);
         store.setDefault(SHOW_COORDS, true);
         store.setDefault(SHOW_HEX_TYPES, false);
-        store.setDefault(HEX_LABEL_OUTLINE, true);
+        store.setDefault(HEX_LABEL_OUTLINE, false);
 
         setDefault(PLANETARY_CONDITIONS_COLOR_TITLE, Color.WHITE);
         setDefault(PLANETARY_CONDITIONS_COLOR_TEXT, DEFAULT_PLANETARY_CONDITIONS_TEXT_COLOR);

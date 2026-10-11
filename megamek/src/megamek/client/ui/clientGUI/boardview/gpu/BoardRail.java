@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
@@ -17,6 +18,7 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelNodePart;
 import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.Coords;
 import megamek.common.board.RailRoute;
 
 /**
@@ -103,6 +105,21 @@ final class BoardRail {
         return RailRoute.drawnSides(feature.decoration(), bridge == null ? 0 : bridge.bridgeExits());
     }
 
+    /** The neighboring bridges whose approach carries this ground rail; underpasses keep their ground support. */
+    static List<BoardScene.Tile> approaches(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
+        if (RailRoute.kind(feature.decoration()) != RailRoute.Kind.RAIL || RailRoute.onDeck(feature.decoration())) {
+            return List.of();
+        }
+        var result = new ArrayList<BoardScene.Tile>();
+        int sides = drawnSides(tile, feature);
+        for (int direction = 0; direction < 6; direction++) {
+            var next = scene.neighbor(tile, direction);
+            if ((sides & RailRoute.side(direction)) != 0 && next != null
+                  && BoardSurface.connectingBridge(tile, next, direction) != null) { result.add(next); }
+        }
+        return List.copyOf(result);
+    }
+
     /**
      * The marker's drawn ends at its edge midpoints, in direction order. A maglev side its neighbour joins eases on one
      * centre-to-centre Hermite curve towards that marker's level; any other end is open and level.
@@ -155,11 +172,12 @@ final class BoardRail {
 
     /**
      * The layout of a route marker; a rail's heights are draped on what carries it: its bridge's drawn deck
-     * ({@code deck}, the tile's installed shape, may be null) or the ground's finished faces ({@code surface}, the road
-     * paint's support), where its rails are set into a drawn road. Without a surface a rail lies on its carrier plane.
+     * or a connected bridge approach (from {@code bridges}, the prepared or installed shapes), else the ground's
+     * finished faces ({@code surface}, the road paint's support), where its rails are set into a drawn road.
+     * Without a surface a rail lies on its carrier plane.
      */
     static Layout layout(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature, BoardSurface surface,
-          BoardBridge.Shape deck) {
+          Function<Coords, BoardBridge.Shape> bridges) {
         var ends = ends(scene, tile, feature);
         var kind = RailRoute.kind(feature.decoration());
         int sides = drawnSides(tile, feature);
@@ -168,9 +186,13 @@ final class BoardRail {
         float scale = BoardGeometry.hexScale(), base = level(tile, feature) * BoardGeometry.level();
         float cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
         boolean onDeck = RailRoute.onDeck(feature.decoration());
+        var deck = bridges.apply(tile.coords());
+        var approaches = approaches(scene, tile, feature).stream().map(next -> bridges.apply(next.coords()))
+              .filter(java.util.Objects::nonNull).toList();
         Carrier carrier = surface == null ? (x, y) -> 0 : (x, y) -> {
             float wx = cx + x * scale, wy = cy + y * scale;
             float z = onDeck ? BoardBridge.drawnTop(deck, tile, wx, wy) : BoardSurface.sampleHeight(surface.groundFaces(), wx, wy, base);
+            for (var approach : approaches) { z = Math.max(z, BoardBridge.top(approach, wx, wy)); }
             return ((Float.isFinite(z) ? z : base) - base) / scale;
         };
         // Rails cross a drawn road set into it; ballast and sleepers resume beyond its carriageway.
@@ -224,7 +246,7 @@ final class BoardRail {
 
     /** A maglev marker's layout, or a rail's on its carrier plane. */
     static Layout layout(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
-        return layout(scene, tile, feature, null, null);
+        return layout(scene, tile, feature, null, at -> null);
     }
 
     /**

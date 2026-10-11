@@ -307,6 +307,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
 
         // The right column: the hex title and Contents tools over Layers and Edit, split by a draggable divider.
         inspector = ui.panel(); inspector.setName("editor-inspector"); inspector.defaults().growX().minWidth(0);
+        inspector.setVisible(false);
         hexTitle = ui.label(UiKit.text("BoardEditor.hexInspector"), "hud-title", 16, UiTheme.TEXT);
         inspector.add(hexTitle).pad(12, 12, 6, 12).row();
         Table contentsHead = new Table(); contentsHead.add(ui.caption(UiKit.text("BoardEditor.layers"))).growX().left();
@@ -719,8 +720,16 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         return true;
     }
 
+    /** Undo can keep an object inspected after clearing the movable selection; explicit deselection clears both. */
+    private boolean inspecting() {
+        return snapshot != null && snapshot.selected() != null && (!snapshot.selection().isEmpty() || !snapshot.object().isEmpty());
+    }
+
     /** What a new snapshot changes outside Layers and Edit: toolbar, document line, issues, side view and cards. */
     private void refresh(BoardEditorSession.Snapshot next) {
+        boolean visible = inspecting();
+        if (!visible && inspector.isVisible()) { stage.unfocus(inspector); }
+        inspector.setVisible(visible);
         if (!libraryTheme.equals(next.activeBrush().theme())) { libraryTheme = next.activeBrush().theme(); showLibrary(); }
         nextBrush = new BrushState(next.tool(), next.brush(), next.activeBrush());
         for (int i = 0; i < tools.size(); i++) { tools.get(i).pressed(i == next.tool().ordinal()); }
@@ -737,7 +746,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         // Hexes are written by their board number everywhere in the editor: "0807".
         String coords = next.selected() == null ? "" : next.selected().getBoardNum();
         documentName.setText(next.title() + (coords.isEmpty() ? "" : " (" + coords + ")"));
-        // The session's opening prompt is what Edit says; the status line stays empty for it.
+        // The session's opening prompt stays out of the status line.
         String feedback = next.message().equals(UiKit.text("BoardEditor.selectHexToEdit")) ? "" : next.message();
         if (!status.textEquals(feedback)) {
             status.setText(feedback); status.setVisible(!feedback.isEmpty());
@@ -1194,7 +1203,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                   .children(objectRows(members, null)));
         });
         contents.nodes(rows);
-        contents.select(!snapshot.group().isEmpty() ? GROUP_ROW + snapshot.group()
+        contents.select(!inspecting() ? "" : !snapshot.group().isEmpty() ? GROUP_ROW + snapshot.group()
               : snapshot.object().isEmpty() ? COMPONENT_ROW + snapshot.component() : OBJECT_ROW + snapshot.object());
     }
 
@@ -1246,11 +1255,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         // Edit starts at its top for a new selection; Layers scroll the selected row into view themselves (UiTree.select).
         numbers.forEach(UiNumber::close); numbers.clear();
         detail.clearChildren(); detail.top(); detail.defaults().growX().minWidth(0).pad(3, 12, 3, 12);
-        if (snapshot.selected() == null) {
-            // The toolbar's status line is ellipsized; long document messages such as an import summary are readable here.
-            if (!snapshot.message().isEmpty() && !snapshot.message().equals(UiKit.text("BoardEditor.selectHexToEdit"))) { text(snapshot.message()); }
-            text(UiKit.text("BoardEditor.inspectHint", UiKit.text("BoardEditor.selectHint"))); return;
-        }
+        if (!inspecting()) { return; }
         var object = snapshot.objects().stream().filter(d -> d.id().equals(snapshot.object())).findFirst();
         if (!snapshot.group().isEmpty() && object.isPresent()) {
             heading(UiKit.text("BoardEditor.groupSize", snapshot.selection().size()));
@@ -1279,12 +1284,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
     private void component() {
         var definition = blueprint.component(snapshot.component());
+        // Edit only shows components that have a row in Layers; absent terrain has no inspector controls.
+        if (!listed(definition)) { return; }
         heading(definition.label());
-        boolean present = definition.isPresent(name -> snapshot.property(name) != null);
-        if (!present) {
-            text(UiKit.text("BoardEditor.componentMissing"));
-            detail.add(button(UiKit.text("BoardEditor.addComponent", definition.label()), () -> send(Action.ADD_COMPONENT, definition.id()))).row(); return;
-        }
         if (definition.id().equals("ground")) {
             number(UiKit.text("BoardEditor.groundLevelLabel"), snapshot.elevation(), -10, 30, 1, Action.ELEVATION, "");
         }

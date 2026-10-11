@@ -44,7 +44,7 @@ interface BoardSource extends AutoCloseable {
               boolean ecmHatch, boolean levelShading, boolean unitLinks, boolean hexTypes, boolean hexLabelOutline) {
             /** The settings' defaults. */
             public static final Overlays DEFAULTS = new Overlays(true, true, true, true, true, false, true, false,
-                  true);
+                  false);
 
             static Overlays capture(GUIPreferences gui) {
                 return new Overlays(gui.getTacticalOverlaysOpen(), gui.getTacticalStatusBadges(),
@@ -124,6 +124,8 @@ interface BoardSource extends AutoCloseable {
 
     record PhaseStatus(String text, boolean blocking) { }
     Frame takeFrame();
+    /** A printable snapshot queued by the EDT, consumed once by the render thread; none for game views. */
+    default GpuBoardPrint.Request takePrintRequest() { return null; }
     void refresh();
     /** EDT-only: discard file-backed artwork caches before publishing a fresh snapshot. */
     default void reloadAssets() throws java.io.IOException { refresh(); }

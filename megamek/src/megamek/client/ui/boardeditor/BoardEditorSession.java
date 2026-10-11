@@ -729,6 +729,7 @@ public final class BoardEditorSession {
                     require(board().contains(at), Messages.getString("BoardEditor.outsideBoard"));
                     boolean present = board().getHex(at).getDecorations().stream().anyMatch(d -> d.id().equals(command.value()));
                     tool = Tool.SELECT; selected = at; selectedObject = present ? command.value() : ""; pendingDrill = null;
+                    if (selectedObject.isEmpty()) { component = "ground"; }
                     selection.clear(); selection.add(new Selection(at, selectedObject));
                 }
             }
@@ -1517,6 +1518,8 @@ public final class BoardEditorSession {
      */
     private void selectPointer(Coords at, double x, double y, boolean drag, String object, boolean additive) {
         Selection hit = new Selection(at, object == null ? "" : object);
+        // A board click selects the ground unless it hit an object; a prior Layers choice belongs to that inspection.
+        if (!drag && hit.object().isEmpty()) { component = "ground"; }
         if (drag) { pendingDrill = null; }
         if (additive && drag) { return; }
         // Only presses need the group, so a drag's move events never consult the board's groups.
@@ -1525,7 +1528,7 @@ public final class BoardEditorSession {
             if (!selection.isEmpty() && selection.iterator().next().object().isEmpty() != hit.object().isEmpty()) { selection.clear(); }
             if (selection.containsAll(items)) { items.forEach(selection::remove); }
             else { selection.addAll(items); }
-            selected = at; selectedObject = hit.object(); return;
+            selected = at; selectedObject = selection.isEmpty() ? "" : hit.object(); return;
         }
         if (!drag) {
             pendingDrill = null;
@@ -1933,6 +1936,7 @@ public final class BoardEditorSession {
         else if (!selection.isEmpty() && !selection.contains(new Selection(selected, selectedObject))) {
             selected = selection.iterator().next().coords(); selectedObject = selection.iterator().next().object();
         } else if (selection.isEmpty()) { selectedObject = ""; }
+        if (selectedObject.isEmpty()) { component = "ground"; }
         tool = Tool.SELECT; message = "";
         revision++;
     }

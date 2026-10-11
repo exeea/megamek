@@ -50,7 +50,7 @@ final class GpuBoardSkin implements Disposable {
     static final Color BAND_SHORT = Color.valueOf("7DF0D1");
     static final Color BAND_MEDIUM = AMBER;
     static final Color BAND_LONG = Color.valueOf("9FB2F0");
-    /** The hex labels' font size in texels: UiTheme.font rasterises the 15 units of default-font at 4x. */
+    /** The hex labels' font size in texels: UiTheme.worldFont rasterises the 15 units of default-font at 4x. */
     static final int FONT_RESOLUTION = 60;
     /** The hex labels' outline font: default-font with a white border, which GpuHexText tints under each label. */
     static final String OUTLINE_FONT = "default-font-outline";
@@ -67,8 +67,8 @@ final class GpuBoardSkin implements Disposable {
         theme = new UiTheme(Configuration.fontsDir());
         skin = theme.skin;
         // Noto Sans stays the default font: the 3D hex labels and the window's loading message use it.
-        BitmapFont font = theme.font("default-font", "Noto Sans/NotoSans-Regular.ttf", 15);
-        theme.font(OUTLINE_FONT, "Noto Sans/NotoSans-Regular.ttf", 15, 15f * OUTLINE / FONT_RESOLUTION);
+        BitmapFont font = theme.worldFont("default-font", "Noto Sans/NotoSans-Regular.ttf", 15, 0);
+        theme.worldFont(OUTLINE_FONT, "Noto Sans/NotoSans-Regular.ttf", 15, 15f * OUTLINE / FONT_RESOLUTION);
         theme.add("default", new Label.LabelStyle(font, TEXT), Label.LabelStyle.class);
         Pixmap enemy = new Pixmap(new FileHandle(new File(Configuration.miscImagesDir(), ENEMY_ICON)));
         try {

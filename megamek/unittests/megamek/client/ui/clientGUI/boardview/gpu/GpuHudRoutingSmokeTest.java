@@ -454,7 +454,7 @@ class GpuHudRoutingSmokeTest {
 
     /**
      * A3 and W6: the board fills the window, so a pick in the former menu and turn bands returns its hex and plans
-     * there; Q turns continuously while held and nothing in the Tactical View.
+     * there; Q turns continuously while held in both views.
      */
     @Test
     void theBoardFillsTheWindowAndTheTurnKeysAreContinuous() throws Exception {
@@ -484,8 +484,14 @@ class GpuHudRoutingSmokeTest {
             assertEquals(azimuth, camera.azimuth(), "The turn stops with the key");
             routing.view.setTacticalView(true);
             routing.view.render();
+            azimuth = camera.azimuth();
             routing.hold(Input.Keys.Q, () -> routing.advance(3, .1f));
-            assertEquals(0, camera.azimuth(), "The Tactical View holds north up while Q is held");
+            assertEquals(-27, turned(azimuth, camera.azimuth()), .01f,
+                  "Q turns at the same speed in the Tactical View");
+            azimuth = camera.azimuth();
+            routing.advance(2, .1f);
+            assertEquals(azimuth, camera.azimuth(), "The tactical turn also stops with the key");
+            assertTrue(camera.tactical(), "Rotation keeps the Tactical View active");
             routing.view.setTacticalView(false);
         });
     }

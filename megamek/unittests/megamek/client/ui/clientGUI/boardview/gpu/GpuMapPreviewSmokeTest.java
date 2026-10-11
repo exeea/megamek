@@ -184,7 +184,7 @@ class GpuMapPreviewSmokeTest {
                         GpuBoardTestUi.click("map-view-isometric"); settle(view, source.get());
                         assertEquals(tactical, ((megamek.client.ui.gdx.UiButton) GpuBoardTestUi.stage().getRoot()
                               .findActor("map-view-isometric")).isDisabled(), "Disabled in the Tactical View only");
-                        assertEquals(!tactical, view.boardCamera.isIsometric(), "The Tactical View holds its top view");
+                        assertEquals(!tactical, view.boardCamera.isIsometric(), "The Tactical View keeps its top-down angle");
                         assertEquals(tactical, view.boardCamera.tactical());
                         assertEquals(wasWireframe, wireframe.isChecked());
                         rightClick(view, new Coords(5, 3)); settle(view, source.get());
