@@ -201,7 +201,10 @@ class GpuEditorPreviewSmokeTest {
                         super.render();
                         assertTrue(System.nanoTime() < deadline, "Preview smoke stalled at " + item + "/" + stage + ": "
                               + source.editorPreview().objects().keySet() + " " + source.editorPreview().hexes());
-                        if (!applied.get() || GpuBoardTestUi.loading(this) || terrain().busy() || frames() < after) { return; }
+                        // Count the frames from the EDT applying the commands, not from sending them: commands applied
+                        // while this frame rendered reach only the frames taken after it.
+                        if (!applied.get()) { after = frames() + 8; return; }
+                        if (GpuBoardTestUi.loading(this) || terrain().busy() || frames() < after) { return; }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         if (aimed != null) { pointer = screen(aimed); hover(pointer); }
                         var preview = source.editorPreview();
