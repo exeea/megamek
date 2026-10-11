@@ -18,9 +18,11 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.board.Coords;
+import megamek.logging.MMLogger;
 
 /** One camera for the 3D view and the Tactical View: orbit presets and free flight over the same board geometry. */
 final class BoardCamera {
+    private static final MMLogger LOGGER = MMLogger.create(BoardCamera.class);
     private static final float ISOMETRIC_TILT = 54.73561f;
     // Manual zoom limits: smaller values zoom in, larger values zoom out.
     private static final float MIN_ZOOM = 0.05f;
@@ -43,6 +45,8 @@ final class BoardCamera {
     /** Degrees from overhead: at or below this tilt, keep visible actions still; otherwise only pan or zoom out. */
     static final float ATTACK_TOP_VIEW_TILT_DEGREES = 30;
     private static final float FRAMING_MARGIN_PIXELS = 64;
+    /** Rings of hexes framed around the target of an attacker off the map. */
+    private static final int OFF_BOARD_TARGET_RINGS = 2;
     final BoardProjectionCamera camera = new BoardProjectionCamera();
     final Vector3 focus = new Vector3();
     // Render-thread settings shared by both views and their Camera-menu checkboxes.
@@ -614,6 +618,13 @@ final class BoardCamera {
         Vector3 axis = new Vector3();
         for (var attack : attacks) {
             var event = attack.event;
+            if (event.attackerOffBoard()) {
+                // Nothing of the attacker is on the map: frame the target with room around it, not the map edge.
+                LOGGER.debug("[AttackCamera] {} fires from off the map, framing only its target at {}",
+                      event.attacker().name(), event.destination().coords());
+                addTargetArea(points, event.destination());
+                continue;
+            }
             addUnit(points, event.attacker());
             if (event.target() != null) {
                 addUnit(points, event.target());
@@ -856,6 +867,16 @@ final class BoardCamera {
         for (var coords : footprint) {
             addHex(points, coords, unit.location().elevation() - .25f,
                   unit.location().elevation() + Math.max(1, unit.height() + 1));
+        }
+    }
+
+    /**
+     * The target hex of an attack from off the map and the rings around it, so the camera neither zooms in on a single
+     * hex nor loses a Long Tom's debris, which lands up to two hexes out.
+     */
+    private static void addTargetArea(List<Vector3> points, BoardScene.Waypoint destination) {
+        for (Coords coords : destination.coords().allAtDistanceOrLess(OFF_BOARD_TARGET_RINGS)) {
+            addHex(points, coords, destination.elevation() - .5f, destination.elevation() + .5f);
         }
     }
 

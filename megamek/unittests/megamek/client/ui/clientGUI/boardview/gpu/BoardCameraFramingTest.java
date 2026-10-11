@@ -445,6 +445,42 @@ class BoardCameraFramingTest {
         assertVisible(camera, 350, attacker);
     }
 
+    /** Off-board artillery: the map edge it fires from is not framed, but the target and two rings around it are. */
+    @Test
+    void anAttackerOffTheMapFramesOnlyItsTargetArea() {
+        var attacker = unit(1, 0, 0, 0, 2);
+        var target = unit(2, 30, 20, 0, 2);
+        var fromTheMap = UnitPlaybackTest.attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
+        var fromOffTheMap = new BoardScene.Combat(fromTheMap.result(), attacker, target, target.location(), false, true);
+        var onBoardCamera = camera(65);
+        onBoardCamera.frameAttacks(List.of(new UnitAttack(fromTheMap)), 1200);
+        onBoardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+        var offBoardCamera = camera(65);
+        offBoardCamera.frameAttacks(List.of(new UnitAttack(fromOffTheMap)), 1200);
+        offBoardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+
+        assertVisible(onBoardCamera, 1200, attacker);
+        assertVisible(offBoardCamera, 1200, target);
+        assertFalse(onScreen(offBoardCamera, attacker.location().coords()), "The attacker's map edge is not framed");
+        for (Coords ring : target.location().coords().allAtDistance(2)) {
+            assertTrue(onScreen(offBoardCamera, ring), "The second ring around the target stays in view: " + ring);
+        }
+        assertTrue(hexWidth(offBoardCamera, target) > 2 * hexWidth(onBoardCamera, target),
+              "Without the attacker to include, the camera closes in on the target area");
+    }
+
+    private static boolean onScreen(BoardCamera camera, Coords coords) {
+        var point = project(camera, BoardGeometry.center(coords, 0));
+        return point.x > 0 && point.x < camera.camera.viewportWidth && point.y > 0
+              && point.y < camera.camera.viewportHeight;
+    }
+
+    private static float hexWidth(BoardCamera camera, BoardScene.Unit unit) {
+        var left = project(camera, BoardGeometry.corner(unit.location().coords(), 0, 0));
+        var right = project(camera, BoardGeometry.corner(unit.location().coords(), 0, 3));
+        return left.dst(right);
+    }
+
     private static BoardCamera camera(float tilt) {
         var camera = new BoardCamera();
         camera.resize(1200, 800);
