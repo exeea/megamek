@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import megamek.common.Configuration;
+import megamek.common.board.BoardSceneryLayouts;
 import org.junit.jupiter.api.Test;
 
 /** Structural scenery must stay grounded without placing a replacement floor over the biome. */
@@ -45,7 +46,7 @@ class BoardSceneryStructureTest {
             assertFalse(Files.exists(root.resolve(name + ".glb")), "No residual slab remains");
             for (var component : layout.components()) {
                 assertFalse(component.asset().equals(name));
-                if (component.kind() != BoardScene.FeatureKind.SCENERY) { continue; }
+                if (component.tree()) { continue; }
                 float lowFloorArea = 0;
                 for (var mesh : load(component.asset()).meshes) {
                     float[] values = mesh.vertices;

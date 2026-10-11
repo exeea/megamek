@@ -22,7 +22,11 @@ class BoardTransportTest {
               "ground", new HexAppearance("ground/grass", null, null, null)));
         board.getHex(1, 0).setDecorations(List.of(new BoardDecoration("member", "prop",
               "scenery/parks/picnic-table", null, -.2, .3, 15, false, .65, BoardDecoration.Placement.ground(),
-              0, false, 0, 0, "L2_1_g0")));
+              0, false, 0, 0, "L2_1_g0"),
+              // A recoloured car: slot 0 keeps the model's colour, slot 1 is replaced.
+              new BoardDecoration("car", "prop", "scenery/vehicles/car", null, .1, 0, 0, false, 1,
+                    BoardDecoration.Placement.ground(), 0, false, 0, 0, null)
+                    .withColours(BoardDecoration.Colours.of(null, "#aa3311"))));
         return board;
     }
 

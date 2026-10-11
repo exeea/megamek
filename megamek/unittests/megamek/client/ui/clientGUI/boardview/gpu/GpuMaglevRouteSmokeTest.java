@@ -18,7 +18,7 @@ import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
-import megamek.common.board.MaglevRoute;
+import megamek.common.board.RailRoute;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -44,7 +44,7 @@ class GpuMaglevRouteSmokeTest {
                     for (int profile = 0; profile < profiles.length; profile++) {
                         var heights = new HashMap<Coords, Double>();
                         for (int i = 0; i < profiles[profile].length; i++) { heights.put(new Coords(4, i + 1), profiles[profile][i]); }
-                        var scene = BoardMaglevTest.scene(heights);
+                        var scene = BoardRailTest.scene(heights);
                         camera.center(BoardGeometry.center(new Coords(4, 4), (float) profiles[profile][3]));
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene); terrain.animate(0, List.of());
@@ -61,7 +61,7 @@ class GpuMaglevRouteSmokeTest {
     }
 
     private static void level(Board board, Coords at, double level) {
-        var route = MaglevRoute.find(board.getHex(at));
+        var route = RailRoute.find(board.getHex(at), RailRoute.Kind.MAGLEV);
         board.getHex(at).setDecorations(List.of(route.transform(0, 0, 0, false, 1,
               megamek.common.board.BoardDecoration.Placement.absolute(level))));
     }
@@ -76,22 +76,22 @@ class GpuMaglevRouteSmokeTest {
                 board.getHex(x, y).setLevel(x >= 5 ? 1 : 0);
             }
             session.game().setBoard(board);
-            session.command(new Command(Action.ASSET, "", MaglevRoute.ASSET), null);
+            session.command(new Command(Action.ASSET, "", RailRoute.Kind.MAGLEV.asset), null);
             // One winding stroke joins its hexes; each then climbs a quarter level.
             var path = new java.util.ArrayList<Coords>(List.of(new Coords(1, 1)));
             for (int direction : new int[] { 3, 3, 2, 2, 1, 1, 0, 0 }) { path.add(path.getLast().translated(direction)); }
             session.command(new Command(Action.BRUSH_VALUE, "object:level", "1"), null);
             for (int i = 0; i < path.size(); i++) { session.pointer(path.get(i), 0, 0, i > 0); }
             session.finishStroke();
-            // A second stroke from the route's (3, 4) adds a branch to the south.
-            session.command(new Command(Action.BRUSH_VALUE, "object:level", "2"), null);
+            // A second stroke from the route's (3, 4) at its level adds a branch to the south (a level away it would cross).
+            session.command(new Command(Action.BRUSH_VALUE, "object:level", "1.5"), null);
             for (var at : List.of(new Coords(3, 4), new Coords(3, 5), new Coords(3, 6))) { session.pointer(at, 0, 0, !at.equals(new Coords(3, 4))); }
             session.finishStroke();
             for (int i = 0; i < path.size(); i++) { level(board, path.get(i), 1 + i * .25); }
             level(board, new Coords(3, 5), 1.5); level(board, new Coords(3, 6), 1.5);
             session.command(new Command(Action.TOOL, "", "SELECT"), null);
             session.pointer(new Coords(3, 4), 0, 0, false,
-                  MaglevRoute.find(board.getHex(3, 4)).id()); session.finishStroke();
+                  RailRoute.find(board.getHex(3, 4), RailRoute.Kind.MAGLEV).id()); session.finishStroke();
             return new GpuMapSource(session.game(), null, session);
         });
         SwingUtilities.invokeAndWait(setup);
@@ -119,32 +119,32 @@ class GpuMaglevRouteSmokeTest {
                             case 0 -> {
                                 var assets = new GpuAssets();
                                 try {
-                                    var shape = new BoardMaglev.Layout(List.of(new BoardMaglev.End(0, -36, 0, 0, 0), new BoardMaglev.End(0, 36, 0, 0, 0)));
-                                    var model = assets.maglev(shape);
-                                    assertSame(model, assets.maglev(shape));
+                                    var shape = new BoardRail.Layout(List.of(new BoardRail.End(0, -36, 0, 0, 0), new BoardRail.End(0, 36, 0, 0, 0)));
+                                    var model = assets.route(shape);
+                                    assertSame(model, assets.route(shape));
                                     assets.retain(assets, java.util.Set.of(), java.util.Set.of(), java.util.Set.of(model));
-                                    assertSame(model, assets.maglev(shape));
+                                    assertSame(model, assets.route(shape));
                                     assets.retain(assets, java.util.Set.of(), java.util.Set.of(), java.util.Set.of());
-                                    assertNotSame(model, assets.maglev(shape));
+                                    assertNotSame(model, assets.route(shape));
                                 } finally { assets.dispose(); }
                                 GpuBoardTestUi.capture(new File(output, "maglev-routes-isometric.png"));
                                 boardCamera.setIsometric(false);
                             }
                             case 1 -> {
                                 GpuBoardTestUi.capture(new File(output, "maglev-routes-top.png"));
-                                sides = MaglevRoute.find(editor.get().board().getHex(3, 4)).connections();
+                                sides = RailRoute.find(editor.get().board().getHex(3, 4), RailRoute.Kind.MAGLEV).connections();
                                 assertNotEquals(0, sides, "The junction is joined");
                                 SwingUtilities.invokeAndWait(() -> editor.get().command(new Command(Action.OBJECT_VALUE, "level", "3"), null));
                                 boardCamera.setIsometric(true);
                             }
                             case 2 -> {
-                                assertEquals(3, MaglevRoute.find(editor.get().board().getHex(3, 4)).placement().level());
-                                assertEquals(sides, MaglevRoute.find(editor.get().board().getHex(3, 4)).connections(), "A level edit keeps the sides");
+                                assertEquals(3, RailRoute.find(editor.get().board().getHex(3, 4), RailRoute.Kind.MAGLEV).placement().level());
+                                assertEquals(sides, RailRoute.find(editor.get().board().getHex(3, 4), RailRoute.Kind.MAGLEV).connections(), "A level edit keeps the sides");
                                 GpuBoardTestUi.capture(new File(output, "maglev-routes-height-edit.png"));
                                 SwingUtilities.invokeAndWait(() -> editor.get().command(new Command(Action.UNDO, "", ""), null));
                             }
                             case 3 -> {
-                                assertEquals(2, MaglevRoute.find(editor.get().board().getHex(3, 4)).placement().level());
+                                assertEquals(2, RailRoute.find(editor.get().board().getHex(3, 4), RailRoute.Kind.MAGLEV).placement().level());
                                 Gdx.app.exit(); return;
                             }
                             default -> throw new AssertionError(step);

@@ -1,88 +1,89 @@
 
-This readme has instructions for using the map editor.  It also contains
-information on the board file format, and the tileset file format.
+This readme describes the board editor. It also contains information on the
+board terrain values, the old .board file format and the tileset file format.
 
-  Introduction To The Map Editor
-    You can access the map editor from the main menu.  When you start the
-    editor, no map will be loaded.  You can use the buttons on the bottom right
-    of the window to make a new, blank map, or open an existing map for editing.
-    The default size for map boards in MegaMek is 16x17.  Most paper Battletech
-    boards are about 15x17 hexes, but this does not allow adjacent boards to
-    line up properly on the computer.
+  Introduction To The Board Editor
+    You can open the board editor from the main menu. It shows the board in
+    3D: a new, blank 16x17 board, or the board you chose. The default size for
+    map boards in MegaMek is 16x17. Most paper Battletech boards are about
+    15x17 hexes, but this does not allow adjacent boards to line up properly
+    on the computer.
 
-    Saving a map is accomplished with the Save or Save As buttons, right below
-    the New and Load buttons.  The MegaMek server only checks files in the
-    data/boards directory, and with the .board extension, when determining which
-    boards to load.  This means you should add a .board extension to all your
-    filenames when saving.
+    The Menu button at the top right has New, Open, Save, Save As, Save As
+    Image, Recent Boards, Open Board Source File, Run Board Tagger, the 2D
+    Preview (the board as the 2D board draws it), View (with the Trace
+    Overlay), Client Settings and Help. Help lists every key and mouse gesture
+    of the editor.
 
-  Quick Reference:
-  Left mouse button - paint terrain onto the board without changing elevation
-  CTRL + left mouse - paint terrain onto the board and update elevation
-  SHIFT + left mouse - add terrain from the work area to the board. (This is useful
-                       to add roads to a map on top of existing terrain)
-  ALT + left mouse - copy terrain from board to the work area
+    The editor saves boards as .board2 files. Opening an older .board file
+    converts it: its decorative scenery becomes 3D objects, and Save writes a
+    new .board2 file next to it, keeping the original file. The MegaMek server
+    loads both kinds of board file from the data/boards directory. A board
+    that breaks the game's rules can still be saved; the editor lists its
+    problems under the red warning triangle at the top, and games refuse the
+    board until they are fixed.
 
-  The Hex Work Area
-    Along the right side of the screen, above the save/load buttons, there are
-    controls for working with a hex.  From top to bottom, there is a picture of
-    your working hex, controls to adjust elevation, a list of terrain types
-    present in the working hex, and controls to remove, add, or adjust terrain.
+  Quick Reference
+    The tools are Select (Z), Sculpt (X), Paint (C) and Erase (V).
+    Left mouse button - select a hex or object, or use the tool on the hexes
+                        within the brush radius
+    Left drag - select with a box, move the selection, or paint along the drag
+    CTRL + mouse wheel - raise or lower the hovered hex
+    CTRL + Z / CTRL + Y - undo / redo
+    CTRL + C / CTRL + V - copy and paste a hex (also between MegaMek windows)
+    Right drag - move the view; mouse wheel - zoom
+    ALT + left mouse - measure line of sight
 
-    The working hex exists in a zone outside the map.  To apply your hex to the
-    map, hold the Ctrl key, then click the hex on the board you want to change.
-    To load a hex from the board into the work area, hold the Alt key, then click
-    the hex on the board you want to copy.  To make a small change to a single hex
-    on the board, you will need to load the hex into the work area, edit it, and
-    then place it back on the map.  For efficient use, use the working hex like
-    a paintbrush to change all the applicable terrain of one type before moving
-    to another type of terrain.
+  Painting Terrain
+    Assets on the left holds the terrain recipes (woods, water, roads,
+    buildings and more), structures, props and decals. Choose one, then click
+    or drag on the board to paint it. The Brush panel at the bottom left holds
+    the options of the active tool: the radius, the values of the terrain you
+    paint, and "Only overwrite clear hexes", which leaves every hex that
+    already holds terrain as it is. Sculpt raises, lowers or levels the
+    ground; Erase removes what the active brush paints.
 
   Editing A Hex
-    Each hex has an elevation and may have terrain.  A clear hex has no terrain
-    listed.  Most hexes with terrain features in them will only have one type
-    of terrain feature, such as woods, or rough.  Some may have several, such
-    as woods with a road running through them, or a building on fire.
-
-    The elevation controls are right under the picture of the current hex.  Use
-    the buttons marked "U" or "D" or move the elevation up or down.  You may
-    also just type the desired elevation in the text box.
-
-    Under the elevation controls, there is a list of terrain features present
-    in the working hex.  To remove a terrain feature, use the Remove Terrain
-    button directly under the list.
-
-    To add terrain, select the type of terrain you wish to add, the level
-    associated with that type of terrain, and press the Add/Set Terrain button.
-    The terrain will appear in the list in the format "terrain:level".  Each
-    individual type of terrain may only appear once in a hex.
+    Each hex has an elevation and may have terrain. A clear hex has no terrain
+    listed. Click a hex with the Select tool: Layers on the right lists its
+    terrain components and objects, and Edit below it changes the selected
+    one, with every terrain value the game uses and, for terrain with exits,
+    the hex sides it connects to. "Use as brush" makes the whole hex the brush.
+    Hold the pointer over a Layers row to see its terrain as the board file
+    writes it, in the format "terrain:level" or "terrain:level:exits".
 
     See the list below for details on the types of terrain and the levels that
     the game expects them at.
 
-    The exits parameter is internally set by the game.  It is a 6-bit integer,
-    with each bit representing a side of the hex, starting at the top and
-    proceeding clockwise around the edges.  A bit is set if the hex in that
-    direction has the same type of terrain present.  There is usually no reason
-    to change this value, but if you want to, check the Set Exits checkbox,
-    and enter the appropriate value before you hit the Add/Set button.  You can
-    also use the small button marked "A", which will pop up a dialog with a
-    diagram of the exits and checkboxes for easy setting.  When you close this
-    dialog, it automatically activates the Add/Set action.
+    The exits of most terrain are set by the game: a side connects when the
+    hex on that side has the same terrain. A board can also specify them, as
+    described for the board file format below.
 
-    Normally, roads automatically exit onto all adjacent pavement hexes.  The
+  Board Settings
+    Settings at the top right holds the board's own settings (Arena, Exit Roads
+    to Pavement, tags), commands for the whole board (theme, raise or lower,
+    flatten, flood, remove a terrain, clear) and its size (resize, new board,
+    random map).
+
+    Normally, roads automatically exit onto all adjacent pavement hexes. The
     designer of the board can override this by explicitly specifying the exits
-    of the road hex (as described above).  On some boards, however, it is
-    easier to specify the road hexes that *do* exit onto a pavement hex rather
-    than saying which ones do *not* exit onto the pavement.  For those boards,
-    uncheck the "Exit Roads to Pavement" checkbox.  Each time you check or un-
-    check the "Exit Roads to Pavement" checkbox, the map refreshes itself to
-    show you the results.  The if this checkbox is not checked when you save
-    the board, the "exit_roads_to_pavement" option described below will be set
-    to "false".  Please note that, when multiple boards are used in a game, if
-    one board has the "exit_roads_to_pavement" option set to "false", *NO*
-    roads will automatically exit onto a pavement hex, so use this option
-    sparingly.
+    of the road hex. On some boards, however, it is easier to specify the road
+    hexes that *do* exit onto a pavement hex rather than saying which ones do
+    *not* exit onto the pavement. For those boards, uncheck "Exit Roads to
+    Pavement" in Settings. The board then saves the "exit_roads_to_pavement"
+    option described below as "false". Please note that, when multiple boards
+    are used in a game, if one board has the "exit_roads_to_pavement" option
+    set to "false", *NO* roads will automatically exit onto a pavement hex, so
+    use this option sparingly.
+
+  Tracing A Paper Map
+    The Trace Overlay (Menu, View) lays a reference image, such as a scanned
+    paper map, over the board while you look straight down: use the top view
+    button at the top right. Choose the image, its opacity, scale and position
+    in Client Settings, Overlays. The position is in pixels of the 2D board at
+    100% zoom, where a hex is 84 x 72 pixels; a position of 84, 72 puts the
+    image's top left corner on the first hex's corner. The image is never
+    saved with the board.
 
   Types Of Terrain Features
     The game expects the level for each type of terrain feature within a certain
@@ -95,12 +96,14 @@ information on the board file format, and the tileset file format.
     has a building level > 0.  The swamp terrain should only appear in a clear,
     rough, or woods hex.
 
-    The "fluff" terrain type can be used to place special images on the map
-    board that have no effect on play, but improve the overall appearance of
-    the map.  The level of fluff in the terrain, coupled with the exits that
-    are specified for the fluff, determine the image that appears.  The full
-    list of fluff images available, and the level and exits needed to display
-    them, can be seen in the file, "data/images/hexes/atmospheric.tileset".
+    The "fluff" terrain type placed special images on the map board of older
+    .board files that have no effect on play, but improve the overall
+    appearance of the map.  The level of fluff in the terrain, coupled with
+    the exits that are specified for the fluff, determine the image that
+    appears.  The full list of fluff images, and the level and exits needed
+    to display them, can be seen in the file,
+    "data/images/hexes/atmospheric.tileset".  The board editor converts this
+    scenery into 3D objects and decals, which it places directly instead.
 
     The terrain feature types and their expected values:
 
@@ -153,8 +156,10 @@ information on the board file format, and the tileset file format.
                          terrain level is the new elevation after it moves.
 
 
-The board file format is plain text.  You will probably not need to edit the
-board files by hand.  This reference is just for creating a different editor.
+The old .board file format is plain text.  You will probably not need to edit
+the board files by hand.  This reference is just for creating a different
+editor.  The board editor reads it and writes the .board2 format, a JSON
+document that also holds the 3D objects and appearance of each hex.
 
   The Board File Format
     As mentioned earlier, the server scans for files that have a .board

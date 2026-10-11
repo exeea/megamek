@@ -15,6 +15,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
@@ -529,7 +530,7 @@ class GpuUtilityMinimapSmokeTest {
               text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit"), text("GpuBoard.hud.mouse.wheel"),
               text("GpuBoard.hud.hint.zoom"), "T", text("GpuBoard.hud.util.backTo3d")), GpuHintLine.items(tactical));
         GpuHud.Inputs planning = parts.update(scene, fixture, move(), GpuReportLog.Snapshot.EMPTY, false, 1920, 1080);
-        assertEquals(List.of(text("GpuBoard.hud.mouse.leftClick"), text("GpuBoard.hud.hint.select"),
+        assertEquals(List.of(text("GpuBoard.hud.mouse.leftClick"), text("GpuBoard.hud.hint.planMove"),
               text("GpuBoard.hud.mouse.ctrlClick"), text("GpuBoard.hud.hint.waypoint"),
               text("GpuBoard.hud.mouse.shiftClick"), text("GpuBoard.hud.hint.orientation"),
               text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.pan"),
@@ -699,7 +700,7 @@ class GpuUtilityMinimapSmokeTest {
         GpuMovePlan.Snapshot empty = GpuMovePlan.Snapshot.EMPTY;
         return new GpuMovePlan.Snapshot(true, true, false, GpuHudFixtures.ATLAS, GpuMovePlan.Mode.AUTO, false, "",
               ROUTE, List.of(), List.of(), ROUTE.getLast().coords(), 0, 3, 3, EntityMovementType.MOVE_WALK, "",
-              true, 1, 1, true, List.of(), true, true, empty.envelope(), 0);
+              true, 1, 1, true, List.of(), true, true, empty.envelope(), Set.of(), 0);
     }
 
     /** A volley of {@code count} weapon attacks of this round, as the report log keeps them for review. */

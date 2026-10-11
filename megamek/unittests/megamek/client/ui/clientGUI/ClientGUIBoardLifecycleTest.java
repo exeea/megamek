@@ -4,23 +4,32 @@ package megamek.client.ui.clientGUI;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import java.awt.Container;
+import java.awt.Window;
 import java.awt.event.WindowEvent;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import javax.swing.AbstractButton;
 import javax.swing.JDialog;
 import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
 import megamek.client.CloseClientListener;
+import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
 import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricSprite;
@@ -37,6 +46,7 @@ import megamek.common.event.GameListener;
 import megamek.common.game.Game;
 import megamek.common.loaders.MapSettings;
 import megamek.common.loaders.MekSummaryCache;
+import megamek.server.ServerBoardHelper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -169,6 +179,149 @@ class ClientGUIBoardLifecycleTest {
             }
             return null;
         });
+    }
+
+    /**
+     * The lobby's 2D and 3D previews stay open together for an A/B comparison: both show one board, both 3D buttons
+     * open the one 3D preview of the lobby window, a 2D preview opened beside the 3D preview shows its board, a new roll
+     * or a map change updates whichever is open without bringing the 3D preview to the front, the 2D preview closes on
+     * its own and the lobby's end closes both. The native window is stubbed: its state is the board it was last given.
+     */
+    @Test
+    void lobbyPreviewsShowOneBoardAndCloseOnTheirOwn() throws Exception {
+        Deque<AutoCloseable> resources = new ArrayDeque<>();
+        AtomicReference<Board> shown3D = new AtomicReference<>();
+        AtomicInteger raised3D = new AtomicInteger();
+        AtomicReference<ChatLounge> lounge = new AtomicReference<>();
+        Board server = Board.createEmptyBoard(6, 6);
+        try {
+            onClient(() -> {
+                resources.push(mockConstruction(UnitDisplayPanel.class));
+                resources.push(mockConstruction(SoundManager.class));
+                var cache = mockStatic(MekSummaryCache.class);
+                resources.push(cache);
+                cache.when(MekSummaryCache::getInstance).thenReturn(mock(MekSummaryCache.class));
+                var application = mockStatic(MegaMekGUI.class);
+                resources.push(application);
+                application.when(MegaMekGUI::getKeyDispatcher).thenReturn(new MegaMekController());
+                // Without a server-built battlefield every preview request rolls a new board from the map settings.
+                var rolls = mockStatic(ServerBoardHelper.class);
+                resources.push(rolls);
+                rolls.when(() -> ServerBoardHelper.getPossibleGameBoard(any(), anyBoolean()))
+                      .thenAnswer(call -> Board.createEmptyBoard(8, 8));
+                Session session = Session.create();
+                resources.push(session);
+                ClientGUI gui = session.gui();
+                Window frame = gui.getFrame();
+                var gpu = mockStatic(GpuBoardWindow.class);
+                resources.push(gpu);
+                gpu.when(() -> GpuBoardWindow.openPreview(any(Window.class), any(Board.class))).thenAnswer(call -> {
+                    assertSame(frame, call.getArgument(0), "The 3D preview belongs to the lobby, not the 2D preview");
+                    shown3D.set(call.getArgument(1));
+                    raised3D.incrementAndGet();
+                    return null;
+                });
+                gpu.when(() -> GpuBoardWindow.updatePreview(any(Window.class), any(Board.class))).thenAnswer(call -> {
+                    if (shown3D.get() != null && call.getArgument(0) == frame) {
+                        shown3D.set(call.getArgument(1));
+                    }
+                    return null;
+                });
+                gpu.when(() -> GpuBoardWindow.showsPreview(any(), any())).thenAnswer(call -> shown3D.get() != null
+                      && call.getArgument(0) == frame && call.getArgument(1) == shown3D.get());
+                gpu.when(() -> GpuBoardWindow.closePreview(frame)).thenAnswer(call -> {
+                    shown3D.set(null);
+                    return null;
+                });
+                MapSettings settings = MapSettings.getInstance();
+                settings.setBoardsSelectedVector(List.of(MapSettings.BOARD_GENERATED));
+                when(gui.getClient().getMapSettings()).thenReturn(settings);
+                ChatLounge chatLounge = new ChatLounge(gui);
+                lounge.set(chatLounge);
+                gui.chatlounge = chatLounge;
+
+                chatLounge.previewGameBoard();
+                Board first = shown2D(chatLounge);
+                assertNotNull(first);
+                assertNull(shown3D.get(), "The 2D preview opens no 3D preview");
+                button(field(chatLounge, "boardPreviewW"), Messages.getString("GpuBoard.preview")).doClick();
+                assertSame(first, shown3D.get(), "The 2D preview's 3D button shows the 2D preview's board");
+                ((AbstractButton) field(chatLounge, "butBoardPreview3D")).doClick();
+                assertSame(first, shown3D.get(), "The lobby's 3D button shows the open 2D preview's board too");
+
+                chatLounge.previewGameBoard();
+                Board second = shown2D(chatLounge);
+                assertNotSame(first, second, "The 2D button rolls the map settings again");
+                assertSame(second, shown3D.get(), "The open 3D preview shows the new roll too");
+                assertEquals(2, raised3D.get(), "The new roll does not bring the 3D preview to the front");
+
+                JDialog window = field(chatLounge, "boardPreviewW");
+                window.getRootPane().getActionMap().get("closeAction").actionPerformed(null);
+                assertNull(field(chatLounge, "previewBV"));
+                assertSame(second, shown3D.get(), "Closing the 2D preview leaves the 3D preview open");
+
+                chatLounge.previewGameBoard();
+                assertSame(second, shown2D(chatLounge), "Opened beside the 3D preview, the 2D shows its board");
+                assertSame(second, shown3D.get(), "Opening the 2D preview rolls no new board for the 3D preview");
+                JDialog reopened = field(chatLounge, "boardPreviewW");
+                reopened.getRootPane().getActionMap().get("closeAction").actionPerformed(null);
+
+                // A server-built battlefield arrives (on the EDT later) while only the 3D preview is open.
+                session.game().receiveBoard(0, server);
+                return null;
+            });
+            onClient(() -> {
+                assertSame(server, shown3D.get(), "A new lobby board shows in the open 3D preview");
+                assertEquals(2, raised3D.get(), "A new lobby board does not bring the 3D preview to the front");
+                assertNull(field(lounge.get(), "boardPreviewW"), "Updating the 3D preview opens no 2D preview");
+                lounge.get().previewGameBoard();
+                assertSame(server, shown2D(lounge.get()));
+                lounge.get().killPreviewBV();
+                assertNull(shown3D.get(), "The lobby's end closes its 3D preview");
+                assertNull(field(lounge.get(), "previewBV"), "The lobby's end closes its 2D preview");
+                return null;
+            });
+        } finally {
+            onClient(() -> {
+                if (lounge.get() != null) {
+                    lounge.get().killPreviewBV();
+                    lounge.get().removeAllListeners();
+                }
+                while (!resources.isEmpty()) {
+                    resources.pop().close();
+                }
+                return null;
+            });
+        }
+    }
+
+    private static Board shown2D(ChatLounge lounge) {
+        BoardView view = field(lounge, "previewBV");
+        return view.getClientState().getBoard();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T field(ChatLounge lounge, String name) {
+        try {
+            var field = ChatLounge.class.getDeclaredField(name);
+            field.setAccessible(true);
+            return (T) field.get(lounge);
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError(failure);
+        }
+    }
+
+    private static AbstractButton button(Container parent, String text) {
+        for (var component : parent.getComponents()) {
+            if (component instanceof AbstractButton button && text.equals(button.getText())) {
+                return button;
+            }
+            AbstractButton found = component instanceof Container child ? button(child, text) : null;
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 
     @Test

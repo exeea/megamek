@@ -113,13 +113,43 @@ final class RigidGlb {
 
     /** A model's colour slots, from its file's JSON alone. */
     static List<ColourSlot> colourSlots(File file) {
+        try {
+            return colourSlots(document(file).get("extras"));
+        } catch (IOException | RuntimeException error) {
+            throw new IllegalArgumentException("Cannot read the colour slots of " + file + ": " + error.getMessage(), error);
+        }
+    }
+
+    /**
+     * How many mesh levels a file holds, from its JSON alone: its highest {@code <component>-lodN} group plus one (a
+     * missing level between reuses the one before, {@link MeshLod#load}).
+     */
+    static int levels(File file) {
+        try {
+            var document = document(file);
+            var scenes = (List<?>) document.get("scenes");
+            Object index = document.get("scene");
+            var roots = (List<?>) ((Map<?, ?>) scenes.get(index instanceof Number number ? number.intValue() : 0)).get("nodes");
+            var nodes = (List<?>) document.get("nodes");
+            int highest = 0;
+            for (Object root : roots) {
+                if (((Map<?, ?>) nodes.get(((Number) root).intValue())).get("name") instanceof String name
+                      && name.matches(".*-lod[0-" + (LEVELS - 1) + "]")) {
+                    highest = Math.max(highest, name.charAt(name.length() - 1) - '0');
+                }
+            }
+            return highest + 1;
+        } catch (IOException | RuntimeException error) {
+            throw new IllegalArgumentException("Cannot read the levels of " + file + ": " + error.getMessage(), error);
+        }
+    }
+
+    /** A GLB file's JSON chunk, without its buffers. */
+    private static Map<?, ?> document(File file) throws IOException {
         try (var input = java.nio.file.Files.newInputStream(file.toPath())) {
             byte[] header = input.readNBytes(20);
             int length = ByteBuffer.wrap(header, 12, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt();
-            var document = new ObjectMapper().readValue(input.readNBytes(length), Map.class);
-            return colourSlots(document.get("extras"));
-        } catch (IOException | RuntimeException error) {
-            throw new IllegalArgumentException("Cannot read the colour slots of " + file + ": " + error.getMessage(), error);
+            return new ObjectMapper().readValue(input.readNBytes(length), Map.class);
         }
     }
 
@@ -146,20 +176,28 @@ final class RigidGlb {
     }
 
     /**
-     * Replace the colours of {@code data}'s slot vertices with {@code colours} (a placed object's or a layout row's).
-     * Each channel keeps its ratio to the slot's default colour in linear light, so the shaded parts of a slot stay
-     * shaded; tools/glb_geometry.py recolour() applies the same rule offline.
+     * Replace the colours of {@code data}'s slot vertices with {@code colours} (a layout row's, a truss deck's or an
+     * editor preview's). Each channel keeps its ratio to the slot's default colour in linear light, so the shaded parts
+     * of a slot stay shaded; tools/glb_geometry.py recolour() applies the same rule offline.
+     * <p>
+     * KEEP IN SYNC with model-colour-slots.glsl#slotColour, its GPU twin, which recolours a placed object's one shared
+     * mesh ({@link #colourSlotMesh}) in every view. Both read each slot's replacement from the same {@link #packed}
+     * 0xRRGGBB (channel / 255), skip a slot whose value is negative, and apply {@code display(shade x
+     * linear(replacement))} with exact sRGB and no clamping; {@link #shade} is their shared factor.
+     * RigidGlbTest#theSharedMeshAndPackedColoursGiveTheRecolouredCopysVertexColours compares the two per vertex.
      */
     static void recolour(ModelData data, BoardDecoration.Colours colours) {
         var model = (Data) data;
-        if (model.slots.length == 0) { return; }
+        float[] packed = packed(colours);
+        if (model.slots.length == 0 || packed == null) { return; }
         float[] vertices = model.meshes.first().vertices;
         for (int vertex = 0; vertex < model.slots.length; vertex++) {
             int slot = model.slots[vertex] - 1;
-            String colour = slot < 0 || slot >= model.colourSlots.size() ? null : colours.slot(slot);
-            if (colour == null) { continue; }
-            Color from = Color.valueOf(model.colourSlots.get(slot).colour()), to = Color.valueOf(colour);
-            float[] defaults = { from.r, from.g, from.b }, replacements = { to.r, to.g, to.b };
+            if (slot < 0 || slot >= model.colourSlots.size() || packed[slot] < 0) { continue; }
+            Color from = Color.valueOf(model.colourSlots.get(slot).colour());
+            int rgb = (int) packed[slot];
+            float[] defaults = { from.r, from.g, from.b };
+            float[] replacements = { (rgb >> 16 & 255) / 255f, (rgb >> 8 & 255) / 255f, (rgb & 255) / 255f };
             for (int channel = 0; channel < 3; channel++) {
                 int at = vertex * STRIDE + 6 + channel;
                 vertices[at] = display(shade(vertices[at], defaults[channel]) * linear(replacements[channel]));
@@ -177,7 +215,7 @@ final class RigidGlb {
     }
 
     /**
-     * The editor's one mesh for every colouring of a recolourable model: {@code data} with one more vertex attribute,
+     * A placed object's one mesh for every colouring of a recolourable model, in every view: {@code data} with one more vertex attribute,
      * {@link #COLOUR_SLOT}, holding each vertex's shade per channel ({@link #shade}) and its slot (w, 0 for none). The
      * vertex shader applies a placement's colours ({@link #packed}) by {@link #recolour}'s rule
      * (model-colour-slots.glsl). A copy: materials, nodes, parts and images are shared with {@code data}.

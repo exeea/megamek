@@ -15,18 +15,23 @@ import java.util.Set;
 import java.util.UUID;
 
 import megamek.client.ui.boardeditor.BoardEditorSession;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
+import megamek.common.board.BoardTreeDistribution;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
+import megamek.common.board.TilesetScenery;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
-/** Editor import of legacy scenery tokens into objects and groups, against hand-checked decode rows. */
+/**
+ * The legacy conversion of scenery tokens into objects and groups, against hand-checked decode rows; the tokens stay
+ * on the board for the 2D board.
+ */
 class BoardLegacyImportTest {
     private static final String PICNIC = "fluff:93:8";
     private static final Coords TABLES = new Coords(0, 0), ROOF = new Coords(1, 0), BRIDGE = new Coords(2, 0),
@@ -48,7 +53,7 @@ class BoardLegacyImportTest {
     }
 
     @Test
-    void pillarArtOnABridgeIsTheBridgesToggleInImportAndInTheLegacyRender() throws Exception {
+    void pillarArtOnABridgeIsTheBridgesToggleAndTheConvertedBoardDrawsNoPosts() throws Exception {
         // An Oanhu span over water between two roads (pillars5 on SE-NW decks), a raised dry deck, a deck under ice,
         // a deck at ground level (Sirius V), pillars on plain ground, a road with trees passing under a deck (Koryo)
         // and a car park on a deck.
@@ -65,15 +70,15 @@ class BoardLegacyImportTest {
         terrain.put(plain, "fluff:4:06");
         terrain.put(trees, "bridge:1:40;bridge_cf:40;road:2:18;bridge_elev:4");
         terrain.put(parked, "bridge:1:09;bridge_cf:40;bridge_elev:2;fluff:5:02");
-        Board legacy = Board.createEmptyBoard(12, 4), board = Board.createEmptyBoard(12, 4);
-        terrain.forEach((at, text) -> { legacy.setHex(at, new Hex(0, text, "")); board.setHex(at, new Hex(0, text, "")); });
-        BoardSceneryLayouts.importBoard(board);
+        Board board = Board.createEmptyBoard(12, 4);
+        terrain.forEach((at, text) -> board.setHex(at, new Hex(0, text, "")));
+        BoardSceneryLayouts.convert(board);
 
         List<Coords> pillared = List.of(west, east, raised, iced, level);
         for (Coords at : pillared) {
             Hex hex = board.getHex(at);
             assertTrue(HexAppearance.pillars(hex.getAppearance()), at + ": the toggle is on");
-            assertFalse(hex.containsTerrain(Terrains.FLUFF), at + ": the token is decoded");
+            assertTrue(hex.containsTerrain(Terrains.FLUFF), at + ": the decoded token stays for the 2D board");
             assertTrue(hex.getDecorations().isEmpty(), at + ": no posts");
         }
         var posts = board.getHex(plain).getDecorations();
@@ -90,15 +95,15 @@ class BoardLegacyImportTest {
         assertFalse(cars.isEmpty());
         assertTrue(cars.stream().allMatch(o -> o.placement().receiver().terrain().equals("bridge")));
 
-        // The legacy render decodes the same art the same way: the toggle, and posts only on plain ground.
-        try (var artwork = new BoardArtwork()) {
-            var pool = new BoardScene.PixelPool();
-            for (Coords at : terrain.keySet()) {
-                var tile = BoardScene.captureTile(legacy.getHex(at), artwork.capture(legacy, at, true), null, pool, legacy::getHex);
-                long drawn = tile.features().stream().filter(f -> f.asset().equals(BoardSceneryLayouts.PILLAR)).count();
-                assertEquals(pillared.contains(at), HexAppearance.pillars(tile.appearance()), at.toString());
-                assertEquals(at.equals(plain) ? 6 : 0, drawn, at + ": legacy posts");
-            }
+        // The converted board, its pillar tokens kept, draws the toggle and the six posts on plain ground once.
+        var tiles = BoardTiles.captureAll(board);
+        for (Coords at : terrain.keySet()) {
+            var tile = tiles.get(at.getX() * board.getHeight() + at.getY());
+            long drawn = tile.features().stream().filter(f -> f.asset().equals(BoardSceneryLayouts.PILLAR)).count();
+            assertEquals(pillared.contains(at), HexAppearance.pillars(tile.appearance()), at.toString());
+            assertEquals(at.equals(plain) ? 6 : 0, drawn, at + ": posts");
+            assertTrue(tile.features().stream().allMatch(f -> f.decoration() != null || f.kind() != BoardScene.FeatureKind.SCENERY),
+                  at + ": no legacy rows");
         }
     }
 
@@ -106,11 +111,11 @@ class BoardLegacyImportTest {
     void picnicTablesBecomeIndividualTablesAndTreesInOneGroup() {
         Board legacy = fixture();
         Board board = fixture();
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         assertTrue(board.isNativeFormat());
 
         Hex tables = board.getHex(TABLES);
-        assertFalse(tables.containsTerrain(Terrains.FLUFF), "The decoded token is removed");
+        assertTrue(tables.containsTerrain(Terrains.FLUFF), "The decoded token stays for the 2D board");
         List<BoardDecoration> objects = tables.getDecorations();
         assertEquals(17, objects.size());
         assertEquals(15, objects.stream().filter(o -> o.asset().equals("scenery/parks/picnic-table")).count());
@@ -118,13 +123,8 @@ class BoardLegacyImportTest {
         for (int i = 0; i < objects.size(); i++) { assertEquals("L0_0_" + i, objects.get(i).id()); }
         assertEquals(BoardDecoration.Placement.ground(), objects.getFirst().placement());
 
-        // The trees are the species and headings the legacy render shows for the same hex.
-        List<BoardScene.Feature> legacyTrees;
-        try (var artwork = new BoardArtwork()) {
-            var image = artwork.capture(legacy, TABLES, true);
-            legacyTrees = BoardFeatures.capture(legacy.getHex(TABLES), TABLES, Map.of(), Set.of(), legacy::getHex,
-                  image.scenery()).stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
-        }
+        // The trees are the species and headings the hex's seed draws for the layout's park tree rows.
+        var legacyTrees = parkTrees(legacy.getHex(TABLES));
         var trees = objects.stream().filter(o -> !o.asset().startsWith("scenery/")).toList();
         assertEquals(2, legacyTrees.size());
         for (int i = 0; i < 2; i++) {
@@ -138,11 +138,11 @@ class BoardLegacyImportTest {
     @Test
     void rowsAreHandCheckedAndOnlyDecodableTokensLeave() throws Exception {
         Board board = fixture();
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
 
         // bevel3 is the roof bevel turned by -120 degrees about the hex centre (generator row, model px).
         Hex roof = board.getHex(ROOF);
-        assertFalse(roof.containsTerrain(Terrains.FLUFF));
+        assertTrue(roof.containsTerrain(Terrains.FLUFF));
         BoardDecoration bevel = roof.getDecorations().getFirst();
         assertEquals(1, roof.getDecorations().size());
         assertEquals("scenery/roofs/bevel", bevel.asset());
@@ -155,22 +155,22 @@ class BoardLegacyImportTest {
         // pillars1 on the bridge: the bridge's Pillars toggle, no objects (the round trip below keeps it).
         Hex bridge = board.getHex(BRIDGE);
         assertTrue(bridge.getDecorations().isEmpty());
-        assertFalse(bridge.containsTerrain(Terrains.FLUFF));
+        assertTrue(bridge.containsTerrain(Terrains.FLUFF));
         assertEquals(HexAppearance.PILLARS, bridge.getAppearance().get("bridge"));
 
         // Road level 2 keeps its rule terrain and becomes the native Alley; its trees become objects.
         Hex road = board.getHex(ROAD);
         assertEquals(2, road.terrainLevel(Terrains.ROAD));
         assertEquals(6, road.getDecorations().size());
-        assertTrue(road.getDecorations().stream().allMatch(o -> BoardFeatures.parkSpecies().contains(o.asset())));
+        assertTrue(road.getDecorations().stream().allMatch(o -> BoardTreeDistribution.PARK.contains(o.asset())));
 
         // A seaport yard is one object; its woods stay for the rules, drawn without trees as the legacy art showed.
         Hex seaport = board.getHex(SEAPORT);
-        assertFalse(seaport.containsTerrain(Terrains.FLUFF));
+        assertTrue(seaport.containsTerrain(Terrains.FLUFF));
         assertEquals(1, seaport.terrainLevel(Terrains.WOODS));
         assertEquals(List.of("scenery/seaport/containers-n-s-01"), seaport.getDecorations().stream().map(BoardDecoration::asset).toList());
         assertNull(seaport.getDecorations().getFirst().group());
-        assertEquals(BoardFeatures.NO_TREES, seaport.getAppearance().get("vegetation").variant());
+        assertEquals(BoardTreeDistribution.NO_TREES, seaport.getAppearance().get("vegetation").variant());
         assertTrue(BoardFeatures.capture(seaport, SEAPORT, Map.of(), Set.of(), board::getHex).stream()
               .noneMatch(f -> f.kind() == BoardScene.FeatureKind.TREE), "No woods trees grow in the container yard");
 
@@ -179,22 +179,25 @@ class BoardLegacyImportTest {
         assertEquals(BoardDecoration.Placement.surface("fuelTank", "top", 0),
               board.getHex(TANK).getDecorations().getFirst().placement());
 
-        // A maglev track becomes one ungrouped N/S route marker; a code without artwork stays as it was.
-        assertFalse(board.getHex(MAGLEV).containsTerrain(Terrains.FLUFF));
+        // A maglev track becomes one ungrouped N/S route marker; a code without artwork stays in the game's memory.
+        assertTrue(board.getHex(MAGLEV).containsTerrain(Terrains.FLUFF));
         var route = board.getHex(MAGLEV).getDecorations();
         assertEquals(1, route.size());
-        assertTrue(megamek.common.board.MaglevRoute.isRoute(route.getFirst()));
+        assertTrue(megamek.common.board.RailRoute.isRoute(route.getFirst()));
         assertEquals(9, route.getFirst().connections());
         assertNull(route.getFirst().group());
         assertEquals(9, board.getHex(INVALID).terrainLevel(Terrains.FLUFF));
 
-        // The imported document round-trips through .board2.
+        // The imported document round-trips through .board2, which holds the objects, not the tokens they came from.
         var text = new ByteArrayOutputStream();
         BoardFile.write(board, text);
         Board reread = BoardFile.readNative(text.toString(StandardCharsets.UTF_8));
         for (int x = 0; x < board.getWidth(); x++) {
-            assertEquals(BoardFile.hexNode(board.getHex(x, 0)), BoardFile.hexNode(reread.getHex(x, 0)));
+            assertEquals(BoardFile.hexNode(BoardSceneryLayouts.withoutTakenTokens(board.getHex(x, 0))),
+                  BoardFile.hexNode(reread.getHex(x, 0)));
         }
+        assertFalse(reread.getHex(TABLES).containsTerrain(Terrains.FLUFF), "A taken token is not written");
+        assertFalse(reread.getHex(INVALID).containsTerrain(Terrains.FLUFF), "A code without artwork is dropped");
     }
 
     @Test
@@ -204,25 +207,23 @@ class BoardLegacyImportTest {
             legacy.setHex(new Coords(x, 0), new Hex(0, "fluff:13:01", ""));
             board.setHex(new Coords(x, 0), new Hex(0, "fluff:13:01", ""));
         }
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         Set<String> herds = new java.util.HashSet<>();
-        try (var artwork = new BoardArtwork()) {
-            for (int x = 0; x < 8; x++) {
-                Coords at = new Coords(x, 0);
-                List<String> chosen = artwork.scenery(legacy, at).models();
-                assertEquals(1, chosen.size(), at.toString());
-                herds.add(chosen.getFirst());
-                var rows = BoardSceneryLayouts.layout(chosen.getFirst()).components();
-                var animals = board.getHex(at).getDecorations();
-                assertFalse(board.getHex(at).containsTerrain(Terrains.FLUFF));
-                assertEquals(rows.size(), animals.size(), chosen.getFirst());
-                assertEquals(Set.of("L" + x + "_0_g0"), animals.stream().map(BoardDecoration::group)
-                      .collect(java.util.stream.Collectors.toSet()), "One group per herd");
-                for (int i = 0; i < rows.size(); i++) {
-                    assertEquals(rows.get(i).asset(), animals.get(i).asset());
-                    assertEquals(rows.get(i).x() / BoardGeometry.TILE_WIDTH, animals.get(i).x(), 1e-6);
-                    assertEquals(rows.get(i).rotation(), animals.get(i).rotation(), 1e-4);
-                }
+        for (int x = 0; x < 8; x++) {
+            Coords at = new Coords(x, 0);
+            List<String> chosen = TilesetScenery.resolve(legacy.getHex(at), false).scenery().models();
+            assertEquals(1, chosen.size(), at.toString());
+            herds.add(chosen.getFirst());
+            var rows = BoardSceneryLayouts.layout(chosen.getFirst()).components();
+            var animals = board.getHex(at).getDecorations();
+            assertTrue(board.getHex(at).containsTerrain(Terrains.FLUFF));
+            assertEquals(rows.size(), animals.size(), chosen.getFirst());
+            assertEquals(Set.of("L" + x + "_0_g0"), animals.stream().map(BoardDecoration::group)
+                  .collect(java.util.stream.Collectors.toSet()), "One group per herd");
+            for (int i = 0; i < rows.size(); i++) {
+                assertEquals(rows.get(i).asset(), animals.get(i).asset());
+                assertEquals(rows.get(i).x() / BoardGeometry.TILE_WIDTH, animals.get(i).x(), 1e-6);
+                assertEquals(rows.get(i).rotation(), animals.get(i).rotation(), 1e-4);
             }
         }
         assertTrue(herds.size() > 1, "The tileset picks the cattle herd by position: " + herds);
@@ -232,14 +233,14 @@ class BoardLegacyImportTest {
     void emblemSetsBecomeOneFullEmblemAndOneHexVariantsKeepTheirTurnAndScale() throws Exception {
         var file = megamek.common.Configuration.boardsDir().toPath().resolve("Templates/LandingPadsFactionSymbols.board");
         Board legacy = BoardFile.read(file), board = BoardFile.read(file);
-        assertEquals(List.of(), BoardSceneryLayouts.importBoard(board), "Every set on the template is complete");
+        assertEquals(List.of(), BoardSceneryLayouts.convert(board), "Every set on the template is complete");
         Set<String> emblems = new java.util.HashSet<>();
         int sets = 0, singles = 0;
         for (int y = 0; y < board.getHeight(); y++) {
             for (int x = 0; x < board.getWidth(); x++) {
                 var before = legacy.getHex(x, y).getTerrain(Terrains.FLUFF);
                 if (before == null || before.getLevel() < 50 || before.getLevel() > 62) { continue; }
-                assertFalse(board.getHex(x, y).containsTerrain(Terrains.FLUFF), "Every piece is decoded: " + x + "," + y);
+                assertTrue(board.getHex(x, y).containsTerrain(Terrains.FLUFF), "Every piece keeps its token: " + x + "," + y);
                 for (var object : board.getHex(x, y).getDecorations()) {
                     assertEquals("decal", object.kind());
                     assertTrue(object.asset().startsWith("decal/emblems/"), object.asset());
@@ -265,27 +266,32 @@ class BoardLegacyImportTest {
     }
 
     @Test
-    void anIncompleteSetStillGetsItsFullEmblemAtTheInferredCentreAndAnIssue() {
-        // Only the N and S pieces of a Red Cross set: the centre hex has no piece of its own.
+    void anIncompleteSetPaintsExactlyItsPiecesAndOneCutByTheEdgeGetsItsFullEmblemAndAnIssue() {
+        // Only the N and S pieces of a Red Cross set: the centre hex, on the board, has no piece of its own. Each piece
+        // shows its part of the emblem on the inferred centre, clipped to its hex; the centre paints nothing.
         Board board = Board.createEmptyBoard(3, 3);
         board.setHex(new Coords(1, 0), new Hex(0, "fluff:62:7", ""));
         board.setHex(new Coords(1, 2), new Hex(0, "pavement:1;fluff:62:13", ""));
-        var issues = BoardSceneryLayouts.importBoard(board);
-        var emblem = board.getHex(new Coords(1, 1)).getDecorations();
-        assertEquals(1, emblem.size());
-        assertEquals("decal/emblems/red-cross", emblem.getFirst().asset());
-        assertEquals(1, emblem.getFirst().scale());
-        assertEquals(List.of(new BoardEditorSession.Issue(new Coords(1, 1), emblem.getFirst().id(),
-              "Emblem set with 2 of 7 pieces: the full emblem is placed")), issues);
-        assertTrue(board.getHex(new Coords(1, 0)).getDecorations().isEmpty());
-        assertFalse(board.getHex(new Coords(1, 2)).containsTerrain(Terrains.FLUFF));
+        assertTrue(BoardSceneryLayouts.convert(board).isEmpty());
+        assertTrue(board.getHex(new Coords(1, 1)).getDecorations().isEmpty());
+        for (Coords piece : List.of(new Coords(1, 0), new Coords(1, 2))) {
+            var emblem = board.getHex(piece).getDecorations();
+            assertEquals(1, emblem.size());
+            assertEquals("decal/emblems/red-cross", emblem.getFirst().asset());
+            assertEquals(1, emblem.getFirst().scale());
+            assertTrue(emblem.getFirst().clipToHex());
+            assertEquals(piece.getY() == 0 ? -1 : 1, emblem.getFirst().y(), 1e-6, "On the centre");
+        }
+        assertTrue(board.getHex(new Coords(1, 2)).containsTerrain(Terrains.FLUFF));
         assertTrue(board.getHex(new Coords(1, 2)).containsTerrain(Terrains.PAVEMENT), "Rule terrain stays");
 
         // A set cut by the board edge: its centre lies north of the board, so its piece's hex owns it at that offset.
+        // In column 0 no other piece's hex is on the board: the full emblem, and an issue for the rest.
         Board cut = Board.createEmptyBoard(3, 3);
-        cut.setHex(new Coords(1, 0), new Hex(0, "fluff:62:13", ""));
-        assertEquals(1, BoardSceneryLayouts.importBoard(cut).size());
-        var offset = cut.getHex(new Coords(1, 0)).getDecorations().getFirst();
+        cut.setHex(new Coords(0, 0), new Hex(0, "fluff:62:13", ""));
+        assertEquals(1, BoardSceneryLayouts.convert(cut).size());
+        var offset = cut.getHex(new Coords(0, 0)).getDecorations().getFirst();
+        assertFalse(offset.clipToHex());
         assertEquals(0, offset.x(), 1e-6);
         assertEquals(1, offset.y(), 1e-6, "One hex height north");
     }
@@ -298,44 +304,43 @@ class BoardLegacyImportTest {
             board.setHex(new Coords(x, 0), new Hex(0, "pavement:1;fluff:5:" + codes[x], ""));
             legacy.setHex(new Coords(x, 0), new Hex(0, "pavement:1;fluff:5:" + codes[x], ""));
         }
-        BoardSceneryLayouts.importBoard(board);
-        try (var artwork = new BoardArtwork()) {
-            for (int x = 0; x < codes.length; x++) {
-                var objects = board.getHex(x, 0).getDecorations();
-                var plates = objects.stream().filter(o -> o.kind().equals("decal")).toList();
-                var cars = objects.stream().filter(o -> o.asset().equals("scenery/vehicles/car")).toList();
-                assertTrue(plates.size() == 1 || plates.size() == 2, codes[x]);
-                assertEquals(1, objects.stream().map(BoardDecoration::group).distinct().count(), "One car-park group");
-                // 00-07 get their lane as a road and stand beside it; 98/99 have no lane and stand back to back.
-                assertRows(plates, x < 8, codes[x]);
-                // The cars keep their paint: the same colours as the legacy key's car rows.
-                var rows = BoardSceneryLayouts.layout(artwork.scenery(legacy, new Coords(x, 0)).models().getFirst()).components();
-                assertEquals(rows.stream().filter(r -> r.asset().equals("scenery/vehicles/car")).map(r -> r.colours().slots()).sorted(
-                      java.util.Comparator.comparing(Object::toString)).toList(), cars.stream().map(c -> c.colours().slots())
-                      .sorted(java.util.Comparator.comparing(Object::toString)).toList());
-                for (var car : cars) {
-                    // Inside one of the decals' bay rows (model px, in that decal's frame), and no two cars share a bay.
-                    double px = car.x() * BoardGeometry.TILE_WIDTH, py = car.y() * BoardGeometry.TILE_HEIGHT;
-                    assertTrue(plates.stream().anyMatch(plate -> {
-                        var size = megamek.common.board.BoardDecalArt.footprint(plate.asset());
-                        double turn = Math.toRadians(-plate.rotation());
-                        double dx = px - plate.x() * BoardGeometry.TILE_WIDTH, dy = py - plate.y() * BoardGeometry.TILE_HEIGHT;
-                        double u = dx * Math.cos(turn) - dy * Math.sin(turn), v = dx * Math.sin(turn) + dy * Math.cos(turn);
-                        return Math.abs(u) < size.width() / 2 && Math.abs(v) < size.height() / 2;
-                    }), codes[x] + " " + car);
-                    // On a slot where its plate paints it: a mirrored plate's art, flipped along the row, keeps its bays.
-                    assertTrue(plates.stream().anyMatch(plate -> {
-                        var size = megamek.common.board.BoardDecalArt.footprint(plate.asset());
-                        var uv = BoardDecals.paintUv(plate);
-                        double dx = (car.x() - plate.x()) * BoardGeometry.width(), dy = (car.y() - plate.y()) * BoardGeometry.height();
-                        return size.slots().stream().anyMatch(slot -> Math.abs(uv.u(dx, dy) - (.5 + slot.x() / size.width())) < 1e-3
-                              && Math.abs(uv.v(dx, dy) - (.5 - slot.y() / size.height())) < 1e-3);
-                    }), codes[x] + " on a painted slot: " + car);
-                    for (var other : cars) {
-                        if (other != car) {
-                            assertTrue(Math.hypot(px - other.x() * BoardGeometry.TILE_WIDTH,
-                                  py - other.y() * BoardGeometry.TILE_HEIGHT) > 4.9, codes[x] + ": one car per bay");
-                        }
+        BoardSceneryLayouts.convert(board);
+        for (int x = 0; x < codes.length; x++) {
+            var objects = board.getHex(x, 0).getDecorations();
+            var plates = objects.stream().filter(o -> o.kind().equals("decal")).toList();
+            var cars = objects.stream().filter(o -> o.asset().equals("scenery/vehicles/car")).toList();
+            assertTrue(plates.size() == 1 || plates.size() == 2, codes[x]);
+            assertEquals(1, objects.stream().map(BoardDecoration::group).distinct().count(), "One car-park group");
+            // 00-07 get their lane as a road and stand beside it; 98/99 have no lane and stand back to back.
+            assertRows(plates, x < 8, codes[x]);
+            // The cars keep their paint: the same colours as the legacy key's car rows.
+            var rows = BoardSceneryLayouts.layout(TilesetScenery.resolve(legacy.getHex(x, 0), false).scenery().models()
+                  .getFirst()).components();
+            assertEquals(rows.stream().filter(r -> r.asset().equals("scenery/vehicles/car")).map(r -> r.colours().slots()).sorted(
+                  java.util.Comparator.comparing(Object::toString)).toList(), cars.stream().map(c -> c.colours().slots())
+                  .sorted(java.util.Comparator.comparing(Object::toString)).toList());
+            for (var car : cars) {
+                // Inside one of the decals' bay rows (model px, in that decal's frame), and no two cars share a bay.
+                double px = car.x() * BoardGeometry.TILE_WIDTH, py = car.y() * BoardGeometry.TILE_HEIGHT;
+                assertTrue(plates.stream().anyMatch(plate -> {
+                    var size = megamek.common.board.BoardDecalArt.footprint(plate.asset());
+                    double turn = Math.toRadians(-plate.rotation());
+                    double dx = px - plate.x() * BoardGeometry.TILE_WIDTH, dy = py - plate.y() * BoardGeometry.TILE_HEIGHT;
+                    double u = dx * Math.cos(turn) - dy * Math.sin(turn), v = dx * Math.sin(turn) + dy * Math.cos(turn);
+                    return Math.abs(u) < size.width() / 2 && Math.abs(v) < size.height() / 2;
+                }), codes[x] + " " + car);
+                // On a slot where its plate paints it: a mirrored plate's art, flipped along the row, keeps its bays.
+                assertTrue(plates.stream().anyMatch(plate -> {
+                    var size = megamek.common.board.BoardDecalArt.footprint(plate.asset());
+                    var uv = BoardDecals.paintUv(plate);
+                    double dx = (car.x() - plate.x()) * BoardGeometry.width(), dy = (car.y() - plate.y()) * BoardGeometry.height();
+                    return size.slots().stream().anyMatch(slot -> Math.abs(uv.u(dx, dy) - (.5 + slot.x() / size.width())) < 1e-3
+                          && Math.abs(uv.v(dx, dy) - (.5 - slot.y() / size.height())) < 1e-3);
+                }), codes[x] + " on a painted slot: " + car);
+                for (var other : cars) {
+                    if (other != car) {
+                        assertTrue(Math.hypot(px - other.x() * BoardGeometry.TILE_WIDTH,
+                              py - other.y() * BoardGeometry.TILE_HEIGHT) > 4.9, codes[x] + ": one car per bay");
                     }
                 }
             }
@@ -396,7 +401,7 @@ class BoardLegacyImportTest {
         int[] lanes = { 18, 36, 9, 18, 36, 9, 36, 9, 0, 0, 9 };
         Board board = Board.createEmptyBoard(2 * terrain.length + 1, 3);
         for (int i = 0; i < terrain.length; i++) { board.setHex(new Coords(1 + 2 * i, 1), new Hex(0, terrain[i], "")); }
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         var text = new ByteArrayOutputStream();
         BoardFile.write(board, text);
         Board reread = BoardFile.readNative(text.toString(StandardCharsets.UTF_8));
@@ -435,11 +440,11 @@ class BoardLegacyImportTest {
         for (int i = 0; i < supports.length; i++) {
             board.setHex(new Coords(1 + 2 * i, 1), new Hex(0, supports[i] + ";fluff:5:02", ""));
         }
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         for (int i = 0; i < supports.length; i++) {
             Hex hex = board.getHex(new Coords(1 + 2 * i, 1));
             assertEquals("none", road(hex), supports[i]);
-            assertFalse(hex.containsTerrain(Terrains.FLUFF), supports[i]);
+            assertTrue(hex.containsTerrain(Terrains.FLUFF), supports[i]);
             assertRows(hex.getDecorations().stream().filter(o -> o.kind().equals("decal")).toList(), false, supports[i]);
         }
         assertTrue(board.getHex(new Coords(1, 1)).getDecorations().stream().filter(o -> o.kind().equals("decal"))
@@ -460,10 +465,10 @@ class BoardLegacyImportTest {
         assertEquals("1:2 automatic", road(board.getHex(automatic)));
         List<String> before = List.of(road(board.getHex(automatic)), road(board.getHex(beside)), road(board.getHex(deadEnd)),
               road(board.getHex(undrawn)));
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         assertEquals(before, List.of(road(board.getHex(automatic)), road(board.getHex(beside)), road(board.getHex(deadEnd)),
               road(board.getHex(undrawn))));
-        assertFalse(board.getHex(automatic).containsTerrain(Terrains.FLUFF));
+        assertTrue(board.getHex(automatic).containsTerrain(Terrains.FLUFF));
         // The drawn roads run between their rows; the undrawn one leaves them back to back.
         for (Coords at : List.of(automatic, deadEnd, undrawn)) {
             assertRows(board.getHex(at).getDecorations().stream().filter(o -> o.kind().equals("decal")).toList(),
@@ -490,38 +495,38 @@ class BoardLegacyImportTest {
         for (int direction = 0; direction < 6; direction++) { paved.put(PARK.translated(direction), "pavement:1"); }
         Board board = lane(paved);
         assertTrue(board.getRoadsAutoExit());
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         assertEquals("1:9 specified", road(board.getHex(PARK)));
 
         // A dead end from the north: the two now point at each other, and the neighbour is unchanged.
         board = lane(Map.of(north, "road:1:08"));
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         assertEquals("1:9 specified", road(board.getHex(PARK)));
         assertEquals("1:8 specified", road(board.getHex(north)));
 
         // Roads at both ends join into one through road.
         board = lane(Map.of(north, "road:1:08", south, "road:1:01"));
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         assertEquals(List.of("1:9 specified", "1:8 specified", "1:1 specified"),
               List.of(road(board.getHex(PARK)), road(board.getHex(north)), road(board.getHex(south))));
 
         // A road pointing in off the lane still ends at the car park's edge, as the legacy lane left it.
         board = lane(Map.of(northEast, "road:1:16"));
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         assertEquals(List.of("1:9 specified", "1:16 specified"), List.of(road(board.getHex(PARK)), road(board.getHex(northEast))));
 
         // An automatic side road keeps the exits it loaded with, written out: no arm toward the car park.
         Coords beyond = southEast.translated(2);
         board = lane(Map.of(southEast, "road:1", beyond, "road:1"));
         assertEquals("1:4 automatic", road(board.getHex(southEast)));
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         assertEquals(List.of("1:9 specified", "1:4 specified", "1:32 automatic"),
               List.of(road(board.getHex(PARK)), road(board.getHex(southEast)), road(board.getHex(beyond))));
 
         // An automatic road on the lane gains its exit toward the car park and joins it.
         board = lane(Map.of(south, "road:1", south.translated(3), "road:1"));
         assertEquals("1:8 automatic", road(board.getHex(south)));
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         assertEquals(List.of("1:9 specified", "1:9 automatic"), List.of(road(board.getHex(PARK)), road(board.getHex(south))));
 
         // The same road beside a second car park, off that one's lane: it still joins the lane and grows no arm toward
@@ -529,7 +534,7 @@ class BoardLegacyImportTest {
         for (int side : new int[] { 5, 1 }) {
             Coords other = south.translated(side);
             board = lane(Map.of(south, "road:1", south.translated(3), "road:1", other, "fluff:5:02"));
-            BoardSceneryLayouts.importBoard(board);
+            BoardSceneryLayouts.convert(board);
             assertEquals(List.of("1:9 specified", "1:9 specified", "1:9 specified"),
                   List.of(road(board.getHex(PARK)), road(board.getHex(south)), road(board.getHex(other))), "side " + side);
         }
@@ -540,22 +545,18 @@ class BoardLegacyImportTest {
         Board legacy = Board.createEmptyBoard(1, 1), imported = Board.createEmptyBoard(1, 1);
         legacy.setHex(TABLES, new Hex(0, "snow:1;" + PICNIC, ""));
         imported.setHex(TABLES, new Hex(0, "snow:1;" + PICNIC, ""));
-        BoardSceneryLayouts.importBoard(imported);
-        List<String> legacyTrees;
-        try (var artwork = new BoardArtwork()) {
-            legacyTrees = BoardFeatures.capture(legacy.getHex(TABLES), TABLES, Map.of(), Set.of(), legacy::getHex,
-                        artwork.capture(legacy, TABLES, true).scenery()).stream()
-                  .filter(f -> f.kind() == BoardScene.FeatureKind.TREE).map(BoardScene.Feature::asset).toList();
-        }
+        BoardSceneryLayouts.convert(imported);
+        List<String> legacyTrees = parkTrees(legacy.getHex(TABLES)).stream().map(row -> row.asset() + "-snow").toList();
         var trees = imported.getHex(TABLES).getDecorations().stream().filter(o -> BoardFeatures.hasSnowForm(o.asset())).toList();
         assertEquals(2, legacyTrees.size());
         assertEquals(legacyTrees, trees.stream().map(o -> o.asset() + "-snow").toList(), "Trees store their bare species");
         assertEquals(legacyTrees, drawnTrees(imported.getHex(TABLES)), "On snow they draw as the legacy winter trees");
 
         // The inspector's Snow toggle keeps one tree bare on the snow; the choice is saved in .board2.
-        var session = new BoardEditorSession(BoardEditorBlueprint.get(), BoardSceneryLayouts.DECODER);
+        var session = new BoardEditorSession(BoardEditorBlueprint.get());
         Coords at = new Coords(1, 1);
-        Hex hex = imported.getHex(TABLES).duplicate();
+        // The editor's document holds the objects, not the token they came from.
+        Hex hex = BoardSceneryLayouts.withoutTakenTokens(imported.getHex(TABLES)).duplicate();
         hex.setDecorations(hex.getDecorations().stream().map(o -> o.withGroup(null)).toList());
         session.board().setHex(at, hex);
         session.pointer(at, 0, 0, false);
@@ -568,6 +569,13 @@ class BoardLegacyImportTest {
         assertEquals(edited.getDecorations(), BoardFile.readNative(text.toString(StandardCharsets.UTF_8)).getHex(at).getDecorations());
     }
 
+    /** The park tree rows of the hex's legacy layout, their species and headings drawn from its seed. */
+    private static List<BoardSceneryLayouts.Component> parkTrees(Hex legacy) {
+        String key = TilesetScenery.resolve(legacy, false).scenery().models().getFirst();
+        return BoardSceneryLayouts.layout(key).chosen(TABLES, BoardTreeDistribution.PARK, BoardTreeDistribution.NATURAL)
+              .stream().filter(BoardSceneryLayouts.Component::tree).toList();
+    }
+
     private static List<String> drawnTrees(Hex hex) {
         return BoardFeatures.capture(hex, TABLES, Map.of(), Set.of(), coords -> null).stream()
               .filter(f -> f.decoration() != null && BoardFeatures.hasSnowForm(f.decoration().asset()))
@@ -575,18 +583,21 @@ class BoardLegacyImportTest {
     }
 
     @Test
-    void roadLevelTwoTreesRenderOnlyOnLegacyBoardsWhileOtherScenerySelectsOnBoth() {
+    void roadLevelTwoTreesDecodeOnlyOnLegacyBoardsAndAConvertedBoardDrawsItsAlley() {
         for (boolean nativeBoard : new boolean[] { false, true }) {
             Board board = fixture();
             board.setNativeFormat(nativeBoard);
-            try (var artwork = new BoardArtwork()) {
-                assertEquals(!nativeBoard, !artwork.capture(board, ROAD, true).scenery().models().isEmpty(),
-                      "Road level 2 is legacy road-with-trees art, natively the Alley finish");
-                var tables = artwork.capture(board, TABLES, true);
-                assertEquals(List.of("scenery/saxarba/SMV_Fluff/FluffSystem-07-Garden-02-Table-1-03"), tables.scenery().models());
-                assertFalse(BoardFeatures.capture(board.getHex(TABLES), TABLES, Map.of(), Set.of(), board::getHex,
-                      tables.scenery()).isEmpty(), "A FLUFF token typed on a native board still renders");
-            }
+            assertEquals(!nativeBoard, !TilesetScenery.resolve(board.getHex(ROAD), nativeBoard).scenery().models().isEmpty(),
+                  "Road level 2 is legacy road-with-trees art, natively the Alley finish");
+            assertEquals(List.of("scenery/saxarba/SMV_Fluff/FluffSystem-07-Garden-02-Table-1-03"),
+                  TilesetScenery.resolve(board.getHex(TABLES), nativeBoard).scenery().models());
+            BoardSceneryLayouts.convert(board);
+            assertEquals(!nativeBoard, !board.getHex(ROAD).getDecorations().isEmpty(), "Only a legacy board's trees decode");
+            // Either way the drawn board shows the Alley and no rows: its trees are objects or were never there.
+            var road = BoardTiles.captureAll(board).get(ROAD.getX() * board.getHeight() + ROAD.getY());
+            assertEquals(BoardRoad.Kind.ALLEY, road.road());
+            assertTrue(road.features().stream().noneMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY
+                  || f.kind() == BoardScene.FeatureKind.TREE && f.decoration() == null));
         }
     }
 
@@ -608,7 +619,7 @@ class BoardLegacyImportTest {
 
     @Test
     void paintingAStampIsOneUndoStep() {
-        var session = new BoardEditorSession(BoardEditorBlueprint.get(), BoardSceneryLayouts.DECODER);
+        var session = new BoardEditorSession(BoardEditorBlueprint.get());
         Coords at = new Coords(2, 2);
         session.command(new BoardEditorSession.Command(BoardEditorSession.Action.ASSET, "stamp/roadside-trees"), null);
         session.pointer(at, 0, 0, false);

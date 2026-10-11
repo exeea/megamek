@@ -5,14 +5,25 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
+import megamek.client.ui.clientGUI.RecentBoardList;
+import megamek.common.Hex;
+import megamek.common.IndustrialElevator;
+import megamek.common.board.Board;
+import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
+import megamek.common.loaders.MapSettings;
+import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
+import megamek.utilities.BoardsTagger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -20,20 +31,7 @@ class BoardEditorSessionTest {
     @TempDir Path directory;
     private final Coords at = new Coords(1, 1);
 
-    @Test void classicNoOpStrokeKeepsTheDocumentCleanAndRedoAvailable() {
-        var session = session();
-        send(session, Action.ELEVATION, "", "2");
-        send(session, Action.UNDO, "", "");
-        assertFalse(session.dirty());
-        session.beginHexEdit(at);
-        session.finishClassicStroke();
-        assertFalse(session.dirty());
-        assertTrue(session.snapshot().canRedo());
-        send(session, Action.REDO, "", "");
-        assertEquals(2, session.board().getHex(at).getLevel());
-    }
-
-    @Test void classicBoardSettingsRemainUnsavedAcrossHexUndoAndSaveTogether() throws Exception {
+    @Test void boardSettingsRemainUnsavedAcrossHexUndoAndSaveTogether() throws Exception {
         var session = session();
         Path file = directory.resolve("classic-settings.board2");
         session.save(file);
@@ -47,6 +45,110 @@ class BoardEditorSessionTest {
         var loaded = BoardFile.read(file);
         assertEquals(session.board().getTags(), loaded.getTags());
         assertEquals(session.board().getRoadsAutoExit(), loaded.getRoadsAutoExit());
+    }
+
+    /**
+     * A car-park Fluff value typed in Edit becomes its objects and decal in the same undo step, its lane road joining the
+     * road beside it, and the token is gone (the document holds what its .board2 holds); Undo returns the hex as it was
+     * before the value was typed, and another edit of the hex never converts it again.
+     */
+    @Test void aFluffValueTypedInEditBecomesObjectsWithoutItsTokenInOneUndoStep() {
+        var session = session();
+        Coords north = at.translated(0);
+        session.board().setHex(north, new megamek.common.Hex(0, "road:1", ""));
+        var hexBefore = BoardFile.hexNode(session.board().getHex(at));
+        var northBefore = BoardFile.hexNode(session.board().getHex(north));
+        send(session, Action.TERRAIN, "fluff", "5");
+        var hex = session.board().getHex(at);
+        assertFalse(hex.containsTerrain(Terrains.FLUFF), "The objects stand for the token, as in the saved .board2");
+        assertTrue(hex.getDecorations().stream().anyMatch(o -> o.kind().equals("decal") && o.asset().startsWith("decal/car-park/")));
+        assertTrue(hex.getDecorations().stream().anyMatch(o -> o.kind().equals("prop")), "The parked cars");
+        assertTrue(hex.containsTerrain(Terrains.ROAD), "The car park's lane");
+        assertNotEquals(northBefore, BoardFile.hexNode(session.board().getHex(north)), "The road beside it is written out");
+        var converted = hex.getDecorations();
+
+        send(session, Action.UNDO, "", "");
+        assertEquals(hexBefore, BoardFile.hexNode(session.board().getHex(at)), "One undo step: no token, objects or lane");
+        assertEquals(northBefore, BoardFile.hexNode(session.board().getHex(north)), "and the neighbour as it was");
+        send(session, Action.REDO, "", "");
+        assertEquals(converted, session.board().getHex(at).getDecorations());
+        assertFalse(session.board().getHex(at).containsTerrain(Terrains.FLUFF), "Redo brings the objects, not the token");
+
+        send(session, Action.ELEVATION, "", "1");
+        send(session, Action.THEME, "", "snow");
+        assertEquals(converted, session.board().getHex(at).getDecorations(), "Other edits never convert the hex again");
+    }
+
+    /**
+     * The 2D Preview's BoardView follows the document only through the board and game events it listens to in a game, so
+     * every kind of edit announces each hex it changes, after its last change and on the thread that edits (the EDT): a
+     * paint stroke, a sculpt, an Edit-panel value, an object, Undo and Redo, an erase, the commit conversion of a typed
+     * Fluff value with its lane road, and a replaced document (New, Open).
+     */
+    @Test void everyEditAnnouncesTheHexesItChangesAsTheBoardViewListensForThem() throws Exception {
+        Path file = directory.resolve("announced.board2");
+        var task = new java.util.concurrent.FutureTask<Void>(() -> {
+            var session = session();
+            Map<Coords, Object> seen = new java.util.HashMap<>();
+            int[] replaced = { 0 };
+            session.board().addBoardListener(new megamek.common.event.board.BoardListenerAdapter() {
+                @Override public void boardChangedHex(megamek.common.event.board.BoardEvent event) {
+                    assertTrue(javax.swing.SwingUtilities.isEventDispatchThread());
+                    seen.put(event.getCoords(), BoardFile.hexNode(session.board().getHex(event.getCoords())));
+                }
+            });
+            session.game().addGameListener(new megamek.common.event.GameListenerAdapter() {
+                @Override public void gameBoardNew(megamek.common.event.board.GameBoardNewEvent event) {
+                    assertSame(session.board(), event.getNewBoard());
+                    replaced[0]++;
+                }
+            });
+            java.util.function.BiConsumer<Coords, String> announced = (hex, edit) ->
+                  assertEquals(BoardFile.hexNode(session.board().getHex(hex)), seen.get(hex), edit + " announces " + hex);
+            Coords painted = new Coords(4, 4), sculpted = new Coords(6, 4), parked = new Coords(2, 2);
+            send(session, Action.CHOOSE_BRUSH, "vegetation", "woods-1");
+            session.pointer(painted, 0, 0, false); session.finishStroke();
+            assertTrue(session.board().getHex(painted).containsTerrain(Terrains.WOODS));
+            announced.accept(painted, "A paint stroke");
+            send(session, Action.TOOL, "", "SCULPT");
+            session.pointer(sculpted, 0, 0, false); session.finishStroke();
+            assertEquals(1, session.board().getHex(sculpted).getLevel());
+            announced.accept(sculpted, "A sculpt");
+            send(session, Action.TOOL, "", "SELECT"); session.pointer(at, 0, 0, false); session.finishStroke();
+            send(session, Action.TERRAIN, "water", "1");
+            announced.accept(at, "An Edit-panel value");
+            send(session, Action.ASSET, "", "scenery/vehicles/car");
+            session.pointer(at, .1, -.1, false); session.finishStroke();
+            assertFalse(session.board().getHex(at).getDecorations().isEmpty());
+            announced.accept(at, "A placed object");
+            send(session, Action.UNDO, "", "");
+            announced.accept(at, "Undo");
+            send(session, Action.REDO, "", "");
+            announced.accept(at, "Redo");
+            send(session, Action.TOOL, "", "ERASE");
+            session.pointer(at, 0, 0, false); session.finishStroke();
+            assertTrue(session.board().getHex(at).getDecorations().isEmpty(), "Erasing with the car brush removes the car");
+            announced.accept(at, "An erase");
+            session.board().setHex(parked.translated(0), new megamek.common.Hex(0, "road:1", ""));
+            send(session, Action.TOOL, "", "SELECT"); session.pointer(parked, 0, 0, false); session.finishStroke();
+            send(session, Action.TERRAIN, "fluff", "5");
+            assertFalse(session.board().getHex(parked).containsTerrain(Terrains.FLUFF));
+            assertFalse(session.board().getHex(parked).getDecorations().isEmpty());
+            announced.accept(parked, "The commit conversion");
+            announced.accept(parked.translated(0), "The commit conversion's lane road");
+            session.save(file); // A clean document: New and Open ask nothing.
+            send(session, Action.NEW, "", "8x8");
+            assertEquals(1, replaced[0], "New is a new board of the game");
+            session.open(file);
+            assertEquals(2, replaced[0], "Open is a new board of the game");
+            send(session, Action.RESIZE, "", "1,1,1,1");
+            assertEquals(3, replaced[0], "A resize is a new board of the game");
+            send(session, Action.UNDO, "", "");
+            assertEquals(4, replaced[0], "So is its Undo");
+            return null;
+        });
+        javax.swing.SwingUtilities.invokeAndWait(task);
+        task.get();
     }
 
     private BoardEditorSession session() {
@@ -582,6 +684,55 @@ class BoardEditorSessionTest {
         assertEquals(2, placedObjects(session).size(), "A whole-group duplicate is one undo step");
     }
 
+    @Test void aGroupRepaintsEveryMemberInOneUndoStep() {
+        var session = session();
+        Coords east = new Coords(2, 1);
+        session.board().getHex(at).setDecorations(java.util.List.of(prop("a", -.2, .1).withGroup("g")));
+        session.board().getHex(east).setDecorations(java.util.List.of(prop("b", .1, -.1).withGroup("g")
+              .withColours(megamek.common.board.BoardDecoration.Colours.of(null, "#ffffff"))));
+        send(session, Action.SELECT_OBJECT, "g", "");
+        send(session, Action.GROUP_VALUE, "colour0", "#24407a");
+        assertEquals(java.util.List.of(java.util.List.of("#24407a"), java.util.Arrays.asList("#24407a", "#ffffff")),
+              java.util.stream.Stream.of("a", "b").map(id -> placedObjects(session).values().stream().filter(o -> o.id().equals(id))
+                    .findFirst().orElseThrow().colours().slots()).toList(), "Every member's slot, the other slots kept");
+        send(session, Action.UNDO, "", "");
+        assertTrue(placedObjects(session).values().stream().filter(o -> o.id().equals("a")).findFirst().orElseThrow()
+              .colours().slots().isEmpty());
+        assertFalse(session.snapshot().canUndo(), "A group repaint is one undo step");
+    }
+
+    /**
+     * A converted maglev train's group also holds its platform and the cars parked beside it: a colour chosen on the
+     * inspected train car repaints every vehicle of the train (cab and coupler too, other models), and neither the
+     * platform nor a parked car; chosen on a parked car, it repaints the cars alone.
+     */
+    @Test void aTrainGroupRepaintsItsVehiclesAndNotTheCarsParkedBesideIt() {
+        var session = session();
+        Coords east = new Coords(2, 1);
+        java.util.function.BiFunction<String, String, BoardDecoration> member = (id, asset) -> new BoardDecoration(id, "prop",
+              asset, null, 0, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0).withGroup("g");
+        session.board().getHex(at).setDecorations(List.of(member.apply("wagon", "scenery/maglev/wagon"),
+              member.apply("cab", "scenery/maglev/cab"), member.apply("coupler", megamek.common.board.RailRoute.COUPLER),
+              member.apply("platform", megamek.common.board.RailRoute.PLATFORM)));
+        var grey = BoardDecoration.Colours.of("#b8b8b8");
+        session.board().getHex(east).setDecorations(List.of(member.apply("car", "scenery/vehicles/car").withColours(grey),
+              member.apply("car-2", "scenery/vehicles/car")));
+        send(session, Action.SELECT_OBJECT, "g", "");
+        assertEquals("wagon", session.snapshot().object(), "The inspected member");
+        send(session, Action.GROUP_VALUE, "colour0", "#24407a");
+        Map<String, List<String>> slots = new java.util.HashMap<>();
+        placedObjects(session).values().forEach(object -> slots.put(object.id(), object.colours().slots()));
+        assertEquals(Map.of("wagon", List.of("#24407a"), "cab", List.of("#24407a"), "coupler", List.of("#24407a"),
+              "platform", List.of(), "car", List.of("#b8b8b8"), "car-2", List.of()), slots);
+        send(session, Action.CLEAR_SELECTION, "", "");
+        click(session, east, "car", false);
+        assertEquals(6, session.snapshot().selection().size(), "A click on a member selects its whole group");
+        send(session, Action.GROUP_VALUE, "colour0", "#ffffff");
+        placedObjects(session).values().forEach(object -> slots.put(object.id(), object.colours().slots()));
+        assertEquals(Map.of("wagon", List.of("#24407a"), "cab", List.of("#24407a"), "coupler", List.of("#24407a"),
+              "platform", List.of(), "car", List.of("#ffffff"), "car-2", List.of("#ffffff")), slots);
+    }
+
     @Test void groupingADrilledMemberWithALooseObjectSelectsAndTransformsTheWholeMergedGroup() {
         var session = session();
         Coords east = new Coords(2, 1);
@@ -678,13 +829,13 @@ class BoardEditorSessionTest {
         session.board().setHex(east, new megamek.common.Hex(0, "building:1:" + (1 << toward) + ";bldg_elev:1;bldg_cf:15", ""));
 
         send(session, Action.TERRAIN, "building", "2");
-        assertEquals(java.util.Set.of(at, east), session.snapshot().issues().stream().map(BoardEditorSession.Issue::coords)
+        assertEquals(java.util.Set.of(at, east), session.snapshot().issues().stream().map(megamek.common.board.BoardIssue::coords)
               .collect(java.util.stream.Collectors.toSet()), "The edited hex and its re-validated neighbour");
         assertTrue(session.snapshot().issues().stream().filter(issue -> issue.coords().equals(at)).findFirst().orElseThrow()
               .text().startsWith("Incomplete Building"), "The game's own rule text");
         send(session, Action.TERRAIN, "bldg_elev", "1");
         send(session, Action.TERRAIN, "bldg_cf", "40");
-        assertEquals(java.util.List.of(new BoardEditorSession.Issue(east, "",
+        assertEquals(java.util.List.of(new megamek.common.board.BoardIssue(east, "",
               "Building has an exit to a building of another Building Type (Light, Medium...).")), session.snapshot().issues(),
               "Completing the building leaves the neighbour's exit issue");
         var published = session.snapshot().issues();
@@ -692,7 +843,7 @@ class BoardEditorSessionTest {
         assertSame(published, session.snapshot().issues(), "Selection and other non-edits publish the same list");
 
         send(session, Action.UNDO, "", "");
-        assertEquals(java.util.Set.of(at, east), session.snapshot().issues().stream().map(BoardEditorSession.Issue::coords)
+        assertEquals(java.util.Set.of(at, east), session.snapshot().issues().stream().map(megamek.common.board.BoardIssue::coords)
               .collect(java.util.stream.Collectors.toSet()), "Undo re-validates");
         send(session, Action.UNDO, "", ""); send(session, Action.UNDO, "", "");
         assertTrue(session.snapshot().issues().isEmpty());
@@ -709,20 +860,25 @@ class BoardEditorSessionTest {
         assertTrue(session.snapshot().issues().stream().noneMatch(issue -> issue.coords().equals(deck)));
         send(session, Action.REMOVE_COMPONENT, "", "bridge");
         var issue = session.snapshot().issues().stream().filter(found -> found.coords().equals(deck)).findFirst().orElseThrow();
-        assertEquals(new BoardEditorSession.Issue(deck, tree, "Object on deck but no bridge"), issue);
+        assertEquals(new megamek.common.board.BoardIssue(deck, tree, "Object on deck but no bridge"), issue);
         send(session, Action.CLEAR_SELECTION, "", ""); send(session, Action.TOOL, "", "PAINT");
         send(session, Action.SELECT_AT, deck.getX() + "," + deck.getY(), issue.object());
         assertEquals(deck, session.snapshot().selected()); assertEquals(tree, session.snapshot().object());
         assertEquals(java.util.List.of(new BoardEditorSession.Selection(deck, tree)), session.snapshot().selection());
         assertEquals(BoardEditorSession.Tool.SELECT, session.snapshot().tool());
 
-        // Opening a document validates all of it: here an object whose art is missing.
+        // Opening a document validates all of it: here an object whose art is missing. Rail and maglev route markers
+        // have no model of their own (the route builder draws the track), so they are not missing art.
         var board = megamek.common.board.Board.createEmptyBoard(4, 4);
         board.getHex(2, 3).setDecorations(java.util.List.of(new megamek.common.board.BoardDecoration("gone", "prop", "scenery/no-such-art",
               null, 0, 0, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0)));
+        for (String route : java.util.List.of("scenery/rail/route", "scenery/maglev/route")) {
+            board.getHex(route.contains("rail") ? 1 : 0, 1).setDecorations(java.util.List.of(new megamek.common.board.BoardDecoration(
+                  route, "prop", route, null, 0, 0, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0)));
+        }
         Path file = directory.resolve("missing.board2"); BoardFile.save(board, file);
         session.open(file);
-        assertEquals(java.util.List.of(new BoardEditorSession.Issue(new Coords(2, 3), "gone", "Object art not found: scenery/no-such-art")),
+        assertEquals(java.util.List.of(new megamek.common.board.BoardIssue(new Coords(2, 3), "gone", "Object art not found: scenery/no-such-art")),
               session.snapshot().issues());
     }
 
@@ -985,5 +1141,560 @@ class BoardEditorSessionTest {
         send(session, Action.UNDO, "", "");
         send(session, Action.UNDO, "", "");
         for (Coords hex : java.util.List.of(centre, water, bridge, building)) { assertEquals(0, session.board().getHex(hex).getLevel()); }
+    }
+
+    /** Settings → Map → Arena: the tag that random map selection reads, not an undo step, saved with the board. */
+    @Test void arenaTogglesTheArenaTagMarksTheDocumentDirtyAndIsSaved() throws Exception {
+        var session = session();
+        Path file = directory.resolve("arena.board2");
+        session.save(file);
+        send(session, Action.BOARD, "arena", "true");
+        assertTrue(session.snapshot().arena());
+        assertTrue(session.dirty());
+        assertFalse(session.snapshot().canUndo(), "A board setting is its own undo, as in the old editor");
+        session.save(file);
+        assertTrue(BoardFile.metadata(file).tags().contains("Arena"));
+        send(session, Action.BOARD, "arena", "false");
+        assertFalse(session.snapshot().arena());
+        assertTrue(session.dirty());
+        session.save(file);
+        assertFalse(BoardFile.metadata(file).tags().contains("Arena"));
+    }
+
+    /** Manual tags are added and removed; Update automatic tags replaces only the "(Auto)" ones, by the tagger's rule. */
+    @Test void manualTagsStayWhileUpdateAutomaticTagsFollowsTheBoard() throws Exception {
+        var session = session();
+        session.save(directory.resolve("tags.board2"));
+        send(session, Action.BOARD, "tag", "  Hills of Home ");
+        assertEquals(List.of("Hills of Home"), session.snapshot().tags());
+        assertTrue(session.dirty());
+        send(session, Action.BOARD, "tag", "Woods (Auto)");
+        assertEquals(Messages.getString("BoardEditor.tagAutomatic"), session.snapshot().message());
+        assertEquals(List.of("Hills of Home"), session.snapshot().tags(), "Automatic tags come only from the tagger's rule");
+        session.board().addTag("Stale (Auto)");
+        send(session, Action.CHOOSE_BRUSH, "vegetation", "woods-2");
+        send(session, Action.BRUSH, "", "4");
+        session.pointer(new Coords(8, 8), 0, 0, false); session.finishStroke();
+        send(session, Action.BOARD, "autotags", "");
+        var expected = new java.util.TreeSet<>(BoardsTagger.tagsFor(session.board()));
+        expected.add("Hills of Home");
+        assertEquals(List.copyOf(expected), session.snapshot().tags(), "The stale automatic tag goes, the manual one stays");
+        send(session, Action.BOARD, "untag", "Hills of Home");
+        assertFalse(session.snapshot().tags().contains("Hills of Home"));
+        assertTrue(session.snapshot().tags().stream().allMatch(BoardsTagger::isAutoTag));
+    }
+
+    /**
+     * The Industrial elevator card paints a shaft from the surface that carries 100 t. Its bottom above its top breaks
+     * the shared rule: the editor refuses such a value, and a board that holds one anyway lists it; it saves (decision
+     * P), but a game's strict read refuses the file.
+     */
+    @Test void industrialElevatorCardAndTheSharedShaftRule() throws Exception {
+        var session = session();
+        send(session, Action.CHOOSE_BRUSH, "elevators", "industrial");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        Terrain shaft = session.board().getHex(at).getTerrain(Terrains.INDUSTRIAL_ELEVATOR);
+        assertEquals(0, shaft.getLevel());
+        assertEquals(0, IndustrialElevator.shaftTop(shaft.getExits()));
+        assertEquals(100, IndustrialElevator.capacityTons(shaft.getExits()));
+        send(session, Action.TOOL, "", "SELECT");
+        send(session, Action.TERRAIN, "industrial_elevator", "2");
+        assertTrue(session.snapshot().message().contains("shaft bottom (2) is above the shaft top (0)"), session.snapshot().message());
+        assertEquals(0, session.board().getHex(at).terrainLevel(Terrains.INDUSTRIAL_ELEVATOR));
+        send(session, Action.ELEVATOR, "top", "3");
+        send(session, Action.TERRAIN, "industrial_elevator", "2");
+        assertEquals(2, session.board().getHex(at).terrainLevel(Terrains.INDUSTRIAL_ELEVATOR));
+        send(session, Action.ELEVATOR, "top", "1");
+        assertEquals(3, IndustrialElevator.shaftTop(session.board().getHex(at).getTerrain(Terrains.INDUSTRIAL_ELEVATOR).getExits()),
+              "A top below the bottom is refused too");
+
+        Coords old = new Coords(5, 5);
+        session.board().setHex(old, new Hex(0, "industrial_elevator:3:266", ""));
+        session.validateAll();
+        assertTrue(session.snapshot().issues().stream().anyMatch(issue -> issue.coords().equals(old)
+              && issue.text().contains("shaft bottom (3) is above the shaft top (1)")), session.snapshot().issues().toString());
+        Path saved = directory.resolve("shaft.board2");
+        session.save(saved);
+        assertThrows(java.io.IOException.class, () -> BoardFile.read(saved));
+    }
+
+    /** The old editor's Flood: submerged hexes get water up to the surface, the rest stays; one Undo restores it all. */
+    @Test void floodSubmergesOnlyHexesBelowTheSurfaceInOneUndoStep() {
+        var session = session();
+        Coords low = new Coords(2, 2), wet = new Coords(4, 4), high = new Coords(6, 6);
+        session.board().setHex(low, new Hex(-2));
+        session.board().setHex(wet, new Hex(-1, "water:1", ""));
+        session.board().setHex(high, new Hex(1, "woods:1;foliage_elev:2", ""));
+        Map<Coords, Object> before = nodes(session, low, wet, high, at);
+        send(session, Action.FLOOD, "", "0");
+        assertEquals(0, session.board().getHex(low).getLevel());
+        assertEquals(2, session.board().getHex(low).terrainLevel(Terrains.WATER), "An L-2 hex becomes depth 2 at L0");
+        assertEquals(0, session.board().getHex(wet).getLevel());
+        assertEquals(2, session.board().getHex(wet).terrainLevel(Terrains.WATER), "Depth 1 at L-1 becomes depth 2");
+        assertEquals(before.get(high), BoardFile.hexNode(session.board().getHex(high)), "A hex above the surface stays");
+        assertEquals(before.get(at), BoardFile.hexNode(session.board().getHex(at)), "A hex at the surface stays");
+        send(session, Action.UNDO, "", "");
+        assertEquals(before, nodes(session, low, wet, high, at));
+        assertFalse(session.snapshot().canUndo(), "Flood was one undo step");
+    }
+
+    /**
+     * Flood with Remove clears the submerged hexes but keeps a bridge whose deck stays above the water (with the objects
+     * on its deck, its height now above the new surface) and the deployment zones, which are scenario data.
+     */
+    @Test void floodRemoveKeepsADeckAboveTheWaterAndTheDeploymentZones() {
+        var session = session();
+        Coords woods = new Coords(2, 2), building = new Coords(4, 4), bridge = new Coords(6, 6), sunk = new Coords(8, 8);
+        session.board().setHex(woods, new Hex(-1, "woods:1;foliage_elev:2;deployment_zone:0:5", ""));
+        session.board().setHex(building, new Hex(-1, "building:1;bldg_cf:15;bldg_elev:1", ""));
+        Hex deck = new Hex(-2, "bridge:1:9;bridge_cf:40;bridge_elev:3", "");
+        deck.setDecorations(List.of(prop("on-deck", 0, 0).transform(0, 0, 0, false, 1, BoardDecoration.Placement.surface("bridge", "deck", 0)),
+              prop("on-ground", .1, .1)));
+        session.board().setHex(bridge, deck);
+        session.board().setHex(sunk, new Hex(-3, "bridge:1:9;bridge_cf:40;bridge_elev:1", ""));
+        Map<Coords, Object> before = nodes(session, woods, building, bridge, sunk);
+        send(session, Action.FLOOD, "remove", "0");
+        Hex flooded = session.board().getHex(woods);
+        assertFalse(flooded.containsAnyTerrainOf(Terrains.WOODS, Terrains.FOLIAGE_ELEV));
+        assertEquals(1, flooded.terrainLevel(Terrains.WATER));
+        assertEquals(5, flooded.getTerrain(Terrains.DEPLOYMENT_ZONE).getExits(), "Zones 1 and 3 stay");
+        assertFalse(session.board().getHex(building).containsAnyTerrainOf(Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV));
+        Hex kept = session.board().getHex(bridge);
+        assertTrue(kept.containsTerrain(Terrains.BRIDGE));
+        assertEquals(1, kept.terrainLevel(Terrains.BRIDGE_ELEV), "The deck stays at L1, now one level above the surface");
+        assertEquals(List.of("on-deck"), kept.getDecorations().stream().map(BoardDecoration::id).toList());
+        assertFalse(session.board().getHex(sunk).containsTerrain(Terrains.BRIDGE), "A deck below the surface goes");
+        send(session, Action.UNDO, "", "");
+        assertEquals(before, nodes(session, woods, building, bridge, sunk));
+    }
+
+    /**
+     * Raise/Lower Board moves every hex and everything at a fixed level in it (the Solaris elevator's alternate level, an
+     * absolute route marker); relative heights stay and a manual cliff edge survives. Flatten puts every hex at L0.
+     */
+    @Test void boardLevelChangeMovesFixedLevelsAndFlattenLevelsTheBoard() {
+        var session = session();
+        send(session, Action.ELEVATION, "", "2");
+        send(session, Action.EDGE, "cliff_top", "0");
+        Coords building = new Coords(2, 2), water = new Coords(4, 4), elevator = new Coords(6, 6), route = new Coords(8, 8);
+        session.board().setHex(building, new Hex(1, "building:1;bldg_cf:15;bldg_elev:2", ""));
+        session.board().setHex(water, new Hex(0, "water:2", ""));
+        session.board().setHex(elevator, new Hex(0, "solaris_elevator:3:63", ""));
+        Hex routed = new Hex(0);
+        routed.setDecorations(List.of(new BoardDecoration("marker", "prop", megamek.common.board.RailRoute.Kind.MAGLEV.asset, null, 0, 0, 0,
+              false, 1, BoardDecoration.Placement.absolute(4), 0, false, 0, 0, null), prop("standing", .2, .2)));
+        session.board().setHex(route, routed);
+        Map<Coords, Object> before = nodes(session, building, water, elevator, route, at, new Coords(0, 0));
+        send(session, Action.BOARD_LEVEL, "by", "2");
+        assertEquals(2, session.board().getHex(0, 0).getLevel());
+        assertEquals(3, session.board().getHex(building).getLevel());
+        assertEquals(2, session.board().getHex(building).terrainLevel(Terrains.BLDG_ELEV), "Heights are relative");
+        assertEquals(2, session.board().getHex(water).terrainLevel(Terrains.WATER), "Depths are relative");
+        assertEquals(5, session.board().getHex(elevator).terrainLevel(Terrains.SOLARIS_ELEVATOR), "The alternate level is absolute");
+        var objects = session.board().getHex(route).getDecorations();
+        assertEquals(6, objects.getFirst().placement().level(), "An absolute marker at L4 moves to L6");
+        assertEquals(BoardDecoration.Placement.ground(), objects.get(1).placement(), "A surface prop keeps its placement");
+        assertEquals(1, session.board().getHex(at).getTerrain(Terrains.CLIFF_TOP).getExits(), "The manual cliff edge survives");
+        send(session, Action.BOARD_LEVEL, "to", "0");
+        for (int x = 0; x < session.board().getWidth(); x++) {
+            for (int y = 0; y < session.board().getHeight(); y++) { assertEquals(0, session.board().getHex(x, y).getLevel()); }
+        }
+        assertEquals(3, session.board().getHex(elevator).terrainLevel(Terrains.SOLARIS_ELEVATOR));
+        assertEquals(4, session.board().getHex(route).getDecorations().getFirst().placement().level());
+        send(session, Action.UNDO, "", "");
+        send(session, Action.UNDO, "", "");
+        assertEquals(before, nodes(session, building, water, elevator, route, at, new Coords(0, 0)), "Each was one undo step");
+    }
+
+    /** Whole-board Remove offers the components on the board and removes one everywhere; Clear blanks every hex. */
+    @Test void removeAndClearAreOneUndoStepEach() {
+        var session = session();
+        send(session, Action.CHOOSE_BRUSH, "vegetation", "woods-1");
+        send(session, Action.BRUSH, "", "3");
+        session.pointer(new Coords(5, 5), 0, 0, false); session.finishStroke();
+        send(session, Action.ASSET, "", "scenery/vehicles/car");
+        session.pointer(new Coords(9, 9), 0, 0, false); session.finishStroke();
+        send(session, Action.TOOL, "", "SELECT");
+        assertTrue(session.snapshot().boardComponents().contains("vegetation"));
+        Map<Coords, Object> before = nodes(session, new Coords(5, 5), new Coords(9, 9));
+        send(session, Action.REMOVE_COMPONENT, "board", "vegetation");
+        assertFalse(session.snapshot().boardComponents().contains("vegetation"));
+        assertFalse(session.board().getHex(5, 5).containsAnyTerrainOf(Terrains.WOODS, Terrains.FOLIAGE_ELEV));
+        assertEquals(1, session.board().getHex(9, 9).getDecorations().size(), "Remove keeps the objects");
+        send(session, Action.UNDO, "", "");
+        assertEquals(before, nodes(session, new Coords(5, 5), new Coords(9, 9)));
+        send(session, Action.CLEAR, "", "");
+        assertEquals(BoardFile.hexNode(new Hex(0)), BoardFile.hexNode(session.board().getHex(5, 5)));
+        assertTrue(session.board().getHex(9, 9).getDecorations().isEmpty());
+        assertTrue(session.snapshot().boardComponents().isEmpty());
+        send(session, Action.UNDO, "", "");
+        assertEquals(before, nodes(session, new Coords(5, 5), new Coords(9, 9)));
+    }
+
+    /** Exit Roads to Pavement: a road beside pavement loses its automatic exit, and the option is saved. */
+    @Test void exitRoadsToPavementChangesAutomaticRoadExitsAndIsSaved() throws Exception {
+        var session = session();
+        Coords road = new Coords(3, 3), pavement = road.translated(0);
+        session.board().setHex(road, new Hex(0, "road:1", ""));
+        session.board().setHex(pavement, new Hex(0, "pavement:1", ""));
+        assertTrue(session.board().getHex(road).containsTerrainExit(Terrains.ROAD, 0), "The road exits to the pavement");
+        send(session, Action.BOARD, "roads", "false");
+        assertFalse(session.snapshot().roadsAutoExit());
+        assertFalse(session.board().getHex(road).containsTerrainExit(Terrains.ROAD, 0));
+        assertTrue(session.dirty());
+        Path file = directory.resolve("roads.board2");
+        session.save(file);
+        assertTrue(Files.readString(file).contains("\"exitRoadsToPavement\":false"));
+        assertFalse(BoardFile.read(file).getRoadsAutoExit());
+    }
+
+    /** The user's own Open (a Recent Boards entry) and Save add the file to the launcher's Recent Boards list. */
+    @Test void openAndSaveAddTheFileToRecentBoards() throws Exception {
+        Path list = new java.io.File(megamek.common.Configuration.configDir(), "recent_boards.yml").toPath();
+        byte[] kept = Files.exists(list) ? Files.readAllBytes(list) : null;
+        try {
+            var session = session();
+            Path first = directory.resolve("first.board2"), second = directory.resolve("second.board2");
+            session.save(first);
+            send(session, Action.OPEN, "", first.toString());
+            assertEquals(first.toAbsolutePath().normalize().toString(), RecentBoardList.getRecentBoards().getLast());
+            session.save(second);
+            send(session, Action.SAVE, "", "");
+            assertEquals(second.toAbsolutePath().normalize().toString(), RecentBoardList.getRecentBoards().getLast());
+        } finally {
+            // The developer's own list stays as it was.
+            if (kept == null) { Files.deleteIfExists(list); } else { Files.write(list, kept); }
+        }
+    }
+
+    /** A new board's .board2 gets the license header when the Client Settings ask for it; an imported one keeps its own. */
+    @Test void newBoardsGetTheLicenseHeaderAndImportsKeepTheirOwn() throws Exception {
+        var preferences = megamek.client.ui.clientGUI.GUIPreferences.getInstance();
+        boolean include = preferences.getBoardSaveIncludeLicense();
+        try {
+            preferences.setValue(megamek.client.ui.clientGUI.GUIPreferences.BOARD_SAVE_INCLUDE_LICENSE, true);
+            var session = session();
+            Path created = directory.resolve("created.board2");
+            session.save(created);
+            assertTrue(BoardFile.read(created).getSourceHeader().startsWith("# MegaMek Data (C) "
+                  + java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) + " by The MegaMek Team"));
+            Path legacy = directory.resolve("Own.board");
+            Files.writeString(legacy, "# My own map\r\nsize 2 2\r\nhex 0101 0 \"\" \"\"\r\nhex 0201 0 \"\" \"\"\r\n"
+                  + "hex 0102 0 \"\" \"\"\r\nhex 0202 0 \"\" \"\"\r\nend\r\n");
+            session.open(legacy);
+            Path imported = directory.resolve("Own.board2");
+            session.save(imported);
+            assertEquals("# My own map\r\n", BoardFile.read(imported).getSourceHeader());
+        } finally {
+            preferences.setValue(megamek.client.ui.clientGUI.GUIPreferences.BOARD_SAVE_INCLUDE_LICENSE, include);
+        }
+    }
+
+    /**
+     * The Deployment zone card paints a real zone (zone 1 by default): Paint adds its zone to every footprint hex and
+     * keeps their other zones, Erase removes only that zone, and the terrain goes with the last one. One undo step per
+     * stroke, and the game reads the zones (Board#getCustomDeploymentZone) from the saved file.
+     */
+    @Test void deploymentZoneCardAddsAndErasesOnlyItsZone() throws Exception {
+        var session = session();
+        Coords centre = new Coords(5, 5);
+        send(session, Action.CHOOSE_BRUSH, "scenario", "deployment");
+        assertEquals(List.of(1), Board.exitsAsIntList(session.snapshot().activeBrush().property("deployment_zone").exits()));
+        send(session, Action.BRUSH, "", "2");
+        send(session, Action.BRUSH_VALUE, "zone", "3");
+        session.pointer(centre, 0, 0, false); session.finishStroke();
+        var footprint = Set.copyOf(session.brush(centre));
+        assertEquals(7, footprint.size());
+        Path file = directory.resolve("zones.board2");
+        session.save(file);
+        assertEquals(footprint, BoardFile.read(file).getCustomDeploymentZone(3));
+        send(session, Action.BRUSH, "", "1");
+        send(session, Action.BRUSH_VALUE, "zone", "5");
+        session.pointer(centre, 0, 0, false); session.finishStroke();
+        assertEquals(List.of(3, 5), zones(session, centre));
+        assertEquals(List.of(3), zones(session, centre.translated(0)), "A neighbour keeps its own zone");
+        send(session, Action.TOOL, "", "ERASE");
+        send(session, Action.BRUSH_VALUE, "zone", "3");
+        session.pointer(centre, 0, 0, false); session.finishStroke();
+        assertEquals(List.of(5), zones(session, centre));
+        send(session, Action.BRUSH_VALUE, "zone", "5");
+        session.pointer(centre, 0, 0, false); session.finishStroke();
+        assertFalse(session.board().getHex(centre).containsTerrain(Terrains.DEPLOYMENT_ZONE), "The last zone takes the terrain");
+        assertEquals(List.of(3), zones(session, centre.translated(0)));
+        for (int step = 0; step < 3; step++) { send(session, Action.UNDO, "", ""); }
+        assertEquals(List.of(3), zones(session, centre), "Each stroke is one undo step");
+        send(session, Action.UNDO, "", "");
+        assertTrue(footprint.stream().noneMatch(hex -> session.board().getHex(hex).containsTerrain(Terrains.DEPLOYMENT_ZONE)));
+    }
+
+    /** Edit's Zone IDs: 1 to 31 as the game reads them; out-of-range IDs are refused and an empty list removes the zone. */
+    @Test void zoneIdsOfTheEditPanelRoundTripAndRefuseOtherIds() throws Exception {
+        var session = session();
+        send(session, Action.TERRAIN, "deployment_zone", "1");
+        Terrain added = session.board().getHex(at).getTerrain(Terrains.DEPLOYMENT_ZONE);
+        assertEquals(List.of(1), Board.exitsAsIntList(added.getExits()), "Add property gives zone 1");
+        assertTrue(added.hasExitsSpecified(), "Specified, so the board never derives the IDs from neighbours");
+        assertEquals(0, added.getLevel());
+        send(session, Action.ZONES, "", "1, 31");
+        Path file = directory.resolve("zone-ids.board2");
+        session.save(file);
+        assertTrue(Files.readString(file).contains("deployment_zone:0:1073741825"));
+        Board read = BoardFile.read(file);
+        assertEquals(Set.of(at), read.getCustomDeploymentZone(1));
+        assertEquals(Set.of(at), read.getCustomDeploymentZone(31));
+        for (String refused : List.of("0", "32", "3, 40", "1, a")) {
+            send(session, Action.ZONES, "", refused);
+            assertEquals(Messages.getString("BoardEditor.deploymentZoneRange", 31), session.snapshot().message(), refused);
+            assertEquals(List.of(1, 31), zones(session, at));
+        }
+        assertEquals("1, 31", BoardEditorSession.zoneIds(session.board().getHex(at).getTerrain(Terrains.DEPLOYMENT_ZONE).getExits()));
+        send(session, Action.ZONES, "", "");
+        assertFalse(session.board().getHex(at).containsTerrain(Terrains.DEPLOYMENT_ZONE));
+    }
+
+    /**
+     * Resize grows or cuts each edge in one undo step: every hex keeps its terrain and its objects with their groups, the
+     * board its settings, notes and Save's file, and the issues follow their hexes. A board setting changed after the
+     * resize stays when the resize is undone or redone.
+     */
+    @Test void resizeIsOneUndoStepThatKeepsTheBoardsContentAndSettings() throws Exception {
+        var session = session();
+        var ground = BoardDecoration.Placement.ground();
+        Coords other = new Coords(3, 2), broken = new Coords(6, 6);
+        session.board().setHex(at, new Hex(2, "woods:1;foliage_elev:2", ""));
+        session.board().getHex(at).setDecorations(List.of(
+              new BoardDecoration("car", "prop", "scenery/vehicles/car", null, 0, 0, 0, false, 1, ground, 0).withGroup("g")));
+        session.board().getHex(other).setDecorations(List.of(
+              new BoardDecoration("van", "prop", "scenery/vehicles/car", null, .2, 0, 0, false, 1, ground, 0).withGroup("g")));
+        session.board().setHex(broken, new Hex(0, "industrial_elevator:3:266", ""));
+        session.board().setDescription("Ridge");
+        session.board().setAnnotations(other, List.of("Note"));
+        send(session, Action.BOARD, "arena", "true");
+        send(session, Action.BOARD, "roads", "false");
+        session.validateAll();
+        Path file = directory.resolve("resize.board2");
+        session.save(file);
+        var hex = BoardFile.hexNode(session.board().getHex(at));
+        var van = BoardFile.hexNode(session.board().getHex(other));
+
+        send(session, Action.RESIZE, "", "2,1,1,3");
+        assertEquals(Messages.getString("BoardEditor.resized", 20, 20), session.snapshot().message());
+        assertEquals(20, session.board().getWidth());
+        assertEquals(20, session.board().getHeight());
+        assertEquals(new Coords(4, 4), megamek.common.util.BoardUtilities.resized(at, 2, 3), "Odd column 1 also moves a row down");
+        assertEquals(hex, BoardFile.hexNode(session.board().getHex(new Coords(4, 4))));
+        assertEquals(van, BoardFile.hexNode(session.board().getHex(megamek.common.util.BoardUtilities.resized(other, 2, 3))));
+        assertTrue(session.snapshot().arena());
+        assertFalse(session.board().getRoadsAutoExit());
+        assertEquals("Ridge", session.board().getDescription());
+        assertEquals(List.of("Note"), List.copyOf(session.board().getAnnotations(megamek.common.util.BoardUtilities.resized(other, 2, 3))));
+        Coords movedIssue = megamek.common.util.BoardUtilities.resized(broken, 2, 3);
+        assertTrue(session.snapshot().issues().stream().anyMatch(issue -> issue.coords().equals(movedIssue)), session.snapshot().issues().toString());
+        assertEquals(file, session.path());
+        assertTrue(session.dirty());
+
+        send(session, Action.BOARD, "tag", "Later");
+        send(session, Action.UNDO, "", "");
+        assertEquals(16, session.board().getWidth());
+        assertEquals(17, session.board().getHeight());
+        assertEquals(hex, BoardFile.hexNode(session.board().getHex(at)));
+        assertTrue(session.snapshot().issues().stream().anyMatch(issue -> issue.coords().equals(broken)));
+        assertTrue(session.snapshot().tags().contains("Later"), "A board setting is no undo step");
+        assertTrue(session.snapshot().arena());
+        send(session, Action.REDO, "", "");
+        assertEquals(20, session.board().getWidth());
+        assertEquals(hex, BoardFile.hexNode(session.board().getHex(new Coords(4, 4))));
+        assertTrue(session.snapshot().tags().contains("Later"));
+
+        send(session, Action.RESIZE, "", "-1,0,0,0");
+        assertEquals(19, session.board().getHeight());
+        assertEquals(hex, BoardFile.hexNode(session.board().getHex(new Coords(4, 3))), "Cutting the north edge moves the rest up");
+        send(session, Action.RESIZE, "", "0,-20,0,0");
+        assertEquals(Messages.getString("BoardEditor.resizeInvalid"), session.snapshot().message());
+        assertEquals(20, session.board().getWidth());
+    }
+
+    /** Random map: the generator's board becomes the document through New's path, of the chosen size and saved state. */
+    @Test void aRandomBoardBecomesTheDocumentAsNewDoes() {
+        var session = session();
+        send(session, Action.ELEVATION, "", "3");
+        var settings = MapSettings.getInstance();
+        settings.setBoardSize(12, 14);
+        session.newRandom(settings);
+        assertEquals(12, session.board().getWidth());
+        assertEquals(14, session.board().getHeight());
+        assertNull(session.path());
+        assertFalse(session.dirty());
+        assertFalse(session.snapshot().canUndo());
+        assertTrue(session.board().isNativeFormat(), "Converted on the way in, as every editor document");
+        assertEquals(Messages.getString("BoardEditor.randomBoardDone", 12, 14), session.snapshot().message());
+    }
+
+    /**
+     * Decision P: a board with a rules error saves, the editor reopens it with the error in its issues list, and every
+     * other reader refuses it, as it refuses the same error in a legacy board; the lobby's thumbnails, which continue on
+     * errors for a legacy board, list the errors of a .board2 the same way.
+     */
+    @Test void aBoardWithRulesErrorsSavesReopensInTheEditorAndGamesRefuseIt() throws Exception {
+        var session = session();
+        Coords broken = new Coords(5, 5);
+        session.board().setHex(broken, new Hex(0, "industrial_elevator:3:266", ""));
+        session.validateAll();
+        Path file = directory.resolve("broken.board2");
+        session.save(file);
+        assertFalse(session.dirty());
+        var reopened = new BoardEditorSession();
+        reopened.open(file);
+        assertEquals(file, reopened.path());
+        assertTrue(reopened.snapshot().issues().stream().anyMatch(issue -> issue.coords().equals(broken) && issue.object().isEmpty()
+              && issue.text().contains("shaft bottom (3) is above the shaft top (1)")), reopened.snapshot().issues().toString());
+        assertTrue(reopened.snapshot().message().endsWith(Messages.getString("BoardEditor.rulesErrors", 1)), reopened.snapshot().message());
+        Path legacy = directory.resolve("broken.board");
+        Files.writeString(legacy, "size 1 1\r\nhex 0101 0 \"industrial_elevator:3:266\" \"\"\r\nend\r\n");
+        for (Path refused : List.of(file, legacy)) {
+            assertThrows(java.io.IOException.class, () -> BoardFile.read(refused));
+            assertThrows(IllegalArgumentException.class, () -> BoardFile.loadSheet(refused.toFile(), false, true),
+                  "A game, the lobby's preview and the map preview load sheets this way");
+            List<String> errors = new java.util.ArrayList<>();
+            Board thumbnail = new Board();
+            try (var stream = Files.newInputStream(refused)) { thumbnail.load(stream, errors, true); }
+            assertTrue(thumbnail.getWidth() > 0 && !errors.isEmpty(), refused + ": " + errors);
+        }
+        // Random-map selection skips such a board (its strict read refuses it) instead of failing the lobby or the game.
+        var boards = megamek.common.Configuration.boardsDir();
+        try {
+            megamek.common.Configuration.setBoardsDir(directory.toFile());
+            MapSettings settings = MapSettings.getInstance();
+            settings.setBoardsAvailableVector(List.of(MapSettings.BOARD_GENERATED, MapSettings.BOARD_RANDOM,
+                  MapSettings.BOARD_SURPRISE, file.getFileName().toString()));
+            settings.setBoardsSelectedVector(List.of(MapSettings.BOARD_RANDOM));
+            settings.replaceBoardWithRandom(MapSettings.BOARD_RANDOM);
+            assertTrue(settings.getBoardsSelectedVector().getFirst().endsWith(MapSettings.BOARD_GENERATED),
+                  settings.getBoardsSelectedVector().toString());
+            assertFalse(settings.getBoardsAvailableVector().contains(file.getFileName().toString()));
+        } finally {
+            megamek.common.Configuration.setBoardsDir(boards);
+        }
+    }
+
+    /** Save As Image writes the old editor's printable board: one 84 × 72 tile of 2D tileset art per hex. */
+    @Test void saveAsImageWritesThePrintableBoard() throws Exception {
+        var session = session();
+        send(session, Action.NEW, "", "5x4");
+        session.board().setHex(new Coords(2, 1), new Hex(0, "woods:2", ""));
+        Path file = directory.resolve("board.png");
+        session.saveImage(file);
+        var image = javax.imageio.ImageIO.read(file.toFile());
+        assertEquals(5 * 84 * 3 / 4 + 84 / 4, image.getWidth());
+        assertEquals(4 * 72 + 72 / 2, image.getHeight());
+        // The centres of hex 0101 (clear) and of hex 0302 (heavy woods; an even column starts at its row's top).
+        assertNotEquals(image.getRGB(42, 36), image.getRGB(2 * 63 + 42, 72 + 36), "The tileset art is drawn");
+        assertTrue(session.snapshot().message().contains("board.png"), session.snapshot().message());
+    }
+
+    /**
+     * Only overwrite clear hexes (the old editor's brush option): Paint and Sculpt leave every hex that holds terrain,
+     * the brush preview shows only the hexes they change, and Erase is not filtered.
+     */
+    @Test void onlyOverwriteClearHexesLeavesHexesWithTerrainToPaintAndSculpt() {
+        var session = session();
+        Coords centre = new Coords(5, 5), building = centre.translated(0), water = centre.translated(3);
+        session.board().setHex(building, new Hex(0, "building:2;bldg_cf:40;bldg_elev:2", ""));
+        session.board().setHex(water, new Hex(0, "water:1", ""));
+        send(session, Action.CHOOSE_BRUSH, "vegetation", "woods-1");
+        send(session, Action.BRUSH, "", "2");
+        assertEquals(7, session.brush(centre).size());
+        send(session, Action.BRUSH_VALUE, "clearOnly", "true");
+        assertTrue(session.snapshot().activeBrush().clearOnly());
+        assertEquals(5, session.brush(centre).size(), "The preview leaves out the building and the water");
+        session.pointer(centre, 0, 0, false); session.finishStroke();
+        assertTrue(session.board().getHex(centre).containsTerrain(Terrains.WOODS));
+        assertTrue(session.board().getHex(centre.translated(1)).containsTerrain(Terrains.WOODS));
+        assertFalse(session.board().getHex(building).containsTerrain(Terrains.WOODS));
+        assertFalse(session.board().getHex(water).containsTerrain(Terrains.WOODS));
+
+        // Erase is not filtered: the woods hexes hold terrain, and the brush takes their woods.
+        send(session, Action.TOOL, "", "ERASE");
+        assertEquals(7, session.brush(centre).size());
+        session.pointer(centre, 0, 0, false); session.finishStroke();
+        assertFalse(session.board().getHex(centre).containsTerrain(Terrains.WOODS));
+
+        // Sculpt with Slope steps the clear neighbours of a raised hex, but not the building beside it.
+        Coords hill = new Coords(2, 2), house = hill.translated(1);
+        session.board().setHex(house, new Hex(0, "building:2;bldg_cf:40;bldg_elev:2", ""));
+        send(session, Action.TOOL, "", "SCULPT");
+        send(session, Action.BRUSH, "", "1");
+        for (int stroke = 0; stroke < 2; stroke++) { session.pointer(hill, 0, 0, false); session.finishStroke(); }
+        assertEquals(2, session.board().getHex(hill).getLevel());
+        assertEquals(1, session.board().getHex(hill.translated(4)).getLevel(), "Slope steps a clear neighbour");
+        assertEquals(0, session.board().getHex(house).getLevel(), "and leaves the building's level");
+        assertEquals(List.of(), session.brush(house));
+        send(session, Action.BRUSH_VALUE, "clearOnly", "false");
+        assertEquals(List.of(house), session.brush(house), "Switched off, the building's hex is in the footprint again");
+    }
+
+    /**
+     * Copy also puts the hex as text on the clipboard, so another window's session pastes it with its level, theme,
+     * terrain and objects (as new objects); the old editor's text format pastes too, and text that is no hex leaves
+     * Paste with the session's own copy.
+     */
+    @Test void copiedHexesTravelAsTextBetweenWindowsAndTheOldTextFormatPastes() throws Exception {
+        var clipboard = new java.awt.datatransfer.Clipboard("test");
+        var from = session();
+        var to = session();
+        from.textClipboard(clipboard); to.textClipboard(clipboard);
+        Hex hex = new Hex(2, "woods:1;foliage_elev:2", "snow");
+        hex.setDecorations(List.of(prop("bench", .1, .2)));
+        from.board().setHex(at, hex);
+        send(from, Action.COPY, "", "");
+        assertTrue(text(clipboard).startsWith("MegaMek Hex2"), text(clipboard));
+
+        Coords target = new Coords(3, 3);
+        to.pointer(target, 0, 0, false);
+        send(to, Action.PASTE, "", "");
+        Hex pasted = to.board().getHex(target);
+        assertEquals(2, pasted.getLevel());
+        assertEquals("snow", pasted.getTheme());
+        assertEquals(1, pasted.terrainLevel(Terrains.WOODS));
+        assertEquals(2, pasted.terrainLevel(Terrains.FOLIAGE_ELEV));
+        assertEquals(1, pasted.getDecorations().size());
+        assertEquals("scenery/vehicles/car", pasted.getDecorations().getFirst().asset());
+        assertNotEquals("bench", pasted.getDecorations().getFirst().id(), "A pasted object is a new object");
+
+        // The old editor's text, as a text editor holds it: a hex without a theme says "null".
+        clipboard.setContents(new java.awt.datatransfer.StringSelection(
+              "MegaMek Hex///Level###-1///Theme###null///Terrain###water:1"), null);
+        send(to, Action.PASTE, "", "");
+        pasted = to.board().getHex(target);
+        assertEquals(-1, pasted.getLevel());
+        assertEquals(1, pasted.terrainLevel(Terrains.WATER));
+        assertNull(pasted.getTheme());
+        assertTrue(pasted.getDecorations().isEmpty());
+
+        // Other text: the copying session pastes its own copy; a session without one has nothing to paste.
+        clipboard.setContents(new java.awt.datatransfer.StringSelection("not a hex"), null);
+        Coords other = new Coords(4, 4);
+        from.pointer(other, 0, 0, false);
+        send(from, Action.PASTE, "", "");
+        assertEquals("snow", from.board().getHex(other).getTheme());
+        var fresh = session();
+        fresh.textClipboard(clipboard);
+        send(fresh, Action.PASTE, "", "");
+        assertEquals("Copy a hex first", fresh.snapshot().message());
+    }
+
+    private static String text(java.awt.datatransfer.Clipboard clipboard) throws Exception {
+        return (String) clipboard.getData(java.awt.datatransfer.DataFlavor.stringFlavor);
+    }
+
+    private static List<Integer> zones(BoardEditorSession session, Coords hex) {
+        Terrain zone = session.board().getHex(hex).getTerrain(Terrains.DEPLOYMENT_ZONE);
+        return zone == null ? List.of() : Board.exitsAsIntList(zone.getExits());
+    }
+
+    private static Map<Coords, Object> nodes(BoardEditorSession session, Coords... hexes) {
+        Map<Coords, Object> nodes = new java.util.LinkedHashMap<>();
+        for (Coords hex : hexes) { nodes.put(hex, BoardFile.hexNode(session.board().getHex(hex))); }
+        return nodes;
     }
 }

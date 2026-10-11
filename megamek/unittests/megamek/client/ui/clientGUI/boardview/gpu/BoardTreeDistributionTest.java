@@ -13,10 +13,11 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
 import megamek.common.Hex;
+import megamek.common.board.BoardTreeDistribution;
 import megamek.common.board.Coords;
+import megamek.common.board.TilesetScenery;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -27,7 +28,7 @@ class BoardTreeDistributionTest {
           "pine-broad", "pine-slender", "pine-layered");
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, boolean natural) {
-        return BoardFeatures.capture(hex, coords, Map.of(), Set.of(), c -> null, BoardArtwork.Scenery.EMPTY, natural)
+        return BoardFeatures.capture(hex, coords, Map.of(), Set.of(), c -> null, TilesetScenery.Scenery.EMPTY, natural)
               .stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
     }
 

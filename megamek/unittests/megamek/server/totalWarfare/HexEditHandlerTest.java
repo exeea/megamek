@@ -47,6 +47,7 @@ import java.util.List;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.board.HexEditSpec;
 import megamek.common.game.Game;
@@ -123,6 +124,31 @@ class HexEditHandlerTest {
 
         assertNull(refusal, "flooding an empty hex should be allowed");
         assertEquals(2, board.getHex(BARE_HEX).depth(), "the hex should now be two levels deep");
+    }
+
+    /**
+     * Batch 10 (user, b10 question 2): a legacy art token a gamemaster types keeps drawing in 3D through its design, which
+     * its own helper gives it; retyping the token changes the design and removing it takes the design off. The token stays
+     * for the 2D board, and the 3D board's hex (without the taken token) holds the design.
+     */
+    @Test
+    void aTypedArtTokenGetsItsDesignAndLosesItWithTheToken() {
+        int boardId = board.getBoardId();
+        assertNull(hexEditHandler.setTerrain(BARE_HEX, boardId, Terrains.ROUGH, 1, GAMEMASTER));
+        assertNull(hexEditHandler.setTerrain(BARE_HEX, boardId, Terrains.FLUFF, 1, GAMEMASTER));
+        Hex hex = board.getHex(BARE_HEX);
+        assertEquals(1, hex.terrainLevel(Terrains.FLUFF), "the 2D board's token stays");
+        assertEquals("rough/obstacles", hex.getAppearance().get("rough").variant());
+        assertEquals(hex.getAppearance(), BoardSceneryLayouts.withoutTakenTokens(hex).getAppearance(),
+              "the 3D board draws the design");
+
+        assertNull(hexEditHandler.setTerrain(BARE_HEX, boardId, Terrains.FLUFF, 2, GAMEMASTER));
+        assertEquals("rough/felled-trees", board.getHex(BARE_HEX).getAppearance().get("rough").variant(),
+              "a retyped token changes its design");
+
+        assertNull(hexEditHandler.setTerrain(BARE_HEX, boardId, Terrains.FLUFF, HexEditHandler.REMOVE_TERRAIN_LEVEL,
+              GAMEMASTER));
+        assertNull(board.getHex(BARE_HEX).getAppearance().get("rough"), "the design goes with its token");
     }
 
     @Test

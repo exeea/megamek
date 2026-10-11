@@ -25,7 +25,10 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Compositions retain their support plane and local transforms while sharing ordinary tree and prop instances. */
+/**
+ * Converted compositions (legacy art the conversion turned into a group of placed objects) keep their support plane and
+ * local transforms while sharing ordinary tree and prop instances.
+ */
 @Tag("on-demand")
 class GpuSceneryTreeSmokeTest {
     @Test
@@ -54,13 +57,17 @@ class GpuSceneryTreeSmokeTest {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     var coords = new Coords(2, 2);
+                    int trees = 0;
                     for (int index = 0; index < scenes.size(); index++) {
                         var scene = scenes.get(index);
-                        var roots = scene.tile(coords).features().stream().filter(BoardScene.Feature::authoredPlacement).toList();
+                        // The converted composition's objects, as the board stores them.
+                        var roots = scene.tile(coords).features().stream().filter(f -> f.decoration() != null).toList();
                         assertTrue(!roots.isEmpty(), samples.get(index).name());
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         var installed = new ArrayList<ModelInstance>();
+                        // The tree-stand species of each installed object (null for other props).
+                        var treeAssets = new ArrayList<Object>();
                         for (Object chunk : (List<?>) field(terrain, "chunks")) {
                             for (Object prop : (List<?>) field(chunk, "props")) {
                                 var instance = (ModelInstance) field(prop, "instance");
@@ -69,6 +76,7 @@ class GpuSceneryTreeSmokeTest {
                                       f.asset().equals(treeAsset) || instance.nodes.first().id.equals(
                                             f.asset().substring(f.asset().lastIndexOf('/') + 1)))) {
                                     installed.add(instance);
+                                    treeAssets.add(treeAsset);
                                 }
                             }
                         }
@@ -80,16 +88,15 @@ class GpuSceneryTreeSmokeTest {
                             var at = instance.transform.getTranslation(new Vector3());
                             assertEquals(BoardGeometry.centerX(coords) + root.x() * BoardGeometry.hexScale(), at.x, .001f);
                             assertEquals(BoardGeometry.centerY(coords) + root.y() * BoardGeometry.hexScale(), at.y, .001f);
-                            float localBase = at.z - root.elevation() * BoardGeometry.MODEL_LEVEL_HEIGHT * BoardGeometry.hexScale();
-                            if (!Float.isFinite(support)) { support = localBase; }
-                            assertEquals(support, localBase, .001f, "Components retain the same authored support plane");
+                            // Every object of a converted composition stands on the hex's one support.
+                            if (!Float.isFinite(support)) { support = at.z; }
+                            assertEquals(support, at.z, .001f, "Components retain the same support plane");
                             var scale = instance.transform.getScale(new Vector3());
                             assertEquals(root.scale() * BoardGeometry.hexScale(), scale.z, .0001f);
                             assertEquals(scale.x, scale.z, .0001f, "Composed meshes retain their proportions");
                             var bounds = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
-                            if (root.kind() == BoardScene.FeatureKind.TREE) {
-                                assertEquals(root.height() * BoardGeometry.MODEL_LEVEL_HEIGHT * BoardGeometry.hexScale(),
-                                      bounds.getDepth(), .002f);
+                            if (root.asset().equals(treeAssets.get(i))) {
+                                trees++;
                                 var canopy = instance.getMaterial("canopy-cutout");
                                 assertNotNull(canopy);
                                 assertTrue(canopy.has(Attribute.getAttributeType("boardFoliage")));
@@ -113,6 +120,7 @@ class GpuSceneryTreeSmokeTest {
                                   new Ray(new Vector3(center.x, center.y, 1000), new Vector3(0, 0, -1))));
                         }
                     }
+                    assertTrue(trees > 0, "Converted trees stand in the tree stand with their foliage materials");
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally { frame.dispose(); terrain.dispose(); Gdx.app.exit(); }

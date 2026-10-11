@@ -54,4 +54,4 @@ rules type with ordinary lake ice.
 
 The 3D editor receives explicit annotations for hidden terrain flags through
 `BoardEditorTerrain`. Gameplay views do not receive those authoring markers.
-See [map editing](map-editor-3d.md) for marker selection and edit routing.
+See [map markers](map-editor-3d.md) for these annotations and [the 3D board editor](3d-board-editor.md) for editing.

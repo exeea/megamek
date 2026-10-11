@@ -33,7 +33,6 @@
 package megamek.common.moves;
 
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 import megamek.common.annotations.Nullable;
@@ -169,22 +168,10 @@ public final class MountPathHelper {
         while ((trimmedPath.length() > 0) && transportHexes.contains(trimmedPath.getFinalCoords())) {
             trimmedPath.removeLastStep();
         }
-        Coords mountFromHex = trimmedPath.getFinalCoords();
-        if (transportHexes.contains(mountFromHex)) {
+        if (transportHexes.contains(trimmedPath.getFinalCoords())) {
             return null;
         }
-
-        int mountFromLevel = trimmedPath.getFinalElevation()
-              + game.getBoard(boardId).getHex(mountFromHex).getLevel();
-        List<Entity> mountableUnits = Compute.getMountableUnits(movingUnit, mountFromHex, boardId, mountFromLevel,
-              game);
-        Entity clickedTransport = null;
-        for (Entity mountableUnit : mountableUnits) {
-            if (mountableUnit.getOccupiedCoords().contains(clickedHex)) {
-                clickedTransport = mountableUnit;
-                break;
-            }
-        }
+        Entity clickedTransport = mountableTransport(trimmedPath, clickedHex, boardId, game);
         if (clickedTransport == null) {
             return null;
         }
@@ -193,5 +180,28 @@ public final class MountPathHelper {
             movePath.removeLastStep();
         }
         return clickedTransport;
+    }
+
+    /**
+     * Returns the transport standing in the clicked hex that the moving unit can mount from where the path ends, as
+     * {@link #trimToMountableTransport} looks for it once the path is trimmed.
+     *
+     * @param movePath   the path whose end the unit would mount from
+     * @param clickedHex the hex the player clicked or dragged to
+     * @param boardId    the board of the clicked hex and of the path's end
+     * @param game       the game
+     *
+     * @return the transport in the clicked hex the unit can mount from the path's end, or {@code null} if none
+     */
+    public static @Nullable Entity mountableTransport(MovePath movePath, Coords clickedHex, int boardId, Game game) {
+        Coords mountFromHex = movePath.getFinalCoords();
+        int mountFromLevel = movePath.getFinalElevation() + game.getBoard(boardId).getHex(mountFromHex).getLevel();
+        for (Entity mountableUnit : Compute.getMountableUnits(movePath.getEntity(), mountFromHex, boardId,
+              mountFromLevel, game)) {
+            if (mountableUnit.getOccupiedCoords().contains(clickedHex)) {
+                return mountableUnit;
+            }
+        }
+        return null;
     }
 }

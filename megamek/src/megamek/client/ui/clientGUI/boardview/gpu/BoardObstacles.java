@@ -11,15 +11,16 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
+import megamek.common.board.Coords;
+import megamek.common.board.TilesetScenery;
 
 /** Authored structure footprints used by cosmetic placement; no GPU resources or game occupancy state. */
 final class BoardObstacles {
     private static final Map<File, BoardKit<Geometry>> MODELS = new ConcurrentHashMap<>();
     private final List<Footprint> footprints = new ArrayList<>();
 
-    private record Geometry(Map<String, BoardShape> shapes, Map<String, String> modules) { }
+    private record Geometry(Map<String, BoardShape> shapes, Map<String, String> modules, BoundingBox bounds) { }
 
     /** Reload assets publishes fresh models on the next terrain build; workers retain their immutable snapshot. */
     static void reload() { MODELS.clear(); }
@@ -64,18 +65,25 @@ final class BoardObstacles {
             if (feature.asset().equals("bridge") && object == null) {
                 // A pier stands from below the floor up to the deck: its whole column is solid wherever cover could grow.
                 for (int d = 0; d < 6; d++) {
-                    if (!BoardBridgeFooting.pier(scene, tile, d)) { continue; }
-                    var outline = BoardBridgeFooting.pierFootprint(tile, d);
-                    var bounds = new BoundingBox().inf();
-                    outline.forEach(bounds::ext);
-                    footprints.add(new Footprint(outline, -Float.MAX_VALUE, Float.MAX_VALUE, bounds));
+                    if (BoardBridgeFooting.pier(scene, tile, d)) { pier(tile, d, false); }
                 }
                 deck(scene, tile, feature);
                 continue;
             }
+            if (BoardRail.route(feature)) {
+                // A maglev's piers stand so too, up to its beam; the beam itself is the model footprint below.
+                for (int d = 0; d < 6; d++) {
+                    if (BoardBridgeFooting.pier(scene, tile, feature, d) != null) { pier(tile, d, true); }
+                }
+            }
             // Paint has no model footprint. Structures already provide clearance for objects on their roofs/decks.
             if (object != null && (object.kind().equals("decal") || object.placement().receiver() != null
                   && !object.placement().receiver().terrain().equals("ground"))) { continue; }
+            if (megamek.common.board.RailRoute.kind(object) == megamek.common.board.RailRoute.Kind.RAIL) {
+                // Nothing grows or lies on a ground rail's track: its ballast band, the full height of the column.
+                rail(scene, tile, feature);
+                continue;
+            }
             // Bridges already have height-aware passage/approach clearance. Fields are ground cover, not solids.
             if (feature.kind() != BoardScene.FeatureKind.BUILDING && feature.kind() != BoardScene.FeatureKind.INDUSTRIAL
                   && feature.kind() != BoardScene.FeatureKind.PROP
@@ -83,17 +91,14 @@ final class BoardObstacles {
                   || feature.asset().equals("bridge") || feature.asset().equals("field")) { continue; }
             boolean procedural = BoardIndustrial.supports(feature);
             boolean custom = object == null && !procedural && feature.asset().startsWith("buildings/")
-                  && BoardArtwork.customBuildingFile(feature.asset()).isFile();
+                  && TilesetScenery.customBuildingFile(feature.asset()).isFile();
             File root = new File(Configuration.dataDir(), custom ? "models/buildings" : "models/board");
             // A tree's winter form has the shape of its bare file's geometry.
-            File file = custom ? BoardArtwork.customBuildingFile(feature.asset())
+            File file = custom ? TilesetScenery.customBuildingFile(feature.asset())
                   : RigidGlb.source(root, feature.asset()).file();
             // Unresolved native references draw a renderer-owned placeholder and must remain editable.
             if (object != null && !file.isFile()) { continue; }
-            var geometry = procedural ? null : MODELS.computeIfAbsent(file.getAbsoluteFile(), key -> new BoardKit<>(() -> {
-                var data = RigidGlb.loadLods(new FileHandle(key), root.toPath()).getFirst();
-                return new Geometry(BoardShape.shapes(data, custom), custom ? GpuBuilding.parts(data) : Map.of());
-            })).get();
+            var geometry = procedural ? null : geometry(root, file, custom);
             List<Vector3> points = new ArrayList<>();
             if (procedural) {
                 points.addAll(BoardIndustrial.triangles(BoardIndustrial.layout(scene, tile, feature)));
@@ -159,6 +164,83 @@ final class BoardObstacles {
                   + (feature.kind() == BoardScene.FeatureKind.SCENERY ? 0 : bounds.min.z * verticalScale);
             float height = custom ? feature.height() * BoardGeometry.level() : bounds.getDepth() * verticalScale;
             footprints.add(new Footprint(List.copyOf(points), low, low + height + upperGround - ground, bounds));
+        }
+    }
+
+    /** A model's finest authored level, read once per file for every hex and worker. */
+    private static Geometry geometry(File root, File file, boolean custom) {
+        return MODELS.computeIfAbsent(file.getAbsoluteFile(), key -> new BoardKit<>(() -> {
+            var data = RigidGlb.loadLods(new FileHandle(key), root.toPath()).getFirst();
+            var shapes = BoardShape.shapes(data, custom);
+            BoundingBox bounds = new BoundingBox().inf();
+            shapes.values().forEach(shape -> shape.polygons().forEach(polygon -> {
+                for (Vector3 point : polygon.points()) { bounds.ext(point); }
+            }));
+            return new Geometry(shapes, custom ? GpuBuilding.parts(data) : Map.of(), bounds);
+        })).get();
+    }
+
+    /**
+     * Points whose convex hull is a placed object's footprint on the board plane, as drawn: a decal's stamp ({@link
+     * BoardDecals#paintRectangle}); a route's track ({@link BoardRail#paths}, its half width either side); else the
+     * eight corners of its model's bounds placed by {@link BoardFeatures#decorationTransform} (anchor, turn, tilt,
+     * scale, stretch and mirror). Null for a missing model, whose placeholder the renderer draws.
+     */
+    static List<Vector3> outline(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
+        var object = feature.decoration();
+        Coords owner = tile.coords();
+        if (object.kind().equals("decal")) { return BoardDecals.paintRectangle(owner, object); }
+        if (BoardRail.route(feature)) {
+            List<Vector3> result = new ArrayList<>();
+            float scale = BoardGeometry.hexScale(), half = BoardRail.halfWidth(feature);
+            for (var path : BoardRail.paths(scene, tile, feature)) {
+                for (Vector3 p : path) {
+                    for (int side = 0; side < 4; side++) {
+                        result.add(new Vector3(BoardGeometry.centerX(owner) + (p.x + ((side & 1) * 2 - 1) * half) * scale,
+                              BoardGeometry.centerY(owner) + (p.y + ((side & 2) - 1) * half) * scale, 0));
+                    }
+                }
+            }
+            return result;
+        }
+        File root = new File(Configuration.dataDir(), "models/board");
+        File file = RigidGlb.source(root, feature.asset()).file();
+        if (!file.isFile()) { return null; }
+        BoundingBox bounds = geometry(root, file, false).bounds();
+        var transform = BoardFeatures.decorationTransform(owner, feature, 0);
+        List<Vector3> corners = new ArrayList<>(8);
+        for (int i = 0; i < 8; i++) {
+            corners.add(new Vector3((i & 1) == 0 ? bounds.min.x : bounds.max.x, (i & 2) == 0 ? bounds.min.y : bounds.max.y,
+                  (i & 4) == 0 ? bounds.min.z : bounds.max.z).mul(transform));
+        }
+        return corners;
+    }
+
+    /** The footing of the pier under the tile's joint {@code d} ({@link BoardBridgeFooting#pierFootprint}), solid at every height. */
+    private void pier(BoardScene.Tile tile, int d, boolean maglev) {
+        var outline = BoardBridgeFooting.pierFootprint(tile, d, maglev);
+        var bounds = new BoundingBox().inf();
+        outline.forEach(bounds::ext);
+        footprints.add(new Footprint(outline, -Float.MAX_VALUE, Float.MAX_VALUE, bounds));
+    }
+
+    /** A ground rail's ballast band along each of its centre lines, as triangles, solid at every height. */
+    private void rail(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature route) {
+        float scale = BoardGeometry.hexScale(), half = BoardRail.halfWidth(route);
+        var centre = BoardGeometry.center(tile.coords(), 0);
+        for (var path : BoardRail.paths(scene, tile, route)) {
+            List<Vector3> triangles = new ArrayList<>();
+            var bounds = new BoundingBox().inf();
+            for (int i = 1; i < path.size(); i++) {
+                Vector3 a = path.get(i - 1), b = path.get(i);
+                var across = new Vector3(a.y - b.y, b.x - a.x, 0).nor().scl(half);
+                Vector3[] corners = { new Vector3(a).add(across), new Vector3(b).add(across), new Vector3(b).sub(across),
+                      new Vector3(a).sub(across) };
+                for (Vector3 corner : corners) { corner.set(centre.x + corner.x * scale, centre.y + corner.y * scale, 0); }
+                triangles.addAll(List.of(corners[0], corners[1], corners[2], corners[0], corners[2], corners[3]));
+                for (Vector3 corner : corners) { bounds.ext(corner); }
+            }
+            if (!triangles.isEmpty()) { footprints.add(new Footprint(triangles, -Float.MAX_VALUE, Float.MAX_VALUE, bounds)); }
         }
     }
 

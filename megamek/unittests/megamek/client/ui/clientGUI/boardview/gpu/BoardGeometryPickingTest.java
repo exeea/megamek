@@ -160,6 +160,39 @@ class BoardGeometryPickingTest {
         for (int i = 0; i < source.size(); i++) { assertSame(source.get(i), retained.get(i)); }
     }
 
+    /** The editor's object picks look through water to its bed (GpuTerrain#decorationHit); lava stays opaque. */
+    @Test
+    void throughWaterLooksPastTheWaterSurfaceToItsBedButNotPastLava() {
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 5; x++) {
+            for (int y = 0; y < 3; y++) {
+                BoardLiquid liquid = x == 1 && y == 1 ? BoardLiquid.WATER : x == 3 && y == 1
+                      ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.NONE;
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, liquid == BoardLiquid.WATER ? 3 : liquid.present() ? 0 : -1,
+                      false, 0, BoardScene.Surface.SAND, null, null, null, null, null, List.of(), List.of(), liquid, null, true));
+            }
+        }
+        BoardScene scene = new BoardScene(0, 5, 3, tiles, List.of(), List.of(), -1, "", List.of());
+        float floor = BoardGeometry.floor(scene);
+        BoardSurface.Cache cache = new BoardSurface.Cache();
+        for (Coords pool : List.of(new Coords(1, 1), new Coords(3, 1))) {
+            BoardScene.Tile tile = scene.tile(pool);
+            // Just off the centre: a ray along the shared edges through it would retry nudged.
+            Ray down = new Ray(BoardGeometry.center(pool, 5).add(.013f, .007f, 0), new Vector3(0, 0, -1));
+            var surface = BoardGeometry.hit(scene, down, tiles, floor, cache, null, false);
+            var through = BoardGeometry.hit(scene, down, tiles, floor, cache, null, true);
+            assertEquals(pool, surface.coords());
+            assertEquals(pool, through.coords());
+            assertEquals(BoardGeometry.waterZ(tile), down.getEndPoint(new Vector3(), (float) Math.sqrt(surface.distance())).z, .01f);
+            float z = down.getEndPoint(new Vector3(), (float) Math.sqrt(through.distance())).z;
+            if (tile.liquid().molten()) {
+                assertEquals(BoardGeometry.waterZ(tile), z, .01f, "Lava stays opaque");
+            } else {
+                assertTrue(z < BoardGeometry.waterZ(tile) - 2 * BoardGeometry.level(), "The depth-3 bed lies beneath: " + z);
+            }
+        }
+    }
+
     private static void probe(List<Ray> rays, BoardSurface.Face face) {
         Vector3 center = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1 / 3f);
         Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();

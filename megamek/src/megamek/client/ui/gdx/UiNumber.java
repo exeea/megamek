@@ -20,9 +20,12 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
 import com.badlogic.gdx.utils.Align;
+import com.badlogic.gdx.utils.TimeUtils;
 
-/** Caption scrubbing, a click-open slider, and direct typing with the same commit boundary. */
+/** Caption scrubbing, a click-open slider, a double-click reset, and direct typing with the same commit boundary. */
 public final class UiNumber extends Table {
+    /** The longest pause between the two clicks of a double-click, as libGDX's ClickListener counts taps. */
+    private static final long DOUBLE_CLICK_MILLIS = 400;
     private final UiKit ui;
     private final Cell<UiKit.Checkbox> checkboxCell;
     private final TextField field;
@@ -34,15 +37,24 @@ public final class UiNumber extends Table {
     private UiAngleDial dial;
     private final BiConsumer<String, Boolean> change;
     private final double step;
+    private final double min, max;
     private double value;
     private boolean held;
+    /** When the last plain caption click ended; a committed edit clears it, so it never pairs across one. */
+    private long clicked;
     private final UiCursorCapture cursor = new UiCursorCapture();
 
+    /**
+     * {@code min} and {@code max} bound scrubbing and the slider, each gesture widened only to include the value it
+     * starts from; typing is not limited to them. A caption double-click resets to the value nearest zero in them.
+     */
     public UiNumber(UiKit ui, Stage stage, String name, double initial, double min, double max, double step,
           BiConsumer<String, Boolean> change) {
         this.ui = ui;
         this.change = change;
         this.step = step;
+        this.min = min;
+        this.max = max;
         label = name;
         value = initial;
         checkboxCell = add((UiKit.Checkbox) null);
@@ -59,7 +71,7 @@ public final class UiNumber extends Table {
         readout = ui.label(format(initial), "hud-small", 14, UiTheme.TEXT);
         readout.setAlignment(Align.right);
         readout.setName("editor-slider-value-" + name);
-        popup = new UiPopover(ui).header(name, "Drag to adjust · type a value for a wider range");
+        popup = new UiPopover(ui).header(name, UiKit.text("GpuBoard.number.hint"));
         popup.setName("editor-number-popup");
         Table content = new Table(); content.pad(10, 14, 10, 14);
         content.add(slider).width(188).padRight(12);
@@ -84,7 +96,7 @@ public final class UiNumber extends Table {
                 if (button != Input.Buttons.LEFT || pointer != 0 || held) { return false; }
                 stage.setKeyboardFocus(null);
                 origin = event.getStageX(); originY = event.getStageY(); start = value; dragged = false; held = true;
-                syncSlider(value);
+                syncSlider(value, true);
                 popup.showAbove(caption, 0);
                 if (dial != null) { dial.begin(event.getStageX(), event.getStageY(), value); }
                 cursor.capture(event.getStageX(), event.getStageY());
@@ -99,7 +111,7 @@ public final class UiNumber extends Table {
                     if (dial != null) { dial.drag(at.x, at.y); return; }
                     double next = Math.round((start + distance * step / 4) / step) * step;
                     next = MathUtils.clamp((float) next, slider.getMinValue(), slider.getMaxValue());
-                    syncSlider(next); preview(next);
+                    syncSlider(next, false); preview(next);
                 }
             }
             @Override public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
@@ -108,6 +120,8 @@ public final class UiNumber extends Table {
                 cursor.release();
                 if (dragged) { finish(); popup.cancel(); }
                 else if (event.isTouchFocusCancel()) { popup.cancel(); }
+                else if (TimeUtils.timeSinceMillis(clicked) < DOUBLE_CLICK_MILLIS) { resetValue(); popup.cancel(); }
+                else { clicked = TimeUtils.millis(); }
             }
         });
         field.addListener(new FocusListener() {
@@ -129,7 +143,13 @@ public final class UiNumber extends Table {
         if (Math.abs(next - value) < step * .001) { return; }
         value = next; showValue(); change.accept(format(next), false);
     }
-    private void finish() { change.accept(format(value), true); }
+    private void finish() { clicked = 0; change.accept(format(value), true); }
+    /** Commits the value nearest zero in the configured range once, as typing it would. */
+    private void resetValue() {
+        clicked = 0;
+        double next = normalized(MathUtils.clamp(0, min, max));
+        if (next != value) { value = next; showValue(); finish(); }
+    }
     private void typed() {
         double previous = value;
         try {
@@ -146,11 +166,15 @@ public final class UiNumber extends Table {
         readout.setText(dial == null ? shown : shown + "°");
         if (dial != null) { dial.value(value); }
     }
-    /** Silence only our own updates: libGDX uses setValue for pointer drags too. */
-    private void syncSlider(double next) {
+    /**
+     * Silence only our own updates: libGDX uses setValue for pointer drags too. The range grows to include
+     * {@code next}; a {@code restart} grows it from min and max, so an earlier value outside them no longer widens it.
+     */
+    private void syncSlider(double next, boolean restart) {
         slider.setProgrammaticChangeEvents(false);
         try {
-            slider.setRange((float) Math.min(slider.getMinValue(), next), (float) Math.max(slider.getMaxValue(), next));
+            slider.setRange((float) Math.min(restart ? min : slider.getMinValue(), next),
+                  (float) Math.max(restart ? max : slider.getMaxValue(), next));
             slider.setValue((float) next);
         } finally { slider.setProgrammaticChangeEvents(true); }
     }
@@ -169,7 +193,7 @@ public final class UiNumber extends Table {
         hub.setTouchable(Touchable.disabled);
         Table content = new Table(); content.pad(8, 14, 10, 14);
         content.add(new Stack(dial, hub)).size(UiAngleDial.SIZE);
-        popup.header(label + " rotation", "Drag right or up to add · click to aim").content(content);
+        popup.header(UiKit.text("GpuBoard.number.rotation", label), UiKit.text("GpuBoard.number.angleHint")).content(content);
         value = normalized(value); showValue();
         return this;
     }
@@ -199,7 +223,7 @@ public final class UiNumber extends Table {
         if (editing() || value == next) { return; }
         value = normalized(next);
         showValue();
-        syncSlider(next);
+        syncSlider(next, true);
     }
 
     /** Give reusable controls stable names in their owner's namespace. */

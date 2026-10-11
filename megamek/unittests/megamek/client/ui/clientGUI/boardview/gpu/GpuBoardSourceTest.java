@@ -24,6 +24,7 @@ import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.ECMEffects;
 import megamek.client.ui.clientGUI.boardview.sprite.CursorSprite;
@@ -651,7 +652,7 @@ class GpuBoardSourceTest {
                 Rectangle cursorBefore = new Rectangle(cursor.getBounds());
                 int offset = fixture.view.getVerticalOffset();
                 Point location = fixture.view.getHexLocation(coords);
-                fixture.view.capturePlanarHexes(new Rectangle(0, 0, 16, 17));
+                fixture.view.capturePlanarTactical(new Rectangle(0, 0, 16, 17), hex -> { });
                 assertEquals(offset, fixture.view.getVerticalOffset());
                 assertEquals(location, fixture.view.getHexLocation(coords));
                 assertEquals(before, range.getBounds());
@@ -742,8 +743,8 @@ class GpuBoardSourceTest {
     }
 
     private static BufferedImage groundArt(GpuBoardFixture fixture, Coords coords) {
-        Rectangle area = new Rectangle(coords.getX(), coords.getY(), 1, 1);
-        return fixture.view.capturePlanarHexes(area).getFirst().terrain();
+        Board board = fixture.game.getBoard();
+        try (var artwork = new BoardArtwork()) { return artwork.capture(board, coords, board.getHex(coords)).terrain(); }
     }
 
     /**

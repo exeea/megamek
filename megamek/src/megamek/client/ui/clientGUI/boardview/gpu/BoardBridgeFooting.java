@@ -51,37 +51,39 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
     }
 
     /**
-     * The pier kit ({@code bridges/bridge-pier.glb}) at two LODs: a cap that follows the deck's underside, a shaft
-     * stretched in Z only (kit Z 0 to 1) and a footing buried in the floor. Kit frame: the origin on the joint, X along
-     * the shared edge (across the deck), Y toward the neighbour; Z per part, as each joint places it. Each part is kept
-     * as its half on the near side of the joint (Y at most 0), cut once here and closed by its section on the joint
-     * ({@link #section}): each hex of a joint builds its own half.
+     * A pier kit at two LODs: a cap that follows the underside of what it carries, a shaft stretched in Z only (kit Z 0
+     * to 1) and a footing buried in the floor. Kit frame: the origin on the joint, X along the shared edge (across the
+     * deck or beam), Y toward the neighbour; Z per part, as each joint places it. Each part is kept as its half on the
+     * near side of the joint (Y at most 0), cut once here and closed by its section on the joint ({@link #section}):
+     * each hex of a joint builds its own half.
      * The soffit (the cap's bottom), the footing's lip (its top) and its half extents are the parts' own bounds.
      */
     private record Pier(List<List<Vector3[]>> cap, List<List<Vector3[]>> shaft, List<List<Vector3[]>> footing,
           float soffit, float lip, float footX, float footY) { }
 
-    private static final BoardKit<Pier> PIER = new BoardKit<>(BoardBridgeFooting::loadPier);
+    /** The bridge's pier kit ({@code bridges/bridge-pier.glb}) and the maglev's slim one ({@code bridges/maglev-pier.glb}). */
+    private static final BoardKit<Pier> PIER = new BoardKit<>(() -> loadPier("bridge-pier")),
+          MAGLEV_PIER = new BoardKit<>(() -> loadPier("maglev-pier"));
     /** A pier footing's corners in units of its half extents. */
     private static final float[][] CORNERS = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };
 
-    private static Pier loadPier() {
-        var shapes = BoardShape.loadKit("bridges/bridge-pier");
+    private static Pier loadPier(String kit) {
+        var shapes = BoardShape.loadKit("bridges/" + kit);
         for (String name : shapes.keySet()) {
-            if (!name.matches("bridge-pier-(cap|shaft|footing)-lod[01]")) {
-                throw new IllegalArgumentException("Unexpected bridge pier mesh: " + name);
+            if (!name.matches(kit + "-(cap|shaft|footing)-lod[01]")) {
+                throw new IllegalArgumentException("Unexpected pier mesh: " + name);
             }
         }
         Map<String, BoundingBox> bounds = new HashMap<>();
-        var cap = halves(shapes, "bridge-pier-cap", bounds);
-        var shaft = halves(shapes, "bridge-pier-shaft", bounds);
-        var footing = halves(shapes, "bridge-pier-footing", bounds);
-        var length = bounds.get("bridge-pier-shaft");
+        var cap = halves(shapes, kit + "-cap", bounds);
+        var shaft = halves(shapes, kit + "-shaft", bounds);
+        var footing = halves(shapes, kit + "-footing", bounds);
+        var length = bounds.get(kit + "-shaft");
         if (Math.abs(length.min.z) > .001f || Math.abs(length.max.z - 1) > .001f) {
-            throw new IllegalArgumentException("The bridge pier shaft must span Z 0 to 1");
+            throw new IllegalArgumentException("A pier shaft must span Z 0 to 1: " + kit);
         }
-        var foot = bounds.get("bridge-pier-footing");
-        return new Pier(cap, shaft, footing, bounds.get("bridge-pier-cap").min.z, foot.max.z, foot.max.x, foot.max.y);
+        var foot = bounds.get(kit + "-footing");
+        return new Pier(cap, shaft, footing, bounds.get(kit + "-cap").min.z, foot.max.z, foot.max.x, foot.max.y);
     }
 
     /** One part's near halves by LOD; records its LOD0 bounds. */
@@ -93,7 +95,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             shape.polygons().forEach(face -> { for (var p : face.points()) { box.ext(p); } });
             // Both hexes of a joint place this same half: the part must be centred on the joint.
             if (Math.abs(box.min.x + box.max.x) > .001f || Math.abs(box.min.y + box.max.y) > .001f) {
-                throw new IllegalArgumentException("Bridge pier parts must be centred on the joint: " + name);
+                throw new IllegalArgumentException("Pier parts must be centred on the joint: " + name);
             }
             bounds.putIfAbsent(part, box);
             var near = new BoardSurface.Face(new Vector3(-100, 0, 0), new Vector3(0, -100, 0), new Vector3(100, 0, 0),
@@ -133,7 +135,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             var b = ring.get(i);
             // Clockwise in X-Z, which faces +Y; a part that is not convex would fold its section over.
             if ((a.z - centre.z) * (b.x - centre.x) - (a.x - centre.x) * (b.z - centre.z) <= 0) {
-                throw new IllegalArgumentException("Bridge pier parts must be convex");
+                throw new IllegalArgumentException("Pier parts must be convex");
             }
             half.add(new Vector3[] { new Vector3(centre), new Vector3(a), new Vector3(b) });
         }
@@ -144,7 +146,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         return point;
     }
 
-    static void reload() { KIT.reload(); PIER.reload(); }
+    static void reload() { KIT.reload(); PIER.reload(); MAGLEV_PIER.reload(); }
 
     static float terminalLength() { return KIT.get().getFirst().size().y; }
 
@@ -163,12 +165,50 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         var next = scene.tile(tile.coords().translated(d));
         if (!BoardBridge.connected(tile, next, d)
               || !HexAppearance.pillars(tile.appearance()) && !HexAppearance.pillars(next.appearance())) { return false; }
-        // A road passing beneath the deck keeps its carriageway.
-        if (BoardRoad.rendered(tile) && (tile.roadExits() & 1 << d) != 0
-              || BoardRoad.rendered(next) && (next.roadExits() & 1 << (d + 3) % 6) != 0) { return false; }
-        float room = BoardBridge.edgeElevation(tile, next, d) * BoardGeometry.level()
-              - Math.max(BoardGeometry.groundZ(tile), BoardGeometry.groundZ(next));
+        return room(tile, next, d, BoardBridge.edgeElevation(tile, next, d) * BoardGeometry.level());
+    }
+
+    /**
+     * Whether a pier fits under the joint of {@code tile} toward {@code d} that carries a deck or beam at height
+     * {@code top} on the joint: no road or rail crosses that edge beneath, and {@code top} is at least one whole level
+     * above both floors. The one room rule of bridge and maglev piers.
+     */
+    private static boolean room(BoardScene.Tile tile, BoardScene.Tile next, int d, float top) {
+        // A road or rail passing beneath keeps its carriageway.
+        if (BoardRoad.carriageway(tile) && (tile.wayExits() & 1 << d) != 0
+              || BoardRoad.carriageway(next) && (next.wayExits() & 1 << (d + 3) % 6) != 0) { return false; }
+        float room = top - Math.max(BoardGeometry.groundZ(tile), BoardGeometry.groundZ(next));
         return room >= BoardGeometry.level() - .001f * BoardGeometry.hexScale();
+    }
+
+    /**
+     * The maglev's joint toward {@code d} when a pier stands under it, else null: its beam joins the neighbour's maglev
+     * there ({@link BoardRail#joint}), the Pillars toggle ({@link megamek.common.board.BoardDecoration#pillars}) is on in
+     * either marker, no bridge deck crosses that edge beneath, no structure stands in either hex (a pier would pierce a
+     * building, industrial plant or fuel tank, and the beam leaves a bridge pier's room
+     * ({@link #room}). Never at a hex centre or an open end, never under a rail. Scene data only, and the same from both
+     * hexes.
+     */
+    static BoardRail.Joint pier(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature marker, int d) {
+        var joint = BoardRail.joint(scene, tile, marker, d);
+        if (joint == null || !marker.decoration().pillars() && !joint.marker().decoration().pillars()
+              || deckExit(tile, d) || deckExit(joint.next(), (d + 3) % 6) || structure(tile) || structure(joint.next())) {
+            return null;
+        }
+        return room(tile, joint.next(), d, joint.underside()) ? joint : null;
+    }
+
+    /** Whether a structure stands in the tile: a building, an industrial plant or a fuel tank (its captured model). */
+    private static boolean structure(BoardScene.Tile tile) {
+        return tile.features().stream().anyMatch(feature -> feature.decoration() == null
+              && (feature.kind() == BoardScene.FeatureKind.BUILDING || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL
+                    || feature.asset().startsWith("buildings/")));
+    }
+
+    /** Whether the tile's bridge deck leaves it across edge {@code d}. */
+    private static boolean deckExit(BoardScene.Tile tile, int d) {
+        var bridge = BoardBridge.feature(tile);
+        return bridge != null && (bridge.bridgeExits() & 1 << d) != 0;
     }
 
     /**
@@ -187,14 +227,40 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 // What the cap follows: the deck's grade above its deck plane.
                 under = deck.sloped() ? BoardBridgeSlope.profile(tile, deck) : List.of();
             }
-            pier(faces, scene, tile, under, d, lod, surfaces);
+            var next = scene.tile(tile.coords().translated(d));
+            // The underside at the joint, the same from both hexes.
+            float atJoint = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, next, d)) - BoardBridge.SLAB * BoardGeometry.hexScale();
+            var grade = under;
+            pier(faces, PIER.get(), scene, tile, d, atJoint, p -> underside(tile, grade, p), lod, surfaces);
         }
         return faces == null ? shape : BoardBridge.shape(shape.surface(), shape.level(), faces);
     }
 
-    /** The outline of the footing of the pier under the tile's joint {@code d} ({@link #pier}), world XY: two triangles. */
-    static List<Vector3> pierFootprint(BoardScene.Tile tile, int d) {
-        var kit = PIER.get();
+    /**
+     * The halves of a maglev's piers that stand in its hex, one under each joint of its beam that {@link
+     * #pier(BoardScene, BoardScene.Tile, BoardScene.Feature, int)} admits: the bridge piers' placement with the slim
+     * maglev kit, its cap under the beam on the beam's grade. Each neighbour adds the other half. Empty without piers.
+     */
+    static List<BoardBridge.Facet> piers(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature marker, TerrainLod lod,
+          Map<Coords, BoardSurface> surfaces) {
+        List<BoardBridge.Facet> faces = new ArrayList<>();
+        for (int d = 0; d < 6; d++) {
+            var joint = pier(scene, tile, marker, d);
+            if (joint == null) { continue; }
+            var frame = joint(tile, d);
+            // The beam leaves the edge squarely: along the kit's Y it climbs at its grade from its underside on the joint.
+            pier(faces, MAGLEV_PIER.get(), scene, tile, d, joint.underside(),
+                  p -> joint.underside() + joint.grade() * new Vector3(p).sub(frame[0]).dot(frame[2]), lod, surfaces);
+        }
+        return faces;
+    }
+
+    /**
+     * The outline of the footing of the pier under the tile's joint {@code d} ({@link #pier}), world XY: two triangles;
+     * a maglev's ({@code maglev}) of the slim kit.
+     */
+    static List<Vector3> pierFootprint(BoardScene.Tile tile, int d, boolean maglev) {
+        var kit = (maglev ? MAGLEV_PIER : PIER).get();
         var frame = joint(tile, d);
         var corners = new Vector3[CORNERS.length];
         for (int i = 0; i < corners.length; i++) {
@@ -203,22 +269,24 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         return List.of(corners[0], corners[1], corners[2], new Vector3(corners[0]), new Vector3(corners[2]), corners[3]);
     }
 
+    /** The drawn underside a pier's cap meets above a point of its joint (world XY), as a world height. */
+    @FunctionalInterface
+    private interface Underside { float at(Vector3 point); }
+
     /**
-     * Appends the half of the pier under joint {@code d} that lies in this tile, in its kit's three frames: the cap's
-     * Z 0 is the drawn deck underside above each of its points ({@link #underside}), so the cap follows the slab's
-     * grade; the footing's Z 0 is the lowest drawn floor under the footing (a 5 x 5 grid over it, the joint and
-     * its corners among them), in either hex (no loose rock; under ice the bed), lowered where needed to keep a 2 px
-     * shaft; under a liquid it sinks out of sight, since an uneven bed would break its lip into loose slivers; the
-     * shaft spans between them, overlapping each by half a px. The kit scales with the hex, never with the level height.
+     * Appends the half of the pier of {@code kit} under joint {@code d} that lies in this tile, in its kit's three
+     * frames: the cap's Z 0 is the drawn underside of the deck or beam above each of its points ({@code underside}, which
+     * is {@code atJoint} on the joint), so the cap follows its grade; the footing's Z 0 is the lowest drawn floor under
+     * the footing (a 5 x 5 grid over it, the joint and its corners among them), in either hex (no loose rock; under ice
+     * the bed), lowered where needed to keep a 2 px shaft; under a liquid it sinks out of sight, since an uneven bed
+     * would break its lip into loose slivers; the shaft spans between them, overlapping each by half a px. The kit
+     * scales with the hex, never with the level height. The one placement of bridge and maglev piers.
      */
-    private static void pier(List<BoardBridge.Facet> faces, BoardScene scene, BoardScene.Tile tile,
-          List<BoardSurface.Face> under, int d, TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
-        var kit = PIER.get();
+    private static void pier(List<BoardBridge.Facet> faces, Pier kit, BoardScene scene, BoardScene.Tile tile, int d,
+          float atJoint, Underside underside, TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
         float s = BoardGeometry.hexScale();
         var next = scene.tile(tile.coords().translated(d));
         var frame = joint(tile, d);
-        // The underside at the joint, the same from both hexes.
-        float atJoint = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, next, d)) - BoardBridge.SLAB * s;
         var near = surfaces.computeIfAbsent(tile.coords(), c -> new BoardSurface(scene, tile, lod)).foundation();
         var far = surfaces.computeIfAbsent(next.coords(), c -> new BoardSurface(scene, next, lod)).foundation();
         float floor = atJoint - (kit.lip() - kit.soffit() + 2) * s;
@@ -243,8 +311,8 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                     if (part == 2) {
                         p.z = floor + k.z * s;
                     } else {
-                        // On the joint the deck's grade is the same from both hexes.
-                        float deckUnder = underside(tile, under, p);
+                        // On the joint the deck's or beam's grade is the same from both hexes.
+                        float deckUnder = underside.at(p);
                         p.z = part == 0 ? deckUnder + k.z * s : MathUtils.lerp(bottom, deckUnder + top, k.z);
                     }
                     points[i] = p;

@@ -46,14 +46,16 @@ class BoardOrchardTest {
     }
 
     @Test
-    void disablingNaturalDistributionRestoresPlantedRowsAcrossStaggeredHexColumns() {
-        for (Coords coords : List.of(new Coords(0, 0), new Coords(1, 0), new Coords(2, 1))) {
-            Hex hex = new Hex(0, "woods:1;fluff:12;foliage_elev:2", "", coords);
-            for (var tree : BoardTreeDistributionTest.capture(hex, coords, false)) {
-                float x = BoardGeometry.centerX(coords) / BoardGeometry.hexScale() + tree.x();
-                float y = BoardGeometry.centerY(coords) / BoardGeometry.hexScale() + tree.y();
-                assertEquals(0, Math.floorMod(Math.round(x), 21), "Columns share one planting grid");
-                assertEquals(18, Math.floorMod(Math.round(y), 36), "Rows share one planting grid");
+    void orchardsKeepPlantedRowsAcrossStaggeredHexColumnsWithOrWithoutTheNaturalDistribution() {
+        for (boolean natural : new boolean[] { false, true }) {
+            for (Coords coords : List.of(new Coords(0, 0), new Coords(1, 0), new Coords(2, 1))) {
+                Hex hex = new Hex(0, "woods:1;fluff:12;foliage_elev:2", "", coords);
+                for (var tree : BoardTreeDistributionTest.capture(hex, coords, natural)) {
+                    float x = BoardGeometry.centerX(coords) / BoardGeometry.hexScale() + tree.x();
+                    float y = BoardGeometry.centerY(coords) / BoardGeometry.hexScale() + tree.y();
+                    assertEquals(0, Math.floorMod(Math.round(x), 21), "Columns share one planting grid");
+                    assertEquals(18, Math.floorMod(Math.round(y), 36), "Rows share one planting grid");
+                }
             }
         }
     }

@@ -34,8 +34,10 @@ package megamek.common.util;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import megamek.common.board.Board;
@@ -175,6 +177,65 @@ class BoardUtilitiesTest {
         Board board = emptyBoard();
 
         assertDoesNotThrow(() -> BoardUtilities.addCraters(board, -5, -2, 1, 1));
+    }
+
+    /**
+     * Resize moves every hex by the old editor's rule: an odd west change also moves the odd columns a row down, so every
+     * hex keeps its neighbours in every direction. The copy keeps terrain, objects, metadata and notes; the source board
+     * stays as it was.
+     */
+    @Test
+    void resizeKeepsEveryNeighbourTheContentAndTheMetadata() {
+        var at = new megamek.common.board.Coords(2, 2);
+        var note = new megamek.common.board.Coords(3, 1);
+        var car = new megamek.common.board.BoardDecoration("car", "prop", "car", null, .2, 0, 0, false, 1,
+              megamek.common.board.BoardDecoration.Placement.ground(), 0).withGroup("g");
+        Board board = Board.createEmptyBoard(6, 5);
+        board.setHex(at, new megamek.common.Hex(3, "woods:1;foliage_elev:2", ""));
+        board.getHex(at).setDecorations(java.util.List.of(car));
+        board.addTag("Arena"); board.setRoadsAutoExit(false); board.setDescription("Ridge");
+        board.setAnnotations(note, java.util.List.of("Note"));
+        for (int west : new int[] { 1, -1, 2, -3 }) {
+            Board resized = BoardUtilities.resize(board, 1, 0, 2, west);
+            assertEquals(6 + west, resized.getWidth());
+            assertEquals(8, resized.getHeight());
+            for (int x = 0; x < board.getWidth(); x++) {
+                for (int y = 0; y < board.getHeight(); y++) {
+                    var from = new megamek.common.board.Coords(x, y);
+                    for (int direction = 0; direction < 6; direction++) {
+                        assertEquals(BoardUtilities.resized(from.translated(direction), 1, west),
+                              BoardUtilities.resized(from, 1, west).translated(direction), from + " towards " + direction);
+                    }
+                }
+            }
+            var moved = BoardUtilities.resized(at, 1, west);
+            if (resized.contains(moved)) {
+                assertEquals(3, resized.getHex(moved).getLevel());
+                assertTrue(resized.getHex(moved).containsTerrain(megamek.common.units.Terrains.WOODS));
+                assertEquals(java.util.List.of(car), resized.getHex(moved).getDecorations());
+            }
+            assertEquals(java.util.Set.of("Arena"), resized.getTags());
+            assertFalse(resized.getRoadsAutoExit());
+            assertEquals("Ridge", resized.getDescription());
+            var movedNote = BoardUtilities.resized(note, 1, west);
+            assertEquals(resized.contains(movedNote) ? java.util.Map.of(movedNote, java.util.List.of("Note")) : java.util.Map.of(),
+                  resized.getAnnotations().entrySet().stream().collect(java.util.stream.Collectors.toMap(
+                        java.util.Map.Entry::getKey, entry -> java.util.List.copyOf(entry.getValue()))));
+        }
+        // An odd west change without a new south row drops the lowest hex of each odd column.
+        board.setHex(1, 3, new megamek.common.Hex(6)); board.setHex(1, 4, new megamek.common.Hex(7));
+        Board shifted = BoardUtilities.resize(board, 0, 0, 0, 1);
+        assertEquals(6, shifted.getHex(2, 4).getLevel());
+        for (int x = 0; x < shifted.getWidth(); x++) {
+            for (int y = 0; y < shifted.getHeight(); y++) { assertTrue(shifted.getHex(x, y).getLevel() != 7); }
+        }
+        Board cut = BoardUtilities.resize(board, -3, -4, 0, 0);
+        assertEquals(2, cut.getWidth());
+        assertEquals(2, cut.getHeight());
+        assertTrue(cut.getAnnotations().isEmpty());
+        assertEquals(6, board.getWidth());
+        assertEquals(java.util.List.of(car), board.getHex(at).getDecorations());
+        assertThrows(IllegalArgumentException.class, () -> BoardUtilities.resize(board, 0, -6, 0, 0));
     }
 
     /** @return a small blank board that craters can be placed on */

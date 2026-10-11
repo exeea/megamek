@@ -66,6 +66,21 @@ class BoardObstaclesTest {
         }
     }
 
+    @Test
+    void aMaglevPierKeepsGroundCoverOutOfItsFootingWhileTheGroundUnderTheBeamStaysOpen() {
+        Coords near = BoardBridgeFootingTest.START, far = near.translated(3);
+        var joint = BoardGeometry.center(near, 0).lerp(BoardGeometry.center(far, 0), .5f);
+        for (boolean toggled : new boolean[] { true, false }) {
+            var scene = BoardBridgeFootingTest.line(megamek.common.board.RailRoute.Kind.MAGLEV, new double[] { 2, 2 },
+                  toggled ? java.util.Set.of(0, 1) : java.util.Set.of(), java.util.Set.of());
+            for (Coords at : List.of(near, far)) {
+                var obstacles = new BoardObstacles(scene, scene.tile(at));
+                assertEquals(toggled, obstacles.obstructs(new Vector3(joint.x, joint.y, 0), .1f, 1), "At the joint");
+                assertFalse(obstacles.obstructs(BoardGeometry.center(at, 0), .1f, 1), "The ground under the beam");
+            }
+        }
+    }
+
     private static final Coords CENTER = new Coords(2, 2);
     private static final String TANK = "buildings/saxarba/fuel_tanks/fuel_tank_hard_15";
 

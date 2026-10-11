@@ -129,7 +129,8 @@ final class GpuMapHud implements GpuBoardHud {
         metrics = GpuHud.Metrics.of(stage.getWidth(), stage.getHeight());
         editor = source.isEditor() ? new GpuBoardEditor(source, ui, stage, terrain, this::frameHex, camera::azimuth) : null;
         if (editor != null) {
-            UiButton settings = utility(GpuUtilityBar.compact(ui, ui.button("hud-utility", "settings", "Settings", null)));
+            UiButton settings = utility(GpuUtilityBar.compact(ui, ui.button("hud-utility", "settings",
+                  Messages.getString("BoardEditor.settingsButton"), null)));
             settings.setName("editor-settings-button");
             onChange(settings, () -> { state.dialog = Dialog.NONE; editor.openSettings(); });
             onChange(tuning.button(), editor::closeSettings);
@@ -138,7 +139,7 @@ final class GpuMapHud implements GpuBoardHud {
         utilityRow.add(menu).size(GpuUtilityBar.HEIGHT).padLeft(GpuUtilityBar.GAP);
         onChange(menu, () -> {
             contextMenu.cancel();
-            if (editor != null) { editor.closeSettings(); }
+            if (editor != null) { editor.closeSettings(); editor.closeHelp(); }
             state.toggle(Dialog.MENU);
         });
         top.toFront(); tuningSlot.toFront();
@@ -243,7 +244,8 @@ final class GpuMapHud implements GpuBoardHud {
             return;
         }
         List<Object> rows = new ArrayList<>();
-        tree.rows(commands, "", 0, rows);
+        // The editor adds its own entries, which open its native dialogs (New, Help).
+        tree.rows(editor == null ? commands : editor.menu(commands), "", 0, rows);
         tree.show(rows, null, command -> {
             state.dialog = Dialog.NONE;
             command.action().run();
@@ -343,6 +345,8 @@ final class GpuMapHud implements GpuBoardHud {
             if (key == Input.Keys.ESCAPE) { contextMenu.cancel(); return true; }
             return stage.keyDown(key);
         }
+        // A tree that holds the keyboard focus (Layers, after a click on a row) takes its navigation keys.
+        if (stage.getKeyboardFocus() instanceof megamek.client.ui.gdx.UiTree && stage.keyDown(key)) { return true; }
         if (key == Input.Keys.ESCAPE && editor != null && editor.escape()) { return true; }
         // Bare tool keys win inside the editor only; a map preview keeps Z for its overview.
         if (editor != null && modifiers == 0 && editor.toolKey(key)) { return true; }
@@ -389,14 +393,14 @@ final class GpuMapHud implements GpuBoardHud {
         if (editor != null) { editor.contextTools(list, contextMenu::cancel); }
         long generation = boardGeneration;
         Integer height = Float.isNaN(pointedZ) ? null : GpuLosResult.pointedHeight(scene.tile(coords).elevation(), pointedZ);
-        list.item("Line of Sight", "Alt + click", null, false, true, () -> {
+        list.item(Messages.getString("GpuBoard.map.lineOfSight"), Messages.getString("GpuBoard.hud.mouse.altClick"), null, false, true, () -> {
             contextMenu.cancel();
             source.changeRuler(generation, model -> { model.clear(); model.addPoint(coords, height); });
         }).setName("map-line-of-sight");
         if (editor != null) {
             editor.contextActions(list, contextMenu::cancel, () -> { state.dialog = Dialog.NONE; editor.openSettings(); });
         }
-        contextMenu.header("Hex " + coords.getBoardNum(), null).content(list);
+        contextMenu.header(Messages.getString("GpuBoard.hud.context.hex", coords.getBoardNum()), null).content(list);
         Vector2 at = stage.screenToStageCoordinates(new Vector2(x, y));
         contextMenu.showAt(at.x, at.y);
     }

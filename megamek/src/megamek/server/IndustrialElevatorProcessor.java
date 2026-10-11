@@ -131,6 +131,12 @@ public class IndustrialElevatorProcessor extends DynamicTerrainProcessor {
                     if (hex.containsTerrain(Terrains.INDUSTRIAL_ELEVATOR)) {
                         Terrain terrain = hex.getTerrain(Terrains.INDUSTRIAL_ELEVATOR);
                         BoardLocation location = BoardLocation.of(new Coords(x, y), board.getBoardId());
+                        // A board that reached the game without validation may hold a shaft whose bottom is above
+                        // its top: that hex has no elevator, and the game goes on.
+                        if (!terrain.isValid(null)) {
+                            LOGGER.warn("No industrial elevator at {}: invalid shaft {}", location, terrain);
+                            continue;
+                        }
                         IndustrialElevator elevator = IndustrialElevator.fromTerrain(
                               location, terrain.getLevel(), terrain.getExits());
                         game.addIndustrialElevator(elevator);

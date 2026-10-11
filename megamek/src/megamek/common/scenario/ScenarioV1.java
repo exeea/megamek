@@ -47,6 +47,7 @@ import megamek.common.ToHitData;
 import megamek.common.annotations.Nullable;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.enums.GamePhase;
@@ -1094,14 +1095,11 @@ public class ScenarioV1 extends HashMap<String, Collection<String>> implements S
                     throw new ScenarioLoaderException("Couldn't find board file " + board);
                 }
 
-                ba[n] = new Board();
-                ba[n].load(new MegaMekFile(Configuration.boardsDir(), sBoardFile).getFile());
+                ba[n] = BoardFile.loadSheet(fBoard, isRotated, true);
 
                 if (constructionFactor > 0) {
                     ba[n].setBridgeCF(constructionFactor);
                 }
-
-                BoardUtilities.flip(ba[n], isRotated, isRotated);
             }
         }
 

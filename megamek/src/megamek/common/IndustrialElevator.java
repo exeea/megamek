@@ -140,11 +140,22 @@ public class IndustrialElevator implements Serializable {
      * @return A new IndustrialElevator instance
      */
     public static IndustrialElevator fromTerrain(BoardLocation location, int level, int exits) {
-        int shaftBottom = level;
-        int shaftTop = (exits >> SHAFT_TOP_SHIFT) & CAPACITY_MASK;
-        int capacityTens = exits & CAPACITY_MASK;
-        int capacityTons = capacityTens * CAPACITY_MULTIPLIER;
-        return new IndustrialElevator(location, shaftBottom, shaftTop, capacityTons);
+        return new IndustrialElevator(location, level, shaftTop(exits), capacityTons(exits));
+    }
+
+    /** The shaft top that an industrial elevator terrain's exits encode (levels above the hex surface). */
+    public static int shaftTop(int exits) {
+        return (exits >> SHAFT_TOP_SHIFT) & CAPACITY_MASK;
+    }
+
+    /** The capacity in tons that an industrial elevator terrain's exits encode. */
+    public static int capacityTons(int exits) {
+        return (exits & CAPACITY_MASK) * CAPACITY_MULTIPLIER;
+    }
+
+    /** The terrain exits encoding {@code shaftTop} and {@code capacityTons} (rounded down to tens of tons). */
+    public static int exits(int shaftTop, int capacityTons) {
+        return (shaftTop << SHAFT_TOP_SHIFT) | ((capacityTons / CAPACITY_MULTIPLIER) & CAPACITY_MASK);
     }
 
     // --- Getters ---
@@ -406,8 +417,7 @@ public class IndustrialElevator implements Serializable {
      * @return The exits value encoding shaft top and capacity
      */
     public int encodeExits() {
-        int capacityTens = capacityTons / CAPACITY_MULTIPLIER;
-        return (shaftTop << SHAFT_TOP_SHIFT) | (capacityTens & CAPACITY_MASK);
+        return exits(shaftTop, capacityTons);
     }
 
     /**

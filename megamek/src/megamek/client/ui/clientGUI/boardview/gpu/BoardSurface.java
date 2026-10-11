@@ -126,7 +126,7 @@ final class BoardSurface {
     /** The hex's shape as a hex further out reads it, with the given water depth. */
     static Shape shape(BoardScene.Tile tile, int waterDepth) {
         return new Shape(tile.elevation(), waterDepth, tile.liquid(), tile.detailedGround(), tile.surface(),
-              tile.roadExits(), tile.road(), tile.cliffTopExits(), tile.ultraSublevel());
+              tile.wayExits(), tile.road(), tile.cliffTopExits(), tile.ultraSublevel());
     }
 
     private static Geometry geometry(BoardScene scene, BoardScene.Tile tile) {
@@ -494,7 +494,7 @@ final class BoardSurface {
             fan(corners, center.z, Finish.TOP);
         } else if (tile.liquid().present()) {
             river(scene);
-        } else if (ramps != 0 || BoardRoad.rendered(tile)) {
+        } else if (ramps != 0 || BoardRoad.carriageway(tile)) {
             road(scene);
         } else {
             // As the shore moves its corners, which a flat top stands in for when its neighbours seek their walls.
@@ -724,9 +724,9 @@ final class BoardSurface {
               || tile.liquid().present() || neighbor.liquid().present()) {
             return false;
         }
-        boolean exit = (tile.roadExits() & (1 << direction)) != 0;
+        boolean exit = (tile.wayExits() & (1 << direction)) != 0;
         int reverse = (direction + 3) % 6;
-        boolean continuation = (neighbor.roadExits() & (1 << reverse)) != 0;
+        boolean continuation = (neighbor.wayExits() & (1 << reverse)) != 0;
         // A bridge approach changes only the road hex, leaving the ground beneath the deck intact.
         if (connectingBridge(tile, neighbor, direction) != null
               || connectingBridge(neighbor, tile, reverse) != null) {
@@ -737,11 +737,11 @@ final class BoardSurface {
     }
 
     static BoardScene.Feature connectingBridge(BoardScene.Tile road, BoardScene.Tile bridge, int direction) {
-        if (road.liquid().present() || (road.roadExits() & (1 << direction)) == 0) {
+        if (road.liquid().present() || (road.wayExits() & (1 << direction)) == 0) {
             return null;
         }
         int reverse = (direction + 3) % 6;
-        boolean continuation = !bridge.liquid().present() && (bridge.roadExits() & (1 << reverse)) != 0;
+        boolean continuation = !bridge.liquid().present() && (bridge.wayExits() & (1 << reverse)) != 0;
         if (continuation && road.elevation() == bridge.elevation()) {
             return null;
         }
@@ -2341,7 +2341,7 @@ final class BoardSurface {
     }
 
     private void simplifyRoad() {
-        BoardRoad road = BoardRoad.clearance(tile.coords(), tile.roadExits() | ramps);
+        BoardRoad road = BoardRoad.clearance(tile.coords(), tile.wayExits() | ramps);
         float scale = BoardGeometry.hexScale();
         BoardRampMesh.simplify(faces, center, p -> road.distance((p.x - center.x) / scale, (p.y - center.y) / scale)
               <= BoardRoad.SHOULDER, p -> roadRamps.stream().anyMatch(ramp -> ramp.curved(p)));
@@ -2350,7 +2350,7 @@ final class BoardSurface {
     /** Concrete stays a flat slab outside the road corridor; retaining walls carry the cut/fill inside it. */
     private void concreteRoad() {
         List<Face> graded = List.copyOf(faces);
-        BoardRoad road = BoardRoad.clearance(tile.coords(), tile.roadExits() | ramps);
+        BoardRoad road = BoardRoad.clearance(tile.coords(), tile.wayExits() | ramps);
         Area corridor = road.footprint(BoardRoad.SHOULDER);
         float scale = BoardGeometry.hexScale();
         corridor.transform(new AffineTransform(scale, 0, 0, scale, center.x, center.y));
@@ -2783,7 +2783,7 @@ final class BoardSurface {
 
     /** Finished geometry can use the same material decision for ground cover without retaining its builder. */
     static boolean bridgeSupport(BoardScene scene, BoardScene.Tile tile, Face face) {
-        if (tile.roadExits() == 0 || tile.liquid().present()
+        if (tile.wayExits() == 0 || tile.liquid().present()
               || (face.finish() != Finish.TOP && face.finish() != Finish.WALL)) { return false; }
         float ground = tile.elevation() * BoardGeometry.level(), epsilon = .001f * BoardGeometry.hexScale();
         float high = Math.max(face.a().z, Math.max(face.b().z, face.c().z));
@@ -2920,7 +2920,7 @@ final class BoardSurface {
     /** Road profiles precede the relief pass; water and ordinary ground already include the shore's corner shift. */
     private Vector3 topographyCorner(int k) {
         int corner = Math.floorMod(k, 6);
-        return !tile.liquid().present() && (ramps != 0 || BoardRoad.rendered(tile))
+        return !tile.liquid().present() && (ramps != 0 || BoardRoad.carriageway(tile))
               ? corners[corner] : moved(corner);
     }
 

@@ -3,22 +3,18 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.function.Predicate;
 
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
-import megamek.common.Hex;
+import megamek.common.board.BoardDecoration;
 import megamek.common.board.BridgeSpan;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
-import megamek.common.units.Terrains;
 
 /**
  * The authored deck shape and its presentation: its type (built or natural, {@link HexAppearance#bridgeBuilt}) and the
@@ -42,20 +38,56 @@ final class BoardBridge {
     /** The drawn top of the tile's built deck, at its hex level plus its bridge's height. */
     static float deckZ(BoardScene.Tile tile) { return deckZ(tile.elevation() + feature(tile).elevation()); }
 
-    /** {@code piers}: the hex's Pillars toggle ({@link HexAppearance#PILLARS}), see {@link BoardBridgeFooting#pier}. */
+    /** The highest TOP facet of an installed deck shape at (x, y), or negative infinity where it has none there. */
+    static float top(Shape shape, float x, float y) {
+        float height = Float.NEGATIVE_INFINITY;
+        if (shape == null) { return height; }
+        for (var facet : shape.facets()) {
+            if (facet.part() == Part.TOP) {
+                height = Math.max(height, new BoardSurface.Face(facet.a(), facet.b(), facet.c(), BoardSurface.Finish.TOP)
+                      .height(x, y));
+            }
+        }
+        return height;
+    }
+
+    /**
+     * The drawn deck at (x, y): its installed shape's top ({@link #top}, a sloped or fitted deck), else the plane of the
+     * tile's flat deck, which its GLB draws alone ({@link #deckZ}). What lies on a deck stands on it, a rail too.
+     */
+    static float drawnTop(Shape shape, BoardScene.Tile tile, float x, float y) {
+        float height = top(shape, x, y);
+        return Float.isFinite(height) || feature(tile) == null ? height : deckZ(tile);
+    }
+
+    /**
+     * {@code piers}: the hex's Pillars toggle ({@link HexAppearance#PILLARS}), see {@link BoardBridgeFooting#pier}.
+     * {@code colours}: the span's truss colours ({@link BridgeSpan#truss}), null for the standard design or a natural
+     * span. {@code joints}: the exits whose neighbour is a joined deck ({@link #connected}); a truss continues there
+     * and ends with an end post at every other exit ({@link #trussNodes}). Any change rebuilds the hex.
+     */
     record Deck(BoardRoad.Kind kind, int exits, List<BoardRoad.Kind> neighbors, BoardScene.Surface surface,
-          List<Float> rises, boolean piers) {
+          List<Float> rises, boolean piers, BoardDecoration.Colours colours, int joints) {
         BoardRoad road(Coords coords) { return BoardRoad.layout(coords, exits, kind, neighbors::get); }
         boolean natural() { return kind == BoardRoad.Kind.NONE; }
         boolean sloped() { return rises.stream().anyMatch(rise -> rise != 0); }
+        boolean truss() { return colours != null; }
+        /** The deck's GLB: the standard kit or the truss kit of its exits. */
+        String asset() { return BoardBridge.asset(exits, truss()); }
     }
 
-    private record Material(BoardRoad.Kind kind, BoardScene.Surface surface) { }
+    private record Material(BoardRoad.Kind kind, BoardScene.Surface surface, BoardDecoration.Colours truss) { }
 
-    /** PIER: the concrete piers under the deck's joints ({@link BoardBridgeFooting#pier}), never a walkable level. */
-    enum Part { TOP, RIM, SIDE, SOFFIT, STRUCTURE, PIER }
+    /**
+     * PIER: the concrete piers under the deck's joints ({@link BoardBridgeFooting#pier}), never a walkable level. STEEL:
+     * a sloped truss's steel members, drawn in their facets' {@code colour} (the span's recoloured Body).
+     */
+    enum Part { TOP, RIM, SIDE, SOFFIT, STRUCTURE, PIER, STEEL }
 
-    record Facet(Vector3 a, Vector3 b, Vector3 c, Vector3 normal, Part part) { }
+    /** {@code colour}: a STEEL facet's own colour; null for every other part, which its material colours. */
+    record Facet(Vector3 a, Vector3 b, Vector3 c, Vector3 normal, Part part, Color colour) {
+        Facet(Vector3 a, Vector3 b, Vector3 c, Vector3 normal, Part part) { this(a, b, c, normal, part, null); }
+    }
 
     /** Immutable CPU geometry, owned by the installed terrain chunk and shared by drawing and picking. */
     record Shape(BoardScene.Surface surface, float level, List<Facet> facets, BoundingBox bounds) {
@@ -83,12 +115,34 @@ final class BoardBridge {
     }
 
     static void triangle(List<Facet> faces, Vector3 a, Vector3 b, Vector3 c, Part part) {
-        var normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a));
-        if (normal.len2() > 1e-8f) { faces.add(new Facet(a, b, c, normal.nor(), part)); }
+        triangle(faces, a, b, c, part, null);
     }
 
-    static String asset(int exits) {
-        return exits == 9 ? "bridge" : "bridges/bridge-exits-" + String.format(java.util.Locale.ROOT, "%02d", exits);
+    static void triangle(List<Facet> faces, Vector3 a, Vector3 b, Vector3 c, Part part, Color colour) {
+        var normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a));
+        if (normal.len2() > 1e-8f) { faces.add(new Facet(a, b, c, normal.nor(), part, colour)); }
+    }
+
+    static String asset(int exits) { return asset(exits, false); }
+
+    /** One GLB per exit mask: the standard kit ({@code bridge} for a straight deck) or the truss kit. */
+    static String asset(int exits, boolean truss) {
+        String mask = String.format(java.util.Locale.ROOT, "%02d", exits);
+        return truss ? "bridges/truss-exits-" + mask : exits == 9 ? "bridge" : "bridges/bridge-exits-" + mask;
+    }
+
+    /**
+     * The nodes of a truss deck's GLB that draw: its body and, per exit, exactly one of its two alternatives, the half
+     * panel that continues the truss across a joint ({@code truss-joint-D}) or the inclined end post
+     * ({@code truss-end-D}) at a bank, a road landing or an open end. Drawing both or neither would be wrong.
+     */
+    static List<String> trussNodes(Deck deck) {
+        var nodes = new ArrayList<String>();
+        nodes.add("truss-exits-" + String.format(java.util.Locale.ROOT, "%02d", deck.exits()));
+        for (int d = 0; d < 6; d++) {
+            if ((deck.exits() & (1 << d)) != 0) { nodes.add(((deck.joints() & (1 << d)) != 0 ? "truss-joint-" : "truss-end-") + d); }
+        }
+        return List.copyOf(nodes);
     }
 
     static BoardScene.Feature feature(BoardScene.Tile tile) {
@@ -102,14 +156,16 @@ final class BoardBridge {
         var kind = material.kind();
         var neighbors = new ArrayList<BoardRoad.Kind>();
         var rises = new ArrayList<Float>();
+        int joints = 0;
         for (int d = 0; d < 6; d++) {
             var next = scene.tile(tile.coords().translated(d));
-            neighbors.add(connected(tile, next, d) ? kind
-                  : road(tile, next, d) ? next.road() : BoardRoad.Kind.NONE);
+            boolean joined = connected(tile, next, d);
+            if (joined) { joints |= 1 << d; }
+            neighbors.add(joined ? kind : road(tile, next, d) ? next.road() : BoardRoad.Kind.NONE);
             rises.add(edgeElevation(tile, next, d) - tile.elevation() - bridge.elevation());
         }
         return new Deck(kind, bridge.bridgeExits(), List.copyOf(neighbors), material.surface(), List.copyOf(rises),
-              HexAppearance.pillars(tile.appearance()));
+              HexAppearance.pillars(tile.appearance()), material.truss(), joints);
     }
 
     /**
@@ -121,9 +177,9 @@ final class BoardBridge {
     }
 
     /**
-     * The connected span's type and materials. Every captured bridge tile carries a type, stored or decoded
-     * ({@link #typed}); where its hexes differ, built wins. Only a hand-made scene without any type keeps the rule that a
-     * road approach makes a span built.
+     * The connected span's type and materials. Every bridge of a converted board stores its type; where its hexes
+     * differ, built wins. A span without any type (a transient editor state, a hand-made scene) is built, as the
+     * editor's stroke types a new bridge. A built span's truss design and colours follow {@link BridgeSpan#truss}.
      */
     private static Material material(BoardScene scene, BoardScene.Tile tile) {
         var pending = new ArrayDeque<BoardScene.Tile>();
@@ -143,7 +199,8 @@ final class BoardBridge {
                 var next = scene.tile(current.coords().translated(d));
                 if (connected(current, next, d)) {
                     if (visited.add(next.coords())) { pending.add(next); }
-                } else if (road(current, next, d)) {
+                } else if (next != null && next.roadExits() != 0 && road(current, next, d)) {
+                    // Only a road votes for the deck's material: a span that only rails reach stays plain asphalt.
                     var kind = next.road() == BoardRoad.Kind.NONE ? BoardRoad.Kind.PAVED : next.road();
                     if (priority(kind) > priority(found)) { found = kind; }
                 } else if (abutment(current, next, d) && next.surface() != BoardScene.Surface.CONCRETE && banks.add(next.coords())) {
@@ -151,8 +208,9 @@ final class BoardBridge {
                 }
             }
         }
-        if (built == null ? found != BoardRoad.Kind.NONE : built) {
-            return new Material(found == BoardRoad.Kind.NONE ? BoardRoad.Kind.ALLEY : found, BoardScene.Surface.ROCK);
+        if (built == null || built) {
+            return new Material(found == BoardRoad.Kind.NONE ? BoardRoad.Kind.ALLEY : found, BoardScene.Surface.ROCK,
+                  BridgeSpan.truss(at -> scene.tile(at).appearance(), visited));
         }
         var surface = tile.surface() == BoardScene.Surface.CONCRETE ? BoardScene.Surface.ROCK : tile.surface();
         int count = 0;
@@ -162,7 +220,7 @@ final class BoardBridge {
                 count = votes[candidate.ordinal()];
             }
         }
-        return new Material(BoardRoad.Kind.NONE, surface);
+        return new Material(BoardRoad.Kind.NONE, surface, null);
     }
 
     private static int priority(BoardRoad.Kind kind) {
@@ -175,8 +233,9 @@ final class BoardBridge {
         };
     }
 
+    /** A carriageway (a road or a ground rail) on {@code next} meets the deck: it gets a half grade and a solid ramp. */
     static boolean road(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
-        return next != null && next.roadExits() != 0
+        return next != null && next.wayExits() != 0
               && BoardSurface.connectingBridge(next, tile, (direction + 3) % 6) != null;
     }
 
@@ -235,56 +294,6 @@ final class BoardBridge {
         var other = feature(next);
         return bridge != null && other != null && BridgeSpan.joined(bridge.bridgeExits(), tile.elevation() + bridge.elevation(),
               other.bridgeExits(), next.elevation() + other.elevation(), direction);
-    }
-
-    /**
-     * The legacy decode of the type of {@code span} (a {@link BridgeSpan}), the one rule of import, of the 3D editor's
-     * typing of untyped bridges and of their render ({@link #typed}): a type stored on any of its hexes (built wins);
-     * else built when one of its hexes has a road attached (ROAD on it at any level, or a deck end on a road hex), rail
-     * or maglev art (FLUFF 10 or 9) on it or at a deck end, pillar art ({@code pillarArt}), PAVEMENT terrain (snow on it
-     * too) on it or at a deck end, or a BUILDING on it or beside it; otherwise natural. {@code hexes} is null off the board.
-     */
-    static boolean built(Function<Coords, Hex> hexes, Predicate<Coords> pillarArt, List<Coords> span) {
-        Boolean stored = BridgeSpan.type(hexes, span);
-        if (stored != null) { return stored; }
-        var members = new HashSet<>(span);
-        for (Coords at : span) {
-            Hex hex = hexes.apply(at);
-            if (pillarArt.test(at) || artificial(hex) || hex.containsTerrain(Terrains.ROAD)) { return true; }
-            int exits = hex.getTerrain(Terrains.BRIDGE).getExits();
-            for (int d = 0; d < 6; d++) {
-                Coords next = at.translated(d);
-                Hex beside = hexes.apply(next);
-                if (beside == null || members.contains(next)) { continue; }
-                if (beside.containsTerrain(Terrains.BUILDING)) { return true; }
-                // A deck end: an exit onto ground, not onto another deck.
-                if ((exits & (1 << d)) != 0 && !beside.containsTerrain(Terrains.BRIDGE)
-                      && (artificial(beside) || beside.containsTerrain(Terrains.ROAD))) { return true; }
-            }
-        }
-        return false;
-    }
-
-    /** Pavement (under snow too), a building, or rail or maglev art (FLUFF 10 or 9): what a built bridge leads to. */
-    private static boolean artificial(Hex hex) {
-        int fluff = hex.containsTerrain(Terrains.FLUFF) ? hex.terrainLevel(Terrains.FLUFF) : -1;
-        return hex.containsAnyTerrainOf(Terrains.PAVEMENT, Terrains.BUILDING) || fluff == 9 || fluff == 10;
-    }
-
-    /**
-     * {@code appearance}, the hex's as the 3D board draws it, with its bridge's type: the stored one, else the legacy
-     * decode's ({@link #built}) over its span on {@code board} (null off the board). A neighbour's pillar art is its own
-     * tile's PILLARS, and a span's built tile wins ({@link #material}). {@code decoded} keeps each decode for the
-     * caller's board, so a later capture (a building beside the span collapsing) does not retype the bridge.
-     */
-    static Map<String, HexAppearance> typed(Hex hex, Coords coords, Map<String, HexAppearance> appearance,
-          Function<Coords, Hex> board, Map<Coords, HexAppearance> decoded) {
-        if (!hex.containsTerrain(Terrains.BRIDGE) || HexAppearance.bridgeBuilt(appearance) != null) { return appearance; }
-        Function<Coords, Hex> hexes = at -> at.equals(coords) ? hex : board.apply(at);
-        Map<String, HexAppearance> typed = new HashMap<>(appearance);
-        typed.put("bridge", decoded.computeIfAbsent(coords, at -> built(hexes, c -> false, BridgeSpan.of(hexes, at))
-              ? HexAppearance.BUILT_BRIDGE : HexAppearance.NATURAL_BRIDGE));
-        return typed;
     }
 
     /** Connected decks and road approaches each own half the grade; bare banks keep the authored deck height. */

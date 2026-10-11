@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.event.InputEvent;
 import java.io.File;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
@@ -28,11 +29,15 @@ import megamek.common.game.Game;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuMapSourceTest {
+    @TempDir
+    Path temporary;
+
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void viewCommandsUseSharedPreferencesWithoutChangingTheDocument(boolean editing) throws Exception {
@@ -88,6 +93,59 @@ class GpuMapSourceTest {
             }
             return null;
         });
+    }
+
+    /**
+     * The editor's Menu has Save As Image, Open Board Source File (only once the document has a file) and, in View, the
+     * Trace Overlay toggle and its settings. The toggle is the shared preference; the editor's trace settings follow it
+     * without editing the document or capturing the board again. A map preview has none of these.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void editorMenuHasTheFileCommandsAndTheTraceOverlay(boolean editing) throws Exception {
+        onEdt(() -> {
+            GUIPreferences preferences = GUIPreferences.getInstance();
+            boolean shown = preferences.getShowTraceOverlay();
+            BoardEditorSession editor = editing ? new BoardEditorSession() : null;
+            Game game = editor == null ? new Game() : editor.game();
+            game.setBoard(Board.createEmptyBoard(4, 4));
+            try (var source = new GpuMapSource(game, null, editor)) {
+                var ids = source.takeFrame().globalCommands().stream().map(BoardScene.Command::id).toList();
+                assertEquals(editing, ids.contains("fileBoardSaveAsImage"));
+                assertEquals(editing, ids.contains("boardSourceFile"));
+                var view = source.takeFrame().globalCommands().stream().filter(command -> command.id().equals("view"))
+                      .flatMap(command -> command.children().stream()).map(BoardScene.Command::id).toList();
+                assertEquals(editing, view.contains("boardTraceOverlay"));
+                assertEquals(editing, view.contains("boardTraceOverlaySettings"));
+                if (!editing) {
+                    assertSame(GpuTraceOverlay.Settings.NONE, source.trace());
+                    return null;
+                }
+                assertFalse(command(source, "boardSourceFile").enabled(), "A document never saved has no file");
+                editor.save(temporary.resolve("menu.board2"));
+                source.refresh();
+                assertEquals(java.awt.Desktop.isDesktopSupported(), command(source, "boardSourceFile").enabled());
+
+                var tiles = source.takeFrame().scene().tiles();
+                var toggle = viewCommand(source, "boardTraceOverlay");
+                assertEquals(shown, toggle.selected());
+                assertEquals(shown, source.trace().enabled());
+                toggle.action().run();
+                assertEquals(!shown, preferences.getShowTraceOverlay());
+                assertEquals(!shown, source.trace().enabled());
+                source.refresh();
+                assertEquals(!shown, viewCommand(source, "boardTraceOverlay").selected());
+                assertSame(tiles, source.takeFrame().scene().tiles(), "A trace setting captures no board art again");
+                assertFalse(editor.dirty(), "The trace overlay is no part of the board");
+            } finally {
+                preferences.setValue(GUIPreferences.SHOW_TRACE_OVERLAY, shown);
+            }
+            return null;
+        });
+    }
+
+    private static BoardScene.Command command(GpuMapSource source, String id) {
+        return source.takeFrame().globalCommands().stream().filter(command -> command.id().equals(id)).findFirst().orElseThrow();
     }
 
     private static BoardScene.Command viewCommand(GpuMapSource source, String id) {

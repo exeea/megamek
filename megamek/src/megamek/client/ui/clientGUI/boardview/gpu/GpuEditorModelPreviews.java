@@ -31,7 +31,9 @@ import megamek.common.Configuration;
 
 /** A page-sized, disposable preview queue: CPU model decoding off-thread; one upload/render per UI frame. */
 final class GpuEditorModelPreviews implements Disposable {
-    private record Request(String asset, megamek.common.board.BoardDecoration.Colours colours, Image target) { }
+    /** A model in these colours; for a route asset its layout of {@code sides} and {@code tracks}, from above when {@code top}. */
+    private record Request(String asset, megamek.common.board.BoardDecoration.Colours colours, int sides, int tracks, boolean top,
+          Image target) { }
     private final java.util.concurrent.ExecutorService worker = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "board-editor-previews"); thread.setDaemon(true); return thread;
     });
@@ -43,9 +45,15 @@ final class GpuEditorModelPreviews implements Disposable {
 
     void add(String asset, Image target) { add(asset, megamek.common.board.BoardDecoration.Colours.NONE, target); }
 
-    /** A preview of the model in these colours, as a palette entry places it. */
+    /** A preview of the model in these colours, as a palette entry places it; a route's shows a N-S straight. */
     void add(String asset, megamek.common.board.BoardDecoration.Colours colours, Image target) {
-        queue.add(new Request(asset, colours, target));
+        queue.add(new Request(asset, colours, megamek.common.board.RailRoute.side(0) | megamek.common.board.RailRoute.side(3), 0,
+              false, target));
+    }
+
+    /** A route of {@code kind} on its flat carrier with these sides and track pieces, seen from above (the junction card). */
+    void add(megamek.common.board.RailRoute.Kind kind, int sides, int tracks, Image target) {
+        queue.add(new Request(kind.asset, megamek.common.board.BoardDecoration.Colours.NONE, sides, tracks, true, target));
     }
 
     void update() {
@@ -58,17 +66,21 @@ final class GpuEditorModelPreviews implements Disposable {
             pending.cancel(true); pending = null; current = null;
         }
         if (pending != null && pending.isDone()) {
-            try { render(pending.get(), current.target()); }
+            try { render(pending.get(), current.top(), current.target()); }
             catch (Exception failure) {
-                current.target().setUserObject("No preview");
+                current.target().setUserObject(megamek.client.ui.gdx.UiKit.text("BoardEditor.noPreview"));
             } finally { pending = null; current = null; }
         }
         if (pending == null && !queue.isEmpty()) {
             current = queue.removeFirst(); String asset = current.asset(); var colours = current.colours();
+            int sides = current.sides(), tracks = current.tracks();
             pending = worker.submit(() -> {
                 File root = new File(Configuration.dataDir(), "models/board");
+                // A route is generated, not a file: the builder lays its pieces on a flat carrier.
+                var route = megamek.common.board.RailRoute.Kind.of(asset);
+                if (route != null) { return BoardRail.model(BoardRail.flat(route, sides, tracks)); }
                 if (asset.startsWith("buildings/")) {
-                    File custom = megamek.client.ui.clientGUI.boardview.BoardArtwork.customBuildingFile(asset);
+                    File custom = megamek.common.board.TilesetScenery.customBuildingFile(asset);
                     if (custom.isFile()) {
                         return RigidGlb.loadLods(new FileHandle(custom), new File(Configuration.dataDir(), "models/buildings").toPath()).getFirst();
                     }
@@ -80,7 +92,7 @@ final class GpuEditorModelPreviews implements Disposable {
         }
     }
 
-    private void render(ModelData data, Image target) {
+    private void render(ModelData data, boolean top, Image target) {
         Map<String, Texture> textures = new HashMap<>();
         Model model = null;
         FrameBuffer image = null;
@@ -92,8 +104,9 @@ final class GpuEditorModelPreviews implements Disposable {
             Vector3 center = bounds.getCenter(new Vector3());
             float radius = Math.max(1, bounds.getDimensions(new Vector3()).len() / 2);
             PerspectiveCamera camera = new PerspectiveCamera(35, 128, 96);
-            camera.up.set(Vector3.Z);
-            camera.position.set(center).add(new Vector3(1, -1.3f, 1).nor().scl(radius * 3.7f));
+            // A junction is read from above, north up; a model from the palette's three-quarter view.
+            camera.up.set(top ? Vector3.Y : Vector3.Z);
+            camera.position.set(center).add((top ? new Vector3(0, -.25f, 1) : new Vector3(1, -1.3f, 1)).nor().scl(radius * (top ? 3 : 3.7f)));
             camera.lookAt(center); camera.near = radius / 100; camera.far = radius * 10; camera.update();
             Environment light = new Environment();
             light.set(new ColorAttribute(ColorAttribute.AmbientLight, .55f, .55f, .55f, 1));

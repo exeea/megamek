@@ -5,6 +5,7 @@ import java.util.Locale;
 
 import com.badlogic.gdx.graphics.Color;
 import megamek.common.Hex;
+import megamek.common.board.HexTile;
 import megamek.common.units.Terrains;
 
 /** Immutable liquid/crust appearance captured from terrain; depth and elevation stay on the tile. */
@@ -19,14 +20,14 @@ record BoardLiquid(Kind kind, String theme, int rapids) {
     record Textures(String base, String foam) { }
 
     static BoardLiquid capture(Hex hex) {
+        // Which hexes hold a liquid is common (HexTile.liquid), the legacy conversion's statement too.
+        if (!HexTile.liquid(hex)) {
+            return hex.terrainLevel(Terrains.MAGMA) == 1 ? new BoardLiquid(Kind.MAGMA_CRUST, "", 0) : NONE;
+        }
         if (hex.terrainLevel(Terrains.MAGMA) == 2) {
             return new BoardLiquid(Kind.MAGMA, "", 0);
         }
-        if (hex.terrainLevel(Terrains.MAGMA) == 1) {
-            return new BoardLiquid(Kind.MAGMA_CRUST, "", 0);
-        }
         boolean hazardous = hex.containsTerrain(Terrains.HAZARDOUS_LIQUID);
-        if (!hazardous && !hex.containsTerrain(Terrains.WATER)) { return NONE; }
         String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
         // Hazardous pools use the ordinary water animation with a green material tint.
         if (hazardous || !(theme.equals("mars") || theme.equals("volcano"))) { theme = ""; }

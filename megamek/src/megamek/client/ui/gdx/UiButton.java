@@ -10,6 +10,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
+import com.badlogic.gdx.scenes.scene2d.utils.Layout;
 import com.badlogic.gdx.utils.Align;
 
 /**
@@ -29,7 +30,7 @@ public class UiButton extends TextButton {
     private Label badge;
     private Image dot;
     private Actor trailing;
-    private float trailingSize;
+    private float trailingSize, trailingWidth;
 
     /** An empty button in the hud style {@code style} of the kit's skin; {@link UiKit} adds its parts. */
     public UiButton(UiKit kit, String style) {
@@ -97,18 +98,22 @@ public class UiButton extends TextButton {
         return this;
     }
 
-    /** An independent action inside the row's frame, without changing its label or selection hit target. */
+    /**
+     * An independent action inside the row's frame, without changing its label or selection hit target: {@code size}
+     * high and as wide as an action that lays itself out prefers, at least {@code size} (a row of several buttons).
+     */
     public UiButton trailingAction(Actor action, float size) {
         if (trailing != null) { trailing.remove(); }
         trailing = action; trailingSize = size;
-        padRight(size + 6); addActor(action); invalidate();
+        trailingWidth = action instanceof Layout layout ? Math.max(size, layout.getPrefWidth()) : size;
+        padRight(trailingWidth + 6); addActor(action); invalidate();
         return this;
     }
 
     @Override
     public void layout() {
         super.layout();
-        if (trailing != null) { trailing.setBounds(getWidth() - trailingSize - 3, (getHeight() - trailingSize) / 2, trailingSize, trailingSize); }
+        if (trailing != null) { trailing.setBounds(getWidth() - trailingWidth - 3, (getHeight() - trailingSize) / 2, trailingWidth, trailingSize); }
         if (badge != null) {
             badge.setSize(Math.max(17, badge.getPrefWidth()), 17);
             badge.setPosition(getWidth() + 6 - badge.getWidth(), getHeight() + 6 - badge.getHeight());

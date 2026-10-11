@@ -20,8 +20,9 @@ import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
-import megamek.common.board.MaglevRoute;
+import megamek.common.board.RailRoute;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
@@ -69,11 +70,18 @@ class BoardSceneryMaglevTest {
     }
 
     @Test
-    void thePaletteKeepsTheRoutePlatformWagonCabAndTrainStampWithoutDuplicateMeshes() {
+    void thePaletteOffersBothRoutesInTransportAndTheRollingStockAndStampsWithoutDuplicateMeshes() {
         var blueprint = BoardEditorBlueprint.get();
-        assertEquals(Set.of(MaglevRoute.ASSET, PLATFORM, WAGON, CAB, "stamp/maglev-train"), blueprint.assets().stream()
-              .filter(asset -> asset.group().equals(GROUP) && asset.palette()).map(BoardEditorBlueprint.Asset::id)
-              .collect(Collectors.toSet()));
+        // Maglev and Rail are two choices in Transport, beside the crossing signal and the level crossing.
+        var transport = blueprint.assets().stream().filter(asset -> asset.group().equals("Transport") && asset.palette())
+              .map(BoardEditorBlueprint.Asset::id).collect(Collectors.toSet());
+        assertTrue(transport.containsAll(Set.of(RailRoute.Kind.MAGLEV.asset, RailRoute.Kind.RAIL.asset,
+              "scenery/rail/crossing-signal", "decal/rail/level-crossing")), transport.toString());
+        var stock = blueprint.assets().stream().filter(asset -> asset.group().equals(GROUP) && asset.palette())
+              .map(BoardEditorBlueprint.Asset::id).collect(Collectors.toSet());
+        assertTrue(stock.containsAll(Set.of(PLATFORM, WAGON, CAB, "stamp/maglev-train", "stamp/maglev-colony-train",
+              "stamp/rail-train", "stamp/express-train", "stamp/colony-train", "scenery/rail/locomotive")), stock.toString());
+        assertTrue(stock.stream().noneMatch(id -> RailRoute.Kind.of(id) != null), "A route is a Transport choice");
         assertTrue(blueprint.assets().stream().filter(asset -> asset.group().equals(GROUP)).allMatch(asset -> asset.snap() == null));
         assertFalse(blueprint.asset("scenery/maglev/coupler").palette(), "The coupler comes with the train stamp");
         var stamp = blueprint.asset("stamp/maglev-train");
@@ -83,13 +91,14 @@ class BoardSceneryMaglevTest {
         assertEquals(List.of(WAGON, CAB, "scenery/maglev/coupler"), train.stream().map(BoardSceneryLayouts.Component::asset).toList());
         assertTrue(train.stream().allMatch(row -> row.z() == 0));
 
-        // The vehicles ride half a pixel into the route's 4 px rail; the platform and route stand on the ground.
-        assertEquals(0, low(MaglevRoute.ASSET), 1e-4);
-        assertEquals(4, high(MaglevRoute.ASSET), 1e-4);
+        // The cars' suspension shoes wrap the route's 4 px beam down to 1.3 px (the coupler to 2.3); the platform and
+        // route stand on the ground.
+        assertEquals(0, low(RailRoute.Kind.MAGLEV.asset), 1e-4);
+        assertEquals(4, high(RailRoute.Kind.MAGLEV.asset), 1e-4);
         assertEquals(0, low(PLATFORM), 1e-4);
-        assertEquals(3.5, low(WAGON), 1e-4);
-        assertEquals(3.5, low(CAB), 1e-4);
-        assertEquals(4, low("scenery/maglev/coupler"), 1e-4);
+        assertEquals(1.3, low(WAGON), 1e-4);
+        assertEquals(1.3, low(CAB), 1e-4);
+        assertEquals(2.3, low("scenery/maglev/coupler"), 1e-4);
 
         var root = Configuration.dataDir().toPath().resolve("models/board/scenery");
         assertFalse(Files.exists(root.resolve("maglev/track.glb")), "The route marker is the only rail mesh");
@@ -103,17 +112,17 @@ class BoardSceneryMaglevTest {
         String[] hexes = { "fluff:9:7", "water:2;bridge:1:09;bridge_cf:40;bridge_elev:1;fluff:9:7", "water:1;fluff:9:7",
               "heavy_industrial:2;fluff:9:7", "building:2;bldg_elev:2;bldg_cf:50;fluff:9:3", "fluff:9:5" };
         for (int x = 0; x < hexes.length; x++) { board.setHex(new Coords(x, 0), new Hex(1, hexes[x], "")); }
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         List<BoardDecoration.Placement> expected = List.of(BoardDecoration.Placement.ground(), BoardDecoration.Placement.absolute(2),
               BoardDecoration.Placement.absolute(1), BoardDecoration.Placement.absolute(3), BoardDecoration.Placement.absolute(3),
               BoardDecoration.Placement.ground());
         for (int x = 0; x < hexes.length; x++) {
             Hex hex = board.getHex(x, 0);
-            assertFalse(hex.containsTerrain(Terrains.FLUFF), hexes[x]);
-            var route = MaglevRoute.find(hex);
+            assertTrue(hex.containsTerrain(Terrains.FLUFF), hexes[x] + ": the token stays for the 2D board");
+            var route = RailRoute.find(hex, RailRoute.Kind.MAGLEV);
             assertNotNull(route, hexes[x]);
             assertNull(route.group(), "A route marker is never a group member");
-            var pieces = hex.getDecorations().stream().filter(object -> !MaglevRoute.isRoute(object)).toList();
+            var pieces = hex.getDecorations().stream().filter(object -> !RailRoute.isRoute(object)).toList();
             // The maglev pieces ride the marker; parked cars stand on the hex's support, and are left out over the
             // water and the industrial plant, which give them none.
             for (var piece : pieces) {
@@ -131,17 +140,71 @@ class BoardSceneryMaglevTest {
         }
     }
 
+    /**
+     * Batch-10 answer 7: a converted maglev run a level or more up (here over a bridge deck) stands on Pillars, all of
+     * its run; a run on the ground does not; and legacy pillar art in the hexes beside a line (Karkand's row of posts) is
+     * that line's Pillars: no pillar objects, the run's Pillars on and the line a level above the ground with the
+     * pieces that ride it, while parked cars stay on the ground.
+     */
+    @Test
+    void convertedMaglevsStandOnPillarsWhereTheLegacyArtShowsThemRaised() {
+        Board board = Board.createEmptyBoard(7, 6);
+        for (int y = 1; y <= 3; y++) {
+            board.setHex(new Coords(0, y), new Hex(0, y == 2 ? "water:1;bridge:1:9;bridge_cf:40;bridge_elev:2;fluff:9:0"
+                  : "fluff:9:0", ""));
+            board.setHex(new Coords(3, y), new Hex(0, "fluff:4:6", ""));
+            board.setHex(new Coords(4, y), new Hex(0, y == 2 ? "fluff:9:6" : "fluff:9:0", ""));
+            board.setHex(new Coords(6, y), new Hex(0, "fluff:9:0", ""));
+        }
+        BoardSceneryLayouts.convert(board);
+        var raised = BoardDecoration.Placement.on("ground", 1);
+        for (int y = 1; y <= 3; y++) {
+            var deck = RailRoute.find(board.getHex(0, y), RailRoute.Kind.MAGLEV);
+            assertTrue(deck.pillars(), "the run over the deck, row " + y);
+            assertEquals(y == 2 ? BoardDecoration.Placement.absolute(2) : BoardDecoration.Placement.ground(), deck.placement());
+            assertFalse(RailRoute.find(board.getHex(6, y), RailRoute.Kind.MAGLEV).pillars(), "a run on the ground, row " + y);
+            assertTrue(board.getHex(3, y).getDecorations().isEmpty(), "the pillar art places no pillars, row " + y);
+            assertTrue(board.getHex(3, y).containsTerrain(Terrains.FLUFF), "its token stays for the 2D board");
+            var line = RailRoute.find(board.getHex(4, y), RailRoute.Kind.MAGLEV);
+            assertTrue(line.pillars(), "the line beside the posts, row " + y);
+            assertEquals(raised, line.placement(), "a level above the ground, row " + y);
+        }
+        for (var piece : board.getHex(4, 2).getDecorations()) {
+            if (RailRoute.isRoute(piece)) { continue; }
+            assertEquals(piece.asset().startsWith("scenery/maglev/") ? raised : BoardDecoration.Placement.ground(),
+                  piece.placement(), piece.asset());
+        }
+        // Pillar art where two lines end (Ishiyama 5407-5607) is no row along a line: it stays plain pillars.
+        Board ends = Board.createEmptyBoard(5, 5);
+        for (int y = 0; y < 3; y++) {
+            ends.setHex(new Coords(1, y), new Hex(0, "fluff:9:0", ""));
+            ends.setHex(new Coords(3, y), new Hex(0, "fluff:9:0", ""));
+        }
+        for (int x = 1; x <= 3; x++) { ends.setHex(new Coords(x, 3), new Hex(0, "fluff:4:6", "")); }
+        BoardSceneryLayouts.convert(ends);
+        for (int x = 1; x <= 3; x++) {
+            assertEquals(6, ends.getHex(x, 3).getDecorations().size(), "the pillars stay, column " + x);
+        }
+        for (int x : new int[] { 1, 3 }) {
+            var line = RailRoute.find(ends.getHex(x, 1), RailRoute.Kind.MAGLEV);
+            assertFalse(line.pillars());
+            assertEquals(BoardDecoration.Placement.ground(), line.placement());
+        }
+    }
+
     @Test
     void aTrainStampedOnARouteRidesItsMarkerAndElsewhereStandsOnTheHex() {
-        var session = new megamek.client.ui.boardeditor.BoardEditorSession(BoardEditorBlueprint.get(), BoardSceneryLayouts.DECODER);
-        send(session, megamek.client.ui.boardeditor.BoardEditorSession.Action.ASSET, MaglevRoute.ASSET);
+        var session = new megamek.client.ui.boardeditor.BoardEditorSession(BoardEditorBlueprint.get());
+        send(session, megamek.client.ui.boardeditor.BoardEditorSession.Action.ASSET, RailRoute.Kind.MAGLEV.asset);
         var route = new Coords(2, 2);
-        session.pointer(route, 0, 0, false); session.finishStroke();
-        var marker = MaglevRoute.find(session.board().getHex(route));
+        // A route long enough for the train: a stamp places only the vehicles that fit on its track.
+        session.pointer(route.translated(0), 0, 0, false); session.pointer(route, 0, 0, true);
+        session.pointer(route.translated(3), 0, 0, true); session.finishStroke();
+        var marker = RailRoute.find(session.board().getHex(route), RailRoute.Kind.MAGLEV);
         assertEquals(BoardDecoration.Placement.surface("ground", "top", 1), marker.placement(), "A painted route rides one level up");
         send(session, megamek.client.ui.boardeditor.BoardEditorSession.Action.ASSET, "stamp/maglev-train");
         session.pointer(route, 0, 0, false); session.finishStroke();
-        var train = session.board().getHex(route).getDecorations().stream().filter(object -> !MaglevRoute.isRoute(object)).toList();
+        var train = session.board().getHex(route).getDecorations().stream().filter(object -> !RailRoute.isRoute(object)).toList();
         assertEquals(List.of(WAGON, CAB, "scenery/maglev/coupler"), train.stream().map(BoardDecoration::asset).toList());
         assertTrue(train.stream().allMatch(object -> object.placement().equals(marker.placement())));
         var plain = new Coords(5, 5);
@@ -168,18 +231,18 @@ class BoardSceneryMaglevTest {
     void realBoardsImportParallelRoutesApartAndThreeHexTrainsInOrder() throws Exception {
         // 86x51 Rail Crossing: parallel NW/SE lines and stations, side by side.
         Board crossing = corpus("unofficial/EVS/86x51 Rail Crossing.board");
-        BoardSceneryLayouts.importBoard(crossing);
+        BoardSceneryLayouts.convert(crossing);
         int joined = 0, apart = 0;
         for (int x = 0; x < crossing.getWidth(); x++) {
             for (int y = 0; y < crossing.getHeight(); y++) {
-                var route = MaglevRoute.find(crossing.getHex(x, y));
+                var route = RailRoute.find(crossing.getHex(x, y), RailRoute.Kind.MAGLEV);
                 if (route == null) { continue; }
                 assertEquals(36, route.connections());
                 for (int direction = 0; direction < 6; direction++) {
-                    var neighbour = MaglevRoute.find(crossing.getHex(new Coords(x, y).translated(direction)));
+                    var neighbour = RailRoute.find(crossing.getHex(new Coords(x, y).translated(direction)), RailRoute.Kind.MAGLEV);
                     if (neighbour == null) { continue; }
                     boolean axis = direction == 2 || direction == 5;
-                    assertEquals(axis, MaglevRoute.joined(route, direction, neighbour), x + "," + y + " towards " + direction);
+                    assertEquals(axis, RailRoute.joined(route, direction, neighbour), x + "," + y + " towards " + direction);
                     if (axis) { joined++; } else { apart++; }
                 }
             }
@@ -189,7 +252,7 @@ class BoardSceneryMaglevTest {
         // 90x41 Whats Done Behind: a N/S train (maglevtrain1, 2, 2, 3) and a NE/SW one (maglevtrain4, 5, 5, 5, 6).
         Board legacy = corpus("unofficial/Derv_Maps/90x41 Whats Done Behind.board");
         Board board = corpus("unofficial/Derv_Maps/90x41 Whats Done Behind.board");
-        BoardSceneryLayouts.importBoard(board);
+        BoardSceneryLayouts.convert(board);
         int trains = 0;
         for (int x = 0; x < legacy.getWidth(); x++) {
             for (int y = 0; y < legacy.getHeight(); y++) {
@@ -203,7 +266,7 @@ class BoardSceneryMaglevTest {
                 trains++;
                 Coords next = at.translated(inward);
                 assertEquals(art <= 8 ? 7 : 10, legacy.getHex(next).getTerrain(Terrains.FLUFF).getExits(), at + " continues into a middle hex");
-                assertTrue(MaglevRoute.joined(MaglevRoute.find(board.getHex(at)), inward, MaglevRoute.find(board.getHex(next))));
+                assertTrue(RailRoute.joined(RailRoute.find(board.getHex(at), RailRoute.Kind.MAGLEV), inward, RailRoute.find(board.getHex(next), RailRoute.Kind.MAGLEV)));
                 var cab = board.getHex(at).getDecorations().stream().filter(object -> object.asset().equals(CAB)).findFirst();
                 assertEquals(art == 6 || art == 9, cab.isPresent(), at + ": only the front hex has the cab");
                 // The nose points away from the train.

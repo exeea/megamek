@@ -11,7 +11,6 @@ import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
@@ -19,7 +18,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.WeakHashMap;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -51,7 +49,6 @@ import megamek.common.actions.EntityAction;
 import megamek.common.actions.WeaponAttackAction;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
-import megamek.common.board.HexAppearance;
 import megamek.common.enums.GamePhase;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.board.BoardEvent;
@@ -101,11 +98,8 @@ final class GpuBoardSource implements BoardSource {
     private volatile int focusUnit = Entity.NONE;
     private final GpuAtmosphereControls atmosphere;
     private final BoardScene.PixelPool terrainImages = new BoardScene.PixelPool();
-    /**
-     * EDT-owned: each board's untyped bridges keep the type decoded on its first capture until it gets new data, so a
-     * building collapsing beside a span, a board switch or a full recapture does not retype it.
-     */
-    private final Map<Board, Map<Coords, HexAppearance>> bridgeTypes = new WeakHashMap<>();
+    /** EDT-owned: the board's terrain tiles, the one capture the preview and the editor share; the markings are ours. */
+    private final BoardTiles terrain = new BoardTiles(terrainImages);
     private final List<BoardScene.Animation> pendingEvents = new ArrayList<>();
     private final Timer timer;
     private final GameListenerAdapter gameListener;
@@ -120,9 +114,6 @@ final class GpuBoardSource implements BoardSource {
     private Board board;
     private List<BoardScene.Tile> tiles = List.of();
     private BoardFieldOfView fieldOfView = BoardFieldOfView.EMPTY;
-    private boolean terrainDirty = true;
-    /** Swing-owned artwork invalidation; neighbouring exits and terrain blends also change after a hex edit. */
-    private Rectangle dirtyHexes;
     private volatile boolean closed;
     /** EDT-confined stack of native modal dialogs; only the newest is shown, so they are answered LIFO. */
     private final Deque<PendingDialog> pendingDialogs = new ArrayDeque<>();
@@ -172,7 +163,6 @@ final class GpuBoardSource implements BoardSource {
         boardListener = new BoardListenerAdapter() {
             @Override
             public void boardNewBoard(BoardEvent event) {
-                onSwing(() -> bridgeTypes.remove(event.getSource()));
                 boardChangedAllHexes(event);
             }
 
@@ -182,13 +172,7 @@ final class GpuBoardSource implements BoardSource {
                     if (closed || event.getSource() != board) { return; }
                     // Changed hexes also change what the fire preview predicts.
                     preview.invalidate();
-                    Coords coords = event.getCoords();
-                    if (coords == null) {
-                        terrainDirty = true;
-                    } else {
-                        Rectangle area = new Rectangle(coords.getX() - 1, coords.getY() - 1, 3, 3);
-                        dirtyHexes = dirtyHexes == null ? area : dirtyHexes.union(area);
-                    }
+                    terrain.changed(event.getCoords());
                 });
             }
 
@@ -196,7 +180,7 @@ final class GpuBoardSource implements BoardSource {
             public void boardChangedAllHexes(BoardEvent event) {
                 onSwing(() -> {
                     if (!closed && event.getSource() == board) {
-                        terrainDirty = true;
+                        terrain.changed(null);
                         preview.invalidate();
                     }
                 });
@@ -307,7 +291,7 @@ final class GpuBoardSource implements BoardSource {
     private void dirtyTerrain() {
         onSwing(() -> {
             if (!closed) {
-                terrainDirty = true;
+                terrain.changed(null);
                 // Changed hexes also change what the fire preview predicts.
                 preview.invalidate();
             }
@@ -679,7 +663,7 @@ final class GpuBoardSource implements BoardSource {
         unitImages.clear();
         camouflage.clear();
         terrainImages.clear();
-        terrainDirty = true;
+        terrain.reload();
         refresh();
     }
 
@@ -703,7 +687,7 @@ final class GpuBoardSource implements BoardSource {
                 view = selectedView;
                 contextCoords = null;
                 unitImages.clear();
-                terrainDirty = true;
+                terrain.changed(null);
                 synchronized (this) {
                     pendingEvents.clear();
                 }
@@ -728,8 +712,7 @@ final class GpuBoardSource implements BoardSource {
                 voluntaryReleases.clear();
             }
             if (board != null) { board.addBoardListener(boardListener); }
-            terrainDirty = true;
-            dirtyHexes = null;
+            terrain.changed(null);
         }
         if (board == null) {
             tiles = List.of();
@@ -748,27 +731,27 @@ final class GpuBoardSource implements BoardSource {
                   (area.x + area.width) / (double) currentBoard.getWidth(),
                   (area.y + area.height) / (double) currentBoard.getHeight() };
         });
-        boolean allTerrain = terrainDirty;
-        Rectangle changedHexes = dirtyHexes;
-        boolean changedTerrain = allTerrain || changedHexes != null;
+        // The recaptured hexes (the whole board after a full invalidation) lose their markings until the pass below.
+        Rectangle[] recaptured = { null };
+        List<BoardScene.Tile> captured = terrain.tiles(board, (coords, art) -> {
+            Rectangle hex = new Rectangle(coords.getX(), coords.getY(), 1, 1);
+            recaptured[0] = recaptured[0] == null ? hex : recaptured[0].union(hex);
+        });
+        Rectangle changedHexes = recaptured[0];
+        boolean changedTerrain = changedHexes != null;
         if (changedTerrain) {
-            List<BoardScene.Tile> nextTiles = terrainDirty
-                  ? new ArrayList<>(Collections.nCopies(board.getWidth() * board.getHeight(), null))
-                  : new ArrayList<>(tiles);
-            Rectangle area = terrainDirty ? new Rectangle(0, 0, board.getWidth(), board.getHeight()) : dirtyHexes;
-            var decoded = bridgeTypes.computeIfAbsent(board, key -> new HashMap<>());
-            view.capturePlanarHexes(area, false, hex -> {
-                int index = hex.coords().getX() * board.getHeight() + hex.coords().getY();
-                nextTiles.set(index, BoardScene.captureTile(board.getHex(hex.coords()), hex, nextTiles.get(index), terrainImages,
-                      board::getHex, decoded));
-            });
+            List<BoardScene.Tile> nextTiles = new ArrayList<>(tiles.size() == captured.size() ? tiles : captured);
+            for (int x = changedHexes.x; x < changedHexes.x + changedHexes.width; x++) {
+                for (int y = changedHexes.y; y < changedHexes.y + changedHexes.height; y++) {
+                    int index = x * board.getHeight() + y;
+                    nextTiles.set(index, captured.get(index));
+                }
+            }
             tiles = List.copyOf(nextTiles);
-            terrainDirty = false;
-            dirtyHexes = null;
         }
         Rectangle area = visibleArea;
         long revision = view.getPlanarRevision();
-        boolean allMarkings = allTerrain || revision != capturedRevision || view.game.getPhase() != capturedPhase;
+        boolean allMarkings = revision != capturedRevision || view.game.getPhase() != capturedPhase;
         boolean changedMarkings = changedTerrain || allMarkings;
         if (changedMarkings || !area.equals(capturedArea)) {
             List<BoardScene.Tile> painted = new ArrayList<>(tiles);
@@ -1462,6 +1445,7 @@ final class GpuBoardSource implements BoardSource {
         terrainImages.clear();
         camouflage.clear();
         tiles = List.of();
+        terrain.close();
         view.releasePlanarCapture();
         synchronized (this) {
             pendingEvents.clear();

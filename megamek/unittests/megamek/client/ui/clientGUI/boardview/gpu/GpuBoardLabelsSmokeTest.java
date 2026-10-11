@@ -1306,7 +1306,7 @@ class GpuBoardLabelsSmokeTest {
         return new GpuMovePlan.Snapshot(plan.active(), plan.planner(), plan.external(), plan.entityId(), plan.mode(),
               plan.explicit(), plan.gearLabel(), plan.route(), plan.hover(), pins, plan.destination(), plan.facing(),
               cost, budget, plan.type(), type, plan.auto(), heat, tmm, plan.legal(), plan.warnings(), plan.canUndo(),
-              plan.canPin(), plan.envelope(), plan.holdingRemaining());
+              plan.canPin(), plan.envelope(), plan.mounts(), plan.holdingRemaining());
     }
 
     /** The Atlas's plotted route through {@code hexes} (facing north-east at the end) with {@code pins}. */

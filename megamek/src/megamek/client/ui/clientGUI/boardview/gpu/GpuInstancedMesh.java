@@ -19,6 +19,11 @@ final class GpuInstancedMesh extends Mesh {
     int drawInstances = -1;
     // (first instance, count) pairs to draw instead, with one bind for all of them.
     private IntArray ranges;
+    /**
+     * Every instance is a mirror image, whose reflection reverses the winding of its triangles: draws take the
+     * clockwise winding as the front, so each pass's culling keeps the faces it keeps for the model unmirrored.
+     */
+    boolean mirrored;
 
     GpuInstancedMesh(int vertices, int indices, VertexAttributes attributes) {
         super(true, vertices, indices, attributes);
@@ -42,6 +47,17 @@ final class GpuInstancedMesh extends Mesh {
 
     @Override
     public void render(ShaderProgram shader, int primitiveType, int offset, int count, boolean autoBind) {
+        if (!mirrored) {
+            draw(shader, primitiveType, offset, count, autoBind);
+            return;
+        }
+        Gdx.gl.glFrontFace(GL20.GL_CW);
+        try {
+            draw(shader, primitiveType, offset, count, autoBind);
+        } finally { Gdx.gl.glFrontFace(GL20.GL_CCW); }
+    }
+
+    private void draw(ShaderProgram shader, int primitiveType, int offset, int count, boolean autoBind) {
         if (ranges == null && (drawInstances < 0 || !isInstanced)) {
             super.render(shader, primitiveType, offset, count, autoBind);
             return;

@@ -412,7 +412,12 @@ final class BoardCamera {
     }
 
     boolean isTopDown() {
-        return !firstPerson && tilt == 0;
+        return isTopDown(0);
+    }
+
+    /** The top view: looking straight down, within {@code toleranceDegrees} of tilt, and not in free flight. */
+    boolean isTopDown(float toleranceDegrees) {
+        return !firstPerson && tilt <= toleranceDegrees;
     }
 
     float tilt() {
@@ -1018,30 +1023,51 @@ final class BoardCamera {
         }
         stopFraming();
         fitToWindow = false;
-        Vector3 previous = focus.cpy();
+        // The ground moves of the drag's screen-horizontal and screen-vertical parts; together they follow the pointer.
+        Vector3 across = new Vector3(), along = new Vector3();
         if (camera.perspective) {
             float x = camera.viewportWidth / 2 - viewOffsetPixels, y = camera.viewportHeight / 2 - viewVerticalOffset;
             Vector3 before = pointOnPlane(x, y, focus.z);
+            Vector3 turn = pointOnPlane(x + dx, y, focus.z);
             Vector3 after = pointOnPlane(x + dx, y - dy, focus.z);
-            if (before != null && after != null) { focus.add(before.sub(after)); }
+            if (before != null && turn != null && after != null) {
+                across.set(before).sub(turn);
+                along.set(turn).sub(after);
+            }
         } else {
-            moveOnBoard(-dx * camera.zoom, dy * camera.zoom);
+            across.set(boardMovement(-dx * camera.zoom, 0));
+            along.set(boardMovement(0, dy * camera.zoom));
         }
-        constrainPan(previous);
+        // Each part stops at the limits on its own, so a diagonal drag keeps the part that an edge does not block.
+        constrainPan(across);
+        float moved = constrainPan(along);
+        if (moved < 1) {
+            // In perspective a vertical drag beside the view's centre also slants sideways. Where only that slant
+            // meets a side edge, the rest still moves straight along the view.
+            Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
+            along.scl(1 - moved);
+            constrainPan(along.mulAdd(right, -along.dot(right)));
+        }
         update();
     }
 
     /**
-     * Keep the full viewport's center over the board, including the area behind HUD panels. The inset footprint
+     * Moves the orbit pivot by {@code travel} as far as the pan limits allow, or with null only returns it within
+     * them. They keep the board on the full viewport's center lines, including the area behind HUD panels. Along each
+     * screen axis the board's extent covers the viewport center: its leftmost, rightmost, nearest and farthest points
+     * cannot pass the center, and a limit on one axis never blocks the other. Along the center's row and column the
+     * board stays inside the viewport, so a turned board cannot leave the screen beside a corner. The inset footprint
      * extends up to the highest terrain or feature, so a tall column remains reachable when its base leaves the view.
-     * Clip a drag along its requested direction: clamping world axes separately would redirect it at rotated edges.
+     * Clip a move along its own direction: clamping world axes separately would redirect it at rotated edges. Returns
+     * the fraction of the move that applied; a return within the limits counts as complete.
      */
-    private void constrainPan(Vector3 previous) {
-        if (boardColumns <= 0 || boardRows <= 0) { return; }
+    private float constrainPan(Vector3 travel) {
+        if (boardColumns <= 0 || boardRows <= 0) {
+            if (travel != null) { focus.add(travel); }
+            return 1;
+        }
         // The orbit pivot belongs to the unobstructed area; constrain the viewport center on its ground plane.
-        Vector3 attempted = focus.cpy();
         Vector3 offset = boardMovement(viewOffsetPixels * camera.zoom, viewVerticalOffset * camera.zoom);
-        focus.add(offset);
         float width = BoardGeometry.width(), height = BoardGeometry.height();
         // Stay just inside the silhouette, avoiding round-off on an exact outer edge when projecting a distant eye.
         float inset = Math.min(width, height) * .001f;
@@ -1050,32 +1076,81 @@ final class BoardCamera {
         // Project the elevated footprint onto the current pan plane along the viewport-center ray.
         float elevation = Math.max(0, boardTopLevel * BoardGeometry.level() - focus.z);
         Vector3 rise = new Vector3(camera.direction.x, camera.direction.y, 0).scl(-elevation / camera.direction.z);
-        if (previous != null) {
-            Vector3 start = previous.cpy().add(offset);
-            Vector3 travel = attempted.cpy().sub(previous);
-            float[] interval = { 0, 1 };
-            // The swept rectangle has the four axis bounds and two sides parallel to the height projection.
-            Vector3 side = new Vector3(camera.direction).crs(camera.up).nor();
-            float sideLow = Math.min(side.x * left, side.x * right) + Math.min(side.y * bottom, side.y * top);
-            float sideHigh = Math.max(side.x * left, side.x * right) + Math.max(side.y * bottom, side.y * top);
-            if (restrictPan(interval, start.x, travel.x, left + Math.min(0, rise.x), right + Math.max(0, rise.x))
-                  && restrictPan(interval, start.y, travel.y, bottom + Math.min(0, rise.y), top + Math.max(0, rise.y))
-                  && restrictPan(interval, start.dot(side), travel.dot(side), sideLow, sideHigh)) {
-                focus.set(previous).mulAdd(travel, interval[1]);
-                return;
-            }
+        // The footprint swept by that rise, as slabs: its world-axis bounds and its extent along the screen axes.
+        Vector3 side = new Vector3(camera.direction).crs(camera.up).nor(), forward = new Vector3(-side.y, side.x, 0);
+        Vector3[] normals = { Vector3.X, Vector3.Y, side, forward };
+        float[] low = new float[4], high = new float[4];
+        for (int i = 0; i < normals.length; i++) {
+            Vector3 normal = normals[i];
+            low[i] = Math.min(normal.x * left, normal.x * right) + Math.min(normal.y * bottom, normal.y * top)
+                  + Math.min(0, rise.dot(normal));
+            high[i] = Math.max(normal.x * left, normal.x * right) + Math.max(normal.y * bottom, normal.y * top)
+                  + Math.max(0, rise.dot(normal));
         }
-        // Zoom, framing or terrain edits can leave the starting center outside the current footprint.
+        // A board edge may pass the center while the board still meets the center's row and its column inside the
+        // viewport: the ground from the center to the viewport's right edge, and to its bottom and top edges.
+        Vector3 row, below, above;
+        if (camera.perspective) {
+            float x = camera.viewportWidth / 2, y = camera.viewportHeight / 2;
+            Vector3 center = pointOnPlane(x, y, focus.z), edge = pointOnPlane(2 * x, y, focus.z);
+            Vector3 near = pointOnPlane(x, 0, focus.z), far = pointOnPlane(x, 2 * y, focus.z);
+            boolean seen = center != null && edge != null && near != null;
+            row = seen ? edge.sub(center) : new Vector3();
+            below = seen ? near.sub(center) : new Vector3();
+            // Above the horizon the column reaches as far as the camera draws.
+            above = !seen ? new Vector3() : far == null ? new Vector3(forward).scl(camera.far) : far.sub(center);
+        } else {
+            row = new Vector3(side).scl(camera.viewportWidth / 2 * camera.zoom);
+            above = boardMovement(0, camera.viewportHeight / 2 * camera.zoom);
+            below = new Vector3(above).scl(-1);
+        }
+        for (int i = 0; i < 2; i++) {
+            float sideways = Math.abs(row.dot(normals[i]));
+            low[i] -= Math.min(sideways, Math.max(below.dot(normals[i]), above.dot(normals[i])));
+            high[i] += Math.min(sideways, -Math.min(below.dot(normals[i]), above.dot(normals[i])));
+        }
+        if (travel != null) {
+            // Clip the requested move itself: recovering it from moved positions would add their round-off across it.
+            Vector3 move = travel.cpy();
+            float applied = clipPan(focus.cpy().add(offset), move, normals, low, high);
+            if (applied >= 0) {
+                focus.mulAdd(move, applied);
+                return applied;
+            }
+            focus.add(travel);
+        }
+        // Zoom, framing or terrain edits can leave the center outside the limits: from the nearest point over the
+        // board, return toward that center as far as the limits allow.
+        focus.add(offset);
+        Vector3 requested = focus.cpy();
         clampPanFootprint(left, right, bottom, top, rise);
+        Vector3 back = requested.sub(focus);
+        focus.mulAdd(back, Math.max(0, clipPan(focus, back, normals, low, high)));
         focus.sub(offset);
+        return 1;
     }
 
-    private static boolean restrictPan(float[] interval, float start, float travel, float low, float high) {
-        // A previous clipped position can round just beyond its edge. Treat it as on the edge, not a fresh overshoot.
-        float lower = start - low, upper = high - start;
-        if (lower > -.001f) { lower = Math.max(0, lower); }
-        if (upper > -.001f) { upper = Math.max(0, upper); }
-        return restrict(interval, -travel, lower) && restrict(interval, travel, upper);
+    /** The fraction of {@code travel} from {@code start} that stays within every slab; -1 if the start is outside. */
+    private static float clipPan(Vector3 start, Vector3 travel, Vector3[] normals, float[] low, float[] high) {
+        float[] interval = { 0, 1 };
+        float length = travel.len();
+        for (int i = 0; i < normals.length; i++) {
+            // Positions round off, the more so the larger the board. A previous clipped center can lie just beyond its
+            // edge: treat it as on the edge, not a fresh overshoot.
+            float position = start.dot(normals[i]), across = travel.dot(normals[i]);
+            float tolerance = Math.max(.001f, Math.abs(position) * 1e-5f);
+            float lower = position - low[i], upper = high[i] - position;
+            if (lower > -tolerance) { lower = Math.max(0, lower); }
+            if (upper > -tolerance) { upper = Math.max(0, upper); }
+            // A move along an edge, derived from such positions, keeps a residue across it. Drop it there, so that it
+            // neither stops the move nor carries the center past the edge a little more with every step.
+            if (Math.abs(across) <= Math.max(tolerance, length * 1e-5f) && (across < 0 ? lower : upper) <= tolerance) {
+                travel.mulAdd(normals[i], -across);
+                across = 0;
+            }
+            if (!restrict(interval, -across, lower) || !restrict(interval, across, upper)) { return -1; }
+        }
+        return interval[1];
     }
 
     /** Clamp to the footprint swept screen-up by the board's height, rather than widening its sideways bounds. */

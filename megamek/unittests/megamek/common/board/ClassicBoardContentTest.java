@@ -47,7 +47,7 @@ class ClassicBoardContentTest {
 
     @Test void classicSaveOfADecoratedBoard2WritesLegacyTextWithTheTerrain() throws Exception {
         Board board = Board.createEmptyBoard(2, 1);
-        Hex hex = new Hex(1, "woods:1;fluff:0:0", "lunar");
+        Hex hex = new Hex(1, "woods:1;fluff:2001", "lunar");
         hex.setDecorations(List.of(new BoardDecoration("car", "prop", "scenery/vehicles/car", "Car",
               0, 0, 30, false, 1, BoardDecoration.Placement.ground(), 0, false, 0, 0, "group-a")));
         board.setHex(0, 0, hex);

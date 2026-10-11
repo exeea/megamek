@@ -82,6 +82,8 @@ class GpuBattleView extends ApplicationAdapter {
     private static final float DRAG_THRESHOLD = 6;
     /** Degrees a middle drag orbits the camera per layout unit, on the board and on the minimap (C.4). */
     static final float ORBIT_DEGREES = .3f;
+    /** The editor's rotation handle on screen, times the layout scale: its line's length and its circle's radius. */
+    private static final float HANDLE_LENGTH = 28, HANDLE_RADIUS = 7;
     private static final MMLogger LOGGER = MMLogger.create(GpuBattleView.class);
     void zoomEditor(int direction) { boardCamera.zoom(direction < 0 ? 1 / 1.2f : 1.2f); }
 
@@ -151,8 +153,15 @@ class GpuBattleView extends ApplicationAdapter {
     private BoardScene scene;
     private GpuHexText hexText;
     private GpuHexGrid hexGrid;
+    /** The board editor's reference image over its top view. */
+    private GpuTraceOverlay traceOverlay;
+    /** The board editor's Paint and Erase preview at the pointer. */
+    private GpuEditorPreview editorPreview;
     private Coords hovered;
+    /** The unit the latest pointer pick found, by its model, meeple or hex ({@link #pointedUnit} for a click's). */
     private int hoveredUnit = Entity.NONE;
+    /** Whether the latest pointer position was over the HUD, whose cursor only a pointer move changes. */
+    private boolean pointerOverHud = true;
     /** While a move animates the hovered hex is not published, so no route is previewed (rebuild plan A.17 Q5). */
     private boolean hoverHeld;
     /** Height of the walkable surface under the latest pointer in the hovered hex, owned by the render thread like hovered. */
@@ -345,6 +354,8 @@ class GpuBattleView extends ApplicationAdapter {
         unitBatch = new ModelBatch(GpuShaderManager.provider("Units", GpuUnitShader::provider), new GpuOpaqueSorter());
         hexText = new GpuHexText();
         hexGrid = new GpuHexGrid();
+        traceOverlay = new GpuTraceOverlay();
+        editorPreview = new GpuEditorPreview();
         lines = new ShapeRenderer();
     }
 
@@ -360,6 +371,8 @@ class GpuBattleView extends ApplicationAdapter {
         if (unitBatch != null) { unitBatch.dispose(); unitBatch = null; }
         if (hexText != null) { hexText.dispose(); hexText = null; }
         if (hexGrid != null) { hexGrid.dispose(); hexGrid = null; }
+        if (traceOverlay != null) { traceOverlay.dispose(); traceOverlay = null; }
+        if (editorPreview != null) { editorPreview.dispose(); editorPreview = null; }
         if (lines != null) { lines.dispose(); lines = null; }
         attackEffects.dispose();
         terrainEffects.dispose();
@@ -554,7 +567,6 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
         terrain.setGravity(atmosphereSettings.gravity());
-        terrain.editableObjects(source.isEditor());
         terrain.update(scene, boardCamera.camera);
         boolean detailChanged = terrain.refine(boardCamera.camera, source.isEditor());
         settings.set(terrain.settings());
@@ -762,12 +774,16 @@ class GpuBattleView extends ApplicationAdapter {
         renderStage("unit outlines");
         unitVisibility.render(boardCamera.camera, outlined, atmosphere.depthTexture(), 0, seeThrough, layoutScale,
               unitBounds, terrain.tacticalView() ? null : terrainEffects.opacityTexture(), terrain);
+        if (source.isEditor()) { traceOverlay.render(boardCamera, source.trace(), Gdx.graphics.getDeltaTime()); }
         renderStage("tactical overlays");
         terrain.render(boardCamera.camera, true);
         // Movement annotations show through scenery; draw the destination ghost after the route and unit icons.
         overlay.renderMarks(boardCamera.camera, unitFootprints::get);
         overlay.render(boardCamera.camera);
         renderHoverRings();
+        if (source.isEditor() && editorPreviewShown()) {
+            editorPreview.render(boardCamera.camera, scene, terrain, source.editorPreview());
+        }
         fireControl.render(boardCamera.camera, Gdx.graphics.getDeltaTime());
         tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), unitIcons.active());
         hexGrid.render(boardCamera, scene, terrain.tacticalView());
@@ -796,6 +812,11 @@ class GpuBattleView extends ApplicationAdapter {
      */
     private void updateHud(GpuBoardSource.Frame frame) {
         GpuHud.HudView view = hudView(frame.scene() != null, frame.panels().fire());
+        // Over the board the pointer follows what a click there takes every frame, as the unit outline does: a mode
+        // change or a new envelope changes it without a pointer move.
+        if (!pointerOverHud) {
+            cursor(boardCursor(view.hoveredUnit(), Gdx.input.getX(), Gdx.input.getY()));
+        }
         // The HUD shows the tuning controls' own values, not the settings of the terrain on display.
         try (TerrainSettings.Scope ignored = TerrainSettings.use(null)) {
             ui.update(frame, view, dialog(), source.uiPreferences());
@@ -847,6 +868,17 @@ class GpuBattleView extends ApplicationAdapter {
             Gdx.gl.glDepthMask(true);
             Gdx.gl.glDisable(GL20.GL_BLEND);
         }
+    }
+
+    /**
+     * Whether the editor's preview shows: Paint or Erase with the pointer over a hex of the board (over the HUD the
+     * pointer hovers no hex, and the source previews nothing).
+     */
+    private boolean editorPreviewShown() {
+        var state = source.editorState();
+        return state != null && (state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.PAINT
+              || state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.ERASE)
+              && hovered != null && scene.tile(hovered) != null;
     }
 
     private void drawHoverRings(float top, float alpha) {
@@ -902,6 +934,7 @@ class GpuBattleView extends ApplicationAdapter {
                 if (valid && boardInput.editorHexGrab != null) { editorProjection(coords, boardInput.editorPlaneZ); }
                 else { ring(coords, valid ? BoardTacticalGeometry.floatingZ(scene, coords) : BoardGeometry.level()); }
             }
+            drawRotationHandle(alpha);
         }
         lines.end();
         drawCliffEdgeHover(alpha);
@@ -910,10 +943,21 @@ class GpuBattleView extends ApplicationAdapter {
         lines.setColor(1, 1, 1, alpha);
         if (source.isEditor() && (modifiers() == InputEvent.CTRL_DOWN_MASK
               || source.editorState() != null && source.editorState().tool() != megamek.client.ui.boardeditor.BoardEditorSession.Tool.SELECT)) {
+            // The brush's reach, dimmed where the preview shows the hexes a click changes: white, or red for Erase.
+            var preview = editorPreviewShown() ? source.editorPreview() : GpuEditorPreview.Data.NONE;
+            lines.setColor(1, 1, 1, alpha * (preview.hexes().isEmpty() ? 1 : .35f));
             for (Coords coords : source.editorBrush(hovered, boardGeneration)) {
                 if (scene.tile(coords) != null) {
                     ring(coords, BoardTacticalGeometry.floatingZ(scene, coords));
                 }
+            }
+            lines.setColor(1, preview.erase() ? .33f : 1, preview.erase() ? .3f : 1, alpha);
+            for (Coords coords : preview.hexes()) {
+                if (scene.tile(coords) != null) { ring(coords, BoardTacticalGeometry.floatingZ(scene, coords)); }
+            }
+            for (var box : preview == GpuEditorPreview.Data.NONE ? List.<com.badlogic.gdx.math.collision.BoundingBox>of()
+                  : editorPreview.outlines()) {
+                lines.box(box.min.x, box.min.y, box.max.z, box.getWidth(), box.getHeight(), box.getDepth());
             }
         } else {
             float base = BoardTacticalGeometry.floatingZ(scene, hovered);
@@ -1009,8 +1053,17 @@ class GpuBattleView extends ApplicationAdapter {
                 targets.put(target, head.scl(stage));
             }
         });
-        return new GpuHud.HudView(boardCamera.tactical(), playbackBusy(), rects, heads, positions, hovered, hoveredUnit,
-              hexPixels, targets);
+        return new GpuHud.HudView(boardCamera.tactical(), playbackBusy(), rects, heads, positions, hovered,
+              pointedUnit(), hexPixels, targets);
+    }
+
+    /**
+     * The hovered unit as a left click there takes it ({@link GpuHud#clickedUnit}): none over a hex the click plans a
+     * move to, its unit's model included, so the board shows the route preview and no unit outline there, and on a
+     * stack the unit the click takes next.
+     */
+    private int pointedUnit() {
+        return ui instanceof GpuHud hud ? hud.clickedUnit(hovered, hoveredUnit) : hoveredUnit;
     }
 
     /**
@@ -1524,6 +1577,85 @@ class GpuBattleView extends ApplicationAdapter {
         return frameObjects.computeIfAbsent(coords, terrain::editorObjects);
     }
 
+    /**
+     * The handle that turns the Select tool's selection about the vertical axis through its {@code pivot}: one object or
+     * decal, or one whole group about its members' centre. A short line from the middle of the selection box's right
+     * side, as the camera sees it, at the box's top, to a small circle at {@code tip}; a fixed size on screen.
+     * {@code from} is what a drag's turn adds to: the object's rotation, or 0 for a group, whose value is its turn.
+     */
+    private record RotationHandle(Vector3 pivot, Vector3 base, Vector3 tip, float radius, boolean group, double from) { }
+
+    /** The selection's rotation handle; null for hexes, routes, other multiple selections and objects not drawn yet. */
+    private RotationHandle rotationHandle() {
+        var state = source.isEditor() && scene != null && terrain != null ? source.editorState() : null;
+        if (state == null || state.tool() != megamek.client.ui.boardeditor.BoardEditorSession.Tool.SELECT
+              || state.selection().isEmpty() || state.selection().size() > 1 && state.group().isEmpty()) { return null; }
+        var box = new com.badlogic.gdx.math.collision.BoundingBox().inf();
+        Vector3 pivot = new Vector3();
+        double from = 0;
+        for (var item : state.selection()) {
+            var tile = scene.tile(item.coords());
+            var object = item.object().isEmpty() || tile == null ? null : tile.features().stream().map(BoardScene.Feature::decoration)
+                  .filter(decoration -> decoration != null && decoration.id().equals(item.object())).findFirst().orElse(null);
+            var drawn = object == null ? null
+                  : frameObjects(item.coords()).stream().filter(value -> value.id().equals(item.object())).findFirst().orElse(null);
+            // A route is laid by painting its hexes; it does not turn.
+            if (drawn == null || megamek.common.board.RailRoute.isRoute(object)) { return null; }
+            box.ext(drawn.bounds());
+            pivot.add(drawn.anchor().x, drawn.anchor().y, 0);
+            from = object.rotation();
+        }
+        var camera = boardCamera.camera;
+        Vector3 right = new Vector3(camera.direction).crs(camera.up);
+        right.z = 0;
+        if (right.isZero(.000001f)) { return null; }
+        right.nor();
+        Vector3 centre = box.getCenter(new Vector3());
+        float reach = Math.abs(right.x) * box.getWidth() / 2 + Math.abs(right.y) * box.getHeight() / 2;
+        Vector3 base = new Vector3(centre.x, centre.y, box.max.z).mulAdd(right, reach);
+        // The pixels one world unit along the handle spans where it starts.
+        Vector3 start = camera.project(new Vector3(base), 0, 0, camera.viewportWidth, camera.viewportHeight);
+        Vector3 step = camera.project(new Vector3(base).add(right), 0, 0, camera.viewportWidth, camera.viewportHeight);
+        float pixels = Vector2.dst(start.x, start.y, step.x, step.y);
+        if (!(pixels > 0) || start.z < 0 || start.z > 1) { return null; }
+        float unit = layoutScale / pixels;
+        boolean group = state.selection().size() > 1;
+        pivot.scl(1f / state.selection().size());
+        pivot.z = base.z;
+        return new RotationHandle(pivot, base, new Vector3(base).mulAdd(right, HANDLE_LENGTH * unit), HANDLE_RADIUS * unit,
+              group, group ? 0 : from);
+    }
+
+    /**
+     * The rotation handle: its line, and its circle facing the camera; white while hovered or held. A held handle turns
+     * about its pivot with the selection, so it stays under the pointer.
+     */
+    private void drawRotationHandle(float alpha) {
+        RotationHandle held = boardInput.rotationGrab, handle = held == null ? rotationHandle() : held;
+        if (handle == null) { return; }
+        if (held != null) {
+            float turn = (float) (boardInput.rotationSent - held.from());
+            Vector3 base = new Vector3(held.base()).sub(held.pivot()).rotate(Vector3.Z, turn).add(held.pivot());
+            Vector3 tip = new Vector3(held.tip()).sub(held.pivot()).rotate(Vector3.Z, turn).add(held.pivot());
+            handle = new RotationHandle(held.pivot(), base, tip, held.radius(), held.group(), held.from());
+        }
+        boolean lit = held != null || boardInput.onHandle(handle, Gdx.input.getX(), Gdx.input.getY());
+        lines.setColor(lit ? 1 : .45f, 1, lit ? 1 : .8f, alpha);
+        Vector3 toward = new Vector3(handle.tip()).sub(handle.base()).nor();
+        lines.line(handle.base(), new Vector3(handle.tip()).mulAdd(toward, -handle.radius()));
+        var camera = boardCamera.camera;
+        Vector3 across = new Vector3(camera.direction).crs(camera.up).nor();
+        Vector3 up = new Vector3(across).crs(camera.direction).nor();
+        Vector3 previous = new Vector3(handle.tip()).mulAdd(across, handle.radius());
+        for (int i = 1; i <= 24; i++) {
+            float angle = i * MathUtils.PI2 / 24;
+            Vector3 next = new Vector3(handle.tip()).mulAdd(across, handle.radius() * MathUtils.cos(angle))
+                  .mulAdd(up, handle.radius() * MathUtils.sin(angle));
+            lines.line(previous, next);
+            previous = next;
+        }
+    }
+
     /** Keep the elevated anchor and its drop footprint visible as one column throughout the drag. */
     private void editorProjection(Coords coords, float top) {
         if (scene.tile(coords) == null) { return; }
@@ -1661,7 +1793,31 @@ class GpuBattleView extends ApplicationAdapter {
         annotationBatch.begin();
         markers.renderLabels(annotationBatch, boardCamera.camera, layoutScale,
               markers.labelObstacles(boardCamera.camera));
+        if (source.isEditor() && editorPreviewShown()) { renderEditorPreviewLabel(); }
         annotationBatch.end();
+    }
+
+    /** The editor preview label's capital height, in layout units. */
+    private static final float PREVIEW_LABEL_HEIGHT = 11;
+
+    /** The editor preview's label over its hex: what the click brings, or for Erase what goes, in red. */
+    private void renderEditorPreviewLabel() {
+        var preview = source.editorPreview();
+        Vector3 point = boardCamera.camera.project(new Vector3(editorPreview.labelPoint()), 0, 0,
+              boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
+        if (preview.label().isEmpty() || point.z < 0 || point.z > 1) { return; }
+        var font = theme.skin.getFont("default-font");
+        float scale = font.getData().scaleX;
+        font.getData().setScale(PREVIEW_LABEL_HEIGHT * layoutScale * scale / font.getCapHeight());
+        try {
+            font.setColor(0, 0, 0, .85f);
+            font.draw(annotationBatch, preview.label(), point.x + layoutScale, point.y - layoutScale, 0, Align.center, false);
+            font.setColor(preview.erase() ? UiTheme.CORAL : Color.WHITE);
+            font.draw(annotationBatch, preview.label(), point.x, point.y, 0, Align.center, false);
+        } finally {
+            font.getData().setScale(scale);
+            font.setColor(Color.WHITE);
+        }
     }
 
     static Rectangle spreadAnnotation(Rectangle preferred, List<Rectangle> occupied,
@@ -1792,6 +1948,10 @@ class GpuBattleView extends ApplicationAdapter {
         private boolean marquee;
         private int gestureButton;
         private GpuTerrain.DecorationHit editorGrab;
+        /** A press on the selection's rotation handle: its drag turns the selection, one undo step. */
+        private RotationHandle rotationGrab;
+        /** The pointer's angle about the grabbed handle's pivot at the press, and the rotation last sent. */
+        private double rotationPress, rotationSent;
         private Coords editorHexGrab;
         private float editorPlaneZ;
         private float editorGrabX, editorGrabY;
@@ -1850,8 +2010,7 @@ class GpuBattleView extends ApplicationAdapter {
                       (point.y - editorGrabY - BoardGeometry.centerY(at)) / BoardGeometry.height(), drag, editorGrab.id(), additive, gestureBoardGeneration);
                 return;
             }
-            var hit = state != null && state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.PAINT && state.activeBrush().object() != null
-                  ? terrain.placementHit(scene, ray) : terrain.selectionHit(scene, ray);
+            var hit = editorHit(ray, state);
             if (hit == null) { return; }
             Vector3 point = ray.getEndPoint(new Vector3(), (float) Math.sqrt(hit.distance()));
             if (!drag && !additive && state != null && state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.SELECT) {
@@ -1859,15 +2018,42 @@ class GpuBattleView extends ApplicationAdapter {
                 editorGrabX = point.x - BoardGeometry.centerX(hit.coords());
                 editorGrabY = point.y - BoardGeometry.centerY(hit.coords());
             }
-            source.editorPointer(hit.coords(), (point.x - BoardGeometry.centerX(hit.coords())) / BoardGeometry.width(),
-                  (point.y - BoardGeometry.centerY(hit.coords())) / BoardGeometry.height(), drag, null, additive, hit.receiver(),
+            double hexX = (point.x - BoardGeometry.centerX(hit.coords())) / BoardGeometry.width();
+            double hexY = (point.y - BoardGeometry.centerY(hit.coords())) / BoardGeometry.height();
+            // A drag moves the preview's pointer too: a route stroke's next step heads where the pointer goes.
+            source.editorHover(hit.coords(), hexX, hexY, hit.receiver());
+            source.editorPointer(hit.coords(), hexX, hexY, drag, null, additive, hit.receiver(),
                   (gestureModifiers & InputEvent.CTRL_DOWN_MASK) != 0, gestureBoardGeneration);
+        }
+
+        /** The hit a Paint, Erase or Select event along {@code ray} takes: an object brush's support, else the ground. */
+        private BoardGeometry.Hit editorHit(com.badlogic.gdx.math.collision.Ray ray,
+              megamek.client.ui.boardeditor.BoardEditorSession.Snapshot state) {
+            return state != null && state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.PAINT
+                  && state.activeBrush().object() != null ? terrain.placementHit(scene, ray) : terrain.selectionHit(scene, ray);
+        }
+
+        /**
+         * Tells the source where a Paint or Erase event at the pointer {@code x, y} would land, the hit {@link #editorPointer}
+         * takes, for the editor's preview; nothing over the HUD, off the board or for the other tools.
+         */
+        private void editorHover(int x, int y, boolean overHud) {
+            var state = source.editorState();
+            var ray = boardCamera.camera.getPickRay(x, y, 0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
+            var hit = overHud || scene == null || terrain == null || state == null
+                  || state.tool() != megamek.client.ui.boardeditor.BoardEditorSession.Tool.PAINT
+                  && state.tool() != megamek.client.ui.boardeditor.BoardEditorSession.Tool.ERASE ? null : editorHit(ray, state);
+            if (hit == null) { source.editorHover(null, 0, 0, null); return; }
+            Vector3 point = ray.getEndPoint(new Vector3(), (float) Math.sqrt(hit.distance()));
+            source.editorHover(hit.coords(), (point.x - BoardGeometry.centerX(hit.coords())) / BoardGeometry.width(),
+                  (point.y - BoardGeometry.centerY(hit.coords())) / BoardGeometry.height(), hit.receiver());
         }
 
         /**
          * The object a Select press picks: over a hex selection, a press on a selected hex picks that hex (null); a press
          * inside a selected object's outline (its installed bounds) picks that object even where its mesh is open;
-         * otherwise the nearest object hit, or null for the ground.
+         * otherwise the nearest object hit, or null for the ground. A decal's paint is picked exactly, without its
+         * outline, so an object standing on a selected decal stays pickable.
          */
         private GpuTerrain.DecorationHit objectPress(com.badlogic.gdx.math.collision.Ray ray,
               megamek.client.ui.boardeditor.BoardEditorSession.Snapshot state) {
@@ -1885,12 +2071,45 @@ class GpuBattleView extends ApplicationAdapter {
             for (var item : selection) {
                 if (item.object().isEmpty()) { continue; }
                 for (var object : terrain.editorObjects(item.coords())) {
-                    if (object.id().equals(item.object()) && com.badlogic.gdx.math.Intersector.intersectRayBoundsFast(ray, object.bounds())) {
+                    if (object.id().equals(item.object()) && !object.decal()
+                          && com.badlogic.gdx.math.Intersector.intersectRayBoundsFast(ray, object.bounds())) {
                         return new GpuTerrain.DecorationHit(item.coords(), object.id(), 0, object.anchorLevel() * BoardGeometry.level());
                     }
                 }
             }
             return hit;
+        }
+
+        /** Whether the pointer x, y (input coordinates) lies on the handle's circle. */
+        private boolean onHandle(RotationHandle handle, int x, int y) {
+            var camera = boardCamera.camera;
+            Vector3 tip = camera.project(new Vector3(handle.tip()), 0, 0, camera.viewportWidth, camera.viewportHeight);
+            return Vector2.dst(tip.x, Gdx.graphics.getHeight() - tip.y, x, y) <= (HANDLE_RADIUS + 4) * layoutScale;
+        }
+
+        /** The pointer's angle (radians) about the handle's pivot, on the horizontal plane of the handle; NaN off it. */
+        private double handleAngle(RotationHandle handle, int x, int y) {
+            var ray = boardCamera.camera.getPickRay(x, y, 0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
+            float distance = Math.abs(ray.direction.z) < .00001f ? -1 : (handle.base().z - ray.origin.z) / ray.direction.z;
+            if (distance <= 0) { return Double.NaN; }
+            Vector3 point = ray.getEndPoint(new Vector3(), distance);
+            return Math.atan2(point.y - handle.pivot().y, point.x - handle.pivot().x);
+        }
+
+        /**
+         * A handle drag's step: the selection turned by the pointer's sweep about the pivot since the press, in whole
+         * degrees (counter-clockwise from above, as the board turns), as one continuing edit that the release finishes.
+         */
+        private void turn(int x, int y) {
+            double angle = handleAngle(rotationGrab, x, y);
+            if (Double.isNaN(angle)) { return; }
+            double degrees = Math.round(Math.IEEEremainder(rotationGrab.from() + Math.toDegrees(angle - rotationPress), 360));
+            if (degrees == rotationSent) { return; }
+            rotationSent = degrees;
+            source.editorValue(new megamek.client.ui.boardeditor.BoardEditorSession.Command(rotationGrab.group()
+                        ? megamek.client.ui.boardeditor.BoardEditorSession.Action.GROUP_VALUE
+                        : megamek.client.ui.boardeditor.BoardEditorSession.Action.OBJECT_VALUE, "rotation", Long.toString((long) degrees)),
+                  false, gestureBoardGeneration);
         }
 
         /** The item a Select press at x, y picks: the object {@link #objectPress} picks, else the ground's hex, else null. */
@@ -2000,6 +2219,13 @@ class GpuBattleView extends ApplicationAdapter {
             orbiting = panning && (button == Input.Buttons.MIDDLE) != shiftDown;
             ui.boardPress();
             if (button == Input.Buttons.LEFT && source.isEditor() && !measurementGesture) {
+                // A press on the selection's rotation handle turns the selection.
+                var handle = rotationHandle();
+                double angle = handle == null || !onHandle(handle, x, y) ? Double.NaN : handleAngle(handle, x, y);
+                if (!Double.isNaN(angle)) {
+                    rotationGrab = handle; rotationPress = angle; rotationSent = handle.from(); marquee = false;
+                    return true;
+                }
                 var state = source.editorState();
                 // A plain press on the selection grabs it to move; any other Select press (also one that hits nothing,
                 // such as the sky around the board) waits for a box or a click.
@@ -2021,6 +2247,7 @@ class GpuBattleView extends ApplicationAdapter {
             if (source.isEditor() && gestureButton == Input.Buttons.LEFT && !measurementGesture) {
                 if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < DRAG_THRESHOLD * layoutScale) { return true; }
                 dragged = true;
+                if (rotationGrab != null) { turn(x, y); return true; }
                 if (marquee) { dragX = x; dragY = y; return true; }
                 // The board editor's left drag paints every hex it crosses, from the press on.
                 if (!ui.hit(x, y)) {
@@ -2106,7 +2333,7 @@ class GpuBattleView extends ApplicationAdapter {
             boardGesture = false;
             measurementGesture = false;
             marquee = false;
-            editorGrab = null; editorHexGrab = null;
+            editorGrab = null; editorHexGrab = null; rotationGrab = null;
             clearElevationScroll();
         }
 
@@ -2165,22 +2392,25 @@ class GpuBattleView extends ApplicationAdapter {
         public boolean mouseMoved(int x, int y) {
             // Camera refreshes must not replace an editor drag's projected destination with a new cursor hit.
             if (source.isEditor() && boardGesture && gestureButton == Input.Buttons.LEFT && !measurementGesture
-                  && (editorGrab != null || editorHexGrab != null)) { return true; }
+                  && (editorGrab != null || editorHexGrab != null || rotationGrab != null)) { return true; }
             boolean overHud = ui.hit(x, y);
             Pick picked = overHud ? new Pick(null, Entity.NONE, Float.NaN, false) : pickSelection(x, y);
             hovered = picked.coords();
             hoveredUnit = picked.entityId();
+            pointerOverHud = overHud;
             hoverZ = picked.floorZ();
             source.setHover(hoverHeld ? null : hovered, picked.pointedZ());
+            if (source.isEditor()) { editorHover(x, y, overHud); }
             // An object under the pointer in the editor's inspected hex is highlighted in its side view and Layers.
             if (ui instanceof GpuMapHud map && source.editorState() != null) {
                 var hit = hovered != null && hovered.equals(source.editorState().selected()) ? terrain.decorationHit(scene,
                       boardCamera.camera.getPickRay(x, y, 0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight)) : null;
                 map.editorBoardHover(hit != null && hit.coords().equals(hovered) ? hit.id() : "");
             }
-            // Desktop pointers: a hand over units, a move cursor over the minimap, which drags the camera (Q5).
+            // Desktop pointers: a hand over units a click selects or inspects and over the editor's rotation handle, a
+            // move cursor over the minimap, which drags the camera (Q5).
             cursor(overHud ? ui.dragsCamera(x, y) ? SystemCursor.AllResize : SystemCursor.Arrow
-                  : hoveredUnit == Entity.NONE ? SystemCursor.Arrow : SystemCursor.Hand);
+                  : boardCursor(pointedUnit(), x, y));
             return false;
         }
 
@@ -2323,6 +2553,16 @@ class GpuBattleView extends ApplicationAdapter {
                  CAMERA_ROTATE_LEFT, CAMERA_ROTATE_RIGHT, CAMERA_TILT_UP, CAMERA_TILT_DOWN -> true;
             default -> false;
         };
+    }
+
+    /**
+     * The board's pointer at x, y (input coordinates): a hand over the unit a click there takes, and over the editor's
+     * rotation handle or while it is held; else the arrow.
+     */
+    private SystemCursor boardCursor(int unitId, int x, int y) {
+        if (unitId != Entity.NONE || boardInput.rotationGrab != null) { return SystemCursor.Hand; }
+        var handle = rotationHandle();
+        return handle != null && boardInput.onHandle(handle, x, y) ? SystemCursor.Hand : SystemCursor.Arrow;
     }
 
     /** Shows a system pointer on desktop platforms; mobile platforms have none to change (user correction 4). */

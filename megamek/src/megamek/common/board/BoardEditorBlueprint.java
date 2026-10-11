@@ -4,6 +4,7 @@ package megamek.common.board;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +46,13 @@ public final class BoardEditorBlueprint {
 
     private final List<Component> components;
     private final Map<String, Variant> variants;
+    /**
+     * The variants with one selector, by its terrain type: the designs a legacy token can stand for. An asset design
+     * (a building model) is not among them: its selector is the art its model's tileset image draws beside that model,
+     * which only the model decides ({@link BoardSceneryLayouts}'s conversion); the 2D board of a {@code .board2} still
+     * draws it through the selector ({@link #artwork(Hex)}).
+     */
+    private final Map<Integer, List<Variant>> selecting = new HashMap<>();
     private final Map<String, Asset> assets;
 
     private static BoardEditorBlueprint shared;
@@ -66,6 +74,11 @@ public final class BoardEditorBlueprint {
         this.components = List.copyOf(components);
         this.variants = java.util.Collections.unmodifiableMap(variants);
         this.assets = java.util.Collections.unmodifiableMap(assets);
+        for (Variant variant : variants.values()) {
+            if (!variant.selectors().isBlank() && !variant.selectors().contains(";") && variant.asset().isBlank()) {
+                selecting.computeIfAbsent(new Terrain(variant.selectors()).getType(), type -> new ArrayList<>()).add(variant);
+            }
+        }
     }
 
     public static BoardEditorBlueprint read(Path file) throws IOException {
@@ -178,6 +191,34 @@ public final class BoardEditorBlueprint {
     public Component component(String id) {
         return components.stream().filter(c -> c.id().equals(id)).findFirst()
               .orElseThrow(() -> new IllegalArgumentException("Unknown component " + id));
+    }
+
+    /**
+     * The design that stands for a legacy art token: the variant whose one selector is {@code token}'s type and level
+     * (and its exits, where the selector names them), owned by a component present on {@code hex}; a blend variant
+     * only where the token's exits are a strength of one to five sixths ({@link #artwork(Hex, String)} adds them back).
+     * Null when no variant reproduces it.
+     */
+    public HexAppearance reproducing(Hex hex, Terrain token) {
+        for (Variant variant : selecting.getOrDefault(token.getType(), List.of())) {
+            Terrain selector = new Terrain(variant.selectors());
+            int exits = token.hasExitsSpecified() ? token.getExits() : 0;
+            if (selector.getLevel() != token.getLevel()
+                  || selector.hasExitsSpecified() && (!token.hasExitsSpecified() || selector.getExits() != exits)
+                  || variant.blend() && (!token.hasExitsSpecified() || exits < 1 || exits > 5)
+                  || !component(variant.owner()).isPresent(name -> hex.containsTerrain(Terrains.getType(name)))) {
+                continue;
+            }
+            return new HexAppearance(variant.id(), null, null, variant.blend() ? exits / 6.0 : null);
+        }
+        return null;
+    }
+
+    /** {@code source} with every owner's design selectors ({@link #artwork(Hex, String)}): what its tokens would draw. */
+    public Hex artwork(Hex source) {
+        Hex result = source;
+        for (String owner : source.getAppearance().keySet()) { result = artwork(result, owner); }
+        return result;
     }
 
     /** Temporary, owner-scoped artwork query. Gameplay terrain and other owners' selectors are never rewritten. */

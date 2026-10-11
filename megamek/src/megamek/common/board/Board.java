@@ -1213,8 +1213,11 @@ public class Board implements Serializable {
         }
 
         if (BoardFile.looksNative(content)) {
-            try { adopt(BoardFile.readNative(content)); }
+            // The same flag as for a legacy board below: a caller that continues on errors (lobby thumbnails, the board
+            // tagger) gets a .board2 that breaks the rules too, with its errors listed; the others refuse it.
+            try { adopt(BoardFile.readNative(content, continueLoadOnError)); }
             catch (IOException failure) { throw new IllegalArgumentException(failure.getMessage(), failure); }
+            if (errors != null) { isValid(errors); }
             return;
         }
         resetStoredElevation();
@@ -1464,20 +1467,28 @@ public class Board implements Serializable {
     }
 
     /**
+     * The {@link #LICENSE_HEADER} with this board's copyright years: from the year of the file it was loaded from, if
+     * that is earlier, to the current year. Both board writers use it.
+     */
+    public String licenseHeader() {
+        int currentYear = Calendar.getInstance().get(Calendar.YEAR);
+        String yearString;
+        if ((originalCopyrightYear > 0) && (originalCopyrightYear < currentYear)) {
+            yearString = originalCopyrightYear + "-" + currentYear;
+        } else {
+            yearString = String.valueOf(currentYear);
+        }
+        return LICENSE_HEADER.formatted(yearString);
+    }
+
+    /**
      * Writes the legacy .board text even for a native board. 3D-only content (placed objects and appearance) is not
-     * written; this is the classic 2D editor's save.
+     * written; {@link #save(OutputStream, boolean)} uses it for a board that needs no native format.
      */
     public void saveLegacy(OutputStream os, boolean includeLicense) {
         try (Writer w = new OutputStreamWriter(os)) {
             if (includeLicense) {
-                int currentYear = Calendar.getInstance().get(Calendar.YEAR);
-                String yearString;
-                if ((originalCopyrightYear > 0) && (originalCopyrightYear < currentYear)) {
-                    yearString = originalCopyrightYear + "-" + currentYear;
-                } else {
-                    yearString = String.valueOf(currentYear);
-                }
-                w.write(LICENSE_HEADER.formatted(yearString));
+                w.write(licenseHeader());
                 w.write("\r\n");
             }
             w.write("size " + width + ' ' + height + "\r\n");
@@ -1932,6 +1943,20 @@ public class Board implements Serializable {
     public void removeBoardListener(BoardListener listener) {
         if (boardListeners != null) {
             boardListeners.removeElement(listener);
+        }
+    }
+
+    /**
+     * Runs {@code change} without telling this board's listeners: for an edit that is undone before it returns, so no
+     * listener ever sees it (the board editor's paint preview, which runs the click itself and undoes it).
+     */
+    public void quietly(Runnable change) {
+        Vector<BoardListener> listeners = boardListeners;
+        boardListeners = null;
+        try {
+            change.run();
+        } finally {
+            boardListeners = listeners;
         }
     }
 

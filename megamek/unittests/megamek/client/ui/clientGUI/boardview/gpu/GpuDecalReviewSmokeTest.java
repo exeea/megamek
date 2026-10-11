@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import javax.imageio.ImageIO;
-import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -25,6 +24,7 @@ import megamek.common.board.Board;
 import megamek.common.board.BoardDecalArt;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
@@ -33,10 +33,9 @@ import org.junit.jupiter.api.Test;
 /**
  * The decal art in the native render: every emblem as one decal at three scales (top down, oblique and far away, where
  * the mipmaps must keep it from shimmering), every standard car-park decal two-sided beside a road and back to back with
- * a car in each slot, legacy against imported for the emblem template and a car-park district of a real map, for
- * car-park lane roads (every car-park code, roof car parks, a lane joining two roads, kept automatic neighbours), and
- * paint on grass, where no blade grows through it. Reports the draw calls the emblem decals add and the decal textures'
- * memory.
+ * a car in each slot, the converted emblem template and a converted car-park district of a real map, converted car-park
+ * lane roads (every car-park code, roof car parks, a lane joining two roads, kept automatic neighbours), and paint on
+ * grass, where no blade grows through it. Reports the draw calls the emblem decals add and the decal textures' memory.
  */
 @Tag("on-demand")
 class GpuDecalReviewSmokeTest {
@@ -93,12 +92,12 @@ class GpuDecalReviewSmokeTest {
             List<BoardSceneryLayouts.Component> rows = new ArrayList<>();
             for (int side = 0; side < 2; side++) {
                 // East of the road opening west, and the same row turned 180 degrees on the west side.
-                rows.add(new BoardSceneryLayouts.Component(park, BoardScene.FeatureKind.SCENERY,
+                rows.add(new BoardSceneryLayouts.Component(park, false,
                       (float) ((side == 0 ? 1 : -1) * (edge + size.height() / 2)), 0, 0, side == 0 ? -90 : 90, 1));
             }
             for (int side = 0; side < 2; side++) {
                 for (int slot = 0; slot < size.slots().size(); slot++) {
-                    rows.add(new BoardSceneryLayouts.Component("scenery/vehicles/car", BoardScene.FeatureKind.SCENERY,
+                    rows.add(new BoardSceneryLayouts.Component("scenery/vehicles/car", false,
                           0, 0, 0, 0, .8f, 0, BoardDecoration.Stretch.NONE,
                           BoardDecoration.Colours.of(PAINT[(slot + side) % PAINT.length]), new BoardSceneryLayouts.Seat(side, slot)));
                 }
@@ -126,7 +125,7 @@ class GpuDecalReviewSmokeTest {
     }
 
     /**
-     * The imported grass board plus hand-placed paint, unclipped like the editor's: a straight-8 car park (column 3), the
+     * The converted grass board plus hand-placed paint, unclipped like the editor's: a straight-8 car park (column 3), the
      * Red Cross and ComStar emblems at half size (5, 7) and the light rubble path (9).
      */
     private static void placePaint(Board board) {
@@ -140,7 +139,7 @@ class GpuDecalReviewSmokeTest {
         }
     }
 
-    /** A legacy board and its import; {@code x0} keeps the column parity of a cropped region. */
+    /** A shipped board as read, or a crop of it; {@code x0} keeps the column parity of a cropped region. */
     private static Board read(String file, int x0, int y0, int width, int height) throws Exception {
         Board source = BoardFile.read(Configuration.boardsDir().toPath().resolve(file));
         if (width == 0) { return source; }
@@ -164,7 +163,7 @@ class GpuDecalReviewSmokeTest {
         return board;
     }
 
-    /** The installed blades of every painted hex (placed decals and legacy paint) stay off the paint. */
+    /** The installed blades of every painted hex (placed decals and untranslated paint) stay off the paint. */
     private static void noBladeThroughPaint(String view, GpuTerrain terrain, BoardScene scene) {
         var index = BoardDecals.index(scene);
         int hexes = 0, roots = 0;
@@ -193,7 +192,7 @@ class GpuDecalReviewSmokeTest {
     }
 
     @Test
-    void decalsRenderSharpAndImportMatchesTheLegacyArt() throws Exception {
+    void decalsRenderSharpAndConvertedBoardsPaintTheirDecals() throws Exception {
         Files.createDirectories(OUTPUT.toPath());
         var emblems = decals("emblems");
         var parks = decals("car-park");
@@ -208,29 +207,26 @@ class GpuDecalReviewSmokeTest {
         }
         System.out.printf("DECALS 22 textures, one per image, mipmapped RGBA8: %d bytes%n", bytes);
 
-        Board template = read("Templates/LandingPadsFactionSymbols.board", 0, 0, 0, 0);
         Board templateImported = read("Templates/LandingPadsFactionSymbols.board", 0, 0, 0, 0);
         // Perdition Spaceport: a Federated Suns set (6557), its one-hex variant on a roof (6070) and a car-park district.
         String spaceport = "unofficial/Ashnods Maps/110x80 Perdition Spaceport.board";
-        Board district = read(spaceport, 58, 52, 34, 24), districtImported = read(spaceport, 58, 52, 34, 24);
+        Board districtImported = read(spaceport, 58, 52, 34, 24);
         // Car-park lane roads: roof car parks (Lunar 0206/0207 without a road, 0307/0308 with their own), a lane joining
         // roads at both ends (OP2Mescape 2402, local 0602) and automatic neighbours kept (Desert Airfield 2443-2446,
         // local 0607-0610, cropped with its road option).
         String lunar = "buildingsnobasement/Lunar Sample 16x17 (No Basement).board";
         String escape = "unofficial/Jackanapes/58x54 OP2Mescape.board";
         String airfield = "unofficial/Strategoslevel3/64x68 Desert Airfiled No Water.board";
-        Board roads = parkRoads(), roadsImported = parkRoads();
-        Board roofs = read(lunar, 0, 0, 0, 0), roofsImported = read(lunar, 0, 0, 0, 0);
-        Board joins = read(escape, 18, 0, 12, 8), joinsImported = read(escape, 18, 0, 12, 8);
+        Board roadsImported = parkRoads();
+        Board roofsImported = read(lunar, 0, 0, 0, 0);
+        Board joinsImported = read(escape, 18, 0, 12, 8);
+        // The crop as read, whose automatic road exits the converted crop must keep.
         Board kept = read(airfield, 18, 36, 12, 14), keptImported = read(airfield, 18, 36, 12, 14);
-        Board meadow = grass(), meadowImported = grass();
-        SwingUtilities.invokeAndWait(() -> {
-            assertTrue(BoardSceneryLayouts.importBoard(templateImported).isEmpty());
-            assertTrue(BoardSceneryLayouts.importBoard(districtImported).isEmpty());
-            for (Board board : List.of(roadsImported, roofsImported, joinsImported, keptImported, meadowImported)) {
-                assertTrue(BoardSceneryLayouts.importBoard(board).isEmpty());
-            }
-        });
+        Board meadowImported = grass();
+        for (Board board : List.of(templateImported, districtImported, roadsImported, roofsImported, joinsImported,
+              keptImported, meadowImported)) {
+            assertTrue(BoardSceneryLayouts.convert(board).isEmpty());
+        }
         placePaint(meadowImported);
         assertEquals(List.of(false, false, true, true), List.of(new Coords(1, 5), new Coords(1, 6), new Coords(2, 6),
               new Coords(2, 7)).stream().map(at -> roofsImported.getHex(at).containsTerrain(Terrains.ROAD)).toList(),
@@ -269,9 +265,7 @@ class GpuDecalReviewSmokeTest {
               List.of(new Shot("overview", new Coords(19, 4), 1.65f, false))));
         views.put("emblems", new View(GpuLegacyImportSmokeTest.scene(emblems(emblems, true)), emblemShots));
         views.put("car-parks", new View(GpuLegacyImportSmokeTest.scene(carParks(parks)), parkShots));
-        views.put("template-legacy", new View(GpuLegacyImportSmokeTest.scene(template), templateShots));
         views.put("template-imported", new View(GpuLegacyImportSmokeTest.scene(templateImported), templateShots));
-        views.put("spaceport-legacy", new View(GpuLegacyImportSmokeTest.scene(district), districtShots));
         views.put("spaceport-imported", new View(GpuLegacyImportSmokeTest.scene(districtImported), districtShots));
         List<Shot> roadShots = new ArrayList<>(List.of(new Shot("overview", new Coords(PARK_HEXES.length, 1), 1, false),
               new Shot("oblique", new Coords(5, 1), .35f, true)));
@@ -279,24 +273,19 @@ class GpuDecalReviewSmokeTest {
             String code = PARK_HEXES[i].substring(PARK_HEXES[i].length() - 2);
             roadShots.add(new Shot(PARK_HEXES[i].startsWith("pavement") ? code : code + "-ground", new Coords(1 + 2 * i, 1), .26f, false));
         }
-        views.put("car-park-roads-legacy", new View(GpuLegacyImportSmokeTest.scene(roads), roadShots));
         views.put("car-park-roads-imported", new View(GpuLegacyImportSmokeTest.scene(roadsImported), roadShots));
         List<Shot> roofShots = List.of(new Shot("roofs", new Coords(2, 6), .3f, false), new Shot("roofs-oblique", new Coords(2, 6), .3f, true));
-        views.put("lunar-legacy", new View(GpuLegacyImportSmokeTest.scene(roofs), roofShots));
         views.put("lunar-imported", new View(GpuLegacyImportSmokeTest.scene(roofsImported), roofShots));
         List<Shot> joinShots = List.of(new Shot("2402", new Coords(5, 1), .26f, false), new Shot("2402-oblique", new Coords(5, 2), .3f, true));
-        views.put("op2mescape-legacy", new View(GpuLegacyImportSmokeTest.scene(joins), joinShots));
         views.put("op2mescape-imported", new View(GpuLegacyImportSmokeTest.scene(joinsImported), joinShots));
         List<Shot> keptShots = List.of(new Shot("2443-2446", new Coords(5, 7), .35f, false),
               new Shot("2443-2446-oblique", new Coords(5, 8), .35f, true));
-        views.put("desert-airfield-legacy", new View(GpuLegacyImportSmokeTest.scene(kept), keptShots));
         views.put("desert-airfield-imported", new View(GpuLegacyImportSmokeTest.scene(keptImported), keptShots));
         // Grass blades show from 120 projected px per hex: the close-ups show none growing through the paint.
         List<Shot> meadowShots = new ArrayList<>(List.of(new Shot("overview", new Coords(6, 2), .9f, false),
               new Shot("oblique", new Coords(5, 2), .3f, true)));
         String[] painted = { "cars-3b", "straight-8", "red-cross", "comstar", "rubble-path", "red-cross-token" };
         for (int i = 0; i < painted.length; i++) { meadowShots.add(new Shot(painted[i], new Coords(1 + 2 * i, 2), .26f, false)); }
-        views.put("grass-legacy", new View(GpuLegacyImportSmokeTest.scene(meadow), meadowShots));
         views.put("grass-imported", new View(GpuLegacyImportSmokeTest.scene(meadowImported), meadowShots));
 
         var failure = new AtomicReference<Throwable>();

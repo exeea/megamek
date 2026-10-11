@@ -1,7 +1,10 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.common.board;
 
+import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -27,6 +30,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import megamek.common.Hex;
 import megamek.common.units.Terrains;
+import megamek.common.util.BoardUtilities;
 
 /** Shared board-file boundary. Native documents contain the Board's rules and authored visuals, never a projection. */
 public final class BoardFile {
@@ -96,23 +100,59 @@ public final class BoardFile {
         return start.startsWith("{") || start.startsWith("[");
     }
 
-    public static Board read(Path path) throws IOException {
+    /** Reads a board file of either format; a board that breaks the game's rules is refused ({@link #read(Path, boolean)}). */
+    public static Board read(Path path) throws IOException { return read(path, false); }
+
+    /**
+     * Reads a board file of either format. With {@code continueOnError} a board that breaks the game's rules
+     * ({@link Board#isValid}) is read anyway, as the old editor's {@code board.load(is, null, true)} read one: only the
+     * board editor does this, to list the errors and fix them. Games, the lobby, map previews and random-map selection
+     * read strictly and refuse such a board. A malformed file is refused either way.
+     */
+    public static Board read(Path path, boolean continueOnError) throws IOException {
         String text = Files.readString(path, StandardCharsets.UTF_8);
-        if (isNativeName(path.toString()) || looksNative(text)) { return readNative(text); }
+        if (isNativeName(path.toString()) || looksNative(text)) { return readNative(text, continueOnError); }
         Board board = new Board();
         List<String> errors = new ArrayList<>();
-        try {
-            board.load(text, errors);
+        try (InputStream stream = new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8))) {
+            board.load(stream, errors, continueOnError);
         } catch (RuntimeException failure) {
             throw new IOException("Cannot read board: " + failure.getMessage(), failure);
         }
-        if (board.getWidth() <= 0 || board.getHeight() <= 0 || !errors.isEmpty()) {
+        if (board.getWidth() <= 0 || board.getHeight() <= 0 || !continueOnError && !errors.isEmpty()) {
             throw new IOException("Invalid board: " + String.join("; ", errors));
         }
         return board;
     }
 
-    public static Board readNative(String text) throws IOException {
+    /**
+     * The one load of a map sheet wherever a sheet becomes (part of) a board to play or to look at: the game start
+     * ({@code TWBoardTransformer}), the lobby's preview of that board ({@code ServerBoardHelper}), scenarios and the file
+     * preview. It loads the file, converts its legacy scenery ({@link BoardSceneryLayouts#convert}) and flips it both
+     * ways when {@code rotate}. Conversion comes before the flip, so a turned sheet keeps the art (and the car parks'
+     * lanes) its file draws. Only a probe that reads the size and edges ({@code convert} false: the lobby's
+     * deployment-zone probes) skips the conversion. The sheet keeps its file's board type: a game's sheets get the
+     * medium's when {@code BoardUtilities.combine} joins them.
+     *
+     * @throws IllegalArgumentException when the file cannot be read as a board
+     */
+    public static Board loadSheet(File file, boolean rotate, boolean convert) {
+        Board sheet = new Board();
+        sheet.load(file);
+        if (convert) { BoardSceneryLayouts.convert(sheet); }
+        BoardUtilities.flip(sheet, rotate, rotate);
+        return sheet;
+    }
+
+    /** Reads a .board2 document; one that breaks the game's rules is refused ({@link #readNative(String, boolean)}). */
+    public static Board readNative(String text) throws IOException { return readNative(text, false); }
+
+    /**
+     * Reads a .board2 document. {@code continueOnError} reads a board that breaks the game's rules ({@link Board#isValid})
+     * anyway, as {@link #read(Path, boolean)} does; the document's own format (fields, coordinates, terrain names, object
+     * IDs) is checked either way.
+     */
+    public static Board readNative(String text, boolean continueOnError) throws IOException {
         try {
             JsonNode root = JSON.readTree(text.startsWith("\uFEFF") ? text.substring(1) : text);
             only(root, "format", "version", "size", "hexes", "name", "description", "tags", "boardType", "options", "notes", "sourceHeader");
@@ -180,8 +220,10 @@ public final class BoardFile {
             }
             List<String> errors = new ArrayList<>();
             board.newData(width, height, hexes, errors);
-            board.isValid(errors);
-            require(errors.isEmpty(), "Invalid terrain: " + String.join("; ", errors));
+            if (!continueOnError) {
+                board.isValid(errors);
+                require(errors.isEmpty(), "Invalid terrain: " + String.join("; ", errors));
+            }
             board.setNativeFormat(true);
             return board;
         } catch (IllegalArgumentException | NullPointerException failure) {
@@ -202,6 +244,25 @@ public final class BoardFile {
         }
     }
 
+    /** A placed object's or a truss bridge's colours: an array of #rrggbb values or null per slot; none when absent. */
+    private static BoardDecoration.Colours colours(JsonNode owner) {
+        if (!owner.has("colours")) { return BoardDecoration.Colours.NONE; }
+        JsonNode slots = owner.get("colours");
+        require(slots.isArray(), "colours must be an array of #rrggbb values or null");
+        List<String> replacements = new ArrayList<>();
+        for (JsonNode slot : slots) {
+            require(slot.isNull() || slot.isTextual(), "colours must be an array of #rrggbb values or null");
+            replacements.add(slot.isNull() ? null : slot.asText());
+        }
+        return new BoardDecoration.Colours(replacements);
+    }
+
+    private static void putColours(ObjectNode owner, BoardDecoration.Colours colours) {
+        if (colours.slots().isEmpty()) { return; }
+        ArrayNode slots = owner.putArray("colours");
+        colours.slots().forEach(slot -> { if (slot == null) { slots.addNull(); } else { slots.add(slot); } });
+    }
+
     private static void readVisuals(JsonNode entry, Hex hex) {
         if (entry.has("appearance")) {
             JsonNode appearances = entry.get("appearance");
@@ -209,9 +270,10 @@ public final class BoardFile {
             Map<String, HexAppearance> values = new LinkedHashMap<>();
             appearances.fields().forEachRemaining(field -> {
                 JsonNode style = field.getValue();
-                only(style, "variant", "asset", "material", "strength");
+                only(style, "variant", "asset", "material", "strength", "colours");
                 HexAppearance value = new HexAppearance(string(style, "variant", null), string(style, "asset", null),
-                      string(style, "material", null), style.has("strength") ? number(style, "strength", 0) : null);
+                      string(style, "material", null), style.has("strength") ? number(style, "strength", 0) : null,
+                      colours(style));
                 value.validateOwner(field.getKey());
                 values.put(field.getKey(), value);
             });
@@ -222,7 +284,7 @@ public final class BoardFile {
             List<BoardDecoration> values = new ArrayList<>();
             for (JsonNode object : entry.get("decorations")) {
                 only(object, "id", "kind", "asset", "name", "position", "rotation", "rotationX", "rotationY", "mirror", "scale", "placement", "drawOrder", "clipToHex", "group", "bare",
-                      "connections", "stretch", "colours");
+                      "connections", "tracks", "pillars", "stretch", "colours");
                 double x = 0, y = 0;
                 if (object.has("position")) {
                     JsonNode position = object.get("position");
@@ -235,17 +297,7 @@ public final class BoardFile {
                     require(factors.isArray() && factors.size() == 3, "stretch must contain X, Y and Z");
                     stretch = new BoardDecoration.Stretch(finite(factors.get(0)), finite(factors.get(1)), finite(factors.get(2)));
                 }
-                var colours = BoardDecoration.Colours.NONE;
-                if (object.has("colours")) {
-                    JsonNode slots = object.get("colours");
-                    require(slots.isArray(), "colours must be an array of #rrggbb values or null");
-                    List<String> replacements = new ArrayList<>();
-                    for (JsonNode slot : slots) {
-                        require(slot.isNull() || slot.isTextual(), "colours must be an array of #rrggbb values or null");
-                        replacements.add(slot.isNull() ? null : slot.asText());
-                    }
-                    colours = new BoardDecoration.Colours(replacements);
-                }
+                var colours = colours(object);
                 String kind = string(object, "kind", null);
                 require(!"prop".equals(kind) || !object.has("drawOrder"), "Props cannot have paint order");
                 JsonNode placement = object.get("placement");
@@ -263,17 +315,23 @@ public final class BoardFile {
                             placement.has("offset") ? number(placement, "offset", 0) : null), integer(object, "drawOrder", 0),
                       bool(object, "clipToHex", "decal".equals(kind)), number(object, "rotationX", 0), number(object, "rotationY", 0),
                       string(object, "group", null), bool(object, "bare", false), integer(object, "connections", 0), stretch,
-                      colours));
+                      colours, integer(object, "tracks", 0), bool(object, "pillars", false)));
             }
             hex.setDecorations(values);
         }
     }
 
-    /** Compact, deterministic output: even a decorated hex occupies a single physical line. */
+    /**
+     * Compact, deterministic output: even a decorated hex occupies a single physical line. The legacy scenery tokens
+     * the conversion took are not written ({@link BoardSceneryLayouts#withoutTakenTokens}); {@code board} is not changed.
+     * A board that breaks the game's rules is written too, as the old editor saved one: the readers decide, and only the
+     * board editor reads it ({@link #read(Path, boolean)}).
+     *
+     * @throws IllegalStateException when {@code board} was never converted ({@link BoardSceneryLayouts#convert}) but holds
+     *       such a token
+     */
     public static void write(Board board, OutputStream stream) throws IOException {
         if (board.getWidth() <= 0 || board.getHeight() <= 0) { throw new IOException("Cannot save an empty board"); }
-        List<String> errors = new ArrayList<>();
-        if (!board.isValid(errors)) { throw new IOException("Cannot save invalid terrain: " + String.join("; ", errors)); }
         Set<String> ids = new HashSet<>();
         ObjectNode root = JSON.createObjectNode().put("format", "megamek-board").put("version", 2);
         root.putObject("size").put("width", board.getWidth()).put("height", board.getHeight());
@@ -295,6 +353,8 @@ public final class BoardFile {
                   });
         }
         // Validate identity before touching the stream. Atomic disk saves below also isolate all write failures.
+        // The hexes as written: without the legacy tokens the conversion took (the board itself keeps them).
+        Hex[] written = new Hex[board.getWidth() * board.getHeight()];
         for (int y = 0; y < board.getHeight(); y++) {
             for (int x = 0; x < board.getWidth(); x++) {
                 Hex hex = board.getHex(x, y);
@@ -302,13 +362,18 @@ public final class BoardFile {
                 for (BoardDecoration decoration : hex.getDecorations()) {
                     if (!ids.add(decoration.id())) { throw new IOException("Duplicate board object ID: " + decoration.id()); }
                 }
+                written[y * board.getWidth() + x] = BoardSceneryLayouts.withoutTakenTokens(hex);
+                if (!board.isNativeFormat() && written[y * board.getWidth() + x] != hex) {
+                    throw new IllegalStateException("Convert the board before writing it: hex "
+                          + new Coords(x, y).getBoardNum() + " holds legacy scenery that was never converted");
+                }
             }
         }
         String header = JSON.writeValueAsString(root);
         stream.write((header.substring(0, header.length() - 1) + ",\n\"hexes\":[\n").getBytes(StandardCharsets.UTF_8));
         for (int y = 0; y < board.getHeight(); y++) {
             for (int x = 0; x < board.getWidth(); x++) {
-                ObjectNode entry = hexNode(board.getHex(x, y)); at(entry, new Coords(x, y));
+                ObjectNode entry = hexNode(written[y * board.getWidth() + x]); at(entry, new Coords(x, y));
                 String comma = x == board.getWidth() - 1 && y == board.getHeight() - 1 ? "" : ",";
                 stream.write((JSON.writeValueAsString(entry) + comma + "\n").getBytes(StandardCharsets.UTF_8));
             }
@@ -341,6 +406,7 @@ public final class BoardFile {
                 ObjectNode style = styles.putObject(entry.getKey()); HexAppearance value = entry.getValue();
                 put(style, "variant", value.variant()); put(style, "asset", value.asset()); put(style, "material", value.material());
                 if (value.strength() != null) { style.put("strength", value.strength()); }
+                putColours(style, value.colours());
             });
         }
         if (!hex.getDecorations().isEmpty()) {
@@ -356,14 +422,13 @@ public final class BoardFile {
                 if (value.mirror()) { object.put("mirror", true); }
                 if (value.bare()) { object.put("bare", true); }
                 if (value.connections() != 0) { object.put("connections", value.connections()); }
+                if (value.tracks() != 0) { object.put("tracks", value.tracks()); }
+                if (value.pillars()) { object.put("pillars", true); }
                 if (value.scale() != 1) { object.put("scale", value.scale()); }
                 if (!value.stretch().equals(BoardDecoration.Stretch.NONE)) {
                     object.putArray("stretch").add(value.stretch().x()).add(value.stretch().y()).add(value.stretch().z());
                 }
-                if (!value.colours().slots().isEmpty()) {
-                    ArrayNode slots = object.putArray("colours");
-                    value.colours().slots().forEach(slot -> { if (slot == null) { slots.addNull(); } else { slots.add(slot); } });
-                }
+                putColours(object, value.colours());
                 if (value.kind().equals("decal")) { object.put("clipToHex", value.clipToHex()); }
                 if (value.drawOrder() != 0) { object.put("drawOrder", value.drawOrder()); }
                 ObjectNode placement = object.putObject("placement").put("mode", value.placement().mode());

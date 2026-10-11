@@ -136,10 +136,16 @@ final class GpuHintLine implements GpuHud.Component {
                   key(preferences, KeyCommandBind.DONE), text("BotCommandPanel.HexPicker.done"),
                   key(preferences, KeyCommandBind.CANCEL), text("BotCommandPanel.HexPicker.cancel"));
         }
-        // A measurement waiting for its second point takes the next left click (GpuHud.boardClick).
+        // A measurement waiting for its second point takes the next left click (GpuHud.boardClick); in the local
+        // planning turn it plans the move to a hex in reach, its unit's model too, and selects or inspects a unit
+        // elsewhere, and in the charge, DFA and ram gears MegaMek's click chooses the target.
         int pending = inputs.frame().panels().los().pending();
+        GpuBattleStatus.Snapshot status = inputs.frame().status();
+        boolean targeting = status.myTurn() && status.phase().isMovement()
+              && inputs.frame().panels().move().mode() == GpuMovePlan.Mode.TARGET;
         List<String> items = new ArrayList<>(List.of(text("GpuBoard.hud.mouse.leftClick"),
-              text(pending != 0 ? "GpuBoard.hud.hint.completeLos" : "GpuBoard.hud.hint.select")));
+              text(pending != 0 ? "GpuBoard.hud.hint.completeLos" : planning ? "GpuBoard.hud.hint.planMove"
+                    : targeting ? "GpuBoard.hud.hint.chooseTarget" : "GpuBoard.hud.hint.select")));
         if (planning && pending == 0) {
             items.addAll(List.of(text("GpuBoard.hud.mouse.ctrlClick"), text("GpuBoard.hud.hint.waypoint"),
                   text("GpuBoard.hud.mouse.shiftClick"), text("GpuBoard.hud.hint.orientation")));

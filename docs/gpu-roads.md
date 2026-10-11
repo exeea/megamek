@@ -10,7 +10,7 @@ unit support must continue to agree on the underlying surface.
 
 | Code | Responsibility |
 | --- | --- |
-| `BoardScene.Tile.road / roadExits` | Carry captured road kind and exit connectivity through scene updates. |
+| `BoardScene.Tile.road / roadExits` | Carry captured road kind and exit connectivity through scene updates. `railExits` (the ground-rail sides, derived from the tile's route markers) and `wayExits` (road or rail) give the carriageway that shapes the ground. |
 | `BoardRoad` | Build carriageway/junction footprints, end shapes, wear coordinates and obstacle-clearance queries. |
 | `BoardSurface` | Shape the physical approach between plateau, neighboring road and bridge deck. |
 | `BoardRelief / BoardConcrete` | Join the approach to natural cut/fill or engineered retaining walls. |
@@ -25,6 +25,15 @@ porous margins exposing the local ground. All use a common carriageway width, so
 material change must not pinch the route. Two exits form a bend, three/four form a
 junction, and five/six form a roundabout. Dead ends extend through the center but retain
 a ground margin before the opposite hex; an exit-free road uses a short isolated stretch.
+
+Rails share the carriageway (batch 10, docs/3d-board-editor.md): every shape and
+clearance site reads `wayExits` and `BoardRoad.carriageway` (a drawn road or a ground
+rail on detailed, dry ground), so a rail-only hex is shaped exactly as the road hex
+with the same exits (hub, ramps of one or two levels, concrete cuts, retaining walls,
+the ramp onto a deck), and the rail's track is draped on the faces road paint lies on.
+Paint, the natural blend gate, tunnels and the tactical art stay road-only, and only a
+road votes a bridge deck's material. A board without rails renders unchanged
+(`wayExits == roadExits`).
 
 `BoardRoad` is also the clearance source for boulders, trees and vegetation. The
 relief's own rim, talus and field rocks and shrubs may stand beside a road but never
@@ -177,8 +186,8 @@ cover portals and cliff clipping.
 `BoardBridge` follows reciprocal span connections and connected approaches. Manufactured
 spans inherit the best connected road surface: marked asphalt, unmarked asphalt, gravel,
 then dirt; without an approach the deck is plain unmarked asphalt. A co-located road below
-a deck is not an explicit deck-surface override. The span's stored type, or for an untyped
-bridge the legacy decode `BoardBridge.built`, makes it built or natural; natural spans use
+a deck is not an explicit deck-surface override. The span's stored type (the legacy conversion stores one on
+every loaded bridge; an untyped span draws built) makes it built or natural; natural spans use
 [natural bridge geometry](gpu-natural-bridges.md).
 
 `BoardBridgeFooting` extends terminal decks to actual bank support. Road-connected

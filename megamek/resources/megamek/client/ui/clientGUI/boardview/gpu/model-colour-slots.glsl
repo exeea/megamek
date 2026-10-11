@@ -3,6 +3,9 @@
 // vertex's shade relative to its slot's default colour (linear rgb; 1 where the default channel is 0) and its slot (w,
 // 0 for none); a placement's colours are 0xRRGGBB per slot, negative to keep the model's own. Exact sRGB like the CPU
 // rule, not light-model.glsl's 2.2 approximation; values above 1 stay unclamped as on the CPU.
+// KEEP IN SYNC with RigidGlb#recolour (the CPU copies of layout rows, truss decks and editor previews): the same packed
+// 0xRRGGBB decode (channel / 255), the same negative = own colour rule and display(shade * linear(replacement)).
+// RigidGlbTest compares the two per vertex; GpuSceneryColourSmokeTest checks the drawn colours of placed objects.
 #ifdef colourSlotsFlag
 in vec4 a_colourSlot;
 uniform vec4 u_slotColours;

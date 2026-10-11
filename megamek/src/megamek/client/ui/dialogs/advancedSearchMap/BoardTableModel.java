@@ -33,6 +33,9 @@
 package megamek.client.ui.dialogs.advancedSearchMap;
 
 import java.awt.image.BufferedImage;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -173,10 +176,8 @@ class BoardTableModel extends AbstractTableModel {
         ImageIcon icon = null;
         String path = getPathAt(row);
 
-        if (path != null) {
-            Board board = new Board(16, 17);
-            board.load(new MegaMekFile(Configuration.boardsDir(), path).getFile());
-
+        Board board = path == null ? null : preview(path);
+        if (board != null) {
             BufferedImage image = MinimapPanel.getMinimapImageMaxZoom(board);
 
             int scaledHeight = Math.min(image.getHeight(), height);
@@ -193,11 +194,8 @@ class BoardTableModel extends AbstractTableModel {
         String info = "";
         String path = getPathAt(row);
 
-        if (path != null) {
-            Board board = new Board(16, 17);
-            board.load(new MegaMekFile(Configuration.boardsDir(), path).getFile());
-
-
+        Board board = path == null ? null : preview(path);
+        if (board != null) {
             String col = UIUtil.tag("TD", "", path);
             info = UIUtil.tag("TR", "", col);
             col = UIUtil.tag("TD", "", board.getWidth() + "x" + board.getHeight());
@@ -212,5 +210,19 @@ class BoardTableModel extends AbstractTableModel {
         }
 
         return info;
+    }
+
+    /**
+     * The board at {@code path}, read on despite rules errors as the lobby's thumbnails are (the strict reader refuses a
+     * board the editor saved with errors); null when the file cannot be read.
+     */
+    private static Board preview(String path) {
+        try (InputStream is = new FileInputStream(new MegaMekFile(Configuration.boardsDir(), path).getFile())) {
+            Board board = new Board();
+            board.load(is, null, true);
+            return board;
+        } catch (IOException | IllegalArgumentException unreadable) {
+            return null;
+        }
     }
 }

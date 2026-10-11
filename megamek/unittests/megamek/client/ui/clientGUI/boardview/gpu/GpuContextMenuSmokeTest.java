@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -121,8 +122,8 @@ class GpuContextMenuSmokeTest {
             Menu menu = new Menu(hud).update(hud, frame(firing(), fire(true)));
             // Shot 13: the King Crab's menu at the pointer, with the popover's corner where the mock's is.
             menu.menu.open(new Coords(12, 3), KING_CRAB, 784, hud.height() - 193);
-            assertEquals(List.of("KING CRAB KGC-000", "Visual contact · 11 hex", "Set as attack target", "---",
-                  "Inspect unit", "Unit record", "Center camera", "Line of sight from Atlas"),
+            assertEquals(List.of("KING CRAB KGC-000", "Visual contact · 11 hex", "Inspect King Crab KGC-000", "---",
+                  "Set as attack target", "---", "Unit record", "Center camera", "Line of sight from Atlas"),
                   lines(menu.popover));
             Rectangle area = UiTestStage.bounds(menu.popover);
             assertEquals(784, area.x, .01f);
@@ -140,7 +141,7 @@ class GpuContextMenuSmokeTest {
             verify(menu.fire).focusTarget(TargetKey.unit(KING_CRAB));
             assertFalse(menu.popover.isVisible(), "choosing an item closes the menu");
             menu.menu.open(new Coords(12, 3), KING_CRAB, 784, hud.height() - 193);
-            click(hud, menu.item("Inspect unit"));
+            click(hud, menu.item("Inspect King Crab KGC-000"));
             assertEquals(KING_CRAB, menu.state.inspected);
             // Its record (unit panel design 2.2): the sheet opens on the inspected enemy, over the overview too
             menu.state.inspected = Entity.NONE;
@@ -166,9 +167,9 @@ class GpuContextMenuSmokeTest {
             // The BattleMaster is a secondary target and the AC/20 is armed.
             menu.state.armedWeapon = AC20;
             menu.menu.open(new Coords(18, 2), BATTLEMASTER, 900, 700);
-            assertEquals(List.of("BATTLEMASTER BLR-1G", "Visual contact · 13 hex", "Assign armed AC/20 here",
-                  "Edit attacks on this target", "Make primary target", "Remove target and its attacks", "---",
-                  "Inspect unit", "Unit record", "Center camera", "Line of sight from Atlas"),
+            assertEquals(List.of("BATTLEMASTER BLR-1G", "Visual contact · 13 hex", "Inspect BattleMaster BLR-1G", "---",
+                  "Assign armed AC/20 here", "Edit attacks on this target", "Make primary target",
+                  "Remove target and its attacks", "---", "Unit record", "Center camera", "Line of sight from Atlas"),
                   lines(menu.popover));
             hud.draw();
             hud.capture("context-menu-enemy-armed").dispose();
@@ -186,13 +187,13 @@ class GpuContextMenuSmokeTest {
 
             // The primary target has no "Make primary"; read-only orders (another player's turn) no attack items.
             menu.menu.open(new Coords(14, 4), TIMBER_WOLF, 900, 700);
-            assertEquals(List.of("TIMBER WOLF PRIME", "Visual contact · 9 hex", "Edit attacks on this target",
-                  "Remove target and its attacks", "---", "Inspect unit", "Unit record", "Center camera",
-                  "Line of sight from Atlas"), lines(menu.popover));
+            assertEquals(List.of("TIMBER WOLF PRIME", "Visual contact · 9 hex", "Inspect Timber Wolf Prime", "---",
+                  "Edit attacks on this target", "Remove target and its attacks", "---", "Unit record",
+                  "Center camera", "Line of sight from Atlas"), lines(menu.popover));
             menu.update(hud, frame(firing(), fire(false)));
             menu.menu.open(new Coords(14, 4), TIMBER_WOLF, 900, 700);
-            assertEquals(List.of("TIMBER WOLF PRIME", "Visual contact · 9 hex", "Inspect unit", "Unit record",
-                  "Center camera", "Line of sight from Atlas"), lines(menu.popover));
+            assertEquals(List.of("TIMBER WOLF PRIME", "Visual contact · 9 hex", "Inspect Timber Wolf Prime", "---",
+                  "Unit record", "Center camera", "Line of sight from Atlas"), lines(menu.popover));
         });
     }
 
@@ -200,20 +201,30 @@ class GpuContextMenuSmokeTest {
     void ownContactAndHexMenus() {
         GpuHudTestStage.run(hud -> {
             Menu menu = new Menu(hud).update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.AUTO)));
-            // M2: the acting Atlas cannot be selected again; the key that centres it is the camera item's detail.
+            // M2: the acting Atlas cannot be selected again; the key that centres it is the camera item's detail. The
+            // scene draws no unit, so each menu's first item is its own unit's (the user's decision of 2026-10-11).
             String space = KeyCommandBind.getDesc(KeyCommandBind.CENTER_ON_SELECTED.keyDefault,
                   KeyCommandBind.CENTER_ON_SELECTED.modifiersDefault);
             menu.menu.open(new Coords(14, 13), ATLAS, 700, 600);
-            assertEquals(List.of("ATLAS AS7-D", "Your unit", "Select unit" + OFF, "Center camera [" + space + "]",
-                  "Unit record"), lines(menu.popover));
+            assertEquals(List.of("ATLAS AS7-D", "Your unit", "Select Atlas AS7-D" + OFF, "---",
+                  "Center camera [" + space + "]", "Unit record"), lines(menu.popover));
             hud.draw();
             hud.capture("context-menu-friendly").dispose();
+            // MegaMek's map menu of the unit's hex follows once its context arrives, below the unit's own items, and
+            // the header stays the unit's (the user's decision of 2026-10-11).
+            verify(menu.source).inspect(new Coords(14, 13));
+            menu.update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.AUTO), context(new Coords(14, 13))));
+            assertEquals(List.of("ATLAS AS7-D", "Your unit", "Select Atlas AS7-D" + OFF, "---",
+                  "Center camera [" + space + "]", "Unit record", "---", "Clear minefield", "---",
+                  "Mark as objective [Ctrl+O]", "✓ Show elevation"), lines(menu.popover));
             click(hud, menu.item("Unit record"));
             assertTrue(menu.state.recordOpen);
             assertEquals(Entity.NONE, menu.state.inspected, "the acting unit's record needs no inspection");
+            // The Warhammer cannot act now: its item inspects it and selects nothing.
             menu.menu.open(new Coords(18, 12), WARHAMMER, 700, 600);
-            click(hud, menu.item("Select unit"));
-            assertEquals(List.of(WARHAMMER), menu.selected, "selecting goes through the HUD's one rule");
+            click(hud, menu.item("Inspect Warhammer WHM-6R"));
+            assertEquals(List.of(WARHAMMER, List.of()), List.of(menu.state.inspected, menu.selected));
+            menu.state.inspected = Entity.NONE;
             menu.menu.open(new Coords(18, 12), WARHAMMER, 700, 600);
             click(hud, menu.item("Unit record"));
             assertEquals(WARHAMMER, menu.state.inspected);
@@ -224,8 +235,8 @@ class GpuContextMenuSmokeTest {
 
             // M4: a sensor contact's line of sight measures its bare hex.
             menu.menu.open(new Coords(9, 3), CONTACT, 700, 600);
-            assertEquals(List.of("SENSOR CONTACT", "Unidentified · hex 1004", "Center camera",
-                  "Inspect sensor return", "Line of sight from Atlas"), lines(menu.popover));
+            assertEquals(List.of("SENSOR CONTACT", "Unidentified · hex 1004", "Inspect sensor return", "---",
+                  "Center camera", "Line of sight from Atlas"), lines(menu.popover));
             hud.draw();
             hud.capture("context-menu-contact").dispose();
             click(hud, menu.item("Line of sight from Atlas"));
@@ -234,6 +245,7 @@ class GpuContextMenuSmokeTest {
             // M5: in the local planning turn a hex plans or pins; MegaMek's map menu follows once the hex's context
             // arrives, its commands in sections rather than behind a menu of menus (the user's decision of 2026-10-03).
             verifyNoInteractions(menu.moves);
+            clearInvocations(menu.source);
             menu.menu.open(HEX, Entity.NONE, 700, 600);
             verify(menu.source).inspect(HEX);
             String title = "HEX 1512";
@@ -510,6 +522,7 @@ class GpuContextMenuSmokeTest {
             assertEquals(hud.height() - 10, area.y + area.height, .01f);
             assertTrue(menu.menu.cancel(), "Esc closes the open menu");
             assertFalse(menu.menu.cancel(), "and then has nothing to close");
+            clearInvocations(menu.source);
             menu.menu.open(HEX, Entity.NONE, 700, 600);
             assertSame(UiMenuList.class, hud.stage.getKeyboardFocus().getClass(), "an open menu takes the keys");
             press(hud, 300, 300);
@@ -593,13 +606,18 @@ class GpuContextMenuSmokeTest {
     private static GpuMovePlan.Snapshot move(GpuMovePlan.Mode mode) {
         return new GpuMovePlan.Snapshot(true, true, false, ATLAS, mode, mode != GpuMovePlan.Mode.AUTO, "", List.of(),
               List.of(), List.of(), null, 0, 0, 3, EntityMovementType.MOVE_NONE, "", true, 0, 0, true, List.of(), false,
-              false, Map.of(), 0);
+              false, Map.of(), Set.of(), 0);
     }
 
     /** MegaMek's context of hex 1512 as the source captures it: the map menu's items, a group among them. */
     private static BoardScene.Context context() {
+        return context(HEX);
+    }
+
+    /** As {@link #context()}, at another hex. */
+    private static BoardScene.Context context(Coords hex) {
         List<String> ran = new ArrayList<>();
-        return new BoardScene.Context(HEX, List.of(
+        return new BoardScene.Context(hex, List.of(
               command("Clear minefield", "A tooltip that the menu does not show", true, ran),
               new BoardScene.Command("special", "Special hex", "", true, false, false, List.of(
                     new BoardScene.Command("objective", "Mark as objective", "", true, false, false, List.of(),

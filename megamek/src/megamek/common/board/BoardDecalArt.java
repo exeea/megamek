@@ -20,20 +20,25 @@ import megamek.common.Configuration;
  */
 public final class BoardDecalArt {
     /** A hex in model px; a decal without a footprint entry covers one hex. */
-    private static final Footprint HEX = new Footprint(84, 72, List.of());
+    private static final Footprint HEX = new Footprint(84, 72, List.of(), null);
 
     /** A parking place in the decal's frame: model px from its centre, and the car's heading (CCW degrees). */
     public record Slot(double x, double y, double heading) { }
 
-    /** The decal's size at scale 1 in model px, centred on the object's position, and its car slots. */
-    public record Footprint(double width, double height, List<Slot> slots) { }
+    /**
+     * The decal's size at scale 1 in model px, centred on the object's position, its car slots, and its paint colour
+     * ({@code #rrggbb}) when it is one colour to paint in any other (lettering), else null.
+     */
+    public record Footprint(double width, double height, List<Slot> slots, String paint) { }
 
     /**
-     * A legacy decal id's decal. A one-hex variant is the decal at {@code scale} and {@code rotation} (CCW degrees). A
-     * piece of a 7-hex set ({@code set}) is one decal at scale 1 on the set's centre hex; {@code direction} is the piece's
-     * hex direction from the centre (0 N to 5 NW, the order of {@link Coords#translated(int)}), -1 for the centre piece.
+     * A legacy decal id's decal. A one-hex variant is the decal at {@code scale} and {@code rotation} (CCW degrees), in
+     * its paint {@code colour} ({@code #rrggbb}) where the legacy image was painted in another colour than the decal's
+     * own (black letters), else null. A piece of a 7-hex set ({@code set}) is one decal at scale 1 on the set's centre
+     * hex; {@code direction} is the piece's hex direction from the centre (0 N to 5 NW, the order of
+     * {@link Coords#translated(int)}), -1 for the centre piece.
      */
-    public record Legacy(String decal, double scale, double rotation, boolean set, int direction) {
+    public record Legacy(String decal, double scale, double rotation, boolean set, int direction, String colour) {
         /** The centre hex of the set this piece at {@code at} belongs to. */
         public Coords centre(Coords at) { return direction < 0 ? at : at.translated((direction + 3) % 6); }
     }
@@ -56,6 +61,11 @@ public final class BoardDecalArt {
     /** The decal a legacy decal id decodes to, or null. */
     public static Legacy legacy(String id) { return Holder.TABLE.legacy().get(id); }
 
+    /** Whether decal {@code id} is the emblem of a legacy 7-hex set ({@link Legacy#set}). */
+    public static boolean setEmblem(String id) {
+        return Holder.TABLE.legacy().values().stream().anyMatch(legacy -> legacy.set() && legacy.decal().equals(id));
+    }
+
     private static Table read(File file) {
         if (!file.isFile()) { return new Table(Map.of(), Map.of()); }
         try {
@@ -68,13 +78,15 @@ public final class BoardDecalArt {
                     slots.add(new Slot(slot.path("position").get(0).asDouble(), slot.path("position").get(1).asDouble(),
                           slot.path("heading").asDouble()));
                 }
-                footprints.put(entry.getKey(), new Footprint(size.get(0).asDouble(), size.get(1).asDouble(), List.copyOf(slots)));
+                footprints.put(entry.getKey(), new Footprint(size.get(0).asDouble(), size.get(1).asDouble(), List.copyOf(slots),
+                      entry.getValue().hasNonNull("colour") ? entry.getValue().get("colour").asText() : null));
             });
             Map<String, Legacy> legacy = new HashMap<>();
             root.path("legacy").fields().forEachRemaining(entry -> {
                 JsonNode value = entry.getValue();
                 legacy.put(entry.getKey(), new Legacy(value.path("decal").asText(), value.path("scale").asDouble(1),
-                      value.path("rotation").asDouble(0), value.path("set").asBoolean(false), value.path("direction").asInt(-1)));
+                      value.path("rotation").asDouble(0), value.path("set").asBoolean(false), value.path("direction").asInt(-1),
+                      value.hasNonNull("colour") ? value.get("colour").asText() : null));
             });
             return new Table(Map.copyOf(footprints), Map.copyOf(legacy));
         } catch (IOException failure) {

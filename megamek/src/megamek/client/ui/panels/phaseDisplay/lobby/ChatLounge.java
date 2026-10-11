@@ -319,8 +319,6 @@ public class ChatLounge extends AbstractPhaseDisplay
     private ClientDialog boardPreviewW;
     private final Game boardPreviewGame = new Game();
     private transient BoardView previewBV;
-    /** Map selection shown in the open 2D preview, so each loaded map gets one 3D-content warning. */
-    private List<String> previewBoards = List.of();
     private transient RulerDialog previewRuler;
     Dimension currentMapButtonSize = new Dimension(0, 0);
     private final JCheckBox showPlayerDeployment = new JCheckBox(Messages.getString("ChatLounge.showPlayerDeployment"));
@@ -1325,8 +1323,7 @@ public class ChatLounge extends AbstractPhaseDisplay
                               megamek.common.board.BoardFile.fileName(boardForImage)).getFile();
                         if (boardFile.exists()) {
                             buttonBoard = new Board(16, 17);
-                            buttonBoard.load(new MegaMekFile(Configuration.boardsDir(),
-                                  megamek.common.board.BoardFile.fileName(boardForImage)).getFile());
+                            // Continues on rules errors, as the map list's thumbnails do (the strict reader refuses).
                             try (InputStream is = new FileInputStream(new MegaMekFile(Configuration.boardsDir(),
                                   megamek.common.board.BoardFile.fileName(boardForImage)).getFile())) {
                                 buttonBoard.load(is, null, true);
@@ -1445,7 +1442,7 @@ public class ChatLounge extends AbstractPhaseDisplay
         boardPreviewW.setLocationRelativeTo(clientgui.getFrame());
         boardPreviewW.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         boardPreviewW.addWindowListener(new WindowAdapter() {
-            @Override public void windowClosing(WindowEvent event) { killPreviewBV(); }
+            @Override public void windowClosing(WindowEvent event) { close2DPreview(); }
         });
 
         try {
@@ -1458,7 +1455,7 @@ public class ChatLounge extends AbstractPhaseDisplay
             JButton previewSaveAs = new JButton(Messages.getString("BoardSelectionDialog.ViewGameBoardSaveAs"));
             previewSaveAs.addActionListener(e -> clientgui.boardSaveAs(boardPreviewGame));
             JButton preview3D = new JButton(Messages.getString("GpuBoard.preview"));
-            preview3D.addActionListener(e -> GpuBoardWindow.openPreview(boardPreviewW, boardPreviewGame.getBoard()));
+            preview3D.addActionListener(e -> previewGameBoard3D());
 
             JPanel previewSettingsPanel = new JPanel(new FlowLayout());
             previewSettingsPanel.add(showPlayerDeployment);
@@ -1485,7 +1482,7 @@ public class ChatLounge extends AbstractPhaseDisplay
             boardPreviewW.getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(escape, closeAction);
             boardPreviewW.getRootPane().getInputMap(JComponent.WHEN_FOCUSED).put(escape, closeAction);
             boardPreviewW.getRootPane().getActionMap().put(closeAction, new AbstractAction() {
-                @Override public void actionPerformed(ActionEvent event) { killPreviewBV(); }
+                @Override public void actionPerformed(ActionEvent event) { close2DPreview(); }
             });
 
             RulerDialog.color1 = GUIP.getRulerColor1();
@@ -1500,7 +1497,7 @@ public class ChatLounge extends AbstractPhaseDisplay
             boardPreviewW.center();
             return true;
         } catch (IOException e) {
-            killPreviewBV();
+            close2DPreview();
             JOptionPane.showMessageDialog(this,
                   Messages.getString("BoardEditor.CouldNotInitialize") + e,
                   Messages.getString("BoardEditor.FatalError"),
@@ -1519,8 +1516,23 @@ public class ChatLounge extends AbstractPhaseDisplay
               : ServerBoardHelper.getPossibleGameBoard(mapSettings, false);
     }
 
+    /**
+     * Whether the 3D preview shows the lobby's preview board. The 2D and 3D previews show one board,
+     * {@code boardPreviewGame}'s, so they can be compared side by side; the 3D preview belongs to the lobby window, not
+     * to the 2D preview, so each closes on its own.
+     */
+    private boolean shows3DPreview() {
+        return GpuBoardWindow.showsPreview(clientgui.getFrame(), boardPreviewGame.getBoard());
+    }
+
+    /**
+     * The 2D preview. Opened beside the 3D preview, it shows the 3D preview's board; otherwise, and when it is open
+     * already, a new roll of the map settings, which the open 3D preview shows too.
+     */
     public void previewGameBoard() {
-        boardPreviewGame.setBoard(getBoardForPreview());
+        if ((previewBV != null) || !shows3DPreview()) {
+            rollPreviewBoard();
+        }
         if ((previewBV == null) && !initializeBoardPreview()) {
             return;
         }
@@ -1536,11 +1548,31 @@ public class ChatLounge extends AbstractPhaseDisplay
             boardPreviewGame.setPlayer(player.getId(), player.copy());
         }
         boardPreviewW.setVisible(true);
-        // Deployment toggles and the server's rebuild of the same selection are not a new map
-        List<String> boards = new ArrayList<>(mapSettings.getBoardsSelectedVector());
-        if (!boards.equals(previewBoards)) {
-            previewBoards = boards;
-            BoardView.warnIfThreeDOnly(boardPreviewW, boardPreviewGame.getBoard(), false);
+    }
+
+    /** The 3D preview (the lobby's button and the 2D preview's): the open 2D preview's board, else a new roll. */
+    private void previewGameBoard3D() {
+        if (previewBV == null) {
+            boardPreviewGame.setBoard(getBoardForPreview());
+        }
+        GpuBoardWindow.openPreview(clientgui.getFrame(), boardPreviewGame.getBoard());
+    }
+
+    /** Changed map settings or a new server board: a new roll in each open preview, opening none. */
+    private void refreshBoardPreviews() {
+        if ((boardPreviewW != null) && boardPreviewW.isVisible()) {
+            previewGameBoard();
+        } else if (shows3DPreview()) {
+            rollPreviewBoard();
+        }
+    }
+
+    /** A new roll of the map settings; the open 3D preview shows it without coming to the front or taking the keys. */
+    private void rollPreviewBoard() {
+        boolean shows3D = shows3DPreview();
+        boardPreviewGame.setBoard(getBoardForPreview());
+        if (shows3D) {
+            GpuBoardWindow.updatePreview(clientgui.getFrame(), boardPreviewGame.getBoard());
         }
     }
 
@@ -2023,9 +2055,7 @@ public class ChatLounge extends AbstractPhaseDisplay
         int indexOfButton = mapButtons.indexOf(button);
         mapSettings.getBoardsSelectedVector().set(indexOfButton, board);
         clientgui.getClient().sendMapSettings(mapSettings);
-        if ((boardPreviewW != null) && boardPreviewW.isVisible()) {
-            previewGameBoard();
-        }
+        refreshBoardPreviews();
 
         String msg = clientgui.getClient().getLocalPlayer() + " changed map to: " + board;
         clientgui.getClient().sendServerChat(Player.PLAYER_NONE, msg);
@@ -2055,11 +2085,7 @@ public class ChatLounge extends AbstractPhaseDisplay
         // This event arrives on the network thread; the preview is Swing, so hop onto the EDT.
         LOGGER.debug("[LobbyBoard] board {} received from the server ({}x{})", e.getBoardId(),
               e.getNewBoard().getWidth(), e.getNewBoard().getHeight());
-        SwingUtilities.invokeLater(() -> {
-            if ((boardPreviewW != null) && boardPreviewW.isVisible()) {
-                previewGameBoard();
-            }
-        });
+        SwingUtilities.invokeLater(this::refreshBoardPreviews);
     }
 
     @Override
@@ -2255,7 +2281,7 @@ public class ChatLounge extends AbstractPhaseDisplay
                 previewGameBoard();
 
             } else if (ev.getSource().equals(butBoardPreview3D)) {
-                GpuBoardWindow.openPreview(clientgui.getFrame(), getBoardForPreview());
+                previewGameBoard3D();
 
             } else if (ev.getSource().equals(butGenerateBattlefield)) {
                 LOGGER.debug("[LobbyBoard] requesting battlefield generation from the server");
@@ -2424,22 +2450,20 @@ public class ChatLounge extends AbstractPhaseDisplay
 
                 if (advancedSearchMapDialog.showDialog().isConfirmed()) {
                     String path = advancedSearchMapDialog.getPath();
-                    if (path != null) {
-                        Board board = new Board(16, 17);
-                        board.load(new MegaMekFile(Configuration.boardsDir(), path).getFile());
+                    // Only its size, from the header: a board with rules errors is marked invalid on its map button.
+                    BoardDimensions size = path == null ? null
+                          : Board.getSize(new MegaMekFile(Configuration.boardsDir(), path).getFile());
+                    if (size != null) {
                         String boardName = megamek.common.board.BoardFile.selectionName(path);
                         boardName = boardName.replace("\\", "/");
                         mapSettings.getBoardsSelectedVector().clear();
                         mapSettings.setMapSize(1, 1);
-                        mapSettings.setBoardSize(board.getWidth(), board.getHeight());
+                        mapSettings.setBoardSize(size.width(), size.height());
                         clientgui.getClient().sendMapDimensions(mapSettings);
                         mapSettings.getBoardsSelectedVector().set(0, boardName);
                         refreshMapUI();
                         clientgui.getClient().sendMapSettings(mapSettings);
-
-                        if ((boardPreviewW != null) && boardPreviewW.isVisible()) {
-                            previewGameBoard();
-                        }
+                        refreshBoardPreviews();
 
                         String msg = clientgui.getClient().getLocalPlayer() + " changed map to: " + boardName;
                         clientgui.getClient().sendServerChat(Player.PLAYER_NONE, msg);
@@ -4342,7 +4366,14 @@ public class ChatLounge extends AbstractPhaseDisplay
         return butForceView.isSelected();
     }
 
+    /** The lobby ends: its 2D and 3D previews close. */
     public void killPreviewBV() {
+        close2DPreview();
+        GpuBoardWindow.closePreview(clientgui.getFrame());
+    }
+
+    /** The 2D preview's own close (Esc, close button) leaves the 3D preview open. */
+    private void close2DPreview() {
         if (previewRuler != null) {
             previewRuler.dispose();
             previewRuler = null;
@@ -4355,7 +4386,6 @@ public class ChatLounge extends AbstractPhaseDisplay
             boardPreviewW.dispose();
             boardPreviewW = null;
         }
-        previewBoards = List.of();
     }
 
     @Override

@@ -55,7 +55,7 @@ class GpuSurfaceBlendTest {
                   : c.equals(tropical) ? "ground_fluff:1:3" : "",
                   wet ? "desert" : c.equals(tropical) ? "tropical" : "grass", c);
             var artwork = new BoardArtwork.HexImage(c, null, null, null, null, null, List.of(), Map.of(), null);
-            return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool());
+            return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool(), neighbour -> null);
         });
         var water = scene.tile(center);
         var land = scene.tile(center.translated(0));
@@ -193,7 +193,7 @@ class GpuSurfaceBlendTest {
             var hex = new Hex(c.getY() < 4 ? 4 : 0, "ground_fluff:1:3",
                   themes.get(Math.floorMod(c.getX() + 2 * c.getY(), themes.size())), c);
             var artwork = new BoardArtwork.HexImage(c, null, null, null, null, null, List.of(), Map.of(), null);
-            return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool());
+            return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool(), neighbour -> null);
         });
         for (int x = 2; x <= 6; x++) {
             var tile = scene.tile(new Coords(x, 3));

@@ -15,6 +15,7 @@ import java.util.function.IntFunction;
 import com.badlogic.gdx.math.Vector2;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 import megamek.common.units.Terrains;
 
 /** Cosmetic road footprints in tile pixels, shared by the road mesh and roadside vegetation/rock clearance. */
@@ -115,19 +116,35 @@ final class BoardRoad {
     }
 
     static Kind capture(Hex hex) {
-        if (!hex.containsTerrain(Terrains.ROAD)) { return Kind.NONE; }
+        // Which roads are drawn is common (HexTile.road), the legacy conversion's statement too.
+        if (!HexTile.road(hex)) { return Kind.NONE; }
         return switch (hex.terrainLevel(Terrains.ROAD)) {
             case 1 -> Kind.PAVED;
             case 2 -> Kind.ALLEY;
             case Terrains.ROAD_LVL_DIRT -> Kind.DIRT;
-            case Terrains.ROAD_LVL_GRAVEL -> Kind.GRAVEL;
-            default -> Kind.NONE;
+            default -> Kind.GRAVEL;
         };
     }
 
     /** Unsupported road decoration and coexisting terrain retain their original artwork. */
     static boolean rendered(BoardScene.Tile tile) {
         return tile.road() != Kind.NONE && tile.detailedGround() && !tile.liquid().present();
+    }
+
+    /**
+     * A carriageway the ground is shaped and cleared for ({@link BoardScene.Tile#wayExits}): a rendered road, or rails on
+     * the tile's detailed, dry ground.
+     */
+    static boolean carriageway(BoardScene.Tile tile) {
+        return rendered(tile) || tile.railExits() != 0 && tile.detailedGround() && !tile.liquid().present();
+    }
+
+    /**
+     * The course of the tile's carriageway, which its shape and clearance follow: its road's ({@link #of}); where rails
+     * lie on its ground too, the widest course a road with all those exits takes ({@link #clearance(Coords, int)}).
+     */
+    static BoardRoad way(BoardScene scene, BoardScene.Tile tile) {
+        return tile.railExits() == 0 ? of(scene, tile) : clearance(tile.coords(), tile.wayExits());
     }
 
     static BoardRoad of(BoardScene scene, BoardScene.Tile tile) {
@@ -175,9 +192,19 @@ final class BoardRoad {
         return layout(coords, exits, Kind.PAVED, direction -> Kind.PAVED, direction -> null);
     }
 
-    /** As {@link #clearance(Coords, int)}, following the course the scene will give the road through its borders. */
+    /**
+     * As {@link #clearance(Coords, int)}, following the course the scene will give the road through its borders; where
+     * {@code rails} lie on the hex's ground too, the course of all its carriageways ({@link #way}).
+     */
     static BoardRoad clearance(Coords coords, Hex hex, Function<Coords, Hex> board) {
-        return layout(coords, hex.getTerrain(Terrains.ROAD).getExits(), Kind.PAVED, direction -> Kind.PAVED,
+        return clearance(coords, hex, board, megamek.common.board.RailRoute.groundSides(hex));
+    }
+
+    /** As {@link #clearance(Coords, Hex, Function)}, with the sides of the rails on the hex's ground given. */
+    static BoardRoad clearance(Coords coords, Hex hex, Function<Coords, Hex> board, int rails) {
+        int exits = hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0;
+        if (rails != 0) { return clearance(coords, exits | rails); }
+        return layout(coords, exits, Kind.PAVED, direction -> Kind.PAVED,
               bends(coords, at -> Node.of(at.equals(coords) ? hex : board.apply(at))));
     }
 
@@ -575,6 +602,9 @@ final class BoardRoad {
         return new PathSample(distance, edge, alongX, alongY);
     }
 
+    /** The period nearest {@code period} that fits whole periods into {@code span}: road dashes, rail sleepers. */
+    static float fit(float span, float period) { return span / Math.max(1, Math.round(span / period)); }
+
     /** Short dashes stay out of junctions; their phase is anchored in board space along each approach. */
     Area markings(Coords coords, int exits) {
         Area area = new Area();
@@ -630,7 +660,7 @@ final class BoardRoad {
             // A junction's arm fits the period of the straight road through it, so a through route keeps its dashes.
             float span = anchors.size() > 1 ? anchors.getLast() - anchors.getFirst()
                   : anchors.isEmpty() ? 0 : 2 * anchors.getFirst();
-            float period = span > 0 ? span / Math.max(1, Math.round(span / (DASH + GAP))) : DASH + GAP;
+            float period = span > 0 ? fit(span, DASH + GAP) : DASH + GAP;
             float dash = period * DASH / (DASH + GAP), anchor = anchors.isEmpty() ? 0 : anchors.getFirst();
             float phase = ((dash + (period - dash) / 2 - anchor) % period + period) % period;
             Area paint = new Area(new BasicStroke(.8f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND,

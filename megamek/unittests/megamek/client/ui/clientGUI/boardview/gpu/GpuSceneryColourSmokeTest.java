@@ -17,19 +17,26 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
+import com.badlogic.gdx.utils.Array;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
+import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The scenery families that share one mesh and differ by colour (parked cars, herd animals, pools and ponds) and the
- * snow forms of placed trees, each hex in close-up: the legacy render, the imported objects as game scenery, and the
- * imported objects as the editor draws them (instanced). Each view also reports one overview frame's draw calls. The
- * captures compare against the same captures made before the colour field (see docs/3d-board-editor.md).
+ * The scenery families that share one mesh and differ by colour (parked cars, herd animals, pools and ponds), the snow
+ * forms of placed trees and two recoloured cars on a building's roof, each hex in close-up, on one converted board. Since
+ * b13 every view draws placed objects as the editor does (instanced, colours applied on the GPU per placement), so these
+ * checks run in the game view; RigidGlbTest compares the GPU recolour rule with the CPU copies' per vertex.
  */
 @Tag("on-demand")
 class GpuSceneryColourSmokeTest {
@@ -47,8 +54,26 @@ class GpuSceneryColourSmokeTest {
      * a rounding decode on the GPU would turn red and black.
      */
     private static final Coords MIRRORED = new Coords(12, 1), FAR = new Coords(12, 3);
+    /**
+     * A two-storey building whose roof holds two recoloured cars, one mirrored (drawn in a batch of its own); hovered,
+     * they fade with the building.
+     */
+    private static final Coords ROOF = new Coords(2, 10);
+    /**
+     * Placed plants whose models have simpler mesh levels (b10-f1): a mirrored coral and a tilted tree, which the plant
+     * stand cannot hold (the rolling stock's levels: {@link #LEVEL_TRAIN}). The overview and a mid view draw a simpler
+     * level; a close-up draws the near one.
+     */
+    private static final Coords LEVEL_CORAL = new Coords(11, 8), LEVEL_TREE = new Coords(12, 9);
+    /**
+     * A blue locomotive (Body slot), whose file has two levels like every rail and maglev vehicle (a detailed LOD0, the
+     * earlier mesh as LOD1): the overview draws the slotted mesh of its simpler level in its colours.
+     */
+    private static final Coords LEVEL_TRAIN = new Coords(11, 9);
     /** Pixels of a capture whose colour may differ by more than 2/255 between two draws of the same objects. */
     private static final int EDGE_PIXELS = 40;
+    /** Close-up pixels of a far-coloured car in its colour class ({@link #colourClasses}): the car is about 3,000. */
+    private static final int CAR_PIXELS = 1000;
 
     /** The legacy board: every car park, the suburbs and pools with cars or ponds, all herds, and trees on snow. */
     static Map<Coords, String> fixture() {
@@ -63,16 +88,17 @@ class GpuSceneryColourSmokeTest {
         for (int i = 0; i < SNOW_SPECIES.size(); i++) { hexes.put(new Coords(i % 10 + 1, 8 + i / 10), "snow:1"); }
         hexes.put(MIRRORED, "pavement:1");
         hexes.put(FAR, "pavement:1");
+        hexes.put(ROOF, "pavement:1;building:2;bldg_elev:2;bldg_cf:50");
         return hexes;
     }
 
-    /** The legacy fixture imported, with snow trees placed and the two far-coloured cars. */
+    /** The legacy fixture converted, with snow trees placed, the two far-coloured cars and the roof cars. */
     static Board imported() throws Exception {
         var hexes = fixture();
         var imported = Board.createEmptyBoard(13, 11);
         for (var entry : hexes.entrySet()) { imported.setHex(entry.getKey(), new Hex(0, entry.getValue(), "")); }
         SwingUtilities.invokeAndWait(() -> {
-            BoardSceneryLayouts.importBoard(imported);
+            BoardSceneryLayouts.convert(imported);
             for (int i = 0; i < SNOW_SPECIES.size(); i++) {
                 var coords = new Coords(i % 10 + 1, 8 + i / 10);
                 var hex = imported.getHex(coords).duplicate();
@@ -87,16 +113,41 @@ class GpuSceneryColourSmokeTest {
                       .withColours(BoardDecoration.Colours.of(coords.equals(MIRRORED) ? "#ff00ff" : "#ffffff"))));
                 imported.setHex(coords, hex);
             }
+            var roof = imported.getHex(ROOF).duplicate();
+            roof.setDecorations(List.of(new BoardDecoration("roof-car", "prop", "scenery/vehicles/car", null, -.12, 0, 30, false,
+                  1, BoardDecoration.Placement.on("building", 0), 0, false).withColours(BoardDecoration.Colours.of("#b8b014")),
+                  new BoardDecoration("roof-car-mirrored", "prop", "scenery/vehicles/car", null, .12, 0, 30, true, 1,
+                        BoardDecoration.Placement.on("building", 0), 0, false).withColours(BoardDecoration.Colours.of("#245c99"))));
+            imported.setHex(ROOF, roof);
+            var coral = imported.getHex(LEVEL_CORAL).duplicate();
+            coral.setDecorations(List.of(new BoardDecoration("level-coral", "prop", "mars/brain-lobes", null, 0, 0, 20, true, 1,
+                  BoardDecoration.Placement.ground(), 0, false)));
+            imported.setHex(LEVEL_CORAL, coral);
+            var tree = imported.getHex(LEVEL_TREE).duplicate();
+            tree.setDecorations(List.of(new BoardDecoration("level-tree", "prop", "tree-broad", null, 0, 0, 0, false, 1,
+                  BoardDecoration.Placement.ground(), 0, false, 12, 0)));
+            imported.setHex(LEVEL_TREE, tree);
+            var train = imported.getHex(LEVEL_TRAIN).duplicate();
+            train.setDecorations(List.of(new BoardDecoration("level-train", "prop", "scenery/rail/locomotive", null, 0, 0, 30,
+                  false, 1, BoardDecoration.Placement.ground(), 0, false).withColours(BoardDecoration.Colours.of("#24407a"))));
+            imported.setHex(LEVEL_TRAIN, train);
         });
         return imported;
     }
 
+    /**
+     * The fixture converted, saved as .board2 and loaded the game's way (BoardFile.loadSheet, the game's GpuBoardSource),
+     * its tactical markings and hex labels (UI overlays) left out, draws its placed objects as the editor does (b13): every
+     * part instanced (the mirrored cars in a batch of their own) or, for a pose the instance data cannot hold, one by one,
+     * none packed with the scenery, each part carrying its object's colours; the far colours draw as themselves (magenta
+     * and white, not the model's red, nor the red and black of a rounding decode). The overview and a mid view draw
+     * simpler mesh levels, a close-up the near ones, and a level change and back draws as before; when the hover of the
+     * roof's building ends (its roof cars fade with it), the roof draws as before it began.
+     */
     @Test
-    void colourVariantsAndSnowTreesLookTheSameAsBefore() throws Exception {
+    void theGameViewDrawsTheConvertedBoardsObjectsInstancedInTheirColours() throws Exception {
         Files.createDirectories(OUTPUT.toPath());
         var hexes = fixture();
-        var legacy = Board.createEmptyBoard(13, 11);
-        for (var entry : hexes.entrySet()) { legacy.setHex(entry.getKey(), new Hex(0, entry.getValue(), "")); }
         var imported = imported();
         int recoloured = 0;
         for (var entry : hexes.entrySet()) {
@@ -109,10 +160,20 @@ class GpuSceneryColourSmokeTest {
                 if (!object.colours().slots().isEmpty()) { recoloured++; }
             }
         }
-        assertTrue(recoloured > 50, "Imported cars, animals and ponds keep their colours: " + recoloured);
-        var scenes = List.of(GpuLegacyImportSmokeTest.scene(legacy), GpuLegacyImportSmokeTest.scene(imported),
-              GpuLegacyImportSmokeTest.scene(imported));
-        String[] views = { "legacy", "imported", "editor" };
+        assertTrue(recoloured > 50, "Converted cars, animals and ponds keep their colours: " + recoloured);
+        File file = new File(OUTPUT, "fixture.board2");
+        BoardFile.save(imported, file.toPath());
+        List<BoardScene.Tile> gameTiles;
+        try (var fixture = GpuBoardFixture.create(BoardFile.loadSheet(file, false, true))) {
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            gameTiles = fixture.source.takeFrame().scene().tiles().stream().map(tile -> tile.withMarkings(null, List.of())).toList();
+        }
+        var scene = new BoardScene(0, imported.getWidth(), imported.getHeight(), gameTiles, List.of(), List.of(), -1, "",
+              List.of());
+        // The drawn level of the two objects with levels: overview, mid view, then close-up.
+        List<Integer> levels = new java.util.ArrayList<>();
+        int[] train = new int[1];
+        int[] parts = new int[3];
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setInitialVisible(false);
@@ -122,62 +183,318 @@ class GpuSceneryColourSmokeTest {
                 var profiler = new GLProfiler(Gdx.graphics);
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                var terrain = new GpuTerrain();
                 try {
-                    for (int view = 0; view < views.length; view++) {
-                        var terrain = new GpuTerrain();
-                        try {
-                            var scene = scenes.get(view);
-                            var camera = new BoardCamera();
-                            camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                            terrain.editableObjects(view == 2);
-                            terrain.setTacticalView(false);
-                            frame.prepare(terrain, camera, scene);
-                            terrain.update(scene);
-                            camera.center(BoardGeometry.center(new Coords(6, 5), 0));
-                            camera.camera.zoom = .9f;
-                            camera.update();
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
-                            frame.render(terrain, camera, scene);
-                            profiler.enable();
-                            profiler.reset();
-                            frame.render(terrain, camera, scene);
-                            System.out.printf("COLOUR %s overview: %d draw calls, %d GL calls%n", views[view],
-                                  profiler.getDrawCalls(), profiler.getCalls());
-                            profiler.disable();
-                            GpuReviewFrame.save(new File(OUTPUT, views[view] + "-overview.png"));
-                            for (var coords : hexes.keySet()) {
-                                camera.center(BoardGeometry.center(coords, 0));
-                                camera.camera.zoom = .1f;
-                                camera.update();
-                                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
-                                frame.render(terrain, camera, scene);
-                                GpuReviewFrame.save(new File(OUTPUT, views[view] + "-" + coords.getBoardNum() + ".png"));
-                            }
-                        } finally { terrain.dispose(); }
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    terrain.setTacticalView(false);
+                    // Grass blades are planted asynchronously; a capture may catch a blade another run has not yet.
+                    terrain.setGrass(false);
+                    frame.prepare(terrain, camera, scene);
+                    terrain.update(scene);
+                    System.arraycopy(objectParts(terrain), 0, parts, 0, parts.length);
+                    // The level objects close up before any level change, to compare after a change and back.
+                    for (var coords : List.of(LEVEL_CORAL, LEVEL_TREE)) {
+                        camera.center(BoardGeometry.center(coords, 0));
+                        camera.camera.zoom = .1f;
+                        camera.update();
+                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(OUTPUT, "game-level-first-" + coords.getBoardNum() + ".png"));
                     }
+                    camera.center(BoardGeometry.center(new Coords(6, 5), 0));
+                    camera.camera.zoom = .9f;
+                    camera.update();
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    frame.render(terrain, camera, scene);
+                    profiler.enable();
+                    profiler.reset();
+                    frame.render(terrain, camera, scene);
+                    System.out.printf("COLOUR game overview: %d draw calls, %d GL calls%n", profiler.getDrawCalls(),
+                          profiler.getCalls());
+                    profiler.disable();
+                    GpuReviewFrame.save(new File(OUTPUT, "game-overview.png"));
+                    levels.addAll(List.of(level(terrain, LEVEL_CORAL), level(terrain, LEVEL_TREE)));
+                    train[0] = level(terrain, LEVEL_TRAIN);
+                    camera.center(BoardGeometry.center(LEVEL_CORAL, 0).lerp(BoardGeometry.center(LEVEL_TREE, 0), .5f));
+                    camera.camera.zoom = .5f;
+                    camera.update();
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    frame.render(terrain, camera, scene);
+                    GpuReviewFrame.save(new File(OUTPUT, "game-levels.png"));
+                    levels.addAll(List.of(level(terrain, LEVEL_CORAL), level(terrain, LEVEL_TREE)));
+                    for (var coords : List.of(LEVEL_CORAL, LEVEL_TREE)) {
+                        camera.center(BoardGeometry.center(coords, 0));
+                        camera.camera.zoom = .1f;
+                        camera.update();
+                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(OUTPUT, "game-level-" + coords.getBoardNum() + ".png"));
+                        levels.add(level(terrain, coords));
+                    }
+                    for (var coords : hexes.keySet()) {
+                        camera.center(BoardGeometry.center(coords, 0));
+                        camera.camera.zoom = .1f;
+                        camera.update();
+                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(OUTPUT, "game-" + coords.getBoardNum() + ".png"));
+                    }
+                    // The pointer on the building's top storey at the default building opacity: the roof cars fade; then
+                    // it leaves, and the roof is drawn as before.
+                    camera.center(BoardGeometry.center(ROOF, 2));
+                    camera.update();
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    frame.render(terrain, camera, scene);
+                    GpuReviewFrame.save(new File(OUTPUT, "game-roof-" + ROOF.getBoardNum() + ".png"));
+                    terrain.animate(0, List.of(), GpuTerrain.DEFAULT_BUILDING_OPACITY, ROOF, BoardGeometry.level());
+                    frame.render(terrain, camera, scene);
+                    GpuReviewFrame.save(new File(OUTPUT, "game-hover-" + ROOF.getBoardNum() + ".png"));
+                    terrain.animate(0, List.of(), GpuTerrain.DEFAULT_BUILDING_OPACITY, null, Float.NaN);
+                    frame.render(terrain, camera, scene);
+                    GpuReviewFrame.save(new File(OUTPUT, "game-unhovered-" + ROOF.getBoardNum() + ".png"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
-                finally { frame.dispose(); Gdx.app.exit(); }
+                finally { terrain.dispose(); frame.dispose(); Gdx.app.exit(); }
             }
         }, config);
-        if (failure.get() != null) { throw new AssertionError("Scenery colour review", failure.get()); }
-        // The editor recolours one shared mesh per model on the GPU; the game draws CPU-recoloured copies. Both must
-        // show every hex alike: cars on pavement (one mirrored, drawn one by one), herds, pools, ponds and snow trees.
-        for (var coords : hexes.keySet()) {
-            int[] differing = differing(new File(OUTPUT, "imported-" + coords.getBoardNum() + ".png"),
-                  new File(OUTPUT, "editor-" + coords.getBoardNum() + ".png"));
-            System.out.printf("COLOUR parity %s: %d px over 2/255, %d px over 8/255%n", coords.getBoardNum(), differing[0], differing[1]);
-            assertTrue(differing[0] <= EDGE_PIXELS, "Editor and game draw " + coords.getBoardNum() + " alike: " + differing[0]);
+        if (failure.get() != null) { throw new AssertionError("Scenery colours in the game view", failure.get()); }
+        System.out.printf("COLOUR object parts: %d instanced (%d of them mirror images), %d one by one%n", parts[0], parts[2],
+              parts[1]);
+        assertTrue(parts[0] > 100, "Placed objects draw instanced in the game view");
+        assertTrue(parts[2] >= 2, "The mirrored cars draw instanced: " + parts[2]);
+        System.out.printf("COLOUR levels (coral, tree: overview, mid, close): %s%n", levels);
+        System.out.printf("COLOUR train overview level (-1: one level): %d%n", train[0]);
+        assertEquals(1, train[0], "The overview draws the locomotive's simpler level");
+        assertTrue(levels.subList(0, 4).stream().allMatch(level -> level > 0), "Overview and mid view draw simpler levels");
+        assertEquals(List.of(0, 0), levels.subList(4, 6), "A close-up draws the near meshes");
+        for (var coords : List.of(LEVEL_CORAL, LEVEL_TREE)) {
+            int[] back = parity(new File(OUTPUT, "game-level-first-" + coords.getBoardNum() + ".png"),
+                  new File(OUTPUT, "game-level-" + coords.getBoardNum() + ".png"));
+            assertEquals(0, back[0], "The game view draws " + coords.getBoardNum() + " as before after a level change and back");
         }
+        int[] restored = parity(new File(OUTPUT, "game-roof-" + ROOF.getBoardNum() + ".png"),
+              new File(OUTPUT, "game-unhovered-" + ROOF.getBoardNum() + ".png"));
+        assertEquals(0, restored[0], "The game view draws the roof as before once the hover ends");
+        int[] magenta = colourClasses(new File(OUTPUT, "game-" + MIRRORED.getBoardNum() + ".png"));
+        int[] white = colourClasses(new File(OUTPUT, "game-" + FAR.getBoardNum() + ".png"));
+        System.out.printf("COLOUR far colours (magenta, red, white px): mirrored car %s, upright car %s%n",
+              java.util.Arrays.toString(magenta), java.util.Arrays.toString(white));
+        assertTrue(magenta[0] > CAR_PIXELS && magenta[1] < CAR_PIXELS / 20, "The mirrored car draws magenta");
+        assertTrue(white[2] > CAR_PIXELS && white[1] < CAR_PIXELS / 20, "The upright car draws white");
     }
 
     /**
-     * In the editor every colouring of a model is one mesh (option A): the fixture draws as many times as with every
+     * The terrain's placed object parts, read from its chunks: instanced, one by one, and instanced mirror images. Each
+     * carries its object's colours (RigidGlb#packed), whichever way it draws.
+     */
+    private static int[] objectParts(GpuTerrain terrain) throws ReflectiveOperationException {
+        int[] result = new int[3];
+        for (Object chunk : (List<?>) field(terrain, "chunks")) {
+            for (String[] kind : new String[][] { { "decorationRenderables", "decorationOwners" }, { "looseDecorations", "looseOwners" } }) {
+                var parts = (Array<?>) field(chunk, kind[0]);
+                var owners = (Array<?>) field(chunk, kind[1]);
+                for (int i = 0; i < parts.size; i++) {
+                    var part = (Renderable) parts.get(i);
+                    var feature = (BoardScene.Feature) field(owners.get(i), "decorationFeature");
+                    assertTrue(java.util.Arrays.equals(RigidGlb.packed(feature.colours()), (float[]) part.userData),
+                          feature.asset() + " carries its colours " + feature.colours().slots());
+                    if (kind[0].equals("looseDecorations")) { result[1]++; } else {
+                        result[0]++;
+                        if (GpuTreeInstances.mirrored(part.worldTransform)) { result[2]++; }
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * A combat scar on a recoloured car (magenta; the model's own paint is red) is drawn in the car's colours: the scar
+     * patch copies the shared mesh's vertices and carries the placement's colours, which no merged scar page could.
+     */
+    @Test
+    void aCombatScarOnARecolouredCarKeepsItsColours() throws Exception {
+        Files.createDirectories(OUTPUT.toPath());
+        Coords at = new Coords(2, 2);
+        var board = Board.createEmptyBoard(5, 5);
+        for (int x = 0; x < 5; x++) {
+            for (int y = 0; y < 5; y++) { board.setHex(new Coords(x, y), new Hex(0, "pavement:1", "")); }
+        }
+        board.getHex(at).setDecorations(List.of(new BoardDecoration("car", "prop", "scenery/vehicles/car", null, 0, 0, 30, false,
+              1, BoardDecoration.Placement.ground(), 0, false).withColours(BoardDecoration.Colours.of("#ff00ff"))));
+        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                var terrain = new GpuTerrain();
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    terrain.setGrass(false);
+                    frame.prepare(terrain, camera, scene);
+                    terrain.update(scene);
+                    camera.center(BoardGeometry.center(at, 0));
+                    camera.camera.zoom = .1f;
+                    camera.update();
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    frame.render(terrain, camera, scene);
+                    GpuReviewFrame.save(new File(OUTPUT, "scar-clean.png"));
+                    Vector3 aim = terrain.editorObjects(at).getFirst().bounds().getCenter(new Vector3());
+                    Vector3 origin = aim.cpy().add(BoardRelief.metres(10), 0, BoardRelief.metres(40));
+                    var mark = GroundDamagePlaybackTest.impact("ISAC20", null);
+                    mark.attack().landscape = ray -> terrain.hit(scene, ray);
+                    mark.attack().landscapeSegment = (ray, length) -> terrain.hit(scene, ray, length);
+                    var contact = mark.attack().landscapeContact(t -> origin.cpy().lerp(aim, (float) t), 1);
+                    assertTrue(contact != null, "The shot strikes the car");
+                    terrain.impact(scene, new GpuGroundDamage.Impact(mark.attack(), "car", origin, contact.point(), mark.effect(),
+                          mark.shot()));
+                    for (int i = 0; i < 6; i++) { frame.render(terrain, camera, scene); }
+                    assertTrue(terrain.surfaceScars().tileCount() > 0, "The shot scars the car");
+                    GpuReviewFrame.save(new File(OUTPUT, "scar-hit.png"));
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { terrain.dispose(); frame.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("A scar on a recoloured car", failure.get()); }
+        var clean = javax.imageio.ImageIO.read(new File(OUTPUT, "scar-clean.png"));
+        var hit = javax.imageio.ImageIO.read(new File(OUTPUT, "scar-hit.png"));
+        // Changed pixels; of those, red-hued (the model's own paint, scorched or not) and magenta-hued (the car's).
+        int changed = 0, red = 0, magenta = 0;
+        for (int y = 0; y < hit.getHeight(); y++) {
+            for (int x = 0; x < hit.getWidth(); x++) {
+                int p = clean.getRGB(x, y), q = hit.getRGB(x, y), largest = 0;
+                for (int shift = 0; shift < 24; shift += 8) { largest = Math.max(largest, Math.abs((p >> shift & 255) - (q >> shift & 255))); }
+                if (largest <= 8) { continue; }
+                changed++;
+                int r = q >> 16 & 255, g = q >> 8 & 255, b = q & 255;
+                if (r > 40 && r > 2.5f * Math.max(g, b)) { red++; }
+                if (Math.min(r, b) > 40 && Math.min(r, b) > 2 * g) { magenta++; }
+            }
+        }
+        System.out.printf("COLOUR scar on the magenta car: %d px changed, %d red, %d magenta%n", changed, red, magenta);
+        assertTrue(magenta > 100, "The scar marks the magenta car: " + magenta + " of " + changed + " changed px");
+        assertTrue(red < magenta / 20, "The scarred car keeps its colour, not the model's red: " + red + " red px");
+    }
+
+    /** Pixels of a capture in each colour class: magenta, red (the car model's own paint) and near white. */
+    private static int[] colourClasses(File file) throws java.io.IOException {
+        var image = javax.imageio.ImageIO.read(file);
+        int[] result = new int[3];
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int p = image.getRGB(x, y), r = p >> 16 & 255, g = p >> 8 & 255, b = p & 255;
+                if (r > 150 && b > 150 && g < 100) { result[0]++; }
+                if (r > 150 && g < 90 && b < 90) { result[1]++; }
+                if (Math.min(r, Math.min(g, b)) > 200 && Math.max(r, Math.max(g, b)) - Math.min(r, Math.min(g, b)) < 25) {
+                    result[2]++;
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * The Tactical View hides placed plants as it hides every other plant (b13: the game's rule, now the editor's too):
+     * their parts are not drawn and the editor cannot pick them there, while the other objects stay drawn and pickable;
+     * back in 3D the plants draw and pick again. Game picking (hover and selection) looks through objects as before.
+     */
+    @Test
+    void theTacticalViewHidesPlacedPlantsAndKeepsTheOtherObjects() throws Exception {
+        var scene = GpuLegacyImportSmokeTest.scene(imported());
+        Coords snowTree = new Coords(1, 8);
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                var terrain = new GpuTerrain();
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    camera.center(BoardGeometry.center(new Coords(6, 5), 0));
+                    camera.camera.zoom = .9f;
+                    camera.update();
+                    frame.prepare(terrain, camera, scene);
+                    terrain.update(scene);
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    for (boolean tactical : new boolean[] { false, true, false }) {
+                        terrain.setTacticalView(tactical);
+                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        frame.render(terrain, camera, scene);
+                        String view = tactical ? "Tactical View" : "3D view";
+                        GpuReviewFrame.save(new File(OUTPUT, "plants-" + (tactical ? "tactical" : "3d") + ".png"));
+                        int plants = 0, objects = 0;
+                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                            for (String owners : List.of("decorationOwners", "looseOwners")) {
+                                for (Object owner : (Array<?>) field(chunk, owners)) {
+                                    if (plant(owner)) { plants++; } else { objects++; }
+                                }
+                            }
+                        }
+                        System.out.printf("PLANTS %s: %d plant parts, %d other object parts%n", view, plants, objects);
+                        assertEquals(tactical, plants == 0, view + ": placed plants' parts");
+                        assertTrue(objects > 100, view + " keeps the other objects");
+                        for (var at : List.of(LEVEL_CORAL, LEVEL_TREE, snowTree)) {
+                            assertEquals(!tactical, hit(terrain, scene, at, true) != null, view + ": the plant of " + at.getBoardNum());
+                            assertEquals(!tactical, terrain.editorObjects(at).getFirst().shown(), view + " shows " + at.getBoardNum());
+                        }
+                        for (var at : List.of(MIRRORED, FAR)) {
+                            assertEquals(at, hit(terrain, scene, at, true).coords(), view + ": the car of " + at.getBoardNum());
+                            // Game picking finds the car's hex; the hover outline looks through the car to the ground.
+                            assertEquals(at, hit(terrain, scene, at, false).coords(), view + ": the hex of the car");
+                        }
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { terrain.dispose(); frame.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Placed plants in the Tactical View", failure.get()); }
+    }
+
+    /** A placed plant: in the tree stand, or a foliage model the stand cannot hold. */
+    private static boolean plant(Object prop) throws ReflectiveOperationException {
+        return field(prop, "treeAsset") != null || GpuTerrain.foliageModel(((ModelInstance) field(prop, "instance")).model);
+    }
+
+    /**
+     * A ray straight down through the middle of the first placed object of {@code at}: the editor's object pick
+     * ({@code objects}), or the game's pick and the hover outline, which must agree on the hex.
+     */
+    private static HitAt hit(GpuTerrain terrain, BoardScene scene, Coords at, boolean objects) {
+        var object = terrain.editorObjects(at).getFirst();
+        Vector3 centre = object.bounds().getCenter(new Vector3());
+        var ray = new Ray(new Vector3(centre.x, centre.y, object.bounds().max.z + 100), new Vector3(0, 0, -1));
+        if (objects) {
+            var hit = terrain.decorationHit(scene, ray);
+            return hit == null ? null : new HitAt(hit.coords());
+        }
+        var picked = terrain.selectionHit(scene, ray);
+        var walkable = terrain.walkableHit(scene, ray);
+        assertEquals(picked.coords(), walkable.coords(), "Picking and the hover outline agree on " + at.getBoardNum());
+        assertEquals("ground", walkable.receiver(), "The hover outline looks through the object of " + at.getBoardNum());
+        return new HitAt(picked.coords());
+    }
+
+    private record HitAt(Coords coords) { }
+
+    /**
+     * Every colouring of a model is one mesh in every view (option A): the fixture draws as many times as with every
      * object in its model's own colours. A partial rebuild of the chunk keeps an untouched car's paint, and a drag's
      * preview pose keeps the dragged car's.
      */
     @Test
-    void theEditorDrawsEveryColouringOfAModelFromOneMeshAndKeepsItsColours() throws Exception {
+    void everyColouringOfAModelDrawsFromOneMeshAndKeepsItsColours() throws Exception {
         Files.createDirectories(OUTPUT.toPath());
         Coords cars = new Coords(1, 1), edit = new Coords(7, 7);
         var board = imported();
@@ -210,7 +527,6 @@ class GpuSceneryColourSmokeTest {
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 var terrain = new GpuTerrain();
                 try {
-                    terrain.editableObjects(true);
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     int[] draws = new int[2];
@@ -229,7 +545,7 @@ class GpuSceneryColourSmokeTest {
                         draws[index] = profiler.getDrawCalls();
                         profiler.disable();
                     }
-                    System.out.printf("COLOUR editor opaque draws: own colours %d, every colour %d%n", draws[0], draws[1]);
+                    System.out.printf("COLOUR opaque draws: own colours %d, every colour %d%n", draws[0], draws[1]);
                     assertEquals(draws[0], draws[1], "Every colouring of a model shares its draws");
 
                     camera.center(BoardGeometry.center(cars, 0));
@@ -268,6 +584,183 @@ class GpuSceneryColourSmokeTest {
         assertTrue(dragged[0] <= EDGE_PIXELS, "The dragged car keeps its paint: " + dragged[0]);
     }
 
+    /**
+     * A mirrored orchard tree, whose fruit only its two nearer levels hold, zoomed from its near level (LOD0) out to
+     * its simplest (LOD2) and in through LOD1 again: its close-up after the round trip equals the one before (the fruit
+     * keeps the mirrored placement's culling). On a hovered building's roof the same round trip keeps the fade and
+     * cutaway on every material, the fruit's too, and the hovered close-up returns as it was. The editor's side view
+     * draws the near level at any board zoom: its silhouette zoomed out equals the close-up's.
+     */
+    @Test
+    void aLevelChangeKeepsThePlacementsStateAndTheSideViewDrawsTheNearLevel() throws Exception {
+        Files.createDirectories(OUTPUT.toPath());
+        Coords ground = new Coords(1, 1), roof = new Coords(3, 2);
+        var board = Board.createEmptyBoard(5, 4);
+        board.setHex(roof, new Hex(0, "pavement:1;building:2;bldg_elev:2;bldg_cf:50", ""));
+        SwingUtilities.invokeAndWait(() -> {
+            BoardSceneryLayouts.convert(board);
+            for (var coords : List.of(ground, roof)) {
+                var hex = board.getHex(coords).duplicate();
+                hex.setDecorations(List.of(new BoardDecoration("orchard-" + coords.getBoardNum(), "prop", "orchard-round", null,
+                      0, 0, 30, true, 1, coords.equals(roof) ? BoardDecoration.Placement.on("building", 0)
+                      : BoardDecoration.Placement.ground(), 0, false)));
+                board.setHex(coords, hex);
+            }
+        });
+        var scene = GpuLegacyImportSmokeTest.scene(board);
+        List<Integer> levels = new java.util.ArrayList<>();
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                var terrain = new GpuTerrain();
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    terrain.setTacticalView(false);
+                    terrain.setGrass(false);
+                    frame.prepare(terrain, camera, scene);
+                    terrain.update(scene);
+                    camera.center(BoardGeometry.center(ground, 0));
+                    camera.update();
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    // The zoom at which the tree's larger side spans a number of pixels (pixels go as 1 / zoom).
+                    var bounds = (com.badlogic.gdx.math.collision.BoundingBox) field(levelled(terrain, ground), "bounds");
+                    float unit = Math.max(bounds.getWidth(), bounds.getHeight()) * BoardCamera.pixelsPerUnit(camera.camera)
+                          * camera.camera.zoom;
+                    float near = unit / 300, simplest = unit / 12, middle = unit / 45;
+                    for (var coords : List.of(ground, roof)) {
+                        // The pointer on the roof's building, its top storey, through the whole round trip.
+                        Coords hover = coords.equals(roof) ? roof : null;
+                        camera.center(BoardGeometry.center(coords, hover == null ? 0 : 2));
+                        zoom(terrain, frame, camera, scene, near, hover);
+                        settle(terrain, frame, camera, scene);
+                        GpuReviewFrame.save(new File(OUTPUT, "orchard-first-" + coords.getBoardNum() + ".png"));
+                        if (hover == null) { section(terrain, ground, bounds, "near"); }
+                        zoom(terrain, frame, camera, scene, simplest, hover);
+                        levels.add(level(terrain, coords));
+                        if (hover == null) { section(terrain, ground, bounds, "far"); }
+                        zoom(terrain, frame, camera, scene, middle, hover);
+                        levels.add(level(terrain, coords));
+                        if (hover != null) {
+                            for (var material : ((com.badlogic.gdx.graphics.g3d.ModelInstance) field(levelled(terrain, roof),
+                                  "instance")).materials) {
+                                assertTrue(material.has(GpuBuildingCutaway.TYPE) && material.has(
+                                            com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute.Type),
+                                      "The hovered tree's " + material.id + " keeps its fade and cutaway");
+                            }
+                        }
+                        zoom(terrain, frame, camera, scene, near, hover);
+                        levels.add(level(terrain, coords));
+                        settle(terrain, frame, camera, scene);
+                        GpuReviewFrame.save(new File(OUTPUT, "orchard-back-" + coords.getBoardNum() + ".png"));
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { terrain.dispose(); frame.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Orchard level round trip", failure.get()); }
+        System.out.printf("COLOUR orchard levels (ground, then roof: simplest, middle, near): %s%n", levels);
+        assertEquals(List.of(2, 1, 0, 2, 1, 0), levels, "The view draws LOD2, LOD1, then LOD0");
+        for (var coords : List.of(ground, roof)) {
+            int[] back = parity(new File(OUTPUT, "orchard-first-" + coords.getBoardNum() + ".png"),
+                  new File(OUTPUT, "orchard-back-" + coords.getBoardNum() + ".png"));
+            assertEquals(0, back[0], "The view draws the orchard tree of " + coords.getBoardNum() + " as before");
+        }
+        int sides = silhouettes(new File(OUTPUT, "editor-orchard-section-near.png"), new File(OUTPUT, "editor-orchard-section-far.png"));
+        System.out.printf("COLOUR side view silhouettes, near against zoomed out: %d px differ%n", sides);
+        assertEquals(0, sides, "The side view draws the tree's near level at any board zoom");
+    }
+
+    /**
+     * Zooms the camera to {@code zoom}, settles and draws a frame, the pointer on the top storey of {@code hover}'s
+     * building (null: on none), told before the frame as the board tells it every frame.
+     */
+    private static void zoom(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene, float zoom,
+          Coords hover) throws Exception {
+        camera.camera.zoom = zoom;
+        camera.update();
+        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        terrain.animate(0, List.of(), GpuTerrain.DEFAULT_BUILDING_OPACITY, hover, hover == null ? Float.NaN : BoardGeometry.level());
+        frame.render(terrain, camera, scene);
+    }
+
+    /**
+     * Settled frames, the shadow map redrawn: a level change alone keeps the previous level's shadow until the next refit
+     * (updateDetail) and a zoom within the last fit's guard does not refit. After the hovered roof tree's level change the
+     * frames also took a few frames to settle (2 pixels by 2/255 on its trunk; the cause is not isolated), so the map is
+     * redrawn three frames after the zoom.
+     */
+    private static void settle(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene) {
+        for (int i = 0; i < 3; i++) { frame.render(terrain, camera, scene); }
+        terrain.refreshShadows();
+        frame.render(terrain, camera, scene);
+        frame.render(terrain, camera, scene);
+    }
+
+    /** The editor's side view of the hex's object (isolated, as the side view reveals one) on a magenta backdrop. */
+    private static void section(GpuTerrain terrain, Coords coords, com.badlogic.gdx.math.collision.BoundingBox bounds,
+          String name) throws ReflectiveOperationException {
+        var camera = new com.badlogic.gdx.graphics.OrthographicCamera();
+        float size = 1.4f * Math.max(bounds.getWidth(), bounds.getDepth());
+        camera.viewportWidth = size * Gdx.graphics.getWidth() / Gdx.graphics.getHeight();
+        camera.viewportHeight = size;
+        var centre = bounds.getCenter(new com.badlogic.gdx.math.Vector3());
+        camera.position.set(centre).add(0, -10000, 0);
+        camera.up.set(com.badlogic.gdx.math.Vector3.Z);
+        camera.lookAt(centre);
+        camera.near = 1;
+        camera.far = 20000;
+        camera.update();
+        Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+        com.badlogic.gdx.utils.ScreenUtils.clear(1, 0, 1, 1, true);
+        terrain.renderEditorSection(camera, coords, (String) field(levelled(terrain, coords), "decorationId"));
+        GpuReviewFrame.save(new File(OUTPUT, "editor-orchard-section-" + name + ".png"));
+    }
+
+    /** Pixels covered by the object in one capture and not the other (the magenta backdrop elsewhere). */
+    private static int silhouettes(File first, File second) throws java.io.IOException {
+        var a = javax.imageio.ImageIO.read(first);
+        var b = javax.imageio.ImageIO.read(second);
+        int result = 0, covered = 0;
+        for (int y = 0; y < a.getHeight(); y++) {
+            for (int x = 0; x < a.getWidth(); x++) {
+                boolean p = (a.getRGB(x, y) & 0xffffff) != 0xff00ff, q = (b.getRGB(x, y) & 0xffffff) != 0xff00ff;
+                if (p != q) { result++; }
+                if (p) { covered++; }
+            }
+        }
+        assertTrue(covered > 1000, "The side view draws the tree: " + covered + " px");
+        return result;
+    }
+
+    /** The hex's placed object with mesh levels (its prop); null for none. */
+    private static Object levelled(GpuTerrain terrain, Coords coords) throws ReflectiveOperationException {
+        for (Object chunk : (List<?>) field(terrain, "chunks")) {
+            for (Object prop : (List<?>) field(chunk, "props")) {
+                if (coords.equals(field(prop, "coords")) && field(prop, "levels") != null) { return prop; }
+            }
+        }
+        return null;
+    }
+
+    /** The drawn level of the hex's placed object with mesh levels, checked against the model it draws; -1 for none. */
+    private static int level(GpuTerrain terrain, Coords coords) throws ReflectiveOperationException {
+        Object prop = levelled(terrain, coords);
+        if (prop == null) { return -1; }
+        var levels = (List<?>) field(prop, "levels");
+        int level = (Integer) field(prop, "lod");
+        var instance = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "instance");
+        assertTrue(instance.model == levels.get(level), coords + " draws its level " + level);
+        assertTrue(field(prop, "pickingModel") == levels.getFirst(), coords + " picks its near level");
+        return level;
+    }
+
     /** The installed bounds of a placed car of the hex, which a reused hex keeps. */
     private static Object carBounds(GpuTerrain terrain, Coords coords) throws ReflectiveOperationException {
         for (Object chunk : (List<?>) field(terrain, "chunks")) {
@@ -284,6 +777,23 @@ class GpuSceneryColourSmokeTest {
         var field = owner.getClass().getDeclaredField(name);
         field.setAccessible(true);
         return field.get(owner);
+    }
+
+    /** Pixels that differ at all, pixels whose largest channel difference exceeds 1/255, and the largest one. */
+    static int[] parity(File first, File second) throws java.io.IOException {
+        var a = javax.imageio.ImageIO.read(first);
+        var b = javax.imageio.ImageIO.read(second);
+        int[] result = new int[3];
+        for (int y = 0; y < a.getHeight(); y++) {
+            for (int x = 0; x < a.getWidth(); x++) {
+                int p = a.getRGB(x, y), q = b.getRGB(x, y), largest = 0;
+                for (int shift = 0; shift < 24; shift += 8) { largest = Math.max(largest, Math.abs((p >> shift & 255) - (q >> shift & 255))); }
+                if (largest > 0) { result[0]++; }
+                if (largest > 1) { result[1]++; }
+                result[2] = Math.max(result[2], largest);
+            }
+        }
+        return result;
     }
 
     /** Pixels whose largest channel difference exceeds 2/255, and 8/255. */

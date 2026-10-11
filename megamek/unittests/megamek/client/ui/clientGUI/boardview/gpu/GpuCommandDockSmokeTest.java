@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
@@ -950,7 +951,7 @@ class GpuCommandDockSmokeTest {
     private static GpuMovePlan.Snapshot explicit(GpuMovePlan.Mode mode, String gearLabel) {
         return new GpuMovePlan.Snapshot(true, true, false, ATLAS, mode, mode != GpuMovePlan.Mode.AUTO, gearLabel,
               List.of(), List.of(), List.of(), null, 0, 0, 3, EntityMovementType.MOVE_NONE, "", false, 0, 0, true,
-              List.of(), false, false, Map.of(), 0);
+              List.of(), false, false, Map.of(), Set.of(), 0);
     }
 
     /** Shot 02's plan: the Atlas walks two hexes north, 2 of 3 MP, chosen by the planner. */
@@ -971,7 +972,7 @@ class GpuCommandDockSmokeTest {
               .map(hex -> new GpuMovePlan.Step(hex, 0, 0, facing, band, false)).toList();
         return new GpuMovePlan.Snapshot(true, true, false, unit, GpuMovePlan.Mode.AUTO, false, "", route, List.of(),
               pinned, route.getLast().coords(), facing, cost, budget, EntityMovementType.MOVE_WALK, type, true, heat, 0,
-              true, List.of(), true, true, Map.of(), 0);
+              true, List.of(), true, true, Map.of(), Set.of(), 0);
     }
 
     /** A hold that still covers {@code remaining} own units on the next turns (G15, E2c). */

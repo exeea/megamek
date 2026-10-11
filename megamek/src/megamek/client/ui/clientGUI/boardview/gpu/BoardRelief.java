@@ -346,9 +346,9 @@ final class BoardRelief {
      */
     private static Site site(BoardScene scene, BoardScene.Tile tile, int ramps) {
         boolean liquid = tile.liquid().present();
-        boolean road = !liquid && BoardRoad.rendered(tile);
+        boolean road = !liquid && BoardRoad.carriageway(tile);
         // Ground a road only approaches is natural ground too: its graded mesh follows the same rim.
-        boolean shaped = liquid || road || tile.roadExits() == 0 && tile.road() == BoardRoad.Kind.NONE;
+        boolean shaped = liquid || road || tile.wayExits() == 0 && tile.road() == BoardRoad.Kind.NONE;
         BoardScene.Surface family = liquid ? waterFamily(scene, tile) : tile.surface();
         float roadLow = tile.elevation();
         for (int direction = 0; road && direction < 6; direction++) {
@@ -1557,7 +1557,7 @@ final class BoardRelief {
         for (Corner end : new Corner[] { edge.a, edge.b }) {
             for (Site site : end.around) {
                 if (site == null || !site.road()) { continue; }
-                BoardRoad road = roads.computeIfAbsent(site.coords(), key -> BoardRoad.of(scene, scene.tile(key)));
+                BoardRoad road = roads.computeIfAbsent(site.coords(), key -> BoardRoad.way(scene, scene.tile(key)));
                 float weight = site == edge.upper || site == edge.lower || site == edge.shoreRoad ? 1
                       : 1 - smooth((end == edge.a ? t : 1 - t) / .3f);
                 // No rock above the road may overhang its carriageway; the cliff beneath the road keeps its profile.
@@ -3035,7 +3035,7 @@ final class BoardRelief {
                 if (neighbor != null) { tunnels.addAll(BoardTunnel.entrances(scene, neighbor)); }
             }
         }
-        boolean road = BoardRoad.rendered(tile);
+        boolean road = BoardRoad.carriageway(tile);
         if (obstacles == null) { obstacles = new BoardObstacles(scene, tile); }
         Site adjoining = landEdge < 0 ? null : neighbor(self, landEdge);
         boolean pitBoundary = adjoining != null && adjoining.ultraSublevel();
@@ -3063,7 +3063,7 @@ final class BoardRelief {
         // Rocks and shrubs may stand beside the road, never on its carriageway or shoulder.
         if (road) {
             float scale = BoardGeometry.hexScale();
-            BoardRoad course = roads.computeIfAbsent(tile.coords(), key -> BoardRoad.of(scene, tile));
+            BoardRoad course = roads.computeIfAbsent(tile.coords(), key -> BoardRoad.way(scene, tile));
             float x = (base.x - BoardGeometry.centerX(tile.coords())) / scale, y = (base.y - BoardGeometry.centerY(tile.coords())) / scale;
             if (course.distance(x, y) < BoardRoad.SHOULDER + radius / scale) { return; }
         }
@@ -3447,7 +3447,7 @@ final class BoardRelief {
             Edge edge = edge(e);
             // Earth slopes get walls; a taller cliff is simply cut back as rock. Nothing walls off a road's own exit.
             if (!edge.profiled || edge.lower != self || edge.upper.liquid() || edge.drop > 2 * BoardGeometry.level()
-                  || (tile.roadExits() & 1 << BoardGeometry.edgeDirection(e)) != 0) {
+                  || (tile.wayExits() & 1 << BoardGeometry.edgeDirection(e)) != 0) {
                 continue;
             }
             int count = samples(edge);

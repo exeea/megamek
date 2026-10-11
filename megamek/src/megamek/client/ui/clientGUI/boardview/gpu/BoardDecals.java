@@ -143,7 +143,7 @@ final class BoardDecals {
     }
 
     /** A tilted decal is a rotated stamp projected onto its receiving surface, not a floating quad. */
-    private static List<Vector3> paintRectangle(Coords owner, BoardDecoration object) {
+    static List<Vector3> paintRectangle(Coords owner, BoardDecoration object) {
         Vector3 anchor = anchor(owner, object);
         double[] size = size(object);
         List<Vector3> corners = new ArrayList<>();
@@ -325,7 +325,10 @@ final class BoardDecals {
             return projectGround(owner, recipient, raised, object);
         }
         Area clip = footprint(owner, object); clip.intersect(hex(recipient));
-        Vector3 anchor = anchor(owner, object);
+        Vector3 placed = anchor(owner, object);
+        // A clipped piece of a larger emblem (a 7-hex set missing a piece) centres beyond its hex: it lies on its hex's support.
+        Vector3 anchor = !object.clipToHex() || BoardGeometry.contains(owner, placed.x, placed.y) ? placed
+              : BoardGeometry.center(owner, 0);
         if (object.clipToHex() && raised.stream().noneMatch(face -> Float.isFinite(face.height(anchor.x, anchor.y)))) {
             return List.of();
         }

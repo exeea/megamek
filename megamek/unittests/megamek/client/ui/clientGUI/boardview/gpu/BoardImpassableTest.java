@@ -194,6 +194,6 @@ class BoardImpassableTest {
 
     private static BoardScene.Tile capture(Hex hex, Coords coords) {
         var artwork = new BoardArtwork.HexImage(coords, null, null, null, null, null, List.of(), Map.of(), null);
-        return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool());
+        return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool(), neighbour -> null);
     }
 }

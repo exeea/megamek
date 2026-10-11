@@ -25,7 +25,7 @@ final class BoardVegetation {
                 if (at.distance(x, y) > 2) { continue; }
                 var tile = scene.tile(new Coords(x, y));
                 sites.add(tile == null ? null : new Site(tile.elevation(), tile.surface(), BoardBiome.kind(tile),
-                      BoardSurfaceBlend.natural(tile), tile.liquid().present(), tile.frozen(), tile.roadExits(), tile.road()));
+                      BoardSurfaceBlend.natural(tile), tile.liquid().present(), tile.frozen(), tile.wayExits(), tile.road()));
             }
         }
         return new Key(Collections.unmodifiableList(sites));

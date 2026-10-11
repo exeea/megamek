@@ -64,8 +64,8 @@ final class BoardFungus {
             var lower = scene.tile(tile.coords().translated(direction));
             // The board's cutaway perimeter is not an ecological cliff. Keep pit, road and water mouths clear.
             if (lower == null || lower.ultraSublevel() || lower.groundLevel() >= tile.groundLevel() || lower.liquid().present()
-                  || (tile.roadExits() & (1 << direction)) != 0
-                  || (lower.roadExits() & (1 << ((direction + 3) % 6))) != 0) {
+                  || (tile.wayExits() & (1 << direction)) != 0
+                  || (lower.wayExits() & (1 << ((direction + 3) % 6))) != 0) {
                 continue;
             }
             int drop = tile.groundLevel() - lower.groundLevel();

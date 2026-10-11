@@ -32,10 +32,13 @@
  */
 package megamek.utilities;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -72,6 +75,26 @@ class BoardsTaggerTest {
               "A board with an industrial elevator hex should get the IndustrialElevator tag");
         assertFalse(tags.contains(BoardsTagger.Tags.TAG_ELEVATOR.getName()),
               "An industrial elevator should not trigger the Solaris Elevator tag");
+    }
+
+    /** The tagger and the board editor share one rule: stale automatic tags go, current ones come, manual ones stay. */
+    @Test
+    void updateAutoTagsReplacesOnlyTheAutomaticTags() {
+        Board board = buildEmptyBoard();
+        Hex elevatorHex = new Hex();
+        elevatorHex.addTerrain(new Terrain(Terrains.INDUSTRIAL_ELEVATOR, 0, true, (4 << 8) | 10));
+        board.setHex(0, 0, elevatorHex);
+        board.addTag("Manual");
+        board.addTag("Stale (Auto)");
+
+        assertTrue(BoardsTagger.updateAutoTags(board));
+
+        Set<String> expected = new HashSet<>(BoardsTagger.tagsFor(board));
+        expected.add("Manual");
+        assertEquals(expected, board.getTags());
+        assertTrue(BoardsTagger.isAutoTag(BoardsTagger.Tags.TAG_INDUSTRIAL_ELEVATOR.getName()));
+        assertFalse(BoardsTagger.isAutoTag("Manual"));
+        assertFalse(BoardsTagger.updateAutoTags(board), "A second run finds nothing to change");
     }
 
     @Test

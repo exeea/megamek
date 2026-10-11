@@ -19,7 +19,10 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Matched native artwork/model views of all parked-car variants, with their installed transforms checked. */
+/**
+ * Every parked-car variant converted (its cars seated in their car-park decal's bays), in the Tactical View, top down and
+ * oblique, with each installed car where its placed object says.
+ */
 @Tag("on-demand")
 class GpuSceneryCarSmokeTest {
     @Test

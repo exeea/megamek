@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 class GpuBuildingInteriorTest {
     @Test
     void lightBuildingWallsEncloseItsCentreWithoutTheRoofBorder() {
-        var file = new com.badlogic.gdx.files.FileHandle(megamek.client.ui.clientGUI.boardview.BoardArtwork
+        var file = new com.badlogic.gdx.files.FileHandle(megamek.common.board.TilesetScenery
               .customBuildingFile("buildings/saxarba/building_light/building_light_00"));
         var shapes = BoardShape.shapes(RigidGlb.loadLods(file).getFirst(), true);
         for (var entry : shapes.entrySet()) {

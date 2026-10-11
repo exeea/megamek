@@ -66,6 +66,7 @@ import megamek.common.actions.TeleMissileAttackAction;
 import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
 import megamek.common.board.BoardLocation;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.enums.GamePhase;
@@ -2777,6 +2778,12 @@ public final class Game extends AbstractGame implements Serializable,
                     pendingDisplacementAttacks.remove(attack);
                 }
             }
+        }
+        // A save made before game boards were converted holds legacy boards: convert each as its sheets would have been
+        // (on a converted board this only types untyped bridges), then join what crosses a seam, as a fresh game does.
+        for (Board board : getBoards().values()) {
+            BoardSceneryLayouts.convert(board);
+            BoardSceneryLayouts.joinSheets(board);
         }
     }
 

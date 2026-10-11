@@ -149,7 +149,6 @@ public class TilesetManager implements IPreferenceChangeListener {
         wreckageDecalCount.put(FILENAME_SUFFIX_WRECKS_ASSAULT_PLUS, getUHeavyDecalCount());
         wreckTileset.loadFromFile("wreckset.txt");
         try {
-            hexTileset.incDepth = 0;
             hexTileset.loadFromFile(PreferenceManager.getClientPreferences().getMapTileset());
         } catch (Exception FileNotFoundException) {
             logger.error("Error loading tileset {} Reverting to default hexset!",
@@ -178,7 +177,6 @@ public class TilesetManager implements IPreferenceChangeListener {
         if (e.getName().equals(ClientPreferences.MAP_TILESET)) {
             HexTileset hts = new HexTileset(game);
             try {
-                hexTileset.incDepth = 0;
                 hts.loadFromFile((String) e.getNewValue());
                 hexTileset.close();
                 hexTileset = hts;

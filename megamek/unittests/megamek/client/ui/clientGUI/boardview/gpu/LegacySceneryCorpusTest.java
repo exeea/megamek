@@ -19,8 +19,6 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Stream;
 
-import megamek.client.ui.boardeditor.BoardEditorSnapping;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -28,18 +26,28 @@ import megamek.common.board.BoardDecalArt;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
+import megamek.common.board.BoardTreeDistribution;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
-import megamek.common.board.MaglevRoute;
+import megamek.common.board.RailRoute;
+import megamek.common.board.TilesetScenery;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 /**
- * Imports every shipped legacy board that has scenery tokens, one at a time, and checks the import invariants. Opt-in
+ * The converter's corpus test: converts every shipped legacy board that has scenery tokens, one at a time, as every load
+ * site does ({@link BoardSceneryLayouts#convert}, image-free common code that needs no AWT), and checks the invariants
+ * of b9-decisions K and K2: every token the board loaded stays in memory (2D views of a game draw its old sprite); the
+ * hex every 3D view draws ({@link BoardSceneryLayouts#withoutTakenTokens}) and the {@code .board2} text hold no layer the
+ * conversion took; the text reads back as that hex; converting a converted board changes nothing; rules errors and
+ * roads change only by the car-park lanes. Batch 10: the conversion takes every legacy art token (FLUFF and GROUND_FLUFF
+ * below the server values, ROAD_FLUFF, WATER_FLUFF, BLDG_FLUFF) as objects, a hex design or nothing, so no
+ * {@code .board2} holds one; the objects and designs of its families are pinned (b10-design section 1). Opt-in
  * (minutes): set the environment variable {@code MEGAMEK_LEGACY_CORPUS=1}. Prints objects and groups per board and per
- * decoded artwork, the tokens kept, the maglev routes and the import times.
+ * decoded artwork, the designs written, the maglev and rail routes and the conversion times.
  */
 @EnabledIfEnvironmentVariable(named = "MEGAMEK_LEGACY_CORPUS", matches = "1")
 class LegacySceneryCorpusTest {
@@ -48,7 +56,7 @@ class LegacySceneryCorpusTest {
     private static final Map<Integer, String> LANES = Map.of(18, "NE-SW", 9, "N-S", 36, "SE-NW");
 
     @Test
-    void everyLegacyBoardImportsWithoutLeavingDecodableScenery() throws Exception {
+    void everyLegacyBoardConvertsOnceKeepingItsTokens() throws Exception {
         Path models = Configuration.dataDir().toPath().resolve("models/board");
         BoardEditorBlueprint blueprint = BoardEditorBlueprint.get();
         List<Path> files;
@@ -56,11 +64,17 @@ class LegacySceneryCorpusTest {
             files = walk.filter(path -> path.toString().endsWith(".board")).sorted().toList();
         }
         List<Result> results = new ArrayList<>();
-        Map<String, Integer> perAsset = new TreeMap<>(), kept = new TreeMap<>(), receivers = new TreeMap<>();
+        Map<String, Integer> perAsset = new TreeMap<>(), untaken = new TreeMap<>(), receivers = new TreeMap<>();
+        // Batch 10: the objects of its families and the designs the conversion wrote, by family.
+        Map<String, Integer> families = new TreeMap<>(), designs = new TreeMap<>();
         int noTrees = 0, stretched = 0, emblemSets = 0, emblemSingles = 0, pillaredBridges = 0;
         // Maglev: markers, their joined sides (counted from both ends), adjacent markers left apart, absolute markers,
         // station and train hexes, and those whose route climbs to a neighbour while the pieces stay level.
         int markers = 0, joinedSides = 0, apart = 0, absolute = 0, stations = 0, sloped = 0;
+        // Batch-10 answer 7: maglev markers on Pillars, and those a row of pillar art lifted a level above the ground.
+        int pillaredMaglevs = 0, raisedMaglevs = 0;
+        // Rail: markers, those riding a bridge deck, and those storing tracks other than their sides' default.
+        int rails = 0, deckRails = 0, storedTracks = 0;
         // Car-park roads: lane roads by axis and their boards, roof (or other off-ground) car parks left without a road,
         // car parks keeping an authored road, and neighbour roads whose automatic exits were written out.
         Map<String, Integer> laneRoads = new TreeMap<>();
@@ -81,18 +95,26 @@ class LegacySceneryCorpusTest {
             List<String> before = new ArrayList<>(), after = new ArrayList<>();
             board.isValid(before);
             Map<Coords, Terrain> roads = new HashMap<>();
+            // The art tokens each hex loaded with, which the conversion keeps in memory, and the designs it had.
+            Map<Coords, List<String>> tokens = new HashMap<>();
+            Map<Coords, Map<String, HexAppearance>> appearances = new HashMap<>();
             for (int y = 0; y < board.getHeight(); y++) {
                 for (int x = 0; x < board.getWidth(); x++) {
                     var road = board.getHex(x, y).getTerrain(Terrains.ROAD);
                     if (road != null) { roads.put(new Coords(x, y), new Terrain(road)); }
+                    var loaded = tokens(board.getHex(x, y));
+                    if (!loaded.isEmpty()) { tokens.put(new Coords(x, y), loaded); }
+                    appearances.put(new Coords(x, y), Map.copyOf(board.getHex(x, y).getAppearance()));
                 }
             }
             long start = System.nanoTime();
-            var issues = BoardSceneryLayouts.importBoard(board);
-            assertEquals(List.of(), issues, "Every emblem set in the corpus is complete: " + file);
+            var issues = BoardSceneryLayouts.convert(board);
+            // Batch 10: an incomplete landing-pad set paints its pieces without an issue; only a set cut by the board edge
+            // would report one, and none is.
+            assertEquals(List.of(), issues, "Every emblem and pad set in the corpus is complete or partial: " + file);
             long millis = (System.nanoTime() - start) / 1_000_000;
             board.isValid(after);
-            assertEquals(before, after, "Import adds no rule errors: " + file);
+            assertEquals(before, after, "The conversion adds no rule errors: " + file);
             // The only road change: a ground car park without a road gains its lane; kept neighbours only write theirs out.
             for (int y = 0; y < board.getHeight(); y++) {
                 for (int x = 0; x < board.getWidth(); x++) {
@@ -121,96 +143,158 @@ class LegacySceneryCorpusTest {
             }
             int objects = 0;
             Set<String> groups = new HashSet<>();
-            try (var artwork = new BoardArtwork()) {
-                for (int y = 0; y < board.getHeight(); y++) {
-                    for (int x = 0; x < board.getWidth(); x++) {
-                        var hex = board.getHex(x, y);
-                        var scenery = artwork.scenery(board, new Coords(x, y));
-                        for (var model : scenery.sources()) {
-                            assertFalse(BoardSceneryLayouts.imported(model.terrains(), hex),
-                                  file.getFileName() + " still selects " + model.key() + " at " + x + "," + y);
+            for (int y = 0; y < board.getHeight(); y++) {
+                for (int x = 0; x < board.getWidth(); x++) {
+                    var hex = board.getHex(x, y);
+                    String where = file.getFileName() + " " + x + "," + y;
+                    // K: the tokens stay on the converted board, so the 2D views of a game still draw the old sprites.
+                    assertEquals(tokens.getOrDefault(new Coords(x, y), List.of()), tokens(hex), where + ": the tokens stay");
+                    // K2: every 3D view draws the hex without its taken tokens, and that hex selects nothing the
+                    // conversion took (its objects stand for it). Only a token can select taken art.
+                    if (tokens.containsKey(new Coords(x, y))) {
+                        for (var layer : TilesetScenery.resolve(BoardSceneryLayouts.withoutTakenTokens(hex), true).layers()) {
+                            assertFalse(layer.taken(), where + ": the 3D board would draw " + layer.key() + " beside its objects");
                         }
-                        for (var decal : scenery.decals()) {
-                            assertFalse(BoardSceneryLayouts.imported(decal.terrains(), hex),
-                                  file.getFileName() + " still paints " + decal.key() + " at " + x + "," + y);
+                    }
+                    // Pillar art on a bridge is the bridge's Pillars toggle: no pillar objects there.
+                    if (HexAppearance.pillars(hex.getAppearance())) { pillaredBridges++; }
+                    if (hex.containsTerrain(Terrains.BRIDGE)) {
+                        assertTrue(hex.getDecorations().stream().noneMatch(o -> o.asset().equals(BoardSceneryLayouts.PILLAR)),
+                              file.getFileName() + " " + x + "," + y + ": no pillar objects on a bridge");
+                    }
+                    var vegetation = hex.getAppearance().get("vegetation");
+                    if (vegetation != null && BoardTreeDistribution.NO_TREES.equals(vegetation.variant())) { noTrees++; }
+                    // Batch 10: the conversion takes every art token (objects, a design or nothing).
+                    var taken = BoardSceneryLayouts.takenTokens(hex);
+                    for (int type : ART) {
+                        if (hex.containsTerrain(type) && !server(hex, type) && !taken.containsKey(type)) {
+                            untaken.merge(hex.getTerrain(type).toString(), 1, Integer::sum);
                         }
-                        // Pillar art on a bridge is the bridge's Pillars toggle: no pillar objects there.
-                        if (HexAppearance.pillars(hex.getAppearance())) { pillaredBridges++; }
-                        if (hex.containsTerrain(Terrains.BRIDGE)) {
-                            assertTrue(hex.getDecorations().stream().noneMatch(o -> o.asset().equals(BoardSceneryLayouts.PILLAR)),
-                                  file.getFileName() + " " + x + "," + y + ": no pillar objects on a bridge");
+                    }
+                    var loadedDesigns = appearances.get(new Coords(x, y));
+                    hex.getAppearance().forEach((owner, design) -> {
+                        if (!owner.equals("bridge") && design.variant() != null && !design.equals(loadedDesigns.get(owner))) {
+                            designs.merge(designFamily(design.variant()), 1, Integer::sum);
                         }
-                        var vegetation = hex.getAppearance().get("vegetation");
-                        if (vegetation != null && BoardFeatures.NO_TREES.equals(vegetation.variant())) { noTrees++; }
-                        if (hex.containsTerrain(Terrains.FLUFF) && hex.terrainLevel(Terrains.FLUFF) < 2000) {
-                            kept.merge("fluff:" + hex.terrainLevel(Terrains.FLUFF), 1, Integer::sum);
+                    });
+                    var route = RailRoute.find(hex, RailRoute.Kind.MAGLEV);
+                    if (route != null) {
+                        markers++;
+                        assertNull(route.group(), "A route marker is never a group member");
+                        if (route.pillars()) { pillaredMaglevs++; }
+                        if (route.placement().equals(BoardDecoration.Placement.on("ground", 1))) {
+                            raisedMaglevs++;
+                            assertTrue(route.pillars(), file.getFileName() + " " + x + "," + y + ": a lifted maglev stands on Pillars");
                         }
-                        var route = MaglevRoute.find(hex);
-                        if (route != null) {
-                            markers++;
-                            assertNull(route.group(), "A route marker is never a group member");
-                            if (route.placement().mode().equals("absolute")) { absolute++; }
-                            // Other artwork of the hex (road trees, say) keeps its own support.
-                            var pieces = hex.getDecorations().stream().filter(object -> !MaglevRoute.isRoute(object)
-                                  && object.asset().startsWith("scenery/maglev/")).toList();
-                            assertTrue(pieces.stream().allMatch(object -> object.placement().equals(route.placement())),
-                                  file.getFileName() + " " + x + "," + y + ": the pieces ride the route");
-                            double level = BoardEditorSnapping.level(hex, route.placement());
-                            boolean climbs = false;
-                            for (int direction = 0; direction < 6; direction++) {
-                                Hex next = board.getHex(new Coords(x, y).translated(direction));
-                                var other = MaglevRoute.find(next);
-                                if (other == null) { continue; }
-                                if (!MaglevRoute.joined(route, direction, other)) { apart++; continue; }
-                                joinedSides++;
-                                climbs |= BoardEditorSnapping.level(next, other.placement()) != level;
-                            }
-                            if (!pieces.isEmpty()) { stations++; if (climbs) { sloped++; } }
+                        if (route.placement().mode().equals("absolute")) { absolute++; }
+                        // Other artwork of the hex (road trees, say) keeps its own support.
+                        var pieces = hex.getDecorations().stream().filter(object -> !RailRoute.isRoute(object)
+                              && object.asset().startsWith("scenery/maglev/")).toList();
+                        assertTrue(pieces.stream().allMatch(object -> object.placement().equals(route.placement())),
+                              file.getFileName() + " " + x + "," + y + ": the pieces ride the route");
+                        double level = route.placement().level(hex);
+                        boolean climbs = false;
+                        for (int direction = 0; direction < 6; direction++) {
+                            Hex next = board.getHex(new Coords(x, y).translated(direction));
+                            var other = RailRoute.find(next, RailRoute.Kind.MAGLEV);
+                            if (other == null) { continue; }
+                            if (!RailRoute.joined(route, direction, other)) { apart++; continue; }
+                            joinedSides++;
+                            climbs |= other.placement().level(next) != level;
                         }
-                        for (BoardDecoration object : hex.getDecorations()) {
-                            objects++;
-                            if (object.group() != null) { groups.add(object.group()); }
-                            perAsset.merge(object.asset(), 1, Integer::sum);
-                            if (!object.stretch().equals(BoardDecoration.Stretch.NONE)) { stretched++; }
-                            if (object.asset().startsWith("decal/emblems/")) {
-                                if (object.scale() == 1) { emblemSets++; } else { emblemSingles++; }
-                            }
-                            if (object.asset().startsWith("decal/car-park/")) {
-                                if (object.mirror()) { foldedRows++; } else { besideRows++; }
-                            }
-                            receivers.merge(object.placement().receiver() == null ? "absolute"
-                                  : object.placement().receiver().terrain(), 1, Integer::sum);
-                            // The trees of a road passing under a bridge stand beneath its deck.
-                            assertFalse(BoardFeatures.parkSpecies().contains(object.asset()) && object.placement().receiver() != null
-                                  && object.placement().receiver().terrain().equals("bridge"), file.getFileName() + ": a tree on a deck");
-                            if (checkedAssets.add(object.asset())) {
-                                // Props have a mesh; decals (emblems, car parks) their image by path convention.
-                                assertTrue(object.kind().equals("decal") ? BoardDecalArt.image(object.asset()).isFile()
-                                      : Files.isRegularFile(models.resolve(object.asset() + ".glb")), object.asset());
-                                assertTrue(blueprint.asset(object.asset()) != null, "Unlabelled import " + object.asset());
-                            }
+                        if (!pieces.isEmpty()) { stations++; if (climbs) { sloped++; } }
+                    }
+                    var rail = RailRoute.find(hex, RailRoute.Kind.RAIL);
+                    if (rail != null) {
+                        rails++;
+                        assertNull(rail.group(), "A rail marker is never a group member");
+                        if (RailRoute.onDeck(rail)) { deckRails++; }
+                        // Every legacy rail sprite lays its sides' default gentle pieces: no stored tracks.
+                        if (rail.tracks() != 0) { storedTracks++; }
+                    }
+                    for (BoardDecoration object : hex.getDecorations()) {
+                        objects++;
+                        if (object.group() != null) { groups.add(object.group()); }
+                        perAsset.merge(object.asset(), 1, Integer::sum);
+                        String family = family(object);
+                        if (family != null) { families.merge(family, 1, Integer::sum); }
+                        if (!object.stretch().equals(BoardDecoration.Stretch.NONE)) { stretched++; }
+                        if (object.asset().startsWith("decal/emblems/")) {
+                            if (object.scale() == 1) { emblemSets++; } else { emblemSingles++; }
+                        }
+                        if (object.asset().startsWith("decal/car-park/")) {
+                            if (object.mirror()) { foldedRows++; } else { besideRows++; }
+                        }
+                        receivers.merge(object.placement().receiver() == null ? "absolute"
+                              : object.placement().receiver().terrain(), 1, Integer::sum);
+                        // The trees of a road passing under a bridge stand beneath its deck.
+                        assertFalse(BoardTreeDistribution.PARK.contains(object.asset()) && object.placement().receiver() != null
+                              && object.placement().receiver().terrain().equals("bridge"), file.getFileName() + ": a tree on a deck");
+                        if (checkedAssets.add(object.asset())) {
+                            // Props have a mesh; decals (emblems, car parks) their image by path convention; a rail's
+                            // track is generated by the route builder.
+                            assertTrue(object.kind().equals("decal") ? BoardDecalArt.image(object.asset()).isFile()
+                                  : RailRoute.kind(object) == RailRoute.Kind.RAIL
+                                  || Files.isRegularFile(models.resolve(object.asset() + ".glb")), object.asset());
+                            assertTrue(blueprint.asset(object.asset()) != null, "Unlabelled import " + object.asset());
                         }
                     }
                 }
             }
             var written = new ByteArrayOutputStream();
             BoardFile.write(board, written);
+            // The native flag means converted: a second conversion decodes nothing and changes nothing.
+            assertEquals(List.of(), BoardSceneryLayouts.convert(board), "Converted again: " + file);
+            var again = new ByteArrayOutputStream();
+            BoardFile.write(board, again);
+            assertEquals(written.toString(StandardCharsets.UTF_8), again.toString(StandardCharsets.UTF_8),
+                  "Converting twice is converting once: " + file);
+            // K2: the .board2 text is the board without its taken tokens, and reads back as exactly that.
             Board reread = BoardFile.readNative(written.toString(StandardCharsets.UTF_8));
             for (int y = 0; y < board.getHeight(); y++) {
                 for (int x = 0; x < board.getWidth(); x++) {
-                    assertEquals(BoardFile.hexNode(board.getHex(x, y)), BoardFile.hexNode(reread.getHex(x, y)), file + " " + x + "," + y);
+                    var stored = reread.getHex(x, y);
+                    assertEquals(BoardFile.hexNode(BoardSceneryLayouts.withoutTakenTokens(board.getHex(x, y))),
+                          BoardFile.hexNode(stored), file + " " + x + "," + y);
+                    assertTrue(BoardSceneryLayouts.withoutTakenTokens(stored) == stored,
+                          file + " " + x + "," + y + ": the .board2 holds no taken token");
+                    // Batch 10: nor any legacy art token at all (server rubble values are game state).
+                    for (int type : ART) {
+                        assertFalse(stored.containsTerrain(type) && !server(stored, type),
+                              file + " " + x + "," + y + ": the .board2 holds " + stored.getTerrain(type));
+                    }
                 }
             }
             results.add(new Result(Configuration.boardsDir().toPath().relativize(file).toString(), objects, groups.size(), millis));
         }
+        System.out.printf("CORPUS headless JVM: %b (the conversion reads no image either way)%n",
+              java.awt.GraphicsEnvironment.isHeadless());
         System.out.printf("CORPUS boards=%d objects=%d groups=%d%n", results.size(),
               results.stream().mapToInt(Result::objects).sum(), results.stream().mapToInt(Result::groups).sum());
         results.stream().sorted((a, b) -> Integer.compare(b.objects(), a.objects())).limit(10)
               .forEach(r -> System.out.printf("CORPUS board %6d objects %5d groups %6d ms  %s%n", r.objects(), r.groups(), r.millis(), r.board()));
         perAsset.forEach((asset, count) -> System.out.printf("CORPUS asset %7d  %s%n", count, asset));
-        kept.forEach((token, count) -> System.out.printf("CORPUS kept %6d hexes  %s%n", count, token));
+        untaken.forEach((token, count) -> System.out.printf("CORPUS untaken %6d hexes  %s%n", count, token));
+        assertEquals(Map.of(), untaken, "Batch 10: the conversion takes every legacy art token");
+        designs.forEach((design, count) -> System.out.printf("CORPUS design %7d hexes  %s%n", count, design));
+        families.forEach((family, count) -> System.out.printf("CORPUS batch-10 family %7d  %s%n", count, family));
+        // b10-design section 1, as converted (one row per family; a hex can be in two).
+        assertEquals(new TreeMap<>(Map.of("building/legacy-art-N", 9_759, "building model (art the model was chosen beside)", 108,
+              "ground/blend/*", 6_705, "ground/quay-*", 66, "road/horizontal", 1_760, "road/rounded", 19_749,
+              "rough/felled-trees", 967, "rough/obstacles", 1_314, "woods/no-trees", 4_224, "woods/orchard", 4_291)), designs);
+        assertEquals(new TreeMap<>(Map.ofEntries(Map.entry("decal/landing-pads clipped", 503),
+              Map.entry("decal/landing-pads spanning", 85), Map.entry("decal/landing-pads/heli-pad", 978),
+              Map.entry("decal/lettering", 327), Map.entry("decal/lettering painted", 68),
+              Map.entry("decal/rail/level-crossing", 4), Map.entry("decal/runway", 4_525), Map.entry("decal/sport", 142),
+              Map.entry("scenery/rail/crossing-signal", 16), Map.entry("scenery/rail/route", 12_044),
+              Map.entry("scenery/roofs/landing-light", 4_443))), families);
+        System.out.printf("CORPUS rail markers=%d (on a bridge deck %d, storing tracks %d)%n", rails, deckRails, storedTracks);
+        // Only rails with a side along their bridge ride its deck; the four that cross under one lie beneath it. 105 of
+        // the 137 are the rail a rail bridge carries across its span (batch-10 answer 3), on 11 boards.
+        assertEquals(137, deckRails);
+        assertEquals(0, storedTracks);
         receivers.forEach((receiver, count) -> System.out.printf("CORPUS receiver %7d objects  %s%n", count, receiver));
-        System.out.printf("CORPUS woods drawn without trees under imported art: %d hexes%n", noTrees);
+        System.out.printf("CORPUS woods drawn without trees under converted art: %d hexes%n", noTrees);
         // The shipped boards hold 23 complete 7-hex emblem sets and 226 one-hex variants (none incomplete).
         System.out.printf("CORPUS emblems: %d sets as one decal each, %d one-hex variants%n", emblemSets, emblemSingles);
         assertEquals(23, emblemSets);
@@ -225,7 +309,47 @@ class LegacySceneryCorpusTest {
         assertEquals(491, pillaredBridges);
         System.out.printf("CORPUS maglev markers=%d (absolute %d), joined sides=%d, adjacent markers apart=%d sides, "
               + "station/train hexes=%d, of which on a climbing route=%d%n", markers, absolute, joinedSides, apart, stations, sloped);
+        // Runs a level up stand on Pillars (on 18 boards); the row of pillar art along Karkand's line lifts it.
+        System.out.printf("CORPUS maglev markers on Pillars=%d, lifted by a row of pillar art=%d%n", pillaredMaglevs, raisedMaglevs);
+        assertEquals(632, pillaredMaglevs);
+        assertEquals(18, raisedMaglevs);
         results.stream().filter(r -> r.board().contains("Valencia_City"))
-              .forEach(r -> System.out.printf("CORPUS valencia import %d ms, %d objects, %d groups%n", r.millis(), r.objects(), r.groups()));
+              .forEach(r -> System.out.printf("CORPUS valencia conversion %d ms, %d objects, %d groups%n", r.millis(), r.objects(), r.groups()));
+    }
+
+    /** The terrains that are legacy art and nothing else. */
+    private static final int[] ART = { Terrains.FLUFF, Terrains.ROAD_FLUFF, Terrains.GROUND_FLUFF, Terrains.WATER_FLUFF,
+          Terrains.BLDG_FLUFF };
+
+    /** The hex's legacy art terrains (server values included), as text. */
+    private static List<String> tokens(Hex hex) {
+        List<String> result = new ArrayList<>();
+        for (int type : ART) {
+            if (hex.containsTerrain(type)) { result.add(hex.getTerrain(type).toString()); }
+        }
+        return result;
+    }
+
+    /** FLUFF and GROUND_FLUFF from 2000 up: cleared-rubble state written in play, never legacy art. */
+    private static boolean server(Hex hex, int type) {
+        return (type == Terrains.FLUFF || type == Terrains.GROUND_FLUFF) && hex.terrainLevel(type) >= 2000;
+    }
+
+    /** A design's family as section 1 of b10-design counts it. */
+    private static String designFamily(String variant) {
+        if (variant.startsWith("building/legacy-art-")) { return "building/legacy-art-N"; }
+        if (variant.startsWith("buildings/")) { return "building model (art the model was chosen beside)"; }
+        if (variant.startsWith("ground/quay-")) { return "ground/quay-*"; }
+        return variant.startsWith("ground/blend/") ? "ground/blend/*" : variant;
+    }
+
+    /** A batch-10 object's family (rails, airfield, lettering, courts), or null. */
+    private static String family(BoardDecoration object) {
+        String asset = object.asset();
+        if (asset.startsWith("scenery/rail/") || asset.startsWith("decal/rail/") || asset.equals("scenery/roofs/landing-light")
+              || asset.equals("decal/landing-pads/heli-pad")) { return asset; }
+        if (asset.startsWith("decal/landing-pads/")) { return "decal/landing-pads " + (object.clipToHex() ? "clipped" : "spanning"); }
+        if (asset.startsWith("decal/lettering/")) { return "decal/lettering" + (object.colours().slots().isEmpty() ? "" : " painted"); }
+        return asset.startsWith("decal/runway/") || asset.startsWith("decal/sport/") ? asset.substring(0, asset.lastIndexOf('/')) : null;
     }
 }

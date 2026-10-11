@@ -25,12 +25,12 @@ class BoardConcreteArtworkTest {
             try (var artwork = new BoardArtwork()) {
                 Hex plain = new Hex(0, "water:2", "grass", at);
                 board.setHex(at, plain);
-                var water = BoardScene.captureTile(plain, artwork.capture(board, at, true), null, new BoardScene.PixelPool());
+                var water = BoardScene.captureTile(plain, artwork.capture(board, at, board.getHex(at)), null, new BoardScene.PixelPool(), neighbour -> null);
                 for (int variant = 1; variant <= 8; variant++) {
                     Hex hex = new Hex(0, "water:2;fluff:100:" + variant, "grass", at);
                     board.setHex(at, hex);
                     artwork.invalidate(at);
-                    var tile = BoardScene.captureTile(hex, artwork.capture(board, at, true), null, new BoardScene.PixelPool());
+                    var tile = BoardScene.captureTile(hex, artwork.capture(board, at, board.getHex(at)), null, new BoardScene.PixelPool(), neighbour -> null);
                     assertNull(tile.decals(), "Native quay geometry replaces the painted wall, variant " + variant);
                     assertNull(tile.tilesetDecals(), "Tactical View also replaces the painted wall, variant " + variant);
                     assertEquals(water.tileset(), tile.tileset(), "The seabed artwork contains no baked quay sprite");
@@ -52,11 +52,11 @@ class BoardConcreteArtworkTest {
             try (var artwork = new BoardArtwork()) {
                 Hex plain = new Hex(0, "", "grass", at);
                 board.setHex(at, plain);
-                var ground = BoardScene.captureTile(plain, artwork.capture(board, at, true), null, new BoardScene.PixelPool());
+                var ground = BoardScene.captureTile(plain, artwork.capture(board, at, board.getHex(at)), null, new BoardScene.PixelPool(), neighbour -> null);
                 Hex pit = new Hex(0, "ultra_sublevel:1", "grass", at);
                 board.setHex(at, pit);
                 artwork.invalidate(at);
-                var tile = BoardScene.captureTile(pit, artwork.capture(board, at, true), null, new BoardScene.PixelPool());
+                var tile = BoardScene.captureTile(pit, artwork.capture(board, at, board.getHex(at)), null, new BoardScene.PixelPool(), neighbour -> null);
                 assertNull(tile.decals(), "The pit geometry replaces the painted hole in 3D");
                 assertNotEquals(ground.tileset(), tile.tileset(), "Tactical View keeps the painted hole");
             }

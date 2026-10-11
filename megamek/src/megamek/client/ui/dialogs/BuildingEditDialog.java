@@ -72,6 +72,7 @@ import megamek.client.ui.tileset.TilesetManager;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
 import megamek.common.annotations.Nullable;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BuildingEditSpec;
 import megamek.common.board.Coords;
 import megamek.common.enums.BasementType;
@@ -309,8 +310,8 @@ public class BuildingEditDialog extends JDialog {
         Hex hex = clientGUI.getClient().getGame().getBoard().getHex(coords);
         if (hex != null) {
             refreshFluffChoices();
-            fluffImageChooser.setSelectedItem(
-                  new FluffChoice(Math.max(0, hex.terrainLevel(Terrains.BLDG_FLUFF))));
+            // The art level of a .board2 lives in the building's design; a loaded .board's game also keeps its token.
+            fluffImageChooser.setSelectedItem(new FluffChoice(BoardSceneryLayouts.buildingArt(hex)));
         }
         for (BuildingClassChoice choice : BUILDING_CLASSES) {
             if (choice.buildingClass() == existing.getBldgClass()) {

@@ -35,7 +35,7 @@ Bridge clearance follows the complete shared road footprint, including dead
 ends and the solid islands inside bridge roundabouts.
 Cover displaced by a route moves onto the verges, keeping the hex's count where it fits.
 
-`BoardRough.variant` supplies the appearance decision to scene capture and artwork
+`HexTile.roughVariant` (common code) supplies the appearance decision to scene capture and artwork
 filtering. The two modeled variants keep detailed ground shading and remove the
 consumed rough fluff decal. The board's terrain and movement rules are unchanged.
 

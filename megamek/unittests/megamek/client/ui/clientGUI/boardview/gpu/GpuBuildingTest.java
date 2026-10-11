@@ -12,14 +12,14 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNodePart;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.common.board.TilesetScenery;
 import org.junit.jupiter.api.Test;
 
 class GpuBuildingTest {
     static final String ASSET = "buildings/saxarba/fortress_light/fortress_light_a_52";
 
     static FileHandle file() {
-        return new FileHandle(BoardArtwork.customBuildingFile(ASSET));
+        return new FileHandle(TilesetScenery.customBuildingFile(ASSET));
     }
 
     private static ModelData modules(String... names) {
@@ -126,7 +126,7 @@ class GpuBuildingTest {
 
     @Test
     void shippedLightBuildingHasOneLodWithSeparateBaseAndFloor() {
-        var file = new FileHandle(BoardArtwork.customBuildingFile("buildings/saxarba/building_light/building_light_00"));
+        var file = new FileHandle(TilesetScenery.customBuildingFile("buildings/saxarba/building_light/building_light_00"));
         var lods = GpuBuilding.lods(file.nameWithoutExtension(), RigidGlb.loadLods(file));
         assertEquals(1, lods.size());
         assertEquals(Set.of("base0", "floor0", "roof0"), GpuBuilding.parts(lods.getFirst()).keySet());

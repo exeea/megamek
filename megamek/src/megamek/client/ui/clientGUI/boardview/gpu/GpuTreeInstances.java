@@ -33,9 +33,9 @@ import com.badlogic.gdx.utils.Pool;
 import com.badlogic.gdx.utils.ShortArray;
 
 /**
- * Trees, modular building parts and the editor's placed objects drawn with OpenGL instancing. Each model at each
- * detail level is held once; a placement adds only its place, turn and size, so the geometry in memory does not grow
- * with the number of trees.
+ * Trees, modular building parts and placed objects drawn with OpenGL instancing. Each model at each detail level is
+ * held once; a placement adds only its place, turn, size and mirror, so the geometry in memory does not grow with the
+ * number of trees.
  * Every chunk's trees stay uploaded in one buffer per species and detail level, in board order; each pass draws the
  * ranges of the chunks it sees, so panning, zooming and a change of detail upload nothing. A chunk's trees upload
  * again only when the chunk is replaced with different trees. Building and object parts still gather per pass.
@@ -57,7 +57,10 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     /** The draw passes that gather building parts; each keeps its own part buffers, as its parts differ. */
     enum Pass { COLOUR, DEPTH, SHADOW }
 
-    /** Floats per tree: x, y, z and the horizontal scale; the cosine and sine of its turn, its vertical scale and 0. */
+    /**
+     * Floats per tree: x, y, z and the horizontal scale; the cosine and sine of its turn, its vertical scale, and 1 for
+     * a mirror image (its model's y axis reversed before the turn, tree-instances.glsl), else 0.
+     */
     static final int STRIDE = 8;
     private static final String MAIN = "void main() {";
 
@@ -79,8 +82,11 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             for (Node node : model.nodes) { collect(node); }
         }
 
-        /** A shared building module part; only this indexed range needs an instanced vertex buffer. */
-        Batch(Renderable source) {
+        /**
+         * A shared building module or object part; only this indexed range needs an instanced vertex buffer. A batch of
+         * mirror images ({@code mirrored}) takes the clockwise winding as the front ({@link GpuInstancedMesh#mirrored}).
+         */
+        Batch(Renderable source, boolean mirrored) {
             FloatArray vertices = new FloatArray();
             ShortArray indices = new ShortArray();
             GpuPropBatch.copyVertices(source.meshPart.mesh, source.meshPart.offset, source.meshPart.size, vertices, indices);
@@ -89,6 +95,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             builder.begin(source.meshPart.mesh.getVertexAttributes(), source.meshPart.primitiveType);
             builder.addMesh(vertices.items, indices.items, 0, indices.size);
             mesh = new GpuInstancedMesh(builder.getNumVertices(), builder.getNumIndices(), builder.getAttributes());
+            mesh.mirrored = mirrored;
             builder.end(mesh);
             boolean colours = RigidGlb.colourSlotted(mesh.getVertexAttributes());
             stride = colours ? STRIDE + 4 : STRIDE;
@@ -220,7 +227,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     private final BiFunction<String, Integer, Model> models;
     private final Map<String, Species[]> species = new HashMap<>();
     private final List<Species> stands = new ArrayList<>();
-    private record Part(Mesh mesh, int offset, int size, Material material) { }
+    /** A part's batch key: mirror images draw in their own batch, whose front face is flipped. */
+    private record Part(Mesh mesh, int offset, int size, Material material, boolean mirrored) { }
     private final Map<Part, Batch[]> sharedParts = new HashMap<>();
     // Persistent chunk snapshots need no per-frame material/range keys; values do not retain their weak keys.
     private final Map<Renderable, Batch[]> sharedLookups = new WeakHashMap<>();
@@ -274,8 +282,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     /**
-     * Building module ranges and editor object parts borrow their meshes; placements add only transforms, using the
-     * same draw path as trees. Each transform must be {@link #placeable}.
+     * Building module ranges and object parts borrow their meshes; placements add only transforms, using the same draw
+     * path as trees. Each transform must be {@link #instanceable}.
      */
     void add(Array<Renderable> parts) {
         for (Renderable source : parts) { add(source); }
@@ -284,10 +292,11 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     /** One part's placement; a part that gathers no placement in a pass costs no draw. */
     void add(Renderable source) {
         Batch[] passes = sharedLookups.computeIfAbsent(source, value -> sharedParts.computeIfAbsent(
-              new Part(value.meshPart.mesh, value.meshPart.offset, value.meshPart.size, value.material),
+              new Part(value.meshPart.mesh, value.meshPart.offset, value.meshPart.size, value.material,
+                    mirrored(value.worldTransform)),
               ignored -> new Batch[Pass.values().length]));
         Batch batch = passes[pass.ordinal()];
-        if (batch == null) { passes[pass.ordinal()] = batch = new Batch(source); }
+        if (batch == null) { passes[pass.ordinal()] = batch = new Batch(source, mirrored(source.worldTransform)); }
         if (batch.data.isEmpty()) { gathered.add(batch); }
         append(batch.data, source.worldTransform);
         // Every colouring of a recolourable model shares this batch: each placement adds its colours.
@@ -295,27 +304,52 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     /**
-     * Whether the instance data can hold this transform: a place, a turn about z, one positive scale along x and y
-     * and a positive vertical scale. Tilted, mirrored, sheared or unevenly stretched placements cannot be instanced.
+     * Whether a tree's instance data can hold this transform: a place, a turn about z, one positive scale along x and y
+     * and a positive vertical scale. Tilted, mirrored, sheared or unevenly stretched placements cannot be instanced in a
+     * stand, whose species batches keep the counter-clockwise front face.
      */
     static boolean placeable(Matrix4 transform) {
+        return placeable(transform, false);
+    }
+
+    /**
+     * Whether an object or module part's instance data can hold this transform: a {@link #placeable} one or its mirror
+     * image, which {@link #add} draws in a batch of its own with the front face flipped. Tilted, sheared or unevenly
+     * stretched placements cannot be instanced.
+     */
+    static boolean instanceable(Matrix4 transform) {
+        return placeable(transform, true);
+    }
+
+    private static boolean placeable(Matrix4 transform, boolean mirrors) {
         float[] m = transform.val;
         double x = Math.hypot(m[Matrix4.M00], m[Matrix4.M10]), y = Math.hypot(m[Matrix4.M01], m[Matrix4.M11]);
         double tolerance = 1e-4 * Math.max(x, Math.abs(m[Matrix4.M22]));
+        double turn = m[Matrix4.M00] * m[Matrix4.M11] - m[Matrix4.M01] * m[Matrix4.M10];
         return x > 0 && m[Matrix4.M22] > 0 && Math.abs(x - y) <= tolerance
               && Math.abs(m[Matrix4.M02]) <= tolerance && Math.abs(m[Matrix4.M12]) <= tolerance
               && Math.abs(m[Matrix4.M20]) <= tolerance && Math.abs(m[Matrix4.M21]) <= tolerance
-              // Perpendicular x and y columns of a positive determinant: a turn, not a shear or a reflection.
+              // Perpendicular x and y columns: a turn, or with a negative determinant a turn of a mirror image; not a shear.
               && Math.abs(m[Matrix4.M00] * m[Matrix4.M01] + m[Matrix4.M10] * m[Matrix4.M11]) <= tolerance * x
-              && m[Matrix4.M00] * m[Matrix4.M11] - m[Matrix4.M01] * m[Matrix4.M10] > 0
+              && (turn > 0 || mirrors && turn < 0)
               && m[Matrix4.M30] == 0 && m[Matrix4.M31] == 0 && m[Matrix4.M32] == 0 && m[Matrix4.M33] == 1;
     }
 
+    /** Whether the transform reflects, which reverses its triangles' winding. */
+    static boolean mirrored(Matrix4 transform) {
+        return transform.det3x3() < 0;
+    }
+
+    /**
+     * The x column gives the turn and the horizontal scale; a mirror image's y column is the turned y axis reversed,
+     * which the last float flags.
+     */
     private static void append(FloatArray data, Matrix4 transform) {
         float[] m = transform.val;
         float horizontal = (float) Math.hypot(m[Matrix4.M00], m[Matrix4.M10]);
-        data.addAll(m[Matrix4.M03], m[Matrix4.M13], m[Matrix4.M23], horizontal,
-              m[Matrix4.M00] / horizontal, m[Matrix4.M10] / horizontal, m[Matrix4.M22], 0);
+        // Two four-float adds: the varargs addAll would allocate an array per instance, every pass.
+        data.add(m[Matrix4.M03], m[Matrix4.M13], m[Matrix4.M23], horizontal);
+        data.add(m[Matrix4.M00] / horizontal, m[Matrix4.M10] / horizontal, m[Matrix4.M22], mirrored(transform) ? 1 : 0);
     }
 
     /** Evict buffers for retired building interiors/modules at the scene commit boundary. */

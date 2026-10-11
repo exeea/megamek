@@ -35,6 +35,30 @@ full-detail chunk (`GpuGroundCover.plant`), and the installed tile keeps them.
 Each instance stores position plus a stable sample rank. Density selects an
 ordered prefix by rank: existing roots do not move when density changes.
 
+No cover grows through paint. `BoardPlants` builds `BoardDecals.Opacity` once
+per hex from the decals painting its ground (each image's alpha at the decal's
+drawn transform, so a round emblem leaves no square bald patch) and from its
+legacy paint overlay, and every planter multiplies its coverage by one minus that
+opacity before its usual threshold: blades, bank turf, reeds and crops alike, in
+every 3D view. Cover vanishes where paint is more than about 45 % opaque and thins
+under soft paint such as the rubble path; each paint keeps the one-model-px margin
+a road's shoulder keeps. A candidate's place and chance are drawn before any
+rejection, so the roots outside the paint keep their places and ranks, and
+removing a decal restores them exactly. Roofs, decks, industrial tops, fuel tanks
+and ice grow no cover, so only paint on the ground counts. Not covered yet: the
+dressing baked into the solid terrain (`BoardScatter` pebbles, tufts and bushes,
+`BoardRelief.field` stones and shrubs) still ignores paint until it is planted by
+the workers too (the pending scatter consolidation); see
+[3D board editor](3d-board-editor.md) for the decal-side limitations.
+
+Nothing grows through stationary map content either. Blades, bank turf, reeds,
+crops and the baked dressing reject a root that `BoardObstacles` reports for its
+hex: structures, placed objects, bridge pier footings, and each bridge deck's
+passage from the slab's underside to its top. Cover tall enough to reach a deck
+at or near the ground is left out there, while the ground under a raised deck
+keeps its grass. This is decided when the hex is built, never per frame: units
+and meeples stand in the grass and never clear or bend it.
+
 Two-level grassy banks include a shallow intermediate shoulder in their canonical
 terrain profile. It admits roots through the existing slope filter, using the same
 finished triangles as support and picking. Its ground material remains visible when
@@ -123,7 +147,10 @@ roots or uploading unchanged instance buffers.
 
 No grass is prepared on the render thread. A chunk's roots are planted by the
 terrain worker that builds it at medium or full detail and replaced with it;
-tiles an edit reuses keep their roots. Planting costs about 0.4 ms per hex,
+tiles an edit reuses keep their roots, except a hex whose paint changed: a
+paint-only edit re-plants its cover on the worker from its installed support and
+installs it with the new paint meshes, leaving its solid terrain untouched. An
+unpainted hex pays one null check per candidate root. Planting costs about 0.4 ms per hex,
 against several milliseconds of surface work per hex at either level, and a
 grass hex holds about 65 KB of roots, so a medium chunk's grass is cheap to
 plant but not free to keep; coarse and distant chunks carry none. A chunk's

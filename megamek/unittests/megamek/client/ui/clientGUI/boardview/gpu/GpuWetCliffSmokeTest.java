@@ -13,7 +13,7 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
-import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -28,8 +28,8 @@ class GpuWetCliffSmokeTest {
         if (board.isBlank()) {
             scene = BoardWetCliffTest.mixedDepthScene();
         } else {
-            var loaded = new Board();
-            loaded.load(new File(board));
+            // As a game loads a sheet: converted.
+            var loaded = BoardFile.loadSheet(new File(board), false, true);
             try (var fixture = GpuBoardFixture.create(loaded)) {
                 SwingUtilities.invokeAndWait(fixture.source::refresh);
                 scene = fixture.source.takeFrame().scene();

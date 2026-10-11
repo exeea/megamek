@@ -16,7 +16,7 @@ import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
-import megamek.common.board.MaglevRoute;
+import megamek.common.board.RailRoute;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -136,22 +136,22 @@ class BoardEditorHexBrushTest {
 
     @Test void stampedRoutesKeepJoinedSidesAndErasingAStampIsUndoable() {
         var session = new BoardEditorSession();
-        var route = new BoardDecoration("route", "prop", MaglevRoute.ASSET, null,
+        var route = new BoardDecoration("route", "prop", RailRoute.Kind.MAGLEV.asset, null,
               0, 0, 0, false, 1, BoardDecoration.Placement.surface("ground", "top", 1), 0)
-              .withConnections(MaglevRoute.side(0) | MaglevRoute.side(3));
+              .withConnections(RailRoute.side(0) | RailRoute.side(3));
         session.board().getHex(source).setDecorations(List.of(route));
         select(session, source); send(session, Action.SAMPLE, "", "");
         Coords joined = first.translated(3);
         session.pointer(first, 0, 0, false); session.pointer(joined, 0, 0, true); session.finishStroke();
-        assertEquals(MaglevRoute.side(3), MaglevRoute.find(session.board().getHex(first)).connections());
-        assertEquals(MaglevRoute.side(0), MaglevRoute.find(session.board().getHex(joined)).connections());
+        assertEquals(RailRoute.side(3), RailRoute.find(session.board().getHex(first), RailRoute.Kind.MAGLEV).connections());
+        assertEquals(RailRoute.side(0), RailRoute.find(session.board().getHex(joined), RailRoute.Kind.MAGLEV).connections());
         send(session, Action.TOOL, "", "ERASE");
         session.pointer(first, 0, 0, false); session.finishStroke();
         assertEquals(BoardFile.hexNode(new Hex(0)), BoardFile.hexNode(session.board().getHex(first)));
-        assertEquals(0, MaglevRoute.find(session.board().getHex(joined)).connections());
+        assertEquals(0, RailRoute.find(session.board().getHex(joined), RailRoute.Kind.MAGLEV).connections());
         send(session, Action.UNDO, "", "");
-        assertTrue(MaglevRoute.joined(MaglevRoute.find(session.board().getHex(first)), 3,
-              MaglevRoute.find(session.board().getHex(joined))));
+        assertTrue(RailRoute.joined(RailRoute.find(session.board().getHex(first), RailRoute.Kind.MAGLEV), 3,
+              RailRoute.find(session.board().getHex(joined), RailRoute.Kind.MAGLEV)));
     }
 
     private static BoardDecoration car(String id) {

@@ -21,7 +21,7 @@ import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.Coords;
-import megamek.common.board.MaglevRoute;
+import megamek.common.board.RailRoute;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -44,7 +44,7 @@ class GpuEditorSelectionControlsSmokeTest {
                         BoardDecoration.Placement.ground(), 0, false),
                   new BoardDecoration("paint", "decal", "decal/damage/rubble-light-path", "Ground marking", 0, 0, 25, false, 2,
                         BoardDecoration.Placement.ground(), 4, false),
-                  new BoardDecoration("route", "prop", MaglevRoute.ASSET, "Maglev", 0, 0, 0, false, 1,
+                  new BoardDecoration("route", "prop", RailRoute.Kind.MAGLEV.asset, "Maglev", 0, 0, 0, false, 1,
                         BoardDecoration.Placement.surface("ground", "top", 1), 0, false)));
             editor.game().setBoard(board);
             editor.command(new Command(Action.ASSET, "", "scenery/vehicles/car"), null);

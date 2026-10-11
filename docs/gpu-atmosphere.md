@@ -70,6 +70,9 @@ colors. Day/night adaptation is already included there. Shared surface lighting
 uses these values consistently; user EV compensation and lightning are applied
 during composition. Decode material colors and encode the output once, rather
 than applying an extra gamma or exposure correction inside each material.
+Lit standard models decode authored emission alongside albedo, add it to the
+reflected linear light, then encode that sum. Adding emission after encoding
+over-brightens ordinary emissive materials and disagrees with terrain lighting.
 
 Sun/moon handover uses one directional shadow source. Direct illumination and
 shadow contrast fade with its visibility. Full Moon enables directional night
@@ -84,7 +87,21 @@ than separate copies in each shader.
 
 ## Scene depth, fog and composition
 
-The scene is captured into an RGBA8 color target with sampleable depth.
+Every main 3D scene is captured into an RGBA16F color target with sampleable depth,
+including boards without lava. Values above diffuse white survive until the
+composite applies exposure and the shared highlight shoulder. Adding or removing
+molten terrain enables or disables the heat halo without replacing scene color
+or depth. Top and isometric cameras use this same path.
+
+Material outputs and scene blending remain display-encoded; the composite decodes
+the completed scene before fog, grading and exposure. This is highlight headroom,
+not a full migration to linear-light alpha blending. Compared with RGBA8, scene
+color's nominal allocation grows by four bytes per physical pixel (7.9 MiB at
+1920×1080, 14.1 MiB at 2560×1440); molten boards already used this format.
+Depth is unchanged and this adds no draw or sampler.
+Measure bandwidth and frame time on the target adapter; unchanged draw counts
+alone do not establish unchanged performance.
+
 The fog pass reconstructs world positions from that depth and the camera.
 It integrates the height-dependent layer at reduced resolution, then
 depth-aware upsampling avoids leaking foreground fog into unrelated surfaces.

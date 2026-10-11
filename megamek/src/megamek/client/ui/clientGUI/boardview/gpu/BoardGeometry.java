@@ -3,19 +3,20 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.function.Function;
 
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
-import megamek.client.ui.tileset.HexTileset;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 
 /** Z-up, tightly tiled hex columns. Rendering and picking use these same surfaces. */
 final class BoardGeometry {
     /** One level in authored board models, using the same units as an 84 by 72 hex. */
-    static final int MODEL_LEVEL_HEIGHT = 18;
+    static final int MODEL_LEVEL_HEIGHT = HexTile.LEVEL_HEIGHT;
     /** Independent default for a whole unit occupying more than one game hex. */
     static final float DEFAULT_MULTI_HEX_UNIT_SCALE = 1.0f;
     /** Whether steps between hexes take room on both sides of their edge; see {@link Tuning#transitions()}. */
@@ -76,8 +77,8 @@ final class BoardGeometry {
      * an edge a marker is coplanar with the terrain there and flickers against it while the camera rotates.
      */
     static final float MARKER_INSET = 0.1f;
-    static final float TILE_WIDTH = HexTileset.HEX_W;
-    static final float TILE_HEIGHT = HexTileset.HEX_H;
+    static final float TILE_WIDTH = HexTile.WIDTH;
+    static final float TILE_HEIGHT = HexTile.HEIGHT;
     static float HEX_SCALE;
     static float WIDTH;
     static float HEIGHT;
@@ -143,13 +144,11 @@ final class BoardGeometry {
     }
 
     static float centerX(Coords coords) {
-        float width = width();
-        return coords.getX() * width * 0.75f + width / 2;
+        return HexTile.centerX(coords, width());
     }
 
     static float centerY(Coords coords) {
-        float height = height();
-        return -(coords.getY() * height + (coords.getX() & 1) * height / 2 + height / 2);
+        return HexTile.centerY(coords, height());
     }
 
     static Vector3 center(Coords coords, float elevation) {
@@ -261,23 +260,27 @@ final class BoardGeometry {
     }
 
     static Hit hit(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor, BoardSurface.Cache cache) {
-        return hit(scene, ray, candidates, floor, cache, null);
+        return hit(scene, ray, candidates, floor, cache, null, false);
     }
 
     /** Borrow the installed terrain's finished geometry without retaining its builders or scene. */
     static Hit hit(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor,
           Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
-        return hit(scene, ray, candidates, floor, null, surfaces);
+        return hit(scene, ray, candidates, floor, null, surfaces, false);
     }
 
-    private static Hit hit(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor,
-          BoardSurface.Cache cache, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
-        Hit hit = nearest(scene, ray, candidates, floor, cache, surfaces);
+    /**
+     * The finished {@code surfaces}, else {@code cache}'s. With {@code throughWater} a see-through liquid's surface
+     * gives way to what lies beneath it, its bed (molten lava stays opaque).
+     */
+    static Hit hit(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor,
+          BoardSurface.Cache cache, Function<Coords, BoardTacticalGeometry.Surface> surfaces, boolean throughWater) {
+        Hit hit = nearest(scene, ray, candidates, floor, cache, surfaces, throughWater);
         if (hit == null) {
             // A ray exactly along a shared triangle edge can miss both triangles in float arithmetic. Symmetry lines
             // through hex centres make that reproducible for axis-aligned pointer rays, so retry once, nudged.
             Ray nudged = new Ray(new Vector3(ray.origin).add(.0013f * hexScale(), .0007f * hexScale(), 0), ray.direction);
-            hit = nearest(scene, nudged, candidates, floor, cache, surfaces);
+            hit = nearest(scene, nudged, candidates, floor, cache, surfaces, throughWater);
         }
         return hit;
     }
@@ -317,7 +320,7 @@ final class BoardGeometry {
     private record PickCandidate(BoardScene.Tile tile, float entry, int order) { }
 
     private static Hit nearest(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor,
-          BoardSurface.Cache cache, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
+          BoardSurface.Cache cache, Function<Coords, BoardTacticalGeometry.Surface> surfaces, boolean throughWater) {
         Coords result = null;
         float nearest = Float.POSITIVE_INFINITY;
         boolean hardSurface = false;
@@ -365,7 +368,8 @@ final class BoardGeometry {
                     struck = face;
                 }
             }
-            for (BoardSurface.Face face : finished == null ? surface.waterFaces : finished.water()) {
+            for (BoardSurface.Face face : throughWater && !tile.liquid().molten() ? List.<BoardSurface.Face>of()
+                  : finished == null ? surface.waterFaces : finished.water()) {
                 if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
                       && nearer(ray.origin.dst2(hit), nearest, candidate.order(), nearestOrder)) {
                     nearest = ray.origin.dst2(hit);

@@ -33,22 +33,24 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
+import megamek.common.board.TilesetScenery;
 
 /** GL-thread ownership of shared models, repeating terrain materials, and animated liquid frames. */
 final class GpuAssets implements Disposable {
     private final File root = new File(Configuration.dataDir(), "models/board");
     private final Map<String, Model> models = new HashMap<>();
     private final Map<String, List<Model>> modelLods = new HashMap<>();
-    /** Each recoloured model's decoded near mesh, in the model's own colours. */
-    private final Map<String, ModelData> recolourable = new HashMap<>();
+    /** Each recoloured model's decoded levels, in the model's own colours (a missing level repeats the one before). */
+    private final Map<String, List<ModelData>> recolourable = new HashMap<>();
     /** Whether each placed model has colour slots, read from its file's JSON once. */
     private final Map<String, Boolean> hasSlots = new HashMap<>();
+    /** How many mesh levels each placed model's file holds, read from its JSON once. */
+    private final Map<String, Integer> fileLevels = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
     private final Map<String, GpuBuilding> buildings = new HashMap<>();
     private final Map<BoardIndustrial.Layout, Model> industrial = new HashMap<>();
-    private final Map<BoardMaglev.Layout, Model> maglev = new HashMap<>();
+    private final Map<BoardRail.Layout, Model> routes = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
     private final Map<String, Cliff> cliffs = new HashMap<>();
     private final Map<Boolean, TextureArray> magmas = new HashMap<>();
@@ -215,43 +217,75 @@ final class GpuAssets implements Disposable {
     }
 
     /**
-     * The model in {@code colours} (a placed object's or a layout row's): the model itself, or one copy per set of
-     * colours with its colour slots replaced ({@link RigidGlb#recolour}). Objects of one colour share their copy, so they
-     * still batch and instance together.
+     * The model in {@code colours} (a layout row's, a truss deck's or an editor preview's): the model itself, or one copy
+     * per set of colours with its colour slots replaced ({@link RigidGlb#recolour}). Objects of one colour share their
+     * copy, so they still batch together. Placed objects draw the shared mesh instead ({@link #slotted}).
      */
     Model model(String name, megamek.common.board.BoardDecoration.Colours colours) {
-        if (colours.slots().isEmpty()) { return model(name); }
+        if (colours.slots().isEmpty()) { return lodModel(name, 0); }
+        // A copy's key cannot meet a level's name ("name-lodN").
         return models.computeIfAbsent(name + colours.slots(), key -> {
             // The file is decoded once; each set of colours recolours a copy of its vertices for its own GPU mesh.
-            ModelData data = decoded(name);
+            ModelData data = decoded(name).getFirst();
             var mesh = data.meshes.first();
-            float[] own = mesh.vertices;
-            mesh.vertices = own.clone();
+            float[] vertices = mesh.vertices;
+            mesh.vertices = vertices.clone();
             try {
                 RigidGlb.recolour(data, colours);
                 return createModel(data);
-            } finally { mesh.vertices = own; }
+            } finally { mesh.vertices = vertices; }
         });
     }
 
-    /** A recolourable model's decoded near mesh, in its own colours; decoded once. */
-    private ModelData decoded(String name) {
-        return recolourable.computeIfAbsent(name, shape -> RigidGlb.loadLods(RigidGlb.source(root, shape), root.toPath()).getFirst());
+    /** A recolourable model's decoded levels, in its own colours; decoded once. */
+    private List<ModelData> decoded(String name) {
+        return recolourable.computeIfAbsent(name, shape -> RigidGlb.loadLods(RigidGlb.source(root, shape), root.toPath()));
+    }
+
+    /** The first level whose mesh {@code level} draws: itself, or the level it repeats where the file lacks it. */
+    private int ownLevel(String name, int level) {
+        var levels = decoded(name);
+        return levels.indexOf(levels.get(level));
     }
 
     /**
-     * The editor's form of a placed model: a model with colour slots is one shared mesh whose placements pass their
-     * colours per draw ({@link RigidGlb#colourSlotMesh}); another model is the model itself, a missing file the marked box.
+     * A placed object's mesh per level of the props' level rule ({@link TreeLod#PROPS}: its near mesh and two simpler
+     * ones), each {@link #slotted}. A level its file lacks repeats the one before, so a model with one level is its near
+     * mesh alone; its file's level count is read once.
      */
-    Model slotted(String name) {
-        var source = RigidGlb.source(root, name);
-        if (!source.file().isFile()) { return decoration(name, megamek.common.board.BoardDecoration.Colours.NONE); }
-        if (!hasSlots.computeIfAbsent(name, key -> !RigidGlb.colourSlots(source.file()).isEmpty())) { return model(name); }
-        // The key cannot meet a detail level's name or a colour copy's "name[...]".
-        return models.computeIfAbsent(name + "#slots", key -> createModel(RigidGlb.colourSlotMesh(decoded(name))));
+    List<Model> objectLevels(String name) {
+        int count = fileLevels.computeIfAbsent(name, key -> {
+            var source = RigidGlb.source(root, key);
+            return source.file().isFile() ? RigidGlb.levels(source.file()) : 1;
+        });
+        List<Model> result = new ArrayList<>(List.of(slotted(name)));
+        for (int level = 1; level < Math.min(count, TreeLod.PROPS.length + 1); level++) { result.add(slotted(name, level)); }
+        return result;
     }
 
-    /** Missing authored references remain editable and visibly marked instead of aborting the board renderer. */
+    /**
+     * A placed object's model, in every view: a model with colour slots is one shared mesh whose placements pass their
+     * colours per draw ({@link RigidGlb#colourSlotMesh}, applied by model-colour-slots.glsl); another model is the model
+     * itself, a missing file the marked box ({@link #decoration}).
+     */
+    Model slotted(String name) { return slotted(name, 0); }
+
+    /** {@link #slotted(String)} at a mesh level ({@link #objectLevels}). */
+    Model slotted(String name, int level) {
+        var source = RigidGlb.source(root, name);
+        if (!source.file().isFile()) { return decoration(name, megamek.common.board.BoardDecoration.Colours.NONE); }
+        if (!hasSlots.computeIfAbsent(name, key -> !RigidGlb.colourSlots(source.file()).isEmpty())) { return lodModel(name, level); }
+        int own = ownLevel(name, level);
+        // The key cannot meet a detail level's name or a colour copy's "name[...]".
+        return models.computeIfAbsent((own == 0 ? name : MeshLod.name(name, own)) + "#slots",
+              key -> createModel(RigidGlb.colourSlotMesh(decoded(name).get(own))));
+    }
+
+    /**
+     * A placed model in its colours as one model of its own ({@link #model(String,
+     * megamek.common.board.BoardDecoration.Colours)}), for the editor preview's ghosts; a missing file is a marked box,
+     * so missing authored references remain editable and visible instead of aborting the board renderer.
+     */
     Model decoration(String name, megamek.common.board.BoardDecoration.Colours colours) {
         if (RigidGlb.source(root, name).file().isFile()) { return model(name, colours); }
         return models.computeIfAbsent("missing-decoration", key -> new com.badlogic.gdx.graphics.g3d.utils.ModelBuilder()
@@ -339,7 +373,7 @@ final class GpuAssets implements Disposable {
         if (!asset.startsWith("buildings/")) { return null; }
         if (!buildings.containsKey(asset)) {
             File customRoot = new File(Configuration.dataDir(), "models/buildings");
-            FileHandle file = new FileHandle(BoardArtwork.customBuildingFile(asset));
+            FileHandle file = new FileHandle(TilesetScenery.customBuildingFile(asset));
             buildings.put(asset, file.file().isFile() ? new GpuBuilding(file, customRoot.toPath(), this::createModel) : null);
         }
         GpuBuilding building = buildings.get(asset);
@@ -354,20 +388,20 @@ final class GpuAssets implements Disposable {
     private final Map<Object, Live> users = new java.util.IdentityHashMap<>();
 
     /**
-     * Records the generated buildings, industrial plants and maglev routes that {@code user}'s installed chunks draw,
+     * Records the generated buildings, industrial plants and rail and maglev routes that {@code user}'s installed chunks draw,
      * then retires those no user of these assets draws or is still building with. On the GL thread, at a scene commit,
      * when {@code user} has no chunk build in flight.
      */
-    void retain(Object user, java.util.Set<GpuBuilding.Assembly> buildings, java.util.Set<Model> industrial, java.util.Set<Model> maglev) {
+    void retain(Object user, java.util.Set<GpuBuilding.Assembly> buildings, java.util.Set<Model> industrial, java.util.Set<Model> routes) {
         java.util.Set<Model> models = new java.util.HashSet<>(industrial);
-        models.addAll(maglev);
+        models.addAll(routes);
         users.put(user, new Live(new java.util.HashSet<>(buildings), models));
         java.util.Set<GpuBuilding.Assembly> liveBuildings = new java.util.HashSet<>();
         java.util.Set<Model> liveModels = new java.util.HashSet<>();
         for (Live live : users.values()) { liveBuildings.addAll(live.buildings()); liveModels.addAll(live.models()); }
         this.buildings.values().stream().filter(java.util.Objects::nonNull).forEach(building -> building.retain(liveBuildings));
         retain(this.industrial, liveModels);
-        retain(this.maglev, liveModels);
+        retain(this.routes, liveModels);
     }
 
     /**
@@ -407,8 +441,8 @@ final class GpuAssets implements Disposable {
     }
 
     /** Procedural models belong to this renderer and survive while installed or cached chunks use them. */
-    Model maglev(BoardMaglev.Layout layout) {
-        return maglev.computeIfAbsent(layout, key -> new Model(BoardMaglev.model(key)));
+    Model route(BoardRail.Layout layout) {
+        return routes.computeIfAbsent(layout, key -> new Model(BoardRail.model(key)));
     }
 
     private static void retain(Map<?, Model> models, java.util.Set<Model> live) {
@@ -753,8 +787,8 @@ final class GpuAssets implements Disposable {
 
     @Override
     public void dispose() {
-        maglev.values().forEach(Model::dispose);
-        maglev.clear();
+        routes.values().forEach(Model::dispose);
+        routes.clear();
         industrial.values().forEach(Model::dispose);
         industrial.clear();
         buildings.values().stream().filter(java.util.Objects::nonNull).forEach(GpuBuilding::dispose);

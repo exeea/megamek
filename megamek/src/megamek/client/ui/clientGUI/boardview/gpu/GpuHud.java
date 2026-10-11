@@ -814,7 +814,8 @@ final class GpuHud implements GpuBoardHud {
      * ({@code pointedZ}; NaN on a unit, or in the Tactical View). A right click opens the context menu and never
      * changes orders; Alt opens the native LOS ruler at the pointed height, and a plain left
      * click ends a measurement waiting for its second point with that measurement's modifier;
-     * while a bot order picks hexes, a left click picks one, as the classic board's click does.
+     * while a bot order picks hexes, a left click picks one, as the classic board's click does. Any other left click
+     * takes the unit {@link #clickedUnit} gives.
      */
     void boardClick(Coords coords, int unitId, int button, int modifiers, int x, int y, float pointedZ) {
         if (inputs == null || inputs.dialog() != null || coords == null || inputs.frame().scene() == null) {
@@ -830,8 +831,61 @@ final class GpuHud implements GpuBoardHud {
         } else if (button == Input.Buttons.LEFT && picking(inputs)) {
             source.click(coords, false, clickModifiers);
         } else if (button == Input.Buttons.LEFT) {
-            leftClick(coords, GpuHudState.unit(inputs.frame().status(), unitId), modifiers, pointedZ);
+            leftClick(coords, GpuHudState.unit(inputs.frame().status(), clickedUnit(coords, unitId)), modifiers,
+                  pointedZ);
         }
+    }
+
+    /**
+     * The unit a left click with this pick takes, which the board view's hover shows too (its cursor, outline, tag and
+     * route preview): the unit {@link #boardUnit} gives, or the next of its hex's units ({@link #cycled}).
+     */
+    int clickedUnit(Coords coords, int unitId) {
+        int taken = boardUnit(coords, unitId);
+        return taken == Entity.NONE || inputs == null ? taken : cycled(coords, taken);
+    }
+
+    /**
+     * The unit a left click with this pick takes before a stack's turn ({@link #clickedUnit}). In the local planning
+     * turn it is none, so the click plans the move there as in an empty hex, on a hex of the plan's envelope, the legal
+     * end hexes the board highlights on the actor's board, other than the actor's own hex: a unit's model there as
+     * well as the ground (the user's decision of 2026-10-11, end destination wins); and on a transport the actor can
+     * board ({@link GpuMovePlan.Snapshot#mounts}). Otherwise it is the picked unit, which a click selects or inspects.
+     */
+    int boardUnit(Coords coords, int unitId) {
+        if (unitId == Entity.NONE || coords == null || inputs == null || inputs.frame().scene() == null
+              || !planning(inputs) || state.turnLocked(inputs.frame().status())) {
+            return unitId;
+        }
+        GpuMovePlan.Snapshot move = inputs.frame().panels().move();
+        GpuBattleStatus.Snapshot status = inputs.frame().status();
+        GpuBattleStatus.UnitStatus actor = GpuHudState.unit(status, status.actorId());
+        boolean destination = actor != null && actor.boardId() == inputs.frame().scene().boardId()
+              && move.envelope().containsKey(coords) && !coords.equals(actor.position());
+        return destination || move.mounts().contains(unitId) ? Entity.NONE : unitId;
+    }
+
+    /**
+     * The unit a left click on {@code coords} takes instead of the picked {@code unitId}: while the unit the HUD shows
+     * as taken (the fire orders' focused target, else the card's unit) stands in that hex, the next of the hex's units
+     * after it, so repeated clicks on a stack select, inspect or focus its units in turn (the user's decision of
+     * 2026-10-11). Only units the status lists take part, not the wrecks the board draws too, and while a click focuses
+     * targets (the local FIRING turn) no sensor contact, which it cannot focus.
+     */
+    private int cycled(Coords coords, int unitId) {
+        GpuBattleStatus.Snapshot status = inputs.frame().status();
+        boolean aiming = status.myTurn() && status.phase().isFiring() && !state.turnLocked(status);
+        List<Integer> stack = GpuContextMenu.stack(inputs.frame().scene(), coords).stream().filter(id -> {
+            GpuBattleStatus.UnitStatus unit = GpuHudState.unit(status, id);
+            return unit != null && !(aiming && unit.sensorContact());
+        }).toList();
+        for (int shown : new int[] { inputs.frame().panels().fire().focus().key().unitId(), state.cardUnit() }) {
+            int at = shown == Entity.NONE ? -1 : stack.indexOf(shown);
+            if (at >= 0) {
+                return stack.get((at + 1) % stack.size());
+            }
+        }
+        return unitId;
     }
 
     /**
@@ -905,17 +959,13 @@ final class GpuHud implements GpuBoardHud {
         if (unit == null) {
             return;
         }
-        boolean own = unit.side() == GpuBattleStatus.Side.OWN;
-        if (own && !status.myTurn()) {
+        if (unit.side() == GpuBattleStatus.Side.OWN && !status.myTurn()) {
             state.restoreSelection();
             state.inspected = Entity.NONE;
             state.pick(unitId);
             return;
         }
-        GamePhase phase = status.phase();
-        boolean firing = phase.isFiring();
-        boolean ready = status.myTurn() && own && unit.canActNow()
-              && (firing || phase.isMovement() || phase.isPhysical() || phase.isTargeting() || phase.isOffboard());
+        boolean ready = acts(status, unit);
         // Only a selection ends a cleared one; an inspected unit leaves it cleared. With the selection cleared the
         // presented status has no actor, so MegaMek selects even its current unit again, afresh.
         state.inspected = ready ? Entity.NONE : unitId;
@@ -923,12 +973,23 @@ final class GpuHud implements GpuBoardHud {
             state.restoreSelection();
         }
         if (ready && unitId != status.actorId()) {
-            if (firing) {
+            if (status.phase().isFiring()) {
                 source.fire().selectUnit(unitId);
             } else {
                 source.selectUnit(unitId);
             }
         }
+    }
+
+    /**
+     * Whether {@link #select} makes the unit the actor: an own unit that can act now in the local MOVEMENT, FIRING,
+     * TARGETING, OFFBOARD or PHYSICAL turn. The unit menus offer "Select" for it and "Inspect" for any other.
+     */
+    static boolean acts(GpuBattleStatus.Snapshot status, GpuBattleStatus.UnitStatus unit) {
+        GamePhase phase = status.phase();
+        return status.myTurn() && unit.side() == GpuBattleStatus.Side.OWN && unit.canActNow()
+              && (phase.isFiring() || phase.isMovement() || phase.isPhysical() || phase.isTargeting()
+              || phase.isOffboard());
     }
 
     @Override

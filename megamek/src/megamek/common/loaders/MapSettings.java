@@ -740,8 +740,13 @@ public class MapSettings implements Serializable {
                         if (!MapSettings.BOARD_GENERATED.equals(boardSelected) &&
                               !MapSettings.BOARD_RANDOM.equals(boardSelected) &&
                               !MapSettings.BOARD_SURPRISE.equals(boardSelected)) {
-                            b.load(new File(Configuration.boardsDir(), megamek.common.board.BoardFile.fileName(boardSelected)));
-                            if (b.isValid()) {
+                            try {
+                                b.load(new File(Configuration.boardsDir(), megamek.common.board.BoardFile.fileName(boardSelected)));
+                            } catch (IllegalArgumentException refused) {
+                                // The strict reader refuses a board with rules errors (the editor saves such files).
+                                b = null;
+                            }
+                            if (b != null && b.isValid()) {
                                 nonFound = false;
                             } else {
                                 boardsAvailable.remove(rIndex);

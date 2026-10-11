@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.awt.event.InputEvent;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicReference;
@@ -14,12 +15,18 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Tool;
+import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiTree;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
@@ -159,7 +166,9 @@ class GpuEditorToolsAndGroupsSmokeTest {
             Actor row = stage.getRoot().findActor("editor-content-left");
             assertTrue(GpuBoardTestUi.shown(header) && GpuBoardTestUi.shown(row));
             assertTrue(GpuBoardTestUi.texts(header).contains("Group · 2 objects"));
-            assertNull(stage.getRoot().findActor("editor-content-right"), "A drilled-in member lists only itself below its header");
+            assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("editor-content-right")), "A drilled-in member keeps its sibling listed");
+            assertTrue(((UiButton) row).isChecked() && !((UiButton) header).isChecked(),
+                  "The drilled-in member's row is the highlighted one");
             float headerX = header.localToStageCoordinates(new Vector2()).x, rowX = row.localToStageCoordinates(new Vector2()).x;
             assertTrue(rowX > headerX + 8, "Members are nested below their group header");
             GpuBoardTestUi.capture(new File(OUTPUT, "editor-group-contents.png"));
@@ -178,7 +187,10 @@ class GpuEditorToolsAndGroupsSmokeTest {
             clickAt(member); settle(view, source);
             assertEquals(List.of("left", "right"), objects(source));
             assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("editor-group-" + group)));
-            assertNull(stage.getRoot().findActor("editor-content-left"), "A whole selected group shows only its header in Contents");
+            assertTrue(((UiButton) stage.getRoot().findActor("editor-group-" + group)).isChecked(),
+                  "A whole selected group highlights its row");
+            assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("editor-content-left"))
+                  && GpuBoardTestUi.shown(stage.getRoot().findActor("editor-content-right")), "and keeps its members listed");
             GpuBoardTestUi.capture(new File(OUTPUT, "editor-group-whole-contents.png"));
 
             // On a selected hex a click on an object standing there selects the object, not the hex.
@@ -200,6 +212,131 @@ class GpuEditorToolsAndGroupsSmokeTest {
             input.touchUp(x1, y1, 0, Input.Buttons.LEFT); settle(view, source);
             assertEquals(List.of("left", "right"), objects(source), "A box from beyond the board selects the group it covers");
         });
+    }
+
+    /**
+     * The user's Layers report (2026-10-10): selecting a group hid its members, and a member picked on the board hid its
+     * siblings. Now a selected group's row is highlighted with all thirteen members listed under it; a member picked
+     * on the board is highlighted among all its siblings and scrolled into view; a group collapsed with its chevron stays
+     * collapsed while the hex is worked on, until a member is selected again; another hex starts expanded.
+     */
+    @Test
+    void layersKeepEveryMemberOfASelectedGroupListed() throws Exception {
+        Coords lot = new Coords(4, 4), other = new Coords(2, 2);
+        var setup = new FutureTask<GpuMapSource>(() -> {
+            var editor = new BoardEditorSession();
+            Board board = Board.createEmptyBoard(9, 9);
+            List<BoardDecoration> cars = new ArrayList<>();
+            for (int i = 0; i < 13; i++) {
+                cars.add(new BoardDecoration("car-" + (i + 1), "prop", "scenery/vehicles/car", null, -.32 + i % 5 * .16,
+                      -.26 + i / 5 * .26, 0, false, .5, BoardDecoration.Placement.ground(), 0).withGroup("lot"));
+            }
+            board.getHex(lot).setDecorations(cars);
+            editor.game().setBoard(board);
+            return new GpuMapSource(editor.game(), null, editor);
+        });
+        // The Layers region at its natural height, whatever divider the developer's settings keep.
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        float split = preferences.getBoardEditorLayersSplit();
+        preferences.setBoardEditorLayersSplit(-1);
+        try {
+            run(setup, 1280, 800, (view, source) -> {
+                GpuTerrain terrain = terrain(view);
+                long deadline = System.nanoTime() + 60_000_000_000L;
+                while (terrain.editorObjects(lot).size() < 13 || terrain.busy()) {
+                    assertTrue(System.nanoTime() < deadline, "Object models must load");
+                    view.render();
+                }
+                // A hex about 260 pixels wide in the middle of the board area, so that each car is easy to pick.
+                float hex = BoardGeometry.width() * Gdx.graphics.getBackBufferHeight() / Gdx.graphics.getHeight() / 260;
+                view.boardCamera.zoom(hex / view.boardCamera.camera.zoom);
+                view.boardCamera.center(BoardGeometry.center(lot, 0));
+                var stage = GpuBoardTestUi.stage();
+                UiTree layers = stage.getRoot().findActor("editor-contents");
+                List<String> members = java.util.stream.IntStream.rangeClosed(1, 13).mapToObj(i -> "editor-content-car-" + i).toList();
+                source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.SELECT_AT, "4,4", ""),
+                      source.takeFrame().boardGeneration());
+                settle(view, source);
+
+                // The group from its Layers row: its row highlighted, every member listed under it.
+                GpuBoardTestUi.click("editor-group-lot"); settle(view, source);
+                assertEquals("lot", source.editorState().group());
+                assertTrue(layers.shown().containsAll(members), "A selected group keeps its members listed: " + layers.shown());
+                assertTrue(pressed("editor-group-lot") && members.stream().noneMatch(GpuEditorToolsAndGroupsSmokeTest::pressed));
+                opaqueCapture(new File(OUTPUT, "b9-layers-group.png"));
+
+                // A member picked on the board (with its group selected, one click drills in): every sibling stays
+                // listed, the member's row is the highlighted one, scrolled into view.
+                clickAt(top(view, terrain, lot, "car-13")); settle(view, source);
+                assertEquals(List.of("car-13"), objects(source));
+                assertTrue(layers.shown().containsAll(members), "Every sibling stays listed: " + layers.shown());
+                assertTrue(pressed("editor-content-car-13") && !pressed("editor-group-lot"));
+                var scroll = (com.badlogic.gdx.scenes.scene2d.ui.ScrollPane) stage.getRoot().findActor("editor-layers-scroll");
+                assertTrue(scroll.getMaxY() > 0, "The thirteen members do not fit the Layers region");
+                assertInView(stage, "editor-content-car-13");
+                opaqueCapture(new File(OUTPUT, "b9-layers-member.png"));
+
+                // The chevron collapses the group; the selection stays, and so does the collapse on the same hex.
+                GpuBoardTestUi.click("editor-group-lot-chevron"); settle(view, source);
+                assertFalse(layers.expanded("editor-group-lot"));
+                assertTrue(members.stream().noneMatch(layers.shown()::contains));
+                assertEquals(List.of("car-13"), objects(source), "Collapsing selects nothing");
+                GpuBoardTestUi.click("editor-component-ground"); settle(view, source);
+                assertEquals("ground", source.editorState().component());
+                assertFalse(layers.expanded("editor-group-lot"), "A new selection on the same hex keeps the group collapsed");
+                Vector2 car = top(view, terrain, lot, "car-7");
+                clickAt(car); settle(view, source);
+                assertEquals("lot", source.editorState().group(), "A click on a member selects its group");
+                assertTrue(pressed("editor-group-lot"));
+                assertFalse(layers.expanded("editor-group-lot"), "Selecting the group itself does not expand it");
+                clickAt(car); settle(view, source);
+                assertEquals(List.of("car-7"), objects(source), "The second click drills in");
+                assertTrue(layers.expanded("editor-group-lot"), "Selecting a member expands its group");
+                assertTrue(pressed("editor-content-car-7"));
+                assertInView(stage, "editor-content-car-7");
+
+                // Another hex starts expanded.
+                GpuBoardTestUi.click("editor-group-lot-chevron"); settle(view, source);
+                assertFalse(layers.expanded("editor-group-lot"));
+                source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.SELECT_AT,
+                      other.getX() + "," + other.getY(), ""), source.takeFrame().boardGeneration());
+                settle(view, source);
+                source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.SELECT_AT, "4,4", ""),
+                      source.takeFrame().boardGeneration());
+                settle(view, source);
+                assertTrue(layers.expanded("editor-group-lot"), "Another hex resets the expansion");
+
+                // After a click on a row, Layers take the arrow keys: Down to the first member, Enter selects it.
+                GpuBoardTestUi.click("editor-group-lot"); settle(view, source);
+                press(Input.Keys.DOWN); press(Input.Keys.ENTER); settle(view, source);
+                assertEquals(List.of("car-1"), objects(source), "Down and Enter in Layers select the first member");
+            });
+        } finally { preferences.setBoardEditorLayersSplit(split); }
+    }
+
+    private static boolean pressed(String name) {
+        return ((UiButton) GpuBoardTestUi.stage().getRoot().findActor(name)).isChecked();
+    }
+
+    /** The row's centre hits the row: it lies inside the Layers region's view, not scrolled away. */
+    private static void assertInView(com.badlogic.gdx.scenes.scene2d.Stage stage, String name) {
+        Actor row = stage.getRoot().findActor(name);
+        Vector2 centre = row.localToStageCoordinates(new Vector2(row.getWidth() / 2, row.getHeight() / 2));
+        Actor hit = stage.hit(centre.x, centre.y, true);
+        assertTrue(hit != null && (hit == row || hit.isDescendantOf(row)), name + " is in view; the centre hits " + hit);
+    }
+
+    /** The window as an opaque PNG: the back buffer's alpha dropped. */
+    private static void opaqueCapture(File file) {
+        assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
+        Pixmap image = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+        try {
+            image.setBlending(Pixmap.Blending.None);
+            for (int y = 0; y < image.getHeight(); y++) {
+                for (int x = 0; x < image.getWidth(); x++) { image.drawPixel(x, y, image.getPixel(x, y) | 0xFF); }
+            }
+            PixmapIO.writePNG(new FileHandle(file), image, -1, true);
+        } finally { image.dispose(); }
     }
 
     /** A box drawn by a plain drag selects objects by their installed anchors: on a roof and on a bridge deck. */

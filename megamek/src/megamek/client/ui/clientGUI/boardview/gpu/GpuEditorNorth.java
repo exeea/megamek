@@ -24,8 +24,9 @@ final class GpuEditorNorth extends Group {
     GpuEditorNorth(UiKit ui) {
         white = ui.skin.get("white", Texture.class);
         setName("editor-north"); setTouchable(Touchable.disabled); setTransform(false); setSize(80, 80);
-        shadow = ui.label("N", "hud-title", 14, Color.BLACK); shadow.pack(); addActor(shadow);
-        label = ui.label("N", "hud-title", 14, UiTheme.TEXT); label.pack(); addActor(label);
+        String north = UiKit.text("BoardEditor.northMarker");
+        shadow = ui.label(north, "hud-title", 14, Color.BLACK); shadow.pack(); addActor(shadow);
+        label = ui.label(north, "hud-title", 14, UiTheme.TEXT); label.pack(); addActor(label);
         setVisible(false);
     }
 

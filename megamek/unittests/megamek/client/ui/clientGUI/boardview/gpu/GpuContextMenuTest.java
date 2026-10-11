@@ -3,6 +3,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.tooltip.HexTooltip;
@@ -39,6 +43,30 @@ class GpuContextMenuTest {
         assertNull(GpuContextMenu.subtitle(terrainLine(10, "rough:1"), HEX, 1), "level 1 is not level 10");
         assertNull(GpuContextMenu.subtitle("", HEX, 1), "no terrain line (the hex tooltip is switched off)");
         assertNull(GpuContextMenu.subtitle(null, HEX, 1));
+    }
+
+    /**
+     * The units of a hex that the unit menus list first and repeated clicks take in turn: every unit the scene draws
+     * there, in the scene's order, a grounded DropShip in each hex of its footprint and a unit drawn in parts once.
+     */
+    @Test
+    void aHexsStackHoldsEveryUnitDrawnThereOnce() {
+        Coords centre = new Coords(10, 10);
+        Coords edge = centre.translated(2);
+        BoardScene.Unit dropShip = new BoardScene.Unit(1, -1, "Union", new BoardScene.Waypoint(centre, 0, 0), null,
+              false, null, 1, false, null, 0, List.of(centre, edge, centre.translated(5)));
+        BoardScene scene = mock(BoardScene.class);
+        when(scene.units()).thenReturn(List.of(dropShip, drawn(2, -1, edge), drawn(3, 0, edge), drawn(3, 1, edge),
+              drawn(4, -1, new Coords(1, 1))));
+        assertEquals(List.of(1, 2, 3), GpuContextMenu.stack(scene, edge));
+        assertEquals(List.of(1), GpuContextMenu.stack(scene, centre));
+        assertEquals(List.of(), GpuContextMenu.stack(scene, new Coords(5, 5)));
+        assertEquals(List.of(), GpuContextMenu.stack(null, edge));
+    }
+
+    private static BoardScene.Unit drawn(int id, int part, Coords hex) {
+        return new BoardScene.Unit(id, part, "Unit " + id, new BoardScene.Waypoint(hex, 0, 0), null, false, null, 1,
+              false);
     }
 
     /**

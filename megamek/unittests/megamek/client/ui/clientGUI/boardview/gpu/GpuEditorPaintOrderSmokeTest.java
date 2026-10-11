@@ -79,7 +79,7 @@ class GpuEditorPaintOrderSmokeTest {
                         switch (step) {
                             case 0 -> {
                                 pixel(true);
-                                Actor handle = root.findActor("editor-reorder-green"), target = root.findActor("editor-content-red");
+                                Actor handle = root.findActor("editor-content-green-grip"), target = root.findActor("editor-content-red");
                                 Vector2 from = screen(handle, handle.getHeight() / 2), to = screen(target, target.getHeight() - 2);
                                 var input = Gdx.input.getInputProcessor();
                                 input.touchDown((int) from.x, (int) from.y, 0, Input.Buttons.LEFT);

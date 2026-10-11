@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
-import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -18,9 +17,9 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -109,31 +108,22 @@ class GpuScenerySmokeTest {
             ledges.setHex(new Coords(variant + 1, 2), new Hex(0, "pavement:1;fluff:8:" + variant, ""));
             ledges.setHex(new Coords(variant + 1, 4), new Hex(0, "pavement:1;fluff:6:" + (12 + variant), ""));
         }
+        // Every board converted as a load site converts it (legacy art becomes placed objects; geysers, rubble and
+        // fortified stay terrain-owned rows), captured as every 3D view captures it.
         var scenes = new ArrayList<BoardScene>();
         for (Board board : List.of(catalog, fccw, details, corrections, port, geothermal, demolition, fccwNoBasement, ledges)) {
-            var captured = new AtomicReference<BoardScene>();
-            SwingUtilities.invokeAndWait(() -> {
-                try (var artwork = new BoardArtwork()) {
-                    var tiles = new ArrayList<BoardScene.Tile>();
-                    var pool = new BoardScene.PixelPool();
-                    for (int x = 0; x < board.getWidth(); x++) for (int y = 0; y < board.getHeight(); y++) {
-                        var coords = new Coords(x, y);
-                        tiles.add(BoardScene.captureTile(board.getHex(coords), artwork.capture(board, coords, true),
-                              null, pool, board::getHex));
-                    }
-                    captured.set(new BoardScene(0, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(), -1, "", List.of()));
-                }
-            });
-            scenes.add(captured.get());
+            BoardSceneryLayouts.convert(board);
+            scenes.add(GpuLegacyImportSmokeTest.scene(board));
         }
         var fccwScene = scenes.get(1);
         assertTrue(fccwScene.tiles().stream().filter(t -> t.features().stream()
-              .anyMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY)).count() >= 25);
-        // Herds decode to one row per animal; a herd's hex is the one holding its first animal where the row puts it.
+              .anyMatch(f -> f.decoration() != null)).count() >= 25);
+        // Herds convert to one object per animal; a herd's hex is the one holding its first animal where the row puts it.
         java.util.function.BiFunction<BoardScene, String, Coords> herd = (scene, key) -> {
             var first = BoardSceneryLayouts.layout("scenery/fluff/" + key).components().getFirst();
             return scene.tiles().stream().filter(t -> t.features().stream().anyMatch(f -> f.asset().equals(first.asset())
-                  && f.x() == first.x() && f.y() == first.y())).findFirst().orElseThrow(() -> new AssertionError(key)).coords();
+                  && Math.abs(f.x() - first.x()) < 1e-3 && Math.abs(f.y() - first.y()) < 1e-3)).findFirst()
+                  .orElseThrow(() -> new AssertionError(key)).coords();
         };
         herd.apply(scenes.get(3), "horses1");
         herd.apply(scenes.get(3), "horses2");

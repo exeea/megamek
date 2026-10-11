@@ -39,6 +39,7 @@ import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.loaders.MapSettings;
@@ -215,9 +216,8 @@ class GpuBoardPerformanceSmokeTest {
     private static Board board(int size) throws Exception {
         String saved = System.getProperty("megamek.gpu.performanceBoard", "");
         if (!saved.isEmpty() && new File(saved).isFile()) {
-            Board board = new Board();
-            board.load(new File(saved));
-            return board;
+            // As a game loads a sheet: converted, so a legacy board draws its scenery as placed objects.
+            return BoardFile.loadSheet(new File(saved), false, true);
         }
         if (Boolean.getBoolean("megamek.gpu.performanceMedium")) {
             // The Random Map dialog's medium water, hills, mountains, cliffs, woods and rough-ground settings.

@@ -28,22 +28,23 @@ import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
-import megamek.common.board.MaglevRoute;
+import megamek.common.board.RailRoute;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Legacy maglev imported as route markers and pieces stands where the legacy render showed it, its vehicles riding the
- * rail on every support, and the palette offers the route, platform, wagon, cab and the train stamp.
+ * Legacy maglev converted to route markers and pieces: its vehicles ride the rail on every support, every converted
+ * object of a corpus board is drawn, and the palette offers the route, platform, wagon, cab and the train stamp.
  */
 @Tag("on-demand")
 class GpuEditorMaglevSmokeTest {
     private static final File OUTPUT = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
     /** A three-hex N/S train, a three-hex NE/SW train, the three stations, parallel tracks and trains on supports. */
     private static final Map<Coords, String> FIXTURE = new LinkedHashMap<>();
-    /** Hexes whose imported vehicles stand somewhere else than the legacy render put them, and why. */
-    private static final Map<Coords, String> MOVED = new HashMap<>();
+    /** Hexes whose route rides a support that gives the parked cars none, and why they are left out. */
+    private static final Map<Coords, String> NO_CARS = new HashMap<>();
     static {
         FIXTURE.put(new Coords(1, 1), "fluff:9:6");
         FIXTURE.put(new Coords(1, 2), "fluff:9:7");
@@ -59,12 +60,10 @@ class GpuEditorMaglevSmokeTest {
         }
         FIXTURE.put(new Coords(7, 4), "water:2;bridge:1:09;bridge_cf:40;bridge_elev:1;fluff:9:7");
         FIXTURE.put(new Coords(9, 4), "heavy_industrial:2;fluff:9:7");
-        MOVED.put(new Coords(9, 4), "the legacy render's ray at the hex centre misses this industrial plant, so the train "
-              + "stood inside it on the ground; the imported route rides on the industrial top, as on a deck or roof, and "
-              + "leaves the parked cars out");
+        NO_CARS.put(new Coords(9, 4), "the route rides on the industrial top, as on a deck or roof, where cars have no "
+              + "support");
         FIXTURE.put(new Coords(11, 4), "water:1;fluff:9:7");
-        MOVED.put(new Coords(11, 4), "the legacy render put the train on the river bed; the imported route keeps the hex's "
-              + "level, above the water, and leaves the parked cars out");
+        NO_CARS.put(new Coords(11, 4), "the route keeps the hex's level above the water, which gives cars no support");
         FIXTURE.put(new Coords(13, 4), "building:2;bldg_elev:2;bldg_cf:50;fluff:9:7");
     }
 
@@ -75,42 +74,38 @@ class GpuEditorMaglevSmokeTest {
     }
 
     @Test
-    void importedMaglevRidesItsRouteWhereTheLegacyRenderShowedIt() throws Exception {
+    void convertedMaglevVehiclesRideTheirRouteOnEverySupport() throws Exception {
         Board imported = legacy();
-        SwingUtilities.invokeAndWait(() -> BoardSceneryLayouts.importBoard(imported));
+        BoardSceneryLayouts.convert(imported);
         Map<String, String> assets = new HashMap<>();
         for (Coords at : FIXTURE.keySet()) { imported.getHex(at).getDecorations().forEach(o -> assets.put(o.id(), o.asset())); }
-        BoardScene before = GpuLegacyImportSmokeTest.scene(legacy()), after = GpuLegacyImportSmokeTest.scene(imported);
+        BoardScene after = GpuLegacyImportSmokeTest.scene(imported);
         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
         render((frame, camera) -> {
             for (int levelHeight : new int[] { BoardGeometry.DEFAULTS.levelHeight(), 30 }) {
                 BoardGeometry.tune(new BoardGeometry.Tuning(1, 1, 1, levelHeight, .8f));
                 float tolerance = .05f * BoardGeometry.hexScale();
-                camera.fit(before);
-                var legacyProps = props(frame, camera, before, false, "maglev-import-legacy-" + levelHeight + ".png");
-                var importedProps = props(frame, camera, after, true, "maglev-import-imported-" + levelHeight + ".png");
+                camera.fit(after);
+                var importedProps = props(frame, camera, after, "maglev-import-imported-" + levelHeight + ".png");
                 for (Coords at : FIXTURE.keySet()) {
                     String name = FIXTURE.get(at) + " at " + at + ", level height " + levelHeight;
                     var pieces = importedProps.get(at);
-                    var route = pieces.stream().filter(p -> MaglevRoute.ASSET.equals(assets.get(p.id()))).toList();
+                    var route = pieces.stream().filter(p -> RailRoute.Kind.MAGLEV.asset.equals(assets.get(p.id()))).toList();
                     assertEquals(1, route.size(), name);
                     float rail = route.getFirst().bounds().max.z;
                     for (var piece : pieces) {
                         String asset = assets.get(piece.id());
                         if (asset != null && asset.matches("scenery/maglev/(wagon|cab|coupler)")) {
-                            // Wagons and cabs ride 0.5 px into the 4 px rail; the coupler sits 0.5 px higher.
-                            float ride = asset.endsWith("coupler") ? 0 : .5f;
+                            // The cars' suspension shoes wrap the 4 px beam down to 1.3 px, the gangway's to 2.3 px.
+                            float ride = asset.endsWith("coupler") ? 1.7f : 2.7f;
                             assertEquals(rail - ride * BoardGeometry.hexScale(), piece.bounds().min.z, tolerance, name + " " + asset);
                         }
                     }
-                    float legacyTop = top(legacyProps.get(at)), importedTop = top(pieces);
-                    System.out.printf("MAGLEV %s: top legacy %.2f imported %.2f (dz %.2f)%n", name, legacyTop, importedTop,
-                          importedTop - legacyTop);
-                    if (!MOVED.containsKey(at)) { assertEquals(legacyTop, importedTop, tolerance, name + ": the legacy height"); }
-                    else { assertTrue(importedTop > legacyTop + tolerance, name + ": above the legacy height, as " + MOVED.get(at)); }
+                    System.out.printf("MAGLEV %s: rail top %.2f, scenery top %.2f%n", name, rail, top(pieces));
                     boolean cars = imported.getHex(at).getDecorations().stream().anyMatch(o -> o.asset().startsWith("scenery/vehicles/car"));
-                    assertEquals(!MOVED.containsKey(at) && !FIXTURE.get(at).matches("fluff:9:(0|5|9)"), cars,
-                          name + ": parked cars only where the hex supports them");
+                    assertEquals(!NO_CARS.containsKey(at) && !FIXTURE.get(at).matches("fluff:9:(0|5|9)"), cars,
+                          name + ": parked cars only where the hex supports them"
+                                + (NO_CARS.containsKey(at) ? "; " + NO_CARS.get(at) : ""));
                 }
             }
             BoardGeometry.tune(BoardGeometry.DEFAULTS);
@@ -118,22 +113,21 @@ class GpuEditorMaglevSmokeTest {
     }
 
     @Test
-    void aCorpusBoardsTrainsAndStationsImportAsTheyWereDrawn() throws Exception {
+    void aCorpusBoardsTrainsAndStationsDrawEveryConvertedObject() throws Exception {
         var file = Configuration.boardsDir().toPath().resolve("unofficial/Derv_Maps/90x41 Whats Done Behind.board");
-        Board legacy = BoardFile.read(file), imported = BoardFile.read(file);
-        SwingUtilities.invokeAndWait(() -> BoardSceneryLayouts.importBoard(imported));
-        BoardScene before = GpuLegacyImportSmokeTest.scene(legacy), after = GpuLegacyImportSmokeTest.scene(imported);
+        Board imported = BoardFile.read(file);
+        BoardSceneryLayouts.convert(imported);
+        BoardScene after = GpuLegacyImportSmokeTest.scene(imported);
         // The NE/SW train runs from 7317 to 7715, the N/S one from 8015 to 8018.
-        var shown = before.tiles().stream().filter(tile -> tile.coords().getX() >= 71 && tile.coords().getX() <= 80
+        var shown = after.tiles().stream().filter(tile -> tile.coords().getX() >= 71 && tile.coords().getX() <= 80
               && tile.coords().getY() >= 12 && tile.coords().getY() <= 18).toList();
         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
         render((frame, camera) -> {
-            camera.fit(before, shown);
-            props(frame, camera, before, false, "maglev-corpus-legacy.png");
-            var objects = props(frame, camera, after, true, "maglev-corpus-imported.png");
+            camera.fit(after, shown);
+            var objects = props(frame, camera, after, "maglev-corpus-imported.png");
             for (var tile : shown) {
                 var hex = imported.getHex(tile.coords());
-                if (MaglevRoute.find(hex) == null) { continue; }
+                if (RailRoute.find(hex, RailRoute.Kind.MAGLEV) == null) { continue; }
                 assertEquals(hex.getDecorations().size(), objects.getOrDefault(tile.coords(), List.of()).stream()
                       .filter(p -> p.id() != null).count(), tile.coords() + ": every imported object is drawn");
             }
@@ -153,8 +147,11 @@ class GpuEditorMaglevSmokeTest {
         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1600, 1000);
-        List<String> visible = List.of(MaglevRoute.ASSET, "scenery/maglev/platform", "scenery/maglev/wagon",
-              "scenery/maglev/cab", "stamp/maglev-train");
+        // Maglev and Rail are two choices in Transport (its props; the level crossing is under Decals); the rolling stock
+        // and train stamps have their own group.
+        List<String> transport = List.of(RailRoute.Kind.MAGLEV.asset, RailRoute.Kind.RAIL.asset, "scenery/rail/crossing-signal");
+        List<String> visible = List.of("scenery/maglev/platform", "scenery/maglev/wagon", "scenery/maglev/cab",
+              "stamp/maglev-train");
         try {
             new Lwjgl3Application(new GpuBattleView(source) {
                 final long deadline = System.nanoTime() + 90_000_000_000L;
@@ -171,15 +168,21 @@ class GpuEditorMaglevSmokeTest {
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         var root = GpuBoardTestUi.stage().getRoot();
                         switch (step) {
-                            case 0 -> GpuBoardTestUi.category("Maglev and wagons");
+                            case 0 -> GpuBoardTestUi.category("Transport");
                             case 1 -> {
+                                if (!ready(root.findActor("editor-library"))) { return; }
+                                for (String id : transport) { assertNotNull(root.findActor("editor-library-" + id), id); }
+                                GpuBoardTestUi.capture(new File(OUTPUT, "editor-transport-palette.png"));
+                                GpuBoardTestUi.category("Maglev and wagons");
+                            }
+                            case 2 -> {
                                 if (!ready(root.findActor("editor-library"))) { return; }
                                 for (String id : visible) { assertNotNull(root.findActor("editor-library-" + id), id); }
                                 assertNull(root.findActor("editor-library-scenery/maglev/coupler"), "The coupler comes with the train");
                                 GpuBoardTestUi.capture(new File(OUTPUT, "editor-maglev-palette.png"));
                                 GpuBoardTestUi.click("editor-library-stamp/maglev-train");
                             }
-                            case 2 -> {
+                            case 3 -> {
                                 assertEquals("stamp/maglev-train", source.editorState().activeBrush().key());
                                 assertEquals(BoardEditorSession.Tool.PAINT, source.editorState().tool());
                                 Gdx.app.exit(); return;
@@ -215,15 +218,14 @@ class GpuEditorMaglevSmokeTest {
                 finally { BoardGeometry.tune(BoardGeometry.DEFAULTS); frame.dispose(); Gdx.app.exit(); }
             }
         }, config);
-        if (failure.get() != null) { throw new AssertionError("Maglev import", failure.get()); }
+        if (failure.get() != null) { throw new AssertionError("Converted maglev", failure.get()); }
     }
 
-    /** One rendered screenshot and the props it installed per hex; imported objects keep their ids. */
+    /** One rendered screenshot and the props it installed per hex; placed objects keep their ids in every view. */
     private static Map<Coords, List<GpuLegacyImportSmokeTest.Installed>> props(GpuReviewFrame frame, BoardCamera camera,
-          BoardScene scene, boolean objects, String screenshot) throws Exception {
+          BoardScene scene, String screenshot) throws Exception {
         var terrain = new GpuTerrain();
         try {
-            terrain.editableObjects(objects);
             frame.prepare(terrain, camera, scene);
             terrain.update(scene);
             terrain.animate(0, List.of());
@@ -242,7 +244,7 @@ class GpuEditorMaglevSmokeTest {
         return (float) props.stream().filter(p -> !p.structure() || p.id() != null).mapToDouble(p -> p.bounds().max.z).max().orElseThrow();
     }
 
-    private static boolean ready(Actor actor) {
+    static boolean ready(Actor actor) {
         if (actor instanceof Image image && "editor-card-preview".equals(image.getName())) {
             assertNotEquals("Preview unavailable", image.getUserObject());
             assertNotEquals("No preview", image.getUserObject());

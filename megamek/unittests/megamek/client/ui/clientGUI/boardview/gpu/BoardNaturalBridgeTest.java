@@ -15,6 +15,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -219,16 +220,19 @@ class BoardNaturalBridgeTest {
     }
 
     @Test
-    void attachingAndRemovingAnApproachChangesTheWholeBridgeAppearance() {
+    void anApproachGivesAnUntypedSpanItsMaterialButNeverTurnsANaturalOneBuilt() {
         var scene = scene(BoardScene.Surface.SAND, false, true);
         var tile = scene.tile(CENTER);
         assertTrue(BoardBridge.deck(scene, tile).natural());
         var entrance = CENTER.translated(0);
         var road = BoardRoadTest.tile(entrance, BoardRoad.Kind.GRAVEL, 9, 3, BoardScene.Surface.SAND);
         var edited = replace(scene, road);
-        assertFalse(BoardBridge.deck(edited, tile).natural());
-        assertEquals(BoardRoad.Kind.GRAVEL, BoardBridge.kind(edited, tile));
-        assertTrue(BoardBridge.deck(replace(edited, scene.tile(entrance)), tile).natural());
+        assertTrue(BoardBridge.deck(edited, tile).natural(), "A stored natural span stays a rock arch beside a road");
+        // An untyped span is built (the editor's stroke default) and takes its approach's material.
+        var untyped = replace(edited, BoardBridgeTypeTest.appearance(tile, Map.of()));
+        assertEquals(BoardRoad.Kind.GRAVEL, BoardBridge.kind(untyped, untyped.tile(CENTER)));
+        var bare = replace(untyped, scene.tile(entrance));
+        assertEquals(BoardRoad.Kind.ALLEY, BoardBridge.kind(bare, bare.tile(CENTER)), "Without a road: plain asphalt");
     }
 
     @Test
@@ -371,14 +375,16 @@ class BoardNaturalBridgeTest {
         return new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());
     }
 
+    /** A natural span's deck, its type stored as a converted board stores it. */
     private static BoardScene.Tile bridge(BoardScene.Tile ground, int exits) {
         var hex = new Hex(ground.elevation());
         hex.addTerrain(new Terrain(Terrains.BRIDGE, 1, true, exits));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 3));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 100));
-        return new BoardScene.Tile(ground.coords(), ground.elevation(), ground.waterDepth(), ground.frozen(),
-              ground.roadExits(), ground.surface(), ground.ground(), null, null, null, null,
-              BoardFeatures.capture(hex, ground.coords(), Map.of()), List.of(), ground.liquid(), null, true, ground.road());
+        return BoardBridgeTypeTest.appearance(new BoardScene.Tile(ground.coords(), ground.elevation(), ground.waterDepth(),
+              ground.frozen(), ground.roadExits(), ground.surface(), ground.ground(), null, null, null, null,
+              BoardFeatures.capture(hex, ground.coords(), Map.of()), List.of(), ground.liquid(), null, true, ground.road()),
+              Map.of("bridge", HexAppearance.NATURAL_BRIDGE));
     }
 
     static BoardScene replace(BoardScene scene, BoardScene.Tile tile) {

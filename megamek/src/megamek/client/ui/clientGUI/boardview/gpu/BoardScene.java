@@ -73,25 +73,17 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         this(boardId, width, height, tiles, units, plannedPath, selectedId, phase, commands, null);
     }
 
-    static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages) {
-        return captureTile(hex, pixels, previous, terrainImages, neighbor -> null);
-    }
-
-    /** The board supplies neighbouring roads, whose course through this hex its scenery keeps clear of. */
+    /**
+     * The hex's tile, as {@link BoardTiles} captures every hex: {@code pixels} is its art, {@code previous} the tile it
+     * replaces (its unchanged pixels are kept), and {@code board} supplies the neighbouring roads, whose course through
+     * this hex its scenery keeps clear of. Nothing is decoded here: the type, Pillars and roads are the hex's own.
+     */
     static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
           java.util.function.Function<Coords, megamek.common.Hex> board) {
-        return captureTile(hex, pixels, previous, terrainImages, board, new HashMap<>());
-    }
-
-    /** {@code bridgeTypes} keeps the type an untyped bridge was first decoded with ({@link BoardBridge#typed}). */
-    static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
-          java.util.function.Function<Coords, megamek.common.Hex> board,
-          Map<Coords, megamek.common.board.HexAppearance> bridgeTypes) {
         return new BoardScene.Tile(pixels.coords(), hex.getLevel(),
               hex.containsTerrain(Terrains.WATER) ? Math.max(0, hex.terrainLevel(Terrains.WATER)) : -1,
               hex.containsTerrain(Terrains.ICE),
-              hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63
-                    : pixels.scenery().cosmeticRoadExits(),
+              hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0,
               BoardFeatures.surface(hex),
               terrainImages.capture(pixels.terrain(), previous == null ? null : previous.ground()),
               terrainImages.capture(pixels.normals(), previous == null ? null : previous.normals()),
@@ -102,8 +94,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               pixels.text(), BoardLiquid.capture(hex),
               terrainImages.capture(pixels.tileset(), previous == null ? null : previous.tileset()),
               BoardFeatures.detailedGround(hex, pixels.structureModels(), pixels.blankTerrains(), pixels.scenery()),
-              !hex.containsTerrain(Terrains.ROAD) && pixels.scenery().cosmeticRoadExits() != 0
-                    ? BoardRoad.Kind.PAVED : BoardRoad.capture(hex),
+              BoardRoad.capture(hex),
               BoardFireSmoke.capture(hex), BoardFeatures.biome(hex), hex.containsTerrain(Terrains.IMPASSABLE),
               hex.containsTerrain(Terrains.BLACK_ICE) && hex.getTerrain(Terrains.BLACK_ICE).isBlackIceDetected(),
               cliffTopExits(hex, pixels.coords(), board), false, BoardSurfaceBlend.capture(hex),
@@ -111,8 +102,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               hex.containsTerrain(Terrains.ULTRA_SUBLEVEL),
               terrainImages.captureOverlay(pixels.tilesetDecals(), previous == null ? null : previous.tilesetDecals()),
               terrainImages.captureOverlay(pixels.tilesetScenery(), previous == null ? null : previous.tilesetScenery()),
-              BoardBridge.typed(hex, pixels.coords(), BoardSceneryLayouts.appearance(hex, pixels.scenery()), board,
-                    bridgeTypes));
+              hex.getAppearance());
     }
 
     /** Pit rims use the existing authored-cliff path. The source hex and its gameplay exits remain untouched. */
@@ -385,6 +375,13 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                   impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance);
         }
 
+        /** This tile with other features: the editor preview's tile of a route stroke's next step. */
+        Tile withFeatures(List<Feature> shown) {
+            return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
+                  decalsWithoutLimbs, tactical, List.copyOf(shown), text, liquid, tileset, detailedGround, road, fireSmoke, biome,
+                  impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance);
+        }
+
         /** Zero-gravity presentation only: expose the liquid bed as bare rock, without editing the source hex. */
         Tile lunar() {
             int depth = Math.max(0, waterDepth);
@@ -463,6 +460,27 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
         /** Visual cap below an ultra-sublevel's mouth, including pits beside ground at the same authored level. */
         int groundLevel() { return elevation - (ultraSublevel ? 1 : 0); }
+
+        /**
+         * The sides of the tile's rails that lie on its ground ({@link megamek.common.board.RailRoute#groundSides}), read
+         * from its route features.
+         */
+        int railExits() {
+            int result = 0;
+            for (Feature feature : features) {
+                var object = feature.decoration();
+                if (megamek.common.board.RailRoute.kind(object) == megamek.common.board.RailRoute.Kind.RAIL
+                      && !megamek.common.board.RailRoute.onDeck(object)) { result |= object.connections(); }
+            }
+            return result;
+        }
+
+        /**
+         * Every carriageway the ground is shaped and cleared for: the road's exits and the ground rails' sides. A rail
+         * shapes its hex as a road with those exits does (ramps, cuts, deck approaches); only road paint reads
+         * {@link #roadExits} alone.
+         */
+        int wayExits() { return roadExits | railExits(); }
 
         /** Inputs shared by terrain meshes, support surfaces and draped tactical geometry. */
         boolean sameGeometry(Tile other) {

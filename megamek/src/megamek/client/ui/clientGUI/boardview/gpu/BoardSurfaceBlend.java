@@ -8,9 +8,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.board.TilesetScenery;
 import megamek.common.units.Terrains;
 
 /** Surface cover at a world position. Rendering and grass placement query the same immutable board snapshot. */
@@ -80,7 +80,7 @@ public final class BoardSurfaceBlend {
     }
 
     public static boolean replacesTransition(Hex hex, Map<Integer, String> models, Set<Integer> blankTerrains,
-          BoardArtwork.Scenery scenery) {
+          TilesetScenery.Scenery scenery) {
         return hasTransition(hex) && BoardFeatures.detailedGround(hex, models, blankTerrains, scenery);
     }
 

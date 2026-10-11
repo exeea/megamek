@@ -20,6 +20,7 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -135,7 +136,9 @@ class GpuNaturalBridgeSmokeTest {
                     frame.render(terrain, camera, scene);
                     int natural = sample(camera, at);
                     var approach = BoardRoadTest.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, 3, BoardScene.Surface.GRASS);
-                    var edited = BoardNaturalBridgeTest.replace(scene, approach);
+                    // The road-attached span is built (a converted board stores it); the bare one stays natural.
+                    var edited = BoardBridgeTypeTest.typed(BoardNaturalBridgeTest.replace(scene, approach),
+                          HexAppearance.BUILT_BRIDGE);
                     var footing = BoardBridgeFooting.build(edited, edited.tile(at), TerrainLod.FULL, new HashMap<>());
                     var gravelTip = BoardGeometry.center(at, 3).lerp(BoardGeometry.center(at.translated(3), 3), .5f)
                           .add(0, -footing.lengths().get(3) * BoardGeometry.hexScale() - BoardRelief.metres(5), 0);

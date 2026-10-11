@@ -13,29 +13,29 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.FloatArray;
 import megamek.client.ui.boardeditor.BoardEditorSession;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BridgeConstruction;
 import megamek.common.board.BridgeSpan;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
+import megamek.common.board.RailRoute;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * A bridge is built or natural ({@link HexAppearance#bridgeBuilt}): one legacy decode ({@link BoardBridge#built}) types
- * the bridges import writes, the 3D editor opens and the render draws untyped; the render honours a stored type.
+ * A bridge is built or natural ({@link HexAppearance#bridgeBuilt}): one legacy decode ({@link BridgeSpan#decode}) types
+ * the bridges the conversion writes and the 3D editor opens; the render draws the stored type, and an untyped span built.
  */
 class BoardBridgeTypeTest {
     private static final String DECK = "bridge:1:09;bridge_cf:40;bridge_elev:";
@@ -75,11 +75,11 @@ class BoardBridgeTypeTest {
     }
 
     private static boolean decoded(Board board, Coords at) {
-        return BoardBridge.built(board::getHex, c -> false, BridgeSpan.of(board::getHex, at));
+        return BridgeSpan.decode(board::getHex, c -> false, BridgeSpan.of(board::getHex, at));
     }
 
     @Test
-    void oneDecodeTypesEachSpanInImportAndInTheLegacyRender() throws Exception {
+    void oneDecodeTypesEachSpanInTheConversionAndTheRenderDrawsIt() throws Exception {
         Board legacy = legacy(), imported = legacy();
         for (var shown : CASES) {
             for (int y = 2; y <= 3; y++) {
@@ -87,7 +87,7 @@ class BoardBridgeTypeTest {
             }
         }
         // Pillar art on one hex makes its whole span built; a stored type beats every signal, built beating natural.
-        assertTrue(BoardBridge.built(legacy::getHex, c -> c.equals(new Coords(1, 3)), BridgeSpan.of(legacy::getHex, new Coords(1, 2))));
+        assertTrue(BridgeSpan.decode(legacy::getHex, c -> c.equals(new Coords(1, 3)), BridgeSpan.of(legacy::getHex, new Coords(1, 2))));
         Board stored = legacy();
         for (int y = 2; y <= 3; y++) { type(stored, new Coords(4, y), HexAppearance.NATURAL_BRIDGE); }
         type(stored, new Coords(1, 3), HexAppearance.BUILT_BRIDGE);
@@ -96,18 +96,16 @@ class BoardBridgeTypeTest {
         type(stored, new Coords(1, 2), HexAppearance.NATURAL_BRIDGE);
         assertTrue(decoded(stored, new Coords(1, 2)), "Built wins in a mixed span");
 
-        BoardSceneryLayouts.importBoard(imported);
-        try (var artwork = new BoardArtwork()) {
-            var pool = new BoardScene.PixelPool();
-            for (var shown : CASES) {
-                for (int y = 2; y <= 3; y++) {
-                    Coords at = new Coords(shown.x(), y);
-                    var expected = shown.built() ? HexAppearance.BUILT_BRIDGE : HexAppearance.NATURAL_BRIDGE;
-                    assertEquals(expected, imported.getHex(at).getAppearance().get("bridge"), "Import: " + shown.name());
-                    var tile = BoardScene.captureTile(legacy.getHex(at), artwork.capture(legacy, at, true), null, pool, legacy::getHex);
-                    assertEquals(expected, tile.appearance().get("bridge"), "Legacy render: " + shown.name());
-                    assertFalse(legacy.getHex(at).getAppearance().containsKey("bridge"), "The render never writes the board");
-                }
+        BoardSceneryLayouts.convert(imported);
+        var drawn = new BoardScene(0, imported.getWidth(), imported.getHeight(), BoardTiles.captureAll(imported), List.of(),
+              List.of(), -1, "", List.of());
+        for (var shown : CASES) {
+            for (int y = 2; y <= 3; y++) {
+                Coords at = new Coords(shown.x(), y);
+                var expected = shown.built() ? HexAppearance.BUILT_BRIDGE : HexAppearance.NATURAL_BRIDGE;
+                assertEquals(expected, imported.getHex(at).getAppearance().get("bridge"), "Conversion: " + shown.name());
+                assertEquals(expected, drawn.tile(at).appearance().get("bridge"), "Drawn: " + shown.name());
+                assertEquals(!shown.built(), BoardBridge.deck(drawn, drawn.tile(at)).natural(), "Deck: " + shown.name());
             }
         }
         assertNull(imported.getHex(new Coords(4, 1)).getAppearance().get("bridge"), "Only bridge hexes get a type");
@@ -120,35 +118,15 @@ class BoardBridgeTypeTest {
     }
 
     @Test
-    void aGameKeepsTheDecodedTypeWhenTheBuildingBesideTheSpanCollapses() throws Exception {
-        Coords north = new Coords(19, 2), south = new Coords(19, 3);
-        try (var fixture = GpuBoardFixture.create(legacy())) {
-            SwingUtilities.invokeAndWait(() -> {
-                Board board = fixture.game.getBoard();
-                fixture.source.refresh();
-                assertEquals(HexAppearance.BUILT_BRIDGE, fixture.source.takeFrame().scene().tile(south).appearance().get("bridge"));
-                board.setHex(south.translated(2), new Hex(1, "rubble:1", ""));
-                assertFalse(decoded(board, south), "Decoded again, the span would now be a rock arch");
-                fixture.source.refresh();
-                for (Coords at : List.of(north, south)) {
-                    assertEquals(HexAppearance.BUILT_BRIDGE, fixture.source.takeFrame().scene().tile(at).appearance().get("bridge"),
-                          "The recaptured neighbourhood keeps its type: " + at);
-                }
-                board.initializeAllAutomaticTerrain();
-                fixture.source.refresh();
-                assertEquals(HexAppearance.BUILT_BRIDGE, fixture.source.takeFrame().scene().tile(south).appearance().get("bridge"),
-                      "A full recapture of the same board keeps it too");
-            });
-        }
-    }
-
-    @Test
     void theEditorTypesAnOpenedBoardsUntypedBridges(@TempDir Path directory) throws Exception {
         Path file = directory.resolve("Untyped.board2");
         Board board = legacy();
+        // A .board2 holds a rail route marker instead of the rail art: the untyped span still sees its railway.
+        board.getHex(new Coords(10, 1)).setDecorations(List.of(new BoardDecoration("rail", "prop", RailRoute.Kind.RAIL.asset,
+              null, 0, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0, false).withConnections(RailRoute.side(3))));
         board.setNativeFormat(true);
         BoardFile.save(board, file);
-        var session = new BoardEditorSession(BoardEditorBlueprint.get(), BoardSceneryLayouts.DECODER);
+        var session = new BoardEditorSession(BoardEditorBlueprint.get());
         session.open(file);
         for (var shown : CASES) {
             for (int y = 2; y <= 3; y++) {
@@ -157,9 +135,6 @@ class BoardBridgeTypeTest {
             }
         }
         assertFalse(session.dirty(), "The stored types are the ones the board was drawn with");
-        var plain = new BoardEditorSession(BoardEditorBlueprint.get());
-        plain.open(file);
-        assertNull(HexAppearance.bridgeBuilt(plain.board().getHex(1, 2).getAppearance()), "Without the 3D board nothing decodes");
     }
 
     @Test
@@ -178,6 +153,33 @@ class BoardBridgeTypeTest {
         }
     }
 
+    @Test
+    void aOneSidedExitJoinsDecksAtOneLevelAndTheConversionWritesTheMissingExit() {
+        // In columns 1 and 3 a deck points south into a deck that points only south (BaelCity's one-hex pieces); a road
+        // at the north end makes the north deck built. Column 3's south deck is a level higher.
+        Board board = Board.createEmptyBoard(5, 6);
+        for (int x : new int[] { 1, 3 }) {
+            board.setHex(x, 1, new Hex(1, "road:1:09", ""));
+            board.setHex(x, 2, new Hex(0, DECK + 1, ""));
+            board.setHex(x, 3, new Hex(0, "bridge:1:08;bridge_cf:40;bridge_elev:" + (x == 1 ? 1 : 2), ""));
+            board.setHex(x, 4, new Hex(1));
+        }
+        Coords north = new Coords(1, 2), south = new Coords(1, 3), high = new Coords(3, 3);
+        assertEquals(Set.of(north, south), Set.copyOf(BridgeSpan.of(board::getHex, north)), "From the deck that points");
+        assertEquals(Set.of(north, south), Set.copyOf(BridgeSpan.of(board::getHex, south)), "From the one that does not");
+        assertEquals(List.of(high), BridgeSpan.of(board::getHex, high), "Decks at different levels are not joined");
+        assertEquals(List.of(new Coords(3, 2)), BridgeSpan.of(board::getHex, new Coords(3, 2)));
+        assertTrue(decoded(board, south), "The piece takes its span's built type");
+        assertFalse(decoded(board, high), "The higher piece is decoded alone");
+
+        BoardSceneryLayouts.convert(board);
+        assertEquals(9, board.getHex(south).getTerrain(Terrains.BRIDGE).getExits(), "The missing exit is written");
+        assertEquals(8, board.getHex(high).getTerrain(Terrains.BRIDGE).getExits(), "No exit is guessed");
+        assertEquals(9, board.getHex(north).getTerrain(Terrains.BRIDGE).getExits());
+        assertEquals(HexAppearance.BUILT_BRIDGE, board.getHex(south).getAppearance().get("bridge"));
+        assertEquals(HexAppearance.NATURAL_BRIDGE, board.getHex(high).getAppearance().get("bridge"));
+    }
+
     /** A bridge tile of a hand-made scene with {@code type} (null: none) and a deck {@code deck} levels up. */
     private static BoardScene.Tile deck(Coords at, int exits, boolean water, int deck, HexAppearance type) {
         Hex bridge = new Hex(0);
@@ -191,7 +193,14 @@ class BoardBridgeTypeTest {
         return type == null ? t : appearance(t, Map.of("bridge", type));
     }
 
-    private static BoardScene.Tile appearance(BoardScene.Tile t, Map<String, HexAppearance> appearance) {
+    /** {@code scene} with every bridge tile storing {@code type}, as a converted board's bridges do. */
+    static BoardScene typed(BoardScene scene, HexAppearance type) {
+        var tiles = scene.tiles().stream()
+              .map(t -> BoardBridge.feature(t) == null ? t : appearance(t, Map.of("bridge", type))).toList();
+        return new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    static BoardScene.Tile appearance(BoardScene.Tile t, Map<String, HexAppearance> appearance) {
         return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(),
               t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.tileset(),
               t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
@@ -209,7 +218,8 @@ class BoardBridgeTypeTest {
         assertTrue(BoardBridge.deck(natural, natural.tile(AT)).natural());
         // A built span without a road is plain asphalt, unmarked; markings come with a paved road.
         var bare = BoardBridgeMaterialsTest.straight(AT, 3, 1, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE);
-        assertTrue(BoardBridge.deck(bare, bare.tile(AT)).natural(), "An untyped hand-made span without roads stays natural");
+        assertEquals(BoardRoad.Kind.ALLEY, BoardBridge.deck(bare, bare.tile(AT)).kind(),
+              "An untyped span is built, as the editor's stroke types a new bridge");
         var built = BoardNaturalBridgeTest.replace(bare, appearance(bare.tile(AT), Map.of("bridge", HexAppearance.BUILT_BRIDGE)));
         var deck = BoardBridge.deck(built, built.tile(AT));
         assertEquals(BoardRoad.Kind.ALLEY, deck.kind());

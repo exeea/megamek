@@ -42,6 +42,7 @@ import megamek.common.Hex;
 import megamek.common.Report;
 import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BuildingEditSpec;
 import megamek.common.board.Coords;
 import megamek.common.enums.BasementType;
@@ -327,7 +328,8 @@ public class BuildingEditHandler extends AbstractTWRuleHandler {
 
     /**
      * Writes the building's special image into the hex, which is where it lives - it chooses how the building is
-     * drawn rather than saying anything about the building itself.
+     * drawn rather than saying anything about the building itself. The image is the building's legacy art level, held
+     * as the token the 2D board draws and the design the 3D board draws ({@link BoardSceneryLayouts#setBuildingArt}).
      *
      * <p>The caller puts the hex back through the board afterwards, so that both sides of the connection end up
      * holding a hex the board has looked over rather than one changed where it lay.</p>
@@ -335,14 +337,10 @@ public class BuildingEditHandler extends AbstractTWRuleHandler {
      * @return {@code true} when the hex changed and needs putting back
      */
     private static boolean writeFluffImage(Hex hex, BuildingEditSpec spec) {
-        int current = hex.containsTerrain(Terrains.BLDG_FLUFF) ? hex.terrainLevel(Terrains.BLDG_FLUFF) : 0;
-        if (current == spec.getFluffImage()) {
+        if (BoardSceneryLayouts.buildingArt(hex) == spec.getFluffImage()) {
             return false;
         }
-        hex.removeTerrain(Terrains.BLDG_FLUFF);
-        if (spec.getFluffImage() > 0) {
-            hex.addTerrain(new Terrain(Terrains.BLDG_FLUFF, spec.getFluffImage()));
-        }
+        BoardSceneryLayouts.setBuildingArt(hex, spec.getFluffImage());
         return true;
     }
 
@@ -364,9 +362,7 @@ public class BuildingEditHandler extends AbstractTWRuleHandler {
             hex.addTerrain(new Terrain(Terrains.BLDG_ARMOR, spec.getArmor()));
         }
         hex.addTerrain(new Terrain(Terrains.BLDG_BASEMENT_TYPE, spec.getBasement().ordinal()));
-        if (spec.getFluffImage() > 0) {
-            hex.addTerrain(new Terrain(Terrains.BLDG_FLUFF, spec.getFluffImage()));
-        }
+        BoardSceneryLayouts.setBuildingArt(hex, spec.getFluffImage());
     }
 
     /**
@@ -409,8 +405,13 @@ public class BuildingEditHandler extends AbstractTWRuleHandler {
               + "; anything stronger is a different type of building";
     }
 
-    /** Takes every scrap of building out of a hex, so nothing of the old one is left to confuse the new one. */
+    /**
+     * Takes every scrap of building out of a hex, so nothing of the old one is left to confuse the new one: its design
+     * too, which would otherwise dress a new building as the old one.
+     */
     private static void clearBuildingTerrain(Hex hex) {
+        // The art level: its token and the building's design.
+        BoardSceneryLayouts.setBuildingArt(hex, 0);
         hex.removeTerrain(Terrains.BUILDING);
         hex.removeTerrain(Terrains.BLDG_CF);
         hex.removeTerrain(Terrains.BLDG_ELEV);
@@ -418,7 +419,6 @@ public class BuildingEditHandler extends AbstractTWRuleHandler {
         hex.removeTerrain(Terrains.BLDG_ARMOR);
         hex.removeTerrain(Terrains.BLDG_BASEMENT_TYPE);
         hex.removeTerrain(Terrains.BLDG_BASE_COLLAPSED);
-        hex.removeTerrain(Terrains.BLDG_FLUFF);
         hex.removeTerrain(Terrains.FUEL_TANK);
         hex.removeTerrain(Terrains.FUEL_TANK_CF);
         hex.removeTerrain(Terrains.FUEL_TANK_ELEV);

@@ -10,7 +10,6 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -20,14 +19,17 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Scenery support is checked against the scene before the decoration is added. */
+/**
+ * Converted scenery (placed objects) and terrain-owned rows (geysers) touch the first solid surface under their anchor,
+ * checked against the scene before they are added.
+ */
 @Tag("on-demand")
 class GpuSceneryPlacementSmokeTest {
     private static final Coords CENTER = new Coords(2, 2);
@@ -51,8 +53,8 @@ class GpuSceneryPlacementSmokeTest {
         for (Sample sample : SAMPLES) {
             var control = capture(sample, false);
             if (!sample.structure().isEmpty()) {
-                assertTrue(control.tile(CENTER).features().stream().anyMatch(f ->
-                      f.kind() == BoardScene.FeatureKind.BUILDING || f.kind() == BoardScene.FeatureKind.PROP),
+                assertTrue(control.tile(CENTER).features().stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.BUILDING
+                      || f.kind() == BoardScene.FeatureKind.INDUSTRIAL || f.kind() == BoardScene.FeatureKind.PROP),
                       sample.name() + " must include an actual solid model");
             }
             controls.add(control);
@@ -78,14 +80,21 @@ class GpuSceneryPlacementSmokeTest {
                         Sample sample = SAMPLES.get(i);
                         BoardScene control = controls.get(i), scene = decorated.get(i);
                         Vector3 center = BoardGeometry.center(CENTER, 0);
+                        // A geyser's row, or the placed object the conversion made of the legacy art; its support is
+                        // sampled under its own anchor.
+                        var feature = scene.tile(CENTER).features().stream()
+                              .filter(f -> f.kind() == BoardScene.FeatureKind.SCENERY || f.decoration() != null)
+                              .findFirst().orElseThrow();
+                        Vector3 anchor = new Vector3(center).add(feature.x() * BoardGeometry.hexScale(),
+                              feature.y() * BoardGeometry.hexScale(), 0);
                         frame.prepare(terrain, camera, control);
                         terrain.update(control);
                         float support;
                         if (sample.lakebed()) {
-                            support = new BoardSurface(control, control.tile(CENTER)).height(center.x, center.y);
+                            support = new BoardSurface(control, control.tile(CENTER)).height(anchor.x, anchor.y);
                             assertTrue(support < BoardGeometry.waterZ(control.tile(CENTER)));
                         } else {
-                            var ray = new Ray(new Vector3(center.x, center.y, 1000), new Vector3(0, 0, -1));
+                            var ray = new Ray(new Vector3(anchor.x, anchor.y, 1000), new Vector3(0, 0, -1));
                             var hit = terrain.selectionHit(control, ray);
                             assertNotNull(hit, sample.name());
                             support = 1000 - (float) Math.sqrt(hit.distance());
@@ -93,8 +102,6 @@ class GpuSceneryPlacementSmokeTest {
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         terrain.animate(.5f, List.of());
-                        var feature = scene.tile(CENTER).features().stream()
-                              .filter(f -> f.kind() == BoardScene.FeatureKind.SCENERY).findFirst().orElseThrow();
                         ModelInstance instance = instance(terrain, feature.asset());
                         BoundingBox placed = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
                         assertEquals(support, placed.min.z, .002f, sample.name() + " must touch the first solid surface");
@@ -129,6 +136,11 @@ class GpuSceneryPlacementSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Scenery solid support", failure.get()); }
     }
 
+    /**
+     * The sample's 5x5 board, its centre with the sample's art when {@code scenery}, converted as every load site
+     * converts a board and captured as every 3D view captures it: legacy art becomes placed objects, terrain-owned art
+     * (a geyser) stays a scenery row.
+     */
     static BoardScene capture(Sample sample, boolean scenery) throws Exception {
         var board = Board.createEmptyBoard(5, 5);
         for (int x = 0; x < 5; x++) for (int y = 0; y < 5; y++) {
@@ -137,20 +149,8 @@ class GpuSceneryPlacementSmokeTest {
         board.setHex(CENTER, new Hex(sample.elevation(), sample.ground()
               + (sample.structure().isEmpty() ? "" : ";" + sample.structure())
               + (scenery ? ";" + sample.fluff() : ""), ""));
-        var captured = new AtomicReference<BoardScene>();
-        SwingUtilities.invokeAndWait(() -> {
-            try (var artwork = new BoardArtwork()) {
-                var tiles = new ArrayList<BoardScene.Tile>();
-                var pool = new BoardScene.PixelPool();
-                for (int x = 0; x < 5; x++) for (int y = 0; y < 5; y++) {
-                    var coords = new Coords(x, y);
-                    tiles.add(BoardScene.captureTile(board.getHex(coords), artwork.capture(board, coords, true),
-                          null, pool, board::getHex));
-                }
-                captured.set(new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of()));
-            }
-        });
-        return captured.get();
+        BoardSceneryLayouts.convert(board);
+        return GpuLegacyImportSmokeTest.scene(board);
     }
 
     private static ModelInstance instance(GpuTerrain terrain, String asset) throws Exception {

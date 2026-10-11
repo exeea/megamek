@@ -54,7 +54,7 @@ projection modes. Keep a short right-click distinguishable from a pan so it stil
 opens contextual actions.
 
 See [attack controls](gpu-attack-controls.md) for target/weapon selection and order
-submission, and [map editing](map-editor-3d.md) for brush/elevation gestures.
+submission, and [map editing](3d-board-editor.md) for brush/elevation gestures.
 
 Free Flight uses the perspective eye managed by `BoardCamera` and swept contact
 from `BoardCameraCollision`. Projection/FOV changes belong in
@@ -99,11 +99,10 @@ with these existing preference/resource owners.
 
 ## Map editor
 
-[BoardEditorPanel](../megamek/src/megamek/client/ui/boardeditor/BoardEditorPanel.java)
-owns the board, tools, brush settings, file operations and undo history.
-The native view uses `GpuMapSource` to send picks back to those editor operations,
-including the existing `paintAt` path. Switching renderers retains the same editable
-board and history.
+[BoardEditorSession](../megamek/src/megamek/client/ui/boardeditor/BoardEditorSession.java)
+owns the document, tools, brush settings, file operations and undo history.
+The native view uses `GpuMapSource` to send picks back to those session commands. The
+classic 2D editor is gone; the editor's 2D Preview is a `BoardView` on the same document.
 
 A brush drag is one undo transaction. Wheel elevation changes also use the editor's
 stroke machinery, and finishing a gesture, losing focus or switching views must finish

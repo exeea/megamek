@@ -92,7 +92,7 @@ final class GpuGroundCover implements Disposable {
         for (int direction = 0; direction < 6; direction++) {
             tundraEdge |= BoardBiome.kind(scene.neighbor(tile, direction)) == BoardScene.Biome.TUNDRA;
         }
-        BoardRoad road = BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
+        BoardRoad road = BoardRoad.carriageway(tile) ? BoardRoad.way(scene, tile) : null;
         float sink = BoardGeometry.width() * .001f;
         // Frozen land's jagged border reaches across a shared edge (terrain-ice.glsl); no blade grows through it.
         List<Vector3[]> iceEdges = new ArrayList<>();

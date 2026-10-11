@@ -15,11 +15,12 @@ import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.Configuration;
+import megamek.common.board.BoardDecoration;
 
 /** Shared CPU geometry for the terrain-rock and scatter kits; no GL resources or placement policy. */
 record BoardShape(List<BoardShape.Polygon> polygons, float height) {
-    /** One flat face, counter-clockwise seen from outside. */
-    record Polygon(Vector3[] points, Vector3 normal, Color color) { }
+    /** One flat face, counter-clockwise seen from outside; {@code material} names its source material. */
+    record Polygon(Vector3[] points, Vector3 normal, Color color, String material) { }
 
     static Map<String, BoardShape> loadKit(String asset) {
         File root = new File(Configuration.dataDir(), "models/board");
@@ -28,10 +29,20 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
 
     /** CPU support uses the same finest authored level as the visible rigid model. */
     static BoardShape loadModel(String asset) {
-        File root = new File(Configuration.dataDir(), "models/board");
-        var shapes = shapes(RigidGlb.loadLods(new FileHandle(new File(root, asset + ".glb")), root.toPath()).getFirst());
+        var shapes = loadNodes(asset, BoardDecoration.Colours.NONE);
         if (shapes.size() != 1) { throw new IllegalArgumentException("Expected one shape in " + asset); }
         return shapes.values().iterator().next();
+    }
+
+    /**
+     * Every root node of the asset's finest authored level by name, its colour slots in {@code colours} by the one
+     * recolour rule ({@link RigidGlb#recolour}): the CPU twin of {@link GpuAssets#model(String, BoardDecoration.Colours)}.
+     */
+    static Map<String, BoardShape> loadNodes(String asset, BoardDecoration.Colours colours) {
+        File root = new File(Configuration.dataDir(), "models/board");
+        var data = RigidGlb.loadLods(new FileHandle(new File(root, asset + ".glb")), root.toPath()).getFirst();
+        RigidGlb.recolour(data, colours);
+        return shapes(data);
     }
 
     static Map<String, BoardShape> shapes(ModelData data) {
@@ -70,7 +81,7 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
                           mesh.vertices[offset + 2]).mul(normals).nor();
                     Color color = new Color(colors.get(part.materialId));
                     color.mul(mesh.vertices[offset + 3], mesh.vertices[offset + 4], mesh.vertices[offset + 5], 1);
-                    polygons.add(new Polygon(points, normal, color));
+                    polygons.add(new Polygon(points, normal, color, part.materialId));
                 }
             }
             if (centered && !polygons.isEmpty()) {

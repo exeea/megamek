@@ -47,6 +47,7 @@ import megamek.client.bot.princess.CardinalEdge;
 import megamek.common.Hex;
 import megamek.common.OffBoardDirection;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BoardType;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
@@ -235,6 +236,8 @@ public class BoardUtilities {
         result.setRoadsAutoExit(roadsAutoExit);
         // Initialize all hexes - buildings, exits, etc
         result.newData(resultWidth, resultHeight, resultData, null);
+        // Each sheet was converted on its own: join the bridges and emblems that cross a seam.
+        BoardSceneryLayouts.joinSheets(result);
 
         // assuming that the map setting and board types match
         result.setType(medium);
@@ -1631,6 +1634,52 @@ public class BoardUtilities {
             }
         }
 
+    }
+
+    /**
+     * A copy of {@code board} grown or shrunk by {@code north}, {@code east}, {@code south} and {@code west} hexes; a
+     * negative amount cuts that edge. Each hex moves as {@link #resized} says, with its terrain, appearance and objects
+     * (their groups included); hexes that end up outside are dropped and new hexes are blank. The copy keeps the board's
+     * metadata (tags, options, description, type, header, name), and each note moves with its hex. {@code board} is not
+     * changed.
+     *
+     * @throws IllegalArgumentException when no hex would be left
+     */
+    public static Board resize(Board board, int north, int east, int south, int west) {
+        int width = board.getWidth() + west + east, height = board.getHeight() + north + south;
+        if (width <= 0 || height <= 0) { throw new IllegalArgumentException("A board keeps at least one hex"); }
+        Hex[] data = new Hex[width * height];
+        for (int y = 0; y < board.getHeight(); y++) {
+            for (int x = 0; x < board.getWidth(); x++) {
+                Coords to = resized(new Coords(x, y), north, west);
+                if (to.getX() >= 0 && to.getX() < width && to.getY() >= 0 && to.getY() < height) {
+                    data[to.getY() * width + to.getX()] = board.getHex(x, y).duplicate();
+                }
+            }
+        }
+        for (int i = 0; i < data.length; i++) {
+            if (data[i] == null) { data[i] = new Hex(); }
+        }
+        Board result = new Board();
+        result.copyMetadataFrom(board);
+        board.getAnnotations().keySet().forEach(at -> result.setAnnotations(at, null));
+        board.getAnnotations().forEach((at, lines) -> {
+            Coords to = resized(at, north, west);
+            if (to.getX() >= 0 && to.getX() < width && to.getY() >= 0 && to.getY() < height) {
+                result.setAnnotations(to, List.copyOf(lines));
+            }
+        });
+        result.newData(width, height, data, null);
+        return result;
+    }
+
+    /**
+     * Where {@link #resize} moves the hex at {@code coords}: {@code west} columns east and {@code north} rows south, and
+     * one row more for an odd column when {@code west} is odd. The columns then change parity, so this keeps every hex's
+     * neighbours (the old editor's rule); the lowest row of those columns falls off unless the south edge grows too.
+     */
+    public static Coords resized(Coords coords, int north, int west) {
+        return new Coords(coords.getX() + west, coords.getY() + north + (coords.getX() & 1 & west));
     }
 
     /**

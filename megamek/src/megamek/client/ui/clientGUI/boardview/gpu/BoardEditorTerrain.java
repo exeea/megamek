@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
@@ -22,11 +23,10 @@ final class BoardEditorTerrain {
     static List<Integer> types(Hex hex, Set<Integer> blank) {
         List<Integer> result = new ArrayList<>();
         for (int type : hex.getTerrainTypes()) {
+            // A legacy art token that draws nothing never reaches the editor: the conversion takes it (takenTokens).
             boolean invisible = switch (type) {
                 case Terrains.BLACK_ICE, Terrains.BLDG_BASE_COLLAPSED, Terrains.METAL_CONTENT -> true;
-                case Terrains.GROUND_FLUFF -> blank.contains(type) && BoardSurfaceBlend.transitionFamily(hex) < 0;
-                case Terrains.BLDG_BASEMENT_TYPE, Terrains.FLUFF, Terrains.ROAD_FLUFF,
-                      Terrains.WATER_FLUFF, Terrains.BLDG_FLUFF -> blank.contains(type);
+                case Terrains.BLDG_BASEMENT_TYPE -> blank.contains(type);
                 default -> false;
             };
             if (invisible) { result.add(type); }
@@ -50,9 +50,10 @@ final class BoardEditorTerrain {
                 });
                 local.setColor(Color.WHITE);
                 local.setFont(new Font(Font.DIALOG, Font.BOLD, 8));
-                String zones = megamek.common.board.Board.exitsAsIntList(mask).stream().map(String::valueOf)
-                      .collect(java.util.stream.Collectors.joining(", "));
-                String label = zones.isEmpty() ? "Deployment zone" : "Zone " + zones;
+                // The IDs as the game reads them and the Edit panel shows them.
+                String zones = megamek.client.ui.boardeditor.BoardEditorSession.zoneIds(mask);
+                String label = zones.isEmpty() ? Messages.getString("BoardEditor.deploymentZoneMarker.none")
+                      : Messages.getString("BoardEditor.deploymentZoneMarker", zones);
                 local.drawString(label, 42 - local.getFontMetrics().stringWidth(label) / 2f, 61);
             }
             if (!types.isEmpty()) {

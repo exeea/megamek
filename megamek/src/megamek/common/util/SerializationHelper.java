@@ -36,7 +36,9 @@ package megamek.common.util;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import com.thoughtworks.xstream.XStream;
@@ -52,6 +54,7 @@ import megamek.common.SourceBookCode;
 import megamek.common.TargetRollModifier;
 import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
+import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.board.CubeCoords;
@@ -116,6 +119,37 @@ public class SerializationHelper {
         xStream.allowTypeHierarchy(AttackHandler.class);
         xStream.allowTypeHierarchy(VictoryCondition.class);
         xStream.allowTypeHierarchy(megamek.common.strategicBattleSystems.SBFMoveStep.class);
+
+        // A placed object's colour slots: XStream writes the record's unmodifiable list with its wrapped list, and
+        // rebuilds an element of it as that list, so the Colours record refused it and every object lost its colours.
+        // One text instead, a slot per comma, empty where the slot keeps the model's own colour.
+        xStream.registerConverter(new Converter() {
+            @Override
+            public boolean canConvert(Class type) {
+                return type == BoardDecoration.Colours.class;
+            }
+
+            @Override
+            public void marshal(Object object, HierarchicalStreamWriter writer, MarshallingContext context) {
+                List<String> slots = ((BoardDecoration.Colours) object).slots();
+                writer.setValue(String.join(",", slots.stream().map(slot -> slot == null ? "" : slot).toList()));
+            }
+
+            @Override
+            public Object unmarshal(HierarchicalStreamReader reader, UnmarshallingContext context) {
+                // A save written before this converter holds the list itself, whose colours were lost then anyway.
+                if (reader.hasMoreChildren()) {
+                    return BoardDecoration.Colours.NONE;
+                }
+                try {
+                    return new BoardDecoration.Colours(Arrays.stream(reader.getValue().split(",", -1))
+                          .map(slot -> slot.isEmpty() ? null : slot).toList());
+                } catch (IllegalArgumentException exception) {
+                    LOGGER.warn(exception, "Could not read an object's colours from the save game; using its own.");
+                    return BoardDecoration.Colours.NONE;
+                }
+            }
+        });
         return xStream;
     }
 

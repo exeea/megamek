@@ -35,28 +35,22 @@
 package megamek.client.ui.tileset;
 
 import java.awt.*;
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileReader;
 import java.io.IOException;
-import java.io.Reader;
-import java.io.StreamTokenizer;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Random;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.Vector;
 
 import megamek.client.ui.util.ImageCache;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardEditorBlueprint;
+import megamek.common.board.HexTile;
+import megamek.common.board.TilesetMatcher;
 import megamek.common.event.GameListener;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.board.BoardEvent;
@@ -64,35 +58,28 @@ import megamek.common.event.board.BoardListener;
 import megamek.common.event.board.GameBoardChangeEvent;
 import megamek.common.event.board.GameBoardNewEvent;
 import megamek.common.game.IGame;
-import megamek.common.units.Terrain;
-import megamek.common.units.Terrains;
 import megamek.common.util.ImageUtil;
-import megamek.common.util.StringUtil;
 import megamek.common.util.fileUtils.MegaMekFile;
-import megamek.logging.MMLogger;
 
 /**
- * Matches each hex with an appropriate image.
+ * Matches each hex with an appropriate image: the tileset's text and its matching are the common {@link TilesetMatcher};
+ * this keeps the images and their caches.
  *
  * @author Ben
  */
 public class HexTileset implements BoardListener, AutoCloseable {
-    private static final MMLogger logger = MMLogger.create(HexTileset.class);
-
     /** The image width of a hex image. */
-    public static final int HEX_W = 84;
+    public static final int HEX_W = HexTile.WIDTH;
 
     /** The image height of a hex image. */
-    public static final int HEX_H = 72;
+    public static final int HEX_H = HexTile.HEIGHT;
 
-    public static final String TRANSPARENT_THEME = "transparent";
-
-    private final List<HexEntry> bases = new ArrayList<>();
-    private final List<HexEntry> superimposed = new ArrayList<>();
-    private final List<HexEntry> orthographic = new ArrayList<>();
-    private final Set<String> themes = new TreeSet<>();
     private final Map<Image, Boolean> blankImages = new IdentityHashMap<>();
     private final File imageRoot;
+    /** Which entries and files each hex selects; shared with the 3D board for its own tileset. */
+    private final TilesetMatcher matcher;
+    /** Each entry's images in its file order, loaded on first use. */
+    private final Map<TilesetMatcher.Entry, List<Image>> entryImages = new IdentityHashMap<>();
     private IGame observedGame;
     private GameListener gameListener;
     private final Set<Board> observedBoards = new java.util.HashSet<>();
@@ -101,16 +88,12 @@ public class HexTileset implements BoardListener, AutoCloseable {
     private ImageCache<Hex, Image> basesCache = new ImageCache<>();
     private ImageCache<Hex, List<Image>> superimposedCache = new ImageCache<>();
     private ImageCache<Hex, List<Image>> orthographicCache = new ImageCache<>();
-    private record TerrainMatch(int type, int level, int exits) { }
-    private record MatchKey(int level, String theme, List<TerrainMatch> terrains) {
-        static MatchKey of(Hex hex) {
-            return new MatchKey(hex.getLevel(), hex.getTheme(), Arrays.stream(hex.getTerrainTypes()).sorted()
-                  .mapToObj(type -> new TerrainMatch(type, hex.terrainLevel(type), hex.getTerrain(type).getExits()))
-                  .toList());
-        }
-    }
-    private record Match(HexEntry base, List<HexEntry> supers, List<HexEntry> orthographic) { }
-    private final Map<MatchKey, Match> matches = new HashMap<>();
+    /**
+     * Whether a hex is drawn with the art its designs stand for ({@link BoardEditorBlueprint#artwork(Hex)}): the 2D board
+     * of a game, whose {@code .board2} holds designs instead of the legacy tokens (building art, transitions, kerbs,
+     * orchards, rough). The 3D board's artwork resolves designs itself, per owner.
+     */
+    private boolean designs;
 
     /**
      * Creates new HexTileset
@@ -121,12 +104,19 @@ public class HexTileset implements BoardListener, AutoCloseable {
 
     /** Explicitly managed artwork cache, without game or board listeners. */
     public HexTileset(File imageRoot) {
+        this(imageRoot, new TilesetMatcher(imageRoot));
+    }
+
+    /** The images of an already loaded tileset text, such as the 3D board's one per JVM; no listeners. */
+    public HexTileset(File imageRoot, TilesetMatcher matcher) {
         this.imageRoot = imageRoot;
+        this.matcher = matcher;
     }
 
     /** A separate artwork root lets the 3D board keep its own editable tileset. */
     public HexTileset(IGame game, File imageRoot) {
         this(imageRoot);
+        designs = true;
         // The Board and Game listeners
         // The HexTileSet caches images with the hex object as key. Therefore, it must listen to Board events to
         // clear changed (but not replaced) hexes from the cache. It must listen to Game events to catch when a board
@@ -179,25 +169,11 @@ public class HexTileset implements BoardListener, AutoCloseable {
      * best image is used.
      */
     public synchronized Object[] assignMatch(Hex hex) {
-        MatchKey key = MatchKey.of(hex);
-        Match match = matches.get(key);
-        if (match == null) {
-            // Match rules depend on terrain, elevation and theme; image variants still depend on coordinates.
-            // Bound this small metadata cache independently of the number of hexes or subsequent board edits.
-            if (matches.size() >= 4096) {
-                matches.clear();
-            }
-            Hex hexCopy = hex.duplicate();
-            List<HexEntry> orthographic = orthographicFor(hexCopy);
-            List<HexEntry> supers = superimposedFor(hexCopy);
-            match = new Match(baseFor(hexCopy), supers, orthographic);
-            matches.put(key, match);
-        }
-        int seed = hex.getCoords().hashCode();
-        List<Image> orthographic = images(match.orthographic(), seed);
-        List<Image> superimposed = images(match.supers(), seed);
-        Random random = new Random(seed);
-        Image base = image(match.base(), Math.abs(random.nextInt() * random.nextInt()));
+        TilesetMatcher.Selection selection = matcher.select(designs && !hex.getAppearance().isEmpty()
+              ? BoardEditorBlueprint.get().artwork(hex) : hex);
+        List<Image> orthographic = images(selection.orthographic());
+        List<Image> superimposed = images(selection.supers());
+        Image base = image(selection.base());
         Object[] pair = new Object[] { base, superimposed, orthographic };
         basesCache.put(hex, base);
         superimposedCache.put(hex, superimposed);
@@ -205,66 +181,37 @@ public class HexTileset implements BoardListener, AutoCloseable {
         return pair;
     }
 
-    private List<Image> images(List<HexEntry> entries, int seed) {
-        List<Image> result = new ArrayList<>(entries.size());
-        for (HexEntry entry : entries) {
-            result.add(image(entry, seed));
+    private List<Image> images(List<TilesetMatcher.Pick> picks) {
+        List<Image> result = new ArrayList<>(picks.size());
+        for (TilesetMatcher.Pick pick : picks) {
+            result.add(image(pick));
         }
         return result;
     }
 
-    private Image image(HexEntry entry, int seed) {
-        Image image = entry == null ? null : entry.getImage(seed);
-        return image == null ? ImageUtil.createAcceleratedImage(HEX_W, HEX_H) : image;
+    /** The image of a picked file; a blank one when no entry was selected or the entry names no file. */
+    public synchronized Image image(TilesetMatcher.Pick pick) {
+        if ((pick == null) || (pick.index() < 0)) {
+            return ImageUtil.createAcceleratedImage(HEX_W, HEX_H);
+        }
+        return entryImages.computeIfAbsent(pick.entry(), this::loadImages).get(pick.index());
     }
 
-    /**
-     * The levels of a decorative terrain that this tileset actually has images for, given the structure described.
-     *
-     * <p>A fluff terrain picks which picture a hex is drawn with, and the numbers are not a range - the tileset
-     * defines particular ones and ties each to a particular structure. One entry reads
-     * {@code building:2:00;bldg_cf:*;bldg_elev:*;bldg_fluff:10}, so that image belongs to a medium building and
-     * nothing else; a light building has four images where a hardened one has fifty-four. Offering a plain number
-     * field therefore offers mostly numbers that draw nothing at all, which is what this exists to avoid.</p>
-     *
-     * @param structure    A hex holding the structure the images are wanted for, as the board would hold it
-     * @param fluffTerrain The decorative terrain to look for, such as {@link Terrains#BLDG_FLUFF}
-     *
-     * @return The levels this tileset has images for, in order; empty when it has none
-     */
-    public synchronized List<Integer> definedFluffLevels(Hex structure, int fluffTerrain) {
-        Set<Integer> levels = new TreeSet<>();
-        for (HexEntry entry : superimposed) {
-            addFluffLevel(entry, structure, fluffTerrain, levels);
+    /** The entry's images in its file order; the loader returns a placeholder for a file it cannot read. */
+    private List<Image> loadImages(TilesetMatcher.Entry entry) {
+        List<Image> images = new ArrayList<>(entry.files().size());
+        for (String filename : entry.files()) {
+            File imgFile = new MegaMekFile(imageRoot, filename).getFile();
+            Image image = ImageUtil.loadImageFromFile(imgFile.toString());
+            images.add(image);
+            imageSources.put(image, new ImageSource(filename, entry.hex()));
         }
-        for (HexEntry entry : bases) {
-            addFluffLevel(entry, structure, fluffTerrain, levels);
-        }
-        return List.copyOf(levels);
+        return images;
     }
 
-    /** Takes one entry's fluff level, when everything else that entry asks for is what the structure actually is. */
-    private static void addFluffLevel(HexEntry entry, Hex structure, int fluffTerrain, Set<Integer> levels) {
-        Hex entryHex = entry.getHex();
-        int fluffLevel = entryHex.terrainLevel(fluffTerrain);
-        if ((fluffLevel == Terrain.LEVEL_NONE) || (fluffLevel == Terrain.WILDCARD)) {
-            // no fluff at all, or the catch-all entry that matches every level and names no particular picture
-            return;
-        }
-        // the same rule the matching above uses, minus exits and theme: an entry only suits a hex that has every
-        // terrain the entry names, at the level it names unless it names a wildcard
-        for (int terrainType : entryHex.getTerrainTypes()) {
-            if (terrainType == fluffTerrain) {
-                continue;
-            }
-            int requiredLevel = entryHex.terrainLevel(terrainType);
-            int actualLevel = structure.terrainLevel(terrainType);
-            if ((actualLevel == Terrain.LEVEL_NONE)
-                  || ((requiredLevel != Terrain.WILDCARD) && (actualLevel != requiredLevel))) {
-                return;
-            }
-        }
-        levels.add(fluffLevel);
+    /** The levels of a decorative terrain this tileset has images for: {@link TilesetMatcher#definedFluffLevels}. */
+    public List<Integer> definedFluffLevels(Hex structure, int fluffTerrain) {
+        return matcher.definedFluffLevels(structure, fluffTerrain);
     }
 
     public synchronized Image getBase(Hex hex) {
@@ -324,335 +271,13 @@ public class HexTileset implements BoardListener, AutoCloseable {
         return Set.copyOf(blank);
     }
 
-    /**
-     * Returns a list of orthographic images to be tiled above the hex. As noted above, all matches must be 1.0, and if
-     * such a match is achieved, all terrain elements from the tileset hex are removed from the hex. Thus, you want to
-     * pass a copy of the original to this function.
-     */
-    private List<HexEntry> orthographicFor(Hex hex) {
-        ArrayList<HexEntry> matches = new ArrayList<>();
-
-        // find orthographic image matches
-        for (HexEntry entry : orthographic) {
-            if (orthographicMatch(hex, entry.getHex()) >= 1.0) {
-                matches.add(entry);
-                // remove involved terrain from consideration
-                for (int terr : entry.getHex().getTerrainTypes()) {
-                    if (entry.getHex().containsTerrain(terr)) {
-                        hex.removeTerrain(terr);
-                    }
-                }
-            }
-        }
-        return matches;
-    }
-
-    /**
-     * Returns a list of images to be superimposed on the hex. As noted above, all matches must be 1.0, and if such a
-     * match is achieved, all terrain elements from the tileset hex are removed from the hex. Thus, you want to pass a
-     * copy of the original to this function.
-     */
-    private List<HexEntry> superimposedFor(Hex hex) {
-        ArrayList<HexEntry> matches = new ArrayList<>();
-
-        // find superimposed image matches
-        for (HexEntry entry : superimposed) {
-            if (superMatch(hex, entry.getHex()) >= 1.0) {
-                matches.add(entry);
-                // remove involved terrain from consideration
-                for (int terr : entry.getHex().getTerrainTypes()) {
-                    if (entry.getHex().containsTerrain(terr)) {
-                        hex.removeTerrain(terr);
-                    }
-                }
-            }
-        }
-        return matches;
-    }
-
-    /**
-     * Returns the best matching base image for this hex. This works best if any terrain with a "super" image is
-     * removed.
-     */
-    private HexEntry baseFor(Hex hex) {
-        // A hazard with no dedicated artwork must never force the first unrelated base as a zero-score fallback.
-        // Keep it available to explicit super rules; remove it only from the remaining base match.
-        hex.removeTerrain(Terrains.BLACK_ICE);
-        hex.removeTerrain(Terrains.METAL_CONTENT);
-        HexEntry bestMatch = null;
-        double match = -1;
-
-        // match a base image to the hex
-        for (HexEntry entry : bases) {
-
-            double thisMatch = baseMatch(hex, entry.getHex());
-            // stop if perfect match
-            if (thisMatch == 1.0) {
-                bestMatch = entry;
-                break;
-            }
-            // compare match with best
-            if (thisMatch > match) {
-                bestMatch = entry;
-                match = thisMatch;
-            }
-        }
-
-        return bestMatch;
-    }
-
-    // perfect match
-    // all but theme
-    // all but elevation
-    // all but elevation & theme
-
-    /** Recursion depth counter to prevent freezing from circular includes */
-    public int incDepth = 0;
-
+    /** Reads the tileset file {@code filename} and its includes ({@link TilesetMatcher#load}). */
     public void loadFromFile(String filename) throws IOException {
-        matches.clear();
-        long startTime = java.lang.System.currentTimeMillis();
-        // make input stream for board
-        Reader r = new BufferedReader(new FileReader(new MegaMekFile(imageRoot, filename).getFile()));
-        // read board, looking for "size"
-        StreamTokenizer st = new StreamTokenizer(r);
-        st.eolIsSignificant(true);
-        st.commentChar('#');
-        st.quoteChar('"');
-        st.wordChars('_', '_');
-        while (st.nextToken() != StreamTokenizer.TT_EOF) {
-            int elevation = 0;
-            // int levity = 0;
-            String terrain;
-            String theme;
-            String imageName;
-            if ((st.ttype == StreamTokenizer.TT_WORD)
-                  && (st.sval.equals("base") || st.sval.equals("super") || st.sval.equals("ortho"))) {
-                boolean bas = st.sval.equals("base");
-                boolean sup = st.sval.equals("super");
-                boolean ort = st.sval.equals("ortho");
-
-                if (st.nextToken() == StreamTokenizer.TT_NUMBER) {
-                    elevation = (int) st.nval;
-                } else {
-                    if (st.ttype == 62) { // ">"
-                        if (st.nextToken() == StreamTokenizer.TT_NUMBER) { // e.g. ">4"
-                            elevation = (int) (Terrain.AT_LEAST + st.nval);
-                        }
-                    } else {
-                        elevation = Terrain.WILDCARD;
-                    }
-                }
-                st.nextToken();
-                terrain = st.sval;
-                st.nextToken();
-                theme = st.sval;
-                themes.add(theme);
-                st.nextToken();
-                imageName = st.sval;
-                // add to list
-                if (bas) {
-                    bases.add(new HexEntry(new Hex(elevation, terrain, theme), imageName));
-                }
-                if (sup) {
-                    superimposed.add(new HexEntry(new Hex(elevation, terrain, theme), imageName));
-                }
-                if (ort) {
-                    orthographic.add(new HexEntry(new Hex(elevation, terrain, theme), imageName));
-                }
-            } else if ((st.ttype == StreamTokenizer.TT_WORD) && st.sval.equals("include")) {
-                st.nextToken();
-                incDepth++;
-                if (incDepth < 100) {
-                    String incFile = st.sval;
-                    logger.debug("Including {}", incFile);
-                    loadFromFile(incFile);
-                }
-            }
-        }
-        r.close();
-        themes.add(TRANSPARENT_THEME);
-        long endTime = java.lang.System.currentTimeMillis();
-
-        String loadInfo = String.format("Loaded %o base images, %o super images and %o orthographic images",
-              bases.size(), superimposed.size(), orthographic.size());
-        logger.debug(loadInfo);
-
-        if (incDepth == 0) {
-            logger.info("HexTileset {} loaded in {}ms.", filename, endTime - startTime);
-        }
-        incDepth--;
+        matcher.load(filename);
     }
 
     public Set<String> getThemes() {
-        return new TreeSet<>(themes);
-    }
-
-    /**
-     * Match the two hexes using the "orthographic" super* formula. All matches must be exact, however the match only
-     * depends on the original hex matching all the elements of the comparison, not vice versa.
-     * <p>
-     * EXCEPTION: a themed original matches any unthemed comparison.
-     */
-    private double orthographicMatch(Hex org, Hex com) {
-        // exact elevation
-        if ((com.getLevel() != Terrain.WILDCARD) && (com.getLevel() < Terrain.AT_LEAST)
-              && (org.getLevel() != com.getLevel())) {
-            return 0;
-        }
-
-        // greater than elevation (e.g. >4), the "-100" to allow >-3
-        if ((com.getLevel() != Terrain.WILDCARD) && (com.getLevel() >= Terrain.AT_LEAST - 100)
-              && (org.getLevel() < com.getLevel() - Terrain.AT_LEAST)) {
-            return 0;
-        }
-
-        // A themed original matches any unthemed comparison.
-        if ((com.getTheme() != null) && !com.getTheme().equalsIgnoreCase(org.getTheme())) {
-            return 0.0;
-        }
-
-        // org terrains must match com terrains
-        if (org.terrainsPresent() < com.terrainsPresent()) {
-            return 0.0;
-        }
-
-        // check terrain
-        int[] cTerrainTypes = com.getTerrainTypes();
-        for (int cTerrType : cTerrainTypes) {
-            Terrain cTerr = com.getTerrain(cTerrType);
-            Terrain oTerr = org.getTerrain(cTerrType);
-
-            if (cTerr != null && ((oTerr == null)
-                  || ((cTerr.getLevel() != Terrain.WILDCARD) && (oTerr.getLevel() != cTerr.getLevel()))
-                  || (cTerr.hasExitsSpecified() && (oTerr.getExits() != cTerr.getExits())))) {
-                return 0;
-            }
-        }
-
-        return 1.0;
-    }
-
-    /**
-     * Match the two hexes using the "super" formula. All matches must be exact, however the match only depends on the
-     * original hex matching all the elements of the comparison, not vice versa.
-     * <p>
-     * EXCEPTION: a themed original matches any unthemed comparison.
-     */
-    private double superMatch(Hex org, Hex com) {
-        // exact elevation
-        if ((com.getLevel() != Terrain.WILDCARD) && (com.getLevel() < Terrain.AT_LEAST)
-              && (org.getLevel() != com.getLevel())) {
-            return 0;
-        }
-
-        // greater than elevation (e.g. >4), the "-100" to allow >-3
-        if ((com.getLevel() != Terrain.WILDCARD) && (com.getLevel() >= Terrain.AT_LEAST - 100)
-              && (org.getLevel() < com.getLevel() - Terrain.AT_LEAST)) {
-            return 0;
-        }
-
-        // A themed original matches any unthemed comparison.
-        if ((com.getTheme() != null) && !com.getTheme().equalsIgnoreCase(org.getTheme())) {
-            return 0.0;
-        }
-
-        // org terrains must match com terrains
-        if (org.terrainsPresent() < com.terrainsPresent()) {
-            return 0.0;
-        }
-
-        // check terrain
-        int[] cTerrainTypes = com.getTerrainTypes();
-        for (int cTerrType : cTerrainTypes) {
-            Terrain cTerr = com.getTerrain(cTerrType);
-            Terrain oTerr = org.getTerrain(cTerrType);
-            if (cTerr != null && ((oTerr == null)
-                  || ((cTerr.getLevel() != Terrain.WILDCARD) && (oTerr.getLevel() != cTerr.getLevel()))
-                  || (cTerr.hasExitsSpecified() && (oTerr.getExits() != cTerr.getExits())))) {
-                return 0;
-            }
-        }
-
-        return 1.0;
-    }
-
-    /**
-     * Match the two hexes using the "base" formula.
-     *
-     * @return a value indicating how close of a match the original hex is to the comparison hex. 0 means no match, 1
-     *       means perfect match.
-     */
-    private double baseMatch(Hex org, Hex com) {
-        double elevation;
-        double terrain;
-        double theme;
-
-        // check elevation
-        if (com.getLevel() == Terrain.WILDCARD) {
-            elevation = 1.0;
-        } else if (com.getLevel() >= Terrain.AT_LEAST - 100) {
-            if (org.getLevel() >= com.getLevel() - Terrain.AT_LEAST) {
-                elevation = 1.0;
-            } else {
-                elevation = 1.01 / (Math.abs(org.getLevel() - com.getLevel() - Terrain.AT_LEAST) + 1.01);
-            }
-        } else {
-            elevation = 1.01 / (Math.abs(org.getLevel() - com.getLevel()) + 1.01);
-        }
-
-        // Determine maximum number of terrain matches.
-        // Bug 732188: Have a non-zero minimum terrain match.
-        double maxTerrains = Math.max(org.terrainsPresent(), com.terrainsPresent());
-        double matches = 0.0;
-
-        int[] orgTerrains = org.getTerrainTypes();
-
-        for (int terrType : orgTerrains) {
-            Terrain cTerr = com.getTerrain(terrType);
-            Terrain oTerr = org.getTerrain(terrType);
-            if ((cTerr == null) || (oTerr == null)) {
-                continue;
-            }
-            double thisMatch;
-
-            if (cTerr.getLevel() == Terrain.WILDCARD) {
-                thisMatch = 1.0;
-            } else if (cTerr.getLevel() >= Terrain.AT_LEAST - 100) {
-                if (oTerr.getLevel() >= com.getLevel() - Terrain.AT_LEAST) {
-                    thisMatch = 1.0;
-                } else {
-                    thisMatch = 1.0 / (Math.abs(oTerr.getLevel() - cTerr.getLevel() - Terrain.AT_LEAST) + 1.0);
-                }
-            } else {
-                thisMatch = 1.0 / (Math.abs(oTerr.getLevel() - cTerr.getLevel()) + 1.0);
-            }
-            // without exit match, terrain counts... um, half?
-            if (cTerr.hasExitsSpecified() && (oTerr.getExits() != cTerr.getExits())) {
-                thisMatch *= 0.5;
-            }
-            // add up match value
-            matches += thisMatch;
-        }
-        if (maxTerrains == 0) {
-            terrain = 1.0;
-        } else {
-            terrain = matches / maxTerrains;
-        }
-
-        // check theme
-        if ((Objects.equals(com.getTheme(), org.getTheme()))
-              || ((com.getTheme() != null) && com.getTheme().equalsIgnoreCase(org.getTheme()))) {
-            theme = 1.0;
-        } else if ((org.getTheme() != null) && (com.getTheme() == null)) {
-            // If no precise themed match, slightly favor unthemed comparisons
-            theme = 0.001;
-        } else {
-            // also don't throw a match entirely out because the theme is off
-            theme = 0.0001;
-        }
-
-        return elevation * terrain * theme;
+        return matcher.getThemes();
     }
 
     public synchronized String imageSource(Image image) {
@@ -664,54 +289,6 @@ public class HexTileset implements BoardListener, AutoCloseable {
     public synchronized boolean imageHasTerrain(Image image, int terrain) {
         ImageSource source = imageSources.get(image);
         return source != null && source.terrain().containsTerrain(terrain);
-    }
-
-    private class HexEntry {
-        private final Hex hex;
-        private Vector<Image> images;
-        private final Vector<String> filenames;
-
-        public HexEntry(Hex hex, String imageFile) {
-            this.hex = hex;
-            filenames = StringUtil.splitString(imageFile, ";");
-        }
-
-        public Hex getHex() {
-            return hex;
-        }
-
-        public Image getImage(int seed) {
-            if ((images == null) || images.isEmpty()) {
-                loadImage();
-            }
-            if (images.isEmpty()) {
-                return null;
-            }
-            if (images.size() > 1) {
-                int rand = (seed % images.size());
-                return images.elementAt(rand);
-            }
-            return images.firstElement();
-        }
-
-        public void loadImage() {
-            images = new Vector<>();
-            for (String filename : filenames) {
-                File imgFile = new MegaMekFile(imageRoot, filename).getFile();
-                Image image = ImageUtil.loadImageFromFile(imgFile.toString());
-                if (image != null) {
-                    images.add(image);
-                    imageSources.put(image, new ImageSource(filename, hex));
-                } else {
-                    logger.error("Received null image from ImageUtil.loadImageFromFile! File: {}", imgFile);
-                }
-            }
-        }
-
-        @Override
-        public String toString() {
-            return "HexTileset: " + hex.toString();
-        }
     }
 
     @Override

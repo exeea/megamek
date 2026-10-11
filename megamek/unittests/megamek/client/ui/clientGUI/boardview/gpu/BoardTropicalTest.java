@@ -13,6 +13,7 @@ import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -20,10 +21,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardTropicalTest {
+    /** The real map as a map preview loads it: converted, so its transitions are drawn by their ground designs. */
     static Board racice() {
-        var board = new Board();
-        board.load(new File("data/boards/Battle of Tukayyid Pack/32x17 Racice River Delta (CSJ).board"));
-        return board;
+        return GpuBoardWindow.loadPreview(new File("data/boards/Battle of Tukayyid Pack/32x17 Racice River Delta (CSJ).board"));
     }
 
     @Test
@@ -87,6 +87,8 @@ class BoardTropicalTest {
         for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) {
             board.setHex(new Coords(x, y), new Hex(0, "ground_fluff:1:3", "tropical"));
         }
+        // As every load site converts a legacy board: the transition becomes its ground design.
+        BoardSceneryLayouts.convert(board);
         var scene = BoardAridSurfaceTest.capture(board);
         var tile = scene.tile(new Coords(1, 1));
         var surface = new BoardSurface(scene, tile);

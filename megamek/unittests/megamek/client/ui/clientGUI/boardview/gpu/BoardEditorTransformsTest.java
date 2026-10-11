@@ -12,6 +12,7 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.common.Hex;
 import megamek.common.board.BoardDecoration;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
@@ -72,11 +73,11 @@ class BoardEditorTransformsTest {
         double[] sample = paint.rotateVector(84 * 2 * 2 * .25, 72 * 2 * .5 * -.3, 0);
         assertEquals(.75, BoardDecals.paintUv(paint).u(sample[0], sample[1]), .00001);
         assertEquals(.8, BoardDecals.paintUv(paint).v(sample[0], sample[1]), .00001);
-        // Layout rows hand the same stretch to the legacy render's features and to imported objects.
-        var row = new BoardSceneryLayouts.Component(object.asset(), BoardScene.FeatureKind.SCENERY, 4, -6, 0, 90, 1, 0, stretch,
+        // Layout rows hand the same stretch to the drawn terrain-owned rows and to imported objects.
+        var row = new BoardSceneryLayouts.Component(object.asset(), false, 4, -6, 0, 90, 1, 0, stretch,
               BoardDecoration.Colours.NONE);
         var layout = new BoardSceneryLayouts.Layout(List.of(row));
-        assertEquals(stretch, layout.features(at, new Hex(), false).getFirst().stretch());
+        assertEquals(stretch, BoardFeatures.features(layout, at, new Hex()).getFirst().stretch());
         assertEquals(stretch, layout.decorations(at, new Hex(), () -> "id", null, true).getFirst().stretch());
     }
 

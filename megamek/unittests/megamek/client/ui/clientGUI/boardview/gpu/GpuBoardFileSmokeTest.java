@@ -16,6 +16,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import org.junit.jupiter.api.Tag;
@@ -48,8 +49,8 @@ class GpuBoardFileSmokeTest {
         List<String> names = new ArrayList<>();
         List<BoardScene> scenes = new ArrayList<>();
         for (String path : boards.split(",")) {
-            Board board = new Board();
-            board.load(new File("data/boards", path.trim()));
+            // As a game loads a sheet: converted, so a legacy board shows its scenery as placed objects.
+            Board board = BoardFile.loadSheet(new File("data/boards", path.trim()), false, true);
             AtomicReference<BoardScene> scene = new AtomicReference<>();
             if (Boolean.getBoolean("megamek.gpu.boards.mapEditor")) {
                 SwingUtilities.invokeAndWait(() -> {

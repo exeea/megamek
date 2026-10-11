@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import javax.swing.SwingUtilities;
 
 import megamek.common.Hex;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -26,7 +27,9 @@ class GpuRoughCaptureTest {
                 var clear = fixture.source.takeFrame().scene().tile(coords);
                 Hex rough = hex.duplicate();
                 rough.addTerrain(new Terrain(Terrains.ROUGH, 1));
+                // A typed rough token (a gamemaster's) draws in 3D through the design its helper gives it.
                 if (fluff != 0) { rough.addTerrain(new Terrain(Terrains.FLUFF, fluff)); }
+                BoardSceneryLayouts.designTypedTokens(hex, rough);
                 fixture.game.getBoard().setHex(coords, rough);
                 fixture.source.refresh();
                 var rocky = fixture.source.takeFrame().scene().tile(coords);
@@ -45,6 +48,7 @@ class GpuRoughCaptureTest {
                 if (fluff != 0) {
                     Hex changed = rough.duplicate();
                     changed.addTerrain(new Terrain(Terrains.FLUFF, 3 - fluff));
+                    BoardSceneryLayouts.designTypedTokens(rough, changed);
                     fixture.game.getBoard().setHex(coords, changed);
                     fixture.source.refresh();
                     var edited = fixture.source.takeFrame().scene().tile(coords);

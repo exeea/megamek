@@ -28,6 +28,7 @@ import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import com.badlogic.gdx.Application;
@@ -531,6 +532,70 @@ class GpuHudInputTest {
         verifyNoInteractions(moves);
     }
 
+    /**
+     * Repeated clicks on a stack take its units in turn in every phase (the user's decision of 2026-10-11), here
+     * outside the local turn: while the shown unit stands in the clicked hex, a click takes the next unit there, so the
+     * own units become the focus one after the other and the enemies, a sensor contact among them, are inspected one
+     * after the other, whichever unit the pick hit. A lone unit stays taken.
+     */
+    @Test
+    void repeatedClicksOnAStackTakeItsUnitsInTurn() {
+        Coords enemies = new Coords(9, 9);
+        Coords alone = new Coords(3, 3);
+        GpuBattleStatus.Snapshot waiting = status(3, GamePhase.FIRING, false, Entity.NONE, 2,
+              unit(FIRST, OWN, false, true), unit(SECOND, OWN, false, true), unit(THIRD, OWN, false, true),
+              unit(FOE, ENEMY, false, false), unit(BLIP, ENEMY, false, false, 1, true));
+        BoardScene scene = scene(Map.of(HEX, List.of(FIRST, SECOND), enemies, List.of(FOE, BLIP), alone,
+              List.of(THIRD)));
+        hud.update(frame(waiting, GpuHudData.EMPTY, scene), GpuHud.HudView.EMPTY, null, preferences());
+        assertEquals(FIRST, hud.state.focus());
+        assertEquals(SECOND, hud.clickedUnit(HEX, FIRST), "the hover shows the unit the click takes");
+        List<Integer> taken = new ArrayList<>();
+        for (int count = 0; count < 3; count++) {
+            click(HEX, FIRST, 0);
+            taken.add(hud.state.focus());
+        }
+        assertEquals(List.of(SECOND, FIRST, SECOND), taken, "the focus stands in the hex: the next unit first");
+        taken.clear();
+        for (int count = 0; count < 3; count++) {
+            click(enemies, BLIP, 0);
+            taken.add(hud.state.inspected);
+        }
+        assertEquals(List.of(BLIP, FOE, BLIP), taken, "the picked unit first");
+        click(alone, THIRD, 0);
+        click(alone, THIRD, 0);
+        assertEquals(List.of(THIRD, Entity.NONE), List.of(hud.state.focus(), hud.state.inspected));
+        verify(source, never()).selectUnit(anyInt());
+    }
+
+    /**
+     * In the local FIRING turn a stack's turn starts from the focused target, so repeated clicks focus its enemies in
+     * turn, the one the card inspects last, and pass over its sensor contact, which a click cannot focus, and the wreck
+     * the board draws there, which the status does not list: no click falls through to the hex's target choice.
+     */
+    @Test
+    void repeatedClicksInTheFiringTurnFocusAStacksEnemiesInTurn() {
+        int other = 9;
+        int wreck = 10;
+        Coords enemies = new Coords(9, 9);
+        GpuBattleStatus.Snapshot firing = status(3, GamePhase.FIRING, true, FIRST, 1, unit(FIRST, OWN, true, true),
+              unit(FOE, ENEMY, false, false), unit(BLIP, ENEMY, false, false, 1, true),
+              unit(other, ENEMY, false, false));
+        BoardScene scene = scene(Map.of(HEX, List.of(FIRST), enemies, List.of(FOE, BLIP, wreck, other)));
+        hud.update(frame(firing, GpuHudData.EMPTY, scene), GpuHud.HudView.EMPTY, null, preferences());
+        hud.state.inspected = FOE;
+        for (int next : List.of(other, FOE, other)) {
+            assertEquals(next, hud.clickedUnit(enemies, BLIP), "the hover shows the unit the click takes");
+            click(enemies, BLIP, 0);
+            verify(fire).focusTarget(any(TargetKey.class));
+            verify(fire).focusTarget(TargetKey.unit(next));
+            clearInvocations(fire);
+            hud.update(frame(firing, panels(GpuMovePlan.Snapshot.EMPTY, focused(next), GpuPhysicalOptions.Snapshot.EMPTY,
+                  GpuUnitRecord.Snapshot.EMPTY), scene), GpuHud.HudView.EMPTY, null, preferences());
+        }
+        verify(fire, never()).clickHex(any(), anyInt(), anyInt());
+    }
+
     @Test
     void shiftClickOrientsThePlannedEndpointWithoutSelectingUnitsOrAddingWaypoints() {
         update(status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true),
@@ -734,8 +799,29 @@ class GpuHudInputTest {
 
     /** A frame of the given status and panels; the scene is a mock, so board clicks are routed. */
     static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, GpuHudData panels) {
-        return new GpuBoardSource.Frame(mock(BoardScene.class), List.of(), null, List.of(), "", null, 0, "", null,
+        return frame(status, panels, mock(BoardScene.class));
+    }
+
+    private static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, GpuHudData panels, BoardScene scene) {
+        return new GpuBoardSource.Frame(scene, List.of(), null, List.of(), "", null, 0, "", null,
               GpuReportLog.Snapshot.EMPTY, status, panels);
+    }
+
+    /** The local actor's orders, focused on the unit {@code id}. */
+    private static GpuFireOrders.Snapshot focused(int id) {
+        return new GpuFireOrders.Snapshot(true, true, FIRST, new GpuFireOrders.Focus(TargetKey.unit(id), "Unit " + id,
+              null), -1, List.of(), List.of(), List.of(), 0, false, false, "", null, null, null, List.of(), null,
+              Map.of(), 0, 0, null);
+    }
+
+    /** A scene of board 0 that draws the units listed under each hex there, in the listed order. */
+    private static BoardScene scene(Map<Coords, List<Integer>> hexes) {
+        List<BoardScene.Unit> units = new ArrayList<>();
+        hexes.forEach((hex, ids) -> ids.forEach(id -> units.add(new BoardScene.Unit(id, -1, "Unit " + id,
+              new BoardScene.Waypoint(hex, 0, 0), null, false, null, 1, false))));
+        BoardScene scene = mock(BoardScene.class);
+        when(scene.units()).thenReturn(units);
+        return scene;
     }
 
     /** MegaMek's default key of every bind, so the user's own key bindings do not change the test. */
@@ -793,7 +879,7 @@ class GpuHudInputTest {
     static GpuMovePlan.Snapshot move(boolean planner, List<GpuMovePlan.Step> route) {
         return new GpuMovePlan.Snapshot(true, planner, false, FIRST, GpuMovePlan.Mode.AUTO, false, "", route,
               List.of(), List.of(), route.isEmpty() ? null : HEX, 0, route.size(), 4, EntityMovementType.MOVE_WALK, "",
-              true, 0, 0, true, List.of(), !route.isEmpty(), !route.isEmpty(), Map.of(), 0);
+              true, 0, 0, true, List.of(), !route.isEmpty(), !route.isEmpty(), Map.of(), Set.of(), 0);
     }
 
     private static GpuUnitRecord.Snapshot record(int unitId) {

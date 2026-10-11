@@ -26,6 +26,7 @@ import com.badlogic.gdx.utils.FloatArray;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
@@ -51,8 +52,8 @@ class GpuTerrainLoadBenchmarkTest {
               .mapToInt(value -> Integer.parseInt(value.trim())).toArray();
         int workers = Integer.getInteger("megamek.gpu.benchmarkWorkers", GpuTerrain.DEFAULT_WORKERS);
         int repeats = Integer.getInteger("megamek.gpu.benchmarkRepeats", 2);
-        Board board = new Board();
-        board.load(file);
+        // As a game loads a sheet: converted (its placed objects and car-park lane roads are part of the board).
+        Board board = BoardFile.loadSheet(file, false, true);
         BoardScene scene = scene(board);
         TerrainSettings settings = TerrainSettings.capture();
         Map<Coords, BoardFlow.Current> currents = settings.call(() -> BoardFlow.calculate(scene));

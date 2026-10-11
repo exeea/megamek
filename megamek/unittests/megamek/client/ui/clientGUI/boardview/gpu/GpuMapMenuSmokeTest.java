@@ -98,10 +98,14 @@ class GpuMapMenuSmokeTest {
                         assertTrue(menu.isChecked());
                         UiButton classic = stage.getRoot().findActor("/viewClassicBoard");
                         assertNotNull(classic);
-                        assertEquals(editing ? "2D Editor" : "2D Board", classic.getText().toString());
+                        assertEquals(editing ? "2D Preview" : "2D Board", classic.getText().toString());
                         assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/viewClientSettings")));
                         assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/helpAbout")));
                         assertEquals(editing, GpuBoardTestUi.shown(stage.getRoot().findActor("/fileBoardSave")));
+                        // The launcher's Recent Boards, a submenu of the editor's Menu.
+                        assertEquals(editing, GpuBoardTestUi.shown(stage.getRoot().findActor("/fileBoardRecent")));
+                        // Run Board Tagger (not clicked here: it rewrites the board files of the boards directories).
+                        assertEquals(editing, GpuBoardTestUi.shown(stage.getRoot().findActor("/boardRunBoardTagger")));
                         if (editing) {
                             assertFalse(GpuBoardTestUi.shown(stage.getRoot().findActor("editor-settings")));
                         }
@@ -118,6 +122,7 @@ class GpuMapMenuSmokeTest {
                         assertFalse(GpuBoardTestUi.shown(panel));
                         assertFalse(menu.isChecked());
                         checkViewMenu(view, source, editing, output);
+                        if (editing) { checkEditorEntries(view, source, output); }
                         GpuBoardTestUi.click("utility-menu"); settle(view, source);
                         GpuBoardTestUi.click("/viewClassicBoard"); settle(view, source);
                         assertEquals(1, switches.get());
@@ -188,6 +193,48 @@ class GpuMapMenuSmokeTest {
         GpuBoardTestUi.click("utility-menu"); settle(view, source);
         GpuBoardTestUi.click("/view"); settle(view, source);
         press(Input.Keys.ESCAPE); settle(view, source);
+    }
+
+    /**
+     * The editor's parity entries: File commands (New, Save As Image, Open Board Source File), Help with the keys and
+     * gestures, and the View menu's Trace Overlay toggle and settings. New opens Settings at its Size section.
+     */
+    private static void checkEditorEntries(GpuBattleView view, GpuMapSource source, File output) throws Exception {
+        var root = GpuBoardTestUi.stage().getRoot();
+        GpuBoardTestUi.click("utility-menu"); settle(view, source);
+        for (String id : List.of("/fileBoardNew", "/fileBoardSaveAsImage", "/boardSourceFile", "/boardEditorHelp")) {
+            assertTrue(GpuBoardTestUi.shown(root.findActor(id)), id);
+        }
+        GpuBoardTestUi.click("/view"); settle(view, source);
+        assertTrue(GpuBoardTestUi.shown(root.findActor("/view/boardTraceOverlay")));
+        assertTrue(GpuBoardTestUi.shown(root.findActor("/view/boardTraceOverlaySettings")));
+        GpuBoardTestUi.click("/view"); settle(view, source);
+        GpuBoardTestUi.click("/boardEditorHelp"); settle(view, source);
+        Actor help = root.findActor("editor-help");
+        assertTrue(GpuBoardTestUi.shown(help));
+        var texts = GpuBoardTestUi.texts(help);
+        for (String key : List.of("BoardEditor.help.paint", "BoardEditor.help.undo", "BoardEditor.help.ctrlWheel",
+              "KeyBinds.cmdNames.cameraFitBoard")) {
+            assertTrue(texts.contains(megamek.client.ui.Messages.getString(key)), key + " in " + texts);
+        }
+        assertTrue(texts.contains("C"), "The Paint tool's key");
+        GpuBoardTestUi.capture(new File(output, "editor-help.png"));
+        press(Input.Keys.ESCAPE); settle(view, source);
+        assertFalse(GpuBoardTestUi.shown(help));
+
+        GpuBoardTestUi.click("utility-menu"); settle(view, source);
+        GpuBoardTestUi.click("/fileBoardNew"); settle(view, source);
+        assertTrue(GpuBoardTestUi.shown(root.findActor("editor-settings")), "New opens the board settings");
+        com.badlogic.gdx.scenes.scene2d.ui.ScrollPane scroll = root.findActor("editor-settings-scroll");
+        Actor size = root.findActor("editor-settings-size");
+        Vector2 top = size.localToActorCoordinates(scroll, new Vector2(0, size.getHeight()));
+        GpuBoardTestUi.capture(new File(output, "editor-menu-new.png"));
+        // Scrolled down to the Size heading: at the top of the view, or as near as the end of the list allows.
+        assertTrue(scroll.getScrollY() > 0 && top.y <= scroll.getHeight() + 1 && top.y - size.getHeight() >= 0
+              && (top.y > scroll.getHeight() - 60 || scroll.getScrollY() >= scroll.getMaxY() - 1),
+              "at the Size section: its heading at " + top.y + " of " + scroll.getHeight());
+        press(Input.Keys.ESCAPE); settle(view, source);
+        assertFalse(GpuBoardTestUi.shown(root.findActor("editor-settings")));
     }
 
     private static void press(int key) {

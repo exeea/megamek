@@ -1,17 +1,17 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javax.swing.JFrame;
+import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
@@ -20,12 +20,14 @@ import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.RecentBoardList;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.dialogs.MMAboutDialog;
 import megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog;
+import megamek.client.ui.panels.CommonSettingsPane;
 import megamek.client.ui.util.UIUtil;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.codeUtilities.StringUtility;
@@ -43,6 +45,7 @@ import megamek.common.units.Entity;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import megamek.logging.MMLogger;
+import megamek.utilities.BoardsTagger;
 
 /** Native preview/editor input. The Game/Board and editor operations are the only authoritative state. */
 final class GpuMapSource implements BoardSource {
@@ -65,10 +68,17 @@ final class GpuMapSource implements BoardSource {
     /** Swing-owned brush settings are published only as a preview, never read directly by the render thread. */
     private record EditorBrush(Coords center, long generation, List<Coords> hexes, String hint) { }
     private volatile EditorBrush editorBrush = new EditorBrush(null, -1, List.of(), "");
+    /** Where the render thread last saw the pointer for a Paint or Erase event ({@link #editorHover}); null off the board. */
+    private record EditorHover(Coords coords, double x, double y, String receiver) { }
+    private volatile EditorHover editorHover;
+    /** EDT-owned: the session's last preview and what it was made into for the render thread. */
+    private BoardEditorSession.Preview shownPreview = BoardEditorSession.Preview.NONE;
+    private GpuEditorPreview.Data previewData = GpuEditorPreview.Data.NONE;
 
-    private final BoardArtwork artwork = new BoardArtwork();
-    private volatile List<String> editorThemes = artwork.themes();
+    private volatile List<String> editorThemes = BoardArtwork.themes();
     private final BoardScene.PixelPool images = new BoardScene.PixelPool();
+    /** EDT-owned: the board's tiles, the one capture the game shares; the editor's markers are ours. */
+    private final BoardTiles terrain = new BoardTiles(images);
     private final GpuAtmosphereControls atmosphere;
     private final Timer timer;
     private final BoardListenerAdapter boardListener = new BoardListenerAdapter() {
@@ -79,13 +89,7 @@ final class GpuMapSource implements BoardSource {
         @Override public void boardChangedHex(BoardEvent event) {
             onSwing(() -> {
                 if (closed || event.getSource() != board) { return; }
-                Coords c = event.getCoords();
-                if (c == null) { dirtyAll(); return; }
-                Rectangle local = new Rectangle(c.getX() - 1, c.getY() - 1, 3, 3);
-                dirtyHexes = dirtyHexes == null ? local : dirtyHexes.union(local);
-                for (int x = local.x; x < local.x + local.width; x++) {
-                    for (int y = local.y; y < local.y + local.height; y++) { artwork.invalidate(new Coords(x, y)); }
-                }
+                if (event.getCoords() == null) { dirtyAll(); } else { terrain.changed(event.getCoords()); }
             });
         }
     };
@@ -94,6 +98,11 @@ final class GpuMapSource implements BoardSource {
     };
     private final IPreferenceChangeListener preferences = event -> onSwing(() -> {
         if (isClosed()) { return; }
+        // The trace overlay is a view setting of the editor alone: no board art changes with it.
+        if (GpuTraceOverlay.Settings.PREFERENCES.contains(event.getName())) {
+            if (isEditor()) { trace = GpuTraceOverlay.Settings.capture(); }
+            return;
+        }
         uiPreferences = UiPreferences.capture();
         // Label/color preferences affect presentation only; interned terrain pixels and feature geometry are reused.
         dirtyAll();
@@ -103,18 +112,20 @@ final class GpuMapSource implements BoardSource {
     /** EDT-owned derived editor annotations; never supplied to map previews or gameplay. */
     private final Map<Coords, BoardTactical> terrainMarkers = new HashMap<>();
     private BoardTactical editorTerrain = BoardTactical.EMPTY;
-    private boolean terrainDirty = true;
-    private Rectangle dirtyHexes;
     private long boardGeneration;
-    private record Publication(Frame frame, BoardEditorSession.Snapshot editor) { }
+    private record Publication(Frame frame, BoardEditorSession.Snapshot editor, GpuEditorPreview.Data preview) { }
     private volatile Publication publication;
     /** Render-thread latch: selection and geometry must describe the same EDT capture for the entire frame. */
     private Publication rendering;
     private volatile UiPreferences uiPreferences = UiPreferences.capture();
+    /** The editor's trace overlay settings, copied from the preferences on the EDT; none for a map preview. */
+    private volatile GpuTraceOverlay.Settings trace = GpuTraceOverlay.Settings.NONE;
     private volatile PhaseStatus phaseStatus = new PhaseStatus("", false);
     private volatile Coords hoverCoords;
     private Coords contextCoords;
     private volatile boolean closed;
+    /** EDT-owned: the board tagger runs ({@link #runBoardTagger}). */
+    private boolean tagging;
     GpuMapSource(Game game, Window owner, BoardEditorSession editor) {
         this(game, owner, editor, null);
     }
@@ -132,6 +143,7 @@ final class GpuMapSource implements BoardSource {
         this.requestClose = requestClose;
         this.requestClassic = requestClassic;
         atmosphere = new GpuAtmosphereControls(() -> owner, game::getBoard, game::getPlanetaryConditions, () -> closed);
+        if (editor != null) { trace = GpuTraceOverlay.Settings.capture(); }
         timer = new Timer(33, event -> refresh());
         try {
             refresh();
@@ -163,32 +175,14 @@ final class GpuMapSource implements BoardSource {
             dirtyAll();
             atmosphere.reset();
         }
-        if (terrainDirty || dirtyHexes != null) {
-            if (terrainDirty) { terrainMarkers.clear(); }
-            Rectangle area = terrainDirty ? new Rectangle(0, 0, board.getWidth(), board.getHeight())
-                  : dirtyHexes.intersection(new Rectangle(0, 0, board.getWidth(), board.getHeight()));
-            List<BoardScene.Tile> next = terrainDirty
-                  ? new ArrayList<>(Collections.nCopies(board.getWidth() * board.getHeight(), null)) : new ArrayList<>(tiles);
-            for (int x = area.x; x < area.x + area.width; x++) {
-                for (int y = area.y; y < area.y + area.height; y++) {
-                    Coords coords = new Coords(x, y);
-                    int index = x * board.getHeight() + y;
-                    BoardScene.Tile previous = tiles.size() == next.size() ? tiles.get(index) : null;
-                    boolean changed = terrainDirty || dirtyHexes != null && dirtyHexes.contains(x, y);
-                    BoardScene.Tile tile = previous;
-                    if (changed) {
-                        var pixels = artwork.capture(board, coords, true);
-                        tile = BoardScene.captureTile(board.getHex(coords), pixels, previous, images, board::getHex);
-                        if (editor != null) {
-                            var markers = BoardEditorTerrain.capture(board.getHex(coords), coords, pixels.blankTerrains());
-                            if (markers == BoardTactical.EMPTY) { terrainMarkers.remove(coords); }
-                            else { terrainMarkers.put(coords, markers); }
-                        }
-                    }
-                    next.set(index, tile.equals(previous) ? previous : tile);
-                }
-            }
-            tiles = List.copyOf(next);
+        List<BoardScene.Tile> next = terrain.tiles(board, (coords, pixels) -> {
+            if (editor == null) { return; }
+            var markers = BoardEditorTerrain.capture(board.getHex(coords), coords, pixels.blankTerrains());
+            if (markers == BoardTactical.EMPTY) { terrainMarkers.remove(coords); }
+            else { terrainMarkers.put(coords, markers); }
+        });
+        if (next != tiles) {
+            tiles = next;
             editorTerrain = editor == null ? BoardTactical.EMPTY : new BoardTactical(
                   terrainMarkers.values().stream().flatMap(value -> value.fills().stream()).toList(),
                   terrainMarkers.values().stream().flatMap(value -> value.labels().stream()).toList());
@@ -197,9 +191,6 @@ final class GpuMapSource implements BoardSource {
                 editorTerrain = BoardDeploymentGeometry.editorOutlines(mapScene(editorTerrain));
             }
             images.retain(tiles);
-            terrainDirty = false;
-            dirtyHexes = null;
-
         }
         Coords hover = hoverCoords;
         if (editor != null) {
@@ -219,48 +210,103 @@ final class GpuMapSource implements BoardSource {
         // An unchanged editor state keeps its instance, so the views' identity checks mean a real change.
         var previous = publication == null ? null : publication.editor();
         var state = editor == null ? null : editor.snapshot();
-        publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state);
+        publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, preview(state));
     }
 
     /** Map workspaces expose their existing document and application actions without requiring a game client. */
     private List<BoardScene.Command> menuCommands() {
         List<BoardScene.Command> commands = new ArrayList<>();
         if (requestClassic != null) {
+            // A preview switches to its 2D board; the editor opens its live 2D Preview beside itself.
             commands.add(menuCommand("viewClassicBoard", editor == null ? "CommonMenuBar.viewClassicBoard"
-                  : "BoardEditor.edit2D", requestClassic));
+                  : "BoardEditor.preview2D", requestClassic));
         }
         if (editor != null) {
             long generation = boardGeneration;
             for (var action : List.of(BoardEditorSession.Action.OPEN, BoardEditorSession.Action.SAVE,
-                  BoardEditorSession.Action.SAVE_AS)) {
+                  BoardEditorSession.Action.SAVE_AS, BoardEditorSession.Action.SAVE_IMAGE)) {
                 String key = switch (action) {
                     case OPEN -> "fileBoardOpen";
                     case SAVE -> "fileBoardSave";
-                    default -> "fileBoardSaveAs";
+                    case SAVE_AS -> "fileBoardSaveAs";
+                    default -> "fileBoardSaveAsImage";
                 };
                 commands.add(menuCommand(key, "CommonMenuBar." + key,
                       () -> editorCommand(new BoardEditorSession.Command(action), generation)));
             }
+            // The launcher's Recent Boards list; an entry opens through the session's Open (with its save prompt).
+            List<BoardScene.Command> recent = new ArrayList<>();
+            for (String file : RecentBoardList.getRecentBoards()) {
+                recent.add(new BoardScene.Command("fileBoardRecent-" + file, new File(file).getName(), "", true, false,
+                      List.of(), () -> editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.OPEN, file), generation)));
+            }
+            commands.add(new BoardScene.Command("fileBoardRecent", Messages.getString("CommonMenuBar.fileBoardRecent"), "",
+                  !recent.isEmpty(), false, recent, () -> { }));
+            // The saved file in the system's program for it; a document never saved has none.
+            commands.add(new BoardScene.Command("boardSourceFile", Messages.getString("CommonMenuBar.boardSourceFile"), "",
+                  editor.path() != null && java.awt.Desktop.isDesktopSupported(), false, false, List.of(),
+                  () -> editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.SOURCE_FILE), generation)));
+            commands.add(new BoardScene.Command("boardRunBoardTagger", Messages.getString("CommonMenuBar.boardRunBoardTagger"),
+                  "", !tagging, false, false, List.of(), () -> onSwing(() -> { if (!closed) { runBoardTagger(); } })));
         }
         GUIPreferences gui = GUIPreferences.getInstance();
-        List<BoardScene.Command> view = List.of(
+        List<BoardScene.Command> view = new ArrayList<>(List.of(
               viewCommand(ClientGUI.VIEW_TOGGLE_HEX_COORDS, editor == null ? KeyCommandBind.HEX_COORDS : null,
                     gui.getCoordsEnabled(), gui::toggleCoords),
               viewCommand(ClientGUI.VIEW_INC_GUI_SCALE, KeyCommandBind.INC_GUI_SCALE, null,
                     () -> CommonMenuBar.changeGUIScale(true)),
               viewCommand(ClientGUI.VIEW_DEC_GUI_SCALE, KeyCommandBind.DEC_GUI_SCALE, null,
-                    () -> CommonMenuBar.changeGUIScale(false)));
+                    () -> CommonMenuBar.changeGUIScale(false))));
+        if (editor != null) {
+            // The editor's reference image over its top view (GpuTraceOverlay); its file, opacity, scale and position are
+            // the Client Settings' Trace Overlay section.
+            view.add(viewCommand("boardTraceOverlay", null, gui.getShowTraceOverlay(), gui::toggleTraceConditionsOverlay));
+            view.add(menuCommand("boardTraceOverlaySettings", "BoardEditor.traceSettings",
+                  () -> clientSettings(CommonSettingsPane.SETTINGS_OVERLAYS)));
+        }
         commands.add(new BoardScene.Command("view", Messages.getString("CommonMenuBar.ViewMenu"), "", true,
               false, view, () -> { }));
-        commands.add(menuCommand("viewClientSettings", "CommonMenuBar.viewClientSettings", () -> {
-            Window parent = owner;
-            while (parent != null && !(parent instanceof JFrame)) { parent = parent.getOwner(); }
-            CommonSettingsDialog settings = new CommonSettingsDialog((JFrame) parent);
-            try { settings.setVisible(true); } finally { settings.dispose(); }
-        }));
+        commands.add(menuCommand("viewClientSettings", "CommonMenuBar.viewClientSettings", () -> clientSettings(null)));
         commands.add(menuCommand("helpAbout", "CommonMenuBar.helpAbout", () -> new MMAboutDialog(owner).show()));
         if (requestClose != null) { commands.add(menuCommand("close", "Close", requestClose)); }
         return List.copyOf(commands);
+    }
+
+    /**
+     * The old editor's Run Board Tagger: {@link BoardsTagger#runBoardTagger} rewrites the automatic tags of every board
+     * file in the boards directories, off the EDT (its menu entry is disabled meanwhile). The open document then gets
+     * the same automatic tags ({@code BOARD autotags}), so a later Save does not write stale ones back, and the old
+     * report says that the tagger is done.
+     */
+    private void runBoardTagger() {
+        if (tagging) { return; }
+        tagging = true;
+        refresh();
+        Thread worker = new Thread(() -> {
+            try { BoardsTagger.runBoardTagger(); }
+            finally {
+                onSwing(() -> {
+                    tagging = false;
+                    if (closed) { return; }
+                    editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.BOARD, "autotags", ""), boardGeneration);
+                    JOptionPane.showMessageDialog(owner, Messages.getString("BoardEditor.boardRunBoardTagger.report"),
+                          Messages.getString("BoardEditor.boardRunBoardTagger.title"), JOptionPane.PLAIN_MESSAGE);
+                });
+            }
+        }, "board-tagger");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /** The Client Settings dialog, opened on the settings page {@code route} when there is one. */
+    private void clientSettings(String route) {
+        Window parent = owner;
+        while (parent != null && !(parent instanceof JFrame)) { parent = parent.getOwner(); }
+        CommonSettingsDialog settings = new CommonSettingsDialog((JFrame) parent);
+        try {
+            if (route != null) { settings.selectRoute(route); }
+            settings.setVisible(true);
+        } finally { settings.dispose(); }
     }
 
     private BoardScene.Command menuCommand(String id, String label, Runnable action) {
@@ -285,20 +331,21 @@ final class GpuMapSource implements BoardSource {
         if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
         if (closed) { return; }
         megamek.common.util.ImageUtil.reloadImages();
-        artwork.reload();
-        editorThemes = artwork.themes();
         images.clear();
-        dirtyAll();
+        terrainMarkers.clear();
+        terrain.reload();
+        editorThemes = BoardArtwork.themes();
         refresh();
     }
 
     @Override public List<String> editorThemes() { return editorThemes; }
-    private void dirtyAll() { terrainDirty = true; artwork.clear(); }
+    private void dirtyAll() { terrainMarkers.clear(); terrain.changed(null); }
     private static void onSwing(Runnable action) {
         if (SwingUtilities.isEventDispatchThread()) { action.run(); } else { SwingUtilities.invokeLater(action); }
     }
     public Frame takeFrame() { rendering = publication; return rendering.frame(); }
     public UiPreferences uiPreferences() { return uiPreferences; }
+    @Override public GpuTraceOverlay.Settings trace() { return trace; }
     public PhaseStatus phaseStatus() { return phaseStatus; }
     public GpuAtmosphereControls atmosphere() { return atmosphere; }
     public boolean isClosed() { return closed; }
@@ -396,6 +443,29 @@ final class GpuMapSource implements BoardSource {
     private void closeMeasuring() { ruler = null; }
 
     public BoardEditorSession.Snapshot editorState() { return (rendering == null ? publication : rendering).editor(); }
+
+    @Override public GpuEditorPreview.Data editorPreview() { return (rendering == null ? publication : rendering).preview(); }
+
+    @Override public void editorHover(Coords coords, double x, double y, String receiver) {
+        editorHover = coords == null ? null : new EditorHover(coords, x, y, receiver);
+    }
+
+    /**
+     * The session's preview of the Paint or Erase event at the render thread's last pointer, made into what the render
+     * thread draws once per new preview: the session keeps its preview while nothing it depends on changes.
+     */
+    private GpuEditorPreview.Data preview(BoardEditorSession.Snapshot state) {
+        if (editor == null) { return GpuEditorPreview.Data.NONE; }
+        var hover = editorHover;
+        var next = hover == null || !board.contains(hover.coords()) ? BoardEditorSession.Preview.NONE
+              : editor.preview(hover.coords(), hover.x(), hover.y(), hover.receiver());
+        if (next != shownPreview) {
+            shownPreview = next;
+            previewData = GpuEditorPreview.data(next, state.tool() == BoardEditorSession.Tool.ERASE,
+                  (coords, hex) -> terrain.preview(board, coords, hex));
+        }
+        return previewData;
+    }
 
     public void editorCommand(BoardEditorSession.Command command, long generation) {
         onSwing(() -> {
@@ -528,7 +598,7 @@ final class GpuMapSource implements BoardSource {
         if (board != null) { board.removeBoardListener(boardListener); }
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferences);
         GUIPreferences.getInstance().removePreferenceChangeListener(preferences);
-        artwork.close();
+        terrain.close();
         images.clear();
         tiles = List.of();
     }

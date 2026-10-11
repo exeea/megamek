@@ -17,6 +17,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `BoardScene` | Stores terrain, visible units, annotations and resolved animation events as presentation snapshots. |
 | `GpuBoardSource` | Captures gameplay from shared client state, applies visibility filtering and returns commands to phase controllers. |
 | `GpuMapSource` | Captures preview/editor boards, listens for local edits and routes editor input with generation checks. |
+| `BoardTiles` | The one tile capture of every 3D view (game, preview, editor; `captureAll` for the editor's samples and tests): one `BoardArtwork`, the tiles, the 3x3 invalidation rule, each hex drawn without the legacy tokens the conversion took, and the unconverted-board tripwire. |
 | `TerrainSettings`, `GpuBoardTuning` | Hold immutable build settings and expose live controls; a build must use the same settings as its displayed result. |
 | `GpuDisplayScale`, `GpuWindowBounds` | Convert logical UI/framebuffer sizes and retain native window placement. |
 | `GpuGraphicsCard` | Handles the Windows NVIDIA Optimus graphics-card preference at native startup. |
@@ -39,10 +40,11 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 
 | Code | What it does |
 | --- | --- |
-| `BoardRoad` | Computes road footprints, joins, material-transition controls and clearance; physical heights come from the supporting surface. |
+| `BoardRoad` | Computes road footprints, joins, material-transition controls and clearance; physical heights come from the supporting surface. Its carriageway (`carriageway`, `way`, `clearance`, read through `BoardScene.Tile.wayExits`: road and ground-rail exits) is also what shapes and clears the ground under a rail, so rails follow the ground and its ramps as roads do; paint stays road-only. |
+| `BoardRail` | The one builder of both route kinds (`common/board/RailRoute`, MAGLEV and RAIL): each hex's gentle pieces (straights and 60-degree arcs), stranded stubs and dead ends as `RailRoute.lines` composes them, along `RailRoute.course`; the maglev beam at its Hermite levels, the rail's generated ballast, sleepers and rails draped on the faces road paint lies on or on the drawn deck (`BoardBridge.drawnTop`), only the rails on a drawn road; `railTop` stands rail rolling stock and buffer stops on that drawn rail top (model px, added in `GpuTerrain.decorationHeight`). `joint` gives the beam's underside on a shared edge for maglev piers; `flat` draws the palette card and the junction card's layouts. |
 | `GpuRoads` | Turns footprints into material masks/atlases carried by existing terrain or bridge triangles. |
-| `BoardBridge` | Follows span connectivity and approach roads to select deck shape and surface material. |
-| `BoardBridgeFooting` | Extends manufactured slab/rails until their bank ends have actual terrain support. |
+| `BoardBridge` | Follows span connectivity; draws each span's stored type (built or natural; an untyped span draws built, the conversion types every loaded bridge) and a built deck's surface from its approach roads. |
+| `BoardBridgeFooting` | Extends manufactured slab/rails until their bank ends have actual terrain support; the one pier implementation (room rule, joint frame, footing sample, liquid sink, stretched shaft, LoD), parameterised by its kit and the underside it carries: deck piers under the joints of a built span whose Pillars toggle is on (`bridges/bridge-pier.glb`), slim piers under the joints of a maglev route whose Pillars are on (`bridges/maglev-pier.glb`, up to the beam's underside from `BoardRail.joint`). |
 | `BoardBridgeSlope` | Fits authored slabs and rails to connected decks one level apart; shares facets with paint and picking. |
 | `BoardNaturalBridge` | Builds hollow rock spans, bank contacts and underpass geometry. |
 | `BoardTunnel` | Detects cosmetic portals at eligible cliff-facing road/deck exits and supplies their placement. |
@@ -56,7 +58,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 
 | Code | What it does |
 | --- | --- |
-| `BoardFeatures` | Captures terrain appearance, feature sizes, species and deterministic prop placement from live hexes. |
+| `BoardFeatures` | Captures terrain appearance, feature sizes, species, deterministic prop placement, placed objects and the terrain-owned scenery rows (geysers, rubble, fortified) from live hexes; a terrain-owned decal row (elevator plates, cleared-rubble gravel) becomes a decal feature with a non-stored object, and a rail's buffer stops are objects the rail owns (ids `terrain:...`, never stored or picked: `terrainOwned`). |
 | `BoardLiquid`, `BoardFireSmoke` | Capture liquid/crust classification and existing fire/smoke facts without retaining mutable game objects. |
 | `BoardBiome` | Provides world-space visual fields shared by ground shading and vegetation. |
 | `BoardVegetation` | Supplies placement inputs; roots are supported by the installed finished terrain. |
@@ -65,8 +67,8 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `GpuBiomeSurface` | Packs per-hex biome data into a texture consumed by the terrain shaders. |
 | `GpuBiomeVegetation` | Prepares field/marsh roots and draws crop/reed tiers with shared instanced buffers. |
 | `GpuGroundCover` | Prepares deterministic grass roots, retains supported surfaces and draws GPU-shaped grass blades. |
-| `GpuTreeInstances` | Instances trees and modular building parts; reuses buffers when placements and pass selections agree. |
-| `TerrainLod`, `TreeLod` | Choose terrain sampling and tree mesh detail from projected size, with stable transitions. |
+| `GpuTreeInstances` | Instances trees, modular building parts and placed objects in every view (a recolourable model's slot colours per instance; mirror images in batches of their own); reuses buffers when placements and pass selections agree. |
+| `TerrainLod`, `TreeLod` | Choose terrain sampling and tree mesh detail from projected size, with stable transitions; `TreeLod` also holds the Object LoD size class and zoom threshold for small placed objects. |
 
 ## Terrain installation, batching and lifetime
 
@@ -80,7 +82,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `GpuPropBatch` | Combines opaque prop ranges from visible chunks. |
 | `GpuTerrainDepth` | Exposes depth-only ranges over installed opaque meshes for depth/shadow passes. |
 | `GpuOpaqueSorter` | Orders opaque submissions while preserving required grass/transparent ordering. |
-| `GpuInstancedMesh` | Owns the instanced-mesh binding behavior, including core-profile instance-attribute cleanup. |
+| `GpuInstancedMesh` | Owns the instanced-mesh binding behavior, including core-profile instance-attribute cleanup and the flipped front face of a batch of mirror images. |
 
 ## Atmosphere, weather and visibility
 
@@ -115,7 +117,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `UnitModelSelection` | Uses the tileset's model identity and captures the appropriate variant/figure count; sensor contacts expose no model identity. |
 | `UnitModelState` | Captures immutable loadout, anatomy, surviving members, appearance and pose state after visibility filtering. |
 | `UnitModelDescriptor` | Reads/validates the JSON body, rig, mount, emitter and recipe contract. |
-| `RigidGlb` | Decodes rigid GLB geometry on the CPU and converts coordinates/colors while preserving named parts. |
+| `RigidGlb` | Decodes rigid GLB geometry on the CPU and converts coordinates/colors while preserving named parts; also builds the shared colour-slot mesh of a recolourable model, which placed objects draw in every view, and packs a placement's slot colours. |
 | `MeshLod` | Resolves asset node names and missing-level fallback at load time. |
 | `GpuUnitModels`, `GpuUnitModel` | Own the shared unit asset library and each loaded model's geometry/placement metadata. |
 | `ModelTextures` | Caches textures for its owning asset library; borrowed models do not independently dispose them. |
@@ -192,12 +194,17 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 
 | Code | What it does |
 | --- | --- |
-| `boardview/BoardClientState` | Owns client presentation state shared by renderers: tactical state, annotations, focus and client integration. |
+| `boardview/BoardClientState` | Owns client presentation state shared by renderers: tactical state (the game's tactical capture pass), annotations, focus and client integration. |
 | `boardview/BoardView` | Paints the classic board and bridges its input to the shared client state. |
-| `boardview/BoardArtwork` | Selects/composes terrain artwork and maps selected tileset art to native assets; also serves printable board output. |
+| `boardview/BoardArtwork` | Paints terrain artwork from the 3D tileset's resolved layers (`TilesetScenery`) and maps selected tileset art to native assets; also serves printable board output. |
+| `common/board/BoardSceneryLayouts` | The one legacy conversion (`convert`, image-free, run where a board is loaded: `BoardFile.loadSheet`, old saves, previews, the editor), the post-combine seam pass (`joinSheets`), the one statement of what is taken (`takenTokens`: objects, a design or nothing, for every legacy art token), the taken-token strip (`withoutTakenTokens`) and the editor's stamps. |
+| `common/board/TilesetMatcher`, `TilesetScenery` | Text-only tileset matching shared by the 2D tileset and the 3D artwork; the one "taken" predicate (`TilesetScenery.Layer.taken`); designed layers in tileset order (`appearanceLayers`). |
+| `common/board/RailRoute` | The one route model of maglev and rail markers: kinds, sides (`connections`), the gentle pieces and stored `tracks` of a hex, stranded stubs and buffer stops, joins (several markers per hex own disjoint sides), the connected run (`run`, the Pillars span), the composition of a hex's centre lines (`lines`, shared by the builder and the riders) and the course in plan, the deck rule (`alongDeck`: a rail rides a deck only along it) and the riding of rolling stock (`snap`, `follow`, which also names the marker and hex reached, `ride`). |
+| `tileset/HexTileset` | The 2D tileset's images; the game's (with a game) matches a hex's designs as the tokens they stand for (`BoardEditorBlueprint.artwork`), so the 2D board of a `.board2` draws building art, transitions, kerbs, orchards and rough. |
+| `common/board/BridgeSpan` | The span unit of bridges and the one bridge-type decode the conversion stores. |
 | `boardview/BoardTactical`, `BoardGlyphContext`, `UnitAnnotations` | Carry client-derived tactical shapes and annotation content into renderer-specific presentation. |
 | `clientGUI/MapMenu`, `panels/phaseDisplay/*` | Own real contextual commands, orders and phase-specific availability. |
-| `boardeditor/BoardEditorPanel` | Owns editable board state, brushes, file actions and undo transactions. |
+| `boardeditor/BoardEditorSession` | Owns the editor document, commands, selection and undo history, and converts a typed legacy token at stroke commit; the classic 2D editor is gone, its 2D Preview is a `BoardView` on the session's game. |
 
 Rules changes belong in the game/client/server owners described in [Codebase](codebase.md).
 The GPU classes above receive the resulting state or execute the existing command.

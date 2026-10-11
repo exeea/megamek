@@ -10,13 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
-import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.ECMEffects;
@@ -149,11 +147,10 @@ class GpuHexOverlayTest {
                 assertTrue(covers(eccm.tactical(), tint, sample, 42, 36));
                 assertTrue(eccm.tile(sample).tactical() == null, "ECCM needs no raster artwork");
 
-                BoardArtwork.HexImage cached = artwork(fixture, sample);
                 GUIPreferences.getInstance().setECMTransparency(48);
-                assertSame(cached.terrain(), artwork(fixture, sample).terrain(), "Opacity must not repaint terrain");
                 fixture.source.refresh();
                 BoardScene faded = fixture.source.takeFrame().scene();
+                assertSame(eccm.tile(sample).features(), faded.tile(sample).features(), "Opacity must not recapture terrain");
                 assertTrue(covers(faded.tactical(), ECMEffects.getECMColor(fixture.player), sample, 42, 36));
                 assertNotEquals(eccm.tactical(), faded.tactical());
                 assertSame(eccm.tile(sample).ground(), faded.tile(sample).ground());
@@ -213,12 +210,6 @@ class GpuHexOverlayTest {
             }
         }
         assertTrue(sources > 0 && coverage > 0, "Exercise both source rings and field coverage");
-    }
-
-    private static BoardArtwork.HexImage artwork(GpuBoardFixture fixture, Coords coords) {
-        List<BoardArtwork.HexImage> result = new ArrayList<>();
-        fixture.view.capturePlanarHexes(new Rectangle(coords.getX(), coords.getY(), 1, 1), false, result::add);
-        return result.getFirst();
     }
 
     private static List<BoardScene.Pixels> raster(BoardScene scene) {

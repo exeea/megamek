@@ -1,0 +1,155 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import java.awt.Rectangle;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.WeakHashMap;
+import java.util.function.BiConsumer;
+
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.common.Hex;
+import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
+import megamek.common.board.Coords;
+import megamek.common.board.TilesetScenery;
+import megamek.common.units.Terrains;
+import megamek.logging.MMLogger;
+
+/**
+ * The one capture of a Board as 3D scene tiles: the game ({@link GpuBoardSource}), the map preview and the editor
+ * ({@link GpuMapSource}), the editor's samples and the tests all draw through it, with one {@link BoardArtwork}, one
+ * invalidation rule and {@link BoardScene#captureTile}. Each hex is drawn as its {@code .board2} holds it
+ * ({@link BoardSceneryLayouts#withoutTakenTokens}): the legacy scenery tokens the conversion took stay in a game's
+ * memory for its 2D board only, and the conversion's objects stand for them here. Only overlays (the game's tactical
+ * marking, the editor's markers) differ per view. Confined to its owner's thread: the EDT, or the samples' worker.
+ */
+final class BoardTiles implements AutoCloseable {
+    private static final MMLogger LOGGER = MMLogger.create(BoardTiles.class);
+    private final BoardArtwork artwork = new BoardArtwork();
+    /** The owner's pool: its tactical pass interns into it too, and the owner retains its published tiles. */
+    private final BoardScene.PixelPool pool;
+    private Board board;
+    /** The board's tiles in column order. */
+    private List<BoardScene.Tile> tiles = List.of();
+    /** Every hex is recaptured next; else {@link #dirty} (null: none). */
+    private boolean all = true;
+    private Rectangle dirty;
+    /** The boards the tripwire reported, each once. */
+    private final Set<Board> warned = Collections.newSetFromMap(new WeakHashMap<>());
+
+    BoardTiles(BoardScene.PixelPool pool) {
+        this.pool = pool;
+    }
+
+    /** Every tile of {@code board}, captured once: the editor's samples and tests. */
+    static List<BoardScene.Tile> captureAll(Board board) {
+        try (var capture = new BoardTiles(new BoardScene.PixelPool())) {
+            return capture.tiles(board, (coords, art) -> { });
+        }
+    }
+
+    /**
+     * The hex at {@code coords} changed, or with null every hex (or its art). The hex is recaptured with its six
+     * neighbours: an edit changes their road exits and blends, and {@code Board.setHexes} fires no event for them.
+     */
+    void changed(Coords coords) {
+        if (coords == null) {
+            all = true;
+            artwork.clear();
+            return;
+        }
+        Rectangle area = new Rectangle(coords.getX() - 1, coords.getY() - 1, 3, 3);
+        dirty = dirty == null ? area : dirty.union(area);
+        for (int x = area.x; x < area.x + area.width; x++) {
+            for (int y = area.y; y < area.y + area.height; y++) { artwork.invalidate(new Coords(x, y)); }
+        }
+    }
+
+    /**
+     * {@code hex} as the tile it would make at {@code coords} of {@code board}, captured as every tile is: for the
+     * editor's paint preview. Its pixels go to a pool of their own, and the art cached for the coords is dropped again,
+     * so the board's own tile there is captured anew from the board.
+     */
+    BoardScene.Tile preview(Board board, Coords coords, Hex hex) {
+        artwork.invalidate(coords);
+        try {
+            return BoardScene.captureTile(hex, artwork.capture(board, coords, hex), null, new BoardScene.PixelPool(), board::getHex);
+        } finally { artwork.invalidate(coords); }
+    }
+
+    /** Rereads the artwork (the 3D views' asset reload); every hex is recaptured. */
+    void reload() {
+        artwork.reload();
+        changed(null);
+    }
+
+    /**
+     * Every tile of {@code board} in column order, recapturing the hexes changed since the last call, or all of them
+     * for another board or size. {@code captured} sees each recaptured hex's art. A recaptured tile that is still equal
+     * keeps its instance, and a call that recaptures nothing returns the same list.
+     */
+    List<BoardScene.Tile> tiles(Board board, BiConsumer<Coords, BoardArtwork.HexImage> captured) {
+        int width = board.getWidth(), height = board.getHeight();
+        if (board != this.board || tiles.size() != width * height) {
+            this.board = board;
+            changed(null);
+        }
+        if (!all && dirty == null) { return tiles; }
+        Rectangle area = all ? new Rectangle(0, 0, width, height) : dirty.intersection(new Rectangle(0, 0, width, height));
+        List<BoardScene.Tile> next = tiles.size() == width * height ? new ArrayList<>(tiles)
+              : new ArrayList<>(Collections.nCopies(width * height, null));
+        for (int x = area.x; x < area.x + area.width; x++) {
+            for (int y = area.y; y < area.y + area.height; y++) {
+                Coords coords = new Coords(x, y);
+                int index = x * height + y;
+                Hex hex = drawn(board, coords);
+                BoardArtwork.HexImage art = artwork.capture(board, coords, hex);
+                BoardScene.Tile previous = next.get(index);
+                BoardScene.Tile tile = BoardScene.captureTile(hex, art, previous, pool, board::getHex);
+                next.set(index, tile.equals(previous) ? previous : tile);
+                captured.accept(coords, art);
+            }
+        }
+        tiles = List.copyOf(next);
+        all = false;
+        dirty = null;
+        return tiles;
+    }
+
+    /**
+     * The hex as the 3D board draws it: without the tokens the conversion took. Meeting one on a board that is not
+     * converted means a load site skipped the conversion: the tripwire reports it once per board and draws nothing for
+     * it; the renderer never decodes legacy scenery itself.
+     */
+    private Hex drawn(Board board, Coords coords) {
+        Hex hex = board.getHex(coords);
+        Hex drawn = BoardSceneryLayouts.withoutTakenTokens(hex);
+        if (!board.isNativeFormat() && !warned.contains(board) && unconverted(hex, drawn)) {
+            warned.add(board);
+            LOGGER.warn("Unconverted legacy scenery (first at {} of {}): a load site skipped conversion; it is not drawn",
+                  coords.getBoardNum(), board.getBoardName());
+        }
+        return drawn;
+    }
+
+    /**
+     * Whether {@code hex} of a board that is not converted holds a token the conversion takes; {@code drawn} is the hex
+     * without the tokens of a converted board. Road level 2 is a token only on a board that is not converted (the legacy
+     * road-with-trees art, {@link BoardSceneryLayouts#imported}), so it is resolved that way here; the capture still draws
+     * it as the native Alley finish.
+     */
+    static boolean unconverted(Hex hex, Hex drawn) {
+        return drawn != hex || hex.terrainLevel(Terrains.ROAD) == 2
+              && TilesetScenery.resolve(hex, false).layers().stream().anyMatch(TilesetScenery.Layer::taken);
+    }
+
+    @Override
+    public void close() {
+        artwork.close();
+        tiles = List.of();
+        board = null;
+    }
+}

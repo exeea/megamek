@@ -39,7 +39,8 @@ final class GpuModelMaterial extends Attribute {
                 else { target.set(id, surface.map); }
             }
         });
-        // A recolourable model's shared mesh drawn one by one (mirrored, tilted, the side view): its placement's colours.
+        // A recolourable model's shared mesh drawn one by one (tilted or faded placements, hover copies, combat scars, the
+        // side view): its placement's colours. Instanced batches carry them per instance instead (GpuTreeInstances).
         shader.register("u_slotColours", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {

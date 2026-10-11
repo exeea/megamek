@@ -7,18 +7,35 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.BoardDecoration;
 
 /** Grade the authored slab and rails together; the installed facets serve drawing, road paint and picking. */
 final class BoardBridgeSlope {
-    private static final Map<Integer, BoardKit<BoardShape>> SHAPES = new ConcurrentHashMap<>();
+    /** A deck GLB's nodes in one set of colours: a truss kit per span colour, the standard kit in its own. */
+    private record Kit(String asset, BoardDecoration.Colours colours) { }
+
+    private static final Map<Kit, BoardKit<Map<String, BoardShape>>> SHAPES = new ConcurrentHashMap<>();
 
     private BoardBridgeSlope() { }
 
     static void reload() { SHAPES.clear(); }
 
+    /**
+     * Drops the recoloured kits (truss span colours) and keeps the uncoloured ones, at each scene commit
+     * ({@code GpuTerrain#commitRebuild}): the colours tried on graded spans do not stay for the session, and a later build
+     * decodes the colours it draws again.
+     */
+    static void retainUncoloured() { SHAPES.keySet().removeIf(kit -> !kit.colours().slots().isEmpty()); }
+
+    /**
+     * A truss draws its body and the joint or end node of each exit ({@link BoardBridge#trussNodes}), its steel as
+     * STEEL facets in their recoloured colour; the standard kit has one node.
+     */
     static BoardBridge.Shape build(BoardScene.Tile tile, BoardBridge.Deck deck, BoardBridgeFooting footing) {
-        var authored = SHAPES.computeIfAbsent(deck.exits(), exits ->
-              new BoardKit<>(() -> BoardShape.loadModel(BoardBridge.asset(exits)))).get();
+        var kit = new Kit(deck.asset(), deck.truss() ? deck.colours() : BoardDecoration.Colours.NONE);
+        var nodes = SHAPES.computeIfAbsent(kit, key ->
+              new BoardKit<>(() -> BoardShape.loadNodes(key.asset(), key.colours()))).get();
+        var drawn = deck.truss() ? BoardBridge.trussNodes(deck) : List.copyOf(nodes.keySet());
         var profile = profile(tile, deck);
         var faces = new ArrayList<>(footing.shape().facets());
         var clipper = new BoardTacticalGeometry.Clipper();
@@ -26,9 +43,10 @@ final class BoardBridgeSlope {
         float scale = BoardGeometry.hexScale();
         var center = BoardGeometry.center(tile.coords(), 0);
         center.z = BoardBridge.deckZ(level);
-        for (var face : authored.polygons()) {
+        for (var face : drawn.stream().flatMap(node -> nodes.get(node).polygons().stream()).toList()) {
             var points = face.points();
-            var part = face.normal().z > .99f && Math.abs(points[0].z) < .001f
+            boolean steel = face.material().equals("bridge-steel");
+            var part = steel ? BoardBridge.Part.STEEL : face.normal().z > .99f && Math.abs(points[0].z) < .001f
                   ? BoardBridge.Part.TOP : BoardBridge.Part.STRUCTURE;
             boolean slab = Math.max(points[0].z, Math.max(points[1].z, points[2].z)) <= .001f;
             clipper.prepare(new BoardTacticalGeometry.Triangle(new Vector3(points[0]).scl(scale).add(center),
@@ -37,8 +55,8 @@ final class BoardBridgeSlope {
                 // The solid ramp owns its top and sides. Retain only the authored rails above that block.
                 if (slab && patch.landEdge() >= 0
                       && (footing.solidExits() & (1 << BoardGeometry.edgeDirection(patch.landEdge()))) != 0) { continue; }
-                clipper.displace(patch, triangle ->
-                      BoardBridge.triangle(faces, triangle.a(), triangle.b(), triangle.c(), part));
+                clipper.displace(patch, triangle -> BoardBridge.triangle(faces, triangle.a(), triangle.b(), triangle.c(),
+                      part, steel ? face.color() : null));
             }
         }
         return BoardBridge.shape(BoardScene.Surface.CONCRETE, level, faces);

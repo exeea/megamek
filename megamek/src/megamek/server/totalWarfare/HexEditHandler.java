@@ -40,6 +40,7 @@ import java.util.Map;
 
 import megamek.common.Hex;
 import megamek.common.Report;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.board.HexEditSpec;
 import megamek.common.board.HexEditValidator;
@@ -266,6 +267,7 @@ public class HexEditHandler extends AbstractTWRuleHandler {
      * The edit describes the ground, not what has been built on it.
      */
     private static void writeTerrain(Hex hex, HexEditSpec.HexPaint paint) {
+        Hex before = hex.duplicate();
         if (paint.getLevel() != null) {
             hex.setLevel(paint.getLevel());
         }
@@ -290,6 +292,7 @@ public class HexEditHandler extends AbstractTWRuleHandler {
         for (Terrain structure : structures) {
             hex.addTerrain(structure);
         }
+        BoardSceneryLayouts.designTypedTokens(before, hex);
     }
 
     /**
@@ -453,7 +456,9 @@ public class HexEditHandler extends AbstractTWRuleHandler {
             return "that hex holds water with units in it; move them first";
         }
 
+        Hex before = hex.duplicate();
         hex.removeAllTerrains();
+        BoardSceneryLayouts.designTypedTokens(before, hex);
         gameManager.sendChangedHex(coords, boardId);
         Report report = new Report(REPORT_HEX_CLEARED, Report.PUBLIC);
         report.add(gamemasterName);
@@ -463,13 +468,18 @@ public class HexEditHandler extends AbstractTWRuleHandler {
         return null;
     }
 
-    /** Adds the terrain at the given level, or removes it when the level says to. */
+    /**
+     * Adds the terrain at the given level, or removes it when the level says to. A legacy art token typed here gets the
+     * design that draws it in 3D ({@link BoardSceneryLayouts#designTypedTokens}).
+     */
     private static void applyTerrain(Hex hex, int terrainType, int terrainLevel) {
+        Hex before = hex.duplicate();
         hex.removeTerrain(terrainType);
         if (terrainLevel != REMOVE_TERRAIN_LEVEL) {
             hex.addTerrain(new Terrain(terrainType, terrainLevel));
         }
         keepFoliageElevationInStep(hex, terrainType, terrainLevel);
+        BoardSceneryLayouts.designTypedTokens(before, hex);
     }
 
     /**

@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.nio.file.Path;
 import java.util.Arrays;
 
-import megamek.client.ui.clientGUI.boardview.gpu.BoardSceneryLayouts;
 import megamek.common.Configuration;
 import megamek.common.board.BoardEditorBlueprint;
 import org.junit.jupiter.api.Test;
@@ -23,7 +22,7 @@ class BoardEditorValidationTimingTest {
     void timesFullValidationOfValenciaCity() throws Exception {
         Path file = Configuration.boardsDir().toPath()
               .resolve("unofficial/VictorMorson/128x192 Texlos - Livius - Valencia_City.board");
-        var session = new BoardEditorSession(BoardEditorBlueprint.get(), BoardSceneryLayouts.DECODER);
+        var session = new BoardEditorSession(BoardEditorBlueprint.get());
         long opened = System.nanoTime();
         session.open(file);
         System.out.printf("VALENCIA open+import+validate %.0f ms%n", (System.nanoTime() - opened) / 1e6);
@@ -34,7 +33,7 @@ class BoardEditorValidationTimingTest {
             for (int x = 0; x < session.board().getWidth(); x++) { objects += session.board().getHex(x, y).getDecorations().size(); }
         }
         // A fresh session has not yet looked up any model file: the first validation after opening a document.
-        var fresh = new BoardEditorSession(BoardEditorBlueprint.get(), BoardSceneryLayouts.DECODER);
+        var fresh = new BoardEditorSession(BoardEditorBlueprint.get());
         fresh.game().setBoard(session.board());
         long cold = System.nanoTime();
         fresh.validateAll();

@@ -87,7 +87,10 @@ class GpuDecalPlacementSmokeTest {
                             terrain.setTacticalView(tactical);
                             float expected = tactical && sample.name().startsWith("bridge")
                                   ? GpuTilesetTerrain.deckZ(scene.tile(CENTER)) : support;
-                            if (tactical || scene.tile(CENTER).decals() != null) {
+                            // Paint and terrain-owned sprites are overlays; art the conversion turned into placed
+                            // objects (the skylights) draws in 3D in both views (GpuSceneryPlacementSmokeTest).
+                            var tile = scene.tile(CENTER);
+                            if (tactical ? tile.tilesetDecals() != null || tile.tilesetScenery() != null : tile.decals() != null) {
                                 assertEquals(expected + BoardDecals.LIFT * BoardGeometry.hexScale(),
                                       overlayHeight(terrain, tactical, ray), .003f, sample.name() + " tactical=" + tactical);
                             }

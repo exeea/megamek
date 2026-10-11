@@ -48,7 +48,6 @@ import java.util.TimerTask;
 import java.util.function.Supplier;
 import javax.swing.text.JTextComponent;
 
-import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.IClientGUI;
 import megamek.client.ui.clientGUI.MegaMekGUI;
@@ -93,7 +92,6 @@ public class MegaMekController implements KeyEventDispatcher {
 
     private static final int MAX_REPEAT_RATE = 100;
 
-    public BoardEditorPanel boardEditor = null;
     public IClientGUI clientGUI = null;
 
     /** Reference to MegaMekGUI for post-unlaunch callbacks (e.g., load game from lobby). */
@@ -137,7 +135,6 @@ public class MegaMekController implements KeyEventDispatcher {
 
         // Don't consider hotkeys when the clientGUI has a dialog visible
         if (((clientGUI != null) && clientGUI.shouldIgnoreHotKeys())
-              || ((boardEditor != null) && boardEditor.shouldIgnoreHotKeys())
               || ignoreKeyPresses) {
             if (shouldLogKeyBind(evt)) {
                 KEY_BIND_LOGGER.debug("[KeyBind] {} ignored: a dialog is open or key presses are suppressed",

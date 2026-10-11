@@ -381,6 +381,26 @@ class RigidGlbTest {
         }
     }
 
+    /**
+     * The level count a placed object's level choice reads from the JSON alone (b10-f1) is the decoder's: each counted
+     * level its own mesh, every further level the last one again.
+     */
+    @Test
+    void theJsonLevelCountIsTheDecodedLevels() {
+        var root = megamek.common.Configuration.dataDir().toPath().resolve("models/board");
+        var expected = java.util.Map.of("scenery/vehicles/car", 1, "bridges/truss-exits-09", 1, "fungus/cup-chalice", 3,
+              "tree-broad", 4, "mars/brain-lobes", 4);
+        for (var entry : expected.entrySet()) {
+            var file = root.resolve(entry.getKey() + ".glb").toFile();
+            int levels = RigidGlb.levels(file);
+            assertEquals((int) entry.getValue(), levels, entry.getKey());
+            var data = RigidGlb.loadLods(new FileHandle(file), root);
+            for (int level = 0; level < data.size(); level++) {
+                assertEquals(Math.min(level, levels - 1), data.indexOf(data.get(level)), entry.getKey() + " level " + level);
+            }
+        }
+    }
+
     /** The shipped car: one mesh whose paint slot takes each row's paint; nothing else changes colour. */
     @Test
     void aSharedMeshTakesItsReplacementColoursInItsSlotsOnly() {

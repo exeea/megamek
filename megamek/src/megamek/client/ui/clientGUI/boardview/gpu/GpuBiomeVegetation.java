@@ -151,7 +151,7 @@ final class GpuBiomeVegetation implements Disposable {
             levelZ = BoardGeometry.groundZ(tile);
             uniform = key.sites().stream().allMatch(site -> site != null && site.biome() == kind
                   && site.elevation() == tile.elevation());
-            road = BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
+            road = BoardRoad.carriageway(tile) ? BoardRoad.way(scene, tile) : null;
             var nearby = new BoardObstacles(scene, tile);
             obstacles = nearby.isEmpty() ? null : nearby;
             across = BoardBiome.ROW_METRES;

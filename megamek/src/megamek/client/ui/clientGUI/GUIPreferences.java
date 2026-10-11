@@ -388,7 +388,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String MOUSE_WHEEL_ZOOM = "MouseWheelZoom";
     public static final String MOUSE_WHEEL_ZOOM_FLIP = "MouseWheelZoomFlip";
     public static final String NAG_FOR_CRUSHING_BUILDINGS = "NagForCrushingBuildings";
-    public static final String NAG_FOR_MAP_ED_README = "NagForMapEdReadme";
     public static final String NAG_FOR_MASC = "NagForMASC";
     public static final String NAG_FOR_NO_ACTION = "NagForNoAction";
     public static final String NAG_FOR_NO_UNJAM_RAC = "NagForNoUnjamRAC";
@@ -953,7 +952,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(NAG_FOR_CRUSHING_BUILDINGS, true);
         store.setDefault(NAG_FOR_DOOMED_MOVE, true);
         store.setDefault(NAG_FOR_AUTO_EJECT, true);
-        store.setDefault(NAG_FOR_MAP_ED_README, true);
         store.setDefault(NAG_FOR_MASC, true);
         store.setDefault(NAG_FOR_NO_ACTION, true);
         store.setDefault(NAG_FOR_NO_UNJAM_RAC, true);
@@ -1710,10 +1708,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public boolean getNagForCrushingBuildings() {
         return store.getBoolean(NAG_FOR_CRUSHING_BUILDINGS);
-    }
-
-    public boolean getNagForMapEdReadme() {
-        return store.getBoolean(NAG_FOR_MAP_ED_README);
     }
 
     public boolean getNagForMASC() {
@@ -2788,10 +2782,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setNagForCrushingBuildings(boolean b) {
         store.setValue(NAG_FOR_CRUSHING_BUILDINGS, b);
-    }
-
-    public void setNagForMapEdReadme(boolean b) {
-        store.setValue(NAG_FOR_MAP_ED_README, b);
     }
 
     public void setNagForMASC(boolean b) {

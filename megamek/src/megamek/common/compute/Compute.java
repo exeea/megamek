@@ -7331,13 +7331,7 @@ public class Compute {
                 continue;
             }
             for (Entity other : game.getEntitiesVector(c, boardId)) {
-                if ((entity.getOwner().equals(other.getOwner())
-                      || (entity.getOwner().getTeam() == other.getOwner().getTeam()))
-                      && !entity.equals(other)
-                      && ((other instanceof SmallCraft) || other.getTowing() != Entity.NONE
-                      || other.getTowedBy() != Entity.NONE)
-                      && other.canLoad(entity)
-                      && !other.isAirborne()
+                if (canMount(entity, other)
                       && (Math.abs((hex.getLevel() + other.getElevation()) - elev) <= maximumLevelDifference)
                       && !mountable.contains(other)) {
                     mountable.add(other);
@@ -7345,6 +7339,26 @@ public class Compute {
             }
         }
         return mountable;
+    }
+
+    /**
+     * Whether the entity could mount the transport under its own power from a hex next to it, leaving out the levels
+     * that {@link #getMountableUnits} also checks: a friendly, grounded Small Craft or DropShip, or a towing or towed
+     * unit, that can load the entity.
+     *
+     * @param entity    The entity to load
+     * @param transport The unit that would carry it
+     *
+     * @return {@code true} if the transport is one the entity can mount
+     */
+    public static boolean canMount(Entity entity, Entity transport) {
+        return ((transport instanceof SmallCraft) || transport.getTowing() != Entity.NONE
+              || transport.getTowedBy() != Entity.NONE)
+              && (entity.getOwner().equals(transport.getOwner())
+              || (entity.getOwner().getTeam() == transport.getOwner().getTeam()))
+              && !entity.equals(transport)
+              && transport.canLoad(entity)
+              && !transport.isAirborne();
     }
 
     public static boolean allowAimedShotWith(WeaponMounted weapon, AimingMode aimingMode) {

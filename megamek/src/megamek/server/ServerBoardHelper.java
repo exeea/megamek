@@ -46,6 +46,8 @@ import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDimensions;
+import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.loaders.MapSettings;
 import megamek.common.util.BoardUtilities;
 import megamek.common.util.fileUtils.MegaMekFile;
@@ -116,7 +118,8 @@ public class ServerBoardHelper {
     /**
      * Returns the game map as it is currently set in the map settings tab. When onlyFixedBoards is true, all Generated
      * and Surprise boards are replaced by empty boards, otherwise they are filled with a generated or a choice of the
-     * surprise maps.
+     * surprise maps. Sheets load as the game loads them ({@link BoardFile#loadSheet}); a probe with onlyFixedBoards
+     * reads only the size and edges, so its sheets skip the legacy scenery conversion.
      */
     public static Board getPossibleGameBoard(MapSettings mapSettings, boolean onlyFixedBoards) {
         mapSettings.replaceBoardWithRandom(MapSettings.BOARD_SURPRISE);
@@ -130,14 +133,13 @@ public class ServerBoardHelper {
             if (name == null || name.isEmpty()) {
                 continue;
             }
-            sheetBoards[i] = new Board();
-
             if ((name.startsWith(MapSettings.BOARD_GENERATED) || name.startsWith(MapSettings.BOARD_SURPRISE))
                   && onlyFixedBoards) {
                 sheetBoards[i] = Board.createEmptyBoard(mapSettings.getBoardWidth(), mapSettings.getBoardHeight());
             } else if (name.startsWith(MapSettings.BOARD_GENERATED)
                   || (mapSettings.getMedium() == MapSettings.MEDIUM_SPACE)) {
                 sheetBoards[i] = BoardUtilities.generateRandom(mapSettings);
+                if (!onlyFixedBoards) { BoardSceneryLayouts.convert(sheetBoards[i]); }
             } else {
                 boolean flipBoard = false;
 
@@ -153,9 +155,8 @@ public class ServerBoardHelper {
                     name = name.substring(Board.BOARD_REQUEST_ROTATION.length());
                 }
 
-                sheetBoards[i].load(new MegaMekFile(Configuration.boardsDir(),
-                      megamek.common.board.BoardFile.fileName(name)).getFile());
-                BoardUtilities.flip(sheetBoards[i], flipBoard, flipBoard);
+                File file = new MegaMekFile(Configuration.boardsDir(), BoardFile.fileName(name)).getFile();
+                sheetBoards[i] = BoardFile.loadSheet(file, flipBoard, !onlyFixedBoards);
             }
             i++;
         }

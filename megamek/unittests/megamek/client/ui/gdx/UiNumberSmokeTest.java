@@ -195,6 +195,78 @@ class UiNumberSmokeTest {
             } finally { number.close(); }
         });
     }
+    @Test void scrubbingStopsAtTheMinimumWhileTypingDoesNot() {
+        UiTestStage.run(ui -> {
+            record Change(String value, boolean finished) { }
+            var events = new ArrayList<Change>();
+            UiNumber number = new UiNumber(ui.kit, ui.stage, "Offset", 2, 0, 30, .1,
+                  (value, finished) -> events.add(new Change(value, finished)));
+            ui.stage.addActor(number); number.setBounds(100, 350, 320, 36); ui.draw();
+            Vector2 at = point(ui.stage, number.findActor("editor-scrub-Offset"));
+            int x = (int) at.x, y = (int) at.y;
+            TextField field = number.findActor("editor-Offset");
+            Slider slider = ui.stage.getRoot().findActor("editor-slider-Offset");
+            try {
+                // A tenth per four units: 400 to the left would reach -8.
+                ui.stage.touchDown(x, y, 0, Input.Buttons.LEFT); ui.stage.touchDragged(x - 400, y, 0);
+                ui.stage.touchUp(x - 400, y, 0, Input.Buttons.LEFT);
+                assertEquals(new Change("0", true), events.getLast(), "Scrubbing stops at the minimum");
+                ui.stage.setKeyboardFocus(field); field.setText("-3"); ui.stage.setKeyboardFocus(null);
+                assertEquals(new Change("-3", true), events.getLast(), "Typing is not limited");
+
+                int before = events.size();
+                ui.stage.touchDown(x, y, 0, Input.Buttons.LEFT); ui.stage.touchDragged(x - 400, y, 0);
+                assertEquals(before, events.size(), "Scrubbing never takes a typed value further below the minimum");
+                assertEquals(-3, slider.getMinValue(), 1e-4, "The slider reaches down to the typed value only");
+                ui.stage.touchDragged(x + 40, y, 0);
+                ui.stage.touchUp(x + 40, y, 0, Input.Buttons.LEFT);
+                assertEquals(new Change("-2", true), events.getLast(), "Scrubbing upward works");
+
+                ui.stage.setKeyboardFocus(field); field.setText("1"); ui.stage.setKeyboardFocus(null);
+                ui.stage.touchDown(x, y, 0, Input.Buttons.LEFT); ui.stage.touchDragged(x - 400, y, 0);
+                assertEquals(0, slider.getMinValue(), 1e-4, "An earlier typed value does not widen a later gesture");
+                ui.stage.touchUp(x - 400, y, 0, Input.Buttons.LEFT);
+                assertEquals(new Change("0", true), events.getLast());
+            } finally { number.close(); }
+        });
+    }
+    @Test void captionDoubleClickResetsOnceWithoutScrubbing() {
+        UiTestStage.run(ui -> {
+            record Change(String value, boolean finished) { }
+            var events = new ArrayList<Change>();
+            UiNumber offset = new UiNumber(ui.kit, ui.stage, "Offset", 7.5, 0, 30, .1,
+                  (value, finished) -> events.add(new Change(value, finished)));
+            UiNumber scale = new UiNumber(ui.kit, ui.stage, "Scale", 2, .05, 8, .05,
+                  (value, finished) -> events.add(new Change(value, finished)));
+            ui.stage.addActor(offset); offset.setBounds(100, 350, 320, 36);
+            ui.stage.addActor(scale); scale.setBounds(100, 250, 320, 36); ui.draw();
+            try {
+                Vector2 at = point(ui.stage, offset.findActor("editor-scrub-Offset"));
+                for (int click = 0; click < 2; click++) {
+                    ui.stage.touchDown((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
+                    ui.stage.touchUp((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
+                }
+                assertEquals(java.util.List.of(new Change("0", true)), events,
+                      "One committed reset, as a typed value commits, and no scrub steps");
+                assertEquals("0", ((TextField) offset.findActor("editor-Offset")).getText());
+                assertFalse(offset.editing(), "The reset closes the slider");
+                ui.stage.touchDown((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
+                ui.stage.touchUp((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
+                assertEquals(1, events.size(), "A third click opens the slider instead of resetting again");
+                assertTrue(offset.editing());
+                offset.dismiss();
+
+                // Zero lies outside this range: the reset takes the value nearest to it.
+                Vector2 scaleAt = point(ui.stage, scale.findActor("editor-scrub-Scale"));
+                for (int click = 0; click < 2; click++) {
+                    ui.stage.touchDown((int) scaleAt.x, (int) scaleAt.y, 0, Input.Buttons.LEFT);
+                    ui.stage.touchUp((int) scaleAt.x, (int) scaleAt.y, 0, Input.Buttons.LEFT);
+                }
+                assertEquals(new Change("0.05", true), events.getLast());
+                assertEquals(2, events.size());
+            } finally { offset.close(); scale.close(); }
+        });
+    }
     private static Vector2 point(Stage stage, Actor actor) {
         return stage.stageToScreenCoordinates(actor.localToStageCoordinates(new Vector2(actor.getWidth() / 2, actor.getHeight() / 2)));
     }

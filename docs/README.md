@@ -20,7 +20,8 @@ The feature guides explain the implementation boundaries and asset contracts.
 | [UI and controls](controls-and-interaction.md) | Phase commands, input routing, native panels and tactical overlays. |
 | [Overlays and occlusion](gpu-overlays.md) | Tactical geometry, field of view, point markers, labels, cutaways and see-through outlines. |
 | [Attack controls](gpu-attack-controls.md) | Weapon/target selection, pending orders, range walls and attack arrows. |
-| [Map editor](map-editor-3d.md) | Shared tools/undo, renderer switching, gestures and terrain annotations. |
+| [Map editor](3d-board-editor.md) | The 3D board editor: session, tools, gestures, undo, 2D Preview, native files and legacy conversion. |
+| [Map markers](map-editor-3d.md) | Shared hex-marker placement and the editor's hidden-terrain annotations. |
 
 ## Terrain and rendering
 

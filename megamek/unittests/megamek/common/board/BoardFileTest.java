@@ -84,7 +84,11 @@ class BoardFileTest {
         assertEquals(colours, combined.getHex(0, 1).getDecorations().getFirst().colours(), "Combining sheets keeps them");
         assertEquals(BoardDecoration.Colours.NONE, colours.with(1, null), "Every slot back to its own colour stores nothing");
         assertThrows(IllegalArgumentException.class, () -> new BoardDecoration("paint", "decal", "decal/car-park/straight-4", null,
-              0, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0).withColours(colours), "A decal has no colour slots");
+              0, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0).withColours(colours), "A decal has one paint colour");
+        var letter = new BoardDecoration("paint", "decal", "decal/lettering/letter-a", null, 0, 0, 0, false, 1,
+              BoardDecoration.Placement.ground(), 0).withColours(BoardDecoration.Colours.of("#000000"));
+        board.getHex(0, 0).setDecorations(List.of(letter));
+        assertEquals(List.of(letter), BoardFile.readNative(encode(board)).getHex(0, 0).getDecorations(), "Its paint is kept");
     }
 
     @TempDir Path directory;
@@ -109,7 +113,7 @@ class BoardFileTest {
         board.setRoadsAutoExit(false);
         board.setAnnotations(new Coords(0, 0), List.of("Note one", "Note two"));
         board.setAnnotations(new Coords(5, 5), List.of("Keep an old out-of-bounds annotation"));
-        Hex hex = new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:4;fluff:0:0", "CustomTheme");
+        Hex hex = new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:4;fluff:2001", "CustomTheme");
         hex.setDecorations(List.of(prop("car-a", BoardDecoration.Placement.ground()),
               prop("car-b", BoardDecoration.Placement.absolute(4)),
               new BoardDecoration("decal-a", "decal", "hexes/marking.png", null, 0, 0, 15, true, 1,
@@ -136,21 +140,37 @@ class BoardFileTest {
             assertEquals(type, back.getHex(0, 0).getAppearance().get("bridge"));
             assertEquals(type == HexAppearance.BUILT_BRIDGE, HexAppearance.bridgeBuilt(back.getHex(0, 0).getAppearance()));
         }
+        // A truss stores its colours like a placed object, in .board2 and on the clipboard; only a truss stores them.
+        Board truss = Board.createEmptyBoard(1, 1);
+        Hex steel = new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:1", "");
+        var green = HexAppearance.built(true, true, BoardDecoration.Colours.of("#2E5233"));
+        steel.setAppearance(Map.of("bridge", green));
+        truss.setHex(0, 0, steel);
+        String text = encode(truss);
+        assertTrue(text.contains("\"bridge\":{\"variant\":\"bridge/truss-pillars\",\"colours\":[\"#2e5233\"]}"), text);
+        assertEquals(green, BoardFile.readNative(text).getHex(0, 0).getAppearance().get("bridge"));
+        assertEquals(green, BoardFile.fromClipboard(BoardFile.clipboard(steel)).getAppearance().get("bridge"));
+        assertTrue(HexAppearance.truss(steel.getAppearance()) && HexAppearance.pillars(steel.getAppearance())
+              && Boolean.TRUE.equals(HexAppearance.bridgeBuilt(steel.getAppearance())), "A truss with piers is a built bridge");
+        assertThrows(java.io.IOException.class, () -> BoardFile.readNative(text.replace("bridge/truss-pillars", "bridge/pillars")),
+              "A standard deck has no colours");
+        assertThrows(IllegalArgumentException.class, () -> new HexAppearance("ground/blend/a", null, null, null,
+              BoardDecoration.Colours.of("#2e5233")));
+        assertThrows(IllegalArgumentException.class, () -> green.validateOwner("road"));
         // A bridge appearance is a plain variant: an asset or a material belongs to another owner.
         assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, "buildings/a", null, null).validateOwner("bridge"));
         assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, "asphalt", null).validateOwner("bridge"));
         assertEquals(hex.getDecorations(), loaded.getHex(0, 0).getDecorations());
         assertEquals(board.getAnnotations(), loaded.getAnnotations());
         assertEquals(board.getSourceHeader(), loaded.getSourceHeader());
-        assertTrue(loaded.getHex(0, 0).containsTerrain(Terrains.FLUFF));
-        assertEquals(0, loaded.getHex(0, 0).terrainLevel(Terrains.FLUFF));
+        assertEquals(2001, loaded.getHex(0, 0).terrainLevel(Terrains.FLUFF), "Server state, never legacy art, is kept");
         assertTrue(loaded.isNativeFormat());
     }
 
     @Test void importKeepsLegacySelectorsAndNeverOverwritesTheOldFile() throws Exception {
         String legacy = "# Attribution\nsize 1 1\noption exit_roads_to_pavement false\n"
               + "description \"Old description\"\ntag \"Old tag\"\nnote 0101 \"Legacy note\"\n"
-              + "hex 0101 0 \"building:1:65;bldg_elev:1;bldg_cf:15;fluff:0:0\" \"lunar\"\nend\n";
+              + "hex 0101 0 \"building:1:65;bldg_elev:1;bldg_cf:15\" \"lunar\"\nend\n";
         Path original = directory.resolve("old.board"); Files.writeString(original, legacy);
         Board imported = BoardFile.read(original);
         assertEquals(65, imported.getHex(0, 0).getTerrain(Terrains.BUILDING).getExits());
@@ -226,13 +246,32 @@ class BoardFileTest {
         assertEquals(new BoardDimensions(2, 3), BoardFile.metadata(file).size(), "Indexing must accept metadata after the hex array");
     }
 
-    @Test void failedSaveKeepsThePreviousFileAndRejectsUnopenableTerrain() throws Exception {
-        Board board = Board.createEmptyBoard(1, 1);
+    @Test void failedSaveKeepsThePreviousFile() throws Exception {
+        Board board = Board.createEmptyBoard(2, 1);
         Path file = directory.resolve("safe.board2"); BoardFile.save(board, file);
         String original = Files.readString(file);
-        board.getHex(0, 0).addTerrain(new megamek.common.units.Terrain(Terrains.BUILDING, 1));
-        assertThrows(java.io.IOException.class, () -> BoardFile.save(board, file));
+        var car = new BoardDecoration("car", "prop", "car", null, 0, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0);
+        board.getHex(0, 0).setDecorations(List.of(car)); board.getHex(1, 0).setDecorations(List.of(car));
+        assertThrows(java.io.IOException.class, () -> BoardFile.save(board, file), "Two objects with one ID");
         assertEquals(original, Files.readString(file));
+    }
+
+    /**
+     * A board that breaks the game's rules is written (decision P: the editor saves it as the old editor did); the one
+     * reader refuses it unless it continues on errors, which only the editor does.
+     */
+    @Test void rulesErrorsAreWrittenAndOnlyALenientReadOpensThem() throws Exception {
+        Board board = Board.createEmptyBoard(1, 1);
+        board.getHex(0, 0).addTerrain(new megamek.common.units.Terrain(Terrains.BUILDING, 1));
+        assertFalse(board.isValid());
+        Path file = directory.resolve("rules.board2"); BoardFile.save(board, file);
+        assertThrows(java.io.IOException.class, () -> BoardFile.read(file));
+        assertThrows(java.io.IOException.class, () -> BoardFile.readNative(Files.readString(file)));
+        Board lenient = BoardFile.read(file, true);
+        assertFalse(lenient.isValid());
+        assertThrows(java.io.IOException.class, () -> BoardFile.read(directory.resolve("missing.board2"), true));
+        assertThrows(java.io.IOException.class, () -> BoardFile.readNative("{\"format\":\"megamek-board\",\"version\":2}", true),
+              "A malformed document is refused either way");
     }
 
     @Test void shippedCompositionExampleLoadsWithIndependentHeightLayers() throws Exception {
@@ -246,7 +285,7 @@ class BoardFileTest {
         var elevated = example.getHex(1, 3).getDecorations();
         assertEquals(java.util.Set.of(4.0, 5.0), elevated.stream().map(d -> d.placement().level()).collect(java.util.stream.Collectors.toSet()));
         // The route marker keeps its N/S sides; a board flip reflects them as terrain exits are.
-        var route = MaglevRoute.find(example.getHex(1, 3));
+        var route = RailRoute.find(example.getHex(1, 3), RailRoute.Kind.MAGLEV);
         assertEquals(9, route.connections());
         assertEquals(9, route.flip(true, false).connections());
         assertEquals(2 | 16, route.withConnections(4 | 32).flip(true, false).connections());

@@ -41,6 +41,7 @@ import java.io.Serializable;
 import java.util.List;
 import java.util.Objects;
 
+import megamek.common.IndustrialElevator;
 import megamek.common.annotations.Nullable;
 import megamek.common.equipment.MiscType;
 import megamek.common.options.OptionsConstants;
@@ -753,6 +754,15 @@ public class Terrain implements Serializable {
 
         if (!valid && (errors != null)) {
             errors.add("Illegal level: " + this);
+        }
+
+        // An industrial elevator's level is its shaft bottom, its exits hold the top: no elevator has a bottom above it.
+        if ((type == INDUSTRIAL_ELEVATOR) && (level > IndustrialElevator.shaftTop(exits))) {
+            valid = false;
+            if (errors != null) {
+                errors.add("Industrial elevator: the shaft bottom (" + level + ") is above the shaft top ("
+                      + IndustrialElevator.shaftTop(exits) + ").");
+            }
         }
 
         return valid;

@@ -12,6 +12,7 @@ import java.util.Set;
 
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.BoardDecoration;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -153,7 +154,70 @@ class BoardConcreteShoreTest {
         } finally { BoardConcrete.tune(original); }
     }
 
+    /**
+     * A placed object keeps its hex's concrete outline only where its footprint reaches a wall the fit moves
+     * (b9-decisions C). On a raised patch, a car at the centre of a hex on the fitted side leaves the straight side as
+     * it is, and the same car on that hex's moved wall keeps the hex's original outline, as a structure does. On a
+     * patch level with the grass a moved edge only changes the ground beneath the car, so the fit stays straight.
+     */
+    @Test
+    void aPlacedObjectKeepsItsHexOutlineOnlyWhereItReachesAMovedWall() {
+        BoardConcrete.Mode original = BoardConcrete.mode();
+        try {
+            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
+            for (int level : new int[] { 2, 0 }) {
+                BoardScene plain = pavedPatch(0, level, null, null);
+                BoardConcrete fit = BoardConcrete.of(plain);
+                // A hex on the fitted side and one of its moved edges toward the grass.
+                Coords at = null;
+                int edge = -1;
+                for (var tile : plain.tiles()) {
+                    for (int k = 0; k < 6 && at == null && tile.surface() == BoardScene.Surface.CONCRETE; k++) {
+                        var across = plain.tile(tile.coords().translated(BoardGeometry.edgeDirection(k)));
+                        boolean moved = !fit.corner(tile.coords(), k).equals(BoardGeometry.corner(tile.coords(), 0, k))
+                              || !fit.corner(tile.coords(), (k + 1) % 6).equals(BoardGeometry.corner(tile.coords(), 0, (k + 1) % 6));
+                        if (moved && across.surface() != BoardScene.Surface.CONCRETE) { at = tile.coords(); edge = k; }
+                    }
+                }
+                assertNotNull(at, "The patch has a fitted side");
+                // Inside the band the edge sweeps: halfway between the original and the fitted middle of the edge.
+                Vector3 centre = BoardGeometry.center(at, 0);
+                Vector3 middle = BoardGeometry.corner(at, 0, edge).add(BoardGeometry.corner(at, 0, (edge + 1) % 6)).scl(.5f);
+                Vector3 fitted = fit.corner(at, edge).add(fit.corner(at, (edge + 1) % 6)).scl(.5f);
+                Vector3 band = middle.lerp(fitted, .5f).sub(centre);
+                BoardConcrete onEdge = BoardConcrete.of(pavedPatch(0, level, at,
+                      car(band.x / BoardGeometry.width(), band.y / BoardGeometry.height())));
+                if (level == 0) {
+                    assertEquals(fit.corners(at), onEdge.corners(at), "A moved edge without a wall keeps the fit: " + at);
+                    continue;
+                }
+                BoardConcrete clear = BoardConcrete.of(pavedPatch(0, level, at, car(0, 0)));
+                for (var tile : plain.tiles()) {
+                    assertEquals(fit.corners(tile.coords()), clear.corners(tile.coords()),
+                          "A car clear of the moved walls keeps the fit straight: " + tile.coords());
+                }
+                for (var shift : onEdge.corners(at)) {
+                    assertEquals(0, Math.hypot(shift.x(), shift.y()), .001f, "A car on the moved wall keeps its hex: " + at);
+                }
+                assertNotEquals(fit.corners(at), onEdge.corners(at));
+            }
+        } finally { BoardConcrete.tune(original); }
+    }
+
+    /** A placed car at (x, y) hex widths/heights from its hex centre, as the scene captures a .board2 object. */
+    private static BoardScene.Feature car(double x, double y) {
+        var object = new BoardDecoration("car", "prop", "scenery/vehicles/car", null, x, y, 30, false, 1,
+              BoardDecoration.Placement.ground(), 0);
+        return new BoardScene.Feature(object.asset(), (float) (x * BoardGeometry.TILE_WIDTH),
+              (float) (y * BoardGeometry.TILE_HEIGHT), 30, 1, 1, 0, BoardScene.FeatureKind.PROP, 0, false, object);
+    }
+
     private static BoardScene pavedPatch(int direction) {
+        return pavedPatch(direction, 0, null, null);
+    }
+
+    /** The patch's concrete stands at {@code level}; one hex may hold one placed object. */
+    private static BoardScene pavedPatch(int direction, int level, Coords objectAt, BoardScene.Feature object) {
         Coords origin = new Coords(8, 8);
         Vector3 center = BoardGeometry.center(origin, 0);
         Vector3 axis = BoardGeometry.center(origin.translated(direction), 0).sub(center).nor();
@@ -164,9 +228,9 @@ class BoardConcreteShoreTest {
                 Vector3 relative = BoardGeometry.center(at, 0).sub(center);
                 boolean land = Math.abs(relative.dot(axis)) <= 280 * BoardGeometry.HEX_SCALE
                       && Math.abs(relative.x * -axis.y + relative.y * axis.x) <= 85 * BoardGeometry.HEX_SCALE;
-                tiles.add(new BoardScene.Tile(at, 0, -1, false, 0,
+                tiles.add(new BoardScene.Tile(at, land ? level : 0, -1, false, 0,
                       land ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, null, null, null, null, null,
-                      List.of(), List.of(), BoardLiquid.NONE, null, true));
+                      at.equals(objectAt) ? List.of(object) : List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }
         return new BoardScene(0, 17, 17, tiles, List.of(), List.of(), -1, "", List.of());

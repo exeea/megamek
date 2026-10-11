@@ -49,7 +49,9 @@ import megamek.common.board.Coords;
  * or the installed geometry changes, and while the terrain is building.
  */
 final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Disposable {
-    private static final String[] LOOKING = { "looking N", "looking NE", "looking SE", "looking S", "looking SW", "looking NW" };
+    /** The message keys of the six directions the view can look along, clockwise from north. */
+    private static final String[] LOOKING = { "BoardEditor.looking.n", "BoardEditor.looking.ne", "BoardEditor.looking.se",
+          "BoardEditor.looking.s", "BoardEditor.looking.sw", "BoardEditor.looking.nw" };
     /** The left ruler, the right pill column, the margin above the plot and the hint line below it. */
     private static final float RULER = 34, PILLS = 136, TOP = 8, BOTTOM = 22;
     /** A pill's height and spacing, and the pointer's reach around a guide. */
@@ -109,7 +111,8 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
         Level level() { return levels.getFirst(); }
         boolean has(String key) { return levels.stream().anyMatch(level -> level.key().equals(key)); }
         String text() {
-            return chip ? name : name + (!mixed && levels.size() > 1 ? " ×" + levels.size() : "") + " · L" + UiNumber.format(level().level());
+            return chip ? name : name + (!mixed && levels.size() > 1 ? " ×" + levels.size() : "") + " · "
+                  + UiKit.text("BoardEditor.level", UiNumber.format(level().level()));
         }
     }
 
@@ -170,7 +173,7 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
     /** Highlights the pill of {@code key}, the item hovered here, in Layers or on the board. */
     void highlight(String key) { highlight = key; }
     /** The direction the view looks along, the main camera's yaw snapped to a hex side: "looking N". */
-    String looking() { return LOOKING[direction]; }
+    String looking() { return UiKit.text(LOOKING[direction]); }
 
     private Coords shown() { return snapshot == null ? null : snapshot.selected(); }
 
@@ -191,7 +194,7 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
 
     private boolean armed() {
         var object = snapshot == null ? null : snapshot.activeBrush().object();
-        return object != null && snapshot.tool() == BoardEditorSession.Tool.PAINT && !megamek.common.board.MaglevRoute.isRoute(object);
+        return object != null && snapshot.tool() == BoardEditorSession.Tool.PAINT && !megamek.common.board.RailRoute.isRoute(object);
     }
 
     private static boolean ctrl() { return Gdx.input.isKeyPressed(Input.Keys.CONTROL_LEFT) || Gdx.input.isKeyPressed(Input.Keys.CONTROL_RIGHT); }
@@ -206,8 +209,8 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
                   .map(objectLabel).orElse(level.key());
         }
         return switch (level.key()) {
-            case "ground" -> snapshot.property("water") == null ? "Ground" : "Water surface";
-            case "water" -> "Water bed";
+            case "ground" -> snapshot.property("water") == null ? blueprint.component("ground").label() : UiKit.text("BoardEditor.waterSurface");
+            case "water" -> UiKit.text("BoardEditor.waterBed");
             default -> blueprint.component(level.key()).label();
         };
     }
@@ -335,10 +338,13 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
             if (!level.receiver().isEmpty() && Math.abs(y(level.level()) - y) <= BAND
                   && (best == null || Math.abs(y(level.level()) - y) < Math.abs(y(best.level()) - y))) { best = level; }
         }
-        if (best != null) { return new Spot(best.receiver(), best.level(), "On " + name(best).toLowerCase(java.util.Locale.ROOT) + " · L" + UiNumber.format(best.level())); }
+        if (best != null) {
+            return new Spot(best.receiver(), best.level(), UiKit.text("BoardEditor.spotOn", name(best).toLowerCase(java.util.Locale.ROOT),
+                  UiNumber.format(best.level())));
+        }
         if (!snapshot.activeBrush().object().kind().equals("prop")) { return null; }
         double step = quarter ? .25 : 1, level = Math.round(levelAt(y) / step) * step;
-        return new Spot("", level, "Fixed · L" + UiNumber.format(level));
+        return new Spot("", level, UiKit.text("BoardEditor.spotFixed", UiNumber.format(level)));
     }
 
     /** Places the armed item at the pointer's offset along the view, kept inside the hex. */
@@ -410,10 +416,10 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
             pill.width = Math.min(pill.text.getPrefWidth() + (draggable(pill) ? 22 : 14), PILLS - 4);
         }
         Drag gesture = drag;
-        hint.setText(gesture != null && gesture.began ? gesture.name + " L" + UiNumber.format(gesture.from) + " → L" + UiNumber.format(gesture.applied)
-              : !armed() ? "Drag a label to change its height · Ctrl: quarter levels for objects"
-              : snapshot.activeBrush().object().kind().equals("decal") ? "Click a line to place on it"
-              : "Click a line to place on it · click air for a fixed level · Ctrl: quarter levels");
+        hint.setText(gesture != null && gesture.began
+              ? UiKit.text("BoardEditor.section.moving", gesture.name, UiNumber.format(gesture.from), UiNumber.format(gesture.applied))
+              : UiKit.text(!armed() ? "BoardEditor.section.drag"
+              : snapshot.activeBrush().object().kind().equals("decal") ? "BoardEditor.section.placeDecal" : "BoardEditor.section.placeProp"));
     }
 
     /**
@@ -440,7 +446,8 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
             inside.subList(room, inside.size()).clear();
         }
         pills.clear();
-        Pill under = chip(below, "below"), over = chip(above, above.stream().allMatch(p -> p.guide > getHeight() - TOP + 1) ? "above" : "more");
+        Pill under = chip(below, "BoardEditor.section.below"), over = chip(above, above.stream()
+              .allMatch(p -> p.guide > getHeight() - TOP + 1) ? "BoardEditor.section.above" : "BoardEditor.section.more");
         if (under != null) { under.y = BOTTOM; pills.add(under); }
         float next = low;
         for (Pill pill : inside) { pill.y = Math.max(pill.guide - PILL_H / 2, next); next = pill.y + slot; }
@@ -463,17 +470,17 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
             if (merged == null) { merged = pill; merged.mixed = true; }
             else { merged.levels.addAll(pill.levels); iterator.remove(); }
         }
-        merged.name = merged.levels.size() + " objects";
+        merged.name = UiKit.text("BoardEditor.objectCount", merged.levels.size());
         return true;
     }
 
-    /** One dimmed chip for {@code gathered}, "3 above", or null when there are none. */
+    /** One dimmed chip for {@code gathered}, "3 above" by the message key {@code where}, or null when there are none. */
     private static Pill chip(List<Pill> gathered, String where) {
         if (gathered.isEmpty()) { return null; }
         Pill chip = new Pill(gathered.getFirst().level(), "");
         chip.levels.clear(); gathered.forEach(pill -> chip.levels.addAll(pill.levels));
         chip.chip = true; chip.guide = Float.NaN;
-        chip.name = chip.levels.size() + " " + where;
+        chip.name = UiKit.text(where, chip.levels.size());
         return chip;
     }
 
@@ -487,7 +494,7 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
     @Override public void draw(Batch batch, float parentAlpha) {
         if (getWidth() < 1 || getHeight() < 1) { return; }
         if (snapshot == null || shown() == null || terrain.get() == null) {
-            hint.setText("Select a hex to see its side elevation");
+            hint.setText(UiKit.text("BoardEditor.section.empty"));
             hint.setBounds(getX(), getY() + getHeight() / 2 - 8, getWidth(), 16); hint.draw(batch, parentAlpha);
             laidOut = null; return;
         }

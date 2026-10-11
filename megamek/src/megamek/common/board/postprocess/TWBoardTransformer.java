@@ -36,6 +36,8 @@ package megamek.common.board.postprocess;
 
 import megamek.common.Configuration;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.loaders.MapSettings;
 import megamek.common.options.IGameOptions;
 import megamek.common.options.OptionsConstants;
@@ -115,9 +117,6 @@ public class TWBoardTransformer {
 
     private static void rotateBoards(MapSettings mapSettings, Board[] sheetBoards) {
         for (int i = 0; i < (mapSettings.getMapWidth() * mapSettings.getMapHeight()); i++) {
-            sheetBoards[i] = new Board();
-            // Need to set map type prior to loading to adjust foliage height, etc.
-            sheetBoards[i].setType(mapSettings.getMedium());
             String name = mapSettings.getBoardsSelectedVector().get(i);
             boolean isRotated = false;
             if (name.startsWith(Board.BOARD_REQUEST_ROTATION)) {
@@ -130,9 +129,10 @@ public class TWBoardTransformer {
             if (name.startsWith(MapSettings.BOARD_GENERATED)
                   || (mapSettings.getMedium() == MapSettings.MEDIUM_SPACE)) {
                 sheetBoards[i] = BoardUtilities.generateRandom(mapSettings);
+                BoardSceneryLayouts.convert(sheetBoards[i]);
             } else {
-                sheetBoards[i].load(new MegaMekFile(Configuration.boardsDir(), megamek.common.board.BoardFile.fileName(name)).getFile());
-                BoardUtilities.flip(sheetBoards[i], isRotated, isRotated);
+                var file = new MegaMekFile(Configuration.boardsDir(), BoardFile.fileName(name)).getFile();
+                sheetBoards[i] = BoardFile.loadSheet(file, isRotated, true);
             }
         }
     }

@@ -127,6 +127,7 @@ class GpuEditorBrushSmokeTest {
                                 assertEquals(owner, source.editorState().selected());
                                 assertFalse(source.editorState().dirty());
                                 assertTrue(root.findActor("editor-brush-").isDescendantOf(root.findActor("editor-brush")));
+                                assertTrue(GpuBoardTestUi.shown(root.findActor("editor-clear-only")), "Only overwrite clear hexes");
                                 assertFalse(GpuBoardTestUi.texts(root.findActor("editor-inspector")).contains("LEGACY SOURCE…"));
                                 GpuBoardTestUi.assertHorizontalBounds((Group) root.findActor("editor-brush"), root.findActor("editor-brush"));
                                 GpuBoardTestUi.capture(new File(output, "editor-brush-vegetation.png"));

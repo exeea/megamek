@@ -24,7 +24,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Real UIKit controls, source capture, object geometry and both cameras without creating an old editor; the workspace
- * layout (Assets, Layers over Edit, the Brush panel and the collapsible side view) at 1920x1080 and 1280x800.
+ * layout (Assets, Layers over Edit, the Brush panel and the collapsible side view) at 1920x1080 and 1280x800, and the
+ * Settings sections at 1280x800: an Arena toggle, a manual tag, and a Flood and a confirmed Clear that one Undo each
+ * restores. The workspace, an object's Edit panel and Settings show no text without a message key.
  */
 @Tag("on-demand")
 class GpuStandaloneEditorSmokeTest {
@@ -52,6 +54,10 @@ class GpuStandaloneEditorSmokeTest {
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
         assertTrue(output.isDirectory() || output.mkdirs());
         AtomicReference<Throwable> failure = new AtomicReference<>();
+        // The default workspace: a Layers divider the developer dragged (kept in the GUI preferences) would shrink Layers.
+        var preferences = megamek.client.ui.clientGUI.GUIPreferences.getInstance();
+        float split = preferences.getBoardEditorLayersSplit();
+        preferences.setBoardEditorLayersSplit(-1);
         try {
             new Lwjgl3Application(new GpuBattleView(source) {
                 final long deadline = System.nanoTime() + 120_000_000_000L;
@@ -73,6 +79,7 @@ class GpuStandaloneEditorSmokeTest {
                         if (step == 0) {
                             var category = (megamek.client.ui.gdx.UiButton) GpuBoardTestUi.stage().getRoot().findActor("editor-category");
                             assertEquals("Terrain · Ground", category.getText().toString(), "One compact category drop-down");
+                            assertTextsResolved();
                             assertWorkspaceSpacing();
                             assertCorners(source.editorState().tool());
                             assertTrue(GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("editor-section-panel")),
@@ -96,6 +103,7 @@ class GpuStandaloneEditorSmokeTest {
                             step++; nextFrame = frames() + 6;
                         } else if (step == 2) {
                             assertNotNull(GpuBoardTestUi.stage().getRoot().findActor("editor-Scale"));
+                            assertTextsResolved();
                             for (String axis : List.of("W", "L", "H")) {
                                 assertNotNull(GpuBoardTestUi.stage().getRoot().findActor("editor-" + axis), "Stretch " + axis);
                             }
@@ -201,13 +209,113 @@ class GpuStandaloneEditorSmokeTest {
                                   + megamek.client.ui.gdx.UiNumber.format(offset)), "Inspector heights must refresh when edited geometry finishes installing");
                             GpuBoardTestUi.capture(new File(output, "standalone-editor-compact.png"));
                             GpuBoardTestUi.capture(new File(output, "standalone-editor-layout-1280.png"));
+                            GpuBoardTestUi.click("editor-settings-button"); step++; nextFrame = frames() + 4;
+                        } else if (step == 14) {
+                            // Settings at 1280x800: the Map, Whole board and Size sections fit the window and scroll.
+                            var stage = GpuBoardTestUi.stage(); var root = stage.getRoot();
+                            var scroll = (com.badlogic.gdx.scenes.scene2d.ui.ScrollPane) root.findActor("editor-settings-scroll");
+                            var corner = scroll.localToStageCoordinates(new com.badlogic.gdx.math.Vector2());
+                            assertTrue(corner.y >= 0 && corner.y + scroll.getHeight() <= stage.getHeight(), "Settings fit the window");
+                            assertTrue(scroll.getMaxY() > 0, "The sections scroll");
+                            for (String section : List.of("editor-settings-map", "editor-settings-whole-board", "editor-settings-size")) {
+                                assertTrue(root.findActor(section).isDescendantOf(scroll.getActor()), section);
+                            }
+                            GpuBoardTestUi.capture(new File(output, "standalone-editor-settings-1280.png"));
+                            assertTextsResolved();
+                            assertFalse(source.editorState().arena());
+                            GpuBoardTestUi.click("editor-settings-arena");
+                            var tag = (com.badlogic.gdx.scenes.scene2d.ui.TextField) root.findActor("editor-add-tag");
+                            stage.setKeyboardFocus(tag); tag.setText("Hills"); stage.setKeyboardFocus(null);
+                            var surface = (com.badlogic.gdx.scenes.scene2d.ui.TextField) root.findActor("editor-settings-flood-surface-field");
+                            stage.setKeyboardFocus(surface); surface.setText("1"); stage.setKeyboardFocus(null);
+                            GpuBoardTestUi.click("editor-settings-flood"); step++; nextFrame = frames() + 8;
+                        } else if (step == 15) {
+                            var state = source.editorState();
+                            assertTrue(state.arena(), "Arena sets the tag");
+                            assertTrue(((megamek.client.ui.gdx.UiKit.Checkbox) GpuBoardTestUi.stage().getRoot()
+                                  .findActor("editor-settings-arena")).isTicked(), "The Map section follows the board");
+                            assertEquals(1, state.elevation(), "Flooding to L1 lifts the inspected L0 hex");
+                            assertEquals(1, state.property("water").value());
+                            assertEquals(List.of("Arena", "Hills"), state.tags(), "Add tag adds a manual tag");
+                            assertNotNull(GpuBoardTestUi.stage().getRoot().findActor("editor-settings-untag-Hills"), "Its chip");
+                            GpuBoardTestUi.capture(new File(output, "standalone-editor-settings-flooded.png"));
+                            assertTrue(GpuBoardTestUi.texts(GpuBoardTestUi.stage().getRoot().findActor("editor-settings-result"))
+                                  .stream().anyMatch(text -> text.startsWith("Flooded 36 hexes up to level 1")));
+                            settingsScroll().setScrollY(0); settingsScroll().updateVisualScroll();
+                            step++; nextFrame = frames() + 3;
+                        } else if (step == 16) {
+                            GpuBoardTestUi.capture(new File(output, "standalone-editor-settings-map.png"));
+                            var scroll = settingsScroll();
+                            var whole = GpuBoardTestUi.stage().getRoot().findActor("editor-settings-whole-board");
+                            var position = whole.localToAscendantCoordinates(scroll.getActor(), new com.badlogic.gdx.math.Vector2());
+                            scroll.setScrollY(scroll.getActor().getHeight() - position.y - whole.getHeight()); scroll.updateVisualScroll();
+                            step++; nextFrame = frames() + 3;
+                        } else if (step == 17) {
+                            GpuBoardTestUi.capture(new File(output, "standalone-editor-settings-whole-board.png"));
+                            source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.UNDO),
+                                  source.takeFrame().boardGeneration());
+                            step++; nextFrame = frames() + 8;
+                        } else if (step == 18) {
+                            var state = source.editorState();
+                            assertEquals(0, state.elevation(), "One Undo restores the flood");
+                            assertNull(state.property("water"));
+                            assertTrue(state.arena(), "Arena is no undo step");
+                            GpuBoardTestUi.click("editor-settings-clear"); step++; nextFrame = frames() + 4;
+                        } else if (step == 19) {
+                            // Clear Board asks first, in the editor's own confirmation card.
+                            assertTrue(GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("editor-clear-confirm")));
+                            assertFalse(source.editorState().objects().isEmpty(), "Nothing is cleared before the answer");
+                            GpuBoardTestUi.capture(new File(output, "standalone-editor-settings-clear.png"));
+                            GpuBoardTestUi.click("editor-clear-confirm-yes"); step++; nextFrame = frames() + 8;
+                        } else if (step == 20) {
+                            var state = source.editorState();
+                            assertTrue(state.objects().isEmpty() && state.property("bridge") == null, "Clear blanks every hex");
+                            source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.UNDO),
+                                  source.takeFrame().boardGeneration());
+                            step++; nextFrame = frames() + 8;
+                        } else if (step == 21) {
+                            assertEquals(4, source.editorState().objects().size(), "One Undo restores the cleared board");
+                            // Settings → Size: Resize by one hex north and one west (an odd west change), with its result line.
+                            var stage = GpuBoardTestUi.stage(); var root = stage.getRoot();
+                            for (String edge : List.of("north", "west")) {
+                                var field = (com.badlogic.gdx.scenes.scene2d.ui.TextField) root.findActor("editor-settings-resize-" + edge + "-field");
+                                stage.setKeyboardFocus(field); field.setText("1"); stage.setKeyboardFocus(null);
+                            }
+                            settingsScroll().setScrollY(settingsScroll().getMaxY()); settingsScroll().updateVisualScroll();
+                            step++; nextFrame = frames() + 3;
+                        } else if (step == 22) {
+                            assertTrue(GpuBoardTestUi.texts(GpuBoardTestUi.stage().getRoot().findActor("editor-settings-resize-result"))
+                                  .contains(megamek.client.ui.gdx.UiKit.text("BoardEditor.resizeResult", 7, 7)));
+                            GpuBoardTestUi.capture(new File(output, "standalone-editor-settings-size.png"));
+                            GpuBoardTestUi.click("editor-settings-resize"); step++; nextFrame = frames() + 8;
+                        } else if (step == 23) {
+                            var state = source.editorState();
+                            assertEquals(7, state.width(), "Resize adds the west column");
+                            assertEquals(7, state.height(), "and the north row");
+                            assertFalse(GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("editor-settings")), "Resize closes Settings");
+                            GpuBoardTestUi.capture(new File(output, "standalone-editor-resized.png"));
+                            source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.UNDO),
+                                  source.takeFrame().boardGeneration());
+                            step++; nextFrame = frames() + 8;
+                        } else if (step == 24) {
+                            assertEquals(6, source.editorState().width(), "One Undo restores the size");
                             Gdx.app.exit();
                         }
                     } catch (Throwable error) { failure.set(error); Gdx.app.exit(); }
                 }
             }, configuration());
-        } finally { SwingUtilities.invokeAndWait(source::close); }
+        } finally { SwingUtilities.invokeAndWait(source::close); preferences.setBoardEditorLayersSplit(split); }
         if (failure.get() != null) { throw new AssertionError("Standalone editor failed", failure.get()); }
+    }
+
+    /** Every text the editor shows comes from messages.properties: none is a missing key's "!Key.name!" marker. */
+    private static void assertTextsResolved() {
+        assertEquals(List.of(), GpuBoardTestUi.texts(GpuBoardTestUi.stage().getRoot()).stream()
+              .filter(text -> text.matches("(?s).*![A-Z][A-Za-z0-9]*\\.[A-Za-z0-9_.]+!.*")).toList(), "Texts without a message");
+    }
+
+    private static com.badlogic.gdx.scenes.scene2d.ui.ScrollPane settingsScroll() {
+        return GpuBoardTestUi.stage().getRoot().findActor("editor-settings-scroll");
     }
 
     private static void assertWorkspaceSpacing() throws ReflectiveOperationException {

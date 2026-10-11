@@ -13,6 +13,7 @@ import java.util.Map;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -128,8 +129,11 @@ class BoardBridgeMaterialsTest {
         var far = new Coords(4, 11);
         assertEquals(BoardRoad.Kind.DIRT, BoardBridge.deck(onlyDirt, onlyDirt.tile(far)).kind());
         assertEquals(BoardRoad.Kind.GRAVEL, BoardBridge.deck(edited, edited.tile(far)).kind());
+        // An untyped span is built: without a road it is plain asphalt; a stored natural type is a rock arch.
         var isolated = straight(start, 3, 12, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE);
-        assertTrue(BoardBridge.deck(isolated, isolated.tile(far)).natural());
+        assertEquals(BoardRoad.Kind.ALLEY, BoardBridge.deck(isolated, isolated.tile(far)).kind());
+        var natural = BoardBridgeTypeTest.typed(edited, HexAppearance.NATURAL_BRIDGE);
+        assertTrue(BoardBridge.deck(natural, natural.tile(far)).natural(), "A stored natural span ignores its approach");
     }
 
     static BoardScene straight(Coords start, int direction, int length, BoardRoad.Kind before, BoardRoad.Kind after) {

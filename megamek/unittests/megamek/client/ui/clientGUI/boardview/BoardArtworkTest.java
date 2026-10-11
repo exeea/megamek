@@ -110,7 +110,7 @@ class BoardArtworkTest {
                 var coords = new Coords(0, 0);
                 board.setHex(coords, new Hex(0, "building:1;bldg_elev:2;bldg_cf:15;fuel_tank:1;"
                       + "fuel_tank_elev:1;fuel_tank_cf:15;fuel_tank_magn:10;heavy_industrial:1", ""));
-                return artwork.capture(board, coords, true);
+                return artwork.capture(board, coords, board.getHex(coords));
             } finally {
                 Configuration.setDataDir(data);
             }

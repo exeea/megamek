@@ -1052,7 +1052,8 @@ public class Hex implements Serializable {
                     }
                     break;
                 case "Theme":
-                    theme = infos[1];
+                    // getClipboardString writes a hex without a theme as "null"
+                    theme = infos[1].equals("null") ? "" : infos[1];
                     break;
                 case "Terrain":
                     terrainString = infos[1];

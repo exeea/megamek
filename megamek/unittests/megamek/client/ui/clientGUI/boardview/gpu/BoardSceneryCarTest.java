@@ -8,16 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import javax.imageio.ImageIO;
 
 import com.badlogic.gdx.files.FileHandle;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
-import megamek.common.Hex;
+import megamek.common.board.BoardSceneryLayouts;
+import megamek.common.board.BoardTreeDistribution;
 import megamek.common.board.Coords;
-import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 /** The unchanged 2D sprites are the independent reference for neutral car bodies, not their blue-gray curbs. */
@@ -38,7 +35,7 @@ class BoardSceneryCarTest {
             assertFalse(Files.exists(root.resolve(name + ".glb")), "No duplicate car geometry stays in the layout");
             BufferedImage reference = ImageIO.read(root.resolve("tileset/fluff/cars_" + variant + ".gif").toFile());
             for (var car : cars) {
-                assertEquals(BoardScene.FeatureKind.SCENERY, car.kind());
+                assertFalse(car.tree());
                 var data = RigidGlb.loadLods(new FileHandle(root.resolve(car.asset() + ".glb").toFile()), root).getFirst();
                 // The row's paint replaces the shared car's paint slot, as the renderer replaces it.
                 RigidGlb.recolour(data, car.colours());
@@ -59,12 +56,9 @@ class BoardSceneryCarTest {
                 assertTrue(bodyPixels >= 7, "Neutral car must overlap its body, not blue-gray curb paint: "
                       + variant + " at " + car.x() + "," + car.y() + " / " + bodyPixels);
             }
-            var scenery = new BoardArtwork.Scenery(List.of(name), Set.of(Terrains.FLUFF), Set.of(Terrains.FLUFF), 0);
-            var hex = new Hex(0, "pavement:1", "");
             var coords = new Coords(2, 2);
-            assertEquals(BoardFeatures.capture(hex, coords, Map.of(), Set.of(), c -> null, scenery, false),
-                  BoardFeatures.capture(hex, coords, Map.of(), Set.of(), c -> null, scenery, true),
-                  "The vegetation switch cannot randomize parked cars");
+            assertEquals(layout.chosen(coords, BoardTreeDistribution.PARK, false), layout.chosen(coords, BoardTreeDistribution.PARK, true),
+                  "The tree distribution cannot randomize parked cars");
         }
         assertEquals(16, neutralCars);
         // The road-free 2b/3b sprites are 7/8 without the lane.

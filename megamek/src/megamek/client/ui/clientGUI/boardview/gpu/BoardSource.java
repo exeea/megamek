@@ -87,6 +87,8 @@ interface BoardSource extends AutoCloseable {
     /** EDT-only: discard file-backed artwork caches before publishing a fresh snapshot. */
     default void reloadAssets() throws java.io.IOException { refresh(); }
     UiPreferences uiPreferences();
+    /** The board editor's trace overlay settings ({@link GpuTraceOverlay}); every other view has none. */
+    default GpuTraceOverlay.Settings trace() { return GpuTraceOverlay.Settings.NONE; }
     /** The map tools' status line (the board editor's title); a game shows its phase in the battle HUD instead. */
     default PhaseStatus phaseStatus() { return new PhaseStatus("", false); }
     GpuAtmosphereControls atmosphere();
@@ -145,6 +147,13 @@ interface BoardSource extends AutoCloseable {
           megamek.client.ui.boardeditor.BoardEditorSession.SelectMode mode, long generation) { }
     /** The active tool's hint for the hovered hex, such as "Raise · 7 hexes"; empty when it has none. */
     default String editorHint() { return ""; }
+    /**
+     * Where the next Paint or Erase pointer event would land, as {@link #editorPointer} takes it (null: off the board),
+     * for the editor's preview; the render thread reports it on every move and drag.
+     */
+    default void editorHover(Coords coords, double x, double y, String receiver) { }
+    /** The editor's preview of that event (GpuEditorPreview), published with the frame; none outside the editor. */
+    default GpuEditorPreview.Data editorPreview() { return GpuEditorPreview.Data.NONE; }
 
     default void editPlanetaryConditions(Consumer<BoardAtmosphere.Settings> completed) { atmosphere().edit(completed); }
     default BoardAtmosphere.Settings atmosphereFor(PlanetaryConditions conditions, boolean inSpace) {

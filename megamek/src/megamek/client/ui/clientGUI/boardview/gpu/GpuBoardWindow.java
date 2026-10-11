@@ -15,9 +15,7 @@ import java.awt.event.MouseEvent;
 import java.awt.event.WindowEvent;
 import java.awt.event.WindowAdapter;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,7 +39,6 @@ import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.boardeditor.BoardEditorSession;
-import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
@@ -51,6 +48,7 @@ import megamek.common.annotations.Nullable;
 import megamek.common.units.Entity;
 import megamek.client.ui.util.ScreenFit;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
 import megamek.logging.MMLogger;
@@ -203,6 +201,8 @@ public final class GpuBoardWindow {
     /** Preview windows own their temporary game and leave the browser's modal session intact. */
     private final boolean preview;
     private final BoardEditorSession editor;
+    /** The editor's open 2D Preview ({@link #showPreview2D}), or null. EDT. */
+    private JDialog preview2D;
     private final Game mapGame;
     private final Map<Dialog, Boolean> dialogOnTop = new IdentityHashMap<>();
     /**
@@ -214,14 +214,20 @@ public final class GpuBoardWindow {
         if (closeWithPreviewOwner(event)) {
             return;
         }
+        if (event.getID() == WindowEvent.WINDOW_CLOSED && event.getSource() instanceof Dialog closed) {
+            // A disposed dialog is released (with its content, such as the lobby's 2D preview) and keeps its stacking.
+            Boolean wasOnTop = dialogOnTop.remove(closed);
+            if (wasOnTop != null) {
+                closed.setAlwaysOnTop(wasOnTop);
+            }
+            return;
+        }
         if (event.getID() == ComponentEvent.COMPONENT_SHOWN
               && event.getSource() instanceof Dialog dialog && belongsToClassicWindow(dialog)) {
             if (asksPrompts() && !allowedOverBattle(dialog)) {
                 return;
             }
-            dialogOnTop.putIfAbsent(dialog, dialog.isAlwaysOnTop());
-            dialog.setAlwaysOnTop(true);
-            dialog.toFront();
+            raise(dialog);
         }
     };
     private volatile Lwjgl3Application application;
@@ -268,19 +274,26 @@ public final class GpuBoardWindow {
 
     /** Load a browser entry without changing the lobby's selected boards. */
     public static void openPreview(Window owner, File boardFile) {
-        Board board = new Board();
-        try (var input = new FileInputStream(boardFile)) {
-            var errors = new ArrayList<String>();
-            board.load(input, errors, false);
-            if (!errors.isEmpty() || board.getWidth() <= 0 || board.getHeight() <= 0) {
-                throw new IOException("Could not load board " + boardFile + ": " + errors);
-            }
-            board.setMapName(boardFile.getName());
-        } catch (IOException | RuntimeException failure) {
+        Board board;
+        try {
+            board = loadPreview(boardFile);
+        } catch (RuntimeException failure) {
             reportPreviewFailure(owner, failure);
             return;
         }
         openPreview(owner, board);
+    }
+
+    /**
+     * A browser entry's board as the file preview shows it: loaded and converted as the game loads a sheet
+     * ({@link BoardFile#loadSheet}), so the preview, the game and the editor show the same board.
+     *
+     * @throws IllegalArgumentException when the file cannot be read as a board
+     */
+    public static Board loadPreview(File boardFile) {
+        Board board = BoardFile.loadSheet(boardFile, false, true);
+        board.setMapName(boardFile.getName());
+        return board;
     }
 
     /** The preview owns a temporary game; the shared renderer supplies all terrain and camera controls. */
@@ -290,8 +303,8 @@ public final class GpuBoardWindow {
         }
         Objects.requireNonNull(owner);
         if (active != null) {
-            if (active.preview && !active.closing && active.classicWindow == owner) {
-                active.replacePreview(board);
+            if (isPreviewOf(owner)) {
+                active.replacePreview(board, true);
             } else if (active.preview || active.closing) {
                 active.close(false);
                 active.afterClose = () -> {
@@ -311,6 +324,32 @@ public final class GpuBoardWindow {
             start(new GpuBoardWindow(null, null, () -> null, owner, null, game));
         } catch (RuntimeException | LinkageError failure) {
             reportPreviewFailure(owner, failure);
+        }
+    }
+
+    /** EDT: whether the owner's open map preview shows this board (not a board browsed since). */
+    public static synchronized boolean showsPreview(Window owner, Board board) {
+        return isPreviewOf(owner) && active.mapGame.getBoard() == board;
+    }
+
+    /**
+     * EDT: shows another board in the owner's open map preview without bringing it to the front, for an update the
+     * user did not ask the preview for (a changed lobby map); without an open preview it does nothing.
+     */
+    public static synchronized void updatePreview(Window owner, Board board) {
+        if (isPreviewOf(owner)) {
+            active.replacePreview(board, false);
+        }
+    }
+
+    private static boolean isPreviewOf(Window owner) {
+        return active != null && active.preview && !active.closing && active.classicWindow == owner;
+    }
+
+    /** Closes the owner's map preview, as hiding or closing the owner does. */
+    public static synchronized void closePreview(Window owner) {
+        if (active != null && active.preview && active.classicWindow == owner) {
+            active.close(false);
         }
     }
 
@@ -334,8 +373,9 @@ public final class GpuBoardWindow {
             return;
         }
         try {
-            BoardEditorSession editor = new BoardEditorSession(megamek.common.board.BoardEditorBlueprint.get(),
-                  BoardSceneryLayouts.DECODER);
+            BoardEditorSession editor = new BoardEditorSession();
+            // Copy and Paste carry hexes as text between MegaMek windows and text editors, as the old editor did.
+            editor.textClipboard(Toolkit.getDefaultToolkit().getSystemClipboard());
             if (file != null) { editor.open(file.toPath()); }
             else if (chooseFile && !editor.chooseOpen(owner)) { return; }
             start(new GpuBoardWindow(null, null, () -> null, owner, editor, editor.game()));
@@ -344,68 +384,76 @@ public final class GpuBoardWindow {
         }
     }
 
-    /** Resume the same document after a 2D view; opening a view never loads a file or resets undo history. */
-    private static synchronized boolean openEditor(Window owner, BoardEditorSession editor) {
-        if (active != null) {
-            JOptionPane.showMessageDialog(owner, Messages.getString("GpuBoard.alreadyOpen"));
-            return false;
-        }
-        start(new GpuBoardWindow(null, null, () -> null, owner, editor, editor.game()));
-        return active != null;
-    }
-
-    /** Change map presentation only, after the native renderer has released its resources. */
+    /**
+     * The menu's 2D command. A map preview changes its presentation: this window closes, and once the native renderer
+     * has released its resources the same board shows in 2D. The editor keeps running and opens its live 2D Preview.
+     */
     private void requestClassic() {
         if (closing) { return; }
-        if (source != null) { source.endEditorStroke(); }
+        if (editor != null) {
+            showPreview2D();
+            return;
+        }
         close(false);
-        afterClose = () -> {
-            if (editor != null) { showClassicEditor(classicWindow, editor); }
-            else { showClassicPreview(classicWindow, mapGame); }
-        };
+        afterClose = () -> showClassicPreview(classicWindow, mapGame);
     }
 
-    private static void showClassicEditor(Window owner, BoardEditorSession session) {
-        BoardEditorPanel classic = new BoardEditorPanel(null, session);
-        classic.getFrame().setName("board-editor-2d");
-        classic.setSwitchTo3D(() -> { if (openEditor(owner, session)) { classic.dispose(); } });
-        classic.getFrame().addWindowListener(new WindowAdapter() {
-            @Override public void windowClosed(WindowEvent event) {
-                if (active == null && owner != null && owner.isDisplayable()) { showClassicWindow(null, owner); }
-            }
-        });
-        classic.showClassicEditor();
-        if (classic.hasClassicView()) { showClassicWindow(null, classic.getFrame()); }
-        else { classic.dispose(); openEditor(owner, session); }
+    /**
+     * The editor's 2D Preview: one non-modal window beside the running editor, owned by the editor's owner window,
+     * showing the edited board as the 2D board draws it. Its {@link BoardView} listens to the session's own Game and
+     * Board as it does in a game (the session edits them on the EDT), so edits, Undo/Redo and a replaced document (Open,
+     * New) show as they happen, without polling or a copy. A second request brings the open window to the front;
+     * closing the editor disposes it ({@link #finish}). EDT.
+     */
+    private void showPreview2D() {
+        if (preview2D != null && preview2D.isDisplayable()) {
+            showClassicWindow(null, preview2D);
+            return;
+        }
+        preview2D = boardWindow2D(classicWindow, Messages.getString("BoardEditor.preview2D"), "board-editor-preview-2d",
+              editor.game());
+        if (preview2D != null) { showClassicWindow(null, preview2D); }
     }
 
     /** A file-browser or lobby preview returns to this exact board, including a randomly generated one. */
     private static void showClassicPreview(Window owner, Game game) {
-        JDialog dialog = new JDialog(owner, previewTitle(game.getBoard()), Dialog.ModalityType.MODELESS);
-        dialog.setName("board-preview-2d");
+        JDialog dialog = boardWindow2D(owner, previewTitle(game.getBoard()), "board-preview-2d", game);
+        if (dialog == null) { return; }
+        JButton return3D = new JButton(Messages.getString("CommonMenuBar.viewGpuBoard"));
+        return3D.setName("preview-view-3d");
+        return3D.addActionListener(event -> {
+            openPreview(owner, game.getBoard());
+            if (active != null && active.preview && active.classicWindow == owner
+                  && active.mapGame.getBoard() == game.getBoard()) { dialog.dispose(); }
+        });
+        dialog.add(return3D, BorderLayout.NORTH);
+        showClassicWindow(null, dialog);
+    }
+
+    /**
+     * The one 2D window of a map, for the map preview's 2D Board and the editor's 2D Preview: a non-modal window showing
+     * {@code game}'s board as the 2D board draws it, through a {@link BoardView} that follows the game's board events and
+     * is disposed with the window. Returns null after reporting a failure. EDT.
+     */
+    private static JDialog boardWindow2D(Window owner, String title, String name, Game game) {
+        JDialog dialog = new JDialog(owner, title, Dialog.ModalityType.MODELESS);
+        dialog.setName(name);
         dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
         try {
             BoardView view = new BoardView(game, null, null, 0);
             view.setUseLosTool(false);
             view.setDisplayInvalidFields(false);
-            JButton return3D = new JButton(Messages.getString("CommonMenuBar.viewGpuBoard"));
-            return3D.setName("preview-view-3d");
-            return3D.addActionListener(event -> {
-                openPreview(owner, game.getBoard());
-                if (active != null && active.preview && active.classicWindow == owner
-                      && active.mapGame.getBoard() == game.getBoard()) { dialog.dispose(); }
-            });
-            dialog.add(return3D, BorderLayout.NORTH);
             dialog.add(view.getComponent(true), BorderLayout.CENTER);
             dialog.addWindowListener(new WindowAdapter() {
                 @Override public void windowClosed(WindowEvent event) { view.dispose(); }
             });
             dialog.setSize(1000, 750);
             dialog.setLocationRelativeTo(owner);
-            showClassicWindow(null, dialog);
+            return dialog;
         } catch (IOException failure) {
             dialog.dispose();
             reportPreviewFailure(owner, failure);
+            return null;
         }
     }
 
@@ -413,8 +461,12 @@ public final class GpuBoardWindow {
         return Messages.getString("GpuBoard.previewTitle") + " - " + board.getBoardName();
     }
 
-    /** Browsing another map reuses the same context, artwork, shaders and UI, just like loading in the editor. */
-    private void replacePreview(Board board) {
+    /**
+     * Browsing another map reuses the same context, artwork, shaders and UI, just like loading in the editor.
+     *
+     * @param raise whether the window comes to the front and takes the keyboard, as an explicit preview request does
+     */
+    private void replacePreview(Board board, boolean raise) {
         previewTitle = previewTitle(board);
         mapGame.setBoard(board); // The source's existing game listener captures and publishes the replacement.
         Lwjgl3Application app = application;
@@ -423,7 +475,9 @@ public final class GpuBoardWindow {
                 if (!closing) { ((Lwjgl3Graphics) app.getGraphics()).getWindow().setTitle(previewTitle); }
             });
         }
-        focus(false);
+        if (raise) {
+            focus(false);
+        }
     }
 
     /** Start the chosen board window even before a scenario or server has delivered its first map. */
@@ -470,6 +524,7 @@ public final class GpuBoardWindow {
             Toolkit.getDefaultToolkit().addAWTEventListener(window.dialogListener,
                   AWTEvent.COMPONENT_EVENT_MASK | AWTEvent.WINDOW_EVENT_MASK | AWTEvent.WINDOW_FOCUS_EVENT_MASK
                         | AWTEvent.KEY_EVENT_MASK | AWTEvent.MOUSE_EVENT_MASK);
+            if (window.editor != null) { quitHandler(window::requestExit); }
             Thread thread = new Thread(window::run, "MegaMek-GPU-board");
             thread.setDaemon(true);
             thread.start();
@@ -634,6 +689,16 @@ public final class GpuBoardWindow {
         if (!preview && classicWindow != null) {
             classicWindow.setVisible(false);
         }
+        if (preview) {
+            // The owner's open dialogs stay in front, as those it opens later do (dialogListener), so the lobby's 2D
+            // preview is not hidden behind its 3D preview.
+            for (Window window : Window.getWindows()) {
+                if (window != classicWindow && window.isShowing() && window instanceof Dialog dialog
+                      && belongsToClassicWindow(dialog)) {
+                    raise(dialog);
+                }
+            }
+        }
         if (gui != null) {
             gui.setClassicBoardViewEnabled(false);
             gui.refreshAuxiliaryWindows();
@@ -665,6 +730,21 @@ public final class GpuBoardWindow {
         } catch (RuntimeException | LinkageError failure) {
             startupFailure = failure;
             close(false);
+        }
+    }
+
+    /**
+     * macOS Quit while the editor runs: the editor's own close ({@link #requestExit}, which asks to save unsaved changes),
+     * and MegaMek keeps running, as {@code AbstractClientGUI} does for a game. Null hands Quit back to the launcher, which
+     * quits at once (it sets the same in its main menu).
+     */
+    private static void quitHandler(Runnable exit) {
+        if (java.awt.Desktop.isDesktopSupported()
+              && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.APP_QUIT_HANDLER)) {
+            java.awt.Desktop.getDesktop().setQuitHandler(exit == null ? null : (event, response) -> {
+                exit.run();
+                response.cancelQuit();
+            });
         }
     }
 
@@ -750,6 +830,13 @@ public final class GpuBoardWindow {
               .anyMatch(type::isInstance);
     }
 
+    /** Keeps a dialog above the native window until either closes ({@link #restoreDialogPresentation}). */
+    private void raise(Dialog dialog) {
+        dialogOnTop.putIfAbsent(dialog, dialog.isAlwaysOnTop());
+        dialog.setAlwaysOnTop(true);
+        dialog.toFront();
+    }
+
     /** True when the window is the classic window itself or a dialog chain owned by it. */
     private boolean belongsToClassicWindow(Window window) {
         for (Window current = window; current != null; current = current.getOwner()) {
@@ -771,6 +858,11 @@ public final class GpuBoardWindow {
 
     private void finish(Throwable failure) {
         startupTimer.stop();
+        // The editor's 2D Preview shows this editor's document: it closes with the editor, whichever way it closes.
+        if (preview2D != null) {
+            preview2D.dispose();
+            preview2D = null;
+        }
         restoreDialogPresentation();
         synchronized (GpuBoardWindow.class) {
             if (active != this) {
@@ -786,6 +878,7 @@ public final class GpuBoardWindow {
         }
         if (editor != null) {
             restoreClassic = classicWindow != null && classicWindow.isDisplayable();
+            quitHandler(null);
         }
         // The native window is already destroyed. Never resurrect a client that is shutting down.
         if (afterClose != null) {

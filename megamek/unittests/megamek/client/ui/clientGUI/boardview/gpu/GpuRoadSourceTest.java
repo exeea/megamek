@@ -15,6 +15,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -160,9 +161,11 @@ class GpuRoadSourceTest {
         return scene("Deserts/16x17 Mines 1.board");
     }
 
+    /** The shipped board as a game shows it: converted where it loads, as every load site does. */
     static BoardScene scene(String path) throws Exception {
         Board board = new Board();
         board.load(new File("data/boards/" + path));
+        BoardSceneryLayouts.convert(board);
         var scene = new AtomicReference<BoardScene>();
         try (var fixture = GpuBoardFixture.create(board)) {
             SwingUtilities.invokeAndWait(() -> {

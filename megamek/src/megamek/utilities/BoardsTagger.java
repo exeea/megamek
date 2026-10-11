@@ -450,29 +450,13 @@ public class BoardsTagger {
             return;
         }
 
-        Set<String> toAdd = new HashSet<>(tagsFor(board));
-
-        // Remove (see below) any auto tags that might be present so that auto tags that
-        // no longer apply
-        // are not left in the board file.
-        Set<String> toRemove = board.getTags().stream().filter(t -> t.contains(AUTO_SUFFIX)).collect(toSet());
-
         if (DEBUG) {
             String message = String.format("----- Board: %s", boardFile);
             logger.debug(message);
-            if (toRemove.equals(toAdd)) {
-                logger.debug("No changes.");
-            } else {
-                toAdd.forEach(logger::debug);
-            }
         }
 
-        // Now, if there are actual changes in the auto tags, remove the former ones,
-        // add the new ones and save
-        if (!toRemove.equals(toAdd)) {
-            toRemove.forEach(board::removeTag);
-            toAdd.forEach(board::addTag);
-
+        // If there are actual changes in the auto tags, save
+        if (updateAutoTags(board)) {
             // Re-save the board
             try (OutputStream os = new FileOutputStream(boardFile)) {
                 board.save(os);
@@ -481,6 +465,35 @@ public class BoardsTagger {
                 logger.error(ex, message);
             }
         }
+    }
+
+    /**
+     * Replaces the board's automatic tags with the ones {@link #tagsFor} finds now and keeps its manual tags, so tags
+     * that no longer apply, or were renamed, do not stay. The board tagger and the board editor both use it.
+     *
+     * @return whether the automatic tags changed
+     */
+    public static boolean updateAutoTags(Board board) {
+        Set<String> toAdd = new HashSet<>(tagsFor(board));
+        Set<String> toRemove = board.getTags().stream().filter(BoardsTagger::isAutoTag).collect(toSet());
+        if (DEBUG) {
+            if (toRemove.equals(toAdd)) {
+                logger.debug("No changes.");
+            } else {
+                toAdd.forEach(logger::debug);
+            }
+        }
+        if (toRemove.equals(toAdd)) {
+            return false;
+        }
+        toRemove.forEach(board::removeTag);
+        toAdd.forEach(board::addTag);
+        return true;
+    }
+
+    /** Whether {@code tag} is one the tagger applies and replaces (its {@code " (Auto)"} suffix), not a manual tag. */
+    public static boolean isAutoTag(String tag) {
+        return tag.contains(AUTO_SUFFIX);
     }
 
     private static void checkSum(Map<String, List<String>> boardCheckSum, File boardFile) {

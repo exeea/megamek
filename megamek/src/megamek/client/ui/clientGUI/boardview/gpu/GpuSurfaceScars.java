@@ -52,7 +52,8 @@ final class GpuSurfaceScars implements Disposable {
     private final ArrayDeque<GpuGroundDamage.Impact> pending = new ArrayDeque<>();
     private final Map<Receiver, Geometry> geometry = new HashMap<>();
     private final Map<Key, Page> tiles = new HashMap<>();
-    private final GpuTerrainPages batches = new GpuTerrainPages(part -> true, true);
+    /** A recoloured object's patch keeps its placement's colours (userData), which a merged page cannot carry. */
+    private final GpuTerrainPages batches = new GpuTerrainPages(part -> part.userData == null, true);
     private int boardId = Integer.MIN_VALUE;
     private long geometryRevision = Long.MIN_VALUE;
 
@@ -316,6 +317,8 @@ final class GpuSurfaceScars implements Disposable {
                 mesh.setIndices(indices);
                 var part = new Renderable();
                 part.material = material(source.source.view().material);
+                // The copied vertices of a recolourable model's shared mesh take its placement's colours (RigidGlb.packed).
+                part.userData = source.source.view().userData;
                 part.meshPart.set("surface-scar", mesh, 0, count, GL20.GL_TRIANGLES);
                 parts.add(part);
             }
@@ -357,7 +360,9 @@ final class GpuSurfaceScars implements Disposable {
         boolean same(Source other) {
             var a = source.view(); var b = other.view();
             return a.meshPart.mesh == b.meshPart.mesh && a.meshPart.offset == b.meshPart.offset && a.meshPart.size == b.meshPart.size
-                  && a.material.equals(b.material) && a.worldTransform.equals(b.worldTransform);
+                  && a.material.equals(b.material) && a.worldTransform.equals(b.worldTransform)
+                  // A recolour keeps the shared slotted mesh: only the colours in userData tell it.
+                  && Arrays.equals(RigidGlb.slotColours(a.userData), RigidGlb.slotColours(b.userData));
         }
         float[] vertex(int index) {
             int at = Short.toUnsignedInt(indices[index]) * stride;

@@ -16,10 +16,16 @@ vec3 instanceTurn(vec3 v) {
     return vec3(a_instance1.x * v.x - a_instance1.y * v.y, a_instance1.y * v.x + a_instance1.x * v.y, v.z);
 }
 
+// The horizontal, horizontal and vertical scales; a mirror image (a_instance1.w = 1) reverses its model's y axis. Its
+// batch also flips the front face, as the reflection reverses the winding (GpuInstancedMesh#mirrored).
+vec3 instanceScale() {
+    return vec3(a_instance0.w, a_instance0.w * (1.0 - 2.0 * a_instance1.w), a_instance1.z);
+}
+
 vec3 instancePosition(vec3 p) {
-    return instanceTurn(p * vec3(a_instance0.w, a_instance0.w, a_instance1.z)) + a_instance0.xyz;
+    return instanceTurn(p * instanceScale()) + a_instance0.xyz;
 }
 
 vec3 instanceNormal(vec3 n) {
-    return normalize(instanceTurn(n / vec3(a_instance0.w, a_instance0.w, a_instance1.z)));
+    return normalize(instanceTurn(n / instanceScale()));
 }

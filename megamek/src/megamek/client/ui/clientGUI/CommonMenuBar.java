@@ -71,15 +71,12 @@ import megamek.common.preference.PreferenceChangeEvent;
 import megamek.logging.MMLogger;
 
 /**
- * The menu bar that is used across MM, i.e. in the main menu, the board editor and the lobby and game.
+ * The menu bar that is used across MM, i.e. in the main menu and the lobby and game.
  */
 public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferenceChangeListener {
     private final static MMLogger logger = MMLogger.create(CommonMenuBar.class);
 
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
-
-    /** True when this menu is attached to the board editor. */
-    private final boolean isBoardEditor;
 
     /** True when this menu is attached to the game's main menu. */
     private final boolean isMainMenu;
@@ -149,27 +146,9 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     private final JMenuItem boardNew = new JMenuItem(getString("CommonMenuBar.fileBoardNew"));
     private final JMenuItem boardOpen = new JMenuItem(getString("CommonMenuBar.fileBoardOpen"));
     private final JMenu boardRecent = new JMenu(getString("CommonMenuBar.fileBoardRecent"));
-    private final JMenuItem boardSave = new JMenuItem(getString("CommonMenuBar.fileBoardSave"));
     private final JMenuItem boardSaveAs = new JMenuItem(getString("CommonMenuBar.fileBoardSaveAs"));
     private final JMenuItem boardSaveAsImage = new JMenuItem(getString("CommonMenuBar.fileBoardSaveAsImage"));
     private final JMenuItem boardSaveAsImageUnits = new JMenuItem(getString("CommonMenuBar.fileBoardSaveAsImageUnits"));
-    private final JCheckBoxMenuItem boardTraceOverlay = new JCheckBoxMenuItem(getString("CommonMenuBar.boardTraceOverlay"));
-    private final JMenuItem boardResize = new JMenuItem(getString("CommonMenuBar.boardResize"));
-    private final JMenuItem boardValidate = new JMenuItem(getString("CommonMenuBar.boardValidate"));
-    private final JMenuItem boardRunBoardTagger = new JMenuItem(getString("CommonMenuBar.boardRunBoardTagger"));
-    private final JMenuItem boardSourceFile = new JMenuItem(getString("CommonMenuBar.boardSourceFile"));
-    private final JMenuItem boardUndo = new JMenuItem(getString("CommonMenuBar.boardUndo"));
-    private final JMenuItem boardRedo = new JMenuItem(getString("CommonMenuBar.boardRedo"));
-    private final JMenuItem boardChangeTheme = new JMenuItem(getString("CommonMenuBar.viewChangeTheme"));
-    private final JMenuItem boardRaise = new JMenuItem(getString("CommonMenuBar.boardRaise"));
-    private final JMenuItem boardClear = new JMenuItem(getString("CommonMenuBar.boardClear"));
-    private final JMenuItem boardFlatten = new JMenuItem(getString("CommonMenuBar.boardFlatten"));
-    private final JMenuItem boardFlood = new JMenuItem(getString("CommonMenuBar.boardFlood"));
-    private JMenu boardRemove = new JMenu(getString("CommonMenuBar.boardRemove"));
-    private final JMenuItem boardRemoveForests = new JMenuItem(getString("CommonMenuBar.boardRemoveForests"));
-    private final JMenuItem boardRemoveWater = new JMenuItem(getString("CommonMenuBar.boardRemoveWater"));
-    private final JMenuItem boardRemoveRoads = new JMenuItem(getString("CommonMenuBar.boardRemoveRoads"));
-    private final JMenuItem boardRemoveBuildings = new JMenuItem(getString("CommonMenuBar.boardRemoveBuildings"));
 
     // The View menu
     private final JCheckBoxMenuItem viewMinimap = new JCheckBoxMenuItem(getString("CommonMenuBar.viewMinimap"));
@@ -242,7 +221,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
      * Tells this menu bar how to find the client whose game should be saved for a bug report.
      *
      * <p>Set this once the client exists. Without it, the bug report packager still works but produces an archive of
-     * logs and system information only, which is the correct behaviour for the main menu and the board editor.</p>
+     * logs and system information only, which is the correct behaviour for the main menu.</p>
      *
      * @param clientSupplier supplies the current client; may return {@code null} when no game is running
      */
@@ -251,28 +230,21 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     }
 
     public static CommonMenuBar getMenuBarForGame() {
-        var menuBar = new CommonMenuBar(false, true, false);
-        menuBar.updateEnabledStates();
-        return menuBar;
-    }
-
-    public static CommonMenuBar getMenuBarForBoardEditor() {
-        var menuBar = new CommonMenuBar(false, false, true);
+        var menuBar = new CommonMenuBar(false, true);
         menuBar.updateEnabledStates();
         return menuBar;
     }
 
     public static CommonMenuBar getMenuBarForMainMenu() {
-        var menuBar = new CommonMenuBar(true, false, false);
+        var menuBar = new CommonMenuBar(true, false);
         menuBar.updateEnabledStates();
         return menuBar;
     }
 
     /** Creates the common MegaMek menu bar. */
-    private CommonMenuBar(boolean isMainMenu, boolean isGame, boolean isBoardEditor) {
+    private CommonMenuBar(boolean isMainMenu, boolean isGame) {
         this.isMainMenu = isMainMenu;
         this.isGame = isGame;
-        this.isBoardEditor = isBoardEditor;
         // Create the Game menu
         JMenu menu = new JMenu(Messages.getString("CommonMenuBar.FileMenu"));
         menu.setMnemonic(VK_F);
@@ -335,38 +307,13 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         initMenuItem(boardOpen, menu, BOARD_OPEN, VK_O);
         initMenuItem(boardRecent, menu, BOARD_OPEN, VK_O);
         initializeRecentBoardsMenu();
-        initMenuItem(boardSave, menu, BOARD_SAVE);
         initMenuItem(boardSaveAs, menu, BOARD_SAVE_AS);
-        menu.addSeparator();
-
-        initMenuItem(boardValidate, menu, BOARD_VALIDATE);
-        initMenuItem(boardSourceFile, menu, BOARD_SOURCE_FILE);
-        initMenuItem(boardRunBoardTagger, menu, BOARD_RUN_BOARD_TAGGER);
         menu.addSeparator();
 
         initMenuItem(boardSaveAsImage, menu, BOARD_SAVE_AS_IMAGE);
         boardSaveAsImage.setToolTipText(Messages.getString("CommonMenuBar.fileBoardSaveAsImage.tooltip"));
         initMenuItem(boardSaveAsImageUnits, menu, BOARD_SAVE_AS_IMAGE_UNITS);
         boardSaveAsImageUnits.setToolTipText(Messages.getString("CommonMenuBar.fileBoardSaveAsImageUnits.tooltip"));
-        initMenuItem(boardTraceOverlay, menu, VIEW_TRACE_OVERLAY, GUIP.getShowTraceOverlay());
-        menu.addSeparator();
-
-        initMenuItem(boardUndo, menu, BOARD_UNDO);
-        initMenuItem(boardRedo, menu, BOARD_REDO);
-        menu.addSeparator();
-
-        initMenuItem(boardResize, menu, BOARD_RESIZE);
-        initMenuItem(boardChangeTheme, menu, VIEW_CHANGE_THEME);
-        initMenuItem(boardRaise, menu, BOARD_RAISE);
-        initMenuItem(boardClear, menu, BOARD_CLEAR);
-        initMenuItem(boardFlatten, menu, BOARD_FLATTEN);
-        initMenuItem(boardFlood, menu, BOARD_FLOOD);
-        boardRemove = new JMenu(Messages.getString("CommonMenuBar.boardRemove"));
-        menu.add(boardRemove);
-        initMenuItem(boardRemoveForests, boardRemove, BOARD_REMOVE_FORESTS);
-        initMenuItem(boardRemoveWater, boardRemove, BOARD_REMOVE_WATER);
-        initMenuItem(boardRemoveRoads, boardRemove, BOARD_REMOVE_ROADS);
-        initMenuItem(boardRemoveBuildings, boardRemove, BOARD_REMOVE_BUILDINGS);
 
         // Create the view menu.
         menu = new JMenu(Messages.getString("CommonMenuBar.ViewMenu"));
@@ -499,8 +446,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         viewIncGUIScale.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.INC_GUI_SCALE));
         viewDecGUIScale.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.DEC_GUI_SCALE));
         viewClientSettings.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.CLIENT_SETTINGS));
-        boardUndo.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.UNDO));
-        boardRedo.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.REDO));
         gameRoundReport.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.ROUND_REPORT));
         viewZoomIn.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.ZOOM_IN));
         viewZoomOut.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.ZOOM_OUT));
@@ -522,7 +467,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
             case ClientGUI.VIEW_INC_GUI_SCALE -> changeGUIScale(true);
             case ClientGUI.VIEW_DEC_GUI_SCALE -> changeGUIScale(false);
             case ClientGUI.VIEW_PLANETARY_CONDITIONS_OVERLAY -> GUIP.togglePlanetaryConditionsOverlay();
-            case VIEW_TRACE_OVERLAY -> GUIP.toggleTraceConditionsOverlay();
             case VIEW_KEYBINDS_OVERLAY -> GUIP.toggleKeybindsOverlay();
             case VIEW_TURN_DETAILS_OVERLAY -> GUIP.setTurnDetailsOverlay(!GUIP.getTurnDetailsOverlay());
             case ClientGUI.VIEW_LABELS -> GUIP.setUnitLabelStyle(GUIP.getUnitLabelStyle().next());
@@ -580,7 +524,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         boolean isLobby = isGame && phase.isLounge();
         boolean isInGame = isGame && phase.isDuringOrAfter(GamePhase.DEPLOYMENT);
         boolean isInGameBoardView = isInGame && phase.isOnMap();
-        boolean isBoardView = isInGameBoardView || isBoardEditor;
         viewBoard.setEnabled(isGame && !isLobby);
         viewBoard.setVisible(isGame);
         boolean canSave = !phase.isUnknown()
@@ -592,22 +535,6 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
 
         viewAccessibilityWindow.setEnabled(false);
 
-        boardChangeTheme.setEnabled(isBoardEditor);
-        boardUndo.setEnabled(isBoardEditor);
-        boardRedo.setEnabled(isBoardEditor);
-        boardRaise.setEnabled(isBoardEditor);
-        boardClear.setEnabled(isBoardEditor);
-        boardFlood.setEnabled(isBoardEditor);
-        boardRemove.setEnabled(isBoardEditor);
-        boardRemoveBuildings.setEnabled(isBoardEditor);
-        boardRemoveWater.setEnabled(isBoardEditor);
-        boardRemoveRoads.setEnabled(isBoardEditor);
-        boardRemoveForests.setEnabled(isBoardEditor);
-        boardFlatten.setEnabled(isBoardEditor);
-        boardValidate.setEnabled(isBoardEditor);
-        boardRunBoardTagger.setEnabled(isBoardEditor);
-        boardResize.setEnabled(isBoardEditor);
-        boardSourceFile.setEnabled(isBoardEditor);
         gameQLoad.setEnabled(isMainMenu || isLobby);
         gameLoad.setEnabled(isMainMenu || isLobby);
         gameStart.setEnabled(isMainMenu);
@@ -622,13 +549,11 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         gameAllMgBurstOff.setVisible(isLobby && burstMgAvailable);
         gameAllHotLoadOn.setVisible(isLobby && hotLoadAvailable);
         gameAllHotLoadOff.setVisible(isLobby && hotLoadAvailable);
-        boardSave.setEnabled(isBoardEditor);
-        boardSaveAs.setEnabled(isBoardEditor || isInGame); // TODO: should work in the lobby
-        boardSaveAsImage.setEnabled(isBoardEditor || isInGame); // TODO: should work in the lobby
-        boardNew.setEnabled(isBoardEditor || isMainMenu);
-        boardOpen.setEnabled(isBoardEditor || isMainMenu);
-        boardRecent.setEnabled((isBoardEditor || isMainMenu) && !RecentBoardList.getRecentBoards().isEmpty());
-        boardTraceOverlay.setEnabled(isBoardEditor);
+        boardSaveAs.setEnabled(isInGame); // TODO: should work in the lobby
+        boardSaveAsImage.setEnabled(isInGame); // TODO: should work in the lobby
+        boardNew.setEnabled(isMainMenu);
+        boardOpen.setEnabled(isMainMenu);
+        boardRecent.setEnabled(isMainMenu && !RecentBoardList.getRecentBoards().isEmpty());
         fileUnitsPaste.setEnabled(isLobby);
         fileUnitsCopy.setEnabled(isLobby);
         // reinforcing a player during a game is a gamemaster's job and lives on the Game Master menu; the same
@@ -647,15 +572,15 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         gameNetworkInformation.setEnabled(isInGame || isLobby || isMainMenu);
         gamePlayerSettings.setEnabled(isInGame);
 
-        viewMinimap.setEnabled(isBoardView);
-        viewZoomIn.setEnabled(isBoardView);
-        viewZoomOut.setEnabled(isBoardView);
-        viewZoomReset.setEnabled(isBoardView);
-        viewZoomOverviewToggle.setEnabled(isBoardView);
-        toggleIsometric.setEnabled(isBoardView);
-        viewKeybindsOverlay.setEnabled(isBoardView);
+        viewMinimap.setEnabled(isInGameBoardView);
+        viewZoomIn.setEnabled(isInGameBoardView);
+        viewZoomOut.setEnabled(isInGameBoardView);
+        viewZoomReset.setEnabled(isInGameBoardView);
+        viewZoomOverviewToggle.setEnabled(isInGameBoardView);
+        toggleIsometric.setEnabled(isInGameBoardView);
+        viewKeybindsOverlay.setEnabled(isInGameBoardView);
         viewPlanetaryConditionsOverlay.setEnabled(isInGameBoardView);
-        toggleHexCoords.setEnabled(isBoardView);
+        toggleHexCoords.setEnabled(isInGameBoardView);
 
         viewLOSSetting.setEnabled(isInGameBoardView);
         viewUnitOverview.setEnabled(isInGameBoardView);

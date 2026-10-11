@@ -14,6 +14,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.common.Configuration;
+import megamek.common.board.HexAppearance;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -137,10 +138,9 @@ class BoardTunnelTest {
         assertTrue(BoardTunnel.entrances(scene, scene.tile(at.translated(0))).isEmpty(),
               "Connected bridge decks stay open");
 
-        scene = BoardNaturalBridgeTest.replace(scene, BoardRoadTest.tile(at.translated(3), BoardRoad.Kind.NONE,
-              0, 0, BoardScene.Surface.ROCK));
+        scene = BoardBridgeTypeTest.typed(scene, HexAppearance.NATURAL_BRIDGE);
         assertTrue(BoardTunnel.entrances(scene, scene.tile(end)).isEmpty(),
-              "Removing the only approach restores the whole natural span");
+              "A natural span opens no portal, even with a road attached");
     }
 
     private static BoardScene.Tile bridge(BoardScene.Tile t, int exits) {

@@ -90,6 +90,7 @@ import megamek.common.Player;
 import megamek.common.actions.AttackAction;
 import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
+import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.equipment.Minefield;
@@ -379,21 +380,6 @@ public final class BoardView extends AbstractBoardView
 
     public BoardView(BoardClientState state, MegaMekController controller, @Nullable ClientGUI clientgui) throws IOException {
         this(state.getGame(), controller, clientgui, state.getBoardId(), state.getTilesetManager(), state);
-    }
-
-    /**
-     * Shows the warning, once per board load, that this 2D view ignores the board's 3D-only content. Does nothing for
-     * a board without such content. Safe to call off the EDT.
-     *
-     * @param editor true for the classic 2D editor, whose save drops that content
-     */
-    public static void warnIfThreeDOnly(@Nullable Component parent, @Nullable Board board, boolean editor) {
-        if ((board == null) || !board.hasThreeDOnlyContent()) {
-            return;
-        }
-        String message = Messages.getString(editor ? "BoardView.threeDOnlyEditor" : "BoardView.threeDOnly");
-        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(parent, message,
-              Messages.getString("BoardView.threeDOnlyTitle"), JOptionPane.WARNING_MESSAGE));
     }
 
     private BoardView(Game game, MegaMekController controller, @Nullable ClientGUI clientgui, int boardId,
@@ -1662,10 +1648,13 @@ public final class BoardView extends AbstractBoardView
         // supers are drawn after. Unfortunately the supers images themselves can't be checked for roads.
         List<Image> supers = tileManager.supersFor(hex);
         boolean supersUnderShadow = false;
+        // A .board2 holds designs instead of the art tokens: test the art the tileset draws for them, as
+        // HexTileset.assignMatch selects it, so a transition goes under the shadow map as its token did.
+        Hex art = hex.getAppearance().isEmpty() ? hex : BoardEditorBlueprint.get().artwork(hex);
         if (hex.containsTerrain(Terrains.ROAD)
               || hex.containsTerrain(Terrains.WATER)
               || hex.containsTerrain(Terrains.PAVEMENT)
-              || hex.containsTerrain(Terrains.GROUND_FLUFF)
+              || art.containsTerrain(Terrains.GROUND_FLUFF)
               || hex.containsTerrain(Terrains.ROUGH)
               || hex.containsTerrain(Terrains.RUBBLE)
               || hex.containsTerrain(Terrains.SNOW)) {
@@ -3858,10 +3847,9 @@ public final class BoardView extends AbstractBoardView
         clientState.setShouldIgnoreKeys(shouldIgnoreKeys);
     }
 
-    /** EDT-only asset refresh shared by the native board and this view's artwork capture. */
+    /** EDT-only asset refresh of the 2D board. */
     public void reloadAssets() throws IOException {
         tileManager.reloadAssets();
-        clientState.reloadArtwork();
         scaledImageCache.clear();
         clearHexImageCache();
     }

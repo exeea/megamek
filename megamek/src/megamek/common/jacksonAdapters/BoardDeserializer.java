@@ -45,6 +45,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import megamek.common.Configuration;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.BoardType;
 import megamek.common.board.Coords;
 import megamek.common.board.postprocess.BoardProcessor;
@@ -294,9 +295,8 @@ public class BoardDeserializer extends StdDeserializer<Board> {
                 throw new IllegalArgumentException("Board file does not exist: " + boardFile + " in " + basePath);
             }
         }
-        Board result = new Board();
-        result.load(boardFile);
-        return result;
+        // Converted before the modifiers flip it, as every game sheet is (BoardFile.loadSheet).
+        return BoardFile.loadSheet(boardFile, false, true);
     }
 
     @Override

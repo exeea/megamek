@@ -41,10 +41,15 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 
+import java.util.Map;
+
+import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BuildingEditSpec;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.enums.BuildingType;
 import megamek.common.equipment.FuelTank;
 import megamek.common.game.Game;
@@ -409,6 +414,25 @@ class BuildingEditHandlerTest {
         assertNull(refusal, "changing only the picture should be allowed");
         assertEquals(7, board.getHex(BUILDING_HEX).terrainLevel(Terrains.BLDG_FLUFF),
               "the hex should hold the picture that was chosen");
+        assertEquals("building/legacy-art-7", board.getHex(BUILDING_HEX).getAppearance().get("building").variant(),
+              "and the design the 3D board draws and a .board2 keeps");
+    }
+
+    @Test
+    void aBoard2BuildingKeepsItsPictureInItsDesignAndANewBuildingDoesNotInheritIt() {
+        // A .board2 holds no picture terrain: the level lives in the building's design, which the dialog reads.
+        Hex hex = board.getHex(BUILDING_HEX).duplicate();
+        hex.setAppearance(Map.of("building", new HexAppearance("building/legacy-art-7", null, null, null)));
+        board.setHex(BUILDING_HEX, hex);
+        assertEquals(7, BoardSceneryLayouts.buildingArt(board.getHex(BUILDING_HEX)));
+
+        BuildingEditSpec remove = new BuildingEditSpec(BUILDING_HEX, board.getBoardId());
+        remove.setRemovingBuilding(true);
+        assertNull(buildingEditHandler().applyBuildingSpec(remove, GAMEMASTER));
+        assertNull(buildingEditHandler().applyBuildingSpec(specFor(BUILDING_HEX, BuildingType.HEAVY), GAMEMASTER));
+
+        assertNull(board.getHex(BUILDING_HEX).getAppearance().get("building"),
+              "a building raised in its place does not inherit the old one's design");
     }
 
     @Test
@@ -425,6 +449,7 @@ class BuildingEditHandlerTest {
 
         assertFalse(board.getHex(BUILDING_HEX).containsTerrain(Terrains.BLDG_FLUFF),
               "choosing the default picture should leave no picture terrain behind");
+        assertNull(board.getHex(BUILDING_HEX).getAppearance().get("building"), "nor its design");
     }
 
     @Test

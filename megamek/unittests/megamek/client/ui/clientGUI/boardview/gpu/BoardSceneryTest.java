@@ -3,13 +3,14 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.math.Vector3;
@@ -18,7 +19,10 @@ import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
+import megamek.common.board.BoardTreeDistribution;
 import megamek.common.board.Coords;
+import megamek.common.board.TilesetScenery;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
@@ -29,37 +33,31 @@ class BoardSceneryTest {
         var catalog = new JsonReader().parse(new FileHandle(root.resolve("scenery/layouts.json").toFile()));
         int trees = 0;
         int picnicTables = 0;
+        var coords = new Coords(7, 9);
         for (var entry : catalog) {
             var layout = BoardSceneryLayouts.layout(entry.name);
             assertEquals(entry.size, layout.components().size());
-            // The legacy render draws the meshes; a car park's lane decal is for import only.
-            var meshes = layout.components().stream().filter(c -> !c.decal()).toList();
-            var scenery = new BoardArtwork.Scenery(List.of(entry.name), Set.of(Terrains.FLUFF), Set.of(Terrains.FLUFF), 0);
-            var coords = new Coords(7, 9);
-            var hex = new Hex(0);
-            var captured = BoardFeatures.capture(hex, coords, Map.of(), Set.of(), ignored -> null, scenery, true);
-            var natural = captured.stream().filter(BoardScene.Feature::authoredPlacement).toList();
-            var planted = BoardFeatures.capture(hex, coords, Map.of(), Set.of(), ignored -> null, scenery, false).stream()
-                  .filter(BoardScene.Feature::authoredPlacement).toList();
-            assertEquals(meshes.size(), natural.size(), entry.name);
-            assertEquals(captured, BoardFeatures.capture(hex, coords, Map.of(), Set.of(), ignored -> null, scenery, true));
+            // The conversion places the meshes; a car park's lane decal is paint, a rail route marker's track generated.
+            var meshes = layout.components().stream().filter(c -> !c.decal() && !rail(c)).toList();
+            var natural = layout.chosen(coords, BoardTreeDistribution.PARK, true).stream().filter(c -> !c.decal() && !rail(c)).toList();
+            var planted = layout.chosen(coords, BoardTreeDistribution.PARK, false).stream().filter(c -> !c.decal() && !rail(c)).toList();
+            assertEquals(natural, layout.chosen(coords, BoardTreeDistribution.PARK, true).stream().filter(c -> !c.decal() && !rail(c)).toList());
             for (int i = 0; i < meshes.size(); i++) {
                 var authored = meshes.get(i);
                 var component = natural.get(i);
                 assertFalse(component.asset().matches("scenery/.*-[0-9a-f]{8}"),
                       "Shared asset identities must not depend on parameter hashes");
-                assertEquals(authored.kind(), component.kind());
                 assertEquals(authored.x(), component.x());
                 assertEquals(authored.y(), component.y());
-                assertEquals(authored.z(), component.elevation() * BoardGeometry.MODEL_LEVEL_HEIGHT, .0001f);
+                assertEquals(authored.z(), component.z());
                 assertEquals(authored.scale(), component.scale());
                 assertEquals(authored.asset(), planted.get(i).asset());
                 assertEquals(authored.rotation(), planted.get(i).rotation());
                 assertTrue(Files.isRegularFile(root.resolve(component.asset() + ".glb")));
-                if (component.kind() == BoardScene.FeatureKind.TREE) {
+                if (authored.tree()) {
                     trees++;
-                    assertEquals(authored.scale() * 30, component.height() * BoardGeometry.MODEL_LEVEL_HEIGHT, .0001f);
                 } else {
+                    assertEquals(authored, component, "Only the park trees draw their species and heading");
                     // The remaining furniture meshes cannot carry duplicate copies of the shared trees.
                     var data = RigidGlb.loadLods(new FileHandle(root.resolve(component.asset() + ".glb").toFile()), root).getFirst();
                     for (var material : data.materials) { assertFalse(material.id.endsWith("-cutout"), entry.name); }
@@ -69,11 +67,15 @@ class BoardSceneryTest {
             if (layout.components().stream().noneMatch(c -> c.asset().equals(entry.name))) {
                 assertFalse(Files.exists(root.resolve(entry.name + ".glb")), "Compositions need no duplicate mesh");
             }
-            assertFalse(hex.containsTerrain(Terrains.WOODS), "Decorative trees do not create gameplay cover");
         }
-        assertEquals(282, catalog.size);
+        // Batch 10: heli pads, elevator plates, cleared-rubble gravel, legacy rails and crossings, train stamps.
+        assertEquals(381, catalog.size);
         assertEquals(422, trees);
         assertTrue(picnicTables > 10, "The same picnic-table mesh is reused by picnic and courtyard layouts");
+    }
+
+    private static boolean rail(BoardSceneryLayouts.Component row) {
+        return megamek.common.board.RailRoute.Kind.of(row.asset()) == megamek.common.board.RailRoute.Kind.RAIL;
     }
 
     @Test
@@ -81,7 +83,8 @@ class BoardSceneryTest {
         for (String support : List.of("pavement:1", "water:2",
               "pavement:1;building:2;bldg_elev:3;bldg_cf:90")) {
             var bare = capture(new Hex(0, support, ""));
-            for (String decoration : List.of("fluff:6:0", "fluff:14:0", "geyser:1")) {
+            // Untranslated paint and terrain-owned art keep their sprites; art the conversion took has none.
+            for (String decoration : List.of("fluff:14:0", "geyser:1")) {
                 var hex = new Hex(0, support + ";" + decoration, "");
                 var image = capture(hex);
                 assertTrue(alpha(image.tilesetDecals()) + alpha(image.tilesetScenery()) > 0,
@@ -94,6 +97,12 @@ class BoardSceneryTest {
                 assertEquals(tile.tilesetScenery(), tile.withTactical(null).tilesetScenery(),
                       "Tactical marker refreshes must retain object artwork");
             }
+            var skylight = drawn(support + ";fluff:6:0");
+            assertTrue(skylight.hex().containsTerrain(Terrains.FLUFF), "The token stays for the 2D board");
+            assertNull(skylight.tile().tilesetScenery(), "The Tactical View shows the skylight object, not its sprite");
+            assertNull(skylight.tile().tilesetDecals());
+            assertEquals(BoardScene.Pixels.capture(bare.tileset(), null), skylight.tile().tileset(),
+                  "The Tactical View's base tile has no copy of it either");
         }
     }
 
@@ -109,7 +118,9 @@ class BoardSceneryTest {
             if (type > 5) { continue; }
             var cleared = new Hex(0, "ground_fluff:2000;fluff:" + (2000 + type), "");
             var path = capture(cleared);
-            assertEquals(List.of("scenery/saxarba/rubble_" + families.get(type - 1) + "_path"), path.scenery().models());
+            // The cleared ground's gravel (a terrain-owned decal row) under the path's debris.
+            assertEquals(List.of("scenery/saxarba/cleared_rubble_gravel", "scenery/saxarba/rubble_" + families.get(type - 1)
+                  + "_path"), path.scenery().models());
             assertFalse(cleared.containsTerrain(Terrains.RUBBLE), "Cosmetic debris must not restore the obstacle");
             assertTrue(cleared.isClearHex());
         }
@@ -146,14 +157,13 @@ class BoardSceneryTest {
     @Test
     void fccwCraneSkylightsAndLedgesKeepPhysicalGroundAndReplaceTheirPaintedObjects() {
         for (String terrain : List.of("fluff:7:0", "fluff:6:0", "fluff:8:0", "fluff:2:3")) {
-            var hex = new Hex(0, "pavement:1;" + terrain, "");
-            var image = capture(hex);
-            var tile = tile(hex, image);
-            assertTrue(tile.detailedGround(), terrain);
-            assertEquals(1, image.scenery().models().size(), terrain);
-            assertTrue(tile.features().stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY));
-            assertEquals(0, alpha(image.decals()), "A modeled object must not leave its painted twin: " + terrain);
-            assertTrue(alpha(image.tileset()) > 0, "Tactical artwork remains available");
+            var drawn = drawn("pavement:1;" + terrain);
+            assertFalse(drawn.hex().getDecorations().isEmpty(), terrain);
+            assertTrue(drawn.tile().detailedGround(), terrain);
+            assertTrue(drawn.tile().features().stream().anyMatch(f -> f.decoration() != null), terrain);
+            assertTrue(drawn.tile().features().stream().noneMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY), terrain);
+            assertNull(drawn.tile().decals(), "A modeled object must not leave its painted twin: " + terrain);
+            assertNotNull(drawn.tile().tileset(), "Tactical artwork remains available");
         }
     }
 
@@ -161,9 +171,9 @@ class BoardSceneryTest {
     void everySkylightAndLedgeRotationUsesTheSelectedSourceVariant() {
         for (int variant = 0; variant < 6; variant++) {
             for (String family : List.of("6", "8")) {
-                var image = capture(new Hex(0, "fluff:" + family + ":" + variant, ""));
+                var hex = new Hex(0, "fluff:" + family + ":" + variant, "");
                 assertEquals(List.of("scenery/fluff/" + (family.equals("6") ? "skylight" : "ledge")
-                      + (variant + 1)), image.scenery().models());
+                      + (variant + 1)), TilesetScenery.resolve(hex, false).scenery().models());
             }
         }
     }
@@ -203,7 +213,7 @@ class BoardSceneryTest {
 
     @Test
     void surfaceSymbolsRemainDecalsWithoutSwitchingOffTheTerrainMaterial() {
-        for (String terrain : List.of("fluff:14:0", "fluff:50:1", "fluff:70:1", "fluff:91:1", "fluff:10:9")) {
+        for (String terrain : List.of("fluff:14:0", "fluff:50:1", "fluff:70:1", "fluff:91:1")) {
             var hex = new Hex(0, "pavement:1;" + terrain, "");
             var image = capture(hex);
             assertTrue(image.scenery().models().isEmpty(), terrain);
@@ -214,45 +224,45 @@ class BoardSceneryTest {
 
     @Test
     void compositePortArtReplacesVisualTreesButRetainsTheGamesWoodsTerrain() {
-        var hex = new Hex(0, "pavement:1;woods:1;fluff:80:1", "");
-        var image = capture(hex);
-        var tile = tile(hex, image);
-        assertEquals(1, hex.terrainLevel(Terrains.WOODS));
-        assertTrue(image.scenery().modelTerrains().contains(Terrains.WOODS));
-        assertFalse(tile.features().stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.TREE));
-        assertTrue(tile.features().stream().anyMatch(f -> f.asset().startsWith("scenery/seaport/")));
+        var drawn = drawn("pavement:1;woods:1;fluff:80:1");
+        assertEquals(1, drawn.hex().terrainLevel(Terrains.WOODS));
+        assertEquals(BoardTreeDistribution.NO_TREES, drawn.hex().getAppearance().get("vegetation").variant());
+        assertFalse(drawn.tile().features().stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.TREE));
+        assertTrue(drawn.tile().features().stream().anyMatch(f -> f.decoration() != null
+              && f.decoration().asset().startsWith("scenery/seaport/")));
+        // The Tactical View's base tile follows the same design (b9-decisions T): no woods sprite under the yard, as the
+        // old tileset's seaport super replaced it; plain woods keep theirs.
+        assertEquals(drawn("pavement:1").tile().tileset(), drawn.tile().tileset());
+        assertNotEquals(drawn("pavement:1;woods:1").tile().tileset(), drawn.tile().tileset());
     }
 
     @Test
     void roadsideTreesAndParkedCarsPreserveTheRoadAndAllSourceVariants() {
         for (String terrain : List.of("road:2:9", "road:1:9;road_fluff:3", "road:1:9;fluff:5:2")) {
-            var hex = new Hex(0, terrain, "");
-            var image = capture(hex);
-            var tile = tile(hex, image);
-            assertFalse(image.scenery().models().isEmpty(), terrain);
-            assertEquals(0, alpha(image.decals()), terrain);
-            assertEquals(9, tile.roadExits(), terrain);
-            assertTrue(tile.road() != BoardRoad.Kind.NONE, terrain);
-            assertTrue(tile.detailedGround(), terrain);
+            var drawn = drawn(terrain);
+            assertFalse(drawn.hex().getDecorations().isEmpty(), terrain);
+            assertNull(drawn.tile().decals(), terrain);
+            assertEquals(9, drawn.tile().roadExits(), terrain);
+            assertTrue(drawn.tile().road() != BoardRoad.Kind.NONE, terrain);
+            assertTrue(drawn.tile().detailedGround(), terrain);
         }
     }
 
     @Test
-    void allParkingRoadsUseTheRoadEngineWithoutAddingGameplayTerrain() {
+    void everyParkingLaneIsARealRoadThroughItsBays() {
         int[] exits = { 18, 36, 9, 18, 36, 9, 36, 9 };
         for (int variant = 0; variant < exits.length; variant++) {
-            var hex = new Hex(0, "fluff:5:" + variant, "");
-            var image = capture(hex);
-            var tile = tile(hex, image);
-            assertFalse(hex.containsTerrain(Terrains.ROAD), "Cosmetic roads do not change movement");
+            var drawn = drawn("fluff:5:" + variant);
+            var tile = drawn.tile();
+            assertEquals(exits[variant], drawn.hex().getTerrain(Terrains.ROAD).getExits(), "The lane is rules terrain");
             assertEquals(BoardRoad.Kind.PAVED, tile.road());
             assertEquals(exits[variant], tile.roadExits());
-            assertEquals(0, alpha(image.decals()));
+            assertNull(tile.decals());
             assertTrue(BoardRoad.rendered(tile));
             assertTrue(tile.detailedGround());
-            // Import has no cosmetic road: one standard car-park decal per side of the lane with cars, its aisle (along the
-            // decal's width) through the same exits; the other side is turned 180 degrees (sized for its own cars).
-            var lanes = lanes(image);
+            // One standard car-park decal per side of the lane with cars, its aisle (along the decal's width) through
+            // the same exits; the other side is turned 180 degrees (sized for its own cars).
+            var lanes = lanes(drawn.legacy());
             assertTrue(lanes.size() == 1 || lanes.size() == 2
                   && Math.floorMod(Math.round(lanes.get(0).rotation() - lanes.get(1).rotation()), 360) == 180, "Variant " + variant);
             for (var lane : lanes) {
@@ -264,15 +274,14 @@ class BoardSceneryTest {
                     }
                 }
             }
-            assertTrue(tile.features().stream().noneMatch(f -> f.asset().startsWith("decal/")), "The legacy render paves it");
+            assertTrue(tile.features().stream().anyMatch(f -> f.decoration() != null
+                  && f.decoration().asset().startsWith("decal/")), "The bays are decal objects");
         }
         for (int variant : new int[] { 98, 99 }) {
-            var hex = new Hex(0, "fluff:5:" + variant, "");
-            var image = capture(hex);
-            var tile = tile(hex, image);
-            assertEquals(BoardRoad.Kind.NONE, tile.road(), "Furniture-only variants have no cosmetic road");
-            assertEquals(0, tile.roadExits());
-            assertFalse(lanes(image).isEmpty(), "Their parked cars still get their bays");
+            var drawn = drawn("fluff:5:" + variant);
+            assertEquals(BoardRoad.Kind.NONE, drawn.tile().road(), "Furniture-only variants have no lane");
+            assertEquals(0, drawn.tile().roadExits());
+            assertFalse(lanes(drawn.legacy()).isEmpty(), "Their parked cars still get their bays");
         }
     }
 
@@ -293,47 +302,53 @@ class BoardSceneryTest {
     void gardenLakesKeepTheirBoundedWaterWithoutChangingGameDepth() {
         // Garden lakes are plain FLUFF (the shipped template and tileset no longer pair them with WATER:0).
         for (int variant = 1; variant <= 5; variant++) {
-            var hex = new Hex(0, "fluff:94:" + variant, "");
-            var image = capture(hex);
-            var tile = tile(hex, image);
+            var drawn = drawn("fluff:94:" + variant);
             assertEquals(List.of("scenery/saxarba/SMV_Fluff/FluffSystem-07-Garden-04-Lake-1-0" + variant),
-                  image.scenery().models());
-            assertFalse(tile.liquid().present(), "The model provides the pond's water inside its banks");
-            assertFalse(tile.water());
+                  TilesetScenery.resolve(drawn.legacy(), false).scenery().models());
+            assertFalse(drawn.tile().liquid().present(), "The object provides the pond's water inside its banks");
+            assertFalse(drawn.tile().water());
         }
         // Game water under lake art is game water too: no artwork turns a WATER token into a decorative basin.
         for (String terrain : List.of("water:0", "water:0;fluff:94:1", "water:1;fluff:94:1", "water:0;ice:1;fluff:94:1")) {
-            var hex = new Hex(0, terrain, "");
-            assertTrue(tile(hex, capture(hex)).liquid().present(), "Ordinary game water keeps the water engine");
+            assertTrue(drawn(terrain).tile().liquid().present(), "Ordinary game water keeps the water engine");
         }
     }
 
     @Test
-    void roofFurnitureDecodesToOneAuthoredRowOnTheRoof() {
-        // Every legacy key decodes through rows now, the glass dome too: the row stands on the solid roof directly.
-        // Its nominal roof level no longer reaches CPU clearance; the building supplies it (docs/3d-board-editor.md).
-        var hex = new Hex(0, "building:2;bldg_elev:3;bldg_cf:50;fluff:90:9", "");
-        var image = capture(hex);
-        var feature = tile(hex, image).features().stream()
-              .filter(f -> f.kind() == BoardScene.FeatureKind.SCENERY).findFirst().orElseThrow();
-        assertEquals("scenery/roofs/glass-dome", feature.asset());
-        assertTrue(feature.authoredPlacement());
-        assertEquals(1, feature.height(), "Authored furniture retains physical dimensions");
+    void roofFurnitureDecodesToOneObjectOnTheRoof() {
+        // Every legacy key decodes through rows, the glass dome too: the object stands on the roof.
+        var drawn = drawn("building:2;bldg_elev:3;bldg_cf:50;fluff:90:9");
+        var dome = drawn.hex().getDecorations().stream().filter(o -> o.asset().equals("scenery/roofs/glass-dome")).toList();
+        assertEquals(1, dome.size());
+        assertEquals("building", dome.getFirst().placement().receiver().terrain());
+        assertTrue(drawn.tile().features().stream().anyMatch(f -> dome.getFirst().equals(f.decoration())));
+        assertTrue(drawn.tile().features().stream().noneMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY));
     }
 
-    private static List<BoardSceneryLayouts.Component> lanes(BoardArtwork.HexImage image) {
-        return BoardSceneryLayouts.layout(image.scenery().models().getFirst()).components().stream()
-              .filter(BoardSceneryLayouts.Component::decal).toList();
+    private static List<BoardSceneryLayouts.Component> lanes(Hex legacy) {
+        return BoardSceneryLayouts.layout(TilesetScenery.resolve(legacy, false).scenery().models().getFirst()).components()
+              .stream().filter(BoardSceneryLayouts.Component::decal).toList();
+    }
+
+    /** A legacy hex, the same hex converted (its token kept) and the tile every 3D view draws for it. */
+    private record Drawn(Hex legacy, Hex hex, BoardScene.Tile tile) { }
+
+    private static Drawn drawn(String terrain) {
+        Board board = Board.createEmptyBoard(1, 1);
+        board.setHex(new Coords(0, 0), new Hex(0, terrain, ""));
+        Hex legacy = board.getHex(0, 0);
+        BoardSceneryLayouts.convert(board);
+        return new Drawn(legacy, board.getHex(0, 0), BoardTiles.captureAll(board).getFirst());
     }
 
     private static BoardArtwork.HexImage capture(Hex hex) {
         Board board = Board.createEmptyBoard(1, 1);
         board.setHex(new Coords(0, 0), hex);
-        try (var artwork = new BoardArtwork()) { return artwork.capture(board, new Coords(0, 0), true); }
+        try (var artwork = new BoardArtwork()) { return artwork.capture(board, new Coords(0, 0), board.getHex(new Coords(0, 0))); }
     }
 
     private static BoardScene.Tile tile(Hex hex, BoardArtwork.HexImage image) {
-        return BoardScene.captureTile(hex, image, null, new BoardScene.PixelPool());
+        return BoardScene.captureTile(hex, image, null, new BoardScene.PixelPool(), neighbour -> null);
     }
 
     private static int alpha(java.awt.image.BufferedImage image) {

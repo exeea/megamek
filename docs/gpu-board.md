@@ -28,13 +28,29 @@ movement and view selection; `BoardProjectionCamera` handles projection and
 `BoardCameraCollision` handles camera contact with the scene. Changing cameras retains
 the same unit instances, picking geometry and playback timeline.
 
-Manual panning and pointer-centered zoom keep the orbit pivot within the board in both
-the 3D and Tactical views. The pivot is the center of the usable board area between HUD
-panels. The limit leaves every edge hex reachable and insets the jagged perimeter so a
-rotated corner cannot leave the map off-screen at close zoom. Dragging against an edge
-still slides along it and responds immediately when reversed. Board replacement resets
-the bounds, and geometry scaling changes their world size. Automatic framing and Free
-Flight retain their own camera behavior.
+Both cameras use right-drag to pan and middle-drag to orbit (look around in Free Flight).
+Holding Shift when pressing either button swaps those actions for the whole drag.
+Free Flight starts with a 45-degree vertical field of view; the Camera tuning slider can
+change it, and Defaults restores 45 degrees.
+
+Manual panning and pointer-centered zoom constrain the full viewport center in both the
+3D and Tactical views, including the area behind HUD panels. The limits act per screen
+axis: the board's leftmost, rightmost, nearest and farthest points cannot pass the viewport
+center, so at a side limit a drag still moves the board up and down (and at a top or bottom
+limit sideways), also when the view is turned. The board also stays on the center's row and
+column inside the viewport, so a turned board cannot leave the screen beside one of its
+corners; with the view turned, the center itself may therefore lie beside the board. A view
+square to the board (north, east, south or west up) keeps the center over it. The inset
+board footprint extends upward to the highest terrain or feature using the current viewing
+angle. A tall pillar's summit remains reachable even when its base leaves the screen. This
+adds vertical room without widening the sideways bounds; flat boards retain their existing
+limits. Each screen axis of a drag stops at a limit on its own, along its requested
+direction, instead of sliding along a rotated board edge. Reversing responds immediately,
+and dragging along the boundary remains possible.
+The displayed terrain snapshot refreshes the bounds after edits and board replacement,
+and geometry scaling changes their world size. Feature heights use the same nominal
+placement and height calculation as Fit board. Automatic framing and Free Flight retain
+their own camera behavior.
 
 ## From game state to a frame
 
@@ -48,10 +64,26 @@ different inputs:
 - `GpuMapSource` captures a preview or editor board directly. Editor operations and
   undo history remain with the existing editor.
 
-Both use `BoardArtwork` for tileset lookup, ground artwork, decals and model selection.
+Both use `BoardArtwork` for tileset lookup, ground artwork, decals and model selection,
+and turn each hex into a tile with the same `BoardScene.captureTile`. A game adds only
+its tactical marking and labels (`HexImage.withTactical`, `Tile.withMarkings`, which keep
+every other field), so it shows the board exactly as the 3D preview and editor do.
+`GpuSourceParityTest` compares both sources' tiles on a board with legacy scenery.
 They publish a `BoardScene` containing terrain and unit presentation data.
 A `BoardSource.Frame` packages that scene with the animation events, command descriptions,
 focus requests and other UI state needed by the native view.
+
+Since batch 9 both capture through one owner, `BoardTiles` (the editor's palette samples and
+the tests use its one-shot `captureAll`): one `BoardArtwork`, the board's tiles, one
+invalidation rule (a changed hex invalidates the art and tile of its 3x3, because
+`Board.setHexes` rewrites the neighbours' exits without an event of their own) and a
+tripwire. It draws each hex without the legacy tokens the conversion took
+(`BoardSceneryLayouts.withoutTakenTokens`), and no view decodes legacy scenery: a board is
+converted where it is loaded (docs/3d-board-editor.md, Legacy conversion), so the game and
+the previews draw what the editor and the saved `.board2` hold. A board that reaches a
+view unconverted logs one warning and draws nothing for those tokens. `BoardClientState`
+keeps only the game's tactical pass. `GpuSourceParityTest` now compares the game source,
+the preview and the editor on one converted fixture.
 
 On a render update, `GpuBattleView` takes a frame and feeds its events into
 `UnitPlayback`. The playback state determines which positions, poses and scene changes
@@ -97,11 +129,12 @@ is drawn at level 11. Movement playback uses each waypoint's hex elevation; land
 LAM and QuadVee forms use their captured movement mode and occupied height, with a brief tilt and smooth height
 transition on the conversion clock. Whole multi-hex tokens fit and center on the existing occupied footprint.
 
-Token caps use clean camouflaged tileset artwork; walls use the shared camouflage shader. Whole-body damage is
-captured from remaining versus original armor (including rear armor) and structure, reaching the final stage when
-doomed/destroyed. The four existing body-damage textures apply only to the walls at half opacity to preserve team
-color/camouflage. The identification artwork stays clear at every damage stage. Repair and mode changes rebuild
-per-instance materials while retaining shared mesh/texture ownership.
+Token caps use clean camouflaged tileset artwork; walls use the shared camouflage shader. Whole-body damage, on
+tokens and on models without location parts (vehicles, aerospace, DropShips, naval), follows the unit's damage level,
+the state its board label's damage tile and the unit card show: light, moderate, heavy and crippled take the four
+stages, and doomed/destroyed the last. On tokens the four body-damage textures apply only to the walls at half
+opacity to preserve team color/camouflage, and the identification artwork stays clear at every damage stage. Repair
+and mode changes rebuild per-instance materials while retaining shared mesh/texture ownership.
 
 ## Wireframe and thermal signatures
 

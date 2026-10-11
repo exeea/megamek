@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
@@ -28,8 +29,10 @@ import megamek.common.Hex;
 import megamek.common.ManeuverType;
 import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
+import megamek.common.compute.Compute;
 import megamek.common.enums.MoveStepType;
 import megamek.common.game.Game;
+import megamek.common.moves.MountPathHelper;
 import megamek.common.moves.MovePath;
 import megamek.common.moves.MovePathSummary;
 import megamek.common.moves.MoveStep;
@@ -52,8 +55,11 @@ final class GpuMovePlan implements AutoCloseable {
     private static final Set<MoveStepType> START_STEPS = EnumSet.of(MoveStepType.START_JUMP,
           MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER, MoveStepType.DEPLOY);
 
-    /** The gear the planner uses; AUTO lets the route choose walking, running or jumping. */
-    enum Mode { AUTO, WALK, RUN, JUMP, BACK, OTHER }
+    /**
+     * The gear the planner uses; AUTO lets the route choose walking, running or jumping. Outside the planner, TARGET is
+     * a charge, DFA or ram gear, whose next board click MegaMek takes as the target, and OTHER any other gear.
+     */
+    enum Mode { AUTO, WALK, RUN, JUMP, BACK, TARGET, OTHER }
 
     /** The movement band of a step or envelope hex. */
     enum Band { WALK, RUN, SPRINT, JUMP, ILLEGAL }
@@ -73,20 +79,23 @@ final class GpuMovePlan implements AutoCloseable {
      * on, the local player's units MegaMek has not moved yet in the held movement phase, on every turn of it (the
      * other players' turns included); 0 when no hold is on. {@code planner} is false for movement the HUD leaves to
      * MegaMek's board clicks (G20: aerospace units, the other gears, a hex the display picks); {@code envelope} is
-     * then the display's last one, and none during a hex pick.
+     * then the display's last one, and none during a hex pick. {@code mounts} are the units a click boards: in the
+     * planner's walk gear, the transports on its board the unit could mount ({@code Compute.canMount}) and may not
+     * stand with, beside which MegaMek's click stops the path for its Mount command
+     * ({@code MountPathHelper.trimToMountableTransport}).
      */
     record Snapshot(boolean active, boolean planner, boolean external, int entityId, Mode mode, boolean explicit,
           String gearLabel, List<Step> route, List<Step> hover, List<Step> pins, Coords destination, int facing,
           int cost, int budget, EntityMovementType type, String typeLabel, boolean auto, int heat, int tmm,
           boolean legal, List<String> warnings, boolean canUndo, boolean canPin, Map<Coords, Band> envelope,
-          int holdingRemaining) {
+          Set<Integer> mounts, int holdingRemaining) {
         static final Snapshot EMPTY = idle(0);
 
         /** No plan (not the local movement turn, or no unit selected), with the hold's count. */
         static Snapshot idle(int holdingRemaining) {
             return new Snapshot(false, false, false, Entity.NONE, Mode.AUTO, false, "", List.of(), List.of(),
                   List.of(), null, -1, 0, 0, EntityMovementType.MOVE_NONE, "", false, 0, 0, false, List.of(), false,
-                  false, Map.of(), holdingRemaining);
+                  false, Map.of(), Set.of(), holdingRemaining);
         }
 
         Snapshot {
@@ -95,6 +104,7 @@ final class GpuMovePlan implements AutoCloseable {
             pins = List.copyOf(pins);
             warnings = List.copyOf(warnings);
             envelope = Map.copyOf(envelope);
+            mounts = Set.copyOf(mounts);
         }
     }
 
@@ -181,19 +191,19 @@ final class GpuMovePlan implements AutoCloseable {
         follow(md, key);
         MovePath path = md.getPlannedMovement();
         boolean planner = planner(md, entity);
-        Mode mode = planner ? mode(md) : Mode.OTHER;
+        Mode mode = planner ? mode(md) : targeting(md) ? Mode.TARGET : Mode.OTHER;
         Facts shown = facts(key, path, entity);
         // During a hex pick MegaMek's board shows the pick's hexes instead of an envelope, so the plan shows none.
         Map<Coords, Band> reach = planner ? plannedEnvelope(md, key, entity, mode)
               : md.isSelectingHex() ? Map.of() : bands(md.getLastEnvelope(), entity, mode);
         Integer elevation = floorElevation(hover, source.currentView().getBoardId(), pointedZ);
         List<Step> hovered = (planner && shown.route().isEmpty()) ? hover(md, key, hover, elevation, reach) : List.of();
-        boolean explicit = (mode != Mode.AUTO) && (mode != Mode.OTHER);
+        boolean explicit = planner && (mode != Mode.AUTO);
         Snapshot next = new Snapshot(true, planner, planner && external, entityId, mode, explicit, label(mode),
               shown.route(), hovered, planner ? pinned(path) : List.of(), shown.destination(), shown.facing(),
               shown.cost(), shown.budget(), shown.type(), typeLabel(shown.type(), mode), planner && (mode == Mode.AUTO),
               shown.heat(), shown.tmm(), shown.legal(), shown.warnings(), planner && canUndo(path),
-              planner && pinnable(md, path), reach, held);
+              planner && pinnable(md, path), reach, planner ? mounts(md, entity) : Set.of(), held);
         if (!next.equals(published)) {
             published = next;
         }
@@ -349,9 +359,12 @@ final class GpuMovePlan implements AutoCloseable {
                 return;
             }
         }
-        MovePath possible = md.getPlannedMovement().clone();
+        MovePath plotted = md.getPlannedMovement();
+        MovePath possible = plotted.clone();
         possible.clipToPossible();
-        boolean cut = possible.length() < md.getPlannedMovement().length();
+        boolean cut = possible.length() < plotted.length();
+        MoveStep blocked = cut ? plotted.getStep(possible.length()) : null;
+        boolean occupied = (blocked != null) && occupiedDestination(plotted, blocked);
         if (cut) {
             md.truncateTo(possible.length());
         }
@@ -362,8 +375,13 @@ final class GpuMovePlan implements AutoCloseable {
             toast(md, "GpuBoard.hud.move.notReachable", label(mode).toUpperCase(Locale.ROOT));
             return;
         }
-        if (cut || !hex.equals(path.getFinalCoords())) {
-            if (mode == Mode.AUTO) {
+        // A click on a transport: MegaMek's click stopped the path beside it, where its Mount command boards it.
+        boolean mount = !cut && !hex.equals(path.getFinalCoords()) && (path.getFinalBoardId() == boardId)
+              && (MountPathHelper.mountableTransport(path, hex, boardId, source.currentView().game) != null);
+        if ((cut || !hex.equals(path.getFinalCoords())) && !mount) {
+            if (occupied) {
+                toast(md, "GpuBoard.hud.move.hexOccupied", blocked.getPosition().getBoardNum());
+            } else if (mode == Mode.AUTO) {
                 toast(md, "GpuBoard.hud.move.beyondRunningMp");
             } else {
                 toast(md, "GpuBoard.hud.move.notReachable", label(mode).toUpperCase(Locale.ROOT));
@@ -645,6 +663,48 @@ final class GpuMovePlan implements AutoCloseable {
         return !entity.isAero() && entity.isDeployed() && !md.isSelectingHex()
               && ((gear == MovementDisplay.GEAR_LAND) || (gear == MovementDisplay.GEAR_JUMP)
               || (gear == MovementDisplay.GEAR_BACKUP));
+    }
+
+    /** The charge, DFA and ram gears: MegaMek's next board click chooses the target (MovementDisplay.chooseTarget). */
+    private static boolean targeting(MovementDisplay md) {
+        int gear = md.getGear();
+        return (gear == MovementDisplay.GEAR_CHARGE) || (gear == MovementDisplay.GEAR_DFA)
+              || (gear == MovementDisplay.GEAR_RAM);
+    }
+
+    /**
+     * The transports a click on which boards them: in the walk gear, MegaMek's click on one stops the path beside it
+     * (MovementDisplay.currentMove), so the HUD plans to it instead of selecting it. That click trims only a path that
+     * cannot end in the transport's hex, so a transport the unit may stand with (infantry with a DropShip, a vehicle
+     * with a Small Craft) is left out: a click there would plan a plain stack.
+     */
+    private Set<Integer> mounts(MovementDisplay md, Entity entity) {
+        if (md.getGear() != MovementDisplay.GEAR_LAND) {
+            return Set.of();
+        }
+        Game game = source.currentView().game;
+        return game.getEntitiesVector().stream()
+              .filter(other -> other.isDeployed() && (other.getPosition() != null)
+                    && (other.getBoardId() == entity.getBoardId()) && Compute.canMount(entity, other)
+                    && (Compute.stackingViolation(game, entity, entity.getElevation(), other.getPosition(),
+                    other.getBoardId(), null, entity.climbMode(), true) != null))
+              .map(Entity::getId).collect(Collectors.toUnmodifiableSet());
+    }
+
+    /**
+     * Whether the rules cut the route where it enters its destination because another unit stands there on the
+     * ground: the step there is legal in itself but no legal end (an illegal stack), or the running or jumping MP
+     * still cover it (a walking Mek entering an enemy Mek's hex). A cut on the way there, or one the MP explain, is
+     * not.
+     */
+    private boolean occupiedDestination(MovePath path, MoveStep blocked) {
+        Entity entity = path.getEntity();
+        int mp = blocked.isJumping() ? entity.getAnyTypeMaxJumpMP() : entity.getRunMP();
+        return (blocked.getPosition() != null) && blocked.getPosition().equals(path.getFinalCoords())
+              && (blocked.getBoardId() == path.getFinalBoardId())
+              && ((blocked.getMovementType(false) != EntityMovementType.MOVE_ILLEGAL) || (blocked.getMpUsed() <= mp))
+              && source.currentView().game.getEntitiesVector(blocked.getPosition(), blocked.getBoardId()).stream()
+                    .anyMatch(unit -> (unit.getId() != entityId) && !unit.isAirborne());
     }
 
     private Mode mode(MovementDisplay md) {

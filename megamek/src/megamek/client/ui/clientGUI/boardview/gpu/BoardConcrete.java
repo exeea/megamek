@@ -5,6 +5,7 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -51,6 +52,8 @@ final class BoardConcrete {
     // Both maps are filled only during construction and then published with this immutable derived outline.
     private final LongMap<Shift> shifts = new LongMap<>(0);
     private final LongMap<float[]> footprints = new LongMap<>(0);
+    /** Construction only: hexes whose placed object an earlier fit reached ({@link #reached}); they keep their outline. */
+    private final Set<Coords> objectPins = new HashSet<>();
 
     static BoardConcrete of(BoardScene scene) {
         Cached first = cached, second = previous;
@@ -154,6 +157,18 @@ final class BoardConcrete {
 
     private BoardConcrete(BoardScene scene) {
         if (mode() == Mode.OFF) { return; }
+        fit(scene);
+        // A placed object keeps its hex's outline only where it reaches an edge the fit moves. Pinning its hex can move
+        // other edges, so the fit repeats until it reaches no further object; the set of pinned hexes only grows.
+        for (Set<Coords> reached = reached(scene); !reached.isEmpty(); reached = reached(scene)) {
+            objectPins.addAll(reached);
+            shifts.clear();
+            footprints.clear();
+            fit(scene);
+        }
+    }
+
+    private void fit(BoardScene scene) {
         Map<Long, Corner> corners = new TreeMap<>();
         for (BoardScene.Tile land : scene.tiles()) {
             if (land.liquid().present() || land.surface() != BoardScene.Surface.CONCRETE) { continue; }
@@ -223,7 +238,7 @@ final class BoardConcrete {
         }
     }
 
-    private static void simplify(Collection<Corner> corners, BoardScene scene, Set<Corner> changed) {
+    private void simplify(Collection<Corner> corners, BoardScene scene, Set<Corner> changed) {
         Set<Corner> visited = new HashSet<>();
         // Open chains first; otherwise starting midway would split a continuous quay at an arbitrary hex.
         for (Corner corner : corners) {
@@ -249,7 +264,7 @@ final class BoardConcrete {
     }
 
     /** A broad patch can be one rectangle too. Try the three lattice axes and keep the least displaced safe fit. */
-    private static boolean fitRectangle(List<Corner> chain, BoardScene scene) {
+    private boolean fitRectangle(List<Corner> chain, BoardScene scene) {
         if (chain.stream().anyMatch(corner -> corner.pinned && !corner.dock)) { return false; }
         float area = 0;
         Set<BoardScene.Tile> land = new HashSet<>();
@@ -316,7 +331,7 @@ final class BoardConcrete {
         return true;
     }
 
-    private static void simplifyChain(Corner start, Set<Corner> visited, BoardScene scene, Set<Corner> changed) {
+    private void simplifyChain(Corner start, Set<Corner> visited, BoardScene scene, Set<Corner> changed) {
         if (visited.contains(start)) { return; }
         List<Corner> chain = new ArrayList<>();
         for (Corner at = start; at != null && visited.add(at); at = at.next) {
@@ -371,7 +386,7 @@ final class BoardConcrete {
     private record Side(Line line, Vector3 a, Vector3 b) { }
 
     /** Prefer a longer established side across a short paved branch, then refit only the affected chains. */
-    private static Set<Corner> continueSides(Collection<Corner> corners, BoardScene scene) {
+    private Set<Corner> continueSides(Collection<Corner> corners, BoardScene scene) {
         Map<Coords, List<Side>> nearby = new HashMap<>();
         Map<Corner, Float> lengths = new HashMap<>();
         Set<Corner> visited = new HashSet<>();
@@ -445,7 +460,7 @@ final class BoardConcrete {
         return changed;
     }
 
-    private static Line dockRail(BoardScene scene, BoardScene.Tile land, Vector3 a, Vector3 b) {
+    private Line dockRail(BoardScene scene, BoardScene.Tile land, Vector3 a, Vector3 b) {
         int links = dockLinks(scene, land);
         if (links <= 0) { return null; } // An isolated concrete tile always keeps its hex footprint.
         Vector3 c = BoardGeometry.center(land.coords(), 0);
@@ -479,7 +494,7 @@ final class BoardConcrete {
     }
 
     /** Fit the quay between fixed rectangle sides, then use their intersections as the landing corners. */
-    private static void fitLanding(List<Corner> chain, int first, int last, BoardScene scene) {
+    private void fitLanding(List<Corner> chain, int first, int last, BoardScene scene) {
         if (last - first < 2) { return; }
         List<Run> runs = new ArrayList<>();
         for (int i = first; i < last;) {
@@ -533,7 +548,7 @@ final class BoardConcrete {
         for (int i = first; i <= last; i++) { chain.get(i).point.set(points[i - first]); }
     }
 
-    private static Vector3[] landingPoints(List<Corner> chain, int first, int last, BoardScene scene, List<Run> runs) {
+    private Vector3[] landingPoints(List<Corner> chain, int first, int last, BoardScene scene, List<Run> runs) {
         // The fitted intersection may belong to a neighbouring lattice corner. Assign it to the nearest one,
         // instead of pulling the arbitrary subdivision endpoint across a whole hex and rejecting both long sides.
         List<Run> joined = new ArrayList<>(runs);
@@ -549,7 +564,7 @@ final class BoardConcrete {
         return points == null && !joined.equals(runs) ? outlinePoints(chain, first, last, scene, runs) : points;
     }
 
-    private static Vector3[] outlinePoints(List<Corner> chain, int first, int last, BoardScene scene, List<Run> runs) {
+    private Vector3[] outlinePoints(List<Corner> chain, int first, int last, BoardScene scene, List<Run> runs) {
         Vector3[] points = new Vector3[last - first + 1];
         points[0] = new Vector3(chain.get(first).point);
         points[points.length - 1] = new Vector3(chain.get(last).point);
@@ -635,7 +650,7 @@ final class BoardConcrete {
         } else { runs.add(new Run(first, last, line, false)); }
     }
 
-    private static boolean clearEdge(BoardScene scene, Corner corner, Vector3 a, Vector3 b) {
+    private boolean clearEdge(BoardScene scene, Corner corner, Vector3 a, Vector3 b) {
         float dx = b.x - a.x, dy = b.y - a.y, length = (float) Math.hypot(dx, dy);
         if (length < .001f) { return false; }
         for (BoardScene.Tile tile : corner.tiles) {
@@ -655,16 +670,110 @@ final class BoardConcrete {
         return true;
     }
 
-    private static boolean protectedLand(BoardScene scene, BoardScene.Tile tile) {
-        return fixedFootprint(tile) || tile.roadExits() != 0 || BoardSurface.ramps(scene, tile) != 0;
+    private boolean protectedLand(BoardScene scene, BoardScene.Tile tile) {
+        return fixedFootprint(tile) || tile.wayExits() != 0 || BoardSurface.ramps(scene, tile) != 0;
     }
 
-    private static boolean fixedFootprint(BoardScene.Tile tile) {
-        return !tile.detailedGround() || tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING
-              || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL || feature.kind() == BoardScene.FeatureKind.PROP);
+    /**
+     * The features the fit reads, the one predicate {@code GpuTerrain#concreteInputsChanged} compares too: structures
+     * (buildings, industrial, bridges, fuel tanks), which keep their hex's outline, and placed objects, which keep it
+     * only where they reach an edge the fit moves ({@link #reaches}).
+     */
+    static boolean fitFeature(BoardScene.Feature feature) {
+        return feature.kind() == BoardScene.FeatureKind.BUILDING || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL
+              || feature.kind() == BoardScene.FeatureKind.PROP;
     }
 
-    private static boolean fixedBoundary(BoardScene scene, Corner corner, BoardScene.Tile tile) {
+    private boolean fixedFootprint(BoardScene.Tile tile) {
+        return !tile.detailedGround() || objectPins.contains(tile.coords())
+              || tile.features().stream().anyMatch(feature -> fitFeature(feature) && feature.decoration() == null);
+    }
+
+    /** The hexes, not yet pinned, holding a placed object that reaches an edge of its hex this fit moved. */
+    private Set<Coords> reached(BoardScene scene) {
+        Set<Coords> result = new HashSet<>();
+        for (BoardScene.Tile tile : scene.tiles()) {
+            // Only a hex the fit moved has a footprint of its own.
+            if (footprints.get(tileKey(tile.coords())) == null || objectPins.contains(tile.coords())) { continue; }
+            if (tile.features().stream().anyMatch(feature -> feature.decoration() != null && fitFeature(feature)
+                  && reaches(scene, tile, feature))) { result.add(tile.coords()); }
+        }
+        return result;
+    }
+
+    /**
+     * Whether a placed object's footprint ({@link BoardObstacles#outline}) overlaps the band an edge of its hex sweeps
+     * from its original to its fitted place, where that edge is a wall or a bank (the levels differ, or one side holds
+     * a liquid): there the concrete would swallow or undercut the object. Between two dry hexes of one level a moved
+     * edge only changes the ground beneath it. An object whose footprint is unknown keeps its hex, as a structure does.
+     */
+    private boolean reaches(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
+        List<Vector3> object = BoardObstacles.outline(scene, tile, feature);
+        if (object == null) { return true; }
+        List<Vector3> footprint = hull(object);
+        Coords coords = tile.coords();
+        for (int k = 0; k < 6; k++) {
+            Vector3 a = BoardGeometry.corner(coords, 0, k), b = BoardGeometry.corner(coords, 0, (k + 1) % 6);
+            BoardScene.Tile across = scene.tile(coords.translated(BoardGeometry.edgeDirection(k)));
+            if (shift(key(a)).equals(ZERO) && shift(key(b)).equals(ZERO) || across == null
+                  || across.elevation() == tile.elevation() && across.liquid().present() == tile.liquid().present()) {
+                continue;
+            }
+            if (overlap(footprint, hull(List.of(a, b, corner(coords, (k + 1) % 6), corner(coords, k))))) { return true; }
+        }
+        return false;
+    }
+
+    /** The convex hull of points on the board plane (monotone chain), counter-clockwise. */
+    private static List<Vector3> hull(List<Vector3> points) {
+        List<Vector3> sorted = new ArrayList<>(points);
+        sorted.sort(Comparator.comparingDouble((Vector3 p) -> p.x).thenComparingDouble(p -> p.y));
+        List<Vector3> result = new ArrayList<>();
+        for (int pass = 0; pass < 2 && !sorted.isEmpty(); pass++) {
+            int start = result.size();
+            for (Vector3 p : sorted) {
+                while (result.size() >= start + 2 && cross(result.get(result.size() - 2), result.getLast(), p) <= 0) {
+                    result.removeLast();
+                }
+                result.add(p);
+            }
+            result.removeLast();
+            Collections.reverse(sorted);
+        }
+        return result;
+    }
+
+    private static float cross(Vector3 o, Vector3 a, Vector3 b) {
+        return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    }
+
+    /** Whether two convex outlines overlap by more than a touch: no edge normal of either separates them. */
+    private static boolean overlap(List<Vector3> first, List<Vector3> second) {
+        if (first.isEmpty() || second.isEmpty()) { return false; }
+        float touch = .01f * BoardGeometry.hexScale();
+        for (List<Vector3> outline : List.of(first, second)) {
+            for (int i = 0; i < outline.size(); i++) {
+                Vector3 a = outline.get(i), b = outline.get((i + 1) % outline.size());
+                float nx = a.y - b.y, ny = b.x - a.x;
+                if (Math.abs(nx) + Math.abs(ny) < 1e-6f) { continue; }
+                float lowFirst = Float.POSITIVE_INFINITY, highFirst = Float.NEGATIVE_INFINITY;
+                float lowSecond = Float.POSITIVE_INFINITY, highSecond = Float.NEGATIVE_INFINITY;
+                for (Vector3 p : first) {
+                    lowFirst = Math.min(lowFirst, nx * p.x + ny * p.y);
+                    highFirst = Math.max(highFirst, nx * p.x + ny * p.y);
+                }
+                for (Vector3 p : second) {
+                    lowSecond = Math.min(lowSecond, nx * p.x + ny * p.y);
+                    highSecond = Math.max(highSecond, nx * p.x + ny * p.y);
+                }
+                float length = (float) Math.hypot(nx, ny);
+                if (highFirst <= lowSecond + touch * length || highSecond <= lowFirst + touch * length) { return false; }
+            }
+        }
+        return true;
+    }
+
+    private boolean fixedBoundary(BoardScene scene, Corner corner, BoardScene.Tile tile) {
         // Moving a material boundary on one ground plane preserves the complete neighbouring foundation.
         // Structures on the concrete itself, height changes and road ramps keep their original footprint.
         return !tile.liquid().present() && protectedLand(scene, tile)
@@ -695,7 +804,7 @@ final class BoardConcrete {
     }
 
     /** Zero links: platform; one: end; two opposite: span; two others: angle. Other patterns are quay landings. */
-    private static int dockLinks(BoardScene scene, BoardScene.Tile land) {
+    private int dockLinks(BoardScene scene, BoardScene.Tile land) {
         if (land.liquid().present() || land.surface() != BoardScene.Surface.CONCRETE
               || protectedLand(scene, land)) { return -1; }
         int links = 0;

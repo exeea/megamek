@@ -15,7 +15,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.client.ui.boardeditor.BoardEditorSession;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardEditorBlueprint;
@@ -38,8 +37,7 @@ final class GpuEditorTerrainPreviews implements Disposable {
     private final java.util.concurrent.ExecutorService worker = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "board-editor-terrain-previews"); thread.setDaemon(true); return thread;
     });
-    /** Only the preview worker touches its artwork resolver and these disposable sample boards. */
-    private BoardArtwork artwork;
+    /** Only the preview worker touches these disposable sample boards and their capture. */
     private Future<BoardScene> pending;
     private Sample current;
     private BoardScene scene;
@@ -108,7 +106,10 @@ final class GpuEditorTerrainPreviews implements Disposable {
         } catch (Exception failure) {
             LOGGER.warn(failure, "Editor sample preview failed: {}", current);
             List<Image> targets = queue.remove(current);
-            if (targets != null) { targets.forEach(target -> target.setUserObject("Preview unavailable")); }
+            if (targets != null) {
+                String unavailable = megamek.client.ui.gdx.UiKit.text("BoardEditor.previewUnavailable");
+                targets.forEach(target -> target.setUserObject(unavailable));
+            }
             current = null; scene = null; pending = null;
         }
     }
@@ -152,8 +153,6 @@ final class GpuEditorTerrainPreviews implements Disposable {
     }
 
     private BoardScene capture(Sample sample) {
-        if (artwork == null) { artwork = new BoardArtwork(); }
-        artwork.clear();
         BoardEditorBlueprint blueprint = BoardEditorBlueprint.get();
         boolean theme = sample.component().isEmpty();
         Board board = Board.createEmptyBoard(theme ? 2 : 1, theme ? 2 : 1);
@@ -198,15 +197,8 @@ final class GpuEditorTerrainPreviews implements Disposable {
                 board.setHex(new Coords(x, y), hex);
             }
         }
-        var pixels = new BoardScene.PixelPool();
-        List<BoardScene.Tile> tiles = new ArrayList<>();
-        for (int x = 0; x < board.getWidth(); x++) {
-            for (int y = 0; y < board.getHeight(); y++) {
-                Coords at = new Coords(x, y);
-                tiles.add(BoardScene.captureTile(board.getHex(at), artwork.capture(board, at, true), null, pixels, board::getHex));
-            }
-        }
-        return new BoardScene(0, board.getWidth(), board.getHeight(), List.copyOf(tiles), List.of(), List.of(), -1, "", List.of());
+        return new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board), List.of(), List.of(), -1,
+              "", List.of());
     }
 
     private static void assign(Image target, FrameBuffer buffer) {
@@ -226,7 +218,6 @@ final class GpuEditorTerrainPreviews implements Disposable {
     @Override public void dispose() {
         queue.clear();
         if (pending != null) { pending.cancel(true); }
-        worker.submit(() -> { if (artwork != null) { artwork.close(); artwork = null; } });
         worker.shutdown();
         cache.values().forEach(value -> value.buffer().dispose()); cache.clear();
         disposeRenderer();

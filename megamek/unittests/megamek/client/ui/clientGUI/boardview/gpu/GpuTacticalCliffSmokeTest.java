@@ -170,7 +170,7 @@ class GpuTacticalCliffSmokeTest {
                 Hex hex = new Hex(at.equals(CENTER) ? 1 : 0);
                 if (cliff && at.equals(CENTER)) { hex.addTerrain(new Terrain("cliff_top:1:63")); }
                 var artwork = new BoardArtwork.HexImage(at, null, null, null, null, null, List.of(), Map.of(), null);
-                BoardScene.Tile t = BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool());
+                BoardScene.Tile t = BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool(), neighbour -> null);
                 tiles.add(new BoardScene.Tile(at, t.elevation(), -1, false, 0, BoardScene.Surface.GRASS,
                       art, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, art, false,
                       BoardRoad.Kind.NONE, BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false, t.cliffTopExits()));

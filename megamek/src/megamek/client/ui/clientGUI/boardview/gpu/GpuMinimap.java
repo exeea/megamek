@@ -90,8 +90,11 @@ final class GpuMinimap implements GpuHud.Component {
     private final float contactScale;
     /** Each hex art's average colour, kept for the art on the current board. */
     private final Map<Art, Integer> colours = new HashMap<>();
-    /** The first frame of each liquid animation file the board has shown, by its tileset path; empty if unreadable. */
-    private final Map<String, Optional<BoardScene.Pixels>> liquids = new HashMap<>();
+    /**
+     * The first frame of each liquid animation file a board has shown, by its tileset path; empty if unreadable. Shared
+     * with the editor's preview tint ({@link #colour}), which the EDT computes.
+     */
+    private static final Map<String, Optional<BoardScene.Pixels>> LIQUIDS = new java.util.concurrent.ConcurrentHashMap<>();
     private GpuHud.Inputs inputs;
 
     GpuMinimap(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera) {
@@ -145,11 +148,11 @@ final class GpuMinimap implements GpuHud.Component {
      * (BoardLiquid), whose first frame stands for it, a hazardous liquid's in the board's tint; frozen water shows the
      * ice of its tileset art.
      */
-    private Art art(BoardScene.Tile tile) {
+    private static Art art(BoardScene.Tile tile) {
         BoardScene.Pixels base = GpuTilesetTerrain.art(tile);
         Color tint = Color.WHITE;
         if (tile.liquid().present() && !tile.frozen()) {
-            Optional<BoardScene.Pixels> liquid = liquids.computeIfAbsent(
+            Optional<BoardScene.Pixels> liquid = LIQUIDS.computeIfAbsent(
                   tile.liquid().textures(tile.waterDepth(), tile.elevation()).base(), GpuMinimap::firstFrame);
             if (liquid.isPresent()) {
                 base = liquid.get();
@@ -216,6 +219,9 @@ final class GpuMinimap implements GpuHud.Component {
         return weight == 0 ? 0 : Color.rgba8888((float) (red / weight) * tint.r, (float) (green / weight) * tint.g,
               (float) (blue / weight) * tint.b, 1);
     }
+
+    /** A hex's colour on the minimap: its art's mean colour from above (rgba8888), as the board image paints it. */
+    static int colour(BoardScene.Tile tile) { return average(art(tile)); }
 
     @Override
     public void dispose() {
@@ -434,7 +440,7 @@ final class GpuMinimap implements GpuHud.Component {
                 return;
             }
             bakedTiles = scene.tiles();
-            Baked next = new Baked(bakedTiles.stream().map(GpuMinimap.this::art).toList(), scene.width(),
+            Baked next = new Baked(bakedTiles.stream().map(GpuMinimap::art).toList(), scene.width(),
                   scene.height(), width, height);
             if (board != null && next.equals(baked)) {
                 return;

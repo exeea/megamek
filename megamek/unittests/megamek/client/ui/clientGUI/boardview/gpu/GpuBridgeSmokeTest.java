@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,6 +23,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -492,6 +494,252 @@ class GpuBridgeSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Bridge piers", failure.get()); }
     }
 
+    /** Captures of the truss design (b10-f1). */
+    private static final File TRUSS = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "b10-f1");
+    /** The piers board's water span is painted green; every other truss keeps its model's Oxide red. */
+    private static final String GREEN = "#2e5233";
+    /** A flat truss deck that carries a painted decal, which lies on its road surface. */
+    private static final Coords DECAL = new Coords(16, 2);
+
+    /** Every built span of {@code board} a truss with its piers kept, the water span (column 1) green. */
+    private static Board truss(Board board) {
+        for (int x = 0; x < board.getWidth(); x++) {
+            for (int y = 0; y < board.getHeight(); y++) {
+                Hex hex = board.getHex(x, y);
+                if (!Boolean.TRUE.equals(megamek.common.board.HexAppearance.bridgeBuilt(hex.getAppearance()))) { continue; }
+                hex.setAppearance(Map.of("bridge", megamek.common.board.HexAppearance.built(true,
+                      megamek.common.board.HexAppearance.pillars(hex.getAppearance()),
+                      x == 1 ? megamek.common.board.BoardDecoration.Colours.of(GREEN) : megamek.common.board.BoardDecoration.Colours.NONE)));
+            }
+        }
+        board.getHex(DECAL).setDecorations(List.of(new megamek.common.board.BoardDecoration("deck-paint", "decal",
+              "decal/damage/rubble-light-path", null, 0, 0, 0, false, 1,
+              megamek.common.board.BoardDecoration.Placement.surface("bridge", "deck", 0), 1)));
+        return board;
+    }
+
+    /**
+     * The truss design on every deck kind of the piers board ({@link #CASES}): each exit draws exactly one of its two
+     * alternatives, the joint where a deck continues and the end post at a bank, a road landing or an open end, and a ray
+     * that meets only an undrawn alternative passes it (picking sees what is drawn); sloped decks draw their steel in the
+     * span's colour; the piers stand as under the standard deck; a decal on a flat truss deck lies on its road surface,
+     * not on the chords. Captures {@code b10-f1/truss-<case>-iso.png} and {@code -side.png}.
+     */
+    @Test
+    void trussSpansDrawOneJointOrEndPerExitInTheirColour() throws Exception {
+        Board all = truss(piers());
+        Map<String, BoardScene> scenes = new java.util.LinkedHashMap<>();
+        for (Case shown : CASES) { scenes.put(shown.label(), GpuLegacyImportSmokeTest.scene(only(all, shown))); }
+        Files.createDirectories(TRUSS.toPath());
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1280, 900);
+        config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var weather = new BoardAtmosphere.Settings(13, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT,
+                      0, 0, new BoardAtmosphere.Effects(0, 0, 0, 0, 0, 0, 0));
+                GpuReviewFrame frame = new GpuReviewFrame(weather);
+                try {
+                    for (Case shown : CASES) {
+                        var scene = scenes.get(shown.label());
+                        GpuTerrain terrain = new GpuTerrain();
+                        try {
+                            var camera = new BoardCamera();
+                            camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                            camera.setIsometric(true);
+                            camera.fit(scene);
+                            frame.prepare(terrain, camera, scene);
+                            terrain.update(scene);
+                            terrain.animate(0, List.of());
+                            for (boolean side : new boolean[] { false, true }) {
+                                camera.setIsometric(true);
+                                if (side) { camera.orbit(45, 78 - camera.tilt()); }
+                                camera.camera.zoom = .14f;
+                                camera.center(BoardGeometry.center(shown.view(), side && shown.label().equals("tall") ? 5 : 1));
+                                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                frame.render(terrain, camera, scene);
+                                GpuReviewFrame.save(new File(TRUSS, "truss-" + shown.label() + (side ? "-side" : "-iso") + ".png"));
+                            }
+                            checkPiers(scene, terrain, shown);
+                            checkTruss(scene, terrain, shown);
+                            if (scene.tile(DECAL) != null && BoardBridge.feature(scene.tile(DECAL)) != null) { checkDeckPaint(scene, terrain); }
+                        } finally { terrain.dispose(); }
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    frame.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Truss bridges", failure.get()); }
+    }
+
+    /**
+     * The Trainjob's rail bridge made a blue truss in the editor (Built: Truss, then a colour: two undo steps), saved as
+     * .board2 and loaded the game's way: the truss in its colour, the rail riding the deck between the trusses; opened
+     * the editor's way it gives the same tiles, which the same renderer draws (b13). Capture
+     * {@code b10-f1/truss-trainjob-game.png}.
+     */
+    @Test
+    void trussCarriesTheTrainjobRail() throws Exception {
+        Files.createDirectories(TRUSS.toPath());
+        Coords deck = new Coords(37, 29);
+        File board = new File(megamek.common.Configuration.boardsDir(), "unofficial/VictorMorson/48x48 The Trainjob.board");
+        File file = new File(TRUSS, "trainjob-truss.board2");
+        var session = new megamek.client.ui.boardeditor.BoardEditorSession();
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+            try {
+                session.open(board.toPath());
+                for (var command : List.of(new String[] { "SELECT_AT", deck.getX() + "," + deck.getY(), "" },
+                      new String[] { "BRIDGE_DESIGN", "", "truss" }, new String[] { "BRIDGE_COLOUR", "", "#24407a" })) {
+                    session.command(new megamek.client.ui.boardeditor.BoardEditorSession.Command(
+                          megamek.client.ui.boardeditor.BoardEditorSession.Action.valueOf(command[0]), command[1], command[2]), null);
+                }
+                megamek.common.board.BoardFile.save(session.board(), file.toPath());
+            } catch (Exception failure) { throw new IllegalStateException(failure); }
+        });
+        assertTrue(session.snapshot().canUndo(), session.snapshot().message());
+        BoardScene scene;
+        try (var fixture = GpuBoardFixture.create(megamek.common.board.BoardFile.loadSheet(file, false, true))) {
+            javax.swing.SwingUtilities.invokeAndWait(fixture.source::refresh);
+            scene = fixture.source.takeFrame().scene();
+        }
+        var tile = scene.tile(deck);
+        assertTrue(BoardBridge.deck(scene, tile).truss(), "The span is a truss");
+        assertEquals("#24407a", BoardBridge.deck(scene, tile).colours().slot(0), "in its colour");
+        assertTrue(tile.features().stream().anyMatch(BoardRail::route), "with its rail");
+        // The editor opens the saved file into the same tiles (its own open path, then the same renderer).
+        var opened = new java.util.concurrent.FutureTask<>(() -> {
+            var editor = new megamek.client.ui.boardeditor.BoardEditorSession();
+            editor.open(file.toPath());
+            try (var source = new GpuMapSource(editor.game(), null, editor)) { return source.takeFrame().scene(); }
+        });
+        javax.swing.SwingUtilities.invokeAndWait(opened);
+        assertEquals(scene.tiles().stream().map(t -> t.withMarkings(null, List.of())).toList(),
+              opened.get().tiles().stream().map(t -> t.withMarkings(null, List.of())).toList(), "One tile build");
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1280, 900);
+        config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                GpuTerrain terrain = new GpuTerrain();
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    terrain.setGrass(false);
+                    frame.prepare(terrain, camera, scene);
+                    terrain.update(scene);
+                    camera.setIsometric(true);
+                    camera.orbit(20 - camera.azimuth(), 45 - camera.tilt());
+                    camera.center(BoardGeometry.center(deck, 2));
+                    camera.zoom(.3f / camera.camera.zoom);
+                    camera.update();
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    frame.render(terrain, camera, scene);
+                    GpuReviewFrame.save(new File(TRUSS, "truss-trainjob-game.png"));
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    terrain.dispose();
+                    frame.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Trainjob truss", failure.get()); }
+    }
+
+    /** The case's decks: one joint or end node per exit, picks on drawn nodes only, sloped steel in the span's colour. */
+    private static void checkTruss(BoardScene scene, GpuTerrain terrain, Case shown) throws Exception {
+        float s = BoardGeometry.hexScale();
+        var hexes = new java.util.LinkedHashSet<>(shown.joints().keySet());
+        hexes.add(shown.view());
+        for (Coords at : hexes) {
+            var tile = scene.tile(at);
+            var deck = BoardBridge.deck(scene, tile);
+            if (deck == null || deck.natural()) { continue; }
+            String name = "truss " + shown.label() + " " + at.getBoardNum();
+            assertTrue(deck.truss(), name + " is a truss");
+            assertEquals(at.getX() == 1 ? GREEN : null, deck.colours().slot(0), name + ": the span's colour");
+            for (int d = 0; d < 6; d++) {
+                assertEquals(BoardBridge.connected(tile, scene.tile(at.translated(d)), d), (deck.joints() & (1 << d)) != 0,
+                      name + ": a joint toward a joined deck only, " + d);
+            }
+            var nodes = BoardShape.loadNodes(deck.asset(), megamek.common.board.BoardDecoration.Colours.NONE);
+            var drawn = BoardBridge.trussNodes(deck);
+            assertEquals(1 + Integer.bitCount(deck.exits()), drawn.size(), name + ": the body and one node per exit");
+            assertTrue(nodes.keySet().containsAll(drawn), name + ": " + drawn + " in " + nodes.keySet());
+            assertEquals(1 + 2 * Integer.bitCount(deck.exits()), nodes.size(), name + ": two alternatives per exit");
+            if (deck.sloped()) {
+                var steel = ((BoardBridge.Shape) field(tileMesh(terrain, at), "bridgeShape")).facets().stream()
+                      .filter(f -> f.part() == BoardBridge.Part.STEEL).toList();
+                assertFalse(steel.isEmpty(), name + ": a sloped truss draws its steel");
+                var expected = com.badlogic.gdx.graphics.Color.valueOf(at.getX() == 1 ? GREEN : "732417");
+                for (var facet : steel) {
+                    assertTrue(Math.abs(facet.colour().r - expected.r) < .01f && Math.abs(facet.colour().g - expected.g) < .01f
+                          && Math.abs(facet.colour().b - expected.b) < .01f, name + ": steel in the span's colour, " + facet.colour());
+                }
+                System.out.printf("TRUSS %s: sloped, %d steel facets%n", name, steel.size());
+                continue;
+            }
+            // A flat deck's GLB: a ray onto each undrawn alternative's faces, along their normal, never stops on them
+            // (where a drawn face lies at the same spot, the spot is skipped).
+            var origin = new Vector3(BoardGeometry.centerX(at), BoardGeometry.centerY(at), BoardBridge.deckZ(tile));
+            float reach = 30 * s, tolerance = .05f * s;
+            int passed = 0;
+            for (var node : nodes.entrySet()) {
+                if (drawn.contains(node.getKey())) { continue; }
+                for (var polygon : node.getValue().polygons()) {
+                    var c = new Vector3(polygon.points()[0]).add(polygon.points()[1]).add(polygon.points()[2]).scl(s / 3).add(origin);
+                    var ray = new Ray(new Vector3(polygon.normal()).scl(reach).add(c), new Vector3(polygon.normal()).scl(-1));
+                    var point = new Vector3();
+                    boolean shared = drawn.stream().flatMap(id -> nodes.get(id).polygons().stream()).anyMatch(p ->
+                          Intersector.intersectRayTriangle(ray, world(p.points()[0], s, origin), world(p.points()[1], s, origin),
+                                world(p.points()[2], s, origin), point) && Math.abs(point.dst(ray.origin) - reach) < tolerance);
+                    if (shared) { continue; }
+                    var pick = terrain.selectionHit(scene, ray);
+                    assertTrue(pick == null || Math.abs((float) Math.sqrt(pick.distance()) - reach) > tolerance,
+                          name + ": the undrawn " + node.getKey() + " is not picked at " + c);
+                    passed++;
+                }
+            }
+            System.out.printf("TRUSS %s: drawn %s, %d faces of undrawn alternatives looked through%n", name, drawn, passed);
+            assertTrue(deck.exits() == 0 || passed > 0, name + ": an undrawn alternative was probed");
+        }
+    }
+
+    private static Vector3 world(Vector3 model, float scale, Vector3 origin) { return new Vector3(model).scl(scale).add(origin); }
+
+    private static Object tileMesh(GpuTerrain terrain, Coords at) throws Exception {
+        for (Object chunk : (List<?>) field(terrain, "chunks")) {
+            Object mesh = ((Map<?, ?>) field(chunk, "tileMeshes")).get(at);
+            if (mesh != null) { return mesh; }
+        }
+        throw new AssertionError("No tile mesh at " + at);
+    }
+
+    /** The decal on the flat truss deck lies on its road surface, at the deck plane, never on the rails' or chords' tops. */
+    private static void checkDeckPaint(BoardScene scene, GpuTerrain terrain) throws Exception {
+        var painted = (List<?>) field(tileMesh(terrain, DECAL), "paint");
+        assertEquals(1, painted.size(), "The deck carries its decal");
+        float deck = BoardBridge.deckZ(scene.tile(DECAL));
+        float highest = Float.NEGATIVE_INFINITY;
+        for (var face : (List<?>) field(painted.getFirst(), "faces")) {
+            var surface = (BoardSurface.Face) face;
+            highest = Math.max(highest, Math.max(surface.a().z, Math.max(surface.b().z, surface.c().z)));
+        }
+        assertTrue(Math.abs(highest - deck) < .01f, "The decal lies on the deck's road surface: " + highest + " / " + deck);
+    }
+
     /** A corpus span per decode reason: its board, the span hex the camera centres and the type the decode gives it. */
     private record Example(String reason, String board, String hex, boolean built) {
         Coords coords() { return new Coords(Integer.parseInt(hex.substring(0, 2)) - 1, Integer.parseInt(hex.substring(2)) - 1); }
@@ -506,19 +754,19 @@ class GpuBridgeSmokeTest {
           new Example("natural", "Battle of Tukayyid Pack/32x17 Kozice Valley (CDS).board", "2609", false));
 
     /**
-     * One legacy decode (BoardBridge.built): each corpus example is drawn with the same type by the legacy render and
-     * after import, which stores it; captures {@code bridges/corpus-<reason>-{legacy,imported}.png}.
+     * One legacy decode (BridgeSpan.decode): the conversion stores each corpus example's type, and the 3D board draws
+     * the stored type (it never decodes); captures {@code bridges/corpus-<reason>-imported.png}.
      */
     @Test
-    void corpusExamplesDrawTheSameTypeLegacyAndImported() throws Exception {
+    void corpusExamplesDrawTheTypeTheConversionStores() throws Exception {
         Map<Example, List<BoardScene>> scenes = new java.util.LinkedHashMap<>();
         for (Example example : EXAMPLES) {
             var file = megamek.common.Configuration.boardsDir().toPath().resolve(example.board());
-            Board legacy = megamek.common.board.BoardFile.read(file), imported = megamek.common.board.BoardFile.read(file);
-            javax.swing.SwingUtilities.invokeAndWait(() -> BoardSceneryLayouts.importBoard(imported));
+            Board imported = megamek.common.board.BoardFile.read(file);
+            javax.swing.SwingUtilities.invokeAndWait(() -> BoardSceneryLayouts.convert(imported));
             assertEquals(example.built(), megamek.common.board.HexAppearance.bridgeBuilt(
                   imported.getHex(example.coords()).getAppearance()), example.reason() + ": the type import stores");
-            scenes.put(example, List.of(GpuLegacyImportSmokeTest.scene(legacy), GpuLegacyImportSmokeTest.scene(imported)));
+            scenes.put(example, List.of(GpuLegacyImportSmokeTest.scene(imported)));
         }
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "bridges");
         Files.createDirectories(output.toPath());
@@ -535,10 +783,9 @@ class GpuBridgeSmokeTest {
                 try {
                     for (var entry : scenes.entrySet()) {
                         Example example = entry.getKey();
-                        for (int path = 0; path < 2; path++) {
-                            var scene = entry.getValue().get(path);
+                        for (var scene : entry.getValue()) {
                             var tile = scene.tile(example.coords());
-                            String name = "corpus-" + example.reason() + (path == 0 ? "-legacy" : "-imported");
+                            String name = "corpus-" + example.reason() + "-imported";
                             assertEquals(!example.built(), BoardBridge.deck(scene, tile).natural(), name);
                             GpuTerrain terrain = new GpuTerrain();
                             try {
@@ -632,13 +879,15 @@ class GpuBridgeSmokeTest {
                               >= 29.5f * s - .01f, name + ": no pier near a hex centre");
                     }
                     var probe = new Vector3(p);
-                    float under = glb != null ? glb.min.z : Float.POSITIVE_INFINITY;
-                    float top = glb != null ? glb.min.z + BoardBridge.SLAB * s : Float.NEGATIVE_INFINITY;
+                    // A flat deck's GLB draws its slab under the deck plane (a truss's chords reach lower).
+                    float under = glb != null ? BoardBridge.deckZ(tile) - BoardBridge.SLAB * s : Float.POSITIVE_INFINITY;
+                    float top = glb != null ? BoardBridge.deckZ(tile) : Float.NEGATIVE_INFINITY;
                     if (glb == null) {
                         for (var facet : structure) {
                             float z = new BoardSurface.Face(facet.a(), facet.b(), facet.c(), BoardSurface.Finish.TOP).height(probe.x, probe.y);
                             if (!Float.isFinite(z)) { continue; }
-                            if (facet.normal().z < -.5f) { under = Math.min(under, z); }
+                            // The slab's underside; a truss's steel chords reach below it.
+                            if (facet.normal().z < -.5f && facet.part() != BoardBridge.Part.STEEL) { under = Math.min(under, z); }
                             if (facet.part() == BoardBridge.Part.TOP) { top = Math.max(top, z); }
                         }
                     }
@@ -650,7 +899,7 @@ class GpuBridgeSmokeTest {
                 }
                 assertTrue(highest >= -.01f, name + ": the cap reaches the drawn underside, " + highest);
                 // The footing's outer corners stand on or below the lowest drawn floor under the footing.
-                var footprint = BoardBridgeFooting.pierFootprint(tile, d);
+                var footprint = BoardBridgeFooting.pierFootprint(tile, d, false);
                 float floor = Float.POSITIVE_INFINITY;
                 for (var corner : footprint) {
                     var owner = BoardGeometry.tile(scene, corner.x, corner.y);

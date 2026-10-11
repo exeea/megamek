@@ -11,17 +11,19 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
+import megamek.common.board.BoardSceneryLayouts;
+import megamek.common.board.BoardTreeDistribution;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
+import megamek.common.board.RailRoute;
+import megamek.common.board.TilesetScenery;
 import megamek.common.units.Terrains;
 
 /** Copies terrain appearance on the Swing thread; no game objects cross into the renderer. */
 final class BoardFeatures {
     /** Width in tile pixels of a Rough boulder at feature scale one; placement and meshing share this size. */
     static final float ROUGH_BOULDER_WIDTH = 12;
-    /** Cosmetic stands and irregular spacing for all vegetation; false restores the original layouts. */
-    static final boolean NATURAL_TREE_DISTRIBUTION = true;
     /** Half-diagonal in tile pixels of the 6.4-pixel square dragon-tooth footprint; clears roads and hex edges. */
     private static final float DRAGON_TOOTH_RADIUS = 4.6f;
     /** Ultra rough's tooth spacing in tile pixels, the closest that still reads as separate teeth. */
@@ -38,8 +40,6 @@ final class BoardFeatures {
     private static final List<String> WETLAND = List.of("willow", "tree-slender", "tree-dead", "willow", "tree",
           "willow-broad", "willow-broad", "birch-spreading", "tree-forked");
     private static final List<String> BARREN = List.of("tree-dead");
-    private static final List<String> PARK = List.of("tree-broad", "tree", "birch", "tree-forked", "tree-layered",
-          "birch-spreading");
     private static final List<String> DESERT = List.of("cactus", "palm", "tree-dead", "cactus-flowers", "palm-bent",
           "cactus");
     private static final List<String> PALMS = List.of("palm", "palm-bent");
@@ -53,12 +53,7 @@ final class BoardFeatures {
           "mars/organ-pipes", "mars/spiral-whorls", "mars/lattice-spires");
     /** Every species that snow turns into its {@code -snow} form: the lists {@link #species} maps on snow. */
     private static final Set<String> SNOW_FORMS = java.util.stream.Stream.of(TEMPERATE, HIGHLAND, ROCKY, WETLAND,
-          BARREN, PARK, ORCHARD).flatMap(List::stream).collect(java.util.stream.Collectors.toUnmodifiableSet());
-    /**
-     * The vegetation design that draws no trees while the woods stay for the rules, as on legacy art that paints its
-     * own scenery over woods (seaport container yards and cranes).
-     */
-    static final String NO_TREES = "woods/no-trees";
+          BARREN, BoardTreeDistribution.PARK, ORCHARD).flatMap(List::stream).collect(java.util.stream.Collectors.toUnmodifiableSet());
     private BoardFeatures() { }
 
     /** The tileset's orchard marker changes woods appearance, never creates cover by itself. */
@@ -73,11 +68,11 @@ final class BoardFeatures {
     }
 
     static boolean detailedGround(Hex hex, Map<Integer, String> structureModels, Set<Integer> blankTerrains) {
-        return detailedGround(hex, structureModels, blankTerrains, BoardArtwork.Scenery.EMPTY);
+        return detailedGround(hex, structureModels, blankTerrains, TilesetScenery.Scenery.EMPTY);
     }
 
     static boolean detailedGround(Hex hex, Map<Integer, String> structureModels, Set<Integer> blankTerrains,
-          BoardArtwork.Scenery scenery) {
+          TilesetScenery.Scenery scenery) {
         for (int terrain : hex.getTerrainTypes()) {
             if (scenery.terrains().contains(terrain)) { continue; }
             if (blankTerrains.contains(terrain) && switch (terrain) {
@@ -105,7 +100,7 @@ final class BoardFeatures {
                 // Fluff 1 selects the standard road bend, already represented by the captured road exits.
                 case Terrains.ROAD_FLUFF -> hex.terrainLevel(Terrains.ROAD_FLUFF) == 1
                       && BoardRoad.capture(hex) != BoardRoad.Kind.NONE;
-                case Terrains.FLUFF -> orchard(hex) || BoardRough.variant(hex) != 0;
+                case Terrains.FLUFF -> orchard(hex) || HexTile.roughVariant(hex) != 0;
                 case Terrains.GROUND_FLUFF -> BoardSurfaceBlend.hasTransition(hex);
                 default -> false;
             };
@@ -170,25 +165,23 @@ final class BoardFeatures {
     /** The board supplies the neighbouring roads, whose course through this hex scenery keeps clear of. */
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
           Set<Integer> blankTerrains, Function<Coords, Hex> board) {
-        return capture(hex, coords, structureModels, blankTerrains, board, BoardArtwork.Scenery.EMPTY);
+        return capture(hex, coords, structureModels, blankTerrains, board, TilesetScenery.Scenery.EMPTY);
     }
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
-          Set<Integer> blankTerrains, Function<Coords, Hex> board, BoardArtwork.Scenery scenery) {
-        return capture(hex, coords, structureModels, blankTerrains, board, scenery, NATURAL_TREE_DISTRIBUTION);
+          Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery) {
+        return capture(hex, coords, structureModels, blankTerrains, board, scenery, BoardTreeDistribution.NATURAL);
     }
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
-          Set<Integer> blankTerrains, Function<Coords, Hex> board, BoardArtwork.Scenery scenery,
+          Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
           boolean natural) {
-        if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return decorations(hex); }
+        if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return decorations(hex, coords); }
         List<BoardScene.Feature> result = new ArrayList<>();
-        // Every scenery model is a layouts.json key (BoardArtwork counts nothing else as a model). Pillar art on a
-        // bridge is its Pillars toggle, drawn as the bridge's piers (BoardScene.captureTile), not as posts.
-        for (String asset : scenery.models()) {
-            if (BoardSceneryLayouts.bridgePillars(hex, asset)) { continue; }
-            result.addAll(BoardSceneryLayouts.layout(asset).features(coords, hex, natural));
-        }
+        // Every scenery model is a layouts.json key (TilesetScenery counts nothing else as a model). Only terrain-owned
+        // art is left (geysers, rubble, fortified, cleared-rubble paths, elevator plates): BoardTiles draws a hex without
+        // the tokens the conversion took, whose objects stand for them.
+        for (String asset : scenery.models()) { result.addAll(features(BoardSceneryLayouts.layout(asset), coords, hex)); }
         int variant = Math.floorMod(coords.getX() * 31 + coords.getY() * 17, 4);
         // Terrain levels are the game's collectable limb counts, not damage inferred from nearby units.
         Random limbs = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ 0x41524D534C454753L);
@@ -234,11 +227,11 @@ final class BoardFeatures {
         Hex vegetation = hex.getAppearance().containsKey("vegetation")
               ? megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "vegetation") : hex;
         boolean jungle = vegetation.containsTerrain(Terrains.JUNGLE);
-        BoardRoad road = BoardRoad.capture(vegetation) == BoardRoad.Kind.NONE ? null
-              : BoardRoad.clearance(coords, vegetation, board);
-        var design = hex.getAppearance().get("vegetation");
-        boolean noTrees = design != null && NO_TREES.equals(design.variant());
-        if ((jungle || vegetation.containsTerrain(Terrains.WOODS)) && !noTrees && !scenery.modelTerrains().contains(Terrains.WOODS)) {
+        // Trees keep off the road and the rails on the ground.
+        int rails = RailRoute.groundSides(hex);
+        BoardRoad road = BoardRoad.capture(vegetation) == BoardRoad.Kind.NONE && rails == 0 ? null
+              : BoardRoad.clearance(coords, vegetation, board, rails);
+        if ((jungle || vegetation.containsTerrain(Terrains.WOODS)) && !BoardTreeDistribution.noTrees(hex)) {
             // Snow/pavement change the ground, not the planet's vegetation (including low cover and jungle).
             boolean mars = vegetation.getTheme() != null && vegetation.getTheme().toLowerCase(Locale.ROOT).contains("mars");
             boolean volcano = vegetation.getTheme() != null && vegetation.getTheme().toLowerCase(Locale.ROOT).contains("volcan");
@@ -273,7 +266,7 @@ final class BoardFeatures {
                 }
                 if (fungus || mars) { radius *= .8f; }
                 float x = (float) Math.cos(angle) * radius, y = (float) Math.sin(angle) * radius;
-                if (orchard && !natural) {
+                if (orchard) {
                     // Light orchard rows align across the 63x72 staggered vegetation lattice.
                     int columns = density >= 3 ? 4 : 3;
                     int rows = count / columns;
@@ -309,12 +302,41 @@ final class BoardFeatures {
         }
         rough(hex, coords, result, board);
         BoardScatter.capture(hex, coords, result);
-        result.addAll(decorations(hex));
+        result.addAll(decorations(hex, coords));
         return List.copyOf(result);
     }
 
-    /** The park species of a layout's broad tree slots, as placed objects store them; snow is chosen when drawn. */
-    static List<String> parkSpecies() { return PARK; }
+    /**
+     * A terrain-owned layout's rows on {@code hex} (a geyser, rubble, fortified, a cleared-rubble path, an elevator's
+     * level plate, cleared-rubble gravel) as features at their authored place: a mesh row a scenery feature, never a
+     * park tree; a decal row a decal of the hex's support, as a placed decal is
+     * ({@link BoardSceneryLayouts.Layout#decorations}), which the terrain owns: the hex never stores it, so it follows
+     * its terrain (an elevator's plate shows its level) and is never picked as an object ({@link #terrainOwned}).
+     */
+    static List<BoardScene.Feature> features(BoardSceneryLayouts.Layout layout, Coords coords, Hex hex) {
+        List<BoardScene.Feature> result = new ArrayList<>(layout.components().stream().filter(row -> !row.decal())
+              .map(row -> new BoardScene.Feature(row.asset(), row.x(), row.y(), row.rotation(), row.scale(), 1,
+                    row.z() / BoardGeometry.MODEL_LEVEL_HEIGHT, BoardScene.FeatureKind.SCENERY, 0, true, null, row.stretch(),
+                    row.colours())).toList());
+        if (layout.components().stream().anyMatch(BoardSceneryLayouts.Component::decal)) {
+            // Each row's id names its hex and asset: unique on the board, as a stored object's id is.
+            String prefix = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":";
+            int[] next = { 0 };
+            layout.decorations(coords, hex, () -> prefix + layout.components().get(next[0]).asset() + "#" + next[0]++,
+                        null, false).stream()
+                  .filter(object -> object.kind().equals("decal")).map(object -> feature(hex, object)).forEach(result::add);
+        }
+        return List.copyOf(result);
+    }
+
+    /**
+     * The id prefix of the decals terrain-owned rows paint ({@link #features}) and of the buffer stops a rail owns
+     * ({@link #decorations}): no stored object has it.
+     */
+    private static final String TERRAIN_OWNED = "terrain:";
+
+    /** An object its terrain or its rail owns ({@link #features}, {@link #decorations}), which no hex stores: never selected. */
+    static boolean terrainOwned(megamek.common.board.BoardDecoration object) { return object.id().startsWith(TERRAIN_OWNED); }
 
     /** Whether a placed tree of this species turns to its {@code -snow} form on snow. */
     static boolean hasSnowForm(String asset) { return SNOW_FORMS.contains(asset); }
@@ -361,10 +383,33 @@ final class BoardFeatures {
                     scale * (float) feature.stretch().z());
     }
 
-    private static List<BoardScene.Feature> decorations(Hex hex) {
-        return hex.getDecorations().stream().map(object -> new BoardScene.Feature(drawnAsset(hex, object),
+    /**
+     * The hex's objects as features, each rail's buffer stops after it ({@link RailRoute#stops} of its drawn sides): the
+     * rail owns them, so the hex never stores them, they come and go with its sides and are never picked as objects
+     * ({@link #terrainOwned}). They ride the rail ({@link RailRoute#ride}).
+     */
+    static List<BoardScene.Feature> decorations(Hex hex, Coords coords) {
+        List<BoardScene.Feature> result = new ArrayList<>();
+        int bridgeExits = hex.containsTerrain(Terrains.BRIDGE) ? hex.getTerrain(Terrains.BRIDGE).getExits() : 0;
+        for (var object : hex.getDecorations()) {
+            result.add(feature(hex, object));
+            if (RailRoute.kind(object) != RailRoute.Kind.RAIL) { continue; }
+            int index = 0;
+            for (var stop : RailRoute.stops(RailRoute.drawnSides(object, bridgeExits))) {
+                result.add(feature(hex, new megamek.common.board.BoardDecoration(
+                      TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":" + object.id() + "#" + index++, "prop",
+                      RailRoute.BUFFER_STOP, null, object.x() + stop.x() / HexTile.WIDTH, object.y() + stop.y() / HexTile.HEIGHT,
+                      stop.rotation(), false, 1, RailRoute.ride(object), 0, false)));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    /** An object of {@code hex} as its feature, at its place. */
+    private static BoardScene.Feature feature(Hex hex, megamek.common.board.BoardDecoration object) {
+        return new BoardScene.Feature(drawnAsset(hex, object),
               (float) (object.x() * BoardGeometry.TILE_WIDTH), (float) (object.y() * BoardGeometry.TILE_HEIGHT),
-              (float) object.rotation(), (float) object.scale(), 1, 0, BoardScene.FeatureKind.PROP, 0, false, object)).toList();
+              (float) object.rotation(), (float) object.scale(), 1, 0, BoardScene.FeatureKind.PROP, 0, false, object);
     }
 
     /** Rough is actual terrain cover, independent of cosmetic scatter density, with larger cover for ultra rough. */
@@ -372,12 +417,13 @@ final class BoardFeatures {
         if (!hex.containsTerrain(Terrains.ROUGH)
               || hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL,
                     Terrains.SPACE, Terrains.SKY, Terrains.MAGMA)) { return; }
-        boolean teeth = BoardRough.variant(hex) == 1;
-        boolean felled = BoardRough.variant(hex) == 2;
+        boolean teeth = HexTile.roughVariant(hex) == 1;
+        boolean felled = HexTile.roughVariant(hex) == 2;
         boolean ultra = hex.terrainLevel(Terrains.ROUGH) == 2;
         int count = teeth ? (ultra ? 24 : 10) : felled ? (ultra ? 12 : 9) : ultra ? 18 : 9;
-        BoardRoad road = hex.containsTerrain(Terrains.ROAD)
-              ? BoardRoad.clearance(coords, hex, board) : null;
+        int rails = RailRoute.groundSides(hex);
+        BoardRoad road = hex.containsTerrain(Terrains.ROAD) || rails != 0
+              ? BoardRoad.clearance(coords, hex, board, rails) : null;
         int exits = hex.containsTerrain(Terrains.BRIDGE) ? hex.getTerrain(Terrains.BRIDGE).getExits() : 0;
         BoardRoad bridge = hex.containsTerrain(Terrains.BRIDGE) ? BoardRoad.clearance(coords, exits) : null;
         Predicate<BoardScene.Feature> clear = feature -> {
@@ -532,7 +578,7 @@ final class BoardFeatures {
         List<String> trees = theme.contains("lunar") ? BARREN : switch (surface) {
             case ROCK, LUNAR, VOLCANO -> ROCKY;
             case DIRT -> WETLAND;
-            case CONCRETE -> PARK;
+            case CONCRETE -> BoardTreeDistribution.PARK;
             case SNOW -> HIGHLAND;
             default -> hex.getLevel() >= 2 ? HIGHLAND : TEMPERATE;
         };

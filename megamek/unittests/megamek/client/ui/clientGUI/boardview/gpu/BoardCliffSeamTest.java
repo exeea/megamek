@@ -176,8 +176,8 @@ class BoardCliffSeamTest {
 
     static BoardScene capturedScene(String path) throws Exception {
         FutureTask<BoardScene> capture = new FutureTask<>(() -> {
-            var board = new Board();
-            board.load(new File("data/boards/" + path));
+            // The map preview's own load, which converts the board's legacy scenery.
+            var board = GpuBoardWindow.loadPreview(new File("data/boards/" + path));
             var game = new Game();
             game.setBoard(board);
             try (var source = new GpuMapSource(game, null, null)) { return source.takeFrame().scene(); }

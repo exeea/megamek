@@ -39,10 +39,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Rule C of batch 6: placed decorative objects under a quarter hex hide while a hex is narrower than 12 px on screen
- * (TreeLod's ±10 % hysteresis), in the editor's instanced parts and the game's packed pages alike, in the colour, shadow
- * and transparent passes and in picking; the editor's pins keep the selection drawn and pickable. The cars are the
- * fixture's only small objects, so every count below is a whole number of cars (GLProfiler counts one instanced draw's
- * indices once). Everything is paved, so nothing else on the board changes with the zoom.
+ * (TreeLod's ±10 % hysteresis), in the colour, shadow and transparent passes and in picking; the editor's pins keep the
+ * selection drawn and pickable. Placed objects draw instanced in every view (b13), so no prop page holds them. The cars
+ * are the fixture's only small objects, so every count below is a whole number of cars (GLProfiler counts one instanced
+ * draw's indices once). Everything is paved, so nothing else on the board changes with the zoom.
  */
 @Tag("on-demand")
 class GpuSmallObjectSmokeTest {
@@ -52,10 +52,10 @@ class GpuSmallObjectSmokeTest {
           EDITED = new Coords(6, 6), ROOF = new Coords(10, 3), LONE = new Coords(3, 10);
 
     /**
-     * Two cars (one mirrored, which the editor draws one by one), a formal garden, a car on a building's roof, and a car
-     * alone in its chunk (8 hexes a side), which so packs only small props.
+     * Two cars (one mirrored, drawn in a batch of its own), a formal garden, a car on a building's roof, and a car alone
+     * in its chunk (8 hexes a side), which so packs no prop.
      */
-    private static Board board(boolean cars, boolean edited) {
+    private static Board board(boolean edited) {
         Board board = Board.createEmptyBoard(12, 12);
         for (int x = 0; x < board.getWidth(); x++) {
             for (int y = 0; y < board.getHeight(); y++) {
@@ -65,13 +65,11 @@ class GpuSmallObjectSmokeTest {
             }
         }
         var ground = BoardDecoration.Placement.ground();
-        if (cars) {
-            place(board, CAR, "car", "scenery/vehicles/car", false, ground, BoardDecoration.Colours.NONE);
-            place(board, MIRRORED, "mirrored", "scenery/vehicles/car", true, ground, BoardDecoration.Colours.of("#1ee0f0"));
-            place(board, ROOF, "roof", "scenery/vehicles/car", false, BoardDecoration.Placement.on("building", 0),
-                  BoardDecoration.Colours.of("#b8b014"));
-            place(board, LONE, "lone", "scenery/vehicles/car", false, ground, BoardDecoration.Colours.of("#245c99"));
-        }
+        place(board, CAR, "car", "scenery/vehicles/car", false, ground, BoardDecoration.Colours.NONE);
+        place(board, MIRRORED, "mirrored", "scenery/vehicles/car", true, ground, BoardDecoration.Colours.of("#1ee0f0"));
+        place(board, ROOF, "roof", "scenery/vehicles/car", false, BoardDecoration.Placement.on("building", 0),
+              BoardDecoration.Colours.of("#b8b014"));
+        place(board, LONE, "lone", "scenery/vehicles/car", false, ground, BoardDecoration.Colours.of("#245c99"));
         place(board, GARDEN, "garden", "scenery/parks/formal-garden-hex", false, ground, BoardDecoration.Colours.NONE);
         return board;
     }
@@ -91,7 +89,7 @@ class GpuSmallObjectSmokeTest {
     @Test
     void smallObjectsHideWhenZoomedOutInEveryPassAndView() throws Exception {
         Files.createDirectories(OUTPUT.toPath());
-        BoardScene scene = scene(board(true, false)), edited = scene(board(true, true)), bare = scene(board(false, false));
+        BoardScene scene = scene(board(false)), edited = scene(board(true));
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setInitialVisible(false);
@@ -100,50 +98,40 @@ class GpuSmallObjectSmokeTest {
             public void create() {
                 var profiler = new GLProfiler(Gdx.graphics);
                 var assets = new GpuAssets();
-                var editor = new GpuTerrain();
-                var game = new GpuTerrain();
-                var withoutCars = new GpuTerrain();
+                var terrain = new GpuTerrain();
                 try {
                     profiler.enable();
                     int car = indices(assets.model("scenery/vehicles/car"));
-                    editor.editableObjects(true);
-                    editor.update(scene);
-                    game.update(scene);
-                    withoutCars.update(bare);
+                    terrain.update(scene);
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     camera.center(BoardGeometry.center(new Coords(6, 4), 0));
-                    // The editor draws the upright cars, whatever their colour, in one instanced draw (option A) and
-                    // the mirrored car one by one; the game packs all four.
-                    checkZoom(editor, camera, profiler, 2 * car, "editor");
-                    checkZoom(game, camera, profiler, 4 * car, "game");
-                    checkHysteresis(editor, camera, profiler, 2 * car);
-                    checkShadowRedraws(editor, camera, profiler, 2 * car);
-                    checkPages(game, withoutCars, camera, profiler);
-                    checkOccupiedSmallChunk(game, camera, profiler);
-                    checkHoveredBuilding(game, camera, profiler, car);
-                    checkPins(editor, scene, camera, profiler, car);
+                    // The upright cars, whatever their colour, draw in one instanced draw (option A), the mirrored car in
+                    // a batch of its own.
+                    checkZoom(terrain, camera, profiler, 2 * car, "view");
+                    checkHysteresis(terrain, camera, profiler, 2 * car);
+                    checkShadowRedraws(terrain, camera, profiler, 2 * car);
+                    checkOccupiedSmallChunk(terrain, camera, profiler);
+                    checkHoveredBuilding(terrain, camera, profiler, car);
+                    checkPins(terrain, scene, camera, profiler, car);
                     zoom(camera, 9);
                     camera.setPerspective(true);
-                    assertEquals(0, hidden(editor, camera, profiler), "Perspective views hide nothing, like grass");
+                    assertEquals(0, hidden(terrain, camera, profiler), "Perspective views hide nothing, like grass");
                     camera.setPerspective(false);
-                    checkReusedTile(game, edited, camera, profiler, 4 * car, "game");
-                    checkScar(game, edited, camera, profiler);
-                    checkReusedTile(editor, edited, camera, profiler, 2 * car, "editor");
-                    editor.setTacticalView(true);
+                    checkReusedTile(terrain, edited, camera, profiler, 2 * car, "view");
+                    checkScar(terrain, edited, camera, profiler);
+                    terrain.setTacticalView(true);
                     zoom(camera, 16);
-                    assertEquals(0, hidden(editor, camera, profiler));
+                    assertEquals(0, hidden(terrain, camera, profiler));
                     zoom(camera, 9);
-                    assertEquals(2 * car, hidden(editor, camera, profiler), "The Tactical View's objects follow the rule");
-                    editor.setTacticalView(false);
+                    assertEquals(2 * car, hidden(terrain, camera, profiler), "The Tactical View's objects follow the rule");
+                    terrain.setTacticalView(false);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
                     profiler.disable();
-                    withoutCars.dispose();
-                    game.dispose();
-                    editor.dispose();
+                    terrain.dispose();
                     assets.dispose();
                     Gdx.app.exit();
                 }
@@ -198,41 +186,11 @@ class GpuSmallObjectSmokeTest {
         assertEquals(all - cars, count(profiler, () -> terrain.renderShadows(null, List.of())));
     }
 
-    /**
-     * The small caches end each page's material runs: a crossing rebuilds no page; at 16 px the rule adds no draw; at
-     * 9 px the frame draws as if the cars were not there.
-     */
-    private static void checkPages(GpuTerrain game, GpuTerrain withoutCars, BoardCamera camera, GLProfiler profiler) throws Exception {
-        var pages = (GpuPropBatch) field(game, "propBatch");
-        zoom(camera, 16);
-        opaque(game, camera, profiler);
-        opaque(game, camera, profiler);
-        long builds = pages.rebuilds();
-        for (float pixels : new float[] { 9, 16, 9, 16 }) {
-            zoom(camera, pixels);
-            opaque(game, camera, profiler);
-        }
-        assertEquals(builds, pages.rebuilds(), "Hiding and showing small objects rebuilds no prop page");
-        int shownDraws = draws(game, camera, profiler);
-        game.setSmallObjects(false);
-        assertEquals(draws(game, camera, profiler), shownDraws, "Shown small objects add no draw to a whole page");
-        game.setSmallObjects(true);
-        zoom(camera, 9);
-        opaque(withoutCars, camera, profiler);
-        opaque(withoutCars, camera, profiler);
-        assertEquals(draws(withoutCars, camera, profiler), draws(game, camera, profiler),
-              "Hidden small objects split no material run");
-        assertEquals(builds, pages.rebuilds());
-    }
-
-    /**
-     * A chunk whose packed props are all small keeps its complete caches when a unit's arrival or departure fades its
-     * props, so its page is not rebuilt.
-     */
+    /** A unit's arrival or departure on the lone hex fades its car without rebuilding a page; the car packs nothing. */
     private static void checkOccupiedSmallChunk(GpuTerrain game, BoardCamera camera, GLProfiler profiler) throws Exception {
         Object chunk = ((List<?>) field(game, "chunks")).get(1);
-        assertEquals(0, ((Array<?>) field(chunk, "shadowPropRenderables")).size, "The lone car's chunk packs only small props");
-        assertTrue(((Array<?>) field(chunk, "smallShadowRenderables")).size > 0);
+        assertEquals(0, ((Array<?>) field(chunk, "shadowPropRenderables")).size, "The lone hex's chunk packs no prop");
+        assertTrue(((Array<?>) field(chunk, "decorationRenderables")).size > 0, "The lone car draws instanced");
         var pages = (GpuPropBatch) field(game, "propBatch");
         var box = new ModelBuilder().createBox(4, 4, 12, new Material(), VertexAttributes.Usage.Position);
         try {
@@ -243,9 +201,9 @@ class GpuSmallObjectSmokeTest {
             for (boolean occupied : new boolean[] { true, false, true, false }) {
                 game.animate(0, occupied ? List.of(unit) : List.of(), .5f);
                 opaque(game, camera, profiler);
-                assertEquals(occupied, !((java.util.Set<?>) field(chunk, "faded")).isEmpty(), "The unit fades the car under it");
+                assertEquals(occupied, !((java.util.Set<?>) field(chunk, "faded")).isEmpty(), "The unit fades the prop under it");
             }
-            assertEquals(builds, pages.rebuilds(), "Occupancy changes repack no all-small chunk");
+            assertEquals(builds, pages.rebuilds(), "Occupancy changes repack no page");
         } finally { box.dispose(); }
     }
 
@@ -358,13 +316,6 @@ class GpuSmallObjectSmokeTest {
 
     private static int opaque(GpuTerrain terrain, BoardCamera camera, GLProfiler profiler) {
         return count(profiler, () -> terrain.render(camera.camera, false));
-    }
-
-    private static int draws(GpuTerrain terrain, BoardCamera camera, GLProfiler profiler) {
-        profiler.reset();
-        ScreenUtils.clear(0, 0, 0, 1, true);
-        terrain.render(camera.camera, false);
-        return profiler.getDrawCalls();
     }
 
     private static int count(GLProfiler profiler, Runnable draw) {

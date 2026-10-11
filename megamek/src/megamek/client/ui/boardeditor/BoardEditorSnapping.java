@@ -9,7 +9,6 @@ import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
-import megamek.common.units.Terrains;
 
 /** Translation-only joins between explicitly authored, compatible connector ends. No model loading or ID guessing. */
 public final class BoardEditorSnapping {
@@ -97,28 +96,7 @@ public final class BoardEditorSnapping {
         // During a drag the anchor may be over another hex while the owning record deliberately stays put.
         double q = owner.toCube().q() + object.x() / .75, r = owner.toCube().r() - object.y() - object.x() / 1.5;
         Coords at = new megamek.common.board.CubeCoords(q, r, -q - r).roundToNearestHex().toOffset();
-        return level(board.getHex(at), placement);
-    }
-
-    /**
-     * The nominal level {@code placement} puts an object's anchor at on {@code hex}, by {@link
-     * BoardDecoration.Placement#level(double, java.util.function.ToDoubleFunction)}: each support's top from the hex's
-     * rules terrain, or NaN where the hex lacks that support.
-     */
-    public static double level(megamek.common.Hex hex, BoardDecoration.Placement placement) {
-        return placement.level(hex == null ? Double.NaN : hex.getLevel(), receiver -> {
-            int type = switch (receiver) {
-                case "bridge" -> Terrains.BRIDGE_ELEV;
-                case "building" -> Terrains.BLDG_ELEV;
-                case "industrial" -> Terrains.INDUSTRIAL;
-                case "fuelTank" -> Terrains.FUEL_TANK_ELEV;
-                case "ice" -> Terrains.ICE;
-                default -> throw new IllegalArgumentException("Unknown receiver " + receiver);
-            };
-            if (hex == null || !hex.containsTerrain(type)) { return Double.NaN; }
-            // Ice lies at the hex's own level, on its water or ground.
-            return hex.getLevel() + (type == Terrains.ICE ? 0 : hex.terrainLevel(type));
-        });
+        return placement.level(board.getHex(at));
     }
 
     /**
@@ -129,7 +107,7 @@ public final class BoardEditorSnapping {
 
     /** {@code placement} on {@code hex}, raised to {@link #lowestLevel} if it lies below it; its support is kept. */
     public static BoardDecoration.Placement clamp(megamek.common.Hex hex, BoardDecoration.Placement placement) {
-        double at = level(hex, placement);
+        double at = placement.level(hex);
         // An object whose support is missing stands on the ground, where the editor draws it.
         if (Double.isNaN(at)) { at = hex.getLevel() + placement.offset(); }
         double lowest = lowestLevel(hex);

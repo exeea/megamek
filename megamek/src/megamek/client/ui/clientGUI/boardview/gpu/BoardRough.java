@@ -8,19 +8,10 @@ import java.util.Map;
 
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
-import megamek.common.Hex;
-import megamek.common.units.Terrains;
 
 /** Authored rough variants: one placement supplies the visible model, picking and unit support. */
 public final class BoardRough {
     private BoardRough() { }
-
-    /** The modeled rough appearance; other uses of fluff retain their tileset artwork. Safe during EDT capture. */
-    public static int variant(Hex hex) {
-        if (hex.getAppearance().containsKey("rough")) { hex = megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "rough"); }
-        int fluff = hex.terrainLevel(Terrains.FLUFF);
-        return hex.containsTerrain(Terrains.ROUGH) && (fluff == 1 || fluff == 2) ? fluff : 0;
-    }
 
     // Capture does not load geometry. Terrain workers share complete immutable CPU shapes, without GL resources.
     private static final BoardKit<Map<String, BoardShape>> KIT = new BoardKit<>(BoardRough::load);

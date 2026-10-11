@@ -88,6 +88,27 @@ public final class UiKit {
     }
 
     /**
+     * Keeps the press and the click of a control inside another clickable control (a row's remove ×) to itself: the
+     * outer control is neither pressed nor clicked.
+     */
+    public static <T extends Actor> T ownEvents(T control) {
+        control.addListener(new InputListener() {
+            @Override
+            public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
+                event.stop();
+                return false;
+            }
+        });
+        control.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                event.stop();
+            }
+        });
+        return control;
+    }
+
+    /**
      * A tooltip on {@code actor} in the theme's "hud" style, empty until its view sets the text. It goes when the actor
      * hides: libGDX hides a tooltip whose actor leaves the stage, but not one whose actor or panel hides under a resting
      * pointer, which then stays stuck. Its label acts only while it shows.

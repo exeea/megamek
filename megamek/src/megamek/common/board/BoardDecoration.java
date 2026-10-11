@@ -14,6 +14,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.ToDoubleFunction;
 
+import megamek.common.Hex;
+import megamek.common.units.Terrains;
+
 /**
  * A visual-only instance owned by one Hex. Heights are board levels; XY uses hex width/height units. The model's local
  * scale is the uniform {@code scale} times {@code stretch} per axis, applied in object space before the rotations.
@@ -21,8 +24,26 @@ import java.util.function.ToDoubleFunction;
  */
 public record BoardDecoration(String id, String kind, String asset, String name, double x, double y,
       double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
-      double rotationX, double rotationY, String group, boolean bare, int connections, Stretch stretch, Colours colours)
-      implements Serializable {
+      double rotationX, double rotationY, String group, boolean bare, int connections, Stretch stretch, Colours colours,
+      int tracks, boolean pillars) implements Serializable {
+    /**
+     * An object without pillars. {@code pillars}: a maglev route marker's Pillars toggle, concrete piers under the joints
+     * of its beam ({@link RailRoute#run}), as a bridge's {@link HexAppearance#PILLARS}; only a maglev has it.
+     */
+    public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
+          double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
+          double rotationX, double rotationY, String group, boolean bare, int connections, Stretch stretch, Colours colours,
+          int tracks) {
+        this(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX,
+              rotationY, group, bare, connections, stretch, colours, tracks, false);
+    }
+    /** An object without a stored track layout: a route marker lays the default pieces of its sides. */
+    public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
+          double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
+          double rotationX, double rotationY, String group, boolean bare, int connections, Stretch stretch, Colours colours) {
+        this(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX,
+              rotationY, group, bare, connections, stretch, colours, 0);
+    }
     /** An object in its model's own colours. */
     public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
           double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
@@ -38,8 +59,9 @@ public record BoardDecoration(String id, String kind, String asset, String name,
               rotationY, group, bare, connections, Stretch.NONE);
     }
     /**
-     * An object without route connections. {@code connections} is a maglev route marker's sides as a mask, N=1, NE=2,
-     * SE=4, S=8, SW=16, NW=32 (the order of {@link Coords#translated(int)}).
+     * An object without route connections. {@code connections} is a route marker's sides as a mask, N=1, NE=2, SE=4,
+     * S=8, SW=16, NW=32 (the order of {@link Coords#translated(int)}); {@code tracks} its track pieces where they differ
+     * from the default of those sides ({@link RailRoute}), else 0.
      */
     public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
           double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
@@ -158,6 +180,27 @@ public record BoardDecoration(String id, String kind, String asset, String name,
             return (receiver.terrain().equals("ground") ? ground : top.applyAsDouble(receiver.terrain())) + offset;
         }
 
+        /**
+         * The nominal level this placement puts an object's anchor at on {@code hex}, by {@link #level(double,
+         * ToDoubleFunction)}: each support's top from the hex's rules terrain, or NaN where the hex (null: none) lacks
+         * that support.
+         */
+        public double level(Hex hex) {
+            return level(hex == null ? Double.NaN : hex.getLevel(), receiver -> {
+                int type = switch (receiver) {
+                    case "bridge" -> Terrains.BRIDGE_ELEV;
+                    case "building" -> Terrains.BLDG_ELEV;
+                    case "industrial" -> Terrains.INDUSTRIAL;
+                    case "fuelTank" -> Terrains.FUEL_TANK_ELEV;
+                    case "ice" -> Terrains.ICE;
+                    default -> throw new IllegalArgumentException("Unknown receiver " + receiver);
+                };
+                if (hex == null || !hex.containsTerrain(type)) { return Double.NaN; }
+                // Ice lies at the hex's own level, on its water or ground.
+                return hex.getLevel() + (type == Terrains.ICE ? 0 : hex.terrainLevel(type));
+            });
+        }
+
         public static Placement ground() { return surface("ground", "top", 0); }
         public static Placement absolute(double level) { return new Placement("absolute", level, null, null); }
         public static Placement surface(String terrain, String surface, double offset) {
@@ -190,41 +233,69 @@ public record BoardDecoration(String id, String kind, String asset, String name,
         if (group != null && group.isBlank()) {
             throw new IllegalArgumentException("A group name cannot be blank");
         }
-        if (connections < 0 || connections > 63 || connections != 0 && !(kind.equals("prop") && asset.equals(MaglevRoute.ASSET))) {
-            throw new IllegalArgumentException("Only a maglev route marker has connections, a mask of its six sides");
+        RailRoute.Kind route = kind.equals("prop") ? RailRoute.Kind.of(asset) : null;
+        if (connections < 0 || connections > 63 || connections != 0 && route == null) {
+            throw new IllegalArgumentException("Only a route marker has connections, a mask of its six sides");
+        }
+        if (tracks != 0 && (route == null || !RailRoute.valid(connections, tracks))) {
+            throw new IllegalArgumentException("A route marker's tracks are gentle pieces between its sides, reaching each");
+        }
+        // A rail lies on its support, the ground or a bridge deck, and follows it; only maglev holds a level of its own.
+        if (route == RailRoute.Kind.RAIL && !(placement.mode().equals("surface") && placement.offset() == 0
+              && (placement.receiver().terrain().equals("ground") || placement.receiver().terrain().equals("bridge")))) {
+            throw new IllegalArgumentException("A rail lies on the ground or a bridge deck");
+        }
+        if (pillars && route != RailRoute.Kind.MAGLEV) {
+            throw new IllegalArgumentException("Only a maglev route stands on pillars");
         }
         // Java serialization of an object saved before stretch or colours existed supplies neither.
         if (stretch == null) { stretch = Stretch.NONE; }
         if (colours == null) { colours = Colours.NONE; }
-        if (kind.equals("decal") && !colours.slots().isEmpty()) {
-            throw new IllegalArgumentException("Only a model has colour slots");
+        // A decal paints in one colour, slot 0 (lettering): it multiplies the decal's image.
+        if (kind.equals("decal") && colours.slots().size() > 1) {
+            throw new IllegalArgumentException("A decal has one paint colour; only a model has colour slots");
         }
     }
 
     /** A copy with a fresh ID that belongs to no group. */
     public BoardDecoration duplicate() {
         return new BoardDecoration(UUID.randomUUID().toString(), kind, asset, name, x, y, rotation, mirror,
-              scale, placement, drawOrder, clipToHex, rotationX, rotationY, null, bare, connections, stretch, colours);
+              scale, placement, drawOrder, clipToHex, rotationX, rotationY, null, bare, connections, stretch, colours, tracks, pillars);
     }
 
     public BoardDecoration withGroup(String group) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
-              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours);
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars);
     }
 
+    /** These sides; the stored track layout stays only while it is still a layout of them, else the default is laid. */
     public BoardDecoration withConnections(int connections) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
-              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours);
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours,
+              RailRoute.valid(connections, tracks) ? tracks : 0, pillars);
+    }
+
+    /** This route marker with these track pieces ({@link RailRoute}); its default layout is stored as none. */
+    public BoardDecoration withTracks(int tracks) {
+        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours,
+              tracks == RailRoute.pieces(connections) ? 0 : tracks, pillars);
+    }
+
+    /** This maglev route marker with its Pillars toggle on or off. */
+    public BoardDecoration withPillars(boolean pillars) {
+        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars);
     }
 
     public BoardDecoration withStretch(Stretch stretch) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
-              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours);
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars);
     }
 
     public BoardDecoration withColours(Colours colours) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
-              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours);
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars);
     }
 
     /** Fresh IDs; members that shared a group share one fresh group, ungrouped objects stay ungrouped. */
@@ -236,7 +307,7 @@ public record BoardDecoration(String id, String kind, String asset, String name,
 
     public BoardDecoration transform(double x, double y, double rotation, boolean mirror, double scale,
           Placement placement) {
-        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours);
+        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars);
     }
 
     /** Right-handed XYZ Euler angles in degrees: apply X, then Y, then Z (the board's up axis). */
@@ -249,7 +320,8 @@ public record BoardDecoration(String id, String kind, String asset, String name,
     }
 
     /**
-     * Reflection in board space, not in anisotropic normalized XY; route sides reflect as terrain exits do. The stretch
+     * Reflection in board space, not in anisotropic normalized XY; route sides reflect as terrain exits do, and the track
+     * pieces between them with them. The stretch
      * stays on the same local axes: a reflection of the board is the mirror flag in object space, which commutes with it.
      */
     public BoardDecoration flip(boolean horizontal, boolean vertical) {
@@ -260,7 +332,7 @@ public record BoardDecoration(String id, String kind, String asset, String name,
         return new BoardDecoration(id, kind, asset, name, horizontal ? -x : x, vertical ? -y : y,
               angle, reflected, scale, placement, drawOrder, clipToHex, rotationX,
               horizontal != vertical ? -rotationY : rotationY, group, bare, flipSides(connections, horizontal, vertical),
-              stretch, colours);
+              stretch, colours, RailRoute.flip(tracks, sides -> flipSides(sides, horizontal, vertical)), pillars);
     }
 
     private static int flipSides(int sides, boolean horizontal, boolean vertical) {

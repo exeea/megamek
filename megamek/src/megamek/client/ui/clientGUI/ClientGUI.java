@@ -215,24 +215,9 @@ public class ClientGUI extends AbstractClientGUI
     public static final String BOARD_NEW = "fileBoardNew";
     public static final String BOARD_OPEN = "fileBoardOpen";
     public static final String BOARD_RECENT = "recent";
-    public static final String BOARD_SAVE = "fileBoardSave";
     public static final String BOARD_SAVE_AS = "fileBoardSaveAs";
     public static final String BOARD_SAVE_AS_IMAGE = "fileBoardSaveAsImage";
     public static final String BOARD_SAVE_AS_IMAGE_UNITS = "fileBoardSaveAsImageUnits";
-    public static final String BOARD_RUN_BOARD_TAGGER = "boardRunBoardTagger";
-    public static final String BOARD_RESIZE = "boardResize";
-    public static final String BOARD_VALIDATE = "boardValidate";
-    public static final String BOARD_SOURCE_FILE = "boardSourcefile";
-    public static final String BOARD_UNDO = "boardUndo";
-    public static final String BOARD_REDO = "boardRedo";
-    public static final String BOARD_RAISE = "boardRaise";
-    public static final String BOARD_CLEAR = "boardClear";
-    public static final String BOARD_FLOOD = "boardFlood";
-    public static final String BOARD_REMOVE_FORESTS = "boardRemoveForests";
-    public static final String BOARD_REMOVE_ROADS = "boardRemoveRoads";
-    public static final String BOARD_REMOVE_WATER = "boardRemoveWater";
-    public static final String BOARD_REMOVE_BUILDINGS = "boardRemoveBuildings";
-    public static final String BOARD_FLATTEN = "boardFlatten";
 
     // unit list submenu
     public static final String FILE_UNITS_REINFORCE = "fileUnitsReinforce";
@@ -255,7 +240,6 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_ACCESSIBILITY_WINDOW = "viewAccessibilityWindow";
     public static final String VIEW_KEYBINDS_OVERLAY = "viewKeyboardShortcuts";
     public static final String VIEW_PLANETARY_CONDITIONS_OVERLAY = "viewPlanetaryConditions";
-    public static final String VIEW_TRACE_OVERLAY = "viewTraceOverlay";
     public static final String VIEW_MINI_MAP = "viewMinimap";
     public static final String VIEW_UNIT_OVERVIEW = "viewUnitOverview";
     public static final String VIEW_ZOOM_IN = "viewZoomIn";
@@ -279,7 +263,6 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_MOVE_ENV = "viewMovementEnvelope";
     public static final String VIEW_TURN_DETAILS_OVERLAY = "viewTurnDetailsOverlay";
     public static final String VIEW_MOVE_MOD_ENV = "viewMovModEnvelope";
-    public static final String VIEW_CHANGE_THEME = "viewChangeTheme";
     public static final String VIEW_ROUND_REPORT = "viewRoundReport";
     public static final String VIEW_GAME_OPTIONS = "viewGameOptions";
     public static final String GAME_GIVE_UP_GAME_MASTER = "gameGiveUpGameMaster";
@@ -393,8 +376,6 @@ public class ClientGUI extends AbstractClientGUI
     private ForceDisplayDialog forceDisplayDialog;
     private MapMenu popup;
     private final Map<Integer, RulerDialog> rulers = new HashMap<>();
-    /** Boards whose 3D-only content was already reported in 2D since they were last loaded. */
-    private final java.util.Set<Integer> warnedBoards = new java.util.HashSet<>();
     protected JComponent curPanel;
     /** Open the default board once per game; later phase changes preserve a manual choice or rendering fallback. */
     private boolean boardViewChosen;
@@ -1533,11 +1514,6 @@ public class ClientGUI extends AbstractClientGUI
             case VIEW_TOGGLE_HEX_COORDS:
                 GUIP.toggleCoords();
                 break;
-            case BOARD_SAVE:
-                ignoreHotKeys = true;
-                boardSave(client.getGame());
-                ignoreHotKeys = false;
-                break;
             case BOARD_SAVE_AS:
                 ignoreHotKeys = true;
                 boardSaveAs(client.getGame());
@@ -1640,9 +1616,6 @@ public class ClientGUI extends AbstractClientGUI
                 if (curPanel instanceof MovementDisplay movementDisplay) {
                     movementDisplay.computeModifierEnvelope();
                 }
-                break;
-            case VIEW_CHANGE_THEME:
-                getCurrentBoardState().ifPresent(BoardClientState::changeTheme);
                 break;
             case FIRE_SAVE_WEAPON_ORDER:
                 Entity ent = getUnitDisplayState().getCurrentEntity();
@@ -3857,7 +3830,6 @@ public class ClientGUI extends AbstractClientGUI
             if (oldState != null) { oldState.close(); }
             var oldMinimap = miniMaps.remove(boardId);
             if (oldMinimap != null) { oldMinimap.dispose(); }
-            warnedBoards.remove(boardId);
             if (e.getNewBoard() != null) {
                 try {
                     BoardClientState state = new BoardClientState(client.getGame(), controller, ClientGUI.this, boardId, tilesetManager);
@@ -4531,7 +4503,8 @@ public class ClientGUI extends AbstractClientGUI
         }
 
         if (game.getBoard().requiresNativeFormat() || megamek.common.board.BoardFile.isNativeName(curFileBoard.getName())) {
-            try { saveNative(game.getBoard(), curFileBoard.toPath()); }
+            // Game boards are converted where they load, so the game board itself is written.
+            try { megamek.common.board.BoardFile.save(game.getBoard(), curFileBoard.toPath()); }
             catch (IOException failure) { logger.error(failure, "Failed to save native board"); }
             return;
         }
@@ -4542,24 +4515,6 @@ public class ClientGUI extends AbstractClientGUI
         } catch (Exception ex) {
             logger.error(ex, "Failed to save board!");
         }
-    }
-
-    /**
-     * Saves {@code board} as a .board2 file. A legacy game board is saved as an imported copy, with its scenery decoded
-     * into objects as the 3D editor would open it; the live game board stays legacy.
-     */
-    static void saveNative(Board board, java.nio.file.Path target) throws IOException {
-        Board saved = board;
-        if (!board.isNativeFormat()) {
-            var bytes = new java.io.ByteArrayOutputStream();
-            board.save(bytes, false);
-            saved = new Board();
-            saved.load(new java.io.ByteArrayInputStream(bytes.toByteArray()));
-            // Legacy text has no name, description, notes, type or source header; the import marks the copy native.
-            saved.copyMetadataFrom(board);
-            megamek.client.ui.clientGUI.boardview.gpu.BoardSceneryLayouts.importBoard(saved);
-        }
-        megamek.common.board.BoardFile.save(saved, target);
     }
 
     /**
@@ -4610,7 +4565,7 @@ public class ClientGUI extends AbstractClientGUI
             }
             if (java.nio.file.Files.exists(target) && JOptionPane.showConfirmDialog(frame,
                   "Replace " + target.getFileName() + "?", "Save board", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) { return; }
-            try { saveNative(game.getBoard(), target); curFileBoard = target.toFile(); }
+            try { megamek.common.board.BoardFile.save(game.getBoard(), target); curFileBoard = target.toFile(); }
             catch (IOException failure) { logger.error(failure, "Failed to save native board"); }
             return;
         }
@@ -5193,10 +5148,6 @@ public class ClientGUI extends AbstractClientGUI
             boardViews.put(state.getBoardId(), view);
             rulers.computeIfAbsent(state.getBoardId(), id -> new RulerDialog(frame, state, client.getGame()));
             view.redrawAllEntities();
-            // Lounge boards are previews (ChatLounge warns there); in a game, warn once per board load, not per 3D/2D switch.
-            if (!client.getGame().getPhase().isLounge() && warnedBoards.add(state.getBoardId())) {
-                BoardView.warnIfThreeDOnly(frame, state.getBoard(), false);
-            }
         } catch (IOException exception) { throw new IllegalStateException("Could not open the classic board", exception); }
     }
 

@@ -80,6 +80,7 @@ class GpuEditorSculptSmokeTest {
                             case 1 -> {
                                 assertEquals(BoardEditorSession.Tool.SCULPT, state.tool());
                                 assertTrue(GpuBoardTestUi.shown(root.findActor("editor-sculpt-slope")), "Sculpt options share the brush tray");
+                                assertTrue(GpuBoardTestUi.shown(root.findActor("editor-clear-only")), "Only overwrite clear hexes");
                                 assertTrue(state.activeBrush().slope(), "Slope is on by default");
                                 Vector3 point = board(clicked);
                                 Gdx.input.getInputProcessor().mouseMoved(Math.round(point.x), Math.round(point.y));

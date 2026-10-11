@@ -155,7 +155,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     private final ClientGUI clientgui;
     private Player localPlayer;
     private final TilesetManager tileManager;
-    private BoardArtwork artwork;
     private BufferedImage tacticalChunk;
     private final Map<Font, FontMetrics> fontMetrics = new HashMap<>();
     private BoardGlyphContext projection;
@@ -374,7 +373,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         hexDrawPlugins.clear();
         listeners.clear();
         releasePlanarCapture();
-        if (artwork != null) { artwork.close(); artwork = null; }
         if (ownsTileset) { tileManager.close(); }
     }
 
@@ -2784,45 +2782,23 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
     public void releasePlanarCapture() {
         tacticalChunk = null;
-        if (artwork != null) { artwork.clear(); }
         clearCapturedHexOverlays();
         capturedTacticalGeometry = BoardTactical.EMPTY;
     }
     public void clearArtwork() {
         fieldOfView.invalidate();
-        if (artwork != null) { artwork.clear(); }
         repaint();
     }
     public void invalidateArtwork(Coords coords) {
         // A terrain blocker changes LOS beyond the artwork's local neighborhood, with or without a renderer.
         fieldOfView.invalidate();
-        if (artwork != null) { artwork.invalidate(coords); }
     }
-    public void reloadArtwork() { if (artwork != null) { artwork.reload(); } repaint(); }
-    public List<BoardArtwork.HexImage> capturePlanarHexes(Rectangle area) {
-        List<BoardArtwork.HexImage> result = new ArrayList<>();
-        capturePlanarHexes(area, true, hex -> {
-            BufferedImage marking = hex.tactical();
-            if (marking != null) {
-                BufferedImage copy = new BufferedImage(marking.getWidth(), marking.getHeight(), BufferedImage.TYPE_INT_ARGB);
-                copy.setData(marking.getData()); marking = copy;
-            }
-            result.add(hex.withTactical(marking));
-        });
-        result.sort(Comparator.comparingInt((BoardArtwork.HexImage hex) -> hex.coords().getX())
-              .thenComparingInt(hex -> hex.coords().getY()));
-        return result;
-    }
-    public void capturePlanarHexes(Rectangle area, boolean tactical, Consumer<BoardArtwork.HexImage> consumer) {
-        capturePlanarHexes(area, true, tactical, consumer);
-    }
-    public void capturePlanarTactical(Rectangle area, Consumer<BoardArtwork.HexImage> consumer) {
-        capturePlanarHexes(area, false, true, consumer);
-    }
-    private void capturePlanarHexes(Rectangle requested, boolean includeArtwork, boolean includeTactical,
-          Consumer<BoardArtwork.HexImage> consumer) {
+    /**
+     * The game's tactical pass: each hex's marking and labels, painted in 16-hex chunks. The terrain is captured by
+     * the 3D board's one capture ({@code BoardTiles}).
+     */
+    public void capturePlanarTactical(Rectangle requested, Consumer<BoardArtwork.HexImage> consumer) {
         if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Capture must run on the client thread"); }
-        if (artwork == null) { artwork = new BoardArtwork(); }
         Rectangle area = requested.intersection(new Rectangle(0, 0, getBoard().getWidth(), getBoard().getHeight()));
         boolean originalCapture = gpuCapture;
         float originalScale = captureScale;
@@ -2833,21 +2809,21 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
               || sprite.isUnitVisual());
         try {
             gpuCapture = true; captureScale = 3;
-            if (includeTactical) { raster.forEach(Sprite::prepare); }
+            raster.forEach(Sprite::prepare);
             for (int column = area.x; column < area.x + area.width; column += 16) {
                 for (int row = area.y; row < area.y + area.height; row += 16) {
                     Rectangle chunk = new Rectangle(column, row, Math.min(16, area.x + area.width - column),
                           Math.min(16, area.y + area.height - row));
                     Rectangle pixels = new Rectangle(chunk.x * HEX_WC * 3, chunk.y * HEX_H * 3,
                           ((chunk.width - 1) * HEX_WC + HEX_W) * 3, (chunk.height * HEX_H + HEX_H / 2) * 3);
-                    if (includeTactical) { paintTacticalChunk(chunk, pixels); }
+                    paintTacticalChunk(chunk, pixels);
                     for (int x = chunk.x; x < chunk.x + chunk.width; x++) {
                         for (int y = chunk.y; y < chunk.y + chunk.height; y++) {
                             Coords coords = new Coords(x, y);
-                            BoardArtwork.HexImage art = artwork.capture(getBoard(), coords, includeArtwork);
+                            BoardArtwork.HexImage art = BoardArtwork.labels(getBoard(), coords);
                             Point point = getHexLocation(coords);
-                            BufferedImage marking = includeTactical ? markingImage(tacticalChunk, point.x - pixels.x, point.y - pixels.y) : null;
-                            // The game's 3D view gets exactly the preview's capture, plus its tactical marking.
+                            BufferedImage marking = markingImage(tacticalChunk, point.x - pixels.x, point.y - pixels.y);
+                            // The game's 3D view gets the shared terrain capture (BoardTiles) plus this marking.
                             consumer.accept(art.withTactical(marking));
                         }
                     }
@@ -2855,7 +2831,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
             }
         } finally {
             gpuCapture = originalCapture; captureScale = originalScale;
-            if (includeTactical && projection != null && oldScale != 3) { raster.forEach(Sprite::prepare); }
+            if (projection != null && oldScale != 3) { raster.forEach(Sprite::prepare); }
         }
     }
     private void paintTacticalChunk(Rectangle area, Rectangle pixels) {
@@ -2948,7 +2924,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         }
     }
 
-    public void reloadAssets() throws IOException { tileManager.reloadAssets(); reloadArtwork(); }
+    public void reloadAssets() throws IOException { tileManager.reloadAssets(); repaint(); }
     public void redrawEntity(Entity entity) {
         // Remove C3 sprites
         c3Sprites.removeIf(c3sprite -> (c3sprite.getEntityId() == entity.getId()) || (c3sprite.getMasterId()
@@ -3188,19 +3164,9 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
 
     private boolean tooltipSuspended;
-    private String selectedTheme;
     public boolean isTooltipSuspended() { return tooltipSuspended; }
     public void suspendTooltip() { tooltipSuspended = true; }
     public void activateTooltip() { tooltipSuspended = false; }
-    public @Nullable String changeTheme() {
-        boolean wasIgnoring = shouldIgnoreKeys;
-        setShouldIgnoreKeys(true);
-        try {
-            selectedTheme = BoardThemeDialog.choose(clientgui == null ? null : clientgui.getFrame(), getBoard(),
-                  tileManager.getThemes(), selectedTheme);
-            return selectedTheme;
-        } finally { setShouldIgnoreKeys(wasIgnoring); }
-    }
 
     private void saveGameSummary(GamePhase phase) {
         if (!GUIP.getGameSummaryBoardView() || !(phase.isDeployment() || phase.isMovement() || phase.isTargeting()

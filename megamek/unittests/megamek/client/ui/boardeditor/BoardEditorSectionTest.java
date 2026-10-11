@@ -188,6 +188,65 @@ class BoardEditorSectionTest {
         assertEquals(List.of(natural, natural, natural, natural), types(north, middle, south, added), "A rock arch has no piers");
     }
 
+    @Test void trussDesignAndColourChangeTheWholeSpanInOneUndoStep() {
+        // A pillared bridge over three hexes joined north to south, and an unrelated built bridge.
+        Coords north = new Coords(1, 1), middle = new Coords(1, 2), south = new Coords(1, 3), other = new Coords(5, 5);
+        for (Coords at : List.of(north, middle, south, other)) {
+            Hex hex = new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:2", "");
+            hex.setAppearance(java.util.Map.of("bridge", at.equals(other) ? HexAppearance.BUILT_BRIDGE : HexAppearance.PILLARS));
+            session.board().setHex(at, hex);
+        }
+        var green = BoardDecoration.Colours.of("#2e5233");
+        var truss = HexAppearance.built(true, true, BoardDecoration.Colours.NONE);
+        var greenTruss = HexAppearance.built(true, true, green);
+        select(middle);
+        send(Action.BRIDGE_COLOUR, "", "#2e5233");
+        assertEquals("Choose the truss design first.", session.snapshot().message(), "A standard deck has no colour");
+        send(Action.BRIDGE_DESIGN, "", "truss");
+        assertEquals(List.of(truss, truss, truss, HexAppearance.BUILT_BRIDGE), types(north, middle, south, other),
+              "The whole span keeps its piers, not another bridge");
+        send(Action.BRIDGE_COLOUR, "", "#2e5233");
+        assertEquals(List.of(greenTruss, greenTruss, greenTruss), types(north, middle, south), "One colour for the span");
+        send(Action.UNDO, "", "");
+        assertEquals(List.of(truss, truss, truss), types(north, middle, south), "The colour is one undo step");
+        send(Action.UNDO, "", "");
+        assertEquals(List.of(HexAppearance.PILLARS, HexAppearance.PILLARS, HexAppearance.PILLARS), types(north, middle, south),
+              "The design is one undo step");
+        assertFalse(session.snapshot().canUndo());
+
+        // Pillars and Built keep the design and colour; a joining hex and a Truss card's stroke take the span's.
+        send(Action.BRIDGE_DESIGN, "", "truss");
+        send(Action.BRIDGE_COLOUR, "", "#2e5233");
+        send(Action.PILLARS, "", "false");
+        var greenDeck = HexAppearance.built(true, false, green);
+        assertEquals(List.of(greenDeck, greenDeck, greenDeck), types(north, middle, south), "Pillars keep the truss and colour");
+        send(Action.BRIDGE_TYPE, "", "built");
+        assertEquals(List.of(greenDeck, greenDeck, greenDeck), types(north, middle, south), "Built keeps the truss");
+        Coords added = south.translated(3);
+        select(added);
+        send(Action.ADD_COMPONENT, "", "bridge");
+        assertEquals(greenDeck, hex(added).getAppearance().get("bridge"), "+ Add Bridge joins the green truss");
+        send(Action.CHOOSE_BRUSH, "bridge", "bridge/truss");
+        session.pointer(other.translated(0), 0, 0, false);
+        session.pointer(other, 0, 0, false);
+        session.finishStroke();
+        assertTrue(HexAppearance.truss(hex(other).getAppearance()) && HexAppearance.truss(hex(other.translated(0)).getAppearance()),
+              "A Truss card's stroke makes the span it paints a truss");
+        assertFalse(HexAppearance.pillars(hex(other).getAppearance()), "and keeps its piers");
+        send(Action.CHOOSE_BRUSH, "bridge", "bridge/built");
+        session.pointer(added, 0, 0, false);
+        session.finishStroke();
+        assertEquals(List.of(HexAppearance.BUILT_BRIDGE, HexAppearance.BUILT_BRIDGE, HexAppearance.BUILT_BRIDGE,
+              HexAppearance.BUILT_BRIDGE), types(north, middle, south, added), "A Built card gives the span the standard deck");
+        select(middle);
+        send(Action.BRIDGE_DESIGN, "", "truss");
+        send(Action.BRIDGE_TYPE, "", "natural");
+        assertEquals(List.of(HexAppearance.NATURAL_BRIDGE, HexAppearance.NATURAL_BRIDGE), types(north, added),
+              "A rock arch has no design");
+        send(Action.BRIDGE_DESIGN, "", "truss");
+        assertEquals("Make the bridge built first.", session.snapshot().message());
+    }
+
     @Test void structureTopsAndCanopyMoveTheirHex() {
         Coords tank = new Coords(4, 2), industry = new Coords(4, 3), woods = new Coords(3, 3);
         session.board().setHex(tank, new Hex(1, "fuel_tank:1;fuel_tank_cf:15;fuel_tank_elev:2;fuel_tank_magn:100", ""));

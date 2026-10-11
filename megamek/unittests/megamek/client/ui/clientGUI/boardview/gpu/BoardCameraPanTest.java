@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
@@ -35,9 +37,9 @@ class BoardCameraPanTest {
                             for (int y = -1; y <= 1; y++) {
                                 view.center(BoardGeometry.center(new Coords(size[0] / 2, size[1] / 2), 0));
                                 view.pan(x * 100000, y * 100000);
-                                assertBoardAtCenter(view, scene);
+                                assertBoardOnCenterLines(view, scene);
                                 for (int step = 0; step < 10; step++) { view.pan(x * 20, y * 20); }
-                                assertBoardAtCenter(view, scene);
+                                assertBoardOnCenterLines(view, scene);
                             }
                         }
                     }
@@ -58,14 +60,102 @@ class BoardCameraPanTest {
             assertTrue(edge.epsilonEquals(view.focus, .01f), "Held input must not accumulate beyond the boundary");
 
             view.pan(100, 20);
-            assertTrue(edge.epsilonEquals(view.focus, .01f), "A blocked diagonal drag must not turn into a slide");
+            assertEquals(edge.x, view.focus.x, .01f, "The blocked part of a diagonal drag must not move");
+            assertEquals(edge.y + 20, view.focus.y, .01f, "Its free part still drags along the edge");
             view.pan(0, 20);
             assertEquals(edge.x, view.focus.x, .01f);
-            assertEquals(edge.y + 20, view.focus.y, .01f, "Dragging along the edge still works");
+            assertEquals(edge.y + 40, view.focus.y, .01f, "Dragging along the edge still works");
             assertEquals(edge.z, view.focus.z);
             view.pan(-10, 0);
             assertEquals(edge.x + 10, view.focus.x, .01f, "Moving back responds on the first input");
             assertBoardAtCenter(view, scene);
+        }
+    }
+
+    @Test
+    void diagonalDragAgainstOneLimitStillMovesAlongTheOtherScreenAxis() {
+        BoardScene scene = scene(16, 17);
+        for (boolean perspective : new boolean[] { false, true }) {
+            // Top view, tilted, turned and steep views; yaw 0 and 180 put the limit parallel to the vertical axis.
+            for (float[] angle : new float[][] { { 0, 0 }, { 0, 70 }, { 180, 45 }, { 30, 60 }, { 210, 80 } }) {
+                for (float zoom : new float[] { .5f, 1, 3 }) {
+                    BoardCamera view = camera(scene, perspective);
+                    view.orbit(angle[0], angle[1]);
+                    view.zoom(zoom / view.camera.zoom);
+                    view.center(BoardGeometry.center(new Coords(8, 8), 0));
+                    Vector3 screen = project(view, view.focus);
+                    view.pan(600 - screen.x, screen.y - 400); // Start with the board at the full viewport center.
+                    view.pan(-100000, 0); // The view reaches its limit to the right, away from the board's corners.
+                    Vector3 edge = view.focus.cpy();
+                    Vector3 right = new Vector3(view.camera.direction).crs(view.camera.up).nor();
+                    Vector3 forward = new Vector3(-right.y, right.x, 0);
+                    int moving = 0;
+                    for (float dy : new float[] { 10, -10 }) {
+                        view.center(edge);
+                        view.pan(0, dy);
+                        float vertical = view.focus.cpy().sub(edge).dot(forward);
+                        view.center(edge);
+                        view.pan(-100, dy);
+                        Vector3 travel = view.focus.cpy().sub(edge);
+                        String pose = (perspective ? "perspective " : "orthographic ") + angle[0] + "/" + angle[1]
+                              + ", zoom " + zoom + ", dy " + dy;
+                        assertTrue(travel.dot(right) < .01f, () -> "The blocked part must stay at its limit: " + pose);
+                        assertBoardOnCenterLines(view, scene);
+                        assertEquals(vertical, travel.dot(forward), .01f + .01f * Math.abs(vertical),
+                              () -> "The free part must move as far as a vertical drag: " + pose);
+                        if (Math.abs(vertical) > 5 * zoom) { moving++; }
+                    }
+                    assertTrue(moving >= (angle[0] % 180 == 0 ? 2 : 1), () -> "Along a limit parallel to the vertical axis"
+                          + " both directions move, elsewhere the inward one: " + (perspective ? "perspective " : "")
+                          + angle[0] + "/" + angle[1] + ", zoom " + zoom);
+                }
+            }
+        }
+    }
+
+    /**
+     * The board editor's camera (retest 2026-10-10): fitted between the Assets and Hex/Layers columns above the Hex
+     * Section dock, rebased to the full width as every frame does, and pushed against a pan limit by mouse drags. A
+     * drag into the limit and along it moves the board exactly as far along it, in both directions, and not into it;
+     * a drag straight into the limit stops; a drag away from it moves on both axes. At all four limits, in the top
+     * view and turned views, with the panels open and closed, over flat and raised ground. Turned views sweep the yaw,
+     * because rounding at a side limit with raised ground depends on the pose.
+     */
+    @Test
+    void atEachPanLimitTheOtherScreenAxisStillFollowsTheMouse() {
+        List<float[]> angles = new ArrayList<>(List.of(new float[] { 0, 0 }, new float[] { 225, 0 },
+              new float[] { 250, 70 }));
+        for (float yaw = 0; yaw < 360; yaw += 15) { angles.add(new float[] { yaw, 54.73561f }); }
+        for (int raised : new int[] { 0, 3 }) {
+            BoardScene scene = scene(16, 17, 0, raised, List.of());
+            for (boolean perspective : new boolean[] { false, true }) {
+                for (float[] angle : angles) {
+                    for (boolean panels : new boolean[] { true, false }) {
+                        for (int[] limit : new int[][] { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }) {
+                            BoardCamera view = editorCamera(scene, perspective, angle, panels);
+                            String pose = (perspective ? "perspective " : "") + angle[0] + "/" + angle[1]
+                                  + (panels ? ", panels" : "") + ", raised " + raised + ", push " + limit[0] + "," + limit[1];
+                            // From the middle of the board at the viewport center, the mouse pushes until the limit holds.
+                            Vector3 middle = project(view, BoardGeometry.center(new Coords(8, 8), 0));
+                            view.pan(800 - middle.x, middle.y - 500);
+                            drag(view, 5 * limit[0], 5 * limit[1], 400);
+                            Vector3 edge = view.focus.cpy();
+                            drag(view, 5 * limit[0], 5 * limit[1], 1);
+                            assertTrue(edge.epsilonEquals(view.focus, .01f), () -> "A push into the limit stops: " + pose);
+                            for (int along : new int[] { -1, 1 }) {
+                                int dx = 3 * (limit[0] + along * Math.abs(limit[1]));
+                                int dy = 3 * (limit[1] + along * Math.abs(limit[0]));
+                                assertDragMoves(view, dx, dy, 3 * along * Math.abs(limit[1]),
+                                      3 * along * Math.abs(limit[0]), () -> "Into the limit and along it: " + pose);
+                            }
+                            assertDragMoves(view, -3 * limit[0] - 3 * limit[1], -3 * limit[1] - 3 * limit[0],
+                                  -3 * limit[0] - 3 * limit[1], -3 * limit[1] - 3 * limit[0],
+                                  () -> "Away from the limit and along it: " + pose);
+                            if (raised == 0) { assertBoardOnCenterLines(view, scene); }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -78,7 +168,8 @@ class BoardCameraPanTest {
                     BoardCamera view = camera(scene, perspective);
                     view.orbit(bearing, 70);
                     view.zoom((perspective ? 5 : 1) / view.camera.zoom);
-                    for (float[] drag : new float[][] { { 0, 20 }, { 0, -20 }, { 20, 0 }, { -20, 0 }, { 12, 20 } }) {
+                    // A diagonal drag keeps its free part at a limit (see diagonalDragAgainstOneLimit...).
+                    for (float[] drag : new float[][] { { 0, 20 }, { 0, -20 }, { 20, 0 }, { -20, 0 } }) {
                         view.center(BoardGeometry.center(new Coords(8, 8), 0));
                         Vector3 screen = project(view, view.focus);
                         view.pan(600 - screen.x, screen.y - 400); // Start with the board at the full viewport center.
@@ -89,8 +180,12 @@ class BoardCameraPanTest {
                         for (int step = 0; step < 600; step++) {
                             view.pan(drag[0], drag[1]);
                             Vector3 travel = view.focus.cpy().sub(start);
-                            assertEquals(0, travel.crs(direction).len(), .05f,
-                                  "Clipping must shorten the drag, never change its direction");
+                            // Beside the view's centre a perspective drag up or down also slants sideways, and a side
+                            // limit stops only that slant.
+                            if (!perspective || drag[1] == 0) {
+                                assertEquals(0, travel.crs(direction).len(), .05f,
+                                      "Clipping must shorten the drag, never change its direction");
+                            }
                         }
                         Vector3 edge = view.focus.cpy();
                         view.pan(drag[0], drag[1]);
@@ -98,7 +193,7 @@ class BoardCameraPanTest {
                         view.pan(-drag[0], -drag[1]);
                         assertTrue(view.focus.cpy().sub(edge).dot(direction) < -1,
                               "Reversing a blocked drag must respond immediately");
-                        if (height == 0) { assertBoardAtCenter(view, scene); }
+                        if (height == 0) { assertBoardOnCenterLines(view, scene); }
                     }
                 }
             }
@@ -106,7 +201,7 @@ class BoardCameraPanTest {
     }
 
     @Test
-    void pointerZoomCannotPullTheBoardAwayFromTheViewportCenter() {
+    void pointerZoomCannotPullTheBoardOffTheViewportCenterLines() {
         BoardScene scene = scene(5, 4);
         for (boolean perspective : new boolean[] { false, true }) {
             BoardCamera view = camera(scene, perspective);
@@ -117,11 +212,11 @@ class BoardCameraPanTest {
                     view.zoom(20 / view.camera.zoom);
                     for (int step = 0; step < 12; step++) {
                         view.zoomAt(.5f, x, y);
-                        assertBoardAtCenter(view, scene);
+                        assertBoardOnCenterLines(view, scene);
                     }
                     for (int step = 0; step < 12; step++) {
                         view.zoomAt(2, x, y);
-                        assertBoardAtCenter(view, scene);
+                        assertBoardOnCenterLines(view, scene);
                     }
                 }
             }
@@ -276,6 +371,80 @@ class BoardCameraPanTest {
         view.setPerspective(perspective);
         view.fit(scene);
         return view;
+    }
+
+    /** The board editor's camera: Fit board between its panels, then rebased to the full width as every frame does. */
+    private static BoardCamera editorCamera(BoardScene scene, boolean perspective, float[] angle, boolean panels) {
+        BoardCamera view = new BoardCamera();
+        view.resize(1600, 1000);
+        view.setPerspective(perspective);
+        view.orbit(angle[0], angle[1]);
+        if (panels) {
+            // GpuMapHud at 1600x1000: Assets and Hex/Layers columns with their gaps, the Hex Section dock, the toolbar.
+            view.fit(scene, 280, 1020, 260, 50);
+        } else {
+            view.fit(scene);
+        }
+        view.viewableArea(0, 1600); // GpuBattleView.updateCameraFocus
+        return view;
+    }
+
+    /** Mouse drag steps as BoardInput.touchDragged passes them: screen pixels, y down. */
+    private static void drag(BoardCamera view, int dx, int dy, int steps) {
+        for (int step = 0; step < steps; step++) { view.pan(dx, dy); }
+    }
+
+    /**
+     * Twenty drag steps of (dx, dy) each move the ground under the pivot by (movedX, movedY) pixels, y down. Each step is
+     * measured on its own: in perspective only the ground under the pivot follows the mouse exactly.
+     */
+    private static void assertDragMoves(BoardCamera view, int dx, int dy, int movedX, int movedY, Supplier<String> pose) {
+        for (int step = 0; step < 20; step++) {
+            Vector3 anchor = view.focus.cpy();
+            Vector3 before = project(view, anchor);
+            view.pan(dx, dy);
+            Vector3 after = project(view, anchor);
+            assertEquals(movedX, after.x - before.x, .1f, pose);
+            assertEquals(-movedY, after.y - before.y, .1f, pose);
+        }
+    }
+
+    /** The board stays visible along the full viewport's center row and center column, at any angle. */
+    private static void assertBoardOnCenterLines(BoardCamera view, BoardScene scene) {
+        Supplier<String> pose = () -> "angle=" + view.azimuth() + "/" + view.tilt() + ", zoom=" + view.camera.zoom
+              + (view.perspective() ? ", perspective" : "");
+        assertTrue(meetsBoard(view, scene, true), () -> "The board must stay on the viewport center's row: " + pose.get());
+        assertTrue(meetsBoard(view, scene, false), () -> "The board must stay on the viewport center's column: " + pose.get());
+    }
+
+    /**
+     * Whether the board meets the viewport center's row (or column) inside the viewport, searched from the center
+     * outward; a pixel either side counts, for a board that touches the line only with a corner. The flat board's
+     * surface first, then its full geometry, which also finds a board thinner than a pixel at a steep angle by its sides.
+     */
+    private static boolean meetsBoard(BoardCamera view, BoardScene scene, boolean row) {
+        return meetsBoard(view, row, ray -> {
+            if (ray.direction.z >= 0) { return false; }
+            Vector3 ground = ray.getEndPoint(new Vector3(), -ray.origin.z / ray.direction.z);
+            return BoardGeometry.tile(scene, ground.x, ground.y) != null;
+        }) || meetsBoard(view, row, ray -> BoardGeometry.hit(scene, ray) != null);
+    }
+
+    private static boolean meetsBoard(BoardCamera view, boolean row, Predicate<Ray> board) {
+        float width = view.camera.viewportWidth, height = view.camera.viewportHeight;
+        for (float offset = 0; offset <= (row ? width : height) / 2; offset += .5f) {
+            for (float sign : new float[] { -1, 1 }) {
+                for (float across = -1; across <= 1; across++) {
+                    float x = row ? width / 2 + sign * offset : width / 2 + across;
+                    float y = row ? height / 2 + across : height / 2 + sign * offset;
+                    // The view ray through that pixel, bottom-left origin.
+                    Vector3 near = new Vector3(2 * x / width - 1, 2 * y / height - 1, -1).prj(view.camera.invProjectionView);
+                    Vector3 far = new Vector3(2 * x / width - 1, 2 * y / height - 1, 1).prj(view.camera.invProjectionView);
+                    if (board.test(new Ray(near, far.sub(near).nor()))) { return true; }
+                }
+            }
+        }
+        return false;
     }
 
     private static void assertBoardAtCenter(BoardCamera view, BoardScene scene) {
