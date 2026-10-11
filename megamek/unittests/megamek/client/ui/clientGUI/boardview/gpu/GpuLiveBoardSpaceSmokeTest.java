@@ -41,6 +41,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.gdx.DisplayScale;
@@ -211,7 +212,7 @@ class GpuLiveBoardSpaceSmokeTest {
         live.draw(3, 0);
     }
 
-    /** The Tactical View: the north mark, the icons' heads, the ghost icon and the flat overlay. */
+    /** The Tactical View: the north mark, the units' bases and their heads, the meeple ghost and the overlay. */
     private static void verifyMovementTactical(Live live) throws Exception {
         live.zoom(new Coords(12, 9), 90);
         live.capture("i1b-movement-tactical.png");
@@ -223,19 +224,18 @@ class GpuLiveBoardSpaceSmokeTest {
         GpuHud.HudView view = live.hudView();
         assertTrue(view.tactical());
         for (int id : List.of(SAGITTAIRE, ATLAS, ARCHER)) {
-            ModelInstance icon = live.icons().instance(live.unit(id));
-            Vector2 centre = live.stage(icon.transform.getTranslation(new Vector3()));
-            float side = live.stage(new Vector3(-.5f, 0, 0).mul(icon.transform))
-                  .dst(live.stage(new Vector3(.5f, 0, 0).mul(icon.transform)));
+            ModelInstance base = live.bases().base(live.unit(id));
+            Vector2 centre = live.stage(base.transform.getTranslation(new Vector3()));
+            float side = live.stage(new Vector3(-GpuUnitBases.RING, 0, 0).mul(base.transform))
+                  .dst(live.stage(new Vector3(GpuUnitBases.RING, 0, 0).mul(base.transform)));
             Vector2 head = view.unitHeads().get(id);
-            assertEquals(centre.x, head.x, .5f, id + ": the head straight above the icon");
-            assertEquals(centre.y + GpuUnitIcons.HEAD_LIFT * side, head.y, .5f, id + ": .62 of the icon's side");
-            assertEquals(side, view.unitRects().get(id).width, .5f, id + ": its rectangle is the icon's square");
+            assertEquals(centre.x, head.x, .5f, id + ": the head straight above the base");
+            assertEquals(centre.y + side / 2, head.y, .5f, id + ": at the base ring's north point");
+            assertEquals(side, view.unitRects().get(id).width, .5f, id + ": its rectangle is the ring's square");
         }
         verifyPlate(live, view, "nameplate-" + SAGITTAIRE, SAGITTAIRE);
-        verifyPlate(live, view, "pip-" + ATLAS, ATLAS);
-        assertSame(live.icons().instance(live.unit(SAGITTAIRE)), field(live.overlay, "ghostSource"),
-              "The Tactical View's ghost is the unit's icon");
+        assertSame(live.model(SAGITTAIRE), field(live.overlay, "ghostSource"),
+              "The Tactical View's ghost copies the unit's meeple");
         assertNotNull(field(live.overlay, "dropEdges"), "The Tactical View's elevation-drop edges");
         live.show(live.overlayOnly(live.frame.get().panels().move()));
         Pixmap planned = live.board();
@@ -316,7 +316,7 @@ class GpuLiveBoardSpaceSmokeTest {
         GpuBoardSource.UiPreferences p = preferences;
         return new GpuBoardSource.UiPreferences(p.scale() * factor, p.reportKeywords(), p.reportFilterKeywords(),
               p.minimapEnabled(), p.contactsEnabled(), p.conditionsVisible(), p.turnDetails(),
-              p.binds(), p.moveSprintRgb());
+              p.binds(), p.moveSprintRgb(), BoardGraphics.ENHANCED);
     }
 
     /** A 3D head is the top of the unit's model above its middle, in stage units, y up (C.4 HudView). */
@@ -608,11 +608,8 @@ class GpuLiveBoardSpaceSmokeTest {
                 live.view.setTacticalView(true);
                 live.zoom(hex, 90);
                 live.capture("i1b-physical-tactical.png");
-                boolean bold = false;
-                for (NodePart part : live.icons().instance(live.unit(enemy)).nodes.first().parts) {
-                    bold |= "bold".equals(part.meshPart.id) && part.enabled;
-                }
-                assertTrue(bold, "The target's icon has the bold frame (flat.js tgt)");
+                assertEquals(GpuUnitBases.Emphasis.FOCUS, live.bases().spec(live.unit(enemy)).emphasis(),
+                      "The target's base glows as the focused enemy");
             });
         }
     }
@@ -861,7 +858,7 @@ class GpuLiveBoardSpaceSmokeTest {
             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures; envelopes and the minimap on.
             source.uiPreferences = new GpuBoardSource.UiPreferences(.1f
                   / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()), "", "", true, true, false,
-                  false, GpuHudInputTest.preferences().binds(), preferences.moveSprintRgb());
+                  false, GpuHudInputTest.preferences().binds(), preferences.moveSprintRgb(), BoardGraphics.ENHANCED);
             // The view reads the preferences through the accessor; tests change them through the field.
             when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);
             when(source.takeFrame()).thenAnswer(invocation -> frame.get());
@@ -1057,8 +1054,8 @@ class GpuLiveBoardSpaceSmokeTest {
             }
         }
 
-        GpuUnitIcons icons() throws Exception {
-            return (GpuUnitIcons) field(view, "unitIcons");
+        GpuUnitBases bases() throws Exception {
+            return (GpuUnitBases) field(view, "unitBases");
         }
 
         /** The facts the view handed the HUD in the last frame. */

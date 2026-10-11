@@ -23,7 +23,7 @@ import megamek.common.game.Game;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Loading-to-board resource transfer in an actual native context, without a classic view. */
+/** Loading-to-board resource transfer in an actual native context, without a Legacy 2D view. */
 @Tag("on-demand")
 class GpuStartupSmokeTest {
     @Test

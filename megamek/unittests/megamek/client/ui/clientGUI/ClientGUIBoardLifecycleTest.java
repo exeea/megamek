@@ -54,7 +54,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClientGUIBoardLifecycleTest {
     @ParameterizedTest
     @EnumSource(value = GamePhase.class, names = { "UNKNOWN", "LOUNGE", "STARTING_SCENARIO", "EXCHANGE" })
-    void nativeMapArrivalReplacementAndBoardSelectionNeedNoClassicRenderer(GamePhase phase) throws Exception {
+    void nativeMapArrivalReplacementAndBoardSelectionNeedNoLegacy2DRenderer(GamePhase phase) throws Exception {
         onClient(() -> {
             try (var views = mockConstruction(BoardView.class);
                   var panels = mockConstruction(BoardViewPanel.class);
@@ -123,7 +123,7 @@ class ClientGUIBoardLifecycleTest {
     }
 
     @Test
-    void lobbyCreatesClassicPreviewOnlyWhenOpenedAndReleasesItsListeners() throws Exception {
+    void lobbyCreatesLegacy2DPreviewOnlyWhenOpenedAndReleasesItsListeners() throws Exception {
         onClient(() -> {
             try (var display = mockConstruction(UnitDisplayPanel.class);
                   var sound = mockConstruction(SoundManager.class);
@@ -336,10 +336,10 @@ class ClientGUIBoardLifecycleTest {
                 Coords selected = new Coords(3, 4);
                 state.select(selected);
                 for (int i = 0; i < 2; i++) {
-                    gui.setClassicBoardViewEnabled(true);
+                    gui.setLegacy2DViewEnabled(true);
                     assertSame(state, gui.getBoardView().getClientState());
                     assertEquals(selected, state.getSelected());
-                    gui.setClassicBoardViewEnabled(false);
+                    gui.setLegacy2DViewEnabled(false);
                     assertSame(state, gui.getBoardState());
                     assertFalse(state.isClosed());
                     assertTrue(gui.boardViews().isEmpty());

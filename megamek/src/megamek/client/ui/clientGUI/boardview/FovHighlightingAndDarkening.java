@@ -130,7 +130,7 @@ public class FovHighlightingAndDarkening {
         state.getGame().removeGameListener(cacheGameListener);
     }
 
-    /** Shared rules result. The classic painter and native renderer consume the same classification and colors. */
+    /** Shared rules result. The Legacy 2D painter and native renderer consume the same classification and colors. */
     public BoardFieldOfView.Hex evaluate(Coords c) {
         boolean highlight = state.shouldFovHighlight();
         boolean darken = state.shouldFovDarken();

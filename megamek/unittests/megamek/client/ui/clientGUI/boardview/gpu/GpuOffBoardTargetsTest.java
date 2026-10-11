@@ -33,13 +33,13 @@ import org.junit.jupiter.api.Timeout;
 
 /**
  * Off-board artillery targets (OffBoardTargetOverlay, plan P7) in a scripted TARGETING turn: an Atlas whose Long Tom
- * faces west, with observed enemy units off the west edge and off the east edge. The classic board's arrows and their
+ * faces west, with observed enemy units off the west edge and off the east edge. The Legacy 2D board's arrows and their
  * click are pinned first; over the GPU window the dock's commands offer the same edges and send exactly what the click
  * sends, and a choice between units beyond one edge is a native question that Esc cancels.
  */
 @Timeout(180)
 class GpuOffBoardTargetsTest {
-    /** The classic board view of the tests, and the middle of its west arrow (OffBoardTargetOverlay's layout). */
+    /** The Legacy 2D board view of the tests, and the middle of its west arrow (OffBoardTargetOverlay's layout). */
     private static final Rectangle VIEW = new Rectangle(800, 600);
     private static final Point WEST_ARROW = new Point(35, 290);
     private static final int ARCHER = 42;
@@ -60,12 +60,12 @@ class GpuOffBoardTargetsTest {
     }
 
     /**
-     * The classic board (characterization of the overlay): one arrow, at the west edge, as the arm-mounted Long Tom
+     * The Legacy 2D board (characterization of the overlay): one arrow, at the west edge, as the arm-mounted Long Tom
      * faces west but not east; a press on it queues the Long Tom's artillery attack on the unit beyond the edge, and
      * Done sends it with the Long Tom's ammunition.
      */
     @Test
-    void theClassicArrowQueuesTheLongTomsAttackOnTheUnitBeyondItsEdge() throws Exception {
+    void theLegacy2DArrowQueuesTheLongTomsAttackOnTheUnitBeyondItsEdge() throws Exception {
         try (GpuTargetingFixture targeting = GpuTargetingFixture.create()) {
             batteries(targeting);
             List<OverlayImage> arrows = onSwing(() -> arrows(targeting));
@@ -98,7 +98,7 @@ class GpuOffBoardTargetsTest {
     }
 
     /**
-     * Two units beyond the west edge: the command asks which one, as the classic arrow does, and the question is
+     * Two units beyond the west edge: the command asks which one, as the Legacy 2D arrow does, and the question is
      * native over the GPU window. Esc (its cancel) queues no attack and keeps the command; choosing the second unit
      * sends the attack on it. A command whose arrow has gone (another weapon selected) asks nothing.
      */
@@ -171,7 +171,7 @@ class GpuOffBoardTargetsTest {
         });
     }
 
-    /** EDT: the arrows the overlay draws over the classic board view. */
+    /** EDT: the arrows the overlay draws over the Legacy 2D board view. */
     private static List<OverlayImage> arrows(GpuTargetingFixture targeting) {
         var graphics = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB).createGraphics();
         try {

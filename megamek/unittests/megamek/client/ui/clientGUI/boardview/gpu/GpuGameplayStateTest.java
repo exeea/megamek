@@ -75,7 +75,7 @@ class GpuGameplayStateTest {
     }
 
     @Test
-    void gameplayCaptureSelectionMovementAndTooltipsConstructNoClassicRenderer() throws Exception {
+    void gameplayCaptureSelectionMovementAndTooltipsConstructNoLegacy2DRenderer() throws Exception {
         onClient(() -> {
             try (var views = mockConstruction(BoardView.class);
                   var panels = mockConstruction(BoardViewPanel.class);
@@ -106,7 +106,7 @@ class GpuGameplayStateTest {
     }
 
     @Test
-    void closingClassicRendererRetainsSharedSelectionListenersAndTacticalState() throws Exception {
+    void closingLegacy2DRendererRetainsSharedSelectionListenersAndTacticalState() throws Exception {
         onClient(() -> {
             try (var session = Session.create()) {
                 var state = session.state();
@@ -115,10 +115,10 @@ class GpuGameplayStateTest {
                 var listener = mock(BoardViewListenerAdapter.class);
                 state.addBoardViewListener(listener);
                 long revision = state.getRevision();
-                BoardView classic = new BoardView(state, null, state.getClientgui());
-                classic.getPanel().repaint();
+                BoardView legacy2D = new BoardView(state, null, state.getClientgui());
+                legacy2D.getPanel().repaint();
                 assertEquals(revision, state.getRevision(), "Swing repaint must not invalidate native tactical state");
-                classic.dispose();
+                legacy2D.dispose();
                 assertFalse(state.isClosed());
                 assertEquals(selected, state.getSelected());
                 state.select(new Coords(5, 4));
@@ -145,7 +145,7 @@ class GpuGameplayStateTest {
     }
 
     @Test
-    void nativeVisibilityRefreshesWhenTerrainChangesWithoutAClassicRenderer() throws Exception {
+    void nativeVisibilityRefreshesWhenTerrainChangesWithoutALegacy2DRenderer() throws Exception {
         try (var options = new GpuFieldOfViewTest.Options()) {
             onClient(() -> {
                 try (var views = mockConstruction(BoardView.class); var session = Session.create()) {
@@ -160,7 +160,7 @@ class GpuGameplayStateTest {
                     session.source().refresh();
                     assertEquals(BoardFieldOfView.Visibility.VISIBLE,
                           GpuFieldOfViewTest.at(session.source().takeFrame().scene().fieldOfView(), target).visibility(),
-                          "Removing terrain must invalidate LOS without a classic renderer listening to edits");
+                          "Removing terrain must invalidate LOS without a Legacy 2D renderer listening to edits");
                     assertEquals(BoardFieldOfView.Visibility.BLOCKED, GpuFieldOfViewTest.at(blocked, target).visibility());
                     var replacement = Board.createEmptyBoard(8, 8);
                     for (int y = 0; y < replacement.getHeight(); y++) { replacement.setHex(4, y, new Hex(5)); }

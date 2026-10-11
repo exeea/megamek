@@ -142,6 +142,9 @@ public class SensorRangeSpriteHandler extends BoardViewSpriteHandler implements 
 
         lBrackets.add(new RangeHelper(minSensorRange, maxSensorRange));
 
+        // The active probe's reach (SensorRangeSprite.ACTIVE_PROBE), none without an active probe
+        lBrackets.add(new RangeHelper(0, Math.max(0, entity.getBAPRange())));
+
         // create the lists of hexes
         List<Set<Coords>> sensorRanges = new ArrayList<>(1);
         int j = 0;

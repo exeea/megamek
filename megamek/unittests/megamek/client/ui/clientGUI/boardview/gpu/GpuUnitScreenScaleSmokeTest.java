@@ -157,16 +157,16 @@ class GpuUnitScreenScaleSmokeTest {
         render(view);
         assertEquals(1.5f * size.x, model.transform.getScaleX(), NEAR * size.x, "Defaults restore the constants");
 
-        // The Tactical View's icons keep their share of the hex where the 3D view's units grow.
+        // The Tactical View's units keep their share of the hex where the 3D view's units grow: the base spans its
+        // hex at every zoom.
         zoomTo(view, threshold / 3, scale);
         GpuBoardTestUi.press(KeyCommandBind.TOGGLE_ISO);
         render(view);
-        var icons = (GpuUnitIcons) field(view, "unitIcons");
-        assertTrue(icons.active());
+        assertTrue(view.boardCamera.tactical());
         var tacticalUnit = scene.units().stream().filter(unit -> unit.id() == ATLAS).findFirst().orElseThrow();
-        ModelInstance icon = icons.instance(tacticalUnit);
-        float hex = screen(view, BoardGeometry.corner(OWN, 0, 3)).dst(screen(view, BoardGeometry.corner(OWN, 0, 0)));
-        GpuTacticalViewSmokeTest.assertSpriteSize(view, tacticalUnit, icon, hex);
+        ModelInstance base = ((GpuUnitBases) field(view, "unitBases")).base(tacticalUnit);
+        assertEquals(BoardGeometry.height() / 2, base.transform.getScaleX(), .001f,
+              "The base is sized in apothems of the hex, without growth");
         GpuBoardTestUi.press(KeyCommandBind.TOGGLE_ISO);
         render(view);
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());

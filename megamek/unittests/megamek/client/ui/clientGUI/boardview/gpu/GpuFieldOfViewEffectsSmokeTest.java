@@ -65,7 +65,7 @@ class GpuFieldOfViewEffectsSmokeTest {
             }
         }
         BoardScene scene = new BoardScene(0, 9, 7, tiles, List.of(), List.of(), -1, "", List.of());
-        // The classic grayscale preference must not override the explicit GPU styles.
+        // The Legacy 2D grayscale preference must not override the explicit GPU styles.
         BoardFieldOfView mask = new BoardFieldOfView(9, 7, hexes, 255, 0, true, true, false);
         GpuTerrain terrain = new GpuTerrain();
         GpuAtmosphere atmosphere = new GpuAtmosphere();

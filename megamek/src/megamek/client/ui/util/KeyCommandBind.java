@@ -169,7 +169,7 @@ public enum KeyCommandBind {
     /** Toggles the objective overlays: control zone outlines and the scheme word on each flag. */
     SHOW_OBJECTS(true, "toggleShowObjects", VK_O),
 
-    // --------- The following binds drive the GPU board's orbit camera; the classic board ignores them
+    // --------- The following binds drive the GPU board's orbit camera; the Legacy 2D board ignores them
     CAMERA_ROTATE_LEFT("cameraRotateLeft", true, VK_Q),
     CAMERA_ROTATE_RIGHT("cameraRotateRight", true, VK_E),
     CAMERA_TILT_UP("cameraTiltUp", true, VK_PAGE_UP),
@@ -177,12 +177,14 @@ public enum KeyCommandBind {
     CAMERA_RESET("cameraReset", VK_HOME),
     CAMERA_FIT_BOARD("cameraFitBoard", VK_END),
 
-    // --------- The following binds are for the GPU board's battle HUD; the classic board ignores them. The playback
+    // --------- The following binds are for the GPU board's battle HUD; the Legacy 2D board ignores them. The playback
     // binds share their keys with CENTER_ON_SELECTED and PREV/NEXT_TARGET, so the HUD tells them apart by phase.
     MOVE_MODE_WALK("moveModeWalk", VK_1),
     MOVE_MODE_RUN("moveModeRun", VK_2),
     MOVE_MODE_JUMP("moveModeJump", VK_3),
     FORCES_GRID("forcesGrid", VK_G),
+    /** Expands or collapses the Tactical View's Overlays panel. */
+    TACTICAL_OVERLAYS("tacticalOverlays", VK_H),
     CLEAR_ORDERS("clearOrders", VK_DELETE),
     PLAYBACK_TOGGLE("playbackToggle", VK_SPACE),
     PLAYBACK_PREV("playbackPrev", VK_LEFT),

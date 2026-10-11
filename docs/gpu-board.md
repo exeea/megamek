@@ -16,9 +16,9 @@ and the map preview get the HUD's map tools (`GpuMapHud`) instead.
 
 `ClientGUI` retains the network connection, phase controllers and common commands.
 [BoardClientState](../megamek/src/megamek/client/ui/clientGUI/boardview/BoardClientState.java)
-holds client presentation state used by the renderers. `BoardView` supplies classic
+holds client presentation state used by the renderers. `BoardView` supplies Legacy 2D
 Swing painting when that view is selected. Native startup can use the shared state
-without constructing the classic viewport, and the native capture API (planar hexes,
+without constructing the Legacy 2D viewport, and the native capture API (planar hexes,
 tactical geometry, field of view, overlays, annotations) exists only on the state.
 Tests build a `BoardClientState` directly (`GpuBoardFixture`); a `BoardView` appears
 only in tests that exercise both renderers on the same state.
@@ -169,7 +169,8 @@ cache until renderer disposal; no additional unit meshes or full-screen buffers 
 ## Tactical View
 
 The HUD's Tactical view utility and the Toggle Tactical View key (T) switch the camera to the Tactical View, a
-north-up top view, and back ([HUD](gpu-hud.md#5-the-tactical-view)). While it is on, at every zoom,
+north-up top view that does not orbit, tilt or turn, and back ([HUD](gpu-hud.md#5-the-tactical-view)). The terrain
+does not follow the view: the 3D Graphics setting chooses it. With Classic, at every zoom and in both views,
 `GpuTilesetTerrain` replaces the shaded terrain, as the libGDX branch drew the board: each
 hex is a plain column at its level, topped by its Saxarba tileset art (`BoardScene.Tile.tileset`, which `BoardArtwork`
 composes from the 3D board's own tileset, never the 2D board) and walled in its material down to lower neighbours or

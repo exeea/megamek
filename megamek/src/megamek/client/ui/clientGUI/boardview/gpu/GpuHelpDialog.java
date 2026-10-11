@@ -35,6 +35,7 @@ import static megamek.client.ui.util.KeyCommandBind.SCROLL_NORTH;
 import static megamek.client.ui.util.KeyCommandBind.SCROLL_SOUTH;
 import static megamek.client.ui.util.KeyCommandBind.SCROLL_WEST;
 import static megamek.client.ui.util.KeyCommandBind.SHOW_NAMEPLATES;
+import static megamek.client.ui.util.KeyCommandBind.TACTICAL_OVERLAYS;
 import static megamek.client.ui.util.KeyCommandBind.TOGGLE_CHAT;
 import static megamek.client.ui.util.KeyCommandBind.TOGGLE_ISO;
 import static megamek.client.ui.util.KeyCommandBind.TURN_LEFT;
@@ -77,7 +78,7 @@ final class GpuHelpDialog implements GpuHud.Component {
                 TWIST_LEFT, TWIST_RIGHT)),
           new Group("GpuBoard.hud.help.playback", List.of(PLAYBACK_TOGGLE, PLAYBACK_PREV, PLAYBACK_NEXT)),
           new Group("GpuBoard.hud.help.panels", List.of(ROUND_REPORT, UNIT_OVERVIEW, UNIT_DISPLAY, FORCES_GRID,
-                MINIMAP, LOS_SETTING, KEY_BINDS, BOT_COMMANDS, TOGGLE_CHAT)),
+                MINIMAP, TACTICAL_OVERLAYS, LOS_SETTING, KEY_BINDS, BOT_COMMANDS, TOGGLE_CHAT)),
           new Group("GpuBoard.hud.help.mouse", List.of()));
     /** The mouse gestures, which no bind names: the message keys of each gesture and of what it does. */
     private static final List<Pair> MOUSE = List.of(

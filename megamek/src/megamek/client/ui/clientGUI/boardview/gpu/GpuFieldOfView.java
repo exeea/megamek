@@ -124,7 +124,7 @@ final class GpuFieldOfView implements Disposable {
 
     private void bindEffect(ShaderProgram shader, String uniform, Style style, float darkness) {
         float opacity = previous.darken() ? previous.darkenAlpha() / 255f * darkness : 0;
-        // GPU styles are explicit: the classic view's grayscale preference must not override Dimmed.
+        // GPU styles are explicit: the Legacy 2D view's grayscale preference must not override Dimmed.
         boolean grayscale = style == Style.GRAYSCALE && previous.darken();
         shader.setUniformf(uniform, opacity, grayscale ? 1 : 0, style == Style.FOG_OF_WAR ? 1 : 0);
     }

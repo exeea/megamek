@@ -36,7 +36,7 @@ import org.junit.jupiter.api.Test;
 
 class BoardIceTest {
     @Test
-    void hiddenBlackIceDoesNotReplaceClassicGrassWithPavement() throws Exception {
+    void hiddenBlackIceDoesNotReplaceLegacy2DGrassWithPavement() throws Exception {
         onEdt(() -> {
             try (var tiles = new HexTileset(new File("data/images/hexes"))) {
                 tiles.loadFromFile("saxarba.tileset");

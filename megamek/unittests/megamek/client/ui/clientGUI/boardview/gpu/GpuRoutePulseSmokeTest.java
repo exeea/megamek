@@ -280,9 +280,8 @@ class GpuRoutePulseSmokeTest {
     void theTacticalViewRunsAFlatGlowAndRipplesTheRingAndTheGhostIconBrightens() throws Exception {
         BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
-            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene, hud.theme.skin);
             GpuBoardOverlay overlay = new GpuBoardOverlay();
-            GpuUnitIcons icons = new GpuUnitIcons();
             List<Pixmap> images = new ArrayList<>();
             try {
                 GpuHudState state = GpuBoardOverlaySmokeTest.state(STATUS);
@@ -291,22 +290,22 @@ class GpuRoutePulseSmokeTest {
                 Cycle cycle = cycle(overlay, scene, true, plan, state, end);
                 GpuBoardOverlaySmokeTest.frame(board, true, plan.route().get(2).coords(), 90, 960, 540);
                 float travel = cycle.travel();
-                Pixmap rest = flat(hud, board, overlay, icons, scene, plan, state, cycle.resting(),
+                Pixmap rest = flat(hud, board, overlay, scene, plan, state, cycle.resting(),
                       "pulse-tactical-0-rest");
-                Pixmap midway = flat(hud, board, overlay, icons, scene, plan, state, travel / 2,
+                Pixmap midway = flat(hud, board, overlay, scene, plan, state, travel / 2,
                       "pulse-tactical-1-midway");
                 Vector3 head = new Vector3();
                 assertTrue(overlay.pulse().headAt(head));
                 Vector2 middle = board.screen(head);
-                Pixmap ripple = flat(hud, board, overlay, icons, scene, plan, state, travel + .25f,
+                Pixmap ripple = flat(hud, board, overlay, scene, plan, state, travel + .25f,
                       "pulse-tactical-2-ripple");
                 images.addAll(List.of(rest, midway, ripple));
                 assertTrue(peak(rest, midway, middle, 3) > 60, "The flat head shines on the dashed line");
                 assertTrue(ripples(board, rest, ripple, end) > 30, "The destination ring ripples out");
                 // The icons and the ghost icon alone: the ghost icon brightens at the surge.
-                Pixmap calm = ghostIcon(hud, board, overlay, icons, scene, plan, state, cycle.resting(),
+                Pixmap calm = ghostIcon(hud, board, overlay, scene, plan, state, cycle.resting(),
                       "pulse-tactical-ghost-rest");
-                Pixmap surging = ghostIcon(hud, board, overlay, icons, scene, plan, state, travel + .08f,
+                Pixmap surging = ghostIcon(hud, board, overlay, scene, plan, state, travel + .08f,
                       "pulse-tactical-ghost-surge");
                 images.addAll(List.of(calm, surging));
                 Vector2 ghost = board.screen(end);
@@ -315,7 +314,6 @@ class GpuRoutePulseSmokeTest {
                             + brightness(surging, ghost, 10));
             } finally {
                 images.forEach(Pixmap::dispose);
-                icons.dispose();
                 overlay.dispose();
                 board.dispose();
             }
@@ -504,34 +502,25 @@ class GpuRoutePulseSmokeTest {
         return hud.captureBackBuffer(name);
     }
 
-    /** The Tactical View: the overlay, the icons over it and the ghost icon, {@code seconds} into the pulse. */
+    /** The Tactical View: the overlay, the meeples on their bases and the ghost, {@code seconds} into the pulse. */
     private static Pixmap flat(GpuHudTestStage hud, GpuBoardSpaceHarness board, GpuBoardOverlay overlay,
-          GpuUnitIcons icons, BoardScene scene, GpuMovePlan.Snapshot plan, GpuHudState state, float seconds,
-          String name) {
+          BoardScene scene, GpuMovePlan.Snapshot plan, GpuHudState state, float seconds, String name) {
         at(overlay, scene, true, plan, state, seconds);
+        board.basesStatus = STATUS;
         board.draw(camera -> {
             overlay.render(camera);
-            icons(icons, board, camera);
-            overlay.renderGhost(camera, icons::instance);
+            overlay.renderGhost(camera, board.instances::get);
         });
         return hud.captureBackBuffer(name);
     }
 
-    /** The Tactical View's icons and the ghost icon alone, {@code seconds} into the pulse. */
+    /** The Tactical View's meeples and the ghost alone, {@code seconds} into the pulse. */
     private static Pixmap ghostIcon(GpuHudTestStage hud, GpuBoardSpaceHarness board, GpuBoardOverlay overlay,
-          GpuUnitIcons icons, BoardScene scene, GpuMovePlan.Snapshot plan, GpuHudState state, float seconds,
-          String name) {
+          BoardScene scene, GpuMovePlan.Snapshot plan, GpuHudState state, float seconds, String name) {
         at(overlay, scene, true, plan, state, seconds);
-        board.draw(camera -> {
-            icons(icons, board, camera);
-            overlay.renderGhost(camera, icons::instance);
-        });
+        board.basesStatus = STATUS;
+        board.draw(camera -> overlay.renderGhost(camera, board.instances::get));
         return hud.captureBackBuffer(name);
-    }
-
-    private static void icons(GpuUnitIcons icons, GpuBoardSpaceHarness board, Camera camera) {
-        icons.update(true, camera, board.scene, STATUS, board.poses, new HashMap<>());
-        icons.render(camera);
     }
 
     /** A hex's centre a little over its level, where the route's marks lie. */

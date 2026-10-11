@@ -45,6 +45,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Layout;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.gdx.UiButton;
@@ -874,7 +875,7 @@ class GpuCommandDockSmokeTest {
 
     /**
      * TARGETING with an observed unit beyond the west edge (plan P7; GpuTargetingFixture: a real targeting display
-     * whose Long Tom faces west): the generic dock leads its option row with the edge whose arrow the classic board
+     * whose Long Tom faces west): the generic dock leads its option row with the edge whose arrow the Legacy 2D board
      * shows, at 1920 x 1080 and 1280 x 720. A click on it queues the Long Tom's attack on that unit through the
      * display: the edge leaves the row with the fired Long Tom, Fire turns on, and the display's Done sends it.
      */
@@ -1243,7 +1244,7 @@ class GpuCommandDockSmokeTest {
         GpuBoardSource.UiPreferences preferences = GpuHudInputTest.preferences();
         return new Shot(shot.status(), withPhase(panels, info), shot.commands(), shot.reports(), shot.playback(),
               new GpuBoardSource.UiPreferences(preferences.scale(), "", "", true, true, false, true,
-                    preferences.binds(), 0));
+                    preferences.binds(), 0, BoardGraphics.ENHANCED));
     }
 
     /** The shot whose phase info names these Done and skip commands, as GpuBoardActions.phaseInfo derives them. */

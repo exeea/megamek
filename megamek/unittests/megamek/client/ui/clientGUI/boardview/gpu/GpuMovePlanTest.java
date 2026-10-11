@@ -408,7 +408,7 @@ class GpuMovePlanTest {
         try (GpuMovementFixture moving = GpuMovementFixture.create()) {
             selectAirborneFighter(moving);
             onSwing(() -> {
-                // The classic board click (GpuBoardSource.click) plots it.
+                // MegaMek's board click (GpuBoardSource.click) plots it.
                 for (int type : new int[] { BoardViewEvent.BOARD_HEX_DRAGGED, BoardViewEvent.BOARD_HEX_CLICKED }) {
                     moving.display.hexMoused(new BoardViewEvent(moving.board.view, new Coords(4, 9), type, 0,
                           MouseEvent.BUTTON1));
@@ -457,7 +457,7 @@ class GpuMovePlanTest {
             assertEquals(List.of(), shown(moving).route());
             assertTrue(onSwing(moving.display::isSelectingHex));
 
-            classicClick(moving, BEHIND_TANK);
+            megamekClick(moving, BEHIND_TANK);
             verify(moving.client).moveEntity(eq(tank.getId()), argThat(path -> launchesPodTo(path, BEHIND_TANK)));
         }
     }
@@ -493,7 +493,7 @@ class GpuMovePlanTest {
             plan.planTo(inland, 0, false);
             assertEquals(List.of(), shown(moving).route(), "Nothing is searched from no position");
 
-            classicClick(moving, entry);
+            megamekClick(moving, entry);
             assertEquals(List.of(true, entry), onSwing(() -> List.of(walker.isDeployed(), walker.getPosition())));
             assertTrue(shown(moving).planner());
             plan.planTo(inland, 0, false);
@@ -522,7 +522,7 @@ class GpuMovePlanTest {
             plan.planTo(BRIDGE_HEX, 0, false);
             assertEquals(List.of(), shown(moving).route(), "The plan plots nothing over the pick");
 
-            classicClick(moving, BRIDGE_HEX);
+            megamekClick(moving, BRIDGE_HEX);
             verify(moving.gui).addToast(ToastLevel.INFO, Messages.getString(
                   "MovementDisplay.BuildBridge.toast.sectionSet", BRIDGE_HEX.getBoardNum()), engineers);
             assertFalse(shown(moving).planner(), "The bridge's far end is picked next");
@@ -536,7 +536,7 @@ class GpuMovePlanTest {
 
     /**
      * BCS: MegaMek's own highlight of an escape pod pick reaches the native frame. Its envelope sprites live in the
-     * board state, which the source captures as tactical geometry, so no classic board view is needed (the fixture
+     * board state, which the source captures as tactical geometry, so no Legacy 2D board view is needed (the fixture
      * builds none). The frame draws the outline of the picked hexes and nothing else in that colour.
      */
     @Test
@@ -1076,7 +1076,7 @@ class GpuMovePlanTest {
     }
 
     /** A left click as GpuHud sends it for movement it does not plan: MegaMek's board tool, press and click. */
-    private static void classicClick(GpuMovementFixture moving, Coords hex) throws Exception {
+    private static void megamekClick(GpuMovementFixture moving, Coords hex) throws Exception {
         moving.board.source.hover(hex, 0);
         moving.board.source.click(hex, false, 0);
         settle();

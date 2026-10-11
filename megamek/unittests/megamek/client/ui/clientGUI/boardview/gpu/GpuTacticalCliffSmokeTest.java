@@ -27,6 +27,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -141,7 +142,8 @@ class GpuTacticalCliffSmokeTest {
         // Include the real board overlay: it must not add a second contour at the sculpted surface's heights.
         overlay.update(new BoardSource.Frame(scene, List.of(), null, List.of(), "", null, 0, "", null),
               new GpuHud.HudView(true, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0),
-              new BoardSource.UiPreferences(1, "", "", false, false, false, false, List.of(), 0),
+              new BoardSource.UiPreferences(1, "", "", false, false, false, false, List.of(), 0,
+                    BoardGraphics.ENHANCED),
               new GpuHudState(new GpuPlaybackHistory(new UnitPlayback())));
         overlay.render(camera.camera);
         return Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());

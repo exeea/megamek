@@ -193,11 +193,11 @@ class GpuBuildingFloorPickSmokeTest {
 
     private static void checkTacticalUnit(GpuBattleView view, int unitId) throws Exception {
         var scene = (BoardScene) field(view, "scene");
-        var icons = (GpuUnitIcons) field(view, "unitIcons");
-        assertTrue(icons.active());
-        ModelInstance icon = icons.instance(scene.units().getFirst());
+        assertTrue(view.boardCamera.tactical());
+        // The Tactical View's base lies centred on the unit's meeple.
+        ModelInstance base = ((GpuUnitBases) field(view, "unitBases")).base(scene.units().getFirst());
         var camera = view.boardCamera.camera;
-        Vector3 center = camera.project(icon.transform.getTranslation(new Vector3()), 0, 0,
+        Vector3 center = camera.project(base.transform.getTranslation(new Vector3()), 0, 0,
               camera.viewportWidth, camera.viewportHeight);
         assertUnitClick(view, Math.round(center.x), Gdx.graphics.getHeight() - Math.round(center.y), unitId);
     }

@@ -32,6 +32,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiTheme;
@@ -258,7 +259,7 @@ class GpuUtilityMinimapSmokeTest {
     private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
         return new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(), p.reportFilterKeywords(),
               p.minimapEnabled(), enabled, p.conditionsVisible(), p.turnDetails(), p.binds(),
-              p.moveSprintRgb());
+              p.moveSprintRgb(), BoardGraphics.ENHANCED);
     }
 
     /** The utilities run the camera's Tactical View, the View menu's minimap item and the HUD's panel toggles. */
@@ -297,6 +298,8 @@ class GpuUtilityMinimapSmokeTest {
         assertTrue(board.camera.tactical(), "Tactical view enters the Tactical View");
         show(hud, board, parts, scene, status, move(), true);
         assertTrue(parts.utilities.chip().isVisible());
+        Button isometric = hud.stage.getRoot().findActor("map-view-isometric");
+        assertTrue(isometric.isDisabled(), "The Tactical View holds its top view: no isometric preset");
         // The chip names the mode only (the user's decision of 2026-10-02): the pressed utility switches back.
         List<String> chip = new ArrayList<>();
         boolean button = false;
@@ -311,6 +314,7 @@ class GpuUtilityMinimapSmokeTest {
         click(hud, "utility-tactical");
         assertFalse(board.camera.tactical(), "Tactical view again returns to the 3D view");
         show(hud, board, parts, scene, status, move(), false);
+        assertFalse(isometric.isDisabled());
         assertFalse(parts.utilities.chip().isVisible());
         verifyNoInteractions(parts.source);
         // The Contacts utility posts the switch of the client's contacts preference to the Swing thread.
@@ -361,9 +365,14 @@ class GpuUtilityMinimapSmokeTest {
             assertEquals(tilt, board.camera.tilt(), "The drag pans only");
             assertEquals(z, board.camera.focus.z, "The drag keeps the focus plane");
             assertFalse(Gdx.input.isCursorCatched(), "The left drag follows the visible pointer");
-            // A middle drag orbits with the cursor held still, as the board's does.
-            assertTrue(hud.stage.touchDown(x, y, 0, Input.Buttons.MIDDLE), "The canvas takes the orbit");
-            assertTrue(Gdx.input.isCursorCatched(), "An orbit holds the cursor");
+            // A middle drag orbits with the cursor held still, as the board's does; the Tactical View holds its
+            // angle, so there a middle press centres the camera as a left one does.
+            assertTrue(hud.stage.touchDown(x, y, 0, Input.Buttons.MIDDLE), "The canvas takes the middle press");
+            assertEquals(!tactical, Gdx.input.isCursorCatched(), "Only an orbit holds the cursor");
+            if (tactical) {
+                assertTrue(centre.epsilonEquals(board.camera.focus, 2 * units), "A middle press centres the camera");
+                assertEquals(0, board.camera.azimuth(), "and turns nothing");
+            }
             hud.stage.touchUp(x, y, 0, Input.Buttons.MIDDLE);
             assertFalse(Gdx.input.isCursorCatched(), "Releasing the orbit shows the cursor again");
             // The wheel over the map zooms the camera by the board's step, about the view's centre (the user's
@@ -526,9 +535,9 @@ class GpuUtilityMinimapSmokeTest {
         GpuHud.Inputs tactical = parts.update(scene, status(fixture, GamePhase.FIRING, true, GpuHudFixtures.ATLAS),
               move(), GpuReportLog.Snapshot.EMPTY, true, 1920, 1080);
         assertEquals(List.of(text("GpuBoard.hud.mouse.leftClick"), text("GpuBoard.hud.hint.select"),
-              text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.panMap"),
-              text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit"), text("GpuBoard.hud.mouse.wheel"),
-              text("GpuBoard.hud.hint.zoom"), "T", text("GpuBoard.hud.util.backTo3d")), GpuHintLine.items(tactical));
+              text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.panMap"), text("GpuBoard.hud.mouse.wheel"),
+              text("GpuBoard.hud.hint.zoom"), "H", text("GpuBoard.hud.hint.overlays"), "T",
+              text("GpuBoard.hud.util.backTo3d")), GpuHintLine.items(tactical));
         GpuHud.Inputs planning = parts.update(scene, fixture, move(), GpuReportLog.Snapshot.EMPTY, false, 1920, 1080);
         assertEquals(List.of(text("GpuBoard.hud.mouse.leftClick"), text("GpuBoard.hud.hint.planMove"),
               text("GpuBoard.hud.mouse.ctrlClick"), text("GpuBoard.hud.hint.waypoint"),
@@ -732,7 +741,7 @@ class GpuUtilityMinimapSmokeTest {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault,
                     KeyCommandBind.getDesc(bind.keyDefault, bind.modifiersDefault))).toList();
-        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, binds, 0);
+        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, binds, 0, BoardGraphics.ENHANCED);
     }
 
     private static String text(String key) {

@@ -262,7 +262,7 @@ class GpuTacticalTest {
     }
 
     @Test
-    void shapesAndTextLeaveTheRasterLayerAndRestoreClassicZoom() throws Exception {
+    void shapesAndTextLeaveTheRasterLayerAndRestoreLegacy2DZoom() throws Exception {
         int originalZoom = GUIPreferences.getInstance().getMapZoomIndex();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             var second = GpuUnitHudTest.addUnits(fixture, 1).getFirst();
@@ -278,15 +278,15 @@ class GpuTacticalTest {
                 assertFalse(captured.tactical().labels().isEmpty(), "Movement costs must remain readable labels");
                 assertEquals(before.tiles().stream().map(BoardScene.Tile::tactical).toList(),
                       captured.tiles().stream().map(BoardScene.Tile::tactical).toList());
-                BoardView classic = fixture.classicView();
+                BoardView legacy2D = fixture.legacy2DView();
                 try {
-                    classic.getComponent();
-                    classic.zoomOut();
-                    float zoom = classic.getScale();
+                    legacy2D.getComponent();
+                    legacy2D.zoomOut();
+                    float zoom = legacy2D.getScale();
                     assertEquals(captured.tactical(), fixture.view.captureTacticalGeometry());
-                    assertEquals(zoom, classic.getScale());
+                    assertEquals(zoom, legacy2D.getScale());
                 } finally {
-                    classic.dispose();
+                    legacy2D.dispose();
                 }
                 sprites.forEach(sprite -> sprite.setHidden(true));
                 BoardTactical hidden = fixture.view.captureTacticalGeometry();

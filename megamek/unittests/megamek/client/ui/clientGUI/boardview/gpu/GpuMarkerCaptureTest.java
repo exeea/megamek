@@ -79,10 +79,10 @@ class GpuMarkerCaptureTest {
     }
 
     @Test
-    void mixedEngineeringSpritesKeepTerrainAndRestoreClassicLabelsAfterCapture() throws Exception {
+    void mixedEngineeringSpritesKeepTerrainAndRestoreLegacy2DLabelsAfterCapture() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board())) {
-            // Sprites regain their classic artwork after a capture only where a classic projection exists.
-            var classicView = fixture.classicView();
+            // Sprites regain their Legacy 2D artwork after a capture only where a Legacy 2D projection exists.
+            var legacy2DView = fixture.legacy2DView();
             try {
             List<Sprite> sprites = List.of(new BridgeBuildSprite(fixture.view, ROOF, 2, 6, 9),
                   new FortifyBuildSprite(fixture.view, new Coords(3, 2), 1, 3),
@@ -92,11 +92,11 @@ class GpuMarkerCaptureTest {
             SwingUtilities.invokeAndWait(() -> {
                 fixture.view.addSprites(sprites);
                 sprites.forEach(Sprite::prepare);
-                List<BoardScene.Pixels> classic = sprites.stream().map(GpuMarkerCaptureTest::spritePixels).toList();
+                List<BoardScene.Pixels> legacy2D = sprites.stream().map(GpuMarkerCaptureTest::spritePixels).toList();
                 fixture.source.refresh();
                 assertFalse(fixture.view.isGpuCapture());
-                assertEquals(classic, sprites.stream().map(GpuMarkerCaptureTest::spritePixels).toList(),
-                      "A 3D capture must restore the classic sprite artwork, including its progress text");
+                assertEquals(legacy2D, sprites.stream().map(GpuMarkerCaptureTest::spritePixels).toList(),
+                      "A 3D capture must restore the Legacy 2D sprite artwork, including its progress text");
             });
             var markers = fixture.source.takeFrame().scene().markers();
             assertEquals(Set.of(BoardMarker.Kind.BRIDGE_BUILD, BoardMarker.Kind.FORTIFY_BUILD,
@@ -107,7 +107,7 @@ class GpuMarkerCaptureTest {
                   && marker.label().equals("2/6")));
             assertTrue(fixture.source.takeFrame().scene().tile(ROOF).tactical() != null,
                   "The unfinished bridge's terrain preview must survive point-marker conversion");
-            } finally { classicView.dispose(); }
+            } finally { legacy2DView.dispose(); }
         }
     }
 

@@ -314,7 +314,7 @@ public class TilesetManager implements IPreferenceChangeListener {
         return imageFor(entity, facingFor(entity), secondaryPos);
     }
 
-    /** The displayed facing, shared by the classic sprite cache and GPU sprite transforms. */
+    /** The displayed facing, shared by the 2D unit sprite cache and GPU sprite transforms. */
     public int facingFor(Entity entity) {
         // meks look like they're facing their secondary facing
         // (except QuadVees, which are using turrets instead of torso twists

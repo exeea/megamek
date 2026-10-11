@@ -133,7 +133,7 @@ final class UnitModelSelection {
     }
 
     /**
-     * The classic sprite shows a Mek at its torso facing, so a twisted Mek appears to turn its legs as well. A model
+     * The 2D unit sprite shows a Mek at its torso facing, so a twisted Mek appears to turn its legs as well. A model
      * with a separate upper body can keep the legs where they are, which needs the difference between the two.
      *
      * @param facing          the unit's own facing (a Mek's legs), in hexsides

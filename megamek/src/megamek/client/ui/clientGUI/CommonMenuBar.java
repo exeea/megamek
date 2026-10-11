@@ -162,6 +162,12 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
           "CommonMenuBar.viewPlanetaryConditions"));
     private final JMenuItem viewZoomIn = new JMenuItem(getString("CommonMenuBar.viewZoomIn"));
     private final JMenuItem viewBoard = new JMenuItem(getString("CommonMenuBar.viewGpuBoard"));
+    // 3D Graphics is a submenu offering the two mutually exclusive 3D board graphics (Classic / Enhanced).
+    private final JMenu viewBoardGraphics = new JMenu(getString("CommonMenuBar.viewBoardGraphics"));
+    private final JRadioButtonMenuItem viewGraphicsClassic =
+          new JRadioButtonMenuItem(getString("CommonMenuBar.viewGraphicsClassic"));
+    private final JRadioButtonMenuItem viewGraphicsEnhanced =
+          new JRadioButtonMenuItem(getString("CommonMenuBar.viewGraphicsEnhanced"));
     private final JMenuItem viewZoomOut = new JMenuItem(getString("CommonMenuBar.viewZoomOut"));
     private final JMenuItem viewZoomReset = new JMenuItem(getString("CommonMenuBar.viewZoomReset"));
     private final JMenuItem viewZoomOverviewToggle = new JMenuItem(getString("CommonMenuBar.viewZoomOverviewToggle"));
@@ -178,6 +184,8 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
           "CommonMenuBar.viewToggleIsometric"));
     private final JCheckBoxMenuItem toggleHexCoords = new JCheckBoxMenuItem(getString(
           "CommonMenuBar.viewToggleHexCoords"));
+    private final JCheckBoxMenuItem toggleHexTypes = new JCheckBoxMenuItem(getString(
+          "CommonMenuBar.viewToggleHexTypes"));
     private final JCheckBoxMenuItem toggleSensorRange = new JCheckBoxMenuItem(getString(
           "CommonMenuBar.viewToggleSensorRange"));
     private final JCheckBoxMenuItem toggleFieldOfFire = new JCheckBoxMenuItem(getString(
@@ -193,6 +201,8 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
           "CommonMenuBar.viewToggleShowObjects"));
     private final JCheckBoxMenuItem toggleFiringSolutions = new JCheckBoxMenuItem(getString(
           "CommonMenuBar.viewToggleFiringSolutions"));
+    private final JCheckBoxMenuItem toggleUnitLinks = new JCheckBoxMenuItem(getString(
+          "CommonMenuBar.viewToggleUnitLinks"));
     private final JCheckBoxMenuItem toggleCFWarning = new JCheckBoxMenuItem(getString(
           "CommonMenuBar.viewToggleCFWarning"));
     private final JCheckBoxMenuItem viewMovementEnvelope = new JCheckBoxMenuItem(getString(
@@ -320,6 +330,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         menu.setMnemonic(VK_V);
         add(menu);
         initMenuItem(viewBoard, menu, VIEW_GPU_BOARD);
+        initBoardGraphicsMenu(menu);
         menu.addSeparator();
         initMenuItem(viewClientSettings, menu, VIEW_CLIENT_SETTINGS, VK_S);
         initMenuItem(viewIncGUIScale, menu, VIEW_INC_GUI_SCALE);
@@ -364,6 +375,8 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         initMenuItem(viewZoomOverviewToggle, menu, VIEW_ZOOM_OVERVIEW_TOGGLE);
         initMenuItem(toggleIsometric, menu, VIEW_TOGGLE_ISOMETRIC, VK_T, GUIP.getIsometricEnabled());
         initMenuItem(toggleHexCoords, menu, VIEW_TOGGLE_HEX_COORDS, VK_G, GUIP.getCoordsEnabled());
+        initMenuItem(toggleHexTypes, menu, VIEW_TOGGLE_HEX_TYPES, GUIP.getHexTypesEnabled());
+        toggleHexTypes.setToolTipText(Messages.getString("CommonMenuBar.viewToggleHexTypesToolTip"));
         initMenuItem(viewLabels, menu, VIEW_LABELS);
         menu.addSeparator();
 
@@ -387,6 +400,8 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         toggleFleeZone.setToolTipText(Messages.getString("CommonMenuBar.viewToggleFleeZoneToolTip"));
         initMenuItem(toggleFiringSolutions, menu, VIEW_TOGGLE_FIRING_SOLUTIONS, GUIP.getShowFiringSolutions());
         toggleFiringSolutions.setToolTipText(Messages.getString("CommonMenuBar.viewToggleFiringSolutionsToolTip"));
+        initMenuItem(toggleUnitLinks, menu, VIEW_TOGGLE_UNIT_LINKS, GUIP.getShowUnitLinks());
+        toggleUnitLinks.setToolTipText(Messages.getString("CommonMenuBar.viewToggleUnitLinksToolTip"));
 
         initMenuItem(toggleCFWarning, menu, VIEW_TOGGLE_CF_WARNING, GUIP.getShowCFWarnings());
         toggleCFWarning.setToolTipText(Messages.getString("CommonMenuBar.viewToggleCFWarningToolTip"));
@@ -470,7 +485,10 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
             case VIEW_KEYBINDS_OVERLAY -> GUIP.toggleKeybindsOverlay();
             case VIEW_TURN_DETAILS_OVERLAY -> GUIP.setTurnDetailsOverlay(!GUIP.getTurnDetailsOverlay());
             case ClientGUI.VIEW_LABELS -> GUIP.setUnitLabelStyle(GUIP.getUnitLabelStyle().next());
+            case VIEW_TOGGLE_HEX_TYPES -> GUIP.toggleHexTypes();
             case VIEW_UNIT_OVERVIEW -> GUIP.setShowUnitOverview(!GUIP.getShowUnitOverview());
+            case VIEW_GRAPHICS_CLASSIC -> GUIP.setBoardGraphics(BoardGraphics.CLASSIC);
+            case VIEW_GRAPHICS_ENHANCED -> GUIP.setBoardGraphics(BoardGraphics.ENHANCED);
             case ClientGUI.HELP_RESET_NAGS ->
                   MegaMek.getMMOptions().setNagDialogIgnore(MMConstants.NAG_BOT_README, false);
         }
@@ -581,6 +599,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         viewKeybindsOverlay.setEnabled(isInGameBoardView);
         viewPlanetaryConditionsOverlay.setEnabled(isInGameBoardView);
         toggleHexCoords.setEnabled(isInGameBoardView);
+        toggleHexTypes.setEnabled(isInGameBoardView);
 
         viewLOSSetting.setEnabled(isInGameBoardView);
         viewUnitOverview.setEnabled(isInGameBoardView);
@@ -591,6 +610,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         toggleFovDarken.setEnabled(isInGameBoardView);
         toggleFovSpotting.setEnabled(isInGameBoardView);
         toggleFiringSolutions.setEnabled(isInGameBoardView);
+        toggleUnitLinks.setEnabled(isInGameBoardView);
         toggleCFWarning.setEnabled(isInGameBoardView);
         viewMovementEnvelope.setEnabled(isInGameBoardView);
         viewTurnDetailsOverlay.setEnabled(isInGameBoardView);
@@ -617,8 +637,8 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
     /** The first View entry always switches to the other visualization. */
     public synchronized void setBoardView3D(boolean active) {
         itemMap.remove(viewBoard.getActionCommand());
-        viewBoard.setText(getString(active ? "CommonMenuBar.viewClassicBoard" : "CommonMenuBar.viewGpuBoard"));
-        viewBoard.setActionCommand(active ? VIEW_CLASSIC_BOARD : VIEW_GPU_BOARD);
+        viewBoard.setText(getString(active ? "CommonMenuBar.viewLegacy2D" : "CommonMenuBar.viewGpuBoard"));
+        viewBoard.setActionCommand(active ? VIEW_LEGACY_2D : VIEW_GPU_BOARD);
         itemMap.put(viewBoard.getActionCommand(), viewBoard);
     }
 
@@ -656,6 +676,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
             case GUIPreferences.USE_ISOMETRIC -> toggleIsometric.setSelected((Boolean) e.getNewValue());
             case GUIPreferences.SHOW_FIELD_OF_FIRE -> toggleFieldOfFire.setSelected((Boolean) e.getNewValue());
             case GUIPreferences.SHOW_SENSOR_RANGE -> toggleSensorRange.setSelected((Boolean) e.getNewValue());
+            case GUIPreferences.SHOW_UNIT_LINKS -> toggleUnitLinks.setSelected((Boolean) e.getNewValue());
             case GUIPreferences.FOV_SPOTTING_MODE -> {
                 // Use invokeLater to avoid interfering with accelerator processing
                 final boolean newState = (Boolean) e.getNewValue();
@@ -672,6 +693,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
             case GUIPreferences.SHOW_UNIT_OVERVIEW -> viewUnitOverview.setSelected((Boolean) e.getNewValue());
             case GUIPreferences.MINI_MAP_ENABLED -> viewMinimap.setSelected(GUIP.getMinimapEnabled());
             case GUIPreferences.SHOW_COORDS -> toggleHexCoords.setSelected(GUIP.getCoordsEnabled());
+            case GUIPreferences.SHOW_HEX_TYPES -> toggleHexTypes.setSelected(GUIP.getHexTypesEnabled());
             case KeyBindParser.KEYBINDS_CHANGED -> setKeyBinds();
             case GUIPreferences.UNIT_DISPLAY_ENABLED -> viewMekDisplay.setSelected(GUIP.getUnitDisplayEnabled());
             case GUIPreferences.FORCE_DISPLAY_ENABLED -> viewForceDisplay.setSelected(GUIP.getForceDisplayEnabled());
@@ -681,6 +703,7 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
             case RecentBoardList.RECENT_BOARDS_UPDATED -> initializeRecentBoardsMenu();
             case GUIPreferences.BOT_COMMANDS_ENABLED, GUIPreferences.BOT_COMMANDS_LOCATION ->
                   updateBotCommandsSelection();
+            case GUIPreferences.BOARD_GRAPHICS -> updateBoardGraphicsSelection();
         }
     }
 
@@ -746,6 +769,25 @@ public class CommonMenuBar extends JMenuBar implements ActionListener, IPreferen
         } else {
             viewBotCommandsFloat.setSelected(true);
         }
+    }
+
+    /**
+     * Builds the 3D Graphics submenu (Classic / Enhanced radio items) after the board switch. It stays enabled in every
+     * state: the choice is a global preference, which every 3D board (game, preview, editor) applies at once.
+     */
+    private void initBoardGraphicsMenu(JMenu parentMenu) {
+        initMenuItem(viewGraphicsClassic, viewBoardGraphics, VIEW_GRAPHICS_CLASSIC);
+        initMenuItem(viewGraphicsEnhanced, viewBoardGraphics, VIEW_GRAPHICS_ENHANCED);
+        ButtonGroup boardGraphicsGroup = new ButtonGroup();
+        boardGraphicsGroup.add(viewGraphicsClassic);
+        boardGraphicsGroup.add(viewGraphicsEnhanced);
+        parentMenu.add(viewBoardGraphics);
+        updateBoardGraphicsSelection();
+    }
+
+    private void updateBoardGraphicsSelection() {
+        boolean classic = GUIP.getBoardGraphics() == BoardGraphics.CLASSIC;
+        (classic ? viewGraphicsClassic : viewGraphicsEnhanced).setSelected(true);
     }
 
     /**

@@ -133,6 +133,8 @@ final class GpuBoardTuning {
     private final List<Control> zoomScale;
     private final CheckBox routePulse;
     private final List<Control> pulse;
+    private final CheckBox ecmPulse;
+    private final List<Control> ecmPulseKnobs;
     private final List<Control> visibility;
     private final ButtonGroup<TextButton> fovModes;
     private final List<Control> fieldOfView;
@@ -300,6 +302,19 @@ final class GpuBoardTuning {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 applyPulse();
+            }
+        });
+        section(skin, "ECM pulse");
+        ecmPulse = checkbox(skin, "Pulse the open ECM field", "tuning-ecm-pulse");
+        ecmPulse.addListener(new TextTooltip("Hovering or selecting an ECM or ECCM unit sends a glow from the unit "
+              + "across the hexes only its field covers, flashing at the border; a hover repeats it, a selection "
+              + "runs it " + GpuElectronicWarfare.SELECTION_CYCLES + " times.", skin, "menu"));
+        ecmPulseKnobs = controls(skin, List.of(new Knob("ECM pulse intensity", 0, 2, .05f, "%.2f"),
+              new Knob("ECM pulse period s", 1, 5, .1f, "%.1f")), this::applyEcmPulse, 0);
+        ecmPulse.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                applyEcmPulse();
             }
         });
         section(skin, "Unit visibility");
@@ -969,6 +984,9 @@ final class GpuBoardTuning {
         routePulse.setChecked(GpuRoutePulse.ENABLED);
         setValues(pulse, new float[] { GpuRoutePulse.SPEED, GpuRoutePulse.INTENSITY });
         applyPulse();
+        ecmPulse.setChecked(GpuElectronicWarfare.PULSE);
+        setValues(ecmPulseKnobs, new float[] { GpuElectronicWarfare.PULSE_INTENSITY, GpuElectronicWarfare.PULSE_PERIOD });
+        applyEcmPulse();
         setValues(visibility, new float[] { GpuTerrain.DEFAULT_BUILDING_OPACITY * 100,
               GpuUnitVisibility.DEFAULT_OUTLINE_INTENSITY * 100 });
         updateReadings(visibility);
@@ -1290,6 +1308,14 @@ final class GpuBoardTuning {
         GpuRoutePulse.intensity = value(pulse, 1);
         pulse.forEach(control -> control.slider().setDisabled(!routePulse.isChecked()));
         updateReadings(pulse);
+    }
+
+    private void applyEcmPulse() {
+        GpuElectronicWarfare.pulse = ecmPulse.isChecked();
+        GpuElectronicWarfare.pulseIntensity = value(ecmPulseKnobs, 0);
+        GpuElectronicWarfare.pulsePeriod = value(ecmPulseKnobs, 1);
+        ecmPulseKnobs.forEach(control -> control.slider().setDisabled(!ecmPulse.isChecked()));
+        updateReadings(ecmPulseKnobs);
     }
 
     private void applyFieldOfView() {

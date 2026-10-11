@@ -60,7 +60,8 @@ class GpuFiringCaptureTest {
             assertTrue(indirect.curMode().isIndirect());
             fixture.view.addAttack(new WeaponAttackAction(fixture.entity.getId(), target.getId(),
                   fixture.entity.getEquipmentNum(indirect)));
-            assertEquals(1, fixture.view.getAttackSprites().size(), "The classic board must accept the queued attacks");
+            assertEquals(1, fixture.view.getAttackSprites().size(),
+                  "The Legacy 2D board must accept the queued attacks");
             assertEquals(3, fixture.view.getAttackSprites().getFirst().getActions().size());
         } catch (Exception error) {
             throw new IllegalStateException(error);
@@ -83,7 +84,8 @@ class GpuFiringCaptureTest {
             SwingUtilities.invokeAndWait(() -> {
                 attacks(fixture);
                 fixture.source.refresh();
-                assertEquals(1, fixture.view.getAttackSprites().size(), "Capture must preserve classic attack sprites");
+                assertEquals(1, fixture.view.getAttackSprites().size(),
+                      "Capture must preserve Legacy 2D attack sprites");
                 BoardScene scene = fixture.source.takeFrame().scene();
                 assertEquals(2, scene.firingLines().size());
                 assertEquals(List.of(false, true), scene.firingLines().stream().map(BoardScene.FiringLine::indirect).toList());

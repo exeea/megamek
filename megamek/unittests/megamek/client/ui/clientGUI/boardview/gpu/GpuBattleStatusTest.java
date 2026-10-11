@@ -150,6 +150,62 @@ class GpuBattleStatusTest {
         }
     }
 
+    /**
+     * The Tactical View's facts (b11-design items 2, 10, 15, 16): the hovered enemy's arcs are its own side table for
+     * every hex within reach, kept while nothing they depend on changes, and gone with the pointer; an own spotter links
+     * to its target; the own unit carries its twist, its movement colour and whether its modifier shows.
+     */
+    @Test
+    void theHoveredEnemysArcsAreItsSideTableAndSpottersLinkToTheirTargets() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            AtomicReference<Entity> warwolf = new AtomicReference<>();
+            SwingUtilities.invokeAndWait(() -> {
+                Player enemy = enemy(fixture.game);
+                warwolf.set(add(fixture, enemy, "Warwolf A.mtf", 42, new Coords(8, 8)));
+                warwolf.get().setFacing(2);
+                fixture.entity.setFacing(0);
+                fixture.entity.setSecondaryFacing(1);
+                fixture.entity.moved = EntityMovementType.MOVE_RUN;
+                fixture.entity.setDone(true);
+                fixture.entity.setSpotting(true);
+                fixture.entity.setSpotTargetId(42);
+                fixture.source.setHover(new Coords(8, 8));
+                fixture.source.refresh();
+            });
+            GpuBattleStatus.Snapshot status = fixture.source.takeFrame().status();
+            GpuBattleStatus.Arc arc = status.arc();
+            assertEquals(42, arc.unitId(), "The hovered enemy's arcs");
+            assertEquals(new Coords(8, 8), arc.origin());
+            SwingUtilities.invokeAndWait(() -> {
+                var board = fixture.game.getBoard();
+                int reach = 0;
+                for (int distance = 1; distance <= GpuBattleStatus.Arc.REACH; distance++) {
+                    for (Coords hex : new Coords(8, 8).allAtDistance(distance)) {
+                        if (!board.contains(hex)) { continue; }
+                        reach++;
+                        assertEquals(warwolf.get().sideTable(hex), arc.sides().get(hex), "The side table at " + hex);
+                    }
+                }
+                assertEquals(reach, arc.sides().size(), "Every hex on the board within reach, and none beyond");
+                fixture.source.refresh();
+            });
+            assertSame(arc, fixture.source.takeFrame().status().arc(), "Unchanged arcs keep their snapshot");
+            assertEquals(List.of(new GpuBattleStatus.Link(1, 42, GpuBattleStatus.Link.Kind.SPOT)), status.links(),
+                  "The spotter links to its target");
+            GpuBattleStatus.UnitStatus own = unit(status, 1);
+            assertEquals(1, own.twist(), "The twist is the secondary facing");
+            assertEquals(GUIPreferences.getInstance().getColorForMovement(EntityMovementType.MOVE_RUN).getRGB(),
+                  own.moveRgb());
+            assertTrue(own.tmmShown(), "Done in the movement phase, the modifier shows");
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.source.setHover(new Coords(1, 1));
+                fixture.source.refresh();
+            });
+            assertEquals(GpuBattleStatus.Arc.NONE, fixture.source.takeFrame().status().arc(),
+                  "No arcs without a hovered or focused enemy");
+        }
+    }
+
     @Test
     void enemiesFollowTheClientDisclosureAndSensorContactsStayAnonymous() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -596,7 +652,8 @@ class GpuBattleStatusTest {
                 source.get().locateUnit(2);
                 SwingUtilities.invokeAndWait(() -> { });
                 GpuBoardSource.Frame frame = source.get().takeFrame();
-                assertEquals(1, frame.scene().boardId(), "The own unit's board is shown, as the classic overview does");
+                assertEquals(1, frame.scene().boardId(),
+                      "The own unit's board is shown, as the Legacy 2D overview does");
                 assertEquals(new Coords(3, 4), frame.centerRequest().coords());
             } finally {
                 SwingUtilities.invokeAndWait(() -> {
@@ -662,7 +719,7 @@ class GpuBattleStatusTest {
     }
 
     /**
-     * The marks of the classic board label, which the nameplates and the unit card show: the damage tile in its
+     * The marks of the Legacy 2D board label, which the nameplates and the unit card show: the damage tile in its
      * level's colour (none while undamaged or while the client hides damage levels) and the armor and structure bars
      * in the colours of their remaining shares.
      */
@@ -711,7 +768,7 @@ class GpuBattleStatusTest {
         }
     }
 
-    /** The name of the classic board label, which the nameplates show: the unit in the client's label style. */
+    /** The name of the Legacy 2D board label, which the nameplates show: the unit in the client's label style. */
     @Test
     void unitsCarryTheirLabelInTheClientsLabelStyle() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();

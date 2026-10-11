@@ -163,7 +163,7 @@ class GpuKeyboardTest {
     }
 
     @Test
-    void nativeUnitOverviewHasNoToggleAndPreservesTheClassicPreference() throws Exception {
+    void nativeUnitOverviewHasNoToggleAndPreservesTheLegacy2DPreference() throws Exception {
         boolean original = preferences.getShowUnitOverview();
         AtomicInteger clicks = new AtomicInteger();
         try {

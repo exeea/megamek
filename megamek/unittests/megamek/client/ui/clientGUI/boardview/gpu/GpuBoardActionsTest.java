@@ -24,8 +24,10 @@ import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
@@ -71,11 +73,12 @@ class GpuBoardActionsTest {
                 menus.get().setPhase(GamePhase.MOVEMENT_REPORT);
             });
             try {
-                find(commands.get(), Messages.getString("CommonMenuBar.viewClassicBoard")).action().run();
+                find(commands.get(), Messages.getString("CommonMenuBar.viewLegacy2D")).action().run();
                 SwingUtilities.invokeAndWait(() -> { });
-                assertEquals(1, clicks.get(), "Returning to classic is a global action, independent of the old phase");
+                assertEquals(1, clicks.get(),
+                      "Returning to Legacy 2D is a global action, independent of the old phase");
                 SwingUtilities.invokeAndWait(() -> menus.get().setPhase(GamePhase.LOUNGE));
-                find(commands.get(), Messages.getString("CommonMenuBar.viewClassicBoard")).action().run();
+                find(commands.get(), Messages.getString("CommonMenuBar.viewLegacy2D")).action().run();
                 SwingUtilities.invokeAndWait(() -> { });
                 assertEquals(1, clicks.get(), "An unavailable global menu item must not execute a stale callback");
             } finally {
@@ -108,6 +111,111 @@ class GpuBoardActionsTest {
                 SwingUtilities.invokeAndWait(() -> menus.get().die());
             }
         }
+    }
+
+    /**
+     * The View menu's 3D Graphics submenu, as the GPU Menu panel captures it: its two radio items show the preference,
+     * a choice sets it, and a change made elsewhere (Client Settings, a preview's menu) moves the selection too.
+     */
+    @Test
+    void theGraphicsChoiceIsARadioGroupOverTheSharedPreference() throws Exception {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        BoardGraphics saved = preferences.getBoardGraphics();
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            AtomicReference<CommonMenuBar> menus = new AtomicReference<>();
+            AtomicReference<GpuBoardActions> actions = new AtomicReference<>();
+            SwingUtilities.invokeAndWait(() -> {
+                preferences.setBoardGraphics(BoardGraphics.ENHANCED);
+                menus.set(CommonMenuBar.getMenuBarForGame());
+                ClientGUI gui = mock(ClientGUI.class);
+                when(gui.getMenuBar()).thenReturn(menus.get());
+                BoardClientState view = spy(fixture.view);
+                doReturn(gui).when(view).getClientgui();
+                actions.set(new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { }));
+            });
+            try {
+                assertEquals(List.of(false, true), graphicsSelection(actions.get()));
+                BoardScene.Command classic = GpuBoardActions.menuItem(capture(actions.get()),
+                      ClientGUI.VIEW_GRAPHICS_CLASSIC);
+                assertEquals(Messages.getString("CommonMenuBar.viewGraphicsClassic"), classic.label());
+                classic.action().run();
+                SwingUtilities.invokeAndWait(() -> { });
+                assertEquals(BoardGraphics.CLASSIC, preferences.getBoardGraphics());
+                assertEquals(List.of(true, false), graphicsSelection(actions.get()));
+                SwingUtilities.invokeAndWait(() -> preferences.setBoardGraphics(BoardGraphics.ENHANCED));
+                assertEquals(List.of(false, true), graphicsSelection(actions.get()));
+            } finally {
+                SwingUtilities.invokeAndWait(() -> {
+                    menus.get().die();
+                    preferences.setBoardGraphics(saved);
+                });
+            }
+        }
+    }
+
+    /**
+     * View > Hex Types, right after Hex Coords in the game's menu as the GPU Menu panel captures it (which the Overlays
+     * panel's Type row runs): the item shows the one client setting, running it switches the setting, and a change
+     * made elsewhere moves the selection too.
+     */
+    @Test
+    void theHexTypesItemFollowsHexCoordsAndSwitchesTheOneSetting() throws Exception {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        boolean saved = preferences.getHexTypesEnabled();
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            AtomicReference<CommonMenuBar> menus = new AtomicReference<>();
+            AtomicReference<GpuBoardActions> actions = new AtomicReference<>();
+            SwingUtilities.invokeAndWait(() -> {
+                if (preferences.getHexTypesEnabled()) { preferences.toggleHexTypes(); }
+                menus.set(CommonMenuBar.getMenuBarForGame());
+                menus.get().setPhase(GamePhase.MOVEMENT);
+                ClientGUI gui = mock(ClientGUI.class);
+                when(gui.getMenuBar()).thenReturn(menus.get());
+                BoardClientState view = spy(fixture.view);
+                doReturn(gui).when(view).getClientgui();
+                actions.set(new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { }));
+            });
+            try {
+                List<BoardScene.Command> commands = capture(actions.get());
+                BoardScene.Command coords = GpuBoardActions.menuItem(commands, ClientGUI.VIEW_TOGGLE_HEX_COORDS);
+                BoardScene.Command types = GpuBoardActions.menuItem(commands, ClientGUI.VIEW_TOGGLE_HEX_TYPES);
+                assertEquals(Messages.getString("CommonMenuBar.viewToggleHexTypes"), types.label());
+                List<String> view = commands.stream().filter(menu -> menu.children().contains(coords)).findFirst()
+                      .orElseThrow().children().stream().map(BoardScene.Command::id).toList();
+                assertEquals(view.indexOf(coords.id()) + 1, view.indexOf(types.id()), "right after Hex Coords");
+                assertEquals(Boolean.FALSE, types.selected());
+                assertTrue(types.enabled());
+                types.action().run();
+                SwingUtilities.invokeAndWait(() -> { });
+                assertTrue(preferences.getHexTypesEnabled(), "the item switches the client setting");
+                assertEquals(Boolean.TRUE, hexTypes(actions.get()).selected());
+                SwingUtilities.invokeAndWait(preferences::toggleHexTypes);
+                assertEquals(Boolean.FALSE, hexTypes(actions.get()).selected(), "and follows it");
+            } finally {
+                SwingUtilities.invokeAndWait(() -> {
+                    menus.get().die();
+                    if (preferences.getHexTypesEnabled() != saved) { preferences.toggleHexTypes(); }
+                });
+            }
+        }
+    }
+
+    private static BoardScene.Command hexTypes(GpuBoardActions actions) throws Exception {
+        return GpuBoardActions.menuItem(capture(actions), ClientGUI.VIEW_TOGGLE_HEX_TYPES);
+    }
+
+    /** Whether the Classic and the Enhanced item are selected, in a fresh capture. */
+    private static List<Boolean> graphicsSelection(GpuBoardActions actions) throws Exception {
+        List<BoardScene.Command> commands = capture(actions);
+        return List.of(GpuBoardActions.menuItem(commands, ClientGUI.VIEW_GRAPHICS_CLASSIC).selected(),
+              GpuBoardActions.menuItem(commands, ClientGUI.VIEW_GRAPHICS_ENHANCED).selected());
+    }
+
+    /** The menu bar as the GPU Menu panel captures it, on the EDT. */
+    private static List<BoardScene.Command> capture(GpuBoardActions actions) throws Exception {
+        FutureTask<List<BoardScene.Command>> capture = new FutureTask<>(actions::globalCommands);
+        SwingUtilities.invokeAndWait(capture);
+        return capture.get();
     }
 
     @Test

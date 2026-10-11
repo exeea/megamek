@@ -197,7 +197,7 @@ public final class GpuBoardWindow {
     private volatile BoardSource source;
     private volatile String previewTitle;
     private volatile String loadingMessage = Messages.getString("ClientGUI.waitingOnTheServer");
-    private final Window classicWindow;
+    private final Window swingWindow;
     /** Preview windows own their temporary game and leave the browser's modal session intact. */
     private final boolean preview;
     private final BoardEditorSession editor;
@@ -206,7 +206,7 @@ public final class GpuBoardWindow {
     private final Game mapGame;
     private final Map<Dialog, Boolean> dialogOnTop = new IdentityHashMap<>();
     /**
-     * The classic window hides while the GPU view runs, so a Swing dialog owned by it would open behind the native
+     * The Swing window hides while the GPU view runs, so a Swing dialog owned by it would open behind the native
      * window. A client dialog that opens while the GPU window cannot ask the client's prompts itself (it starts or
      * closes), or one of {@link #allowedOverBattle} while it can, is raised above it instead.
      */
@@ -223,7 +223,7 @@ public final class GpuBoardWindow {
             return;
         }
         if (event.getID() == ComponentEvent.COMPONENT_SHOWN
-              && event.getSource() instanceof Dialog dialog && belongsToClassicWindow(dialog)) {
+              && event.getSource() instanceof Dialog dialog && belongsToSwingWindow(dialog)) {
             if (asksPrompts() && !allowedOverBattle(dialog)) {
                 return;
             }
@@ -233,7 +233,7 @@ public final class GpuBoardWindow {
     private volatile Lwjgl3Application application;
     private volatile boolean closing;
     private volatile boolean presented;
-    private volatile boolean restoreClassic;
+    private volatile boolean restoreLegacy2D;
     private volatile boolean exitRequested;
     private volatile Throwable startupFailure;
     private Runnable afterClose;
@@ -259,7 +259,7 @@ public final class GpuBoardWindow {
         this.panel = panel;
         preview = previewOwner != null && editor == null;
         if (preview) { previewTitle = previewTitle(mapGame.getBoard()); }
-        classicWindow = preview || editor != null ? previewOwner
+        swingWindow = preview || editor != null ? previewOwner
                     : gui == null ? null : gui.getFrame();
         if (editor != null) {
             loadingMessage = Messages.getString("BoardEditor.edit3DLoading");
@@ -343,12 +343,12 @@ public final class GpuBoardWindow {
     }
 
     private static boolean isPreviewOf(Window owner) {
-        return active != null && active.preview && !active.closing && active.classicWindow == owner;
+        return active != null && active.preview && !active.closing && active.swingWindow == owner;
     }
 
     /** Closes the owner's map preview, as hiding or closing the owner does. */
     public static synchronized void closePreview(Window owner) {
-        if (active != null && active.preview && active.classicWindow == owner) {
+        if (active != null && active.preview && active.swingWindow == owner) {
             active.close(false);
         }
     }
@@ -388,14 +388,14 @@ public final class GpuBoardWindow {
      * The menu's 2D command. A map preview changes its presentation: this window closes, and once the native renderer
      * has released its resources the same board shows in 2D. The editor keeps running and opens its live 2D Preview.
      */
-    private void requestClassic() {
+    private void requestLegacy2D() {
         if (closing) { return; }
         if (editor != null) {
             showPreview2D();
             return;
         }
         close(false);
-        afterClose = () -> showClassicPreview(classicWindow, mapGame);
+        afterClose = () -> showLegacy2DPreview(swingWindow, mapGame);
     }
 
     /**
@@ -407,27 +407,27 @@ public final class GpuBoardWindow {
      */
     private void showPreview2D() {
         if (preview2D != null && preview2D.isDisplayable()) {
-            showClassicWindow(null, preview2D);
+            showLegacy2D(null, preview2D);
             return;
         }
-        preview2D = boardWindow2D(classicWindow, Messages.getString("BoardEditor.preview2D"), "board-editor-preview-2d",
+        preview2D = boardWindow2D(swingWindow, Messages.getString("BoardEditor.preview2D"), "board-editor-preview-2d",
               editor.game());
-        if (preview2D != null) { showClassicWindow(null, preview2D); }
+        if (preview2D != null) { showLegacy2D(null, preview2D); }
     }
 
     /** A file-browser or lobby preview returns to this exact board, including a randomly generated one. */
-    private static void showClassicPreview(Window owner, Game game) {
+    private static void showLegacy2DPreview(Window owner, Game game) {
         JDialog dialog = boardWindow2D(owner, previewTitle(game.getBoard()), "board-preview-2d", game);
         if (dialog == null) { return; }
         JButton return3D = new JButton(Messages.getString("CommonMenuBar.viewGpuBoard"));
         return3D.setName("preview-view-3d");
         return3D.addActionListener(event -> {
             openPreview(owner, game.getBoard());
-            if (active != null && active.preview && active.classicWindow == owner
+            if (active != null && active.preview && active.swingWindow == owner
                   && active.mapGame.getBoard() == game.getBoard()) { dialog.dispose(); }
         });
         dialog.add(return3D, BorderLayout.NORTH);
-        showClassicWindow(null, dialog);
+        showLegacy2D(null, dialog);
     }
 
     /**
@@ -504,7 +504,7 @@ public final class GpuBoardWindow {
                 active.focus(false);
             } else {
                 // A new game may arrive while the previous game's native window is still being disposed.
-                active.restoreClassic = false;
+                active.restoreLegacy2D = false;
                 active.afterClose = () -> open(gui, view, panel);
             }
             return;
@@ -686,21 +686,21 @@ public final class GpuBoardWindow {
         if (closing) {
             return;
         }
-        if (!preview && classicWindow != null) {
-            classicWindow.setVisible(false);
+        if (!preview && swingWindow != null) {
+            swingWindow.setVisible(false);
         }
         if (preview) {
             // The owner's open dialogs stay in front, as those it opens later do (dialogListener), so the lobby's 2D
             // preview is not hidden behind its 3D preview.
             for (Window window : Window.getWindows()) {
-                if (window != classicWindow && window.isShowing() && window instanceof Dialog dialog
-                      && belongsToClassicWindow(dialog)) {
+                if (window != swingWindow && window.isShowing() && window instanceof Dialog dialog
+                      && belongsToSwingWindow(dialog)) {
                     raise(dialog);
                 }
             }
         }
         if (gui != null) {
-            gui.setClassicBoardViewEnabled(false);
+            gui.setLegacy2DViewEnabled(false);
             gui.refreshAuxiliaryWindows();
         }
         // A source captured during native startup must publish the now-measured tools inset before camera fitting.
@@ -725,7 +725,7 @@ public final class GpuBoardWindow {
         if (mapGame != null && (mapGame.getBoard().getWidth() < 1 || mapGame.getBoard().getHeight() < 1)) { return; }
         try {
             source = mapGame == null ? new GpuBoardSource(view, panel)
-                  : new GpuMapSource(mapGame, classicWindow, editor, this::requestExit, this::requestClassic);
+                  : new GpuMapSource(mapGame, swingWindow, editor, this::requestExit, this::requestLegacy2D);
             startupTimer.stop();
         } catch (RuntimeException | LinkageError failure) {
             startupFailure = failure;
@@ -758,7 +758,7 @@ public final class GpuBoardWindow {
             try {
                 if (editor != null) {
                     if (source != null) { source.endEditorStroke(); }
-                    if (editor.confirmDiscard(classicWindow)) { close(true); }
+                    if (editor.confirmDiscard(swingWindow)) { close(true); }
                 } else if (gui == null) {
                     close(false);
                 } else {
@@ -837,10 +837,10 @@ public final class GpuBoardWindow {
         dialog.toFront();
     }
 
-    /** True when the window is the classic window itself or a dialog chain owned by it. */
-    private boolean belongsToClassicWindow(Window window) {
+    /** True when the window is the Swing window itself or a dialog chain owned by it. */
+    private boolean belongsToSwingWindow(Window window) {
         for (Window current = window; current != null; current = current.getOwner()) {
-            if (current == classicWindow) {
+            if (current == swingWindow) {
                 return true;
             }
         }
@@ -848,7 +848,7 @@ public final class GpuBoardWindow {
     }
 
     private boolean closeWithPreviewOwner(AWTEvent event) {
-        if (preview && !closing && event.getSource() == classicWindow
+        if (preview && !closing && event.getSource() == swingWindow
               && (event.getID() == ComponentEvent.COMPONENT_HIDDEN || event.getID() == WindowEvent.WINDOW_CLOSED)) {
             close(false);
             return true;
@@ -871,20 +871,20 @@ public final class GpuBoardWindow {
             active = null;
         }
         if (preview) {
-            if (classicWindow.isShowing() && afterClose == null) {
-                classicWindow.toFront();
-                classicWindow.requestFocus();
+            if (swingWindow.isShowing() && afterClose == null) {
+                swingWindow.toFront();
+                swingWindow.requestFocus();
             }
         }
         if (editor != null) {
-            restoreClassic = classicWindow != null && classicWindow.isDisplayable();
+            restoreLegacy2D = swingWindow != null && swingWindow.isDisplayable();
             quitHandler(null);
         }
         // The native window is already destroyed. Never resurrect a client that is shutting down.
         if (afterClose != null) {
             afterClose.run();
-        } else if (restoreClassic && classicWindow != null) {
-            showClassicWindow(gui, classicWindow);
+        } else if (restoreLegacy2D && swingWindow != null) {
+            showLegacy2D(gui, swingWindow);
         }
         if (failure != null) {
             reportFailure(failure);
@@ -898,19 +898,19 @@ public final class GpuBoardWindow {
     }
 
     /** Return to the existing client without disconnecting or changing the game. */
-    public static synchronized void showClassic(ClientGUI gui) {
+    public static synchronized void showLegacy2D(ClientGUI gui) {
         if (!SwingUtilities.isEventDispatchThread()) {
-            SwingUtilities.invokeLater(() -> showClassic(gui));
+            SwingUtilities.invokeLater(() -> showLegacy2D(gui));
             return;
         }
         if (active != null && active.gui == gui) {
             active.close(true);
         } else if (gui.getFrame() != null) {
-            showClassicWindow(gui, gui.getFrame());
+            showLegacy2D(gui, gui.getFrame());
         }
     }
 
-    /** Includes preparation: classic panels must not open while the native window is starting. */
+    /** Includes preparation: Legacy 2D panels must not open while the native window is starting. */
     public static synchronized boolean isActiveFor(ClientGUI gui) {
         return active != null && active.gui == gui;
     }
@@ -1010,9 +1010,9 @@ public final class GpuBoardWindow {
         return window == null || window.gui != gui || !(window.source instanceof GpuBoardSource game) ? null : game;
     }
 
-    private static void showClassicWindow(ClientGUI gui, Window window) {
+    private static void showLegacy2D(ClientGUI gui, Window window) {
         if (gui != null) {
-            gui.setClassicBoardViewEnabled(!gui.getClient().getGame().getPhase().isLounge());
+            gui.setLegacy2DViewEnabled(!gui.getClient().getGame().getPhase().isLounge());
             gui.getMenuBar().setBoardView3D(false);
         }
         if (window instanceof Frame frame && (frame.getExtendedState() & Frame.ICONIFIED) != 0) {
@@ -1075,9 +1075,9 @@ public final class GpuBoardWindow {
         }
     }
 
-    private void close(boolean returnToClassic) {
+    private void close(boolean returnToLegacy2D) {
         afterClose = null;
-        restoreClassic = returnToClassic;
+        restoreLegacy2D = returnToLegacy2D;
         closing = true;
         startupTimer.stop();
         if (source != null) {
@@ -1104,25 +1104,25 @@ public final class GpuBoardWindow {
     private void reportFailure(Throwable failure) {
         if (editor != null) {
             LOGGER.error("GPU map editor failed", failure);
-            JOptionPane.showMessageDialog(classicWindow, failureMessage("BoardEditor.edit3DUnavailable", failure),
+            JOptionPane.showMessageDialog(swingWindow, failureMessage("BoardEditor.edit3DUnavailable", failure),
                   Messages.getString("BoardEditor.edit3D"), JOptionPane.ERROR_MESSAGE);
             return;
         }
         if (preview) {
-            reportPreviewFailure(classicWindow, failure);
+            reportPreviewFailure(swingWindow, failure);
             return;
         }
         LOGGER.error("GPU battle view failed", failure);
         Object[] choices = { Messages.getString("CommonMenuBar.viewGpuBoard"),
-              Messages.getString("CommonMenuBar.viewClassicBoard"), Messages.getString("MegaMek.Quit.label") };
-        int choice = JOptionPane.showOptionDialog(classicWindow, failureMessage("GpuBoard.unavailable", failure),
+              Messages.getString("CommonMenuBar.viewLegacy2D"), Messages.getString("MegaMek.Quit.label") };
+        int choice = JOptionPane.showOptionDialog(swingWindow, failureMessage("GpuBoard.unavailable", failure),
               Messages.getString("CommonMenuBar.viewGpuBoard"), JOptionPane.DEFAULT_OPTION, JOptionPane.ERROR_MESSAGE,
               null, choices, choices[0]);
         if (choice == 0) {
             open(gui, initialView, panel);
         } else if (choice == 1 && gui != null) {
             GUIPreferences.getInstance().setUse3DBoard(false);
-            showClassicWindow(gui, classicWindow);
+            showLegacy2D(gui, swingWindow);
         } else if (gui != null) {
             gui.handleExit();
         }

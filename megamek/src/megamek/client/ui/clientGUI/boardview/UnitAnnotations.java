@@ -66,6 +66,7 @@ import megamek.common.compute.Compute;
 import megamek.common.compute.VirtualRealityPilotingPod;
 import megamek.common.compute.VirtualRealityPilotingPod.Interference;
 import megamek.common.compute.VirtualRealityPilotingPod.InterferenceState;
+import megamek.common.enums.GamePhase;
 import megamek.common.equipment.HandheldWeapon;
 import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Aero;
@@ -808,13 +809,10 @@ public final class UnitAnnotations {
                 drawOnDeckFrontArc(graph);
             }
 
-            // determine secondary facing for non-meks & flipped arms
-            int secFacing = entity.getFacing();
-            if (!((entity instanceof Mek) || (entity instanceof ProtoMek)) || (entity instanceof QuadVee)) {
-                secFacing = entity.getSecondaryFacing();
-            } else if (entity.getArmsFlipped()) {
-                secFacing = (entity.getFacing() + 3) % 6;
-            }
+            // determine secondary facing for non-meks & flipped arms; the label shows no Mek torso twist
+            boolean mekTorso = ((entity instanceof Mek) || (entity instanceof ProtoMek)) && !(entity instanceof QuadVee)
+                  && !entity.getArmsFlipped();
+            int secFacing = mekTorso ? entity.getFacing() : twistFacing(entity);
             // draw secondary facing arrow if necessary
             if (!floating && (secFacing != -1) && (secFacing != entity.getFacing())) {
                 graph.setColor(Color.GREEN);
@@ -899,10 +897,6 @@ public final class UnitAnnotations {
         return secondaryPos == -1 || secondaryPos == 6 || entity instanceof AbstractBuildingEntity && secondaryPos == 0;
     }
 
-    private boolean isStaticEntity() {
-        return UnitStatusWords.isStaticEntity(entity);
-    }
-
     private Color labelBackground(boolean floating) {
         return criticalStatus && (!floating || !onlyDetectedBySensors()) ? LABEL_CRITICAL_BACK : labelBack;
     }
@@ -953,12 +947,30 @@ public final class UnitAnnotations {
 
     private Tmm tmm() {
         int mode = GUIP.getTMMPipMode();
-        if (mode == 0 || isStaticEntity() || entity.isAero()
-              || !(entity.isDone() && bv.getGame().getPhase().isMovement() || bv.getGame().getPhase().isFiring())) {
+        if (mode == 0 || !tmmShown(entity, bv.getGame().getPhase())) {
             return null;
         }
         return new Tmm(mode, Compute.getTargetMovementModifier(bv.getGame(), entity.getId()).getValue(),
               mode == 1 || mode == 3 ? Color.WHITE : GUIP.getColorForMovement(entity.moved));
+    }
+
+    /**
+     * Whether the unit's target movement modifier means something to show in {@code phase}: once the unit has moved
+     * in the movement phase, and in the firing phase; never for a static unit or an aerospace unit. Both boards use
+     * it: the Legacy 2D label's pips (with its pip-mode preference) and the Tactical View's chevrons.
+     */
+    public static boolean tmmShown(Entity entity, GamePhase phase) {
+        return !UnitStatusWords.isStaticEntity(entity) && !entity.isAero()
+              && (entity.isDone() && phase.isMovement() || phase.isFiring());
+    }
+
+    /**
+     * The facing the unit fires from beside its body's: the opposite facing with its arms flipped, else its secondary
+     * facing (a torso twist, a turret); -1 for none. The Tactical View's twist notch shows it for every unit; the
+     * Legacy 2D label leaves out a Mek's torso twist.
+     */
+    public static int twistFacing(Entity entity) {
+        return entity.getArmsFlipped() ? (entity.getFacing() + 3) % 6 : entity.getSecondaryFacing();
     }
 
     /**

@@ -17,6 +17,7 @@ import javax.swing.Timer;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -59,7 +60,7 @@ final class GpuMapSource implements BoardSource {
     private RulerModel ruler;
     private final BoardEditorSession editor;
     private final Runnable requestClose;
-    private final Runnable requestClassic;
+    private final Runnable requestLegacy2D;
     /** Only Swing owns the active brush stroke; render input carries the board generation it picked. */
     private Board editorStrokeBoard;
     /** Swing queues wheel notches (hex, levels) in arrival order until a capture; releasing Ctrl commits the undo entry. */
@@ -104,6 +105,8 @@ final class GpuMapSource implements BoardSource {
             return;
         }
         uiPreferences = UiPreferences.capture();
+        // Tiles carry the art of both graphics: the next frame publishes the choice, and no hex is captured again.
+        if (GUIPreferences.BOARD_GRAPHICS.equals(event.getName())) { return; }
         // Label/color preferences affect presentation only; interned terrain pixels and feature geometry are reused.
         dirtyAll();
     });
@@ -134,14 +137,14 @@ final class GpuMapSource implements BoardSource {
         this(game, owner, editor, requestClose, null);
     }
 
-    GpuMapSource(Game game, Window owner, BoardEditorSession editor, Runnable requestClose, Runnable requestClassic) {
+    GpuMapSource(Game game, Window owner, BoardEditorSession editor, Runnable requestClose, Runnable requestLegacy2D) {
         if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
         if (editor != null && editor.game() != game) { throw new IllegalArgumentException("The editor owns its Game"); }
         this.game = game;
         this.owner = owner;
         this.editor = editor;
         this.requestClose = requestClose;
-        this.requestClassic = requestClassic;
+        this.requestLegacy2D = requestLegacy2D;
         atmosphere = new GpuAtmosphereControls(() -> owner, game::getBoard, game::getPlanetaryConditions, () -> closed);
         if (editor != null) { trace = GpuTraceOverlay.Settings.capture(); }
         timer = new Timer(33, event -> refresh());
@@ -216,10 +219,10 @@ final class GpuMapSource implements BoardSource {
     /** Map workspaces expose their existing document and application actions without requiring a game client. */
     private List<BoardScene.Command> menuCommands() {
         List<BoardScene.Command> commands = new ArrayList<>();
-        if (requestClassic != null) {
-            // A preview switches to its 2D board; the editor opens its live 2D Preview beside itself.
-            commands.add(menuCommand("viewClassicBoard", editor == null ? "CommonMenuBar.viewClassicBoard"
-                  : "BoardEditor.preview2D", requestClassic));
+        if (requestLegacy2D != null) {
+            // A preview switches to its Legacy 2D board; the editor opens its live Legacy 2D Preview beside itself.
+            commands.add(menuCommand("viewLegacy2D", editor == null ? "CommonMenuBar.viewLegacy2D"
+                  : "BoardEditor.preview2D", requestLegacy2D));
         }
         if (editor != null) {
             long generation = boardGeneration;
@@ -250,9 +253,18 @@ final class GpuMapSource implements BoardSource {
                   "", !tagging, false, false, List.of(), () -> onSwing(() -> { if (!closed) { runBoardTagger(); } })));
         }
         GUIPreferences gui = GUIPreferences.getInstance();
-        List<BoardScene.Command> view = new ArrayList<>(List.of(
+        // The 3D board's graphics, as CommonMenuBar's 3D Graphics submenu; a choice applies at once.
+        BoardGraphics graphics = gui.getBoardGraphics();
+        BoardScene.Command boardGraphics = new BoardScene.Command("viewBoardGraphics",
+              Messages.getString("CommonMenuBar.viewBoardGraphics"), "", true, false, List.of(
+                    viewCommand(ClientGUI.VIEW_GRAPHICS_CLASSIC, null, graphics == BoardGraphics.CLASSIC,
+                          () -> gui.setBoardGraphics(BoardGraphics.CLASSIC)),
+                    viewCommand(ClientGUI.VIEW_GRAPHICS_ENHANCED, null, graphics == BoardGraphics.ENHANCED,
+                          () -> gui.setBoardGraphics(BoardGraphics.ENHANCED))), () -> { });
+        List<BoardScene.Command> view = new ArrayList<>(List.of(boardGraphics,
               viewCommand(ClientGUI.VIEW_TOGGLE_HEX_COORDS, editor == null ? KeyCommandBind.HEX_COORDS : null,
                     gui.getCoordsEnabled(), gui::toggleCoords),
+              viewCommand(ClientGUI.VIEW_TOGGLE_HEX_TYPES, null, gui.getHexTypesEnabled(), gui::toggleHexTypes),
               viewCommand(ClientGUI.VIEW_INC_GUI_SCALE, KeyCommandBind.INC_GUI_SCALE, null,
                     () -> CommonMenuBar.changeGUIScale(true)),
               viewCommand(ClientGUI.VIEW_DEC_GUI_SCALE, KeyCommandBind.DEC_GUI_SCALE, null,

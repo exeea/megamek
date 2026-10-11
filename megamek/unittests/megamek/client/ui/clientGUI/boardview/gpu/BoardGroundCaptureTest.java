@@ -266,12 +266,12 @@ class BoardGroundCaptureTest {
     }
 
     @Test
-    void cosmeticTransitionsUseNativeGroundWhileClassicAndUnmodeledArtworkRemainAvailable() throws Exception {
+    void cosmeticTransitionsUseNativeGroundWhileLegacy2DAndUnmodeledArtworkRemainAvailable() throws Exception {
         onEdt(() -> {
             var board = Board.createEmptyBoard(1, 1);
             var coords = new Coords(0, 0);
-            try (var artwork = new BoardArtwork(); var classic = new HexTileset(Configuration.hexesDir())) {
-                classic.loadFromFile("saxarba.tileset");
+            try (var artwork = new BoardArtwork(); var tileset = new HexTileset(Configuration.hexesDir())) {
+                tileset.loadFromFile("saxarba.tileset");
                 for (int family = 1; family <= 5; family++) {
                     for (int strength = 1; strength <= 5; strength++) {
                         Hex hex = new Hex(0, "ground_fluff:" + family + ":" + strength, "grass", coords);
@@ -293,7 +293,7 @@ class BoardGroundCaptureTest {
                         }
                         assertEquals(0, tile.groundCover().sand(), "Theme gradients never introduce loose SAND");
                         assertNull(tile.decals(), "A hidden transition must not survive in the decal pass");
-                        assertFalse(classic.blankTerrainTypes(hex).contains(Terrains.GROUND_FLUFF),
+                        assertFalse(tileset.blankTerrainTypes(hex).contains(Terrains.GROUND_FLUFF),
                               "The ordinary board keeps its authored transition artwork");
                         assertEquals(strength, hex.getTerrain(Terrains.GROUND_FLUFF).getExits());
                     }

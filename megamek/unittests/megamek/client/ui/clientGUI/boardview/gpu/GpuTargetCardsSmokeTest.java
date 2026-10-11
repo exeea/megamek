@@ -157,9 +157,8 @@ class GpuTargetCardsSmokeTest {
     void cardsOverTheBoardBesideShots05To07And15() throws Exception {
         BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
-            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene, hud.theme.skin);
             GpuBoardOverlay overlay = new GpuBoardOverlay();
-            GpuUnitIcons icons = new GpuUnitIcons();
             try {
                 Coords atlasHex = unit(scene, ATLAS).location().coords();
                 GpuBattleStatus.Snapshot declaring = GpuBoardOverlaySmokeTest.status(GamePhase.FIRING, ATLAS);
@@ -169,7 +168,7 @@ class GpuTargetCardsSmokeTest {
                     Layer layer = new Layer(hud, mock(GpuBoardSource.class), board.camera);
                     frame(board, tactical, atlasHex, tactical ? 60.8f : 118, tactical ? 868 : 925,
                           tactical ? 672 : 790);
-                    GpuHud.HudView view = draw(hud, board, overlay, icons, layer, firing(scene, declaring, shot05()),
+                    GpuHud.HudView view = draw(hud, board, overlay, layer, firing(scene, declaring, shot05()),
                           panels(hud, PANELS_05));
                     Table wolf = layer.card(TIMBER_WOLF);
                     Table master = layer.card(BATTLEMASTER);
@@ -195,7 +194,7 @@ class GpuTargetCardsSmokeTest {
                 // Shot 06: three targets; only the focused Timber Wolf's card lists its attacks.
                 Layer layer = new Layer(hud, mock(GpuBoardSource.class), board.camera);
                 frame(board, false, atlasHex, 118, 980, 850);
-                GpuHud.HudView view = draw(hud, board, overlay, icons, layer, firing(scene, declaring, shot06()),
+                GpuHud.HudView view = draw(hud, board, overlay, layer, firing(scene, declaring, shot06()),
                       panels(hud, PANELS_05));
                 Table wolf = layer.card(TIMBER_WOLF);
                 assertEquals(List.of("A", "TIMBER WOLF", "PRIMARY", "SRM 6", "[LT] SRM 6  (9)", "7+", "58%",
@@ -217,7 +216,7 @@ class GpuTargetCardsSmokeTest {
                 hud.size(1280, 720);
                 layer = new Layer(hud, mock(GpuBoardSource.class), board.camera);
                 frame(board, false, atlasHex, 79, 615, 360 + 530);
-                view = draw(hud, board, overlay, icons, layer, firing(scene, declaring, shot05()),
+                view = draw(hud, board, overlay, layer, firing(scene, declaring, shot05()),
                       panels(hud, PANELS_15));
                 assertEquals(270, layer.card(TIMBER_WOLF).getWidth(), .01f, "270 wide at W <= 1350");
                 assertPlaced(hud, layer, view, panels(hud, PANELS_15));
@@ -227,7 +226,6 @@ class GpuTargetCardsSmokeTest {
                       new Crop("area", area(hud, 300, 0, 720, 480), 300, 0)).dispose();
                 layer.dispose();
             } finally {
-                icons.dispose();
                 overlay.dispose();
                 board.dispose();
             }
@@ -326,9 +324,8 @@ class GpuTargetCardsSmokeTest {
     void aDraggedRowFloatsOverItsCardWhileTheOthersMakeRoom() throws Exception {
         BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
-            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene, hud.theme.skin);
             GpuBoardOverlay overlay = new GpuBoardOverlay();
-            GpuUnitIcons icons = new GpuUnitIcons();
             try {
                 GpuBoardSource source = mock(GpuBoardSource.class);
                 GpuFireOrders fire = mock(GpuFireOrders.class);
@@ -337,7 +334,7 @@ class GpuTargetCardsSmokeTest {
                 GpuBattleStatus.Snapshot declaring = GpuBoardOverlaySmokeTest.status(GamePhase.FIRING, ATLAS);
                 frame(board, false, unit(scene, ATLAS).location().coords(), 118, 925, 790);
                 GpuBoardSource.Frame orders = firing(scene, declaring, shot05());
-                draw(hud, board, overlay, icons, layer, orders, panels(hud, PANELS_05));
+                draw(hud, board, overlay, layer, orders, panels(hud, PANELS_05));
                 Table wolf = layer.card(TIMBER_WOLF);
                 Rectangle srm = GpuHudTestStage.bounds(wolf.findActor("card-row-2"));
                 // The right arm laser's row held by its middle (a row drags from any part of it, as the .or does).
@@ -353,7 +350,7 @@ class GpuTargetCardsSmokeTest {
                 for (int frame = 0; frame < 24; frame++) {
                     hud.stage.act(1 / 60f);
                 }
-                draw(hud, board, overlay, icons, layer, orders, panels(hud, PANELS_05));
+                draw(hud, board, overlay, layer, orders, panels(hud, PANELS_05));
                 Rectangle risen = GpuHudTestStage.bounds(wolf.findActor("card-row-2"));
                 assertEquals(srm.y + 48, risen.y, .5f, "the SRM's row rose into the AC/20's place");
                 capture(hud, "cards-drag", "05-weapon-declaration.jpg", new Crop("wolf", wolf, 1005, 40)).dispose();
@@ -362,7 +359,6 @@ class GpuTargetCardsSmokeTest {
                 verify(fire).move(AC20, 1);
                 layer.dispose();
             } finally {
-                icons.dispose();
                 overlay.dispose();
                 board.dispose();
             }
@@ -678,30 +674,23 @@ class GpuTargetCardsSmokeTest {
     // ------------------------------------------------------------------ drawing and checks
 
     /**
-     * Draws the board with the G7 overlay as GpuBattleView orders it (in the Tactical View with the icons), then the
+     * Draws the board with the G7 overlay as GpuBattleView orders it (in the Tactical View on the bases), then the
      * labels layer with the view's facts of that draw, and returns them.
      */
     private static GpuHud.HudView draw(GpuHudTestStage hud, GpuBoardSpaceHarness board, GpuBoardOverlay overlay,
-          GpuUnitIcons icons, Layer layer, GpuBoardSource.Frame frame, List<Rectangle> panels) {
+          Layer layer, GpuBoardSource.Frame frame, List<Rectangle> panels) {
         boolean tactical = board.tactical();
         layer.state.update(frame.status(), GpuUnitRecord.Snapshot.EMPTY, false);
         overlay.update(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0),
               preferences(), layer.state);
-        Map<BoardScene.Unit, Vector3> iconAnchors = new HashMap<>();
         GpuFireOrders.Snapshot fire = frame.panels().fire();
+        board.basesStatus = frame.status();
         board.draw(camera -> {
-            if (!tactical) {
-                overlay.renderGhost(camera, board.instances::get);
-            }
+            overlay.renderGhost(camera, board.instances::get);
             overlay.renderMarks(camera, board.poses::get);
             overlay.render(camera);
-            if (tactical) {
-                icons.update(true, camera, board.scene, frame.status(), board.poses, iconAnchors);
-                icons.render(camera);
-                overlay.renderGhost(camera, icons::instance);
-            }
         });
-        GpuHud.HudView view = GpuBoardLabelsSmokeTest.view(board, tactical ? iconAnchors : board.anchors, tactical);
+        GpuHud.HudView view = GpuBoardLabelsSmokeTest.view(board, board.anchors, tactical);
         layer.update(hud, frame, view, panels);
         hud.drawStage();
         return view;

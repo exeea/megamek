@@ -1434,7 +1434,7 @@ public class ChatLounge extends AbstractPhaseDisplay
         return hasServerBoard ? board : null;
     }
 
-    /** The classic preview owns a renderer only after the user opens it. */
+    /** The Legacy 2D preview owns a renderer only after the user opens it. */
     private boolean initializeBoardPreview() {
         boardPreviewW = new ClientDialog(clientgui.getFrame(),
               Messages.getString("BoardSelectionDialog.ViewGameBoard"),

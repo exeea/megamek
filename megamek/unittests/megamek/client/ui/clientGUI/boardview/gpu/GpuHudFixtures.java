@@ -102,7 +102,7 @@ final class GpuHudFixtures {
         return units;
     }
 
-    /** A classic unit sprite, data/images/units/meks/{name}.png. */
+    /** A 2D unit sprite, data/images/units/meks/{name}.png. */
     static BoardScene.Pixels sprite(String name) {
         return pixels(new File(new File(Configuration.unitImagesDir(), "meks"), name + ".png"));
     }

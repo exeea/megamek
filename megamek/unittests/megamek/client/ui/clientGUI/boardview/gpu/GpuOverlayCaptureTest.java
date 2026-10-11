@@ -15,7 +15,6 @@ import java.awt.geom.AffineTransform;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,7 +36,7 @@ import org.junit.jupiter.api.Test;
 
 class GpuOverlayCaptureTest {
     private static final Coords EDITED = new Coords(0, 0), RETAINED = new Coords(0, 2);
-    private static final Color RETAINED_COLOR = new Color(31, 107, 193, 91);
+    private static final Color ECM_COLOR = new Color(120, 40, 60, 83);
 
     @Test
     void dialogSelectionsAttackPreviewsHeatAndRulerEndpointsUseTheirOwnHexPlanes() throws Exception {
@@ -163,39 +162,25 @@ class GpuOverlayCaptureTest {
                 Color sheetColor = preferences.getMapsheetColor();
                 try {
                     preferences.setShowMapSheets(false);
-                    Map<String, Map<Coords, Color>> fields = new LinkedHashMap<>();
+                    // E(C)CM reaches the 3D board as its own snapshot, never as these per-hex commands.
                     for (String name : List.of("ecmHexes", "eccmHexes", "ecmCenters", "eccmCenters")) {
-                        Map<Coords, Color> colors = new HashMap<>();
-                        colors.put(EDITED, new Color(120, 40 + fields.size() * 25, 60, 83));
-                        fields.put(name, colors);
-                        setField(fixture.view, name, colors);
+                        setField(fixture.view, name, new HashMap<>(Map.of(EDITED, ECM_COLOR)));
                     }
-                    fields.get("ecmHexes").put(RETAINED, RETAINED_COLOR);
+                    fixture.game.getBoard().setEmbeddedBoard(41, RETAINED);
                     BoardTactical before = fixture.view.captureTacticalGeometry();
                     BoardTactical repeated = fixture.view.captureTacticalGeometry();
                     assertEquals(before, repeated);
                     assertSame(before, repeated, "An unchanged immutable snapshot must reach the renderer by identity");
-                    assertSame(fill(before, RETAINED_COLOR), fill(repeated, RETAINED_COLOR),
+                    assertSame(fillAt(before, RETAINED), fillAt(repeated, RETAINED),
                           "Unchanged coverage must reuse its immutable drawing commands");
-
-                    for (var entry : fields.entrySet()) {
-                        before = fixture.view.captureTacticalGeometry();
-                        entry.getValue().put(EDITED, new Color(200, 110, 35, 109));
-                        BoardTactical recolored = fixture.view.captureTacticalGeometry();
-                        assertNotEquals(before, recolored, entry.getKey() + " recoloring must be visible");
-                        assertSame(fill(before, RETAINED_COLOR), fill(recolored, RETAINED_COLOR));
-                        assertFresh(fixture.view, recolored);
-                        entry.getValue().remove(EDITED);
-                        BoardTactical removed = fixture.view.captureTacticalGeometry();
-                        assertNotEquals(recolored, removed, entry.getKey() + " removal must be visible");
-                        assertFresh(fixture.view, removed);
-                    }
+                    assertTrue(before.fills().stream().noneMatch(fill -> fill.argb() == ECM_COLOR.getRGB()),
+                          "No E(C)CM wash or source ring in the 3D board's markings");
 
                     BoardTactical unembedded = fixture.view.captureTacticalGeometry();
                     fixture.game.getBoard().setEmbeddedBoard(42, EDITED);
                     BoardTactical embedded = fixture.view.captureTacticalGeometry();
                     assertNotEquals(unembedded, embedded);
-                    assertSame(fill(unembedded, RETAINED_COLOR), fill(embedded, RETAINED_COLOR));
+                    assertSame(fillAt(unembedded, RETAINED), fillAt(embedded, RETAINED));
                     assertFresh(fixture.view, embedded);
                     fixture.game.getBoard().embeddedBoardCoords().remove(EDITED);
                     assertEquals(unembedded, fixture.view.captureTacticalGeometry());
@@ -205,7 +190,7 @@ class GpuOverlayCaptureTest {
                     preferences.setMapSheetColor(firstSheet);
                     preferences.setShowMapSheets(true);
                     BoardTactical withSheets = fixture.view.captureTacticalGeometry();
-                    assertTrue(withSheets.fills().indexOf(fill(withSheets, RETAINED_COLOR))
+                    assertTrue(withSheets.fills().indexOf(fillAt(withSheets, RETAINED))
                           < withSheets.fills().indexOf(fill(withSheets, firstSheet)),
                           "All coverage precedes map-sheet borders, including overlapping edge hexes");
                     assertFresh(fixture.view, withSheets);
@@ -221,7 +206,7 @@ class GpuOverlayCaptureTest {
                     fixture.view.captureTacticalGeometry();
                     fixture.game.setBoardDirect(board());
                     BoardTactical replacement = fixture.view.captureTacticalGeometry();
-                    assertEquals(unembedded, replacement, "A same-sized replacement must not retain embedded markers");
+                    assertTrue(replacement.fills().isEmpty(), "A same-sized replacement must not retain embedded markers");
                     assertFresh(fixture.view, replacement);
                 } finally {
                     preferences.setShowMapSheets(sheets);
@@ -235,8 +220,7 @@ class GpuOverlayCaptureTest {
     void liveSpriteVisibilityAndColorRemainLiveWithoutARepaintInvalidation() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board())) {
             SwingUtilities.invokeAndWait(() -> {
-                Map<Coords, Color> coverage = new HashMap<>(Map.of(RETAINED, RETAINED_COLOR));
-                setField(fixture.view, "ecmHexes", coverage);
+                fixture.game.getBoard().setEmbeddedBoard(41, RETAINED);
                 CursorSprite cursor = new CursorSprite(fixture.view, Color.MAGENTA);
                 cursor.setHexLocation(new Coords(3, 3));
                 fixture.view.addSprites(List.of(cursor));
@@ -249,7 +233,7 @@ class GpuOverlayCaptureTest {
                 BoardTactical hidden = fixture.view.captureTacticalGeometry();
                 assertEquals(revision, fixture.view.getPlanarRevision());
                 assertFalse(hidden.fills().stream().anyMatch(fill -> fill.argb() == Color.MAGENTA.getRGB()));
-                assertSame(fill(shown, RETAINED_COLOR), fill(hidden, RETAINED_COLOR));
+                assertSame(fillAt(shown, RETAINED), fillAt(hidden, RETAINED));
                 assertFresh(fixture.view, hidden);
                 cursor.setColor(Color.ORANGE);
                 cursor.setHidden(false);
@@ -263,6 +247,12 @@ class GpuOverlayCaptureTest {
 
     private static BoardTactical.Fill fill(BoardTactical tactical, Color color) {
         return tactical.fills().stream().filter(fill -> fill.argb() == color.getRGB()).findFirst().orElseThrow();
+    }
+
+    /** The first command that covers the hex's centre, such as its embedded-board mark. */
+    private static BoardTactical.Fill fillAt(BoardTactical tactical, Coords coords) {
+        double x = coords.getX() * 63 + 42, y = coords.getY() * 72 + (coords.getX() & 1) * 36 + 36;
+        return tactical.fills().stream().filter(fill -> fill.shape().contains(x, y)).findFirst().orElseThrow();
     }
 
     private static void assertFresh(BoardClientState view, BoardTactical incremental) {

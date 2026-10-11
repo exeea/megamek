@@ -2,9 +2,11 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.Camera;
@@ -231,5 +233,66 @@ final class GpuHexSurface implements Disposable {
         pages.clear();
         dependencies.clear();
         bounds.inf();
+    }
+
+    /**
+     * One hex pass's carriers by chunk: each is built when its chunk is first in view and kept while its terrain stays
+     * current. Its owner chooses the chunks and draws them with its own shader and per-draw state.
+     */
+    static final class Cache implements Disposable {
+        private final Map<Coords, GpuHexSurface> surfaces = new HashMap<>();
+        private final Map<Coords, BoundingBox> bounds = new HashMap<>();
+        private BoardScene scene;
+        private Function<Coords, BoardTacticalGeometry.Surface> terrain;
+        private boolean wholeHex;
+
+        /** Drops the carriers whose terrain changed, and the bounds when the tiles or the surfaces changed. */
+        void update(BoardScene next, Function<Coords, BoardTacticalGeometry.Surface> finished, boolean whole) {
+            if (whole != wholeHex) { clear(); }
+            if (scene != null && (scene.tiles() != next.tiles() || terrain != finished)) { bounds.clear(); }
+            scene = next;
+            terrain = finished;
+            wholeHex = whole;
+            surfaces.entrySet().removeIf(entry -> {
+                if (entry.getValue().current(finished)) { return false; }
+                entry.getValue().dispose();
+                bounds.remove(entry.getKey());
+                return true;
+            });
+        }
+
+        /** Frees the carriers of every other chunk. */
+        void retain(Set<Coords> chunks) {
+            bounds.keySet().retainAll(chunks);
+            surfaces.entrySet().removeIf(entry -> {
+                if (chunks.contains(entry.getKey())) { return false; }
+                entry.getValue().dispose();
+                return true;
+            });
+        }
+
+        /** Submits the chunks in view; {@code state} reaches the shader as each renderable's user data. */
+        void submit(ModelBatch batch, Camera camera, Shader shader, Material material, Object state,
+              Collection<Coords> chunks) {
+            for (Coords coords : chunks) {
+                BoundingBox box = bounds.computeIfAbsent(coords, key -> GpuHexSurface.bounds(scene, key, terrain, wholeHex));
+                if (!camera.frustum.boundsInFrustum(box)) { continue; }
+                surfaces.computeIfAbsent(coords, key -> new GpuHexSurface(scene, key, terrain, wholeHex))
+                      .submit(batch, camera, shader, material, state);
+            }
+        }
+
+        long bytes() { return surfaces.values().stream().mapToLong(GpuHexSurface::bytes).sum(); }
+
+        void clear() {
+            surfaces.values().forEach(GpuHexSurface::dispose);
+            surfaces.clear();
+            bounds.clear();
+            scene = null;
+            terrain = null;
+        }
+
+        @Override
+        public void dispose() { clear(); }
     }
 }

@@ -133,7 +133,7 @@ class GpuOverlayTest {
                     }
                     assertArrayEquals(actual.getRGB(0, 0, pixels.width, pixels.height, null, 0, pixels.width),
                           layered.getRGB(0, 0, pixels.width, pixels.height, null, 0, pixels.width),
-                          "Native layers must preserve the classic painter's pixels and placement");
+                          "Native layers must preserve the Legacy 2D painter's pixels and placement");
                 }
             });
         } finally {

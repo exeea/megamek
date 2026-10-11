@@ -27,7 +27,7 @@ class GpuPlaybackCameraTest {
     }
 
     @Test
-    void initialFitIgnoresOldClassicCenterRequestsButNewRequestsStillWork() {
+    void initialFitIgnoresOldLegacy2DCenterRequestsButNewRequestsStillWork() {
         var unit = UnitPlaybackTest.unit(1, 0);
         var view = view(true);
         try {
@@ -38,7 +38,7 @@ class GpuPlaybackCameraTest {
                     var point = view.boardCamera.camera.project(BoardGeometry.corner(tile.coords(), tile.elevation(), corner),
                           0, 0, 800, 600);
                     assertTrue(point.x > 0 && point.x < 800 && point.y > 0 && point.y < 600,
-                          "The initial view must fit the map even if the classic board had centered a unit");
+                          "The initial view must fit the map even if the Legacy 2D board had centered a unit");
                 }
             }
             view.updateCameraFocus(scene, new BoardFocus(2, unit.location().coords()));
@@ -256,7 +256,7 @@ class GpuPlaybackCameraTest {
     }
 
     @Test
-    void classicMovementAutoCenterIsConsumedWithoutReframingAVisibleRouteOnArrival() throws Exception {
+    void legacy2DMovementAutoCenterIsConsumedWithoutReframingAVisibleRouteOnArrival() throws Exception {
         var move = movement(1, 0, 2);
         var view = view(false);
         try {

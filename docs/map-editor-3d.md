@@ -3,7 +3,7 @@
 [Docs index](README.md) · [Complete class responsibilities](gpu-code-map.md) · [3D board editor](3d-board-editor.md)
 
 The board editor is the 3D editor: its session, tools, keys, gestures, undo, 2D Preview, files and legacy conversion
-are described in [Standalone 3D board editor](3d-board-editor.md). The classic 2D editor, its Tools palette and its
+are described in [Standalone 3D board editor](3d-board-editor.md). The Legacy 2D editor, its Tools palette and its
 switch between 2D and 3D are gone. This page covers the hex markers that the game, the map previews and the editor
 share, and the editor's terrain annotations.
 

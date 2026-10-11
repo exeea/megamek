@@ -241,7 +241,7 @@ final class GpuMinimap implements GpuHud.Component {
         Canvas() {
             setName("minimap-canvas");
             addListener(new InputListener() {
-                /** Whether the press is a middle one, whose drag orbits; and its last point. */
+                /** Whether the press is a middle one that orbits; and its last point. */
                 private boolean orbiting;
                 private float lastX;
                 private float lastY;
@@ -250,12 +250,13 @@ final class GpuMinimap implements GpuHud.Component {
 
                 @Override
                 public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-                    orbiting = button == Input.Buttons.MIDDLE;
+                    // The Tactical View holds its angle: there a middle press centres as a left one does.
+                    orbiting = button == Input.Buttons.MIDDLE && !camera.rotationLocked();
                     if (orbiting) {
                         lastX = x;
                         lastY = y;
                         cursor.capture(x, y);
-                    } else if (button == Input.Buttons.LEFT) {
+                    } else if (button == Input.Buttons.LEFT || button == Input.Buttons.MIDDLE) {
                         centre(x, y);
                     } else {
                         return false;

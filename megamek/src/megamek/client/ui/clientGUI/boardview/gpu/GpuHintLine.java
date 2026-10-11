@@ -52,8 +52,8 @@ final class GpuHintLine implements GpuHud.Component {
     /** Gesture and action texts, alternating, of the line on screen. */
     private List<String> shown = List.of();
     /**
-     * The pick's chip: its instructions, the picked hexes once there are some, Done and Cancel, as the classic board's
-     * picker dialog shows them.
+     * The pick's chip: its instructions, the picked hexes once there are some, Done and Cancel, as the Legacy 2D
+     * board's picker dialog shows them.
      */
     private final Table chip;
     private final Label instructions;
@@ -123,7 +123,7 @@ final class GpuHintLine implements GpuHud.Component {
 
     /**
      * The line's gestures and what each does now, alternating (the prototype's hintText, plan A.12 L11). While a bot
-     * order picks hexes, the pick's: its instructions and picked hexes, Done and Cancel, as the classic board's
+     * order picks hexes, the pick's: its instructions and picked hexes, Done and Cancel, as the Legacy 2D board's
      * picker dialog shows them.
      */
     static List<String> items(GpuHud.Inputs inputs) {
@@ -151,9 +151,11 @@ final class GpuHintLine implements GpuHud.Component {
                   text("GpuBoard.hud.mouse.shiftClick"), text("GpuBoard.hud.hint.orientation")));
         }
         if (inputs.view().tactical()) {
+            // The Tactical View holds its angle (BoardCamera.rotationLocked): no orbit gesture. Its Overlays panel opens
+            // and collapses on a key.
             items.addAll(List.of(text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.panMap"),
-                  text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit"),
                   text("GpuBoard.hud.mouse.wheel"), text("GpuBoard.hud.hint.zoom"),
+                  key(preferences, KeyCommandBind.TACTICAL_OVERLAYS), text("GpuBoard.hud.hint.overlays"),
                   key(preferences, KeyCommandBind.TOGGLE_ISO), text("GpuBoard.hud.util.backTo3d")));
         } else {
             String camera = key(preferences, KeyCommandBind.SCROLL_NORTH) + key(preferences, KeyCommandBind.SCROLL_WEST)

@@ -63,6 +63,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
@@ -206,9 +207,9 @@ class GpuHudRoutingSmokeTest {
             routing.show(SCENARIOS.get(6));
             routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
             verify(routing.fire).focusTarget(TargetKey.unit(FOE_ID));
-            for (Scenario classic : List.of(SCENARIOS.get(8), SCENARIOS.get(9))) {
+            for (Scenario unplanned : List.of(SCENARIOS.get(8), SCENARIOS.get(9))) {
                 clearInvocations(routing.source, routing.fire);
-                routing.show(classic);
+                routing.show(unplanned);
                 routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
                 verify(routing.source).hover(FOE_HEX, 0);
                 verify(routing.source).click(FOE_HEX, false, 0);
@@ -483,9 +484,8 @@ class GpuHudRoutingSmokeTest {
             assertEquals(azimuth, camera.azimuth(), "The turn stops with the key");
             routing.view.setTacticalView(true);
             routing.view.render();
-            azimuth = camera.azimuth();
             routing.hold(Input.Keys.Q, () -> routing.advance(3, .1f));
-            assertEquals(-27, turned(azimuth, camera.azimuth()), .01f, "The Tactical View shares the turn controls");
+            assertEquals(0, camera.azimuth(), "The Tactical View holds north up while Q is held");
             routing.view.setTacticalView(false);
         });
     }
@@ -1004,7 +1004,7 @@ class GpuHudRoutingSmokeTest {
     private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
         return new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(), p.reportFilterKeywords(),
               p.minimapEnabled(), enabled, p.conditionsVisible(), p.turnDetails(), p.binds(),
-              p.moveSprintRgb());
+              p.moveSprintRgb(), BoardGraphics.ENHANCED);
     }
 
     /**

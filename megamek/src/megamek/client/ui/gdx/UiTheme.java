@@ -130,6 +130,11 @@ public final class UiTheme implements Disposable {
           Map.entry("star", 0xE838), Map.entry("star-outline", 0xE838), Map.entry("tune", 0xE429),
           Map.entry("arrow-right", 0xE941), Map.entry("arrow-up", 0xE986), Map.entry("arrow-down", 0xE984),
           Map.entry("triangle-left", 0xE5DE), Map.entry("wireframe", 0xF016),
+          // The Tactical View's unit badges: power_settings_new, vertical_align_bottom, anchor, sensors_off, sensors,
+          // security, visibility, terrain, visibility_off (a TAG link's crosshair is "locate").
+          Map.entry("power", 0xE8AC), Map.entry("prone", 0xE258), Map.entry("anchor", 0xF1CD),
+          Map.entry("jammed", 0xE51F), Map.entry("ecm", 0xE51E), Map.entry("eccm", 0xE32A),
+          Map.entry("spotting", 0xE8F4), Map.entry("hull-down", 0xE564), Map.entry("hidden", 0xE8F5),
           Map.entry("tool-select", 0xF82F), Map.entry("tool-paint", 0xE3AE), Map.entry("tool-erase", 0xE6D0),
           Map.entry("tool-sculpt", 0xE3F7),
           // Board editor layer types: domain, factory, nature, format_paint, stacks, train, water, signpost,

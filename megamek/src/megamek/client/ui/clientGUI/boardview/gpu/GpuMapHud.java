@@ -52,6 +52,7 @@ final class GpuMapHud implements GpuBoardHud {
     private final Container<Actor> tuningSlot;
     private final Table top = new Table();
     private final Table utilityRow = new Table();
+    private final UiButton isometric;
     private final UiButton tactical;
     private final UiButton wireframe;
     private final UiButton menu;
@@ -83,7 +84,7 @@ final class GpuMapHud implements GpuBoardHud {
         north = source.isEditor() ? new GpuEditorNorth(ui) : null;
         if (north != null) { stage.addActor(north); }
 
-        GpuUtilityBar.cameraButtons(ui, utilityRow, camera, () -> {
+        isometric = GpuUtilityBar.cameraButtons(ui, utilityRow, camera, () -> {
             if (scene != null) { camera.fit(scene, framingLeft(), framingWidth(), framingBottom(), framingTop()); }
         });
         tactical = utility(GpuUtilityBar.utility(ui, "tactical", "GpuBoard.hud.util.tactical", "utility-tactical"));
@@ -182,6 +183,7 @@ final class GpuMapHud implements GpuBoardHud {
         boardGeneration = frame.boardGeneration();
         // Only an open menu pins the hex card; every dismissal path returns it to the latest hover.
         if (!contextMenu.isVisible() && frame.context() != null) { source.inspect(null); }
+        isometric.setDisabled(camera.rotationLocked());
         tactical.pressed(camera.tactical());
         wireframe.pressed(tuningModel.wireframe()).setDisabled(!GpuWireframe.supported());
         menu.pressed(state.dialog == Dialog.MENU);

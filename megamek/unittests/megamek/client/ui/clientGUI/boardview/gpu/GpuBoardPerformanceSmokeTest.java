@@ -16,6 +16,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
@@ -35,6 +36,8 @@ import com.badlogic.gdx.utils.ScreenUtils;
 import jdk.jfr.Event;
 import jdk.jfr.Name;
 import jdk.jfr.StackTrace;
+import megamek.client.ui.clientGUI.BoardGraphics;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.common.Hex;
@@ -257,7 +260,15 @@ class GpuBoardPerformanceSmokeTest {
         }
         int scenarioFrames = warmupFrames + sampleFrames;
         boolean comparePages = Boolean.getBoolean("megamek.gpu.performanceComparePages");
-        int variants = comparePages ? 2 : 1;
+        // The 3D Graphics of each scenario's variants, the first also loads the board (for example CLASSIC,ENHANCED);
+        // none keeps the saved choice. TODO(b11 step 7): Classic is still the draw-time flip to the tileset columns.
+        List<BoardGraphics> graphics = graphics();
+        if (comparePages && graphics.size() > 1) {
+            throw new IllegalArgumentException("One comparison per run: the terrain pages or the graphics");
+        }
+        int variants = comparePages ? 2 : Math.max(1, graphics.size());
+        BoardGraphics savedGraphics = GUIPreferences.getInstance().getBoardGraphics();
+        if (!graphics.isEmpty()) { setGraphics(graphics.getFirst()); }
         long settleNanos = Integer.getInteger("megamek.gpu.performanceSettleSeconds", 180) * 1_000_000_000L;
         // The draw audit installs GL interceptors. Leave warmup after removing them before measuring frame pacing.
         int drawCountFrame = warmupFrames / 2;
@@ -331,6 +342,8 @@ class GpuBoardPerformanceSmokeTest {
                           warmupFrames, sampleFrames, noFinish ? "none" : "glFinish");
                     System.out.printf("PERF terrainLoD=%s frozenCapture=%s%n", TerrainLod.enabled(),
                           Boolean.getBoolean("megamek.gpu.performanceFrozenCapture"));
+                    System.out.printf("PERF graphics=%s%n", graphics.isEmpty()
+                          ? List.of(GUIPreferences.getInstance().getBoardGraphics()) : graphics);
                 }
 
                 @Override
@@ -372,11 +385,15 @@ class GpuBoardPerformanceSmokeTest {
                         if (comparePages && phase == 0) {
                             setPages(this, frame / scenarioFrames % variants == 1);
                         }
+                        BoardGraphics shown = graphics.isEmpty() ? null : graphics.get(frame / scenarioFrames % variants);
+                        // The switch takes effect in this warmup frame, which builds what the variant first draws.
+                        if (graphics.size() > 1 && phase == 0) { setGraphics(shown); }
                         if (frame == 1) {
                             boardCamera.setIsometric(!Boolean.getBoolean("megamek.gpu.performanceTopView"));
                             boardCamera.fit(fixture.source.takeFrame().scene());
                         }
-                        if (frame == scenarioFrames * variants || comparePages && view == 2 && phase == 0) {
+                        // Each variant of the moving view pans the same path.
+                        if (frame == scenarioFrames * variants || variants > 1 && view == 2 && phase == 0) {
                             boardCamera.camera.zoom = Float.parseFloat(System.getProperty("megamek.gpu.performanceZoom", ".5"));
                             BoardScene scene = fixture.source.takeFrame().scene();
                             boardCamera.center(BoardGeometry.center(new Coords(scene.width() / 2, scene.height() / 2), 0));
@@ -387,6 +404,7 @@ class GpuBoardPerformanceSmokeTest {
                         }
                         String scenario = view == 0 ? "overview" : view == 1 ? "close" : "moving";
                         if (comparePages) { scenario += frame / scenarioFrames % variants == 0 ? "-original" : "-pages"; }
+                        if (shown != null) { scenario += "-" + shown.name().toLowerCase(Locale.ROOT); }
                         if (phase == 0 && detailFrames == 0) {
                             phase(frame == 0 ? "terrain-build" : scenario + "-warmup");
                             detailStarted = System.nanoTime();
@@ -512,8 +530,23 @@ class GpuBoardPerformanceSmokeTest {
                 }
 
             }, config);
-        } finally { TerrainLod.setEnabled(previousLod); }
+        } finally {
+            TerrainLod.setEnabled(previousLod);
+            setGraphics(savedGraphics);
+        }
         if (failure.get() != null) { throw new AssertionError("Full board rendering benchmark", failure.get()); }
+    }
+
+    /** {@code megamek.gpu.performanceGraphics}: a comma-separated list of 3D Graphics names, empty for none. */
+    private static List<BoardGraphics> graphics() {
+        String names = System.getProperty("megamek.gpu.performanceGraphics", "");
+        return names.isBlank() ? List.of() : Arrays.stream(names.split(","))
+              .map(name -> BoardGraphics.valueOf(name.trim().toUpperCase(Locale.ROOT))).toList();
+    }
+
+    /** Chooses the 3D Graphics on the Swing thread, as the menus do; the view applies it in its next frame. */
+    private static void setGraphics(BoardGraphics graphics) throws Exception {
+        SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().setBoardGraphics(graphics));
     }
 
     @Name("megamek.GpuBenchmarkPhase")

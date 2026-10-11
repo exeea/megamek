@@ -29,7 +29,7 @@ class GpuMeasurementTest {
                 }
             }));
             Coords start = new Coords(4, 4), end = new Coords(8, 6);
-            // The HUD hands every Ctrl or Alt click to MegaMek's tools, both endpoints as on the classic board.
+            // The HUD hands every Ctrl or Alt click to MegaMek's tools, both endpoints as on the Legacy 2D board.
             fixture.source.click(start, false, InputEvent.CTRL_DOWN_MASK);
             SwingUtilities.invokeAndWait(() -> assertEquals(start, fixture.view.getFirstLOS()));
             fixture.source.click(end, false, InputEvent.CTRL_DOWN_MASK);

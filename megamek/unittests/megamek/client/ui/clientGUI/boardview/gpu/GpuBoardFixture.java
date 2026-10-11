@@ -23,7 +23,7 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
 
-/** Shared integration fixture with the shipped board and unit artwork; no classic renderer is constructed. */
+/** Shared integration fixture with the shipped board and unit artwork; no Legacy 2D renderer is constructed. */
 final class GpuBoardFixture implements AutoCloseable {
     final Game game = new Game();
     final Player player = new Player(0, "GPU review");
@@ -74,8 +74,8 @@ final class GpuBoardFixture implements AutoCloseable {
         return task.get();
     }
 
-    /** A classic Swing viewport over the shared state, only for tests that exercise both renderers together. */
-    BoardView classicView() {
+    /** A Legacy 2D Swing viewport over the shared state, only for tests that exercise both renderers together. */
+    BoardView legacy2DView() {
         try {
             return new BoardView(view, null, null);
         } catch (IOException failure) {

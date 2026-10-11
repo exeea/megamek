@@ -415,7 +415,7 @@ final class GpuFireOrders implements AutoCloseable {
         List<WeaponRow> rows = new ArrayList<>();
         for (WeaponMounted weapon : WeaponDisplayData.listedWeapons(actor)) {
             if (weapon.getEntity() != actor) {
-                // A handheld weapon has no number on the actor; it keeps the classic controls.
+                // A handheld weapon has no number on the actor; it keeps the Swing controls.
                 continue;
             }
             int eqNum = actor.getEquipmentNum(weapon);

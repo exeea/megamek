@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
  * The battle HUD's own widgets and the two harnesses: unit rows and sprites, letter squares and heat bars in one
  * swatch beside crops of the hud-v3 shots 02, 05 and 12, on the toolkit's generic widgets (UiGallerySmokeTest shows
  * those alone); sprite mask ownership; and the roster over the shipped board as sprite models in the 3D view and as
- * GpuUnitIcons in both views.
+ * meeples on their GpuUnitBases in the Tactical View.
  */
 @Tag("on-demand")
 class GpuHudKitSmokeTest {
@@ -113,10 +113,8 @@ class GpuHudKitSmokeTest {
         BoardScene scene = GpuBoardSpaceHarness.scene();
         assertEquals(10, scene.units().size());
         GpuHudTestStage.run(hud -> {
-            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
-            GpuUnitIcons icons = new GpuUnitIcons();
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene, hud.theme.skin);
             try {
-                Map<BoardScene.Unit, Vector3> iconAnchors = new HashMap<>();
                 for (boolean tactical : new boolean[] { false, true }) {
                     board.view(tactical);
                     assertEquals(tactical, board.tactical());
@@ -125,50 +123,32 @@ class GpuHudKitSmokeTest {
                     board.draw(camera -> { });
                     Pixmap bare = hud.captureBackBuffer("board-space-" + view + "-bare");
                     try {
-                        if (!tactical) {
-                            // The 3D view's units: GpuBattleView's sprite models and the contact's marker.
-                            board.units = true;
-                            board.draw(camera -> { });
-                            board.units = false;
-                            Pixmap units = hud.captureBackBuffer("board-space-units-3d");
-                            try {
-                                assertEquals(scene.units().size(), board.anchors.size(), "An anchor for every unit");
-                                for (BoardScene.Unit unit : scene.units()) {
-                                    Vector2 center = board.screen(
-                                          board.instances.get(unit).transform.getTranslation(new Vector3()));
-                                    // A 13 x 13 window: the woods' canopies may hide a unit's own anchor.
-                                    assertTrue(changedTexels(bare, units, center, 6) >= 13, unit.name()
-                                          + " is drawn at " + center + " in the 3D view");
-                                }
-                            } finally {
-                                units.dispose();
-                            }
-                        }
-                        // GpuBattleView shows icons only in the Tactical View; here they are forced on in 3D as
-                        // well, so a real board-space component checks the tilted camera, ground heights and
-                        // projection.
-                        board.draw(camera -> {
-                            icons.update(true, camera, board.scene, board.status, board.poses, iconAnchors);
-                            icons.render(camera);
-                        });
-                        Pixmap drawn = hud.captureBackBuffer("board-space-icons-" + view);
+                        // The 3D view's units are GpuBattleView's sprite models, the Tactical View's its meeples on
+                        // their bases; the contact is its marker in both.
+                        board.units = true;
+                        board.draw(camera -> { });
+                        board.units = false;
+                        Pixmap units = hud.captureBackBuffer("board-space-units-" + view);
                         try {
-                            for (BoardScene.Unit unit : board.scene.units()) {
-                                assertNotNull(icons.instance(unit), "An icon for " + unit.name());
+                            assertEquals(scene.units().size(), board.anchors.size(), "An anchor for every unit");
+                            for (BoardScene.Unit unit : scene.units()) {
                                 Vector2 center = board.screen(
-                                      icons.instance(unit).transform.getTranslation(new Vector3()));
-                                assertTrue(changedTexels(bare, drawn, center, 2) >= 13, unit.name()
-                                      + "'s icon is drawn at " + center + " in the " + view + " view");
+                                      board.instances.get(unit).transform.getTranslation(new Vector3()));
+                                // A 13 x 13 window: the woods' canopies may hide a unit's own anchor.
+                                assertTrue(changedTexels(bare, units, center, 6) >= 13, unit.name()
+                                      + " is drawn at " + center + " in the " + view + " view");
+                                if (tactical) {
+                                    assertNotNull(board.bases().base(unit), "A base for " + unit.name());
+                                }
                             }
                         } finally {
-                            drawn.dispose();
+                            units.dispose();
                         }
                     } finally {
                         bare.dispose();
                     }
                 }
             } finally {
-                icons.dispose();
                 board.dispose();
             }
         });

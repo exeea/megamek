@@ -195,7 +195,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | Code | What it does |
 | --- | --- |
 | `boardview/BoardClientState` | Owns client presentation state shared by renderers: tactical state (the game's tactical capture pass), annotations, focus and client integration. |
-| `boardview/BoardView` | Paints the classic board and bridges its input to the shared client state. |
+| `boardview/BoardView` | Paints the Legacy 2D board and bridges its input to the shared client state. |
 | `boardview/BoardArtwork` | Paints terrain artwork from the 3D tileset's resolved layers (`TilesetScenery`) and maps selected tileset art to native assets; also serves printable board output. |
 | `common/board/BoardSceneryLayouts` | The one legacy conversion (`convert`, image-free, run where a board is loaded: `BoardFile.loadSheet`, old saves, previews, the editor), the post-combine seam pass (`joinSheets`), the one statement of what is taken (`takenTokens`: objects, a design or nothing, for every legacy art token), the taken-token strip (`withoutTakenTokens`) and the editor's stamps. |
 | `common/board/TilesetMatcher`, `TilesetScenery` | Text-only tileset matching shared by the 2D tileset and the 3D artwork; the one "taken" predicate (`TilesetScenery.Layer.taken`); designed layers in tileset order (`appearanceLayers`). |
@@ -204,7 +204,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `common/board/BridgeSpan` | The span unit of bridges and the one bridge-type decode the conversion stores. |
 | `boardview/BoardTactical`, `BoardGlyphContext`, `UnitAnnotations` | Carry client-derived tactical shapes and annotation content into renderer-specific presentation. |
 | `clientGUI/MapMenu`, `panels/phaseDisplay/*` | Own real contextual commands, orders and phase-specific availability. |
-| `boardeditor/BoardEditorSession` | Owns the editor document, commands, selection and undo history, and converts a typed legacy token at stroke commit; the classic 2D editor is gone, its 2D Preview is a `BoardView` on the session's game. |
+| `boardeditor/BoardEditorSession` | Owns the editor document, commands, selection and undo history, and converts a typed legacy token at stroke commit; the Legacy 2D editor is gone, its Legacy 2D Preview is a `BoardView` on the session's game. |
 
 Rules changes belong in the game/client/server owners described in [Codebase](codebase.md).
 The GPU classes above receive the resulting state or execute the existing command.

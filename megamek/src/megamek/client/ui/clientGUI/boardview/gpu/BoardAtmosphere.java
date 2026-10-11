@@ -79,6 +79,13 @@ final class BoardAtmosphere {
     private static final float SKY_LEVEL = 1 / (1 + KEY_FILL);
     /** Full-moon light overhead, before adaptation, so that the adapted moon lands FULL_MOON_STOPS below noon. */
     private static final float NIGHT_LEVEL = (float) Math.pow(2, FULL_MOON_STOPS / (1 - ADAPTATION));
+    /**
+     * The Tactical View's fixed light (b11 design item 23), so shadows read the same on every map: from the
+     * north-west, 50 degrees above the horizon (board +y is north), in clear 13:00 colours and a neutral grade; the
+     * light reaching level ground stays that of 13:00. Night and dust stay rules data on the conditions card. After
+     * the levels above, which the 13:00 lighting reads.
+     */
+    static final Lighting TACTICAL = tactical(lighting(DEFAULTS));
 
     /** Ground layer height is in terrain levels; exposure is in stops. Night defaults to full moon unless explicitly suppressed. */
     record Settings(float hour, float clouds, float fog, float groundLayerHeight, float haze, float exposure,
@@ -482,6 +489,16 @@ final class BoardAtmosphere {
         float airMass = (1 + AIR_MASS_OFFSET) / (Math.max(altitude, 0) + AIR_MASS_OFFSET);
         return rgb((float) Math.exp(-EXTINCTION[0] * airMass), (float) Math.exp(-EXTINCTION[1] * airMass),
               (float) Math.exp(-EXTINCTION[2] * airMass));
+    }
+
+    /** {@code noon}'s colours from the fixed north-west direction, with its direct light on level ground kept. */
+    private static Lighting tactical(Lighting noon) {
+        Vector3 direction = new Vector3(.5f, -.5f, -.84f).nor();
+        float compensation = noon.direction().z / direction.z;
+        Color direct = rgb(noon.direct().r * compensation, noon.direct().g * compensation,
+              noon.direct().b * compensation);
+        return new Lighting(direction, direct, noon.ambient(), noon.fog(), noon.sky(), noon.horizon(),
+              new Color(Color.WHITE), 1, noon.daylight(), true);
     }
 
     private static Color groundLight(Vector3 direction, Color direct, Color ambient) {

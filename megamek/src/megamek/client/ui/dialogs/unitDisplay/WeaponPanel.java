@@ -83,7 +83,7 @@ import megamek.common.util.fileUtils.MegaMekFile;
 import megamek.logging.MMLogger;
 
 /**
- * Classic Swing view of the shared weapon selection and firing presentation.
+ * Swing view of the shared weapon selection and firing presentation.
  */
 public class WeaponPanel extends PicMap implements ListSelectionListener, ActionListener, IPreferenceChangeListener {
     private static final MMLogger logger = MMLogger.create(WeaponPanel.class);

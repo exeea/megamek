@@ -33,7 +33,7 @@ class BoardEditorSessionTest {
 
     @Test void boardSettingsRemainUnsavedAcrossHexUndoAndSaveTogether() throws Exception {
         var session = session();
-        Path file = directory.resolve("classic-settings.board2");
+        Path file = directory.resolve("board-settings.board2");
         session.save(file);
         send(session, Action.ELEVATION, "", "2");
         session.board().addTag("Arena");
@@ -186,7 +186,7 @@ class BoardEditorSessionTest {
         assertEquals("a", session.snapshot().objects().getFirst().id(), "Numeric paint order and contents agree");
     }
 
-    @Test void buildsRoadAndBuildingContextWithoutAnyClassicEditor() {
+    @Test void buildsRoadAndBuildingContextWithoutAnyLegacy2DEditor() {
         var session = session();
         send(session, Action.ADD_COMPONENT, "", "road");
         send(session, Action.TERRAIN, "road", "4");
@@ -1590,6 +1590,40 @@ class BoardEditorSessionTest {
         // The centres of hex 0101 (clear) and of hex 0302 (heavy woods; an even column starts at its row's top).
         assertNotEquals(image.getRGB(42, 36), image.getRGB(2 * 63 + 42, 72 + 36), "The tileset art is drawn");
         assertTrue(session.snapshot().message().contains("board.png"), session.snapshot().message());
+    }
+
+    /**
+     * The saved image prints every hex's coordinates and type whatever the views show (both switched off here), black
+     * on a white outline: hex 0302, depth-0 water, has DEPTH 0 at its bottom edge and its number at its top.
+     */
+    @Test void saveAsImagePrintsCoordinatesAndHexTypesBlackOnAWhiteOutline() throws Exception {
+        var preferences = megamek.client.ui.clientGUI.GUIPreferences.getInstance();
+        boolean coords = preferences.getCoordsEnabled(), types = preferences.getHexTypesEnabled();
+        try {
+            if (coords) { preferences.toggleCoords(); }
+            if (types) { preferences.toggleHexTypes(); }
+            var session = session();
+            send(session, Action.NEW, "", "5x4");
+            session.board().setHex(new Coords(2, 1), new Hex(0, "water:0", ""));
+            Path file = directory.resolve("types.png");
+            session.saveImage(file);
+            var image = javax.imageio.ImageIO.read(file.toFile());
+            // The tile of hex 0302 starts at (126, 72); its bottom line and its top line, each about 13 pixels high.
+            for (int top : new int[] { 72 + 56, 72 + 5 }) {
+                int black = 0, white = 0;
+                for (int y = top; y < top + 13; y++) {
+                    for (int x = 126 + 14; x < 126 + 70; x++) {
+                        int rgb = image.getRGB(x, y), r = rgb >> 16 & 255, g = rgb >> 8 & 255, b = rgb & 255;
+                        if (Math.max(r, Math.max(g, b)) < 50) { black++; }
+                        if (Math.min(r, Math.min(g, b)) > 225) { white++; }
+                    }
+                }
+                assertTrue(black > 8 && white > 20, "Black text on white at row " + top + ": " + black + "/" + white);
+            }
+        } finally {
+            if (preferences.getCoordsEnabled() != coords) { preferences.toggleCoords(); }
+            if (preferences.getHexTypesEnabled() != types) { preferences.toggleHexTypes(); }
+        }
     }
 
     /**

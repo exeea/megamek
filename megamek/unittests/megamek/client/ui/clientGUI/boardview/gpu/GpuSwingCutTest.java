@@ -87,7 +87,7 @@ class GpuSwingCutTest {
 
     /**
      * G4: MegaMek's firing solution draws into the board state's tactical capture, but the native frame leaves it out
-     * (the board labels' to-hit badges stand for it), and the sprite stays shown for the classic board.
+     * (the board labels' to-hit badges stand for it), and the sprite stays shown for the Legacy 2D board.
      */
     @Test
     void theNativeFrameLeavesOutMegaMeksFiringSolutions() throws Exception {
@@ -110,7 +110,7 @@ class GpuSwingCutTest {
             });
             assertNotEquals(captures.get(1), captures.get(0), "MegaMek's own capture draws the solution");
             assertEquals(captures.get(1), captures.get(2), "The native frame draws everything else, and no solution");
-            assertFalse(onSwing(solution::isHidden), "The capture leaves the sprite shown for the classic board");
+            assertFalse(onSwing(solution::isHidden), "The capture leaves the sprite shown for the Legacy 2D board");
         }
     }
 
@@ -147,7 +147,7 @@ class GpuSwingCutTest {
     /**
      * G4: while the plan draws a unit's route, the native frame leaves out MegaMek's step arrows and costs too, which
      * the board state captures over the route (the user's report of 2026-10-03: the old route marks mixed with the
-     * new); without a plan it shows them, and the capture leaves them shown for the classic board.
+     * new); without a plan it shows them, and the capture leaves them shown for the Legacy 2D board.
      */
     @Test
     void theNativeFrameLeavesOutMegaMeksStepArrowsWhileThePlanDrawsTheRoute() throws Exception {
@@ -170,12 +170,12 @@ class GpuSwingCutTest {
             assertNotEquals(captures.get(2), captures.get(1), "MegaMek's own capture draws the steps");
             assertEquals(captures.get(2), captures.get(0), "The native frame draws everything else, and no step");
             assertTrue(onSwing(() -> steps.stream().noneMatch(Sprite::isHidden)),
-                  "The capture leaves the steps shown for the classic board");
+                  "The capture leaves the steps shown for the Legacy 2D board");
 
             moving.board.panel = new JPanel();
-            Planned classic = planned(moving);
-            assertFalse(classic.planner());
-            assertEquals(classic.state(), classic.frame(), "Without a plan the frame shows MegaMek's steps");
+            Planned unplanned = planned(moving);
+            assertFalse(unplanned.planner());
+            assertEquals(unplanned.state(), unplanned.frame(), "Without a plan the frame shows MegaMek's steps");
         }
     }
 
@@ -237,7 +237,7 @@ class GpuSwingCutTest {
 
     /**
      * D13: over the battle window MegaMek's map menu, which the HUD's "More actions" captures, has no View group (its
-     * Unit Display and readout are the HUD's unit card and record sheet); the classic board keeps it.
+     * Unit Display and readout are the HUD's unit card and record sheet); the Legacy 2D board keeps it.
      */
     @Test
     void theCapturedMapMenuHasNoViewGroupWhileTheBattleWindowIsActive() throws Exception {
@@ -252,7 +252,7 @@ class GpuSwingCutTest {
             GpuBoardActions actions = new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { });
             Coords hex = fixture.entity.getPosition();
             assertTrue(labels(onSwing(() -> actions.contextCommands(hex))).contains("View"),
-                  "The classic board's map menu views the unit on the hex");
+                  "The Legacy 2D board's map menu views the unit on the hex");
             present(gui, view, fixture.source);
             try {
                 List<String> labels = labels(onSwing(() -> actions.contextCommands(hex)));
@@ -282,7 +282,7 @@ class GpuSwingCutTest {
             BoardClientState view = spy(fixture.view);
             doReturn(gui).when(view).getClientgui();
             JFrame frame = onSwing(JFrame::new);
-            // The ruler belongs to the client's classic window, whose dialogs the battle window's listener judges.
+            // The ruler belongs to the client's Swing window, whose dialogs the battle window's listener judges.
             when(gui.getFrame()).thenReturn(frame);
             RulerDialog ruler = onSwing(() -> new RulerDialog(frame, view, fixture.game));
             var field = ClientGUI.class.getDeclaredField("rulers");

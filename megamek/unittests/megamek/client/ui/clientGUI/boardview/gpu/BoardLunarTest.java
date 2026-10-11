@@ -18,6 +18,7 @@ import com.badlogic.gdx.math.collision.Ray;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.common.Hex;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -41,8 +42,10 @@ class BoardLunarTest {
         assertEquals(center.z, surface.height(center.x, center.y), .001f);
         assertEquals(ORIGIN, BoardGeometry.pick(scene, new Ray(center.cpy().add(0, 0, 500), new Vector3(0, 0, -1))));
         assertTrue(surface.waterFaces.isEmpty());
-        assertEquals(expected == 0 ? List.of() : List.of(Messages.getString("BoardView1.LEVEL") + expected),
+        assertEquals(expected == 0 ? List.of() : List.of(BoardHexText.level(expected)),
               lunar.text().stream().map(BoardHexText::text).toList());
+        assertTrue(lunar.text().stream().allMatch(label -> label.baseline() == 66),
+              "Without DEPTH and FOLIAGE the bed's height line settles on the bottom edge");
         assertEquals(lunar, lunar.lunar(), "Repeated presentation must not lower the bed again");
         assertEquals(elevation, original.elevation());
         assertEquals(depth, original.waterDepth());
@@ -85,6 +88,30 @@ class BoardLunarTest {
         assertEquals(2, BoardBridge.feature(shallow).elevation());
         assertTrue(BoardBridge.connected(deep, shallow, 3));
         assertTrue(BoardBridge.connected(shallow, deep, 0));
+    }
+
+    @Test
+    void theTypeBlockOnTheDryBedRaisesTheBridgeAndLosesTheVegetationTheIceAndTheLiquids() {
+        var font = new Font(Font.SANS_SERIF, Font.PLAIN, 10);
+        var bridge = new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, 1, BoardScene.FeatureKind.PROP, 9);
+        // SWAMP, HEAVY, DEEP SNOW, ICE and TORRENT go with the liquid; ROUGH, FORTIFIED and FIRE stay.
+        var hex = new Hex(0, "water:2;swamp:1;bridge:1;bridge_elev:1;bridge_cf:40;woods:2;foliage_elev:2;ice:1;"
+              + "snow:2;rapids:2;rough:1;fortified:1;fire:1", "");
+        Map<Boolean, List<String>> lines = new HashMap<>();
+        for (boolean types : new boolean[] { false, true }) {
+            var labels = BoardHexText.capture(ORIGIN, hex, Board.createEmptyBoard(1, 1), 1, font, font, false, types,
+                  false);
+            var lunar = new BoardScene.Tile(ORIGIN, 0, 2, true, 0, BoardScene.Surface.ROCK, PIXELS, null, null,
+                  List.of(bridge), labels).lunar();
+            lines.put(types, lunar.text().stream().map(BoardHexText::text).toList());
+            assertEquals(3, lunar.text().get(1).elevation(), "HEIGHT 3 or BRIDGE▲3 on the deck, as high as before");
+            assertEquals(lunar, lunar.lunar(), "Repeated presentation must not raise the bridge again");
+            assertEquals(66, lunar.text().stream().filter(label -> label.elevation() == 0)
+                  .mapToInt(BoardHexText::baseline).max().orElse(0), "The ground lines still end on the bottom edge");
+        }
+        // The deck keeps its absolute level with Hex Types off and on alike.
+        assertEquals(List.of("SUBLEVEL 2", Messages.getString("BoardView1.HEIGHT") + " 3"), lines.get(false));
+        assertEquals(List.of("SUBLEVEL 2", BoardHexText.bridge(3), "ROUGH", "FORTIFIED", "FIRE"), lines.get(true));
     }
 
     @Test
@@ -178,13 +205,14 @@ class BoardLunarTest {
           List<BoardScene.Feature> features) {
         var font = new Font(Font.SANS_SERIF, Font.PLAIN, 10);
         var labels = new ArrayList<BoardHexText>();
+        // As BoardHexText.capture stacks them: the height line on top, then DEPTH, the last line on the bottom edge.
         if (elevation != 0) {
-            labels.add(new BoardHexText(Messages.getString("BoardView1.LEVEL") + elevation, 66, font, -1, false, 0));
+            labels.add(new BoardHexText(BoardHexText.level(elevation), 46, font, -1, false, 0));
         }
         if (depth > 0) {
-            labels.add(new BoardHexText(Messages.getString("BoardView1.DEPTH") + depth, 56, font, -1, false, 0));
+            labels.add(new BoardHexText(Messages.getString("BoardView1.DEPTH") + " " + depth, 56, font, -1, false, 0));
         }
-        labels.add(new BoardHexText(Messages.getString("BoardView1.LowFoliage"), 46, font, -1, false, 0));
+        labels.add(new BoardHexText(Messages.getString("BoardView1.LowFoliage"), 66, font, -1, false, 0));
         return new BoardScene.Tile(ORIGIN, elevation, depth, true, 0, family, PIXELS, PIXELS, PIXELS, PIXELS,
               null, features, labels, liquid, PIXELS, false, BoardRoad.Kind.PAVED, BoardFireSmoke.NONE,
               BoardScene.Biome.MARSH, true, true);

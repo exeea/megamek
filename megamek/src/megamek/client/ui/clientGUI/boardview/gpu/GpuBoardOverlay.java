@@ -38,7 +38,6 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
-import megamek.client.ui.gdx.UiTheme;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
@@ -55,21 +54,14 @@ import megamek.common.units.Entity;
  * they show changed. Owns its meshes, its pulse, its batch and its shape renderer on the GL thread.
  */
 final class GpuBoardOverlay implements Disposable {
-    /** One prototype pixel in hex radii at the Tactical View zoom GpuUnitIcons follows: an icon of 38 = 1.25 radii. */
+    /** One prototype pixel in hex radii at the prototype's Tactical View zoom, where 38 pixels are 1.25 radii. */
     static final float PIXEL = 1.25f / 38;
-    // overlay.js:10-12, the 3D palette.
+    // overlay.js:10-12, the palette of both views (b11-design 1.1); a jump takes the client's jump colour.
     private static final Color MINT = new Color(.45f, .92f, .80f, 1);
     private static final Color RUN = new Color(.93f, .76f, .40f, 1);
     private static final Color CORAL = new Color(1, .44f, .40f, 1);
-    private static final Color VIOLET = new Color(.72f, .62f, 1, 1);
     private static final Color BLIP = new Color(1, .66f, .34f, 1);
     private static final Color WRECK = new Color(.3f, .3f, .3f, 1);
-    // flat.js:16-75, the Tactical View palette; its mint is the HUD's mint token.
-    private static final Color FLAT_RUN = new Color(.9f, .76f, .45f, 1);
-    private static final Color FLAT_SELECTED = Color.valueOf("a3ffe0");
-    private static final Color FLAT_TARGET = Color.valueOf("ff7a70");
-    private static final Color FLAT_ARROW = Color.valueOf("e9fff7");
-    private static final Color FLAT_PIN = Color.valueOf("f2f5f1");
     /** overlay.js:66: the displayed weapon's mount arc, a wedge from .8 to 2.2 hex radii in 28 steps. */
     private static final float WEDGE_INNER = .8f;
     private static final float WEDGE_OUTER = 2.2f;
@@ -81,8 +73,6 @@ final class GpuBoardOverlay implements Disposable {
     private static final Color GHOST = new Color(.25f, .72f, .95f, 1);
     private static final Color GHOST_GLOW = new Color(.15f, .43f, .57f, 1);
     private static final float GHOST_OPACITY = .75f;
-    /** The Tactical View's ghost is the unit's icon at half strength (rebuild plan A.7 G4). */
-    private static final float GHOST_ICON_OPACITY = .5f;
     /** The marks the board hides show at this opacity (occluded selection outlines). */
     private static final float HIDDEN_OPACITY = .5f;
     // overlay.js:20-31 and 56-57: the bands of a contact, a wreck, another target and the hovered unit.
@@ -120,12 +110,16 @@ final class GpuBoardOverlay implements Disposable {
     private GpuPhysicalOptions.Snapshot physical;
     /** MegaMek's sprint colour, for a route's sprint steps; the prototype has no sprint band. */
     private int sprintRgb;
+    /** MegaMek's jump colour, for a route's jump (the user's decision of 2026-10-10: red by default). */
+    private int jumpRgb;
     private int hoveredUnit = Entity.NONE;
     private int inspected = Entity.NONE;
     private boolean tactical;
     private int revision = -1;
     /** The enemy the shown overlay focuses (its coral glow), or {@code Entity.NONE}. */
     private int focused = Entity.NONE;
+    /** The acting unit the shown overlay marks (its mint glow), or {@code Entity.NONE}. */
+    private int acting = Entity.NONE;
     /** The hex radius in world units while building. */
     private float radius;
     // The ghost of the plotted route: the moving unit as the scene shows it and where the route leaves it, or null.
@@ -172,6 +166,7 @@ final class GpuBoardOverlay implements Disposable {
               && view.hoveredUnit() == hoveredUnit && state.inspected == inspected;
         // A hovered unit hides the hover route (G3), so for the meshes only whether one is hovered counts.
         boolean sameMeshes = same && panels.move() == move && preferences.moveSprintRgb() == sprintRgb
+              && preferences.moveJumpRgb() == jumpRgb
               && (view.hoveredUnit() == Entity.NONE) == (hoveredUnit == Entity.NONE)
               && revision == BoardGeometry.revision();
         scene = frame.scene();
@@ -181,6 +176,7 @@ final class GpuBoardOverlay implements Disposable {
         fire = panels.fire();
         physical = panels.physical();
         sprintRgb = preferences.moveSprintRgb();
+        jumpRgb = preferences.moveJumpRgb();
         hoveredUnit = view.hoveredUnit();
         inspected = state.inspected;
         tactical = view.tactical();
@@ -228,6 +224,14 @@ final class GpuBoardOverlay implements Disposable {
         return focused;
     }
 
+    /**
+     * The acting unit the shown overlay marks with its mint glow: the status's actor, a listed, living, friendly unit
+     * outside the initiative phases; {@code Entity.NONE} for none. The Tactical View's base glows for it.
+     */
+    int actor() {
+        return acting;
+    }
+
     /** Whether two captures show the same overlay: the same units and terrain (by identity, as its caches compare). */
     private static boolean sameDrawing(BoardScene shown, BoardScene next) {
         return shown == next || shown != null && next != null && shown.boardId() == next.boardId()
@@ -238,7 +242,7 @@ final class GpuBoardOverlay implements Disposable {
      * Draws the marks where the units stand this frame and on their hexes, level as selection bands, half
      * a unit above the unit's base ({@code poses} gives each scene unit's as the view placed it; a unit without one
      * shows none) or on a hex's floating plane: in 3D first the hidden bands faintly where the terrain or a model hides
-     * them, then every band depth-tested; in the Tactical View flat over the board, under the icons.
+     * them, then every band depth-tested; in the Tactical View flat over the board and the units' bases.
      */
     void renderMarks(Camera camera, Function<BoardScene.Unit, UnitFootprint.Pose> poses) {
         if (scene == null || unitMarks.isEmpty() && hexMarks.isEmpty()) {
@@ -356,8 +360,8 @@ final class GpuBoardOverlay implements Disposable {
     /**
      * The plotted route's ghost (rebuild plan A.7 G4): a copy of the instance the view draws for the moving unit
      * ({@code shown} gives it for a scene unit, or null), sharing its meshes, at the route's destination in the final
-     * facing. In 3D a translucent cyan copy of the model; in the Tactical View the unit's icon at half strength.
-     * Both show through scenery without writing scene depth, drawn after the route and the units.
+     * facing: a translucent cyan copy of the model, or of the meeple in the Tactical View. It shows through scenery
+     * without writing scene depth, drawn after the route and the units.
      * When the route's pulse lands, the ghost surges. Nothing without a plotted route of the planner.
      */
     void renderGhost(Camera camera, Function<BoardScene.Unit, ModelInstance> shown) {
@@ -384,11 +388,7 @@ final class GpuBoardOverlay implements Disposable {
         ghost.transform.setToTranslation(to).rotate(Vector3.Z, (mover.location().facing() - arrival.facing()) * 60)
               .translate(-from.x, -from.y, -from.z).mul(source.transform);
         batch.begin(camera);
-        if (tactical) {
-            batch.render(ghost);
-        } else {
-            batch.render(ghost, ghostLight);
-        }
+        batch.render(ghost, ghostLight);
         batch.end();
     }
 
@@ -403,30 +403,15 @@ final class GpuBoardOverlay implements Disposable {
             ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity =
                   ghostOpacity[index] + (1 - ghostOpacity[index]) * opaque;
             Color glow = ((ColorAttribute) material.get(ColorAttribute.Emissive)).color;
-            if (tactical) {
-                glow.set(pulse.arrivalColour()).mul(GpuRoutePulse.ICON_SURGE * surge);
-            } else {
-                glow.set(GpuRoutePulse.GHOST_SURGE).mul(surge).add(GHOST_GLOW);
-            }
+            glow.set(GpuRoutePulse.GHOST_SURGE).mul(surge).add(GHOST_GLOW);
         }
     }
 
     /**
-     * Turns a copied material into the ghost's: in the Tactical View the icon's own at half strength, with a glow for
-     * the pulse's surge (none at rest); in 3D a lit, translucent cyan that keeps only a cut-out (alpha-tested) texture,
-     * so that a flat sprite keeps its outline.
+     * Turns a copied material into the ghost's: a lit, translucent cyan that keeps only a cut-out (alpha-tested)
+     * texture, so that a flat sprite keeps its outline.
      */
     private void ghostly(Material material) {
-        if (tactical) {
-            BlendingAttribute blending = (BlendingAttribute) material.get(BlendingAttribute.Type);
-            if (blending == null) {
-                material.set(new BlendingAttribute(GHOST_ICON_OPACITY));
-            } else {
-                blending.opacity *= GHOST_ICON_OPACITY;
-            }
-            material.set(ColorAttribute.createEmissive(Color.BLACK), new DepthTestAttribute(GL20.GL_ALWAYS, false));
-            return;
-        }
         Attribute alphaTest = material.get(FloatAttribute.AlphaTest);
         Attribute cutOut = alphaTest == null ? null : material.get(TextureAttribute.Diffuse);
         Attribute cullFace = material.get(IntAttribute.CullFace);
@@ -453,7 +438,7 @@ final class GpuBoardOverlay implements Disposable {
             route(sink, markers, moving);
             sink.material(material(tactical));
         }
-        if (fire.active() && !tactical) {
+        if (fire.active()) {
             if (fire.frontArc() != null) {
                 outline(sink, fire.frontArc().hexes(), .03f, false, alpha(Color.WHITE, .3f));
             }
@@ -483,10 +468,10 @@ final class GpuBoardOverlay implements Disposable {
     }
 
     /**
-     * overlay.js:20-31 and 56-57, flat.js:65: in 3D the contacts, the wrecks, the acting and focused glows and the
-     * side rings (moved units fade), a focused hex's glow, the other targets' rings and the hovered unit's ring; in the
-     * Tactical View the acting and focused glows. Glows mark the acting unit and the focused enemy outside the
-     * initiative phases (overlay.js:21-28).
+     * overlay.js:20-31 and 56-57: the contacts, the wrecks, the acting and focused glows and the side rings (moved
+     * units fade), a focused hex's glow, the other targets' rings and the hovered unit's ring. In the Tactical View the
+     * units' bases show the side, the glows, contacts and wrecks (GpuUnitBases), so only the hex and target marks stay.
+     * Glows mark the acting unit and the focused enemy outside the initiative phases (overlay.js:21-28).
      */
     private void marks() {
         Map<Integer, List<Band>> byUnit = new HashMap<>();
@@ -494,6 +479,7 @@ final class GpuBoardOverlay implements Disposable {
         Map<Integer, List<Band>> hiddenByUnit = new HashMap<>();
         Map<Coords, List<Band>> hiddenByHex = new LinkedHashMap<>();
         focused = Entity.NONE;
+        acting = Entity.NONE;
         if (scene != null) {
             GamePhase phase = status.phase();
             Map<Integer, GpuBattleStatus.UnitStatus> listed = units.stream()
@@ -507,53 +493,43 @@ final class GpuBoardOverlay implements Disposable {
             int focusId = fire.editable() ? fire.focus().key().unitId() : physical.active() ? physical.targetId()
                   : inspected;
             focused = glows && eligible(listed.get(focusId), shown.get(focusId), true) ? focusId : Entity.NONE;
+            acting = actor;
             // A focus that is no unit, a hex, a building or a minefield, glows on its hex as a focused enemy does.
             Coords focusHex = glows && fire.editable() ? fire.focus().hex() : null;
             boolean focusShown = focusHex != null && scene.tile(focusHex) != null;
-            if (tactical) {
-                if (actor != Entity.NONE) {
-                    add(byUnit, actor, flatGlow(FLAT_SELECTED));
+            for (BoardScene.Unit unit : tactical ? List.<BoardScene.Unit>of() : shown.values()) {
+                int id = unit.id();
+                GpuBattleStatus.UnitStatus listing = listed.get(id);
+                if (unit.sensorContact()) {
+                    add(byUnit, id, CONTACT);
+                } else if (listing != null && listing.destroyed()) {
+                    add(byUnit, id, WRECKED);
+                } else if (listing != null && (id == actor || id == focused)) {
+                    glow(byUnit, hiddenByUnit, id, id == actor ? MINT : CORAL);
+                } else if (listing != null) {
+                    boolean enemy = listing.side() == GpuBattleStatus.Side.ENEMY;
+                    float strength = phase.isMovement() && listing.done() ? .2f : enemy ? .5f : .45f;
+                    add(byUnit, id, List.of(new Band(.08f, .03f, alpha(enemy ? CORAL : MINT, strength))));
                 }
-                if (focusShown) {
-                    add(byHex, focusHex, flatGlow(FLAT_TARGET));
-                } else if (focusHex == null && focused != Entity.NONE) {
-                    add(byUnit, focused, flatGlow(FLAT_TARGET));
-                }
-            } else {
-                for (BoardScene.Unit unit : shown.values()) {
-                    int id = unit.id();
-                    GpuBattleStatus.UnitStatus listing = listed.get(id);
-                    if (unit.sensorContact()) {
-                        add(byUnit, id, CONTACT);
-                    } else if (listing != null && listing.destroyed()) {
-                        add(byUnit, id, WRECKED);
-                    } else if (listing != null && (id == actor || id == focused)) {
-                        glow(byUnit, hiddenByUnit, id, id == actor ? MINT : CORAL);
-                    } else if (listing != null) {
-                        boolean enemy = listing.side() == GpuBattleStatus.Side.ENEMY;
-                        float strength = phase.isMovement() && listing.done() ? .2f : enemy ? .5f : .45f;
-                        add(byUnit, id, List.of(new Band(.08f, .03f, alpha(enemy ? CORAL : MINT, strength))));
+            }
+            if (focusShown) {
+                glow(byHex, hiddenByHex, focusHex, CORAL);
+            }
+            if (fire.active()) {
+                for (GpuFireOrders.Target target : fire.targets()) {
+                    if (target.key().equals(fire.focus().key())) {
+                        continue;
+                    }
+                    if (target.hex() == null) {
+                        add(byUnit, target.key().unitId(), TARGETED);
+                    } else if (scene.tile(target.hex()) != null) {
+                        add(byHex, target.hex(), TARGETED);
                     }
                 }
-                if (focusShown) {
-                    glow(byHex, hiddenByHex, focusHex, CORAL);
-                }
-                if (fire.active()) {
-                    for (GpuFireOrders.Target target : fire.targets()) {
-                        if (target.key().equals(fire.focus().key())) {
-                            continue;
-                        }
-                        if (target.hex() == null) {
-                            add(byUnit, target.key().unitId(), TARGETED);
-                        } else if (scene.tile(target.hex()) != null) {
-                            add(byHex, target.hex(), TARGETED);
-                        }
-                    }
-                }
-                if (hoveredUnit != Entity.NONE && hoveredUnit != actor) {
-                    add(byUnit, hoveredUnit, HOVERED);
-                    add(hiddenByUnit, hoveredUnit, HOVERED);
-                }
+            }
+            if (hoveredUnit != Entity.NONE && hoveredUnit != actor) {
+                add(byUnit, hoveredUnit, HOVERED);
+                add(hiddenByUnit, hoveredUnit, HOVERED);
             }
         }
         unitMarks = byUnit;
@@ -568,15 +544,6 @@ final class GpuBoardOverlay implements Disposable {
         add(marks, key, List.of(new Band(.08f, .92f, alpha(color, .16f)), new Band(-.03f, .2f, alpha(color, .14f)),
               new Band(0, .1f, alpha(color, .3f)), strongest));
         add(hidden, key, List.of(strongest));
-    }
-
-    /** flat.js:65: a 3-pixel outline with a 12-pixel blur, the blur drawn as three fading halos. */
-    private static List<Band> flatGlow(Color color) {
-        float middle = .04f;
-        return List.of(new Band(middle - 10.5f * PIXEL, 21 * PIXEL, alpha(color, .08f)),
-              new Band(middle - 6.5f * PIXEL, 13 * PIXEL, alpha(color, .16f)),
-              new Band(middle - 3.5f * PIXEL, 7 * PIXEL, alpha(color, .3f)),
-              new Band(middle - 1.5f * PIXEL, 3 * PIXEL, alpha(color, 1)));
     }
 
     private static <K> void add(Map<K, List<Band>> marks, K key, List<Band> bands) {
@@ -709,7 +676,7 @@ final class GpuBoardOverlay implements Disposable {
             }
             BoardScene.Waypoint point = new BoardScene.Waypoint(pin.coords(), pin.level(), pin.facing());
             if (tactical) {
-                disc(markers, markerCenter(point, 0), 8 * PIXEL, 24, FLAT_PIN);
+                disc(markers, markerCenter(point, 0), 8 * PIXEL, 24, alpha(Color.WHITE, .95f));
             } else {
                 ring(markers, tile, .06f, .2f, .02f, alpha(Color.WHITE, .95f), markerCenter(point, 0).z);
                 disc(markers, markerCenter(point, .1f), .16f, 20, alpha(Color.WHITE, .9f));
@@ -728,7 +695,7 @@ final class GpuBoardOverlay implements Disposable {
         Vector3 across = new Vector3(ahead.y, -ahead.x, 0);
         if (tactical) {
             sink.triangle(point(center, ahead, .85f, across, 0), point(center, ahead, .45f, across, .22f),
-                  point(center, ahead, .45f, across, -.22f), FLAT_ARROW);
+                  point(center, ahead, .45f, across, -.22f), Color.WHITE);
         } else {
             Color color = alpha(Color.WHITE, strength);
             Vector3 tip = point(center, ahead, .9f, across, 0);
@@ -816,10 +783,10 @@ final class GpuBoardOverlay implements Disposable {
 
     private Color moveColor(GpuMovePlan.Band band) {
         return switch (band) {
-            case WALK -> tactical ? UiTheme.MINT : MINT;
-            case RUN -> tactical ? FLAT_RUN : RUN;
+            case WALK -> MINT;
+            case RUN -> RUN;
             case SPRINT -> rgb(sprintRgb);
-            case JUMP -> VIOLET;
+            case JUMP -> rgb(jumpRgb);
             case ILLEGAL -> CORAL;
         };
     }

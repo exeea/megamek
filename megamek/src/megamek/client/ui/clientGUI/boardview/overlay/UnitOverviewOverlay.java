@@ -151,7 +151,7 @@ public class UnitOverviewOverlay implements IDisplayable, IPreferenceChangeListe
 
     /**
      * Whether the overview shows: the player's choice. The native battle window ({@link GpuBoardWindow}) draws no
-     * classic overlay, so it does not force the overview on.
+     * Legacy 2D overlay, so it does not force the overview on.
      */
     private boolean isVisible() {
         return GUIP.getShowUnitOverview();

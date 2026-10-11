@@ -10,9 +10,9 @@ board terrain values, the old .board file format and the tileset file format.
     on the computer.
 
     The Menu button at the top right has New, Open, Save, Save As, Save As
-    Image, Recent Boards, Open Board Source File, Run Board Tagger, the 2D
-    Preview (the board as the 2D board draws it), View (with the Trace
-    Overlay), Client Settings and Help. Help lists every key and mouse gesture
+    Image, Recent Boards, Open Board Source File, Run Board Tagger, the Legacy
+    2D Preview (the board as the Legacy 2D board draws it), View (with 3D
+    Graphics and the Trace Overlay), Client Settings and Help. Help lists every key and mouse gesture
     of the editor.
 
     The editor saves boards as .board2 files. Opening an older .board file

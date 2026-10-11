@@ -61,7 +61,12 @@ final class GpuMarkers implements Disposable {
     static final float TOP_GROUP_RADIUS_IN_HEXES = 0.28f;
     static final float TOP_UNIT_MARKER_SIZE_IN_HEXES = 0.17f;
     static final float TOP_UNIT_MARKER_RADIUS_IN_HEXES = 0.375f;
-    static final float TOP_UNIT_MARKER_SIDE_ARC_DEGREES = 60;
+    /**
+     * Overhead, the symbols on a unit's hex stand in one column on its east side, from this many degrees below east
+     * over this arc: below the Tactical View base's E(C)CM badge and clear of its condition icons on the west side.
+     */
+    static final float TOP_UNIT_MARKER_ARC_START_DEGREES = 15;
+    static final float TOP_UNIT_MARKER_ARC_DEGREES = 20;
     /** Each symbol can opt out independently. The existing See-through intensity slider still applies. */
     static final boolean SENSOR_CONTACT_OUTLINE = true;
     static final boolean COLLAPSE_WARNING_OUTLINE = true;
@@ -178,9 +183,8 @@ final class GpuMarkers implements Disposable {
         if (flat(camera) && (occupied || count > 1)) {
             float size = BoardGeometry.height() * (occupied ? TOP_UNIT_MARKER_SIZE_IN_HEXES : TOP_GROUP_SIZE_IN_HEXES);
             if (occupied) {
-                int perSide = (count + 1) / 2;
-                return perSide == 1 ? size : Math.min(size, 2 * topRadius(true)
-                      * MathUtils.sinDeg(TOP_UNIT_MARKER_SIDE_ARC_DEGREES / (perSide - 1) / 2) / GROUP_SPACING);
+                return count == 1 ? size : Math.min(size, 2 * topRadius(true)
+                      * MathUtils.sinDeg(TOP_UNIT_MARKER_ARC_DEGREES / (count - 1) / 2) / GROUP_SPACING);
             }
             return count == 1 ? size : Math.min(size, 2 * topRadius(occupied) * MathUtils.sin(MathUtils.PI / count)
                   / GROUP_SPACING);
@@ -194,7 +198,10 @@ final class GpuMarkers implements Disposable {
         return BoardGeometry.height() * (occupied ? TOP_UNIT_MARKER_RADIUS_IN_HEXES : TOP_GROUP_RADIUS_IN_HEXES);
     }
 
-    /** Overhead symbols flank units, or form a ring in empty hexes. Angled symbols form a grid above the unit. */
+    /**
+     * Overhead symbols stand in a column east of units, or form a ring in empty hexes. Angled symbols form a grid
+     * above the unit.
+     */
     static Vector3 groupOffset(Camera camera, int index, int count, boolean occupied) {
         Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
         if (flat(camera)) {
@@ -203,12 +210,10 @@ final class GpuMarkers implements Disposable {
             }
             Vector3 up = new Vector3(camera.up.x, camera.up.y, 0).nor();
             if (occupied) {
-                // Alternate sides, keeping each side centred and the question mark's hook and dot unobstructed.
-                int sideCount = (count + 1 - index % 2) / 2;
-                float angle = sideCount == 1 ? 0
-                      : TOP_UNIT_MARKER_SIDE_ARC_DEGREES * (0.5f - (index / 2) / (float) (sideCount - 1));
-                float side = index % 2 == 0 ? -1 : 1;
-                return right.scl(side * MathUtils.cosDeg(angle) * topRadius(true))
+                // Down the east side, keeping the question mark's hook and dot unobstructed.
+                float angle = -TOP_UNIT_MARKER_ARC_START_DEGREES
+                      - (count == 1 ? 0 : TOP_UNIT_MARKER_ARC_DEGREES * index / (count - 1));
+                return right.scl(MathUtils.cosDeg(angle) * topRadius(true))
                       .mulAdd(up, MathUtils.sinDeg(angle) * topRadius(true));
             }
             float angle = -90 + index * 360f / count;

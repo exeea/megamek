@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.Color;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +23,7 @@ import megamek.client.ui.clientGUI.unitDisplay.HeatEffects;
 import megamek.common.ECMInfo;
 import megamek.common.Player;
 import megamek.common.Report;
+import megamek.common.TagInfo;
 import megamek.common.actions.AttackAction;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.SearchlightAttackAction;
@@ -55,7 +57,8 @@ final class GpuBattleStatus {
      * server does not report the turn order either.
      */
     record Snapshot(int round, GamePhase phase, boolean myTurn, int localPlayerId, int actorId, List<Slot> turns,
-          int turnIndex, List<UnitStatus> units, List<InitiativeSide> initiative, boolean turnOrderHidden) {
+          int turnIndex, List<UnitStatus> units, List<InitiativeSide> initiative, boolean turnOrderHidden,
+          List<Link> links, Arc arc) {
         static final Snapshot EMPTY = new Snapshot(0, GamePhase.UNKNOWN, false, Player.PLAYER_NONE, Entity.NONE,
               List.of(), -1, List.of(), List.of(), false);
 
@@ -63,6 +66,36 @@ final class GpuBattleStatus {
             turns = List.copyOf(turns);
             units = List.copyOf(units);
             initiative = List.copyOf(initiative);
+            links = List.copyOf(links);
+        }
+
+        /** A status without links between units or an enemy's arcs, as the HUD tests build it. */
+        Snapshot(int round, GamePhase phase, boolean myTurn, int localPlayerId, int actorId, List<Slot> turns,
+              int turnIndex, List<UnitStatus> units, List<InitiativeSide> initiative, boolean turnOrderHidden) {
+            this(round, phase, myTurn, localPlayerId, actorId, turns, turnIndex, units, initiative, turnOrderHidden,
+                  List.of(), Arc.NONE);
+        }
+    }
+
+    /**
+     * A link the board draws between two listed units: an own or allied unit spotting for indirect fire
+     * ({@code Entity.isSpotting}, {@code getSpotTargetId}), or a TAG hit of this turn as the game reports it.
+     */
+    record Link(int fromId, int toId, Kind kind) {
+        enum Kind { SPOT, TAG }
+    }
+
+    /**
+     * The side of {@code unitId}, standing at {@code origin}, each hex within {@link #REACH} hexes attacks, by
+     * {@code Entity.sideTable} (a {@code ToHitData} SIDE_ code, the rule's exact-line split included): the hovered
+     * enemy's arcs, else those of the focused target. {@link #NONE} without one.
+     */
+    record Arc(int unitId, Coords origin, Map<Coords, Integer> sides) {
+        static final int REACH = 5;
+        static final Arc NONE = new Arc(Entity.NONE, null, Map.of());
+
+        Arc {
+            sides = Map.copyOf(sides);
         }
     }
 
@@ -93,7 +126,7 @@ final class GpuBattleStatus {
     enum Side { OWN, ALLY, ENEMY }
 
     /**
-     * One listed unit as the classic client shows it. {@code name} is the client's unique short name, {@code chassis}
+     * One listed unit as the Swing client shows it. {@code name} is the client's unique short name, {@code chassis}
      * and {@code model} its two parts. {@code canActNow}: the local player's current turn accepts it; {@code pending}:
      * a remaining turn of the phase accepts it; {@code done}: it has acted this phase; {@code destroyed}: destroyed or
      * doomed, as the tooltip says. {@code heatCapacity} is the tooltip's text, empty for units without heat, and
@@ -108,8 +141,11 @@ final class GpuBattleStatus {
      * the attacks queued but not yet sent, so it is a declaration only once the unit is {@code done}.
      * {@code ownerId} is its owner's player id. {@code label} is its board label's name in the client's label style
      * ({@code UnitAnnotations.labelName}), empty where that style names none, and {@code marks} are the label's damage
-     * tile and bars. A sensor contact carries only its id, side, position, board and blip icon: its text is empty, its
-     * numbers are zero, its facing is -1, its meters are {@code ARMOR_NA}, its owner is {@code Player.PLAYER_NONE}, it
+     * tile and bars. {@code twist} is the facing it fires from beside its body's ({@code UnitAnnotations.twistFacing},
+     * -1 for none), {@code moveRgb} the client's colour of its movement type ({@code getColorForMovement}) and
+     * {@code tmmShown} whether its target movement modifier means something now ({@code UnitAnnotations.tmmShown}).
+     * A sensor contact carries only its id, side, position, board and blip icon: its text is empty, its numbers are
+     * zero, its facing and twist are -1, its meters are {@code ARMOR_NA}, its owner is {@code Player.PLAYER_NONE}, it
      * has no status words or tiles and its marks are {@link Marks#NONE}.
      */
     record UnitStatus(int id, Side side, boolean sensorContact, String name, String chassis, String model,
@@ -118,11 +154,28 @@ final class GpuBattleStatus {
           int mpUsed, int hexesMoved, int facing, int tmm, boolean canActNow, boolean pending, boolean done,
           boolean destroyed, int damageLevel, List<String> destroyedLocations, String heatEffects, Coords position,
           int boardId, BoardScene.Pixels icon, List<UnitStatusWords.StatusWord> statusWords, int weightClassIndex,
-          int declaredAttacks, int ownerId, List<UnitStatusWords.StatusWord> statusTiles, String label, Marks marks) {
+          int declaredAttacks, int ownerId, List<UnitStatusWords.StatusWord> statusTiles, String label, Marks marks,
+          int twist, int moveRgb, boolean tmmShown) {
         UnitStatus {
             destroyedLocations = List.copyOf(destroyedLocations);
             statusWords = List.copyOf(statusWords);
             statusTiles = List.copyOf(statusTiles);
+        }
+
+        /** A unit without a twist, movement colour or shown modifier, as the HUD tests that do not draw bases build it. */
+        UnitStatus(int id, Side side, boolean sensorContact, String name, String chassis, String model,
+              double tons, String weightClass, String formation, String pilot, int gunnery, int piloting, double armor,
+              double structure, int heat, int heatRgb, String heatCapacity, int walk, String run, int jump,
+              String moved, int mpUsed, int hexesMoved, int facing, int tmm, boolean canActNow, boolean pending,
+              boolean done, boolean destroyed, int damageLevel, List<String> destroyedLocations, String heatEffects,
+              Coords position, int boardId, BoardScene.Pixels icon, List<UnitStatusWords.StatusWord> statusWords,
+              int weightClassIndex, int declaredAttacks, int ownerId, List<UnitStatusWords.StatusWord> statusTiles,
+              String label, Marks marks) {
+            this(id, side, sensorContact, name, chassis, model, tons, weightClass, formation, pilot, gunnery,
+                  piloting, armor, structure, heat, heatRgb, heatCapacity, walk, run, jump, moved, mpUsed, hexesMoved,
+                  facing, tmm, canActNow, pending, done, destroyed, damageLevel, destroyedLocations, heatEffects,
+                  position, boardId, icon, statusWords, weightClassIndex, declaredAttacks, ownerId, statusTiles,
+                  label, marks, -1, 0, false);
         }
 
         /**
@@ -161,10 +214,15 @@ final class GpuBattleStatus {
     /** Total, roll and bonus of one roll in an {@code InitiativeRoll} text. */
     private record Roll(int total, int roll, int bonus) { }
 
+    /** What a unit's arcs depend on: the unit, its hex, its facing and its board. */
+    private record ArcKey(int id, Coords position, int facing, int boardId) { }
+
     private Snapshot snapshot = Snapshot.EMPTY;
+    /** The unit and placement the shown arcs were worked out for, or null. */
+    private ArcKey arcKey;
 
     /**
-     * Lists the local player's units ({@code Game.getPlayerEntities}, as the classic unit overview) and every other
+     * Lists the local player's units ({@code Game.getPlayerEntities}, as the Legacy 2D unit overview) and every other
      * {@code visible} unit; units that are not {@code identified} stay anonymous. {@code activeTurn} is the turn the
      * client lets the local player act in now, or null. An unchanged capture returns the previous snapshot, so the
      * render thread can compare by identity.
@@ -214,13 +272,75 @@ final class GpuBattleStatus {
             units.add(unit(game, entity, side, activeTurn != null && activeTurn.isValidEntity(entity, game), pending,
                   icon.apply(entity), words, tiles, attacks.getOrDefault(entity.getId(), 0)));
         }
+        // The arcs follow the pointer and the focus, which the source knows only later: they stay until arcs() runs.
         Snapshot next = new Snapshot(GpuReportLog.displayRound(game.getRoundCount(), game.getReports(0)),
               game.getPhase(), activeTurn != null, localId, actorId, slots, turnIndex, units, initiative(game, local),
-              game.getOptions().booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND));
+              game.getOptions().booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND), links(game, units),
+              snapshot.arc());
         if (!next.equals(snapshot)) {
             snapshot = next;
         }
         return snapshot;
+    }
+
+    /**
+     * The last captured status with the arcs of {@code target} (null: none), an enemy the source chose from the
+     * pointer and the focus; a unit the status does not list as an identified unit shows none. Each hex within
+     * {@link Arc#REACH} gets {@code Entity.sideTable}'s side; the arcs are worked out again only when the target, its
+     * hex or its facing changed. An unchanged status keeps its identity.
+     */
+    Snapshot arcs(Entity target) {
+        boolean shown = target != null && target.getPosition() != null && snapshot.units().stream()
+              .anyMatch(unit -> unit.id() == target.getId() && !unit.sensorContact());
+        ArcKey key = shown ? new ArcKey(target.getId(), target.getPosition(), target.getFacing(), target.getBoardId())
+              : null;
+        Arc arc = !shown ? Arc.NONE : key.equals(arcKey) ? snapshot.arc() : arc(target);
+        arcKey = key;
+        if (!arc.equals(snapshot.arc())) {
+            snapshot = new Snapshot(snapshot.round(), snapshot.phase(), snapshot.myTurn(), snapshot.localPlayerId(),
+                  snapshot.actorId(), snapshot.turns(), snapshot.turnIndex(), snapshot.units(), snapshot.initiative(),
+                  snapshot.turnOrderHidden(), snapshot.links(), arc);
+        }
+        return snapshot;
+    }
+
+    /** The side of {@code target} each hex within {@link Arc#REACH} of it attacks, on its board. */
+    static Arc arc(Entity target) {
+        Map<Coords, Integer> sides = new HashMap<>();
+        var board = target.getGame() == null ? null : target.getGame().getBoard(target);
+        for (int distance = 1; distance <= Arc.REACH; distance++) {
+            for (Coords hex : target.getPosition().allAtDistance(distance)) {
+                if (board == null || board.contains(hex)) {
+                    sides.put(hex, target.sideTable(hex));
+                }
+            }
+        }
+        return new Arc(target.getId(), target.getPosition(), sides);
+    }
+
+    /**
+     * The links between listed units: each own or allied unit that spots for indirect fire, to its spot target, and
+     * each TAG hit of this turn the game reports, between two listed units. Sensor contacts link to nothing.
+     */
+    private static List<Link> links(Game game, List<UnitStatus> units) {
+        Map<Integer, UnitStatus> listed = new HashMap<>();
+        units.stream().filter(unit -> !unit.sensorContact()).forEach(unit -> listed.put(unit.id(), unit));
+        List<Link> links = new ArrayList<>();
+        for (UnitStatus unit : listed.values()) {
+            Entity entity = game.getEntity(unit.id());
+            if (unit.side() != Side.ENEMY && entity != null && entity.isSpotting()
+                  && listed.containsKey(entity.getSpotTargetId())) {
+                links.add(new Link(unit.id(), entity.getSpotTargetId(), Link.Kind.SPOT));
+            }
+        }
+        for (TagInfo tag : game.getTagInfo()) {
+            if (!tag.missed && tag.target instanceof Entity target && listed.containsKey(tag.attackerId)
+                  && listed.containsKey(target.getId())) {
+                links.add(new Link(tag.attackerId, target.getId(), Link.Kind.TAG));
+            }
+        }
+        links.sort(Comparator.comparingInt(Link::fromId).thenComparingInt(Link::toId));
+        return links;
     }
 
     /**
@@ -394,7 +514,7 @@ final class GpuBattleStatus {
         }
     }
 
-    /** The values the classic unit display and tooltip show; no rule is recomputed here. */
+    /** The values the Swing unit display and tooltip show; no rule is recomputed here. */
     private static UnitStatus unit(Game game, Entity entity, Side side, boolean canActNow, boolean pending,
           BoardScene.Pixels icon, List<UnitStatusWords.StatusWord> statusWords, List<UnitStatusWords.StatusWord> statusTiles,
           int declaredAttacks) {
@@ -431,6 +551,9 @@ final class GpuBattleStatus {
               entity.isDone(), entity.isDoomed() || entity.isDestroyed(), entity.getDamageLevel(),
               destroyedLocations, heatEffects, entity.getPosition(), entity.getBoardId(), icon, statusWords,
               entity.getWeightClass(), declaredAttacks, entity.getOwnerId(), statusTiles,
-              UnitAnnotations.labelName(entity, GUIPreferences.getInstance().getUnitLabelStyle()), marks);
+              UnitAnnotations.labelName(entity, GUIPreferences.getInstance().getUnitLabelStyle()), marks,
+              UnitAnnotations.twistFacing(entity),
+              GUIPreferences.getInstance().getColorForMovement(entity.moved).getRGB(),
+              UnitAnnotations.tmmShown(entity, game.getPhase()));
     }
 }

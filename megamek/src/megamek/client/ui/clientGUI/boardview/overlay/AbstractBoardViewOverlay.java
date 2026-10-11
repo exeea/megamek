@@ -92,7 +92,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
     protected final Font font;
 
     private OverlayImage.Fade fade;
-    /** Keeps the classic repaint timer running through the final animation frame. */
+    /** Keeps the Legacy 2D repaint timer running through the final animation frame. */
     private boolean sliding;
     private int overlayWidth = 500;
     private int overlayHeight = 500;

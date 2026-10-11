@@ -61,7 +61,7 @@ class GpuRoundNumberTest {
                     + "and that before its phase, and no initiative phase is ever sent");
         assertLogShowsTheStatusRound(shown);
         assertEquals(List.of(1), entryRounds(shown.getLast().log()),
-              "The deployment's reports open round 1's report, as GameReports and the classic report keep them");
+              "The deployment's reports open round 1's report, as GameReports and the Swing report keep them");
     }
 
     @Test

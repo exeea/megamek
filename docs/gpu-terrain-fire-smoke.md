@@ -13,7 +13,7 @@
 | `terrain-effects-composite.frag` | Upsample and composite the half-resolution result against scene depth. |
 
 Persistent fire and smoke use a volumetric shader in the GPU board view. They retain the original ground below them.
-The classic Swing board still uses its tileset artwork.
+The Legacy 2D Swing board still uses its tileset artwork.
 
 ## Map data and ownership
 

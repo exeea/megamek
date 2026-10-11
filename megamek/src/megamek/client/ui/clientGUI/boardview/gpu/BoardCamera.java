@@ -342,8 +342,9 @@ final class BoardCamera {
         update();
     }
 
-    /** Sets the isometric or the straight-down, north-up angle. */
+    /** Sets the isometric or the straight-down, north-up angle; the Tactical View keeps the latter. */
     void setIsometric(boolean value) {
+        if (value && rotationLocked()) { return; }
         setFirstPerson(false);
         stopFraming();
         stopRotation();
@@ -358,10 +359,18 @@ final class BoardCamera {
     }
 
     /**
+     * The Tactical View holds its north-up top view (user, 2026-10-10): nothing orbits, tilts or turns it, neither
+     * the held keys, the mouse and minimap orbits nor the isometric preset.
+     */
+    boolean rotationLocked() {
+        return tactical();
+    }
+
+    /**
      * Enters or leaves the Tactical View. Entering turns the camera straight down, north up, and keeps the focus and
      * zoom (or the fit to the window); leaving restores the replaced 3D pose, including that fit, exactly. A turn or
      * framing move in progress counts as finished, so the 3D view returns where it was heading. In between, the
-     * camera pans, zooms, orbits, tilts and turns as in the 3D view.
+     * camera pans and zooms as in the 3D view and holds its angle ({@link #rotationLocked()}).
      */
     void setTactical(boolean enabled, BoardScene scene) {
         if (enabled == tactical()) { return; }
@@ -437,6 +446,7 @@ final class BoardCamera {
             look(rotation, -inclination);
             return;
         }
+        if (rotationLocked()) { return; }
         stopRotation();
         anchorOrbit();
         azimuth = wrapDegrees(azimuth + rotation);
@@ -449,6 +459,7 @@ final class BoardCamera {
             look(0, -inclination);
             return;
         }
+        if (rotationLocked()) { return; }
         stopFraming();
         fitToWindow = false;
         anchorOrbit();
@@ -467,6 +478,7 @@ final class BoardCamera {
             look(direction * ROTATION_STEP, 0);
             return;
         }
+        if (rotationLocked()) { return; }
         stopFraming();
         fitToWindow = false;
         anchorOrbit();

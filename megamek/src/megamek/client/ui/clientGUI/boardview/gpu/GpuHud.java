@@ -24,6 +24,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.util.KeyCommandBind;
@@ -74,7 +75,7 @@ final class GpuHud implements GpuBoardHud {
           KeyCommandBind.FORCES_GRID, KeyCommandBind.PLAYBACK_TOGGLE, KeyCommandBind.PLAYBACK_PREV,
           KeyCommandBind.PLAYBACK_NEXT, KeyCommandBind.SHOW_NAMEPLATES, KeyCommandBind.UD_GENERAL,
           KeyCommandBind.UD_PILOT, KeyCommandBind.UD_ARMOR, KeyCommandBind.UD_WEAPONS, KeyCommandBind.UD_SYSTEMS,
-          KeyCommandBind.UD_EXTRAS);
+          KeyCommandBind.UD_EXTRAS, KeyCommandBind.TACTICAL_OVERLAYS);
 
     /**
      * The prototype's layout sizes for one window, in stage units (its CSS pixels): the gap, the left and right column
@@ -177,6 +178,8 @@ final class GpuHud implements GpuBoardHud {
     private final GpuChatPanel chat;
     private final GpuLogPanel log;
     private final GpuModalDialog modal;
+    /** The Tactical View's Overlays panel, which the layout may show collapsed for a frame. */
+    private final GpuTacticalOverlays overlays;
     /** The layer of Help, Menu, Players and the tuning panel: a focus in it is that dialog's Esc step. */
     private final Group dialogs;
     private final UiModal centeredDialogs;
@@ -193,6 +196,7 @@ final class GpuHud implements GpuBoardHud {
     private final Container<Actor> hintSlot;
     private final Container<Actor> pickSlot;
     private final Container<Actor> minimapSlot;
+    private final Container<Actor> overlaysSlot;
     private final Container<Actor> contactsSlot;
     private final Container<Actor> weaponsSlot;
     private final Container<Actor> solutionSlot;
@@ -283,6 +287,7 @@ final class GpuHud implements GpuBoardHud {
         });
         GpuHintLine hint = new GpuHintLine(kit, source, state, camera);
         GpuMinimap minimap = new GpuMinimap(kit, source, state, camera);
+        overlays = new GpuTacticalOverlays(kit, source);
         GpuContactsPanel contacts = new GpuContactsPanel(kit, source, state, contextMenu, this::select);
         // The guides follow the contacts panel's toggles and open row; hex-anchored labels need the board camera.
         boardLabels = new GpuBoardLabels(kit, source, state, camera, contacts);
@@ -298,8 +303,8 @@ final class GpuHud implements GpuBoardHud {
         GpuToastStack toasts = new GpuToastStack(kit, source, state);
         modal = new GpuModalDialog(kit, source, state);
         List<Component> parts = new ArrayList<>(List.of(nameplates, boardLabels, targetCards, losPanel, phaseHeader,
-              initiativeCard, conditionsCard, forces, unitCard, recordSheet, utilities, hint, minimap, contacts,
-              weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, toasts, modal));
+              initiativeCard, conditionsCard, forces, unitCard, recordSheet, utilities, hint, minimap, overlays,
+              contacts, weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, toasts, modal));
 
         // The Tactical View's north mark first: the prototype draws it on the board, under the labels (G4). Then the
         // prototype's #fx strokes (guides, traces, leaders) under every board label, the nameplates included (G8b).
@@ -317,6 +322,7 @@ final class GpuHud implements GpuBoardHud {
         utilitySlot = panel(panels, utilities.actor()).top().right();
         chipSlot = panel(panels, utilities.chip()).top();
         minimapSlot = panel(panels, minimap.actor()).top().fillX();
+        overlaysSlot = panel(panels, overlays.actor()).top().fillX();
         contactsSlot = panel(panels, contacts.actor()).top().fillX();
         weaponsSlot = panel(panels, weapons.actor()).top().fillX();
         logSlot = panel(panels, log.actor()).top().fillX();
@@ -733,6 +739,9 @@ final class GpuHud implements GpuBoardHud {
             // One wide left panel at a time: the key closes an open sheet and shows the grid.
             state.forcesGrid = GpuRecordSheet.open(state) || !state.forcesGrid;
             state.recordOpen = false;
+        } else if (binds.contains(KeyCommandBind.TACTICAL_OVERLAYS) && inputs.view().tactical()) {
+            // The Overlays panel's client setting, which the Swing thread changes.
+            source.command(() -> GUIPreferences.getInstance().toggleTacticalOverlaysOpen());
         } else if (binds.contains(KeyCommandBind.TOGGLE_CHAT) || binds.contains(KeyCommandBind.TOGGLE_CHAT_CMD)) {
             state.chatOpen = true;
             chat.focus();
@@ -814,8 +823,8 @@ final class GpuHud implements GpuBoardHud {
      * ({@code pointedZ}; NaN on a unit, or in the Tactical View). A right click opens the context menu and never
      * changes orders; Alt opens the native LOS ruler at the pointed height, and a plain left
      * click ends a measurement waiting for its second point with that measurement's modifier;
-     * while a bot order picks hexes, a left click picks one, as the classic board's click does. Any other left click
-     * takes the unit {@link #clickedUnit} gives.
+     * while a bot order picks hexes, a left click picks one, as the Legacy 2D board's click does. Any other left
+     * click takes the unit {@link #clickedUnit} gives.
      */
     void boardClick(Coords coords, int unitId, int button, int modifiers, int x, int y, float pointedZ) {
         if (inputs == null || inputs.dialog() != null || coords == null || inputs.frame().scene() == null) {
@@ -1039,6 +1048,7 @@ final class GpuHud implements GpuBoardHud {
         boolean sheet = GpuRecordSheet.open(state) && !covered;
         sheetSlot.setVisible(sheet);
         minimapSlot.setVisible(!covered && inputs.preferences().minimapEnabled());
+        overlaysSlot.setVisible(!covered);
         logSlot.setVisible(!covered && logOpen);
         weaponsSlot.setVisible(!covered && weaponsOpen);
         solutionSlot.setVisible(!covered && weaponsOpen);
@@ -1133,13 +1143,31 @@ final class GpuHud implements GpuBoardHud {
         float northWidth = northSlot.getPrefWidth();
         place(northSlot, (width - northWidth) / 2, GpuUtilityBar.NORTH_TOP, northWidth, northSlot.getPrefHeight());
 
-        // Panels of the middle area, each below what it would overlap; one without room for its minimum is hidden.
+        // The Tactical View's overlays: a column at the top right, left of the right column's top panel (the minimap,
+        // else the panel that moves up in its place), at the window's right edge while the column is empty. Expanded
+        // as saved, unless the window is too short for its rows or a card beside the right column needs the room:
+        // then its header for the frame, and the card stacks below it.
         float initiativeWidth = Math.min(INITIATIVE_WIDTH, bandRight - bandLeft);
-        stack(initiativeSlot, centred(initiativeWidth, bandLeft, bandRight), height * INITIATIVE_TOP,
-              initiativeWidth, List.of(conditionsSlot, chipSlot));
+        float initiativeX = centred(initiativeWidth, bandLeft, bandRight);
+        if (shown(overlaysSlot)) {
+            float column = Math.max(shown(minimapSlot) ? m.right() : 0,
+                  shown(contactsSlot) || shown(weaponsSlot) || shown(logSlot) ? rightWidth : 0);
+            float overlaysWidth = overlays.width();
+            float overlaysX = width - gap - (column > 0 ? column + gap : 0) - overlaysWidth;
+            boolean crowded = beside || shown(initiativeSlot) && initiativeX < overlaysX + overlaysWidth
+                  && overlaysX < initiativeX + initiativeWidth;
+            boolean expanded = overlays.open() && !crowded
+                  && rightStart + overlays.height(true) <= height - RIGHT_BOTTOM;
+            overlays.show(expanded);
+            place(overlaysSlot, overlaysX, rightStart, overlaysWidth, overlays.height(expanded));
+        }
+
+        // Panels of the middle area, each below what it would overlap; one without room for its minimum is hidden.
+        stack(initiativeSlot, initiativeX, height * INITIATIVE_TOP, initiativeWidth,
+              List.of(conditionsSlot, chipSlot, overlaysSlot));
         if (beside) {
             stack(solutionSlot, width - gap - 2 * m.right() - STACK, SECOND_ROW, m.right(),
-                  List.of(conditionsSlot, chipSlot));
+                  List.of(conditionsSlot, chipSlot, overlaysSlot));
         }
 
         // Overlays: chat, forces overview, centred dialogs and toasts.

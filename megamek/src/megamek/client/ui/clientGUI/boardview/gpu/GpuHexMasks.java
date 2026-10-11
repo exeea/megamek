@@ -3,10 +3,8 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -23,7 +21,6 @@ import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
-import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
@@ -38,13 +35,11 @@ final class GpuHexMasks implements Disposable {
         public void dispose() { color.dispose(); parameters.dispose(); }
     }
 
-    private final Map<Coords, GpuHexSurface> surfaces = new HashMap<>();
-    private final Map<Coords, BoundingBox> bounds = new HashMap<>();
+    private final GpuHexSurface.Cache carriers = new GpuHexSurface.Cache();
     private final Material material = new Material(new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA));
     private Layer layer;
     private List<BoardTactical.Fill> previous = List.of();
     private BoardScene scene;
-    private Function<Coords, BoardTacticalGeometry.Surface> terrain;
     private MaskShader shader;
     private int tuning = -1;
     private boolean tint;
@@ -81,29 +76,16 @@ final class GpuHexMasks implements Disposable {
         boolean reset = scene == null || scene.boardId() != next.boardId() || scene.width() != next.width()
               || scene.height() != next.height() || tuning != BoardGeometry.revision() || this.tint != tint;
         if (reset) { clear(); }
-        if (scene != null && (scene.tiles() != next.tiles() || terrain != finished)) { bounds.clear(); }
+        carriers.update(next, finished, tint);
         scene = next;
-        terrain = finished;
         this.tint = tint;
         tuning = BoardGeometry.revision();
-        surfaces.entrySet().removeIf(entry -> {
-            if (entry.getValue().current(finished)) { return false; }
-            entry.getValue().dispose();
-            bounds.remove(entry.getKey());
-            return true;
-        });
         if (commands.equals(previous)) { return true; }
         Layer replacement = layer(next, entries, tint);
         if (layer != null) { layer.dispose(); }
         layer = replacement;
         previous = commands;
-        Set<Coords> active = layer.chunks();
-        bounds.keySet().retainAll(active);
-        surfaces.entrySet().removeIf(entry -> {
-            if (active.contains(entry.getKey())) { return false; }
-            entry.getValue().dispose();
-            return true;
-        });
+        carriers.retain(layer.chunks());
         return true;
     }
 
@@ -168,12 +150,7 @@ final class GpuHexMasks implements Disposable {
     void submit(ModelBatch batch, Camera camera) {
         if (layer == null) { return; }
         if (shader == null) { shader = new MaskShader(); }
-        for (Coords coords : layer.chunks()) {
-            BoundingBox box = bounds.computeIfAbsent(coords, key -> GpuHexSurface.bounds(scene, key, terrain, tint));
-            if (!camera.frustum.boundsInFrustum(box)) { continue; }
-            GpuHexSurface surface = surfaces.computeIfAbsent(coords, key -> new GpuHexSurface(scene, key, terrain, tint));
-            surface.submit(batch, camera, shader, material, layer);
-        }
+        carriers.submit(batch, camera, shader, material, layer, layer.chunks());
     }
 
     /** Uses the same transparent sorting and GL-state owner as ordinary tactical pages and unit icons. */
@@ -225,17 +202,14 @@ final class GpuHexMasks implements Disposable {
 
     boolean active() { return layer != null; }
 
-    long bytes() { return surfaces.values().stream().mapToLong(GpuHexSurface::bytes).sum(); }
+    long bytes() { return carriers.bytes(); }
 
     private void clear() {
         if (layer != null) { layer.dispose(); }
         layer = null;
-        surfaces.values().forEach(GpuHexSurface::dispose);
-        surfaces.clear();
-        bounds.clear();
+        carriers.clear();
         previous = List.of();
         scene = null;
-        terrain = null;
     }
 
     @Override

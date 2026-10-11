@@ -284,7 +284,13 @@ final class GpuAtmosphere implements Disposable {
 
     /** Apply after the camera's final pose, before either geometry shadows or cloud transmission. */
     void updateLight(Camera camera) {
-        lighting = options.fixedSun() ? worldLighting.relativeTo(camera) : worldLighting;
+        updateLight(camera, false);
+    }
+
+    /** As {@link #updateLight(Camera)}; the Tactical View ({@code tactical}) has its one fixed light instead. */
+    void updateLight(Camera camera, boolean tactical) {
+        lighting = tactical ? BoardAtmosphere.TACTICAL
+              : options.fixedSun() ? worldLighting.relativeTo(camera) : worldLighting;
     }
 
     void setOptions(Options options) {

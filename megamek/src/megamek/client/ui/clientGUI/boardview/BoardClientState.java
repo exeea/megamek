@@ -28,7 +28,6 @@ import java.awt.image.DataBufferInt;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -207,14 +206,13 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     List<Coords> highlightedEntityHexes = new ArrayList<>(), demolitionChargeHighlightHexes = new ArrayList<>();
     private final Set<Integer> selectedEntities = new HashSet<>(), ecmEntities = new HashSet<>();
     Map<Coords, Color> ecmHexes = Map.of(), eccmHexes = Map.of(), ecmCenters = Map.of(), eccmCenters = Map.of();
+    /** The 3D board's E(C)CM, rebuilt with the Legacy 2D maps above by {@link #updateEcmList()}. */
+    private BoardElectronicWarfare electronicWarfare = BoardElectronicWarfare.EMPTY;
     private Shape[] facingPolys, movementPolys, finalFacingPolys;
     private Shape upArrow, downArrow;
     Rectangle displayablesRect = new Rectangle();
-    private record HexOverlayStyle(Color ecm, Color eccm, Color ecmCenter, Color eccmCenter, boolean embedded) {
-        boolean empty() { return ecm == null && eccm == null && ecmCenter == null && eccmCenter == null && !embedded; }
-    }
-    private record CapturedHexOverlay(HexOverlayStyle style, BoardTactical geometry) { }
-    private final Map<Coords, CapturedHexOverlay> capturedHexOverlays = new HashMap<>();
+    /** The embedded-board marks; E(C)CM reaches the 3D board as {@link #electronicWarfare()} instead. */
+    private final Map<Coords, BoardTactical> capturedHexOverlays = new HashMap<>();
     private final Map<Coords, BoardTactical> capturedSheetBorders = new HashMap<>();
     private Board capturedOverlayBoard;
     private Rectangle capturedOverlayClip;
@@ -2129,11 +2127,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         }
         Set<Coords> marked = new TreeSet<>(Comparator.comparingInt(Coords::getX).thenComparingInt(Coords::getY));
         marked.addAll(board.embeddedBoardCoords());
-        for (Map<Coords, Color> colors : Arrays.asList(ecmHexes, eccmHexes, ecmCenters, eccmCenters)) {
-            if (colors != null) {
-                marked.addAll(colors.keySet());
-            }
-        }
         if (GUIP.getShowMapSheets()) {
             for (int x = 0; x < board.getWidth(); x++) {
                 for (int y = 0; y < board.getHeight(); y++) {
@@ -2151,25 +2144,12 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         UIUtil.setHighQualityRendering(scratch);
         try {
             for (Coords coords : marked) {
-                HexOverlayStyle style = new HexOverlayStyle(colorAt(ecmHexes, coords), colorAt(eccmHexes, coords),
-                      colorAt(ecmCenters, coords), colorAt(eccmCenters, coords), board.embeddedBoardCoords().contains(coords));
-                if (style.empty()) {
+                if (!board.embeddedBoardCoords().contains(coords)) {
                     capturedHexOverlays.remove(coords);
                     continue;
                 }
-                CapturedHexOverlay previous = capturedHexOverlays.get(coords);
-                if (previous == null || !previous.style().equals(style)) {
-                    BoardTactical captured = captureHexOverlay(scratch, coords, local -> {
-                        BoardTacticalGraphics.draw(local, BoardTactical.Playback.HOLD_DURING_PLAYBACK,
-                              layer -> drawElectronicWarfare(layer, coords));
-                        if (style.embedded()) {
-                            drawEmbeddedBoard(local);
-                        }
-                    });
-                    previous = new CapturedHexOverlay(style, captured);
-                    capturedHexOverlays.put(coords, previous);
-                }
-                graphics.append(previous.geometry());
+                graphics.append(capturedHexOverlays.computeIfAbsent(coords,
+                      key -> captureHexOverlay(scratch, key, this::drawEmbeddedBoard)));
             }
             if (GUIP.getShowMapSheets()) {
                 // Shared edges cross into both hexes; all coverage fills must be below the borders.
@@ -2197,26 +2177,25 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         return colors == null ? null : colors.get(coords);
     }
 
+    /**
+     * The Legacy 2D look of E(C)CM: player-colour washes, static noise and source rings. The 3D board's captures skip it
+     * and draw {@link #electronicWarfare()} instead.
+     */
     public void drawElectronicWarfare(Graphics2D graphics, Coords coords) {
+        if (gpuCapture) {
+            return;
+        }
         Graphics2D local = (Graphics2D) graphics.create();
         try {
-            boolean vectors = local instanceof BoardTacticalGraphics;
-            boolean solids = !gpuCapture || vectors;
             Color ecm = colorAt(ecmHexes, coords);
             if (ecm != null) {
-                if (solids) {
-                    drawFieldTint(local, ecm);
-                }
-                if (!vectors) {
-                    Image noise = getScaledImage(tileManager.getEcmStaticImage(ecm), false);
-                    local.drawImage(noise, 0, 0, noise.getWidth(null), noise.getHeight(null), null);
-                }
+                drawFieldTint(local, ecm);
+                Image noise = getScaledImage(tileManager.getEcmStaticImage(ecm), false);
+                local.drawImage(noise, 0, 0, noise.getWidth(null), noise.getHeight(null), null);
             }
-            if (solids) {
-                drawFieldTint(local, colorAt(eccmHexes, coords));
-                drawFieldSource(local, colorAt(ecmCenters, coords));
-                drawFieldSource(local, colorAt(eccmCenters, coords));
-            }
+            drawFieldTint(local, colorAt(eccmHexes, coords));
+            drawFieldSource(local, colorAt(ecmCenters, coords));
+            drawFieldSource(local, colorAt(eccmCenters, coords));
         } finally {
             local.dispose();
         }
@@ -2225,21 +2204,12 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public void drawFieldTint(Graphics2D graphics, Color tint) {
         if (tint != null) {
             graphics.setColor(tint);
-            // Use the full shared hex in native geometry, avoiding the classic bitmap's one-pixel gutters.
-            Shape hex = graphics instanceof BoardTacticalGraphics ? HexDrawUtilities.getHexFullBorderLine(0) : HEX_POLY;
-            graphics.fill(AffineTransform.getScaleInstance(getScale(), getScale()).createTransformedShape(hex));
+            graphics.fill(AffineTransform.getScaleInstance(getScale(), getScale()).createTransformedShape(HEX_POLY));
         }
     }
 
     public void drawFieldSource(Graphics2D graphics, Color tint) {
-        if (tint == null) {
-            return;
-        }
-        if (graphics instanceof BoardTacticalGraphics) {
-            int alpha = Math.min(255, tint.getAlpha() * 2);
-            drawHexBorder(graphics, new Point(), new Color(0, 0, 0, Math.min(160, alpha)), 4, 6, true);
-            drawHexBorder(graphics, new Point(), new Color(tint.getRed(), tint.getGreen(), tint.getBlue(), alpha), 5, 4, true);
-        } else {
+        if (tint != null) {
             drawHexBorder(graphics, tint.darker(), 5, 10);
         }
     }
@@ -2336,7 +2306,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         drawArtilleryHexes(graphics2D);
         drawOrbitalBombardmentHexes(graphics2D);
 
-        // The GPU capture draws selection, hover and acting-unit outlines natively. Capturing the classic flat
+        // The GPU capture draws selection, hover and acting-unit outlines natively. Capturing the Legacy 2D flat
         // hex cursors as well would render them on each hex's raised marking plane, split across neighbouring
         // levels wherever the hexes differ in elevation.
         if (includeUnits) {
@@ -2370,8 +2340,10 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
             BoardTacticalGraphics.drawDeployment(graphics2D, this::drawDeploymentBorders);
         }
 
-        // draw C3 links
-        drawSprites(graphics2D, c3Sprites);
+        // draw C3 links, unless View > Unit Links hides the lines between units
+        if (GUIP.getShowUnitLinks()) {
+            drawSprites(graphics2D, c3Sprites);
+        }
 
         // draw flyover routes
         if (game.getBoard(boardId).isGround()) {
@@ -2438,6 +2410,9 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         ecmEntities.clear();
         // Compute info about all E(C)CM on the board
         final ArrayList<ECMInfo> allEcmInfo = ComputeECM.computeAllEntitiesECMInfo(game.getEntitiesVector());
+        // The 3D board's snapshot: the shown emitting units and each displayed field with its covered hexes
+        List<Entity> emitters = new ArrayList<>();
+        List<Map.Entry<ECMInfo, List<Coords>>> fields = new ArrayList<>();
 
         // First, mark the sources of E(C)CM Used for highlighting hexes and tooltips
         for (Entity entity : game.getEntitiesVector()) {
@@ -2470,6 +2445,9 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
             // Update ECCM center information
             if (entity.getECCMInfo() != null) {
                 newECCMCenters.put(entity.getPosition(), ecmColor);
+            }
+            if (entity.getECMInfo() != null || entity.getECCMInfo() != null) {
+                emitters.add(entity);
             }
             Coords position = entity.getPosition();
             if (ComputeECM.isAffectedByECM(entity, position, position, allEcmInfo)) { ecmEntities.add(entity.getId()); }
@@ -2514,6 +2492,8 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
 
             final Coords ecmPos = ecmInfo.getPos();
             final int range = ecmInfo.getRange();
+            List<Coords> covered = new ArrayList<>();
+            fields.add(Map.entry(ecmInfo, covered));
 
             // Add each Coords within range to the list of ECM Coords
             for (int x = -range;
@@ -2533,6 +2513,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                     if ((distance > range) || !inArc) {
                         continue;
                     }
+                    covered.add(coords);
 
                     // Check for allied ECCM or enemy ECM
                     if ((!ecmInfo.isOpposed(localPlayer) && ecmInfo.isECCM()) || (ecmInfo.isOpposed(localPlayer)
@@ -2566,17 +2547,25 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
             processAffectedCoords(coords, null, eccm, newECMHexes, newECCMHexes);
         }
 
-        if (!newECMHexes.equals(ecmHexes) || !newECCMHexes.equals(eccmHexes)
-              || !newECMCenters.equals(ecmCenters) || !newECCMCenters.equals(eccmCenters)) {
-            visibilityChanged();
-            invalidatePlanarCapture();
-        }
-
+        BoardElectronicWarfare nextWarfare = BoardElectronicWarfare.capture(getBoard(), getLocalPlayer(), fields,
+              emitters, GUIP.getECMTransparency());
+        boolean legacyChanged = !newECMHexes.equals(ecmHexes) || !newECCMHexes.equals(eccmHexes)
+              || !newECMCenters.equals(ecmCenters) || !newECCMCenters.equals(eccmCenters);
+        boolean warfareChanged = !nextWarfare.equals(electronicWarfare);
         synchronized (this) {
             ecmHexes = newECMHexes;
             ecmCenters = newECMCenters;
             eccmHexes = newECCMHexes;
             eccmCenters = newECCMCenters;
+            if (warfareChanged) {
+                electronicWarfare = nextWarfare;
+            }
+        }
+        if (legacyChanged || warfareChanged) {
+            visibilityChanged();
+        }
+        if (legacyChanged) {
+            invalidatePlanarCapture();
         }
 
         repaint();
@@ -2628,6 +2617,9 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         }
     }
     public boolean isAffectedByECM(Entity entity) { return ecmEntities.contains(entity.getId()); }
+
+    /** The E(C)CM fields the local player may see, as the 3D board draws them; Swing thread. */
+    public BoardElectronicWarfare electronicWarfare() { return electronicWarfare; }
 
     public void drawHexEffects(Graphics2D graphics2D, Coords coords) {
         AffineTransform scaleTransform = new AffineTransform();

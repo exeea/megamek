@@ -39,6 +39,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.Clipboard;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.Messages;
 import megamek.client.ui.dialogs.RoundsInAirDialog;
@@ -269,7 +270,7 @@ class GpuLogPanelSmokeTest {
             panel = new Panel(hud);
             play(panel.state.history, round);
             panel.preferences = new GpuBoardSource.UiPreferences(1, "Piloting\nlaser", "Hit Damage", true, true,
-                  false, false, GpuHudInputTest.preferences().binds(), 0);
+                  false, false, GpuHudInputTest.preferences().binds(), 0, BoardGraphics.ENHANCED);
             panel.show(hud, status, round.log());
             assertTrue(panel.log.key(Set.of(KeyCommandBind.REPORT_KEY_SELECT_NEXT)));
             assertTrue(panel.log.key(Set.of(KeyCommandBind.REPORT_KEY_NEXT)));
@@ -299,7 +300,7 @@ class GpuLogPanelSmokeTest {
             play(panel.state.history, new Round(log, round.events()));
             GpuBattleStatus.Snapshot status = status(GamePhase.END_REPORT, 4);
             panel.preferences = new GpuBoardSource.UiPreferences(1, "laser", "Piloting\nheat", true, true, false,
-                  false, GpuHudInputTest.preferences().binds(), 0);
+                  false, GpuHudInputTest.preferences().binds(), 0, BoardGraphics.ENHANCED);
             panel.show(hud, status, log);
             List<String> list = panel.list();
             int artillery = list.indexOf(UiTheme.upper(Messages.getString("GpuBoard.hud.log.artilleryInFlight")));

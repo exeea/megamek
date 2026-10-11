@@ -59,6 +59,8 @@ public class SensorRangeSprite extends FieldOfFireSprite {
     public final static int SENSORS_AIR = 1;
     public final static int VISUAL = 2;
     public final static int VISUAL_DARK = 3;
+    /** The reach of the unit's active probe (b11-design item 22), in the sensor range colour. */
+    public final static int ACTIVE_PROBE = 4;
 
     /** Upright GPU visual-range boundary, often clipped to a straight line at the map edge. */
     private static final float GPU_VISUAL_RANGE_HEIGHT = 0.5f;
@@ -69,7 +71,7 @@ public class SensorRangeSprite extends FieldOfFireSprite {
 
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
 
-    private static final int COLORS_MAX = 4;
+    private static final int COLORS_MAX = 5;
 
     // in this sprite type, the images are very repetitive
     // therefore they get saved in a static array
@@ -89,7 +91,7 @@ public class SensorRangeSprite extends FieldOfFireSprite {
 
     public static Color getColor(int sensorType) {
         return switch (sensorType) {
-            case SENSORS, SENSORS_AIR -> GUIP.getSensorRangeColor();
+            case SENSORS, SENSORS_AIR, ACTIVE_PROBE -> GUIP.getSensorRangeColor();
             case VISUAL, VISUAL_DARK -> GUIP.getVisualRangeColor();
             default -> new Color(0, 0, 0);
         };

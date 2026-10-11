@@ -52,7 +52,7 @@ import org.junit.jupiter.api.Timeout;
 /**
  * A bot order that picks target hexes (HexTargetPicker), over the GPU battle window: no Swing control dialog, the
  * pick in the frame for the HUD, the board's clicks picking the hexes, and the HUD's Done and Esc ending it, with the
- * same order the classic board's picker sends.
+ * same order the Legacy 2D board's picker sends.
  */
 @Timeout(180)
 class GpuHexPickTest {
@@ -87,27 +87,27 @@ class GpuHexPickTest {
     }
 
     @Test
-    void theBoardsClicksPickTheHexesAndDoneSendsWhatTheClassicPickerSends() throws Exception {
-        assumeFalse(GraphicsEnvironment.isHeadless(), "The classic picker shows its Swing control dialog");
+    void theBoardsClicksPickTheHexesAndDoneSendsWhatTheLegacy2DPickerSends() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "The Legacy 2D picker shows its Swing control dialog");
         try (GpuBoardFixture fixture = GpuBoardFixture.create(); Session game = onSwing(() -> session(fixture))) {
-            // The classic board: the control dialog, the board's clicks and the dialog's Done.
+            // The Legacy 2D board: the control dialog, the board's clicks and the dialog's Done.
             onSwing(() -> {
                 strategicTarget(game).doClick(0);
                 return null;
             });
             JDialog controls = onSwing(GpuHexPickTest::controlDialog);
-            assertNotNull(controls, "the classic board shows the control dialog");
+            assertNotNull(controls, "the Legacy 2D board shows the control dialog");
             onSwing(() -> {
                 game.view().mouseAction(FIRST, BoardClientState.BOARD_HEX_CLICK, 0, 1);
                 game.view().mouseAction(SECOND, BoardClientState.BOARD_HEX_CLICK, 0, 1);
                 button(controls, Messages.getString("BotCommandPanel.HexPicker.done")).doClick(0);
                 return null;
             });
-            List<String> classic = List.copyOf(game.sent());
-            assertEquals(2, classic.stream().filter(line -> line.startsWith("chat: Princess: ")).count(),
-                  "one target order per hex: " + classic);
-            assertTrue(classic.stream().anyMatch(line -> line.endsWith(FIRST.getBoardNum()))
-                  && classic.stream().anyMatch(line -> line.endsWith(SECOND.getBoardNum())), classic.toString());
+            List<String> legacy2D = List.copyOf(game.sent());
+            assertEquals(2, legacy2D.stream().filter(line -> line.startsWith("chat: Princess: ")).count(),
+                  "one target order per hex: " + legacy2D);
+            assertTrue(legacy2D.stream().anyMatch(line -> line.endsWith(FIRST.getBoardNum()))
+                  && legacy2D.stream().anyMatch(line -> line.endsWith(SECOND.getBoardNum())), legacy2D.toString());
 
             present(game.gui(), game.view(), game.source());
             try {
@@ -129,7 +129,7 @@ class GpuHexPickTest {
                 // The HUD's Done key.
                 game.source().players().endPick(true);
                 assertNull(pick(game), "Done ends the pick");
-                assertEquals(classic, List.copyOf(game.sent()), "the classic picker's order and toasts");
+                assertEquals(legacy2D, List.copyOf(game.sent()), "the Legacy 2D picker's order and toasts");
                 assertTrue(game.view().getWeaponRangeSprites().isEmpty(), "the highlights go with the pick");
             } finally {
                 dismiss();
@@ -205,7 +205,7 @@ class GpuHexPickTest {
         return new Session(gui, view, source, princess, sent);
     }
 
-    /** EDT: Princess's Strategic Target item in the panel's Priority Target popup, as the classic panel shows it. */
+    /** EDT: Princess's Strategic Target item in the panel's Priority Target popup, as the Swing panel shows it. */
     private static JMenuItem strategicTarget(Session game) {
         String title = Messages.getString("BotCommandPanel.PriorityTarget.title");
         BotCommandsPanel.PopupCommand command = game.gui().getBotCommandsPanel().popupCommands(game.princess())
@@ -252,7 +252,7 @@ class GpuHexPickTest {
         return game.source().takeFrame().panels().players().pick();
     }
 
-    /** EDT: the classic picker's control dialog while it shows, else null. */
+    /** EDT: the Legacy 2D picker's control dialog while it shows, else null. */
     private static JDialog controlDialog() {
         return Arrays.stream(Window.getWindows()).filter(window -> window instanceof JDialog dialog
                     && dialog.isShowing()

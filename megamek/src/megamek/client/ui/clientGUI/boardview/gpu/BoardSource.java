@@ -7,6 +7,7 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import megamek.client.ui.clientGUI.boardview.RulerModel;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.util.KeyCommandBind;
@@ -21,13 +22,49 @@ interface BoardSource extends AutoCloseable {
 
     /**
      * Immutable preference snapshot published to the render thread: the existing preferences the native views read,
-     * whether the battle HUD shows its contacts panel, every key binding and MegaMek's sprint colour.
+     * whether the battle HUD shows its contacts panel, every key binding, MegaMek's sprint colour, the 3D board's
+     * graphics, MegaMek's jump colour and the overlay switches.
      */
     public record UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
           boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
-          List<Bind> binds, int moveSprintRgb) {
+          List<Bind> binds, int moveSprintRgb, BoardGraphics graphics, int moveJumpRgb, Overlays overlays) {
         public UiPreferences {
             binds = List.copyOf(binds);
+        }
+
+        /**
+         * The client settings of the Tactical View's Overlays panel (GpuTacticalOverlays), View > Unit Links and View >
+         * Hex Types, the one switch of each overlay for the panel and for the passes that draw it: the panel is
+         * expanded, the bases show their status badges, the enemy's rear arcs are shaded, the E(C)CM fields are
+         * outlined and the jammed hexes hatched, the ground layer is lightened by level, the lines between units are
+         * drawn, and the hexes' captured labels carry their type block (so the Tactical View adds no depth of its own).
+         */
+        public record Overlays(boolean panelOpen, boolean statusBadges, boolean rearArcs, boolean ecmFields,
+              boolean ecmHatch, boolean levelShading, boolean unitLinks, boolean hexTypes) {
+            /** The settings' defaults. */
+            public static final Overlays DEFAULTS = new Overlays(true, true, true, true, true, false, true, false);
+
+            static Overlays capture(GUIPreferences gui) {
+                return new Overlays(gui.getTacticalOverlaysOpen(), gui.getTacticalStatusBadges(),
+                      gui.getTacticalRearArcs(), gui.getEcmTacticalFields(), gui.getEcmTacticalHatch(),
+                      gui.getTacticalLevelShading(), gui.getShowUnitLinks(), gui.getHexTypesEnabled());
+            }
+        }
+
+        /** Preferences with the overlays' defaults, as the tests that switch no overlay build them. */
+        public UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
+              boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
+              List<Bind> binds, int moveSprintRgb, BoardGraphics graphics, int moveJumpRgb) {
+            this(scale, reportKeywords, reportFilterKeywords, minimapEnabled, contactsEnabled, conditionsVisible,
+                  turnDetails, binds, moveSprintRgb, graphics, moveJumpRgb, Overlays.DEFAULTS);
+        }
+
+        /** Preferences with MegaMek's default jump colour, as the tests that draw no jump build them. */
+        public UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
+              boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
+              List<Bind> binds, int moveSprintRgb, BoardGraphics graphics) {
+            this(scale, reportKeywords, reportFilterKeywords, minimapEnabled, contactsEnabled, conditionsVisible,
+                  turnDetails, binds, moveSprintRgb, graphics, java.awt.Color.RED.getRGB());
         }
 
         static UiPreferences capture() {
@@ -38,7 +75,8 @@ interface BoardSource extends AutoCloseable {
                   gui.getShowPlanetaryConditionsOverlay(), gui.getTurnDetailsOverlay(),
                   Stream.of(KeyCommandBind.values()).map(bind -> new Bind(bind, bind.key, bind.modifiers,
                         KeyCommandBind.getDesc(bind))).toList(),
-                  gui.getMoveSprintColor().getRGB());
+                  gui.getMoveSprintColor().getRGB(), gui.getBoardGraphics(), gui.getMoveJumpColor().getRGB(),
+                  Overlays.capture(gui));
         }
     }
 

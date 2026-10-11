@@ -23,6 +23,7 @@ import java.util.zip.CRC32C;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.FloatArray;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -35,8 +36,9 @@ import org.junit.jupiter.api.Test;
 /**
  * Times the CPU side of terrain chunk preparation on a region of a real board and prints a digest of everything it
  * produced, so a faster build can be checked against the geometry and materials it must not change. The board,
- * region, detail levels, worker count and repeats come from the {@code megamek.gpu.benchmark*} properties; run it
- * with {@code gradlew :megamek:gpuTerrainLoadBenchmark}.
+ * region, detail levels, worker count, repeats and graphics ({@code megamek.gpu.benchmarkGraphics}, ENHANCED or
+ * CLASSIC) come from the {@code megamek.gpu.benchmark*} properties; run it with
+ * {@code gradlew :megamek:gpuTerrainLoadBenchmark}.
  */
 @Tag("on-demand")
 class GpuTerrainLoadBenchmarkTest {
@@ -52,20 +54,46 @@ class GpuTerrainLoadBenchmarkTest {
               .mapToInt(value -> Integer.parseInt(value.trim())).toArray();
         int workers = Integer.getInteger("megamek.gpu.benchmarkWorkers", GpuTerrain.DEFAULT_WORKERS);
         int repeats = Integer.getInteger("megamek.gpu.benchmarkRepeats", 2);
+        BoardGraphics graphics = BoardGraphics.parse(System.getProperty("megamek.gpu.benchmarkGraphics"));
         // As a game loads a sheet: converted (its placed objects and car-park lane roads are part of the board).
         Board board = BoardFile.loadSheet(file, false, true);
         BoardScene scene = scene(board);
         TerrainSettings settings = TerrainSettings.capture();
         Map<Coords, BoardFlow.Current> currents = settings.call(() -> BoardFlow.calculate(scene));
         float floor = settings.call(() -> BoardGeometry.floor(scene));
-        System.out.printf("PERF terrain-prepare board=%s region=%s workers=%d%n", file.getName(),
-              Arrays.toString(region), workers);
+        System.out.printf("PERF terrain-prepare board=%s region=%s workers=%d graphics=%s%n", file.getName(),
+              Arrays.toString(region), workers, graphics);
+        // Today a Classic game prepares the same 3D chunks and builds the tileset columns on the render thread when
+        // it first draws them, so CLASSIC adds that column geometry. TODO(b11 step 7): CLASSIC prepares the columns
+        // in place of the 3D chunks.
         for (String name : System.getProperty("megamek.gpu.benchmarkLods", "DISTANT,FULL").split(",")) {
             TerrainLod lod = TerrainLod.valueOf(name.trim());
             for (int repeat = 0; repeat < repeats; repeat++) {
                 prepare(scene, settings, currents, floor, lod, region, workers);
             }
         }
+        for (int repeat = 0; graphics == BoardGraphics.CLASSIC && repeat < repeats; repeat++) {
+            columns(scene, settings, floor, region);
+        }
+    }
+
+    /** Times and digests the region's tileset column geometry, hex by hex as the render thread builds it. */
+    private static void columns(BoardScene scene, TerrainSettings settings, float floor, int[] region) {
+        Sink out = new Sink();
+        int hexes = 0;
+        long faces = 0;
+        long start = System.nanoTime();
+        for (int x = region[0]; x < Math.min(scene.width(), region[0] + region[2]); x++) {
+            for (int y = region[1]; y < Math.min(scene.height(), region[1] + region[3]); y++) {
+                BoardScene.Tile tile = scene.tile(new Coords(x, y));
+                BoardTacticalGeometry.Surface column = settings.call(() -> GpuTilesetTerrain.column(scene, tile, floor));
+                hexes++;
+                faces += column.top().size() + column.faces().size() + column.walls().size();
+                surface(out, column);
+            }
+        }
+        System.out.printf("PERF terrain-columns hexes=%d withDigest=%.1f ms faces=%d checksum=%08x%n", hexes,
+              (System.nanoTime() - start) / 1e6, faces, out.value());
     }
 
     /** The live capture without artwork: structures keep a model name so their hexes get the same footprint. */
@@ -187,15 +215,7 @@ class GpuTerrainLoadBenchmarkTest {
             faces(out, surface.faces);
             faces(out, surface.waterFaces);
             var topography = prepared.topography().get(coords);
-            if (topography != null) {
-                faces(out, topography.top());
-                faces(out, topography.slopes());
-                faces(out, topography.faces());
-                faces(out, topography.water());
-                faces(out, topography.walls());
-                for (var side : topography.waterfalls()) { side(out, side); }
-                out.writeFloat(topography.highestTop());
-            }
+            if (topography != null) { surface(out, topography); }
             var sculpt = prepared.sculpts().get(coords);
             if (sculpt != null) {
                 faces(out, sculpt.walls());
@@ -302,6 +322,16 @@ class GpuTerrainLoadBenchmarkTest {
         field(out, prepared.water());
         field(out, prepared.lava());
         return blended;
+    }
+
+    private static void surface(Sink out, BoardTacticalGeometry.Surface surface) {
+        faces(out, surface.top());
+        faces(out, surface.slopes());
+        faces(out, surface.faces());
+        faces(out, surface.water());
+        faces(out, surface.walls());
+        for (var side : surface.waterfalls()) { side(out, side); }
+        out.writeFloat(surface.highestTop());
     }
 
     private static void faces(Sink out, List<BoardSurface.Face> faces) {

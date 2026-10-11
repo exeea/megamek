@@ -28,6 +28,7 @@ import com.badlogic.gdx.InputProcessor;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.Vector3;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.util.KeyCommandBind;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -124,7 +125,8 @@ class GpuKeyboardSmokeTest {
                             verify(source, never()).key(KeyEvent.VK_I, true, InputEvent.SHIFT_DOWN_MASK);
                             verify(source, never()).key(KeyEvent.VK_F9, true, 0);
 
-                            // Both Shift keys boost WASD and Q/E in 3D, Tactical View and Free Flight.
+                            // Both Shift keys boost WASD in 3D, Tactical View and Free Flight, and Q/E in 3D and Free
+                            // Flight. The Tactical View holds north up: there Q/E turn nothing, boosted or not.
                             source.uiPreferences = GpuHudInputTest.preferences();
                             super.render();
                             clearInvocations(source);
@@ -138,7 +140,11 @@ class GpuKeyboardSmokeTest {
                                 }
                                 for (int key : new int[] { Input.Keys.W, Input.Keys.A, Input.Keys.S, Input.Keys.D,
                                       Input.Keys.Q, Input.Keys.E }) {
-                                    assertCameraBoost(keyboard, processor, key);
+                                    if (mode == 1 && (key == Input.Keys.Q || key == Input.Keys.E)) {
+                                        assertLocked(keyboard, processor, key);
+                                    } else {
+                                        assertCameraBoost(keyboard, processor, key);
+                                    }
                                 }
                             }
                             var start = boardCamera.camera.position.cpy();
@@ -196,6 +202,18 @@ class GpuKeyboardSmokeTest {
                     }
                 }
 
+                /** A held turn key, plain and with Shift, leaves the Tactical View's north-up camera where it is. */
+                private void assertLocked(Input keyboard, InputProcessor processor, int key) {
+                    for (boolean shift : new boolean[] { false, true }) {
+                        when(keyboard.isKeyPressed(Input.Keys.SHIFT_LEFT)).thenReturn(shift);
+                        processor.keyDown(key);
+                        assertEquals(0, advanceCamera(key), "The Tactical View does not turn");
+                        processor.keyUp(key);
+                        assertEquals(0, boardCamera.azimuth(), "North stays up");
+                    }
+                    when(keyboard.isKeyPressed(Input.Keys.SHIFT_LEFT)).thenReturn(false);
+                }
+
                 private float advanceCamera(int key) {
                     if (!boardCamera.firstPerson()) {
                         // Measure input speed with room to move; repeated boosted steps now stop at map boundaries.
@@ -233,7 +251,8 @@ class GpuKeyboardSmokeTest {
         GpuBoardSource.UiPreferences defaults = GpuHudInputTest.preferences();
         List<GpuBoardSource.Bind> binds = defaults.binds().stream().map(bind -> keys.containsKey(bind.command())
               ? new GpuBoardSource.Bind(bind.command(), keys.get(bind.command()), 0, bind.text()) : bind).toList();
-        return new GpuBoardSource.UiPreferences(defaults.scale(), "", "", true, true, false, false, binds, 0);
+        return new GpuBoardSource.UiPreferences(defaults.scale(), "", "", true, true, false, false, binds, 0,
+              BoardGraphics.ENHANCED);
     }
 
     /** The modifier keys the mocked input reports as held, as GLFW does while they are down. */

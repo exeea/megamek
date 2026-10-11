@@ -43,6 +43,7 @@ import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.gdx.DisplayScale;
@@ -112,13 +113,14 @@ class GpuBattleView extends ApplicationAdapter {
     private final UnitDamageDisplay damageDisplay = new UnitDamageDisplay();
     private final GpuJumpJets jumpJets = new GpuJumpJets();
     private final GpuUnitCamouflage camouflage = new GpuUnitCamouflage();
-    private final GpuUnitIcons unitIcons = new GpuUnitIcons();
+    /** The Tactical View's unit bases and badges; created with the HUD's skin, whose icons and font they borrow. */
+    private GpuUnitBases unitBases;
     private final Map<BoardScene.Unit, Vector3> unitAnchors = new HashMap<>();
     private final Map<BoardScene.Unit, UnitFootprint.Pose> unitFootprints = new HashMap<>();
     private final Map<String, ModelInstance> unitInstances = new HashMap<>();
-    /** The instance the view shows for a scene unit: its icon in the Tactical View, else its 3D model. */
-    private final Function<BoardScene.Unit, ModelInstance> shownUnit = unit -> unitIcons.active()
-          ? unitIcons.instance(unit) : unitInstances.get(unit.id() + ":" + unit.part());
+    /** The instance the view shows for a scene unit: its 3D model or meeple. */
+    private final Function<BoardScene.Unit, ModelInstance> shownUnit =
+          unit -> unitInstances.get(unit.id() + ":" + unit.part());
     private final UnitBounds.Frame unitBounds = new UnitBounds.Frame();
     private final UnitPicking unitPicking = new UnitPicking();
     private final Map<String, UnitModelState.Appearance> equipmentAppearance = new HashMap<>();
@@ -222,8 +224,9 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /**
-     * GL thread. Enters the Tactical View's top view, whose next frame shows unit icons and flat terrain sprites, or
-     * returns to the exact 3D pose it replaced. The {@code TOGGLE_ISO} key (T by default) calls this.
+     * GL thread. Enters the Tactical View's locked top view, whose next frame shows every unit as its meeple on its
+     * base, with the ground layer over the terrain the graphics setting chose, or returns to the exact 3D pose it
+     * replaced. The {@code TOGGLE_ISO} key (T by default) calls this.
      */
     void setTacticalView(boolean enabled) {
         boardCamera.setTactical(enabled, scene);
@@ -298,6 +301,7 @@ class GpuBattleView extends ApplicationAdapter {
         // screen borrows it again while the terrain builds.
         theme = loadingTheme == null ? new GpuBoardSkin() : loadingTheme;
         loadingTheme = null;
+        unitBases = new GpuUnitBases(theme.skin);
         tuning = new GpuBoardTuning(theme.skin, source, boardCamera);
         // The HUD draws with the view's batch, which it does not own: the battle HUD over a game, the map tools over
         // the board editor and the map preview. The batch outlives an asset reload, which recreates the renderers.
@@ -459,7 +463,7 @@ class GpuBattleView extends ApplicationAdapter {
                         camouflage.dispose();
                         damageDisplay.dispose();
                         unitTextures.dispose();
-                        unitIcons.dispose();
+                        unitBases.dispose();
                         groundSurfaces.clear();
                         attachments.clear();
                         BoardRocks.reload();
@@ -542,7 +546,7 @@ class GpuBattleView extends ApplicationAdapter {
               || scene.boardId() != frame.scene().boardId());
         List<BoardScene.Tile> previousTiles = scene == null ? null : scene.tiles();
         scene = frame.scene();
-        if (unitModels != null) { unitModels.setDisplayMode(tuning.unitDisplayMode()); }
+        if (unitModels != null) { unitModels.setDisplayMode(displayMode()); }
         history.accept(frame.timeline(), scene, frame.reports(), this::hasInfantryTransports);
         scene = history.live(scene);
         // Apply HUD state independently of camera framing; panels overlay the full board viewport.
@@ -560,10 +564,11 @@ class GpuBattleView extends ApplicationAdapter {
         }
         boardGeneration = frame.boardGeneration();
         var atmosphereSettings = tuning.atmosphere();
-        atmosphere.configure(atmosphereSettings);
+        // The Tactical View has clear air and its one fixed light: no clouds, fog, haze or weather (b11-design 4.3).
+        atmosphere.configure(boardCamera.tactical() ? BoardAtmosphere.DEFAULTS : atmosphereSettings);
         atmosphere.setOptions(tuning.atmosphereOptions());
         // Material readiness includes live lighting/cloud flags, before any visible terrain is submitted.
-        atmosphere.updateLight(boardCamera.camera);
+        atmosphere.updateLight(boardCamera.camera, boardCamera.tactical());
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
         terrain.setGravity(atmosphereSettings.gravity());
@@ -605,14 +610,17 @@ class GpuBattleView extends ApplicationAdapter {
         }
         fireControl.update(scene, HIDE_TARGET_ARROWS_DURING_ATTACKS && !playback.attacks().isEmpty(), frame.status(),
               frame.panels().fire());
-        tactical.update(scene, detailChanged, hovered, !frame.panels().move().route().isEmpty());
+        tactical.update(scene, detailChanged, hovered, !frame.panels().move().route().isEmpty(), hoveredUnit);
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(tuning.fovStyle(), tuning.fovDarkness(), tuning.sensorStyle(), tuning.sensorDarkness());
         attackEffects.setWind(atmosphereSettings.effects());
         terrain.setNormalMaps(tuning.normalMaps());
         terrain.setTerrainWear(tuning.terrainWear());
-        terrain.setGrass(tuning.grass());
-        terrain.setWaterEffects(tuning.waterEffects());
+        // The Tactical View hides what has no gameplay value. Grass and water effects are the terrain's live switches.
+        // TODO(b11 step 7): terrain.setFluffHidden(boardCamera.tactical()) hides trees, scatter, decorative props,
+        // building models, decals, paint, scars and water pages by the keep rule (b11-design 4.3), without a rebuild.
+        terrain.setGrass(tuning.grass() && !boardCamera.tactical());
+        terrain.setWaterEffects(tuning.waterEffects() && !boardCamera.tactical());
         terrain.setSmallObjects(tuning.objectLod());
         if (unitTextures.update(scene.units().stream().filter(unit -> !unit.sensorContact()
               && (unitModels == null || unitModels.get(unit.model(), unit.id()) == null)).map(BoardScene.Unit::image).distinct()
@@ -701,20 +709,21 @@ class GpuBattleView extends ApplicationAdapter {
             });
         }
         updateEquipmentDetail();
-        // Icons and the tileset columns are the Tactical View; the 3D view keeps its meshes at every angle and zoom.
-        if (unitIcons.update(boardCamera.tactical(), boardCamera.camera, scene, frame.status(),
-              unitFootprints, unitAnchors)) { unitPicking.clear(); }
-        terrain.setTacticalView(boardCamera.tactical());
-        markers.update(unitIcons.active() ? unitIcons.instances() : unitInstances.values(), boardCamera.camera);
+        if (boardCamera.tactical()) { anchorOnBases(); }
+        // The graphics setting alone chooses the terrain; the Tactical View is the camera and the presentation.
+        // TODO(b11 step 7): terrain.setColumns(graphics == CLASSIC) before terrain.update builds Classic. Until then
+        // Classic drives today's draw-time flip to the tileset columns.
+        terrain.setTacticalView(source.uiPreferences().graphics() == BoardGraphics.CLASSIC);
+        markers.update(unitInstances.values(), boardCamera.camera);
         updateJumpJets();
         attackEffects.update(playback.attacks(), completedAttacks, unitModels, unitInstances);
-        if (!terrain.tacticalView()) {
+        // No craters in the Tactical View or on the Classic columns. TODO(b11 step 7): columns() for tacticalView().
+        if (!terrain.tacticalView() && !boardCamera.tactical()) {
             attackEffects.groundImpacts(completedAttacks, impact -> terrain.impact(scene, impact));
         }
         unitBounds.begin();
-        List<ModelInstance> units = new ArrayList<>(unitIcons.active() ? unitIcons.instances() : unitInstances.values());
+        List<ModelInstance> units = new ArrayList<>(unitInstances.values());
         List<ModelInstance> outlined = scene.units().stream()
-              .filter(unit -> !unitIcons.active())
               .filter(unit -> !unit.sensorContact() || GpuMarkers.outlineEnabled(BoardMarker.Kind.SENSOR_CONTACT))
               .map(unit -> unitInstances.get(unit.id() + ":" + unit.part()))
               .collect(Collectors.toCollection(ArrayList::new));
@@ -722,18 +731,24 @@ class GpuBattleView extends ApplicationAdapter {
         outlined.removeIf(instance -> instance == null || !boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance)));
         float seeThrough = tuning.seeThrough();
         boolean wireframeView = tuning.wireframe() && GpuWireframe.supported();
-        // The units' poses and anchors, the icons and the camera are final for this frame. The tuning model follows
-        // the camera, which can leave Free Flight by itself (its keys, the Tactical View).
+        // The units' poses and anchors and the camera are final for this frame. The tuning model follows the camera,
+        // which can leave Free Flight by itself (its keys, the Tactical View).
         renderStage("board-space HUD");
         tuning.syncCamera();
         updateHud(frame);
+        if (boardCamera.tactical()) {
+            // After the HUD update, which settles the board overlay's acting unit and focused enemy.
+            unitBases.update(scene, frame.status(), unitFootprints, overlay.actor(), overlay.focus(), hoveredUnit,
+                  hovered, UnitScreenScale.hexPixels(boardCamera.camera.zoom, 1), Gdx.graphics.getDeltaTime(),
+                  source.uiPreferences().overlays().statusBadges());
+        }
         renderStage("cutaways and light");
-        atmosphere.updateLight(boardCamera.camera);
+        atmosphere.updateLight(boardCamera.camera, boardCamera.tactical());
         terrain.setAtmosphere(atmosphere.lighting());
         terrain.animate(Gdx.graphics.getDeltaTime(), units, tuning.buildingOpacity(),
               ui.hit(Gdx.input.getX(), Gdx.input.getY()) ? null : hovered, hoverFloorZ());
         renderStage("geometry shadows");
-        terrain.renderShadows(boardCamera.camera, unitIcons.active() ? List.of() : units);
+        terrain.renderShadows(boardCamera.camera, units);
         renderStage("cloud transmission");
         atmosphere.prepareClouds(terrain, scene, Gdx.graphics.getDeltaTime());
         renderStage("opaque terrain");
@@ -745,6 +760,13 @@ class GpuBattleView extends ApplicationAdapter {
         } else {
             terrain.render(boardCamera.camera, false);
         }
+        if (boardCamera.tactical()) {
+            // The Tactical View's ground marks, then the bases, which the meeples cover (b11-design 4.4).
+            renderStage("ground layer");
+            hexGrid.render(boardCamera, scene, terrain.tacticalView(), true, frame.status().arc(),
+                  source.uiPreferences().overlays().levelShading());
+            unitBases.renderBases(boardCamera.camera);
+        }
         renderStage("units");
         renderUnits(wireframeView);
         renderStage("transparent effects");
@@ -753,19 +775,21 @@ class GpuBattleView extends ApplicationAdapter {
         Color smokeLight = atmosphere.particleLight();
         terrainEffects.update(scene, groundSurfaces, atmosphereSettings.effects(), animationSeconds());
         effectDepth.begin();
-        // The Tactical View's tileset art already shows fire and smoke.
-        if (!terrain.tacticalView()) {
+        // The Classic columns' tileset art already shows fire and smoke, the Tactical View marks them on their hexes.
+        // TODO(b11 step 7): columns() for tacticalView().
+        if (!terrain.tacticalView() && !boardCamera.tactical()) {
             terrainEffects.render(boardCamera.camera, effectDepth, smokeLight, atmosphere.lighting().direction());
         }
         jumpJets.setSmokeLight(smokeLight);
         attackEffects.setSmokeLight(smokeLight);
         attackEffects.setLightDirection(atmosphere.lighting().direction());
-        if (!unitIcons.active()) { jumpJets.render(boardCamera.camera); }
+        jumpJets.render(boardCamera.camera);
         attackEffects.render(boardCamera.camera, effectDepth);
         if (!terrain.waterVisible()) { waterImpacts.clear(); }
-        else if (!unitIcons.active()) {
+        else if (!boardCamera.tactical()) {
             waterImpacts.render(boardCamera.camera, scene, motions, unitInstances, smokeLight, playback.attachment());
         }
+        if (boardCamera.tactical()) { unitBases.renderBadges(boardCamera.camera); }
         renderStage("atmosphere composite");
         atmosphere.end(boardCamera.camera, terrain, scene, 0, fieldOfView, !wireframeView);
         if (wireframeView) { wireframe.lines(boardCamera.camera, terrain); }
@@ -773,11 +797,12 @@ class GpuBattleView extends ApplicationAdapter {
         atmosphere.renderWeather(boardCamera.camera, scene);
         renderStage("unit outlines");
         unitVisibility.render(boardCamera.camera, outlined, atmosphere.depthTexture(), 0, seeThrough, layoutScale,
-              unitBounds, terrain.tacticalView() ? null : terrainEffects.opacityTexture(), terrain);
+              unitBounds, terrain.tacticalView() || boardCamera.tactical() ? null : terrainEffects.opacityTexture(),
+              terrain);
         if (source.isEditor()) { traceOverlay.render(boardCamera, source.trace(), Gdx.graphics.getDeltaTime()); }
         renderStage("tactical overlays");
         terrain.render(boardCamera.camera, true);
-        // Movement annotations show through scenery; draw the destination ghost after the route and unit icons.
+        // Movement annotations show through scenery; draw the destination ghost after the route and the units.
         overlay.renderMarks(boardCamera.camera, unitFootprints::get);
         overlay.render(boardCamera.camera);
         renderHoverRings();
@@ -785,10 +810,13 @@ class GpuBattleView extends ApplicationAdapter {
             editorPreview.render(boardCamera.camera, scene, terrain, source.editorPreview());
         }
         fireControl.render(boardCamera.camera, Gdx.graphics.getDeltaTime());
-        tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), unitIcons.active());
-        hexGrid.render(boardCamera, scene, terrain.tacticalView());
+        tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), boardCamera.tactical(),
+              source.uiPreferences().overlays());
+        // Outside the Tactical View the grid over the finished scene; inside it, the ground layer drew it.
+        if (!boardCamera.tactical()) {
+            hexGrid.render(boardCamera, scene, terrain.tacticalView(), false, GpuBattleStatus.Arc.NONE);
+        }
         renderHexText();
-        unitIcons.render(boardCamera.camera);
         overlay.renderGhost(boardCamera.camera, shownUnit);
         fireControl.renderLabels(boardCamera.camera);
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
@@ -1013,17 +1041,18 @@ class GpuBattleView extends ApplicationAdapter {
      * The board view's facts for the HUD: the view mode, the hovered hex and unit, a hex's width on the screen and,
      * while a board is drawn, each drawn unit's head (its label anchor) and screen rectangle in stage units, y up, and
      * its animated board position. The rectangle runs from the unit's ground up to its head, .55 of a hex wide, in 3D
-     * and is the icon's square in the Tactical View; a unit whose head lies behind the camera has neither. A unit
-     * drawn in parts is placed by its centre part. A fire target that is no unit is anchored on its hex's centre, on
-     * the plane of the hex annotations.
+     * and is the square around its base's ring in the Tactical View, whose head is the ring's north point; a unit
+     * whose head lies behind the camera has neither. A unit drawn in parts is placed by its centre part. A fire target
+     * that is no unit is anchored on its hex's centre, on the plane of the hex annotations.
      */
     private GpuHud.HudView hudView(boolean drawn, GpuFireOrders.Snapshot fire) {
         Map<Integer, Rectangle> rects = new HashMap<>();
         Map<Integer, Vector2> heads = new HashMap<>();
         Map<Integer, Vector2> positions = new HashMap<>();
         float hexPixels = UnitScreenScale.hexPixels(boardCamera.camera.zoom, layoutScale);
-        float width = hexPixels * (unitIcons.active()
-              ? GpuUnitIcons.SIZE_IN_HEXES * BoardGeometry.HEIGHT / BoardGeometry.WIDTH : UNIT_RECT_WIDTH);
+        boolean based = boardCamera.tactical();
+        float width = hexPixels * (based ? GpuUnitBases.RING * BoardGeometry.HEIGHT / BoardGeometry.WIDTH
+              : UNIT_RECT_WIDTH);
         // Stage units per viewport pixel: the HUD's stage spans the board camera's viewport.
         float stage = ui.stage().getWidth() / boardCamera.camera.viewportWidth;
         for (Map.Entry<BoardScene.Unit, Vector3> entry : unitAnchors.entrySet()) {
@@ -1040,7 +1069,7 @@ class GpuBattleView extends ApplicationAdapter {
             }
             heads.put(id, head.scl(stage));
             ground.scl(stage);
-            rects.put(id, unitIcons.active() ? new Rectangle(ground.x - width / 2, ground.y - width / 2, width, width)
+            rects.put(id, based ? new Rectangle(ground.x - width / 2, ground.y - width / 2, width, width)
                   : new Rectangle(Math.min(ground.x, head.x) - width / 2, Math.min(ground.y, head.y),
                         Math.abs(head.x - ground.x) + width, Math.abs(head.y - ground.y)));
         }
@@ -1136,11 +1165,27 @@ class GpuBattleView extends ApplicationAdapter {
         jumpJets.endFrame();
     }
 
+    /** The Tactical View shows every unit as its meeple, whatever the tuning's display; the 3D view follows it. */
+    private UnitDisplayMode displayMode() {
+        return boardCamera.tactical() ? UnitDisplayMode.ALL_MEEPLES : tuning.unitDisplayMode();
+    }
+
+    /**
+     * In the Tactical View a unit's labels hang from the north point of its base's ring, straight up the screen at
+     * every zoom, instead of from its model's head.
+     */
+    private void anchorOnBases() {
+        float north = GpuUnitBases.RING * BoardGeometry.height() / 2;
+        for (Map.Entry<BoardScene.Unit, UnitFootprint.Pose> entry : unitFootprints.entrySet()) {
+            unitAnchors.put(entry.getKey(), entry.getValue().position().cpy().add(0, north, 0));
+        }
+    }
+
     private void prepareUnits() {
         hover.clear();
         unitAnchors.clear();
         unitFootprints.clear();
-        // Zoomed out, the 3D view's units grow to stay visible; the Tactical View's icons keep their size in the hex.
+        // Zoomed out, the 3D view's units grow to stay visible; the Tactical View's meeples keep their size in the hex.
         float growth = boardCamera.tactical() ? 1
               : UnitScreenScale.factor(UnitScreenScale.hexPixels(boardCamera.camera.zoom, layoutScale));
         unitInstances.keySet().retainAll(scene.units().stream().map(unit -> unit.id() + ":" + unit.part())
@@ -1188,7 +1233,7 @@ class GpuBattleView extends ApplicationAdapter {
                 if (Float.isFinite(ground)) { position.z = MathUtils.lerp(position.z, ground, collapse); }
             }
             if (visual == null) {
-                visual = spriteModels.computeIfAbsent(new UnitSprite(unit.image(), tuning.unitDisplayMode().meeple(unit.model())),
+                visual = spriteModels.computeIfAbsent(new UnitSprite(unit.image(), displayMode().meeple(unit.model())),
                       sprite -> sprite.meeple() ? GpuUnitModel.meeple(sprite.pixels(), unitTextures.region(sprite.pixels()))
                             : GpuUnitModel.sprite(sprite.pixels(), unitTextures.region(sprite.pixels())));
             }
@@ -1342,7 +1387,7 @@ class GpuBattleView extends ApplicationAdapter {
             fitted = true;
             cameraSelection = scene.selectedId();
             cameraFollowingPlayback = false;
-            // Start with the whole map, ignoring any earlier classic-board centering. Later board switches
+            // Start with the whole map, ignoring any earlier Legacy 2D board centering. Later board switches
             // can follow a unit-list click, whose pending focus request must still be applied.
             centerSequence = centerSequence < 0 ? request.sequence() : 0;
         }
@@ -1362,7 +1407,7 @@ class GpuBattleView extends ApplicationAdapter {
             if (playback.movement() != null) {
                 // The complete route is already framed. Do not chase the unit or recenter it on arrival.
                 cameraFollowingPlayback = false;
-                // The classic board auto-centers each move's start; do not replay that request after arrival.
+                // The Legacy 2D board auto-centers each move's start; do not replay that request after arrival.
                 if (request.entityId() == Entity.NONE
                       && playback.movement().path().getFirst().coords().equals(request.coords())) {
                     centerSequence = request.sequence();
@@ -1526,17 +1571,15 @@ class GpuBattleView extends ApplicationAdapter {
         lines.setProjectionMatrix(boardCamera.camera.combined);
         lines.begin(ShapeRenderer.ShapeType.Line);
         lines.setColor(TETHER_COLOR);
-        if (!unitIcons.active()) {
-            for (BoardScene.Unit unit : scene.units()) {
-                BoardScene.Tile tile = scene.tile(unit.location().coords());
-                ModelInstance instance = unitInstances.get(unit.id() + ":" + unit.part());
-                UnitMotion motion = motions.get(unit.id());
-                if (tile == null || instance == null) {
-                    continue;
-                }
-                instance.transform.getTranslation(center);
-                renderTether(center, tetherGround(unit, tile.elevation(), center, motion != null && motion.isMoving()));
+        for (BoardScene.Unit unit : scene.units()) {
+            BoardScene.Tile tile = scene.tile(unit.location().coords());
+            ModelInstance instance = unitInstances.get(unit.id() + ":" + unit.part());
+            UnitMotion motion = motions.get(unit.id());
+            if (tile == null || instance == null) {
+                continue;
             }
+            instance.transform.getTranslation(center);
+            renderTether(center, tetherGround(unit, tile.elevation(), center, motion != null && motion.isMoving()));
         }
         var ruler = scene.tactical().ruler();
         if (ruler != null) {
@@ -1721,7 +1764,7 @@ class GpuBattleView extends ApplicationAdapter {
 
     /**
      * Shows a torso twist on a model whose upper body turns on its own. The scene gives the unit's torso facing, as
-     * the classic sprite does, so the legs are that facing less the twist.
+     * the 2D unit sprite does, so the legs are that facing less the twist.
      *
      * @param twist hexsides the torso is turned clockwise from the legs
      *
@@ -1763,17 +1806,15 @@ class GpuBattleView extends ApplicationAdapter {
 
     private void renderUnits(boolean thermal) {
         unitBatch.begin(boardCamera.camera);
-        if (!unitIcons.active()) {
-            for (BoardScene.Unit unit : unitAnchors.keySet()) {
-                ModelInstance instance = unitInstances.get(unit.id() + ":" + unit.part());
-                if (boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance))) {
-                    if (unit.sensorContact()) {
-                        unitBatch.render(instance);
-                    } else if (thermal) {
-                        wireframe.units.add(instance, unit, unitBounds.get(instance));
-                    } else {
-                        unitBatch.render(instance, terrain.environment());
-                    }
+        for (BoardScene.Unit unit : unitAnchors.keySet()) {
+            ModelInstance instance = unitInstances.get(unit.id() + ":" + unit.part());
+            if (boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance))) {
+                if (unit.sensorContact()) {
+                    unitBatch.render(instance);
+                } else if (thermal) {
+                    wireframe.units.add(instance, unit, unitBounds.get(instance));
+                } else {
+                    unitBatch.render(instance, terrain.environment());
                 }
             }
         }
@@ -1861,7 +1902,8 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     private void renderHexText() {
-        hexText.update(scene, theme.skin.getFont("default-font"), terrain::roofBounds);
+        hexText.update(scene, theme.skin.getFont("default-font"), terrain::roofBounds, boardCamera.tactical(),
+              source.uiPreferences().overlays().hexTypes());
         hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0);
     }
 
@@ -1890,14 +1932,6 @@ class GpuBattleView extends ApplicationAdapter {
 
     private boolean hovers(BoardScene.Unit unit) {
         return hovered != null && unit.footprint().contains(hovered);
-    }
-
-    /**
-     * The selected unit and the enemy the board overlay focuses (as of its last update); their Tactical View icons
-     * get the bold white frame
-     */
-    private boolean marked(BoardScene.Unit unit) {
-        return unit.id() == scene.selectedId() || unit.id() == overlay.focus();
     }
 
     /** Held camera binds share the existing focus and release routing; free flight uses wall-clock movement. */
@@ -2134,7 +2168,7 @@ class GpuBattleView extends ApplicationAdapter {
             float nearest = Float.POSITIVE_INFINITY;
             BoardScene.Unit picked = null;
             for (BoardScene.Unit unit : scene.units()) {
-                var instance = unitIcons.active() ? unitIcons.instance(unit) : unitInstances.get(unit.id() + ":" + unit.part());
+                var instance = unitInstances.get(unit.id() + ":" + unit.part());
                 if (instance == null) { continue; }
                 float distance = unitPicking.distance(instance, ray);
                 if (distance < nearest) {
@@ -2150,7 +2184,7 @@ class GpuBattleView extends ApplicationAdapter {
                 return new Pick(null, Entity.NONE, Float.NaN, false);
             }
             var pickedUnit = pickUnit(x, y);
-            if (pickedUnit == null && !unitIcons.active() && tuning.seeThrough() > 0) {
+            if (pickedUnit == null && tuning.seeThrough() > 0) {
                 // The outline extends slightly beyond the mesh. Direct model hits always take priority.
                 float step = GpuUnitVisibility.OUTLINE_STEP * layoutScale;
                 for (int dx = -1; dx <= 1 && pickedUnit == null; dx++) {
@@ -2215,8 +2249,9 @@ class GpuBattleView extends ApplicationAdapter {
             dragged = false;
             panning = button == Input.Buttons.RIGHT || button == Input.Buttons.MIDDLE;
             boolean shiftDown = (gestureModifiers & InputEvent.SHIFT_DOWN_MASK) != 0;
-            // Right drags pan and middle drags orbit or look around; Shift at the press swaps them in every mode.
-            orbiting = panning && (button == Input.Buttons.MIDDLE) != shiftDown;
+            // Right drags pan and middle drags orbit or look around; Shift at the press swaps them in every mode. The
+            // Tactical View holds its angle, so there both pan.
+            orbiting = panning && (button == Input.Buttons.MIDDLE) != shiftDown && !boardCamera.rotationLocked();
             ui.boardPress();
             if (button == Input.Buttons.LEFT && source.isEditor() && !measurementGesture) {
                 // A press on the selection's rotation handle turns the selection.
@@ -2738,7 +2773,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
         camouflage.dispose();
         damageDisplay.dispose();
-        unitIcons.dispose();
+        if (unitBases != null) { unitBases.dispose(); }
         if (annotationBatch != null) {
             annotationBatch.dispose();
         }

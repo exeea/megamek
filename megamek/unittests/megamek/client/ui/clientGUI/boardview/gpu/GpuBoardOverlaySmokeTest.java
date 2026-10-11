@@ -26,6 +26,7 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.tileset.MekTileset;
 import megamek.common.Configuration;
@@ -61,7 +62,7 @@ class GpuBoardOverlaySmokeTest {
     /**
      * One rendered picture: the snapshots, the view, the prototype camera's framing of the focus hex and, in 3D, the
      * instance the view draws for a unit, of which the overlay copies the moving unit's ghost (the Tactical View's
-     * ghost copies the icon).
+     * ghost copies the meeple).
      */
     private record Shot(String name, String mock, boolean tactical, BoardScene scene, GpuBattleStatus.Snapshot status,
           GpuHudData panels, Coords focus, float hexPixels, int x, int y, int[] crop,
@@ -300,10 +301,9 @@ class GpuBoardOverlaySmokeTest {
               ? moved(unit, unit(scene, ATLAS).location().coords().translated(0)) : unit).toList());
         BoardScene.UnitModel atlasModel = atlasModel();
         GpuHudTestStage.run(hud -> {
-            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
-            GpuBoardSpaceHarness melee = new GpuBoardSpaceHarness(adjacent);
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene, hud.theme.skin);
+            GpuBoardSpaceHarness melee = new GpuBoardSpaceHarness(adjacent, hud.theme.skin);
             GpuBoardOverlay overlay = new GpuBoardOverlay();
-            GpuUnitIcons icons = new GpuUnitIcons();
             GpuUnitModels models = new GpuUnitModels();
             try {
                 // Shot 02's ghost is the Atlas's authored model, as GpuBattleView shows it in 3D; the harness itself
@@ -344,7 +344,7 @@ class GpuBoardOverlaySmokeTest {
                       new Shot("physical-tactical", null, true, adjacent, meleeStatus, physical, atlasHex, 60.8f, 960,
                             540, new int[] { 0, 0, 0, 0 }, null));
                 for (Shot shot : shots) {
-                    render(hud, shot.scene() == adjacent ? melee : board, overlay, icons, shot, 1920, 1080);
+                    render(hud, shot.scene() == adjacent ? melee : board, overlay, shot, 1920, 1080);
                 }
                 // Shot 15: the compact window, declaring attacks in 3D.
                 Gdx.graphics.setWindowedMode(1280, 720);
@@ -352,13 +352,12 @@ class GpuBoardOverlaySmokeTest {
                       + Gdx.graphics.getBackBufferHeight());
                 if (Gdx.graphics.getBackBufferWidth() == 1280) {
                     board.camera.resize(1280, 720);
-                    render(hud, board, overlay, icons, new Shot("firing-3d-1280x720", "15-compact-1280x720.jpg",
+                    render(hud, board, overlay, new Shot("firing-3d-1280x720", "15-compact-1280x720.jpg",
                           false, scene, declaring, firing, atlasHex, 80, 615, 520, new int[] { 250, 90, 780, 520 },
                           sprites), 1280, 720);
                 }
             } finally {
                 Gdx.graphics.setWindowedMode(1920, 1080);
-                icons.dispose();
                 overlay.dispose();
                 models.dispose();
                 melee.dispose();
@@ -388,7 +387,7 @@ class GpuBoardOverlaySmokeTest {
                 Pixmap overUnit = draw(hud, board, overlay, scene, moving, hoverPanels, null, ATLAS, "hover-unit");
                 Pixmap noRoute = draw(hud, board, overlay, scene, moving, panels(withRoute(plan, List.of(),
                       List.of(), true), GpuFireOrders.Snapshot.EMPTY), null, "no-route");
-                Pixmap classic = draw(hud, board, overlay, scene, moving, panels(withRoute(plan, plan.route(),
+                Pixmap nonPlanner = draw(hud, board, overlay, scene, moving, panels(withRoute(plan, plan.route(),
                       List.of(), false), GpuFireOrders.Snapshot.EMPTY), null, "non-planner");
                 Vector2 dot = board.screen(ground(scene, routeHex));
                 // G3: the hover preview shows at half strength without a plotted route, never over a unit.
@@ -397,7 +396,7 @@ class GpuBoardOverlaySmokeTest {
                 assertTrue(half > 5 && half < full, "The hover route is fainter: " + half + " vs " + full);
                 assertTrue(difference(noRoute, overUnit, dot) < .5f, "No hover route while a unit is hovered");
                 // G20: a non-planner unit gets no route line from the overlay.
-                assertTrue(difference(noRoute, classic, dot) < .5f, "No route for a non-planner unit");
+                assertTrue(difference(noRoute, nonPlanner, dot) < .5f, "No route for a non-planner unit");
 
                 // Terrain owns cliff strokes in its top artwork; this overlay must add no floating drop edges.
                 Vector3 edge = dropEdge(scene, Set.of(atlas));
@@ -409,7 +408,7 @@ class GpuBoardOverlaySmokeTest {
                 Pixmap solidBare = draw(hud, board, overlay, null, moving, GpuHudData.EMPTY, null, "3d-bare");
                 Pixmap solid = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, null, "3d-drops");
                 assertTrue(difference(solidBare, solid, board.screen(edge)) < .5f, "No drop edge in 3D");
-                for (Pixmap image : List.of(planned, hovering, overUnit, noRoute, classic, flatBare, flat, solidBare,
+                for (Pixmap image : List.of(planned, hovering, overUnit, noRoute, nonPlanner, flatBare, flat, solidBare,
                       solid)) {
                     image.dispose();
                 }
@@ -424,9 +423,8 @@ class GpuBoardOverlaySmokeTest {
     void aJumpIsOneArcAndOnlyAPlottedRouteLeavesAGhost() throws Exception {
         BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
-            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene, hud.theme.skin);
             GpuBoardOverlay overlay = new GpuBoardOverlay();
-            GpuUnitIcons icons = new GpuUnitIcons();
             List<Pixmap> images = new ArrayList<>();
             try {
                 GpuBattleStatus.Snapshot moving = GpuHudFixtures.status();
@@ -462,31 +460,32 @@ class GpuBoardOverlaySmokeTest {
                 Vector3 destination = lifted(scene, walk.route().getLast().coords(), 0);
                 GpuHudData plotted = panels(walk, GpuFireOrders.Snapshot.EMPTY);
                 GpuHudData hover = panels(withRoute(walk, List.of(), walk.route(), true), GpuFireOrders.Snapshot.EMPTY);
-                GpuHudData classic = panels(withRoute(walk, walk.route(), List.of(), false),
+                GpuHudData nonPlanner = panels(withRoute(walk, walk.route(), List.of(), false),
                       GpuFireOrders.Snapshot.EMPTY);
-                Pixmap route = drawGhost(hud, board, overlay, icons, moving, plotted, false, "route");
-                Pixmap ghost = drawGhost(hud, board, overlay, icons, moving, plotted, true, "ghost");
-                Pixmap hoverRoute = drawGhost(hud, board, overlay, icons, moving, hover, false, "hover-route");
-                Pixmap hoverGhost = drawGhost(hud, board, overlay, icons, moving, hover, true, "hover-ghost");
-                Pixmap classicRoute = drawGhost(hud, board, overlay, icons, moving, classic, false, "classic-route");
-                Pixmap classicGhost = drawGhost(hud, board, overlay, icons, moving, classic, true, "classic-ghost");
+                Pixmap route = drawGhost(hud, board, overlay, moving, plotted, false, "route");
+                Pixmap ghost = drawGhost(hud, board, overlay, moving, plotted, true, "ghost");
+                Pixmap hoverRoute = drawGhost(hud, board, overlay, moving, hover, false, "hover-route");
+                Pixmap hoverGhost = drawGhost(hud, board, overlay, moving, hover, true, "hover-ghost");
+                Pixmap nonPlannerRoute = drawGhost(hud, board, overlay, moving, nonPlanner, false,
+                      "non-planner-route");
+                Pixmap nonPlannerGhost = drawGhost(hud, board, overlay, moving, nonPlanner, true,
+                      "non-planner-ghost");
                 frame(board, true, atlas, 60.8f, 960, 540);
-                Pixmap flatRoute = drawGhost(hud, board, overlay, icons, moving, plotted, false, "tactical-route");
-                Pixmap flatGhost = drawGhost(hud, board, overlay, icons, moving, plotted, true, "tactical-ghost");
+                Pixmap flatRoute = drawGhost(hud, board, overlay, moving, plotted, false, "tactical-route");
+                Pixmap flatGhost = drawGhost(hud, board, overlay, moving, plotted, true, "tactical-ghost");
                 Vector2 flatDestination = board.screen(destination);
-                images.addAll(List.of(route, ghost, hoverRoute, hoverGhost, classicRoute, classicGhost, flatRoute,
+                images.addAll(List.of(route, ghost, hoverRoute, hoverGhost, nonPlannerRoute, nonPlannerGhost, flatRoute,
                       flatGhost));
                 frame(board, false, atlas, 118, 960, 600);
                 Vector2 solidDestination = board.screen(destination);
                 assertTrue(difference(route, ghost, solidDestination, 10) > 8, "The ghost at the destination");
                 assertTrue(difference(hoverRoute, hoverGhost, solidDestination, 10) < .5f, "No ghost of a hover");
-                assertTrue(difference(classicRoute, classicGhost, solidDestination, 10) < .5f,
+                assertTrue(difference(nonPlannerRoute, nonPlannerGhost, solidDestination, 10) < .5f,
                       "No ghost for a non-planner unit");
                 assertTrue(difference(flatRoute, flatGhost, flatDestination, 6) > 8,
-                      "The Tactical View's ghost icon at the destination");
+                      "The Tactical View's meeple ghost at the destination");
             } finally {
                 images.forEach(Pixmap::dispose);
-                icons.dispose();
                 overlay.dispose();
                 board.dispose();
             }
@@ -674,26 +673,19 @@ class GpuBoardOverlaySmokeTest {
     }
 
     /**
-     * Frames the shot, draws the board with the overlay, the moving unit's ghost and, in the Tactical View, the icons,
-     * in GpuBattleView's order, and compares it with the mock.
+     * Frames the shot, draws the board with the overlay and the moving unit's ghost (in the Tactical View the meeples
+     * on their bases), in GpuBattleView's order, and compares it with the mock.
      */
     private static void render(GpuHudTestStage hud, GpuBoardSpaceHarness board, GpuBoardOverlay overlay,
-          GpuUnitIcons icons, Shot shot, int width, int height) {
+          Shot shot, int width, int height) {
         frame(board, shot.tactical(), shot.focus(), shot.hexPixels(), shot.x(), shot.y());
         overlay.update(frame(shot.scene(), shot.status(), shot.panels()), view(shot.tactical(), null, Entity.NONE),
               preferences(), state(shot.status()));
-        Map<BoardScene.Unit, Vector3> anchors = new HashMap<>();
+        board.basesStatus = shot.status();
         board.draw(camera -> {
-            if (!shot.tactical()) {
-                overlay.renderGhost(camera, shot.shown());
-            }
+            overlay.renderGhost(camera, shot.tactical() ? board.instances::get : shot.shown());
             overlay.renderMarks(camera, board.poses::get);
             overlay.render(camera);
-            if (shot.tactical()) {
-                icons.update(true, camera, board.scene, shot.status(), board.poses, anchors);
-                icons.render(camera);
-                overlay.renderGhost(camera, icons::instance);
-            }
         });
         Pixmap image = hud.captureBackBuffer("g7-" + shot.name());
         try {
@@ -733,25 +725,19 @@ class GpuBoardOverlaySmokeTest {
 
     /**
      * Draws the board with the overlay of these snapshots as GpuBattleView orders it and, when {@code ghost}, the
-     * ghost of the moving unit: of its 3D instance before the overlay, of its icon after the icons.
+     * ghost of the moving unit: of its sprite, or of its meeple in the Tactical View, before the overlay.
      */
     private static Pixmap drawGhost(GpuHudTestStage hud, GpuBoardSpaceHarness board, GpuBoardOverlay overlay,
-          GpuUnitIcons icons, GpuBattleStatus.Snapshot status, GpuHudData panels, boolean ghost, String name) {
+          GpuBattleStatus.Snapshot status, GpuHudData panels, boolean ghost, String name) {
         overlay.update(frame(board.scene, status, panels), view(board.tactical(), null, Entity.NONE),
               preferences(), state(status));
+        board.basesStatus = status;
         board.draw(camera -> {
-            if (ghost && !board.tactical()) {
+            if (ghost) {
                 overlay.renderGhost(camera, board.instances::get);
             }
             overlay.renderMarks(camera, board.poses::get);
             overlay.render(camera);
-            if (board.tactical()) {
-                icons.update(true, camera, board.scene, status, board.poses, new HashMap<>());
-                icons.render(camera);
-                if (ghost) {
-                    overlay.renderGhost(camera, icons::instance);
-                }
-            }
         });
         return hud.captureBackBuffer("g7-probe-" + name);
     }
@@ -991,7 +977,7 @@ class GpuBoardOverlaySmokeTest {
 
     static GpuBoardSource.UiPreferences preferences() {
         return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, List.of(),
-              GUIPreferences.getInstance().getMoveSprintColor().getRGB());
+              GUIPreferences.getInstance().getMoveSprintColor().getRGB(), BoardGraphics.ENHANCED);
     }
 
     static BoardScene.Unit unit(BoardScene scene, int id) {

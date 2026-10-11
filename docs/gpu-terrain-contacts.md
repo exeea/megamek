@@ -47,7 +47,7 @@ Legacy `ground_fluff` transitions remain defined in the tileset. GPU artwork cap
 intercepts the five recognized transition kinds (desert, grass, tropical grass, Mars
 and Moon) and omits their painted overlay from the GPU decal pass. `BoardScene.Tile`
 instead captures their target material proportions: strengths 1–5 use 1/6, 2/6, 3/6,
-4/6 and 5/6, leaving some base material at both ends. The board and classic artwork
+4/6 and 5/6, leaving some base material at both ends. The board and Legacy 2D artwork
 are unchanged. Unknown ground artwork keeps its existing fallback handling.
 
 These weights feed the same world-space contact field as neighboring terrain, so

@@ -52,6 +52,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.UIUtils;
 import com.badlogic.gdx.utils.GdxNativesLoader;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.client.ui.gdx.UiKit;
@@ -833,7 +834,8 @@ class GpuHudInputTest {
     static GpuBoardSource.UiPreferences preferences(float scale) {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault, "")).toList();
-        return new GpuBoardSource.UiPreferences(scale, "", "", true, true, false, false, binds, 0);
+        return new GpuBoardSource.UiPreferences(scale, "", "", true, true, false, false, binds, 0,
+              BoardGraphics.ENHANCED);
     }
 
     static GpuBattleStatus.Snapshot status(int round, GamePhase phase, boolean myTurn, int actor, int turnIndex,

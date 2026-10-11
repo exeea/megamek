@@ -49,8 +49,6 @@ final class GpuRoutePulse implements Disposable {
     /** The 3D ghost's glow added at the surge's peak, and the share of its transparency the peak takes away. */
     static final Color GHOST_SURGE = new Color(.42f, .52f, .45f, 1);
     static final float GHOST_SURGE_OPACITY = .8f;
-    /** The Tactical View ghost icon's glow at the peak, a share of the route's last colour. */
-    static final float ICON_SURGE = .55f;
     /** How far the ripple runs out from the destination's centre, in hex radii, and how long it takes, in seconds. */
     static final float RING_RADIUS = 1.65f;
     static final float RING_SECONDS = .75f;
@@ -217,11 +215,6 @@ final class GpuRoutePulse implements Disposable {
         float rise = since < SURGE_RISE ? MathUtils.sin(since / SURGE_RISE * MathUtils.HALF_PI)
               : .5f + .5f * MathUtils.cos((since - SURGE_RISE) / (SURGE - SURGE_RISE) * MathUtils.PI);
         return rise * intensity;
-    }
-
-    /** The route's last colour, which the ripple and the Tactical View's ghost take. */
-    Color arrivalColour() {
-        return last;
     }
 
     private boolean shows() {

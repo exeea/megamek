@@ -63,7 +63,7 @@ class GpuShaderCoreSmokeTest {
         for (String fragment : List.of("particles", "beams", "projectiles", "water-splash")) {
             compile("effects", fragment);
         }
-        for (String pair : List.of("explosion", "missile", "terrain-effects", "hex-mask")) {
+        for (String pair : List.of("explosion", "missile", "terrain-effects", "hex-mask", "ecm-field")) {
             compile(pair, pair);
         }
         for (var kind : GpuWeatherParticles.Kind.values()) { GpuWeatherParticles.shader(kind).dispose(); }

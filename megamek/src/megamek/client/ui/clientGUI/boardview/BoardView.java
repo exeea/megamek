@@ -676,24 +676,24 @@ public final class BoardView extends AbstractBoardView
     private void registerKeyboardCommands(final MegaMekController controller) {
 
         keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.SCROLL_NORTH,
-              this::canScrollClassicView,
+              this::canScrollLegacy2D,
               this::scrollNorth,
               this::pingMinimap));
         keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.SCROLL_SOUTH,
-              this::canScrollClassicView,
+              this::canScrollLegacy2D,
               this::scrollSouth,
               this::pingMinimap));
         keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.SCROLL_EAST,
-              this::canScrollClassicView,
+              this::canScrollLegacy2D,
               this::scrollEast,
               this::pingMinimap));
         keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.SCROLL_WEST,
-              this::canScrollClassicView,
+              this::canScrollLegacy2D,
               this::scrollWest,
               this::pingMinimap));
     }
 
-    private boolean canScrollClassicView() {
+    private boolean canScrollLegacy2D() {
         return scrollPane != null && shouldReceiveKeyCommands()
               && (clientgui == null || !GpuBoardWindow.isActiveFor(clientgui));
     }
@@ -795,6 +795,7 @@ public final class BoardView extends AbstractBoardView
             case GUIPreferences.FLOATING_ISO:
             case GUIPreferences.LEVEL_HIGHLIGHT:
             case GUIPreferences.SHOW_COORDS:
+            case GUIPreferences.SHOW_HEX_TYPES:
             case GUIPreferences.FOV_DARKEN:
             case GUIPreferences.FOV_DARKEN_ALPHA:
             case GUIPreferences.FOV_GRAYSCALE:
@@ -1001,7 +1002,7 @@ public final class BoardView extends AbstractBoardView
         // renderMinefieldScores((Graphics2D) graphics2D);
     }
 
-    /** Shared tactical presentation for the classic board and GPU surface layers. */
+    /** Shared tactical presentation for the Legacy 2D board and GPU surface layers. */
     private void drawTacticalLayers(Graphics2D graphics2D, boolean includeUnits) {
         clientState.drawTacticalLayers(graphics2D, includeUnits);
     }
@@ -1617,7 +1618,7 @@ public final class BoardView extends AbstractBoardView
         boolean dontCache = false;
         int imgWidth = (int) (HEX_W * scale);
         int imgHeight = (int) (HEX_H * scale);
-        // Tactical capture does not draw the base tile or raised classic sides.
+        // Tactical capture does not draw the base tile or raised Legacy 2D sides.
         Image baseImage = tileManager.baseFor(hex);
         scaledImage = getScaledImage(baseImage, true);
         dontCache = animatedImages.contains(baseImage.hashCode());
@@ -3094,7 +3095,7 @@ public final class BoardView extends AbstractBoardView
     @Override public BoardGlyphContext glyphContext() { return clientState; }
 
 
-    /** Uses the existing tooltip provider with the GPU's picked hex, regardless of classic camera occlusion. */
+    /** Uses the existing tooltip provider with the GPU's picked hex, regardless of Legacy 2D camera occlusion. */
     public String getHexTooltip(Coords coords) {
         if (coords == null || !getBoard().contains(coords)) {
             return "";
@@ -3282,7 +3283,7 @@ public final class BoardView extends AbstractBoardView
 
     @Override
     public void boardChangedHex(BoardEvent boardEvent) {
-        // Shared state has invalidated LOS. Only the classic raster embeds FoV into its hex images.
+        // Shared state has invalidated LOS. Only the Legacy 2D raster embeds FoV into its hex images.
         if (shouldFovDarken() || shouldFovHighlight()) { hexImageCache.clear(); }
         Coords coords = boardEvent.getCoords();
         Hex hex = game.getBoard(boardId).getHex(coords);
@@ -3336,7 +3337,7 @@ public final class BoardView extends AbstractBoardView
         public void run() {
             long currentTime = java.lang.System.currentTimeMillis();
 
-            // The GPU window also presents these clientState.overlays while the classic panel is hidden.
+            // The GPU window also presents these clientState.overlays while the Legacy 2D panel is hidden.
             boolean redraw = false;
             for (IDisplayable displayable : clientState.overlays) {
                 if (!displayable.isSliding()) {
@@ -3511,7 +3512,7 @@ public final class BoardView extends AbstractBoardView
     }
 
     /** Drop the inactive Swing viewport and its artwork; shared game interaction remains owned by this board adapter. */
-    public void releaseClassicView() {
+    public void releaseLegacy2DView() {
         stopSoftCentering();
         if (scrollPane != null) {
             scrollPane.setViewportView(null);
@@ -3740,7 +3741,7 @@ public final class BoardView extends AbstractBoardView
             return null;
         }
 
-        // Captures can use a different raster scale from the classic view's zoom setting.
+        // Captures can use a different raster scale from the Legacy 2D view's zoom setting.
         if (scale == 1) {
             return base;
         }
@@ -3891,7 +3892,7 @@ public final class BoardView extends AbstractBoardView
             if (fovHighlightingAndDarkening != null) {
                 fovHighlightingAndDarkening.invalidate();
             }
-            // GPU raster tiles no longer contain FoV. Only classic pixels and the presentation snapshot change.
+            // GPU raster tiles no longer contain FoV. Only Legacy 2D pixels and the presentation snapshot change.
             hexImageCache.clear();
             invalidatePlanarCapture();
         }
@@ -4077,7 +4078,7 @@ public final class BoardView extends AbstractBoardView
         return clientState.isOnThisBord(boardLocation);
     }
 
-    /** Capture only affected hexes, in stable order, using the same painters as the classic board. */
+    /** Capture only affected hexes, in stable order, using the same painters as the Legacy 2D board. */
 
 
     /** Shared authoritative colors; only the static texture remains in native raster capture. */

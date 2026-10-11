@@ -26,6 +26,7 @@ import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import megamek.client.ui.clientGUI.boardview.BoardElectronicWarfare;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.gdx.UiKit;
@@ -37,13 +38,15 @@ import megamek.common.units.Entity;
  * Unit nameplates and pips over the board, the lowest HUD layer
  * Every unit with a head anchor gets a team pip, or a tag while it is the focus unit, hovered,
  * inspected, the physical target or a sensor contact, and every unit while the nameplate key is held. A tag names the
- * unit as the client's label style does (the classic board label's name) before its status words; a tag with neither
+ * unit as the client's label style does (the Legacy 2D board label's name) before its status words; a tag with neither
  * stays a pip (the user's decision of 2026-10-07: no phase words, no model repeated after the name).
  * Every unit but a sensor contact or a destroyed unit also gets its board label's marks on its head, under the pip or
- * tag: the classic board's damage tile and armor and structure bars ({@link GpuBattleStatus.Marks}). The weapon target
- * cards replace their targets' plates, and a unit whose head lies behind the camera has none. The hovered unit's
- * plate and the plate of the unit the card shows are drawn over the others. It reads the presented snapshots only, on
- * the render thread, and takes no presses.
+ * tag: the Legacy 2D board's damage tile, armor and structure bars ({@link GpuBattleStatus.Marks}), and an E(C)CM
+ * source its "ECM"/"ECCM" chip beside them. A tag carries the unit's weight class letter and its gunnery and piloting
+ * skills. In the Tactical View the units' bases show the pips, marks and E(C)CM badges, so a unit has a tag or
+ * nothing. The weapon target cards replace their targets' plates, and a unit whose head lies behind the camera has
+ * none. The hovered unit's plate and the plate of the unit the card shows are drawn over the others. It reads the
+ * presented snapshots only, on the render thread, and takes no presses.
  */
 final class GpuNameplates implements GpuHud.Component {
     /** Beyond this many units an unhovered sensor contact shows only "?". */
@@ -75,7 +78,7 @@ final class GpuNameplates implements GpuHud.Component {
     private static final float[] SHADOW = { .5f, .2f };
     private static final Color FILL = rgba(23, 35, 35, .88f);
     /**
-     * The marks: the classic label's bars, 24 long and 3 tall, the structure bar 1 under the armor bar, 3 right of the
+     * The marks: the Legacy 2D label bars, 24 long and 3 tall, the structure bar 1 under the armor bar, 3 right of the
      * damage tile, all 2 inside the tags' fill; the pip or tag stands 2 above them.
      */
     private static final float BAR_LENGTH = 24;
@@ -172,28 +175,40 @@ final class GpuNameplates implements GpuHud.Component {
         Set<TargetKey> carded = fire.carded();
         int physicalTarget = physical.active() ? physical.targetId() : Entity.NONE;
         boolean many = units.size() > MANY_UNITS;
+        // In the Tactical View the bases carry the pips, marks and E(C)CM badges.
+        boolean based = view.tactical();
+        BoardScene scene = inputs.frame().scene();
+        Map<Integer, BoardElectronicWarfare.Source> sources = new HashMap<>();
+        if (scene != null && scene.electronicWarfare() != null && !based) {
+            scene.electronicWarfare().sources().forEach(source -> sources.putIfAbsent(source.entityId(), source));
+        }
         Set<Integer> shown = new HashSet<>();
         for (UnitStatus unit : units) {
             Vector2 head = view.unitHeads().get(unit.id());
             if (head == null || carded.contains(TargetKey.unit(unit.id()))) {
                 continue;
             }
-            Plate plate = plates.computeIfAbsent(unit.id(), Plate::new);
             boolean hovered = view.hoveredUnit() == unit.id();
             boolean enemy = unit.side() == GpuBattleStatus.Side.ENEMY;
             boolean tagged = unit.id() == state.focus() || hovered || state.altHeld || unit.id() == state.inspected
                   || unit.id() == physicalTarget;
             String sub = tagged && !unit.sensorContact() ? sub(unit, hovered && enemy ? focus : null, fire) : "";
+            boolean tag = unit.sensorContact() || tagged && !(unit.label().isEmpty() && sub.isEmpty());
+            if (based && !tag) {
+                continue;
+            }
+            Plate plate = plates.computeIfAbsent(unit.id(), Plate::new);
             if (unit.sensorContact()) {
-                plate.tag(Look.CONTACT, hovered || !many ? text(SENSOR_CONTACT) : CONTACT_UNKNOWN, "");
-            } else if (tagged && !(unit.label().isEmpty() && sub.isEmpty())) {
+                plate.tag(Look.CONTACT, hovered || !many ? text(SENSOR_CONTACT) : CONTACT_UNKNOWN, "", "");
+            } else if (tag) {
                 plate.tag(unit.id() == state.focus() ? Look.FOCUS : enemy ? Look.ENEMY : Look.FRIEND, unit.label(),
-                      sub);
+                      sub, chip(unit));
             } else {
                 plate.pip(enemy ? UiTheme.CORAL : UiTheme.MINT, unit.destroyed() ? DESTROYED_OPACITY
                       : unit.done() && status.phase().isMovement() ? MOVED_OPACITY : 1);
             }
-            plate.marks(unit);
+            plate.marks(based ? null : unit);
+            plate.ecm(unit.destroyed() ? null : sources.get(unit.id()));
             plate.place(head);
             shown.add(unit.id());
         }
@@ -203,6 +218,7 @@ final class GpuNameplates implements GpuHud.Component {
                 plate.tag.remove();
                 plate.pip.remove();
                 plate.marks.remove();
+                plate.ecm.remove();
                 iterator.remove();
             }
         }
@@ -238,6 +254,18 @@ final class GpuNameplates implements GpuHud.Component {
               .orElse("");
     }
 
+    /**
+     * A tag's chip: the unit's weight class letter (L, M, H, A; other classes their first letter) and its gunnery and
+     * piloting skills, as "H 4/5"; empty for a destroyed unit.
+     */
+    static String chip(UnitStatus unit) {
+        if (unit.destroyed()) {
+            return "";
+        }
+        String letter = unit.weightClass().isBlank() ? "" : unit.weightClass().strip().substring(0, 1).toUpperCase();
+        return text("GpuBoard.hud.plate.skills", letter, unit.gunnery(), unit.piloting()).strip();
+    }
+
     /** The hovered enemy's part: the focus unit's best roll on it while it declares fire, else its distance, or "". */
     private static String hoverDetail(UnitStatus unit, UnitStatus from, GpuFireOrders.Snapshot fire) {
         if (fire.editable()) {
@@ -260,11 +288,17 @@ final class GpuNameplates implements GpuHud.Component {
         final int id;
         final Table tag = new Table();
         final Label name = ui.label("", "hud-medium", TEXT_SIZE, Color.WHITE);
+        final Label chip = ui.label("", "hud-medium", TEXT_SIZE, Color.WHITE);
+        final Cell<Label> chipCell;
         final Label sub = ui.label("", "hud-body", TEXT_SIZE, Color.WHITE);
         final Cell<Label> subCell;
         final Pip pip = new Pip();
         final UnitMarks marks = new UnitMarks();
+        /** An E(C)CM source's chip, in the marks' row. */
+        final Table ecm = new Table();
+        final Label ecmText = ui.label("", "hud-medium", TEXT_SIZE, Color.WHITE);
         private Look look;
+        private BoardElectronicWarfare.Source ecmSource;
 
         Plate(int id) {
             this.id = id;
@@ -272,14 +306,19 @@ final class GpuNameplates implements GpuHud.Component {
             tag.setTouchable(Touchable.disabled);
             tag.pad(PAD_Y, PAD_X, PAD_Y, PAD_X);
             tag.add(name).height(LINE_HEIGHT);
+            chipCell = tag.add(chip).height(LINE_HEIGHT);
             subCell = tag.add(sub).height(LINE_HEIGHT);
             pip.setName("pip-" + id);
             marks.setName("marks-" + id);
+            ecm.setName("ecm-" + id);
+            ecm.setTouchable(Touchable.disabled);
+            ecm.pad(1, 5, 1, 5);
+            ecm.add(ecmText).height(LINE_HEIGHT);
         }
 
-        /** Shows the unit's marks, or none for a sensor contact (it has none) or a destroyed unit. */
+        /** Shows the unit's marks, or none for a sensor contact (it has none), a destroyed unit or null. */
         void marks(UnitStatus unit) {
-            if (unit.destroyed() || !unit.marks().shown()) {
+            if (unit == null || unit.destroyed() || !unit.marks().shown()) {
                 marks.remove();
                 return;
             }
@@ -289,21 +328,52 @@ final class GpuNameplates implements GpuHud.Component {
             marks.set(unit);
         }
 
-        void tag(Look look, String nameText, String subText) {
+        /**
+         * Shows the E(C)CM chip of {@code source} in its side's colour (the E(C)CM record's own or enemy field), at 40 %
+         * when TacOps ECCM negated its field and with a small "A" for an Angel suite; none for null.
+         */
+        void ecm(BoardElectronicWarfare.Source source) {
+            if (source == null) {
+                ecm.remove();
+                ecmSource = null;
+                return;
+            }
+            if (ecm.getParent() == null) {
+                GpuNameplates.this.marks.addActor(ecm);
+            }
+            if (source.equals(ecmSource)) {
+                return;
+            }
+            ecmSource = source;
+            Look side = source.own() ? Look.FRIEND : Look.ENEMY;
+            String kind = text(source.ecm() ? "GpuBoard.hud.plate.ecm" : "GpuBoard.hud.plate.eccm");
+            ecmText.setText(source.angel() ? text("GpuBoard.hud.plate.angel", kind) : kind);
+            ecmText.setColor(side.text);
+            ecm.setBackground(boxes.get(side));
+            ecm.getColor().a = source.suppressed() ? .4f : 1;
+            ecm.pack();
+            ecm.setSize(Math.round(ecm.getWidth()), Math.round(ecm.getHeight()));
+        }
+
+        void tag(Look look, String nameText, String subText, String chipText) {
             pip.remove();
             if (tag.getParent() == null) {
                 tags.addActor(tag);
             }
-            if (look == this.look && name.textEquals(nameText) && sub.textEquals(subText)) {
+            if (look == this.look && name.textEquals(nameText) && sub.textEquals(subText)
+                  && chip.textEquals(chipText)) {
                 return;
             }
             this.look = look;
             tag.setBackground(boxes.get(look));
             name.setText(nameText);
             name.setColor(look.text);
+            chip.setText(chipText);
+            chip.setColor(look.text);
+            chipCell.padLeft(nameText.isEmpty() || chipText.isEmpty() ? 0 : GAP);
             sub.setText(subText);
             sub.setColor(look.sub);
-            subCell.padLeft(nameText.isEmpty() || subText.isEmpty() ? 0 : GAP);
+            subCell.padLeft(nameText.isEmpty() && chipText.isEmpty() || subText.isEmpty() ? 0 : GAP);
             tag.pack();
             // Whole units keep the one-unit border on the pixel grid, as the browser snaps the box's edges.
             tag.setSize(Math.round(tag.getWidth()), Math.round(tag.getHeight()));
@@ -319,11 +389,16 @@ final class GpuNameplates implements GpuHud.Component {
 
         void place(Vector2 head) {
             float bottom = Math.round(head.y);
+            Actor shown = marker();
+            if (ecm.hasParent()) {
+                // Right of the marks' row, or of the marker without marks.
+                Actor beside = marks.hasParent() ? marks : shown;
+                ecm.setPosition(Math.round(head.x + beside.getWidth() / 2 + MARKS_GAP), bottom);
+            }
             if (marks.hasParent()) {
                 marks.setPosition(Math.round(head.x - marks.getWidth() / 2), bottom);
                 bottom += marks.getHeight() + MARKS_GAP;
             }
-            Actor shown = marker();
             shown.setPosition(Math.round(head.x - shown.getWidth() / 2), bottom);
         }
 
@@ -376,7 +451,7 @@ final class GpuNameplates implements GpuHud.Component {
     }
 
     /**
-     * A unit's marks on the tags' fill, as the classic board label draws them (UnitAnnotations): the damage tile, if
+     * A unit's marks on the tags' fill, as the Legacy 2D board label draws them (UnitAnnotations): the damage tile, if
      * any, then the armor bar over the structure bar, if the unit has one, each on the label's grey track.
      */
     private final class UnitMarks extends Actor {
@@ -399,7 +474,7 @@ final class GpuNameplates implements GpuHud.Component {
             Color.argb8888ToColor(damage, marks.damageArgb());
             Color.argb8888ToColor(armor, marks.armorArgb());
             Color.argb8888ToColor(structure, marks.structureArgb());
-            // A unit without armor at all (ARMOR_NA) shows an empty bar, as the classic label does.
+            // A unit without armor at all (ARMOR_NA) shows an empty bar, as the Legacy 2D label does.
             armorShare = Math.max(0, (float) unit.armor());
             structureShare = Math.max(0, (float) unit.structure());
             float content = tile ? Math.max(GpuHudKit.DAMAGE_TILE, bars()) : bars();

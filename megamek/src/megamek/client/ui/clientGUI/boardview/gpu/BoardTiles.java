@@ -108,7 +108,8 @@ final class BoardTiles implements AutoCloseable {
                 Hex hex = drawn(board, coords);
                 BoardArtwork.HexImage art = artwork.capture(board, coords, hex);
                 BoardScene.Tile previous = next.get(index);
-                BoardScene.Tile tile = BoardScene.captureTile(hex, art, previous, pool, board::getHex);
+                BoardScene.Tile tile = BoardScene.captureTile(hex, art, previous, pool, board::getHex,
+                      board::getBuildingAt);
                 next.set(index, tile.equals(previous) ? previous : tile);
                 captured.accept(coords, art);
             }

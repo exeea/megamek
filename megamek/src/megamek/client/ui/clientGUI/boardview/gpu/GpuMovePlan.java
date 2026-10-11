@@ -653,8 +653,8 @@ final class GpuMovePlan implements AutoCloseable {
     }
 
     /**
-     * The planner plots for ground units on the board in the walk, jump and back-up gears; other movement stays
-     * classic (G20), and so does a hex the display picks (an escape pod landing or a bridge build), which its own
+     * The planner plots for ground units on the board in the walk, jump and back-up gears; other movement keeps
+     * plain clicks (G20), and so does a hex the display picks (an escape pod landing or a bridge build), which its own
      * board click selects. A unit that walks on (walk-on deployment) is not on the board yet: MegaMek's click on its
      * entry hex places it first, and the plan then continues from there.
      */

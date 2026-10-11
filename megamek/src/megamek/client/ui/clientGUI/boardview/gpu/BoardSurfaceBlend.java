@@ -71,7 +71,7 @@ public final class BoardSurfaceBlend {
     static Cover solid(BoardScene.Surface family) { return SOLID[family.ordinal()]; }
     static Cover solid(int family) { return SOLID[family]; }
 
-    /** The classic tileset's ground_fluff transitions: desert, grass, tropical grass, Mars and Moon. */
+    /** The 2D tileset's ground_fluff transitions: desert, grass, tropical grass, Mars and Moon. */
     public static boolean hasTransition(Hex hex) { return transitionFamily(hex) >= 0; }
 
     /** Omit legacy paint only when native ground can actually display the captured material mixture. */

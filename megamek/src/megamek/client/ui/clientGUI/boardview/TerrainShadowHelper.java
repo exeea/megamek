@@ -103,7 +103,7 @@ class TerrainShadowHelper {
         return updateShadowMap(true);
     }
 
-    /** Shadow travel per elevation level in board pixels; shared by the classic and GPU renderers. */
+    /** Shadow travel per elevation level in board pixels; shared by the Legacy 2D and GPU renderers. */
     @Nullable
     Point lightDirection() {
         return boardView.getClientState().getTerrainLightDirection();

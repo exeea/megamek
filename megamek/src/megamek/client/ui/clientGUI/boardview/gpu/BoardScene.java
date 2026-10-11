@@ -20,6 +20,7 @@ import javax.swing.ImageIcon;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.client.ui.clientGUI.boardview.BoardElectronicWarfare;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
@@ -32,7 +33,16 @@ import megamek.common.units.Terrains;
 record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
       List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
       List<FiringLine> firingLines, List<RangeBorder> rangeBorders, List<BoardMarker> markers, BoardTactical tactical,
-      List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView) {
+      List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView, BoardElectronicWarfare electronicWarfare) {
+
+    /** A scene without E(C)CM: map previews, the editor and tests. */
+    BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
+          List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
+          List<FiringLine> firingLines, List<RangeBorder> rangeBorders, List<BoardMarker> markers, BoardTactical tactical,
+          List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView) {
+        this(boardId, width, height, tiles, units, plannedPath, selectedId, phase, commands, light, firingLines,
+              rangeBorders, markers, tactical, rangeLabels, fieldOfView, BoardElectronicWarfare.EMPTY);
+    }
 
     BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
           List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
@@ -76,10 +86,17 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     /**
      * The hex's tile, as {@link BoardTiles} captures every hex: {@code pixels} is its art, {@code previous} the tile it
      * replaces (its unchanged pixels are kept), and {@code board} supplies the neighbouring roads, whose course through
-     * this hex its scenery keeps clear of. Nothing is decoded here: the type, Pillars and roads are the hex's own.
+     * this hex its scenery keeps clear of; {@code buildings} the board's building at a hex, or null where the board
+     * keeps none (the editor, a map preview). Nothing is decoded here: the type, Pillars and roads are the hex's own.
      */
     static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
           java.util.function.Function<Coords, megamek.common.Hex> board) {
+        return captureTile(hex, pixels, previous, terrainImages, board, coords -> null);
+    }
+
+    static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
+          java.util.function.Function<Coords, megamek.common.Hex> board,
+          java.util.function.Function<Coords, megamek.common.units.IBuilding> buildings) {
         return new BoardScene.Tile(pixels.coords(), hex.getLevel(),
               hex.containsTerrain(Terrains.WATER) ? Math.max(0, hex.terrainLevel(Terrains.WATER)) : -1,
               hex.containsTerrain(Terrains.ICE),
@@ -102,7 +119,40 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               hex.containsTerrain(Terrains.ULTRA_SUBLEVEL),
               terrainImages.captureOverlay(pixels.tilesetDecals(), previous == null ? null : previous.tilesetDecals()),
               terrainImages.captureOverlay(pixels.tilesetScenery(), previous == null ? null : previous.tilesetScenery()),
-              hex.getAppearance());
+              hex.getAppearance(), Cover.capture(hex, buildings.apply(pixels.coords()), pixels.coords()));
+    }
+
+    /**
+     * The terrain the Tactical View's ground layer marks on a hex, captured with it: the woods or jungle density
+     * ({@code woods} 0 for none, 1 light, 2 heavy, 3 ultra) and a structure: its {@code structure} kind (a building's
+     * type 1-5, {@link #FUEL_TANK} or {@link #INDUSTRIAL}, 0 for none), the hexsides it continues across
+     * ({@code exits}, MegaMek directions), its current construction factor (the hex tooltip's rule: the board's
+     * building, else the hex's own CF; 0 for industry) and its height in levels.
+     */
+    record Cover(int woods, boolean jungle, int structure, int exits, int cf, int height) {
+        static final int FUEL_TANK = 6;
+        static final int INDUSTRIAL = 7;
+        static final Cover NONE = new Cover(0, false, 0, 0, 0, 0);
+
+        static Cover capture(megamek.common.Hex hex, megamek.common.units.IBuilding building, Coords coords) {
+            boolean jungle = hex.containsTerrain(Terrains.JUNGLE);
+            int woods = Math.max(0, jungle ? hex.terrainLevel(Terrains.JUNGLE) : hex.terrainLevel(Terrains.WOODS));
+            if (hex.containsTerrain(Terrains.BUILDING)) {
+                return new Cover(woods, jungle, hex.terrainLevel(Terrains.BUILDING),
+                      hex.getTerrain(Terrains.BUILDING).getExits() & 63,
+                      building == null ? hex.terrainLevel(Terrains.BLDG_CF) : building.getCurrentCF(coords),
+                      hex.terrainLevel(Terrains.BLDG_ELEV));
+            }
+            if (hex.containsTerrain(Terrains.FUEL_TANK)) {
+                return new Cover(woods, jungle, FUEL_TANK, hex.getTerrain(Terrains.FUEL_TANK).getExits() & 63,
+                      building == null ? hex.terrainLevel(Terrains.FUEL_TANK_CF) : building.getCurrentCF(coords),
+                      hex.terrainLevel(Terrains.FUEL_TANK_ELEV));
+            }
+            if (hex.containsTerrain(Terrains.INDUSTRIAL)) {
+                return new Cover(woods, jungle, INDUSTRIAL, 0, 0, hex.terrainLevel(Terrains.INDUSTRIAL));
+            }
+            return woods == 0 ? NONE : new Cover(woods, jungle, 0, 0, 0, 0);
+        }
     }
 
     /** Pit rims use the existing authored-cliff path. The source hex and its gameplay exits remain untouched. */
@@ -231,7 +281,20 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
           boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
           boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
           boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
-          java.util.Map<String, megamek.common.board.HexAppearance> appearance) {
+          java.util.Map<String, megamek.common.board.HexAppearance> appearance, Cover cover) {
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
+              Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
+              boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
+              boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
+              java.util.Map<String, megamek.common.board.HexAppearance> appearance) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
+                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+                  cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
+                  Cover.NONE);
+        }
+
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
           Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
           Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
@@ -372,7 +435,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             if (marking == tactical && Objects.equals(labels, text)) { return this; }
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
                   decalsWithoutLimbs, marking, features, labels, liquid, tileset, detailedGround, road, fireSmoke, biome,
-                  impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance);
+                  impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
+                  cover);
         }
 
         /** This tile with other features: the editor preview's tile of a route stroke's next step. */
@@ -413,37 +477,49 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                     default -> kept.add(feature);
                 }
             }
-            String levelPrefix = Messages.getString("BoardView1.LEVEL");
+            String sourceLevel = BoardHexText.level(elevation);
             String depthPrefix = Messages.getString("BoardView1.DEPTH");
             String heightPrefix = Messages.getString("BoardView1.HEIGHT") + " ";
             int bridgeHeight = bridge == null ? 0 : Math.round(bridge.elevation()) + depth;
-            String lowFoliage = Messages.getString("BoardView1.LowFoliage");
+            String sourceBridge = bridge == null ? null : BoardHexText.bridge(Math.round(bridge.elevation()));
+            // The vegetation, the ice and snow and the liquids are gone with the liquid, so are their labels (FOLIAGE,
+            // the cover, FIELDS, TUNDRA, ICE, BLACK ICE, SNOW, SWAMP, MAGMA, RAPIDS, HAZ. LIQUID and their levels).
+            Set<String> gone = Set.copyOf(Stream.of("LowFoliage", "hexType.cover1", "hexType.cover2",
+                  "hexType.cover3", "hexType.planted_fields", "hexType.tundra", "hexType.ice", "hexType.black_ice",
+                  "hexType.snow", "hexType.snow2", "hexType.swamp", "hexType.swamp2", "hexType.magma",
+                  "hexType.magma2", "hexType.rapids", "hexType.rapids2", "hexType.hazardous_liquid")
+                  .map(key -> Messages.getString("BoardView1." + key)).toList());
             List<BoardHexText> labels = new ArrayList<>();
             boolean groundLabel = false;
             for (BoardHexText label : text) {
-                if (label.text().startsWith(levelPrefix) || label.text().startsWith(depthPrefix)) {
+                if (label.text().equals(sourceLevel) || label.text().startsWith(depthPrefix)) {
                     if (!groundLabel && level != 0) {
-                        labels.add(new BoardHexText(levelPrefix + level, label.baseline(), label.font(), label.argb(),
-                              label.fromTop(), 0));
+                        labels.add(new BoardHexText(BoardHexText.level(level), label.baseline(), label.font(),
+                              label.argb(), label.fromTop(), 0));
                     }
                     groundLabel = true;
                 } else if (bridgeHeight > label.elevation() && label.text().startsWith(heightPrefix)) {
                     labels.add(new BoardHexText(heightPrefix + bridgeHeight, label.baseline(), label.font(), label.argb(),
                           label.fromTop(), bridgeHeight));
-                } else if (!label.text().equals(lowFoliage)) {
+                } else if (label.text().equals(sourceBridge)) {
+                    // The type block's bridge line, on the deck where it is the roof label, keeps the deck's level too.
+                    labels.add(new BoardHexText(BoardHexText.bridge(bridgeHeight), label.baseline(), label.font(),
+                          label.argb(), label.fromTop(), label.elevation() > 0 ? bridgeHeight : 0));
+                } else if (!gone.contains(label.text())) {
                     labels.add(label);
                 }
             }
             return new Tile(coords, level, -1, false, roadExits, Surface.LUNAR, ground, null, null, null,
-                  tactical, kept, labels, BoardLiquid.NONE, null, true, road, fireSmoke, Biome.NONE,
-                  impassable, false, cliffTopExits, true, BoardSurfaceBlend.solid(Surface.LUNAR), bridge(), ultraSublevel,
-                  null, null, appearance);
+                  tactical, kept, BoardHexText.settled(labels, text), BoardLiquid.NONE, null, true, road, fireSmoke,
+                  Biome.NONE, impassable, false, cliffTopExits, true, BoardSurfaceBlend.solid(Surface.LUNAR), bridge(),
+                  ultraSublevel, null, null, appearance, cover);
         }
 
         Tile {
             features = List.copyOf(features);
             text = List.copyOf(text);
             appearance = java.util.Map.copyOf(appearance);
+            cover = Objects.requireNonNullElse(cover, Cover.NONE);
         }
 
         boolean water() {
@@ -676,12 +752,12 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     BoardScene withTiles(List<Tile> shown) {
         if (shown == tiles) { return this; }
         return new BoardScene(boardId, width, height, shown, units, plannedPath, selectedId, phase, commands, light,
-              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView);
+              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, electronicWarfare);
     }
 
     BoardScene withUnits(List<Unit> shown) {
         return new BoardScene(boardId, width, height, tiles, shown, plannedPath, selectedId, phase, commands, light,
-              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView);
+              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, electronicWarfare);
     }
 
     /** Board artwork, terrain and authorized contacts advance with the queue; interactive tools stay live. */
@@ -699,7 +775,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               hideMovement ? List.of() : world.plannedPath, selectedId, phase, commands, light,
               hideMovement ? List.of() : world.firingLines, hideMovement ? List.of() : world.rangeBorders, shownMarkers,
               tactical.duringPlayback(settled == null ? BoardTactical.EMPTY : settled.tactical, hideMovement),
-              hideMovement ? List.of() : world.rangeLabels, hideMovement ? BoardFieldOfView.EMPTY : world.fieldOfView);
+              hideMovement ? List.of() : world.rangeLabels, hideMovement ? BoardFieldOfView.EMPTY : world.fieldOfView,
+              world.electronicWarfare);
     }
 
     /** Excludes HUD commands and other live controls, which do not need a playback checkpoint. */
@@ -708,7 +785,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               && tiles.equals(other.tiles) && units.equals(other.units) && markers.equals(other.markers)
               && tactical.equals(other.tactical) && plannedPath.equals(other.plannedPath)
               && firingLines.equals(other.firingLines) && rangeBorders.equals(other.rangeBorders)
-              && rangeLabels.equals(other.rangeLabels) && fieldOfView.equals(other.fieldOfView);
+              && rangeLabels.equals(other.rangeLabels) && fieldOfView.equals(other.fieldOfView)
+              && electronicWarfare.equals(other.electronicWarfare);
     }
 
     /**

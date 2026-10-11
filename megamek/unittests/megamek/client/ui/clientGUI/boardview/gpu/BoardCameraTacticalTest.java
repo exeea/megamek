@@ -10,13 +10,14 @@ import java.util.List;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.GdxNativesLoader;
+import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Tactical View's camera: it enters at the north-up top view, orbits as the 3D view does and hands the replaced 3D
- * pose back unchanged.
+ * The Tactical View's camera: it enters at the north-up top view, holds it while it pans, zooms and frames, and hands
+ * the replaced 3D pose back unchanged.
  */
 class BoardCameraTacticalTest {
     private static final float TOLERANCE = 0.0001f;
@@ -45,7 +46,7 @@ class BoardCameraTacticalTest {
     }
 
     @Test
-    void entersTheNorthUpTopViewOrbitsAndRestoresTheReplacedPoseExactly() {
+    void entersTheNorthUpTopViewHoldsItAndRestoresTheReplacedPoseExactly() {
         BoardCamera view = orbiting();
         Vector3 focus = view.focus.cpy();
         float zoom = view.camera.zoom;
@@ -66,20 +67,26 @@ class BoardCameraTacticalTest {
         view.zoom(2);
         assertEquals(2 * zoom, view.camera.zoom, TOLERANCE);
 
+        assertTrue(view.rotationLocked());
+        Vector3 panned = view.focus.cpy();
+        // The mouse, minimap and held-key orbit, the tilt keys, a turn step and the isometric preset.
         view.orbit(35, 20);
+        assertTopView(view);
         view.tilt(15);
-        assertEquals(35, view.azimuth(), TOLERANCE, "The Tactical View orbits");
-        assertEquals(35, view.tilt(), TOLERANCE, "and tilts");
+        assertTopView(view);
         view.rotateStep(1);
+        assertFalse(view.isRotating(), "No turn starts");
         view.advance(BoardCamera.ROTATION_SECONDS);
-        assertEquals(35 + BoardCamera.ROTATION_STEP, view.azimuth(), TOLERANCE, "and turns");
+        assertTopView(view);
+        view.setIsometric(true);
+        assertTopView(view);
         assertTrue(view.tactical(), "Only setTactical leaves the Tactical View");
-        view.rotateStep(1);
-        view.advance(.1f);
+        assertEquals(panned, view.focus, "The locked controls leave the view where it was");
+        assertEquals(2 * zoom, view.camera.zoom, TOLERANCE);
 
         view.setTactical(false, null);
         assertFalse(view.tactical());
-        assertFalse(view.isRotating(), "A turn in the Tactical View ends with it");
+        assertFalse(view.rotationLocked());
         assertEquals(focus, view.focus);
         assertEquals(zoom, view.camera.zoom);
         assertEquals(azimuth, view.azimuth());
@@ -171,17 +178,27 @@ class BoardCameraTacticalTest {
     }
 
     @Test
-    void automaticFramingKeepsTheAngleAndResetReturnsToTheTopView() {
+    void framingKeepsTheTopViewAndResetStaysInIt() {
         BoardCamera view = orbiting();
         view.setTactical(true, null);
-        view.orbit(30, 25);
         var unit = new BoardScene.Unit(1, -1, "Unit 1", new BoardScene.Waypoint(new Coords(18, 14), 3, 0),
               null, false, null, 2, true);
         view.frameSelection(unit, 700);
         view.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
-        assertEquals(30, view.azimuth(), TOLERANCE, "Framing keeps the orbited angle");
-        assertEquals(25, view.tilt(), TOLERANCE);
+        assertTopView(view);
         BoardCameraFramingTest.assertVisible(view, 700, unit);
+
+        // A long east-west shot out of view: the 3D view would turn to lay it across the usable area.
+        var attacker = new BoardScene.Unit(2, -1, "Unit 2", new BoardScene.Waypoint(new Coords(2, 30), 0, 0),
+              null, false, null, 2, true);
+        var target = new BoardScene.Unit(3, -1, "Unit 3", new BoardScene.Waypoint(new Coords(40, 30), 0, 0),
+              null, false, null, 2, true);
+        view.frameAttacks(List.of(new UnitAttack(UnitPlaybackTest.attack(attacker, target, ResolvedAttack.Kind.SHOT,
+              true))), 700);
+        view.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+        assertTopView(view);
+        BoardCameraFramingTest.assertVisible(view, 700, attacker);
+        BoardCameraFramingTest.assertVisible(view, 700, target);
 
         view.reset(UnitPlaybackTest.scene(unit));
         assertTopView(view);

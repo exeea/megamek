@@ -42,7 +42,7 @@ import megamek.client.ui.clientGUI.boardview.UnitAnnotations;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
 
-/** Classic-view placement of the shared unit annotations. */
+/** Legacy 2D placement of the shared unit annotations. */
 public class EntitySprite extends Sprite {
     private final UnitAnnotations annotations;
 

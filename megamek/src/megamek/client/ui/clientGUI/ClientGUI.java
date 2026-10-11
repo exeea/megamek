@@ -244,12 +244,15 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_UNIT_OVERVIEW = "viewUnitOverview";
     public static final String VIEW_ZOOM_IN = "viewZoomIn";
     public static final String VIEW_GPU_BOARD = "viewGpuBoard";
-    public static final String VIEW_CLASSIC_BOARD = "viewClassicBoard";
+    public static final String VIEW_LEGACY_2D = "viewLegacy2D";
+    public static final String VIEW_GRAPHICS_CLASSIC = "viewGraphicsClassic";
+    public static final String VIEW_GRAPHICS_ENHANCED = "viewGraphicsEnhanced";
     public static final String VIEW_ZOOM_OUT = "viewZoomOut";
     public static final String VIEW_ZOOM_RESET = "viewZoomReset";
     public static final String VIEW_ZOOM_OVERVIEW_TOGGLE = "viewZoomOverviewToggle";
     public static final String VIEW_TOGGLE_ISOMETRIC = "viewToggleIsometric";
     public static final String VIEW_TOGGLE_HEX_COORDS = "viewToggleHexCoords";
+    public static final String VIEW_TOGGLE_HEX_TYPES = "viewToggleHexTypes";
     public static final String VIEW_LABELS = "viewLabels";
     public static final String VIEW_TOGGLE_FIELD_OF_FIRE = "viewToggleFieldOfFire";
     public static final String VIEW_TOGGLE_FLEE_ZONE = "viewToggleFleeZone";
@@ -259,6 +262,8 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_TOGGLE_FOV_SPOTTING = "viewToggleFovSpotting";
     public static final String VIEW_TOGGLE_SHOW_OBJECTS = "viewToggleShowObjects";
     public static final String VIEW_TOGGLE_FIRING_SOLUTIONS = "viewToggleFiringSolutions";
+    /** The lines between units on every board: C3 networks, spotting for indirect fire and TAG. */
+    public static final String VIEW_TOGGLE_UNIT_LINKS = "viewToggleUnitLinks";
     public static final String VIEW_TOGGLE_CF_WARNING = "viewToggleCFWarnings";
     public static final String VIEW_MOVE_ENV = "viewMovementEnvelope";
     public static final String VIEW_TURN_DETAILS_OVERLAY = "viewTurnDetailsOverlay";
@@ -492,7 +497,7 @@ public class ClientGUI extends AbstractClientGUI
         controller = c;
         // Dialogs that know only their parent frame find their client here (forFrame)
         frame.getRootPane().putClientProperty(ClientGUI.class, this);
-        boardViewsContainer.setClassicViewEnabled(client instanceof BotClient || !GUIP.getUse3DBoard());
+        boardViewsContainer.setLegacy2DEnabled(client instanceof BotClient || !GUIP.getUse3DBoard());
         initializeSpriteHandlers();
         panMain.setLayout(cardsMain);
         panSecondary.setLayout(cardsSecondary);
@@ -722,7 +727,7 @@ public class ClientGUI extends AbstractClientGUI
         toastDripTimer.start();
     }
 
-    /** The optional classic inspector. Gameplay code must use {@link #getUnitDisplayState()}. */
+    /** The optional Swing inspector. Gameplay code must use {@link #getUnitDisplayState()}. */
     @Nullable
     public UnitDisplayPanel getUnitDisplay() {
         return unitDisplayPanel;
@@ -733,12 +738,12 @@ public class ClientGUI extends AbstractClientGUI
         return unitDisplayState;
     }
 
-    /** Presentation only: a phase may suggest a classic tab without constructing the inspector. */
+    /** Presentation only: a phase may suggest a Swing inspector tab without constructing the inspector. */
     public void showUnitDisplayPanel(String panel) {
         if (unitDisplayPanel != null) { unitDisplayPanel.showPanel(panel); }
     }
 
-    private void initializeClassicUnitDisplay() {
+    private void initializeLegacy2DUnitDisplay() {
         if (unitDisplayPanel == null) {
             setUnitDisplayDialog(new UnitDisplayDialog(getFrame(), this));
             unitDisplayPanel = new UnitDisplayPanel(this, controller);
@@ -1546,10 +1551,10 @@ public class ClientGUI extends AbstractClientGUI
                 GUIP.setUse3DBoard(true);
                 openGpuBoard();
                 break;
-            case VIEW_CLASSIC_BOARD:
+            case VIEW_LEGACY_2D:
                 boardViewChosen = true;
                 GUIP.setUse3DBoard(false);
-                GpuBoardWindow.showClassic(this);
+                GpuBoardWindow.showLegacy2D(this);
                 break;
             case VIEW_ZOOM_OUT:
                 if (GpuBoardWindow.isActiveFor(this)) { GpuBoardWindow.cameraCommand(this, KeyCommandBind.ZOOM_OUT); }
@@ -1594,6 +1599,10 @@ public class ClientGUI extends AbstractClientGUI
                 GUIP.setFovSpottingMode(!GUIP.getFovSpottingMode());
                 onAllBoardStates(BoardClientState::refreshDisplayables);
                 onAllBoardStates(BoardClientState::visibilityChanged);
+                break;
+            case VIEW_TOGGLE_UNIT_LINKS:
+                // The board states repaint on the preference change.
+                GUIP.toggleShowUnitLinks();
                 break;
             case VIEW_TOGGLE_SHOW_OBJECTS:
                 // the ground object sprite handler listens for the preference change and re-renders
@@ -1919,13 +1928,13 @@ public class ClientGUI extends AbstractClientGUI
         }
         if (CG_CHAT_LOUNGE.equals(mainPanel)) {
             boardViewChosen = false;
-            GpuBoardWindow.showClassic(this);
+            GpuBoardWindow.showLegacy2D(this);
         } else if (!boardViewChosen) {
             if (GUIP.getUse3DBoard()) {
                 openGpuBoard();
             } else {
                 boardViewChosen = true;
-                GpuBoardWindow.showClassic(this);
+                GpuBoardWindow.showLegacy2D(this);
             }
         }
     }
@@ -1936,9 +1945,9 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     /** Construct the legacy map components only when that visualization is requested. */
-    public void setClassicBoardViewEnabled(boolean enabled) {
+    public void setLegacy2DViewEnabled(boolean enabled) {
         if (enabled) {
-            boardStates().forEach(this::createClassicBoardView);
+            boardStates().forEach(this::createLegacy2DBoardView);
         } else {
             rulers.values().forEach(RulerDialog::dispose);
             rulers.clear();
@@ -1946,7 +1955,7 @@ public class ClientGUI extends AbstractClientGUI
             boardViews().forEach(IBoardView::dispose);
             boardViews.clear();
         }
-        boardViewsContainer.setClassicViewEnabled(enabled);
+        boardViewsContainer.setLegacy2DEnabled(enabled);
         boardViewsContainer.updateMapTabs();
     }
 
@@ -2195,8 +2204,8 @@ public class ClientGUI extends AbstractClientGUI
 
     protected void showBoardPopup(BoardViewEvent event) {
         if (fillPopup(event)) {
-            BoardView classic = getBoardView(event.getBoardId());
-            if (classic != null) { classic.showPopup(popup, event.getCoords()); }
+            BoardView legacy2D = getBoardView(event.getBoardId());
+            if (legacy2D != null) { legacy2D.showPopup(popup, event.getCoords()); }
         }
     }
 
@@ -2286,10 +2295,10 @@ public class ClientGUI extends AbstractClientGUI
 
     /**
      * Shows or hides the minimap based on the current menu setting. The native battle window's minimap keeps the
-     * player's choice through every phase, so its phase rules apply to the classic board only.
+     * player's choice through every phase, so its phase rules apply to the Legacy 2D board only.
      */
     private void maybeShowMinimap() {
-        if (!boardViewsContainer.isClassicViewEnabled() || GpuBoardWindow.isActiveFor(this)) {
+        if (!boardViewsContainer.isLegacy2DEnabled() || GpuBoardWindow.isActiveFor(this)) {
             return;
         }
         GamePhase phase = getClient().getGame().getPhase();
@@ -2578,12 +2587,12 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     public void setUnitDisplayLocation(boolean visible) {
-        if (GpuBoardWindow.isActiveFor(this) || !boardViewsContainer.isClassicViewEnabled()) {
+        if (GpuBoardWindow.isActiveFor(this) || !boardViewsContainer.isLegacy2DEnabled()) {
             if (getUnitDisplayDialog() != null) { getUnitDisplayDialog().setVisible(false); }
             return;
         }
         if (unitDisplayPanel == null && !visible) { return; }
-        initializeClassicUnitDisplay();
+        initializeLegacy2DUnitDisplay();
         saveSplitPaneLocations();
         setDockAxis();
 
@@ -2641,7 +2650,7 @@ public class ClientGUI extends AbstractClientGUI
 
     public void setMiniReportLocation(boolean visible) {
         // The native reader owns reports while the 3D board is presented. Preference and docking changes can
-        // reach this method even while the classic frame is hidden; never let them reopen its report dialog.
+        // reach this method even while the Swing frame is hidden; never let them reopen its report dialog.
         if (GpuBoardWindow.isActiveFor(this)) {
             getMiniReportDisplayDialog().setVisible(false);
             getMiniReportDisplay().setVisible(false);
@@ -3605,7 +3614,7 @@ public class ClientGUI extends AbstractClientGUI
         }
     }
 
-    /** Measures from {@code from} to {@code to} in the active board's native panel or classic ruler dialog. */
+    /** Measures from {@code from} to {@code to} in the active board's native panel or Legacy 2D ruler dialog. */
     public void measureLineOfSight(int boardId, Coords from, Coords to) {
         if (GpuBoardWindow.updateRuler(this, boardId, model -> model.measure(from, to, Entity.NONE, null))) { return; }
         RulerDialog ruler = rulers.get(boardId);
@@ -3847,11 +3856,11 @@ public class ClientGUI extends AbstractClientGUI
                     state.addOverlay(new BoardToastOverlay(state, ClientGUI.this));
                     state.redrawAllEntities();
                     state.refreshAttacks();
-                    if (boardViewsContainer.isClassicViewEnabled()) { createClassicBoardView(state); }
+                    if (boardViewsContainer.isLegacy2DEnabled()) { createLegacy2DBoardView(state); }
                     MinimapDialog minimap = new MinimapDialog(frame);
                     minimap.add(new MinimapPanel(minimap, client.getGame(), state, ClientGUI.this, null, boardId));
                     minimap.setVisible(!client.getGame().getPhase().isLounge()
-                          && boardViewsContainer.isClassicViewEnabled() && !GpuBoardWindow.isActiveFor(ClientGUI.this)
+                          && boardViewsContainer.isLegacy2DEnabled() && !GpuBoardWindow.isActiveFor(ClientGUI.this)
                           && GUIP.getMinimapEnabled());
                     miniMaps.put(boardId, minimap);
                 } catch (IOException ex) { throw new IllegalStateException("Could not initialize board presentation", ex); }
@@ -5136,7 +5145,7 @@ public class ClientGUI extends AbstractClientGUI
         boardStates().forEach(consumer);
     }
 
-    private void createClassicBoardView(BoardClientState state) {
+    private void createLegacy2DBoardView(BoardClientState state) {
         if (boardViews.containsKey(state.getBoardId())) { return; }
         try {
             BoardView view = new BoardView(state, controller, this);
@@ -5148,7 +5157,9 @@ public class ClientGUI extends AbstractClientGUI
             boardViews.put(state.getBoardId(), view);
             rulers.computeIfAbsent(state.getBoardId(), id -> new RulerDialog(frame, state, client.getGame()));
             view.redrawAllEntities();
-        } catch (IOException exception) { throw new IllegalStateException("Could not open the classic board", exception); }
+        } catch (IOException exception) {
+            throw new IllegalStateException("Could not open the Legacy 2D board", exception);
+        }
     }
 
 }

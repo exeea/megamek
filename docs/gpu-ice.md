@@ -48,7 +48,7 @@ hidden for a new game. The server reveals it through its movement-entry check
 and sends the changed hex to clients.
 
 Undiscovered black ice has no gameplay surface graphic or terrain-tooltip entry.
-The classic tile matcher also avoids letting invisible black-ice or metal metadata
+The Legacy 2D tile matcher also avoids letting invisible black-ice or metal metadata
 select an unintended base pavement image. Revealing black ice must not replace its
 rules type with ordinary lake ice.
 

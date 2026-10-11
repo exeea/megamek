@@ -130,7 +130,7 @@ import org.junit.jupiter.api.Timeout;
  * The closing gate of user decision 2, no Swing in the battle view (rebuild plan R9, stage Z1). With the client's
  * battle window presented and its own dialog listener running, each prompt chokepoint of swing-inventory table 2, each
  * table-3 dialog that N7 made native and a list prompt of each class E6d routed asks in the native window, and no
- * Swing window shows; without the window the classic client shows the same openers as Swing dialogs. The Swing
+ * Swing window shows; without the window the Legacy 2D client shows the same openers as Swing dialogs. The Swing
  * surfaces the user kept are raised over the battle window; any other Swing dialog is logged at error level and not
  * raised. The test thread plays the GL thread; the Swing dialogs need a display.
  */
@@ -156,7 +156,7 @@ class GpuSwingDialogGateTest {
     }
 
     @Test
-    void theClientsPromptChokepointsAskNativelyOverTheBattleWindowAndInSwingOnTheClassicClient() throws Exception {
+    void theClientsPromptChokepointsAskNativelyOverTheBattleWindowAndInSwingOnTheLegacy2DClient() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "Shows Swing dialogs");
         ClientPreferences clientPreferences = PreferenceManager.getClientPreferences();
         boolean hadFlightPathNotice = clientPreferences.hasProperty("ShowFlightPathNotice");
@@ -252,7 +252,7 @@ class GpuSwingDialogGateTest {
     }
 
     @Test
-    void theTableThreeDialogsAskNativelyOverTheBattleWindowAndInSwingOnTheClassicClient() throws Exception {
+    void theTableThreeDialogsAskNativelyOverTheBattleWindowAndInSwingOnTheLegacy2DClient() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "Shows Swing dialogs");
         Entity minelayer = GpuBombMineDialogRoutingTest.minelayer();
         Entity platoon = GpuImplantBlowFacingRoutingTest.platoon();
@@ -376,7 +376,7 @@ class GpuSwingDialogGateTest {
     }
 
     @Test
-    void aListPromptOfEachRoutedClassAndTheBotherNagAskNativelyOverTheBattleWindowAndInSwingOnTheClassicClient()
+    void aListPromptOfEachRoutedClassAndTheBotherNagAskNativelyOverTheBattleWindowAndInSwingOnTheLegacy2DClient()
           throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "Shows Swing dialogs");
         // MovementDisplay: the player a traitor unit goes to; the crane helpers' carrier and facing, which get only the
@@ -734,7 +734,7 @@ class GpuSwingDialogGateTest {
             Toolkit.getDefaultToolkit().addAWTEventListener(listener, AWTEvent.COMPONENT_EVENT_MASK);
         }
 
-        /** Unregisters the window and its listener: the classic client. */
+        /** Unregisters the window and its listener: the Legacy 2D client. */
         void dismiss() throws Exception {
             if (listener != null) {
                 Toolkit.getDefaultToolkit().removeAWTEventListener(listener);
@@ -744,9 +744,9 @@ class GpuSwingDialogGateTest {
         }
 
         /**
-         * Runs the opener with the window presented, answering each native request as Esc does, then on the classic
+         * Runs the opener with the window presented, answering each native request as Esc does, then on the Legacy 2D
          * client, closing each Swing window it shows. Natively the first request is of the kind and no Swing window
-         * shows; on the classic client a window of the surface shows and nothing is asked natively.
+         * shows; on the Legacy 2D client a window of the surface shows and nothing is asked natively.
          */
         void drive(String name, DialogKind kind, Predicate<Window> surface, Callable<?> opener) throws Exception {
             present();
@@ -812,17 +812,17 @@ class GpuSwingDialogGateTest {
                 if (done && opened.isEmpty()) {
                     break;
                 }
-                assertTrue(System.nanoTime() < deadline, name + ": the classic client's dialog stays open");
+                assertTrue(System.nanoTime() < deadline, name + ": the Legacy 2D client's dialog stays open");
                 Thread.sleep(10);
             }
             task.get();
-            assertTrue(matched, name + ": the classic client shows its Swing dialog, " + closed);
-            assertNull(fixture.source.dialog(), name + ": nothing asked natively on the classic client");
+            assertTrue(matched, name + ": the Legacy 2D client shows its Swing dialog, " + closed);
+            assertNull(fixture.source.dialog(), name + ": nothing asked natively on the Legacy 2D client");
         }
 
         /**
          * A board pick: with the window presented the pick runs in the HUD, so nothing is asked and no Swing window
-         * shows; on the classic client its control dialog shows.
+         * shows; on the Legacy 2D client its control dialog shows.
          */
         void pick(String name, Callable<HexTargetPicker> picker) throws Exception {
             present();
@@ -858,7 +858,7 @@ class GpuSwingDialogGateTest {
                 return null;
             });
             assertTrue(opened.stream().anyMatch(JDialog.class::isInstance),
-                  name + ": the classic client shows the control dialog, " + names(opened));
+                  name + ": the Legacy 2D client shows the control dialog, " + names(opened));
         }
 
         /**

@@ -23,6 +23,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import megamek.client.ui.boardeditor.BoardEditorSession;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.gdx.UiButton;
 import megamek.common.board.Board;
@@ -96,9 +97,9 @@ class GpuMapMenuSmokeTest {
                         Actor panel = stage.getRoot().findActor("menu-panel");
                         assertTrue(GpuBoardTestUi.shown(panel));
                         assertTrue(menu.isChecked());
-                        UiButton classic = stage.getRoot().findActor("/viewClassicBoard");
-                        assertNotNull(classic);
-                        assertEquals(editing ? "2D Preview" : "2D Board", classic.getText().toString());
+                        UiButton legacy2D = stage.getRoot().findActor("/viewLegacy2D");
+                        assertNotNull(legacy2D);
+                        assertEquals(editing ? "Legacy 2D Preview" : "Legacy 2D", legacy2D.getText().toString());
                         assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/viewClientSettings")));
                         assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/helpAbout")));
                         assertEquals(editing, GpuBoardTestUi.shown(stage.getRoot().findActor("/fileBoardSave")));
@@ -124,7 +125,7 @@ class GpuMapMenuSmokeTest {
                         checkViewMenu(view, source, editing, output);
                         if (editing) { checkEditorEntries(view, source, output); }
                         GpuBoardTestUi.click("utility-menu"); settle(view, source);
-                        GpuBoardTestUi.click("/viewClassicBoard"); settle(view, source);
+                        GpuBoardTestUi.click("/viewLegacy2D"); settle(view, source);
                         assertEquals(1, switches.get());
                         assertEquals(0, closes.get(), "Switching views must not run the close/discard action");
                         assertFalse(GpuBoardTestUi.shown(panel));
@@ -170,7 +171,7 @@ class GpuMapMenuSmokeTest {
         GpuBoardTestUi.click("utility-menu"); settle(view, source);
         GpuBoardTestUi.click("/view"); settle(view, source);
         var stage = GpuBoardTestUi.stage();
-        for (String id : List.of("viewToggleHexCoords", "viewIncGUIScale", "viewDecGUIScale")) {
+        for (String id : List.of("viewToggleHexCoords", "viewToggleHexTypes", "viewIncGUIScale", "viewDecGUIScale")) {
             assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/view/" + id)), id);
         }
         for (String id : List.of("viewToggleIsometric", "viewWireframe", "viewZoomIn", "viewZoomOut",
@@ -188,11 +189,47 @@ class GpuMapMenuSmokeTest {
         GpuBoardTestUi.click("/view/viewToggleHexCoords"); settle(view, source);
         assertTrue(source.takeFrame().scene().tile(at).text().stream()
               .anyMatch(label -> label.text().equals(at.getBoardNum())));
+        checkBoardGraphics(view, source);
 
         // Restore the compact root menu before the remaining modal/document/close checks.
         GpuBoardTestUi.click("utility-menu"); settle(view, source);
         GpuBoardTestUi.click("/view"); settle(view, source);
         press(Input.Keys.ESCAPE); settle(view, source);
+    }
+
+    /**
+     * The View menu's 3D Graphics group (CommonMenuBar's submenu): a choice sets the shared preference, which reaches
+     * the render thread through the source's preferences, and the view draws the tileset columns at once in Classic.
+     */
+    private static void checkBoardGraphics(GpuBattleView view, GpuMapSource source) throws Exception {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        BoardGraphics saved = preferences.getBoardGraphics();
+        try {
+            SwingUtilities.invokeAndWait(() -> preferences.setBoardGraphics(BoardGraphics.ENHANCED));
+            settle(view, source);
+            // The View group is still open from the checks before.
+            GpuBoardTestUi.click("utility-menu"); settle(view, source);
+            GpuBoardTestUi.click("/view/viewBoardGraphics"); settle(view, source);
+            var stage = GpuBoardTestUi.stage();
+            assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/view/viewBoardGraphics/viewGraphicsEnhanced")));
+            GpuBoardTestUi.click("/view/viewBoardGraphics/viewGraphicsClassic"); settle(view, source);
+            assertEquals(BoardGraphics.CLASSIC, preferences.getBoardGraphics());
+            assertEquals(BoardGraphics.CLASSIC, source.uiPreferences().graphics());
+            assertTrue(columns(view), "Classic draws the tileset columns");
+            SwingUtilities.invokeAndWait(() -> preferences.setBoardGraphics(BoardGraphics.ENHANCED));
+            settle(view, source);
+            assertFalse(columns(view), "Enhanced draws the 3D terrain again");
+        } finally {
+            SwingUtilities.invokeAndWait(() -> preferences.setBoardGraphics(saved));
+        }
+    }
+
+    /** Whether the view's terrain draws the tileset columns, after the frames that apply a changed choice. */
+    private static boolean columns(GpuBattleView view) throws Exception {
+        var field = GpuBattleView.class.getDeclaredField("terrain");
+        field.setAccessible(true);
+        // TODO(b11 step 7): GpuTerrain.columns() replaces today's tacticalView() flip.
+        return ((GpuTerrain) field.get(view)).tacticalView();
     }
 
     /**

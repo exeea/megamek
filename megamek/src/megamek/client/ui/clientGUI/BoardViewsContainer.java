@@ -70,7 +70,7 @@ public class BoardViewsContainer {
 
     private final AbstractClientGUI clientGUI;
     private Integer selectedBoardId;
-    private boolean classicViewEnabled = true;
+    private boolean legacy2DEnabled = true;
     private boolean updatingTabs;
 
     /**
@@ -104,7 +104,7 @@ public class BoardViewsContainer {
             boardViewsContainer.removeAll();
             mapTabPane.removeAll();
             shownBoardViews.clear();
-            if (classicViewEnabled) {
+            if (legacy2DEnabled) {
                 if (clientGUI.boardViews.size() > 1) {
                     arrangeMultipleBoardViews();
                     showBoardView(selectedBoardId);
@@ -121,9 +121,9 @@ public class BoardViewsContainer {
     }
 
     /** The native board needs selection, but never needs to construct the legacy map components. */
-    public void setClassicViewEnabled(boolean enabled) {
-        if (classicViewEnabled != enabled) {
-            classicViewEnabled = enabled;
+    public void setLegacy2DEnabled(boolean enabled) {
+        if (legacy2DEnabled != enabled) {
+            legacy2DEnabled = enabled;
             updateMapTabs();
         }
     }
@@ -160,7 +160,7 @@ public class BoardViewsContainer {
     }
 
     /**
-     * Returns the selected board independently of the visualization. Classic tabs reflect this selection only when
+     * Returns the selected board independently of the visualization. Legacy 2D tabs reflect this selection only when
      * enabled; native startup and navigation do not depend on a Swing component being constructed or painted.
      *
      * @return The currently shown {@link megamek.client.ui.clientGUI.boardview.BoardView}, if any
@@ -185,7 +185,7 @@ public class BoardViewsContainer {
         }
         selectedBoardId = boardId;
         updateBoardViewKeyStatus();
-        if (classicViewEnabled && mapTabPane.getTabCount() > 1) {
+        if (legacy2DEnabled && mapTabPane.getTabCount() > 1) {
             String componentName = String.valueOf(boardId);
             for (int i = 0; i < mapTabPane.getTabCount(); i++) {
                 if (componentName.equals(mapTabPane.getComponentAt(i).getName())) {
@@ -221,8 +221,8 @@ public class BoardViewsContainer {
         }
     }
 
-    public boolean isClassicViewEnabled() {
-        return classicViewEnabled;
+    public boolean isLegacy2DEnabled() {
+        return legacy2DEnabled;
     }
 
     private void updateSelection() {

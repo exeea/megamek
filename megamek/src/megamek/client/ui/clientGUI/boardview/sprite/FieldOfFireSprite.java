@@ -172,7 +172,7 @@ public class FieldOfFireSprite extends MovementEnvelopeSprite {
         };
     }
 
-    /** Shared labels for the classic markers and the native range contours. */
+    /** Shared labels for the Legacy 2D markers and the native range contours. */
     public static String getRangeText(int rangeBracket) {
         return switch (rangeBracket) {
             case RangeType.RANGE_MINIMUM -> "min";

@@ -149,8 +149,7 @@ class GpuNameplatesSmokeTest {
     void platesOverTheBoardFollowTheMockStates() throws Exception {
         BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
-            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
-            GpuUnitIcons icons = new GpuUnitIcons();
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene, hud.theme.skin);
             try {
                 GpuBattleStatus.Snapshot moving = GpuHudFixtures.status();
                 List<UnitStatus> roster = moving.units();
@@ -158,7 +157,7 @@ class GpuNameplatesSmokeTest {
 
                 // Shot 02: the Atlas plans its move; every other unit shows its pip, the contact its tag.
                 Plates plates = new Plates(hud);
-                Map<Integer, Vector2> heads = draw(hud, board, icons, plates, false, List.of(moving), none,
+                Map<Integer, Vector2> heads = draw(hud, board, plates, false, List.of(moving), none,
                       Entity.NONE);
                 assertEquals(10, heads.size(), "Every unit of the roster has a head in 3D");
                 Map<Integer, List<String>> expected = pips(roster);
@@ -175,7 +174,7 @@ class GpuNameplatesSmokeTest {
                 board.camera.resize(1280, 720);
                 hud.size(1280, 720);
                 plates = new Plates(hud);
-                heads = draw(hud, board, icons, plates, false, List.of(moving), none, Entity.NONE);
+                heads = draw(hud, board, plates, false, List.of(moving), none, Entity.NONE);
                 assertEquals(expected, plates.markers(roster));
                 plates.assertOnHeads(heads);
                 Rectangle compact = GpuHudTestStage.bounds(plates.tag(ATLAS));
@@ -189,7 +188,7 @@ class GpuNameplatesSmokeTest {
 
                 // Shot 03: the player selected the Panther; the Atlas is a pip again.
                 plates = new Plates(hud);
-                draw(hud, board, icons, plates, false, List.of(moving, status(moving, GamePhase.MOVEMENT, true,
+                draw(hud, board, plates, false, List.of(moving, status(moving, GamePhase.MOVEMENT, true,
                       PANTHER, roster)), none, Entity.NONE);
                 expected = pips(roster);
                 expected.put(PANTHER, List.of("Panther", ""));
@@ -202,7 +201,7 @@ class GpuNameplatesSmokeTest {
                 List<UnitStatus> moved = new ArrayList<>(roster);
                 moved.set(0, unit(roster.get(0), false, false, true, false, List.of()));
                 plates = new Plates(hud);
-                draw(hud, board, icons, plates, false, List.of(moving, status(moving, GamePhase.MOVEMENT, false,
+                draw(hud, board, plates, false, List.of(moving, status(moving, GamePhase.MOVEMENT, false,
                       TIMBER_WOLF, moved)), none, Entity.NONE);
                 expected = pips(roster);
                 expected.put(WARHAMMER, List.of("Warhammer", ""));
@@ -223,13 +222,15 @@ class GpuNameplatesSmokeTest {
                 expected.remove(BATTLEMASTER);
                 for (boolean tactical : new boolean[] { false, true }) {
                     plates = new Plates(hud);
-                    heads = draw(hud, board, icons, plates, tactical, List.of(firing), attacks, Entity.NONE);
+                    heads = draw(hud, board, plates, tactical, List.of(firing), attacks, Entity.NONE);
                     assertEquals(10, heads.size(), "Every unit has a head");
-                    assertEquals(expected, plates.markers(roster));
+                    // The Tactical View's bases carry the pips: its plates are the tags alone.
+                    Map<Integer, List<String>> shown = new TreeMap<>(expected);
+                    if (tactical) { shown.values().removeIf(PIP::equals); }
+                    assertEquals(shown, plates.markers(roster));
                     plates.assertOnHeads(heads);
                     if (tactical) {
-                        capture(hud, "nameplates-07", SHOT_07, new Crop("tag", plates.tag(ATLAS), 834, 626),
-                              new Crop("pip", plates.pip(MARAUDER), 955, 641));
+                        capture(hud, "nameplates-07", SHOT_07, new Crop("tag", plates.tag(ATLAS), 834, 626));
                     } else {
                         capture(hud, "nameplates-05", SHOT_05, new Crop("tag", plates.tag(ATLAS), 885, 731));
                     }
@@ -240,7 +241,7 @@ class GpuNameplatesSmokeTest {
                 List<UnitStatus> resolved = roster.stream()
                       .map(unit -> unit(unit, false, false, false, false, List.of())).toList();
                 plates = new Plates(hud);
-                draw(hud, board, icons, plates, false, List.of(status(moving, GamePhase.FIRING_REPORT, false,
+                draw(hud, board, plates, false, List.of(status(moving, GamePhase.FIRING_REPORT, false,
                       Entity.NONE, resolved)), none, Entity.NONE);
                 expected = pips(roster);
                 expected.put(CONTACT, CONTACT_TAG);
@@ -250,7 +251,7 @@ class GpuNameplatesSmokeTest {
 
                 // Shot 09: the Atlas kicks the Timber Wolf, whose full tag shows as the physical target.
                 plates = new Plates(hud);
-                draw(hud, board, icons, plates, false, List.of(status(moving, GamePhase.PHYSICAL, true, ATLAS,
+                draw(hud, board, plates, false, List.of(status(moving, GamePhase.PHYSICAL, true, ATLAS,
                       roster)), panels(GpuFireOrders.Snapshot.EMPTY, new GpuPhysicalOptions.Snapshot(true, ATLAS,
                       TIMBER_WOLF, List.of(TIMBER_WOLF), List.of())), Entity.NONE);
                 expected = pips(roster);
@@ -264,7 +265,6 @@ class GpuNameplatesSmokeTest {
                       new Crop("tag", plates.tag(ATLAS), 913, 437));
                 plates.dispose();
             } finally {
-                icons.dispose();
                 board.dispose();
             }
         });
@@ -276,7 +276,6 @@ class GpuNameplatesSmokeTest {
         GpuHudTestStage.run(hud -> {
             // Shot 14: 100 against 100; ten enemies are sensor contacts, shown only as "?" unless hovered.
             GpuBoardSpaceHarness battle = new GpuBoardSpaceHarness(large);
-            GpuUnitIcons unused = new GpuUnitIcons();
             try {
                 List<UnitStatus> units = largeStatus();
                 GpuBattleStatus.Snapshot moving = status(GpuHudFixtures.status(), GamePhase.MOVEMENT, true, ATLAS,
@@ -285,7 +284,7 @@ class GpuNameplatesSmokeTest {
                       .orElseThrow();
                 GpuHudData none = panels(GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY);
                 Plates plates = new Plates(hud);
-                Map<Integer, Vector2> heads = draw(hud, battle, unused, plates, false, List.of(moving), none,
+                Map<Integer, Vector2> heads = draw(hud, battle, plates, false, List.of(moving), none,
                       hovered);
                 assertEquals(200, heads.size());
                 for (UnitStatus unit : units) {
@@ -336,7 +335,6 @@ class GpuNameplatesSmokeTest {
                 }
                 plates.dispose();
             } finally {
-                unused.dispose();
                 battle.dispose();
             }
         });
@@ -539,6 +537,8 @@ class GpuNameplatesSmokeTest {
                 all.put(KING_CRAB, List.of("King Crab", ""));
                 all.put(ENEMY_LOCUST, List.of("Locust", ""));
                 assertEquals(all, markers(root, roster));
+                assertEquals("A 3/4", line(root.findActor("nameplate-" + ATLAS), 1),
+                      "A tag's chip: the weight class letter and the gunnery and piloting skills");
                 // The prototype's plates take no pointer events: a press on one reaches the board.
                 Rectangle tag = GpuHudTestStage.bounds(root.findActor("nameplate-" + KING_CRAB));
                 Vector2 press = hud.stage.stageToScreenCoordinates(new Vector2(tag.x + tag.width / 2,
@@ -575,9 +575,9 @@ class GpuNameplatesSmokeTest {
     }
 
     /**
-     * The classic board label's marks (the user's request of 2026-10-07): every unit but the sensor contact and the
+     * The Legacy 2D board label's marks (the user's request of 2026-10-07): every unit but the sensor contact and the
      * destroyed Locust has its damage tile, if any, and its bars bottom-centred on its head, with its pip or tag 2
-     * above them; in 3D and in the Tactical View, beside a tag and the pips.
+     * above them in 3D; in the Tactical View the units' bases show them, so there are neither marks nor pips.
      */
     @Test
     void marksSitOnTheHeadUnderTheMarker() throws Exception {
@@ -588,8 +588,7 @@ class GpuNameplatesSmokeTest {
         int warning = preferences.getWarningColor().getRGB();
         int black = java.awt.Color.BLACK.getRGB();
         GpuHudTestStage.run(hud -> {
-            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
-            GpuUnitIcons icons = new GpuUnitIcons();
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene, hud.theme.skin);
             try {
                 List<UnitStatus> roster = new ArrayList<>(GpuHudFixtures.status().units());
                 Map<Integer, GpuBattleStatus.Marks> marks = Map.of(
@@ -614,12 +613,17 @@ class GpuNameplatesSmokeTest {
                 GpuHudData none = panels(GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY);
                 for (boolean tactical : new boolean[] { false, true }) {
                     Plates plates = new Plates(hud);
-                    Map<Integer, Vector2> heads = draw(hud, board, icons, plates, tactical, List.of(moving), none,
+                    Map<Integer, Vector2> heads = draw(hud, board, plates, tactical, List.of(moving), none,
                           Entity.NONE);
                     assertEquals(10, heads.size(), "Every unit has a head");
                     for (UnitStatus unit : roster) {
                         Vector2 head = heads.get(unit.id());
                         Actor shown = plates.marks(unit.id());
+                        if (tactical) {
+                            assertNull(shown, "The base shows the marks of " + unit.id());
+                            assertNull(plates.pip(unit.id()), "and its pip");
+                            continue;
+                        }
                         Actor marker = plates.tag(unit.id()) != null ? plates.tag(unit.id()) : plates.pip(unit.id());
                         float markerBottom = GpuHudTestStage.bounds(marker).y;
                         if (unit.sensorContact() || unit.destroyed()) {
@@ -641,7 +645,6 @@ class GpuNameplatesSmokeTest {
                     plates.dispose();
                 }
             } finally {
-                icons.dispose();
                 board.dispose();
             }
         });
@@ -712,25 +715,19 @@ class GpuNameplatesSmokeTest {
     }
 
     /**
-     * Draws the board in 3D or in the Tactical View (with its icons), then shows each status in turn to the plates
-     * with the heads of the drawn units, and draws them over the board.
+     * Draws the board in 3D or in the Tactical View (its meeples on their bases), then shows each status in turn to
+     * the plates with the heads of the drawn units, and draws them over the board.
      */
-    private static Map<Integer, Vector2> draw(GpuHudTestStage hud, GpuBoardSpaceHarness board, GpuUnitIcons icons,
-          Plates plates, boolean tactical, List<GpuBattleStatus.Snapshot> statuses, GpuHudData panels, int hovered) {
+    private static Map<Integer, Vector2> draw(GpuHudTestStage hud, GpuBoardSpaceHarness board, Plates plates, boolean tactical, List<GpuBattleStatus.Snapshot> statuses, GpuHudData panels, int hovered) {
         GpuBattleStatus.Snapshot status = statuses.getLast();
         board.view(tactical);
         if (!tactical) {
             // Nearer to the 3D shots' framing: the roster at 1.8x the fitted view, the large battle at 1.25x.
             closeUp(board.camera.camera, board.scene.units().size() > 10 ? 1.25f : 1.8f);
         }
-        Map<BoardScene.Unit, Vector3> iconAnchors = new HashMap<>();
-        board.draw(camera -> {
-            if (tactical) {
-                icons.update(true, camera, board.scene, status, board.poses, iconAnchors);
-                icons.render(camera);
-            }
-        });
-        Map<Integer, Vector2> heads = heads(board.camera.camera, tactical ? iconAnchors : board.anchors);
+        board.basesStatus = status;
+        board.draw(camera -> { });
+        Map<Integer, Vector2> heads = heads(board.camera.camera, board.anchors);
         for (GpuBattleStatus.Snapshot shown : statuses) {
             plates.update(hud, shown, panels, heads, tactical, hovered);
         }
@@ -798,7 +795,7 @@ class GpuNameplatesSmokeTest {
     private static List<String> marker(Group root, int id) {
         Table tag = root.findActor("nameplate-" + id);
         if (tag != null) {
-            return List.of(line(tag, 0), line(tag, 1));
+            return List.of(line(tag, 0), line(tag, 2));
         }
         return root.findActor("pip-" + id) != null ? PIP : null;
     }
@@ -849,7 +846,7 @@ class GpuNameplatesSmokeTest {
         return pips;
     }
 
-    /** A tag's name (0) or sub-line (1). */
+    /** A tag's name (0), chip (1: weight class and skills) or sub-line (2). */
     private static String line(Table tag, int index) {
         return ((Label) tag.getChild(index)).getText().toString();
     }

@@ -28,7 +28,7 @@ import org.junit.jupiter.api.Test;
 
 class BoardViewsContainerTest {
     @Test
-    void savedClassicStyleStartsClassicAndTheViewMenuOnlyOffersTheOtherBoard() throws Exception {
+    void savedLegacy2DStyleStartsLegacy2DAndTheViewMenuOnlyOffersTheOtherBoard() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         boolean style = preferences.getUse3DBoard();
         SwingUtilities.invokeAndWait(() -> {
@@ -48,7 +48,7 @@ class BoardViewsContainerTest {
                 preferences.setUse3DBoard(false);
                 gui.showDefaultBoard(ClientGUI.CG_STARTING_SCENARIO);
                 verify(frame).setVisible(true);
-                verify(gui).setClassicBoardViewEnabled(true);
+                verify(gui).setLegacy2DViewEnabled(true);
                 assertFalse(preferences.getUse3DBoard());
                 JMenu view = java.util.Arrays.stream(menu.getComponents()).filter(JMenu.class::isInstance)
                       .map(JMenu.class::cast).filter(group -> group.getItemCount() > 0 && group.getItem(0) != null
@@ -56,11 +56,11 @@ class BoardViewsContainerTest {
                       .findFirst().orElseThrow();
                 assertEquals("3D Board", view.getItem(0).getText());
                 menu.setBoardView3D(true);
-                assertEquals("2D Board", view.getItem(0).getText());
-                assertEquals(ClientGUI.VIEW_CLASSIC_BOARD, view.getItem(0).getActionCommand());
+                assertEquals("Legacy 2D", view.getItem(0).getText());
+                assertEquals(ClientGUI.VIEW_LEGACY_2D, view.getItem(0).getActionCommand());
                 assertEquals(1, java.util.Arrays.stream(view.getMenuComponents())
                       .filter(javax.swing.JMenuItem.class::isInstance).map(javax.swing.JMenuItem.class::cast)
-                      .filter(item -> java.util.Set.of(ClientGUI.VIEW_GPU_BOARD, ClientGUI.VIEW_CLASSIC_BOARD)
+                      .filter(item -> java.util.Set.of(ClientGUI.VIEW_GPU_BOARD, ClientGUI.VIEW_LEGACY_2D)
                             .contains(item.getActionCommand())).count());
             } finally {
                 menu.die();
@@ -70,7 +70,7 @@ class BoardViewsContainerTest {
     }
 
     @Test
-    void nativeSelectionNeedsNoClassicComponentsAndSurvivesSwitchingViews() throws Exception {
+    void nativeSelectionNeedsNoLegacy2DComponentsAndSurvivesSwitchingViews() throws Exception {
         ClientGUI gui = mock(ClientGUI.class);
         var views = AbstractClientGUI.class.getDeclaredField("boardViews");
         views.setAccessible(true);
@@ -90,7 +90,7 @@ class BoardViewsContainerTest {
         when(second.getComponent()).thenReturn(new JPanel());
         SwingUtilities.invokeAndWait(() -> {
             BoardViewsContainer container = new BoardViewsContainer(gui);
-            container.setClassicViewEnabled(false);
+            container.setLegacy2DEnabled(false);
             assertTrue(container.getCurrentBoardView().isEmpty());
             gui.boardStates.put(0, mock(BoardClientState.class));
             gui.boardStates.put(1, mock(BoardClientState.class));
@@ -106,12 +106,12 @@ class BoardViewsContainerTest {
 
             gui.boardViews.put(0, first);
             gui.boardViews.put(1, second);
-            container.setClassicViewEnabled(true);
+            container.setLegacy2DEnabled(true);
             JTabbedPane tabs = (JTabbedPane) ((JPanel) container.getPanel()).getComponent(0);
             assertSame(second.getComponent(), tabs.getSelectedComponent());
             tabs.setSelectedComponent(first.getComponent());
             assertSame(first, container.getCurrentBoardView().orElseThrow());
-            container.setClassicViewEnabled(false);
+            container.setLegacy2DEnabled(false);
             assertEquals(0, ((JPanel) container.getPanel()).getComponentCount());
             assertSame(first, container.getCurrentBoardView().orElseThrow());
 

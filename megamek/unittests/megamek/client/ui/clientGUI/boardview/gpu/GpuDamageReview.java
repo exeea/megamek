@@ -157,7 +157,7 @@ final class GpuDamageReview {
                       .allMatch(part -> texture(part) != null && texture(part).getWidth() == 128));
                 var scene = (BoardScene) field(view, "scene");
                 var tile = scene.tile(coords);
-                assertNotNull(tile.decals(), "The classic limb marker remains available as fallback");
+                assertNotNull(tile.decals(), "The 2D limb marker remains available as fallback");
                 assertNotNull(tile.decalsWithoutLimbs(), "An empty replacement decal is retained, not mistaken for unavailable");
                 assertNotEquals(tile.decals(), tile.decalsWithoutLimbs());
                 var model = (Model) field(terrain, "limbModel");

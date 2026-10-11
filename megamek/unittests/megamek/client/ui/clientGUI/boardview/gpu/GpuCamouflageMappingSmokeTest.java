@@ -36,11 +36,11 @@ import megamek.common.units.Infantry;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Compare the actual GPU projection with the classic board's camouflage sampler on an unlit white unit. */
+/** Compare the actual GPU projection with the Legacy 2D board's camouflage sampler on an unlit white unit. */
 @Tag("on-demand")
 class GpuCamouflageMappingSmokeTest {
     @Test
-    void oneImageSpansTheRestUnitAndMatchesClassicRotationAndScale() {
+    void oneImageSpansTheRestUnitAndMatchesLegacy2DRotationAndScale() {
         var failure = new AtomicReference<Throwable>();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
@@ -63,17 +63,17 @@ class GpuCamouflageMappingSmokeTest {
                               new int[] { 0, 20 }, new int[] { 35, 15 })) {
                             var instance = new ModelInstance(rest);
                             paints.apply(instance, rest, appearance(pixels, settings[0], settings[1]));
-                            var classic = classic(image, settings[0], settings[1]);
+                            var legacy2D = legacy2D(image, settings[0], settings[1]);
                             for (int side = 0; side < 3; side++) {
                                 var camera = camera(side, size);
                                 var rendered = pixels(batch, buffer, camera, instance);
-                                compare(classic, rendered, "size=" + size + ", rotation=" + settings[0]
+                                compare(legacy2D, rendered, "size=" + size + ", rotation=" + settings[0]
                                       + ", scale=" + settings[1] + ", side=" + side);
                                 if (side == 1 && settings[0] == 0) {
                                     instance.transform.setToRotation(Vector3.Z, 30);
                                     camera.rotateAround(Vector3.Zero, Vector3.Z, 30);
                                     camera.update();
-                                    compare(classic, pixels(batch, buffer, camera, instance), "unit facing");
+                                    compare(legacy2D, pixels(batch, buffer, camera, instance), "unit facing");
                                     instance.transform.idt();
                                 }
                             }
@@ -86,7 +86,7 @@ class GpuCamouflageMappingSmokeTest {
                             var camera = camera(1, size);
                             camera.rotateAround(Vector3.Zero, Vector3.Z, 90);
                             camera.update();
-                            compare(classic, pixels(batch, buffer, camera, instance), "rigid animation");
+                            compare(legacy2D, pixels(batch, buffer, camera, instance), "rigid animation");
                         }
                     }
                     assertEquals(1, paints.textureCount(), "Unit dimensions and camo settings share the same image");
@@ -144,7 +144,7 @@ class GpuCamouflageMappingSmokeTest {
               new UnitModelState.Camo("review", "pattern", rotation, scale, 0xFFFFFF, pixels, null));
     }
 
-    private static BufferedImage classic(BufferedImage pattern, int rotation, int scale) {
+    private static BufferedImage legacy2D(BufferedImage pattern, int rotation, int scale) {
         var camo = new Camouflage("review", "pattern") {
             @Override public Image getBaseImage() { return pattern; }
         };
@@ -190,18 +190,18 @@ class GpuCamouflageMappingSmokeTest {
         } finally { buffer.end(); }
     }
 
-    private static void compare(BufferedImage classic, int[] rendered, String context) {
+    private static void compare(BufferedImage legacy2D, int[] rendered, String context) {
         int maximum = 0;
         // Ignore rasterized silhouette edges; compare all interior pixels, including the seam between parts.
         for (int y = 2; y < 70; y++) {
             for (int x = 2; x < 82; x++) {
-                int expected = classic.getRGB(x, y), actual = rendered[y * 84 + x] >>> 8;
+                int expected = legacy2D.getRGB(x, y), actual = rendered[y * 84 + x] >>> 8;
                 for (int shift : new int[] { 0, 8, 16 }) {
                     maximum = Math.max(maximum, Math.abs(((expected >>> shift) & 255) - ((actual >>> shift) & 255)));
                 }
             }
         }
-        // Classic CPU interpolation rounds twice; GL texture filtering may round differently by a few levels.
+        // Legacy 2D CPU interpolation rounds twice; GL texture filtering may round differently by a few levels.
         assertTrue(maximum <= 4, context + ": maximum channel error " + maximum);
     }
 

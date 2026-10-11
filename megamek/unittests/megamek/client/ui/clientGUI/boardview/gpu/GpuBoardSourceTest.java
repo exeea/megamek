@@ -25,6 +25,8 @@ import megamek.client.event.BoardViewListenerAdapter;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.client.ui.clientGUI.boardview.BoardElectronicWarfare;
+import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.ECMEffects;
 import megamek.client.ui.clientGUI.boardview.sprite.CursorSprite;
@@ -99,30 +101,30 @@ class GpuBoardSourceTest {
     void minimapNavigationAndViewportRecreationDoNotDependOnAnInactiveRenderer() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
-                BoardView classic = fixture.classicView();
+                BoardView legacy2D = fixture.legacy2DView();
                 try {
-                    assertNull(classic.getPanel().getParent());
-                    classic.centerOnPointRel(1, 1);
+                    assertNull(legacy2D.getPanel().getParent());
+                    legacy2D.centerOnPointRel(1, 1);
                     Coords corner = new Coords(fixture.game.getBoard().getWidth() - 1,
                           fixture.game.getBoard().getHeight() - 1);
                     assertEquals(corner, fixture.view.getCenterRequest().coords());
                     fixture.source.refresh();
                     assertEquals(fixture.view.getCenterRequest(), fixture.source.takeFrame().centerRequest());
-                    assertNull(classic.getPanel().getParent());
-                    var viewport = classic.getComponent();
-                    classic.releaseClassicView();
-                    assertNull(classic.getPanel().getParent());
+                    assertNull(legacy2D.getPanel().getParent());
+                    var viewport = legacy2D.getComponent();
+                    legacy2D.releaseLegacy2DView();
+                    assertNull(legacy2D.getPanel().getParent());
                     assertEquals(corner, fixture.view.getCenterRequest().coords());
-                    assertNotSame(viewport, classic.getComponent(), "Switching back creates a new classic viewport");
+                    assertNotSame(viewport, legacy2D.getComponent(), "Switching back creates a new Legacy 2D viewport");
                 } finally {
-                    classic.dispose();
+                    legacy2D.dispose();
                 }
             });
         }
     }
 
     @Test
-    void captureNavigationAndBoardExportsDoNotNeedAClassicViewport() throws Exception {
+    void captureNavigationAndBoardExportsDoNotNeedALegacy2DViewport() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         boolean softCenter = preferences.getSoftCenter();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -146,7 +148,7 @@ class GpuBoardSourceTest {
     }
 
     @Test
-    void deploymentEcmFillsTheWholeHexForFriendlyAndEnemyUnits() throws Exception {
+    void deploymentEcmReachesTheSnapshotWithItsSideForFriendlyAndEnemyUnits() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             fixture.addEcm();
             Player enemy = new Player(1, "Enemy deployment");
@@ -164,13 +166,11 @@ class GpuBoardSourceTest {
                     fixture.source.refresh();
                 });
                 BoardScene scene = fixture.source.takeFrame().scene();
-                for (Point point : List.of(new Point(42, 36), new Point(42, 12), new Point(42, 60),
-                      new Point(14, 36), new Point(70, 36))) {
-                    assertTrue(scene.tactical().fills().stream().anyMatch(fill ->
-                                fill.argb() == ECMEffects.getECMColor(owner).getRGB()
-                                      && fill.shape().contains(4 * 63 + point.x, 4 * 72 + point.y)),
-                          "Native ECM must cover the entire hex: " + owner.getName() + " at " + point);
-                }
+                int kind = owner == enemy ? BoardElectronicWarfare.ENEMY_ECM : BoardElectronicWarfare.OWN_ECM;
+                assertEquals(kind, scene.electronicWarfare().hex(new Coords(4, 4)) & 15, owner.getName());
+                assertEquals(owner != enemy, scene.electronicWarfare().sources().getFirst().own());
+                assertTrue(scene.tactical().fills().stream().noneMatch(fill ->
+                      fill.argb() == ECMEffects.getECMColor(owner).getRGB()), "No player-colour wash on the 3D board");
             }
         }
     }
@@ -204,7 +204,7 @@ class GpuBoardSourceTest {
         String originalTileset = preferences.getMapTileset();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
-                preferences.setMapTileset("classic.tileset");
+                preferences.setMapTileset("legacy2D.tileset");
                 Coords coords = new Coords(2, 2);
                 Hex hex = new Hex(0);
                 hex.addTerrain(new Terrain(Terrains.BUILDING, 4, true, 0));
@@ -294,6 +294,37 @@ class GpuBoardSourceTest {
         }
     }
 
+    /**
+     * View > Hex Types reaches the game's 3D board the way Hex Coords does: the published labels of a level-1
+     * building trade its roof's HEIGHT label for the type block, and the render thread's snapshot carries the setting.
+     */
+    @Test
+    void hexTypesReplaceTheBottomLabelsOfTheGameBoardAndTrackTheSetting() throws Exception {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        boolean types = preferences.getHexTypesEnabled();
+        Board board = Board.createEmptyBoard(8, 8);
+        Coords building = new Coords(2, 2);
+        board.setHex(building, new Hex(1, "building:1;bldg_elev:2;bldg_cf:15", ""));
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
+            for (boolean on : new boolean[] { false, true, false }) {
+                SwingUtilities.invokeAndWait(() -> {
+                    if (preferences.getHexTypesEnabled() != on) { preferences.toggleHexTypes(); }
+                    fixture.source.refresh();
+                });
+                var frame = fixture.source.takeFrame();
+                List<String> labels = frame.scene().tile(building).text().stream()
+                      .map(BoardHexText::text)
+                      .filter(text -> !text.equals(building.getBoardNum())).toList();
+                assertEquals(on ? List.of("LEVEL 1", "LIGHT▲2") : List.of("LEVEL 1", "HEIGHT 2"), labels);
+                assertEquals(on, fixture.source.uiPreferences().overlays().hexTypes());
+            }
+        } finally {
+            SwingUtilities.invokeAndWait(() -> {
+                if (preferences.getHexTypesEnabled() != types) { preferences.toggleHexTypes(); }
+            });
+        }
+    }
+
     @Test
     void cliffExitsSurviveTacticalArtworkRefreshes() throws Exception {
         Board board = new Board();
@@ -316,7 +347,7 @@ class GpuBoardSourceTest {
     }
 
     @Test
-    void gpuArtworkDoesNotIncludeClassicGeneratedShadows() throws Exception {
+    void gpuArtworkDoesNotIncludeLegacy2DGeneratedShadows() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         boolean shadows = preferences.getShadowMap();
         boolean ambient = preferences.getAOHexShadows();
@@ -344,22 +375,22 @@ class GpuBoardSourceTest {
     }
 
     @Test
-    void tileResolutionDoesNotDependOnClassicZoom() throws Exception {
+    void tileResolutionDoesNotDependOnLegacy2DZoom() throws Exception {
         int originalZoom = GUIPreferences.getInstance().getMapZoomIndex();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             BoardScene.Tile tile = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
             SwingUtilities.invokeAndWait(() -> {
-                BoardView classic = fixture.classicView();
+                BoardView legacy2D = fixture.legacy2DView();
                 try {
-                    classic.getComponent();
-                    classic.zoomOut();
-                    float scale = classic.getScale();
-                    Dimension size = new Dimension(classic.getHexSize());
+                    legacy2D.getComponent();
+                    legacy2D.zoomOut();
+                    float scale = legacy2D.getScale();
+                    Dimension size = new Dimension(legacy2D.getHexSize());
                     fixture.source.refresh();
-                    assertEquals(scale, classic.getScale());
-                    assertEquals(size, classic.getHexSize());
+                    assertEquals(scale, legacy2D.getScale());
+                    assertEquals(size, legacy2D.getHexSize());
                 } finally {
-                    classic.dispose();
+                    legacy2D.dispose();
                 }
             });
             BoardScene.Tile after = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
@@ -582,9 +613,9 @@ class GpuBoardSourceTest {
             });
             BoardScene.Tile after = fixture.source.takeFrame().scene().tile(destination);
             assertTrue(samePixels(before.ground(), after.ground()),
-                  "The classic moving-unit ghost must not be baked into the captured terrain");
+                  "The Legacy 2D moving-unit ghost must not be baked into the captured terrain");
             assertTrue(samePixels(before.tactical(), after.tactical()),
-                  "The classic moving-unit ghost must not be baked into the captured layers");
+                  "The Legacy 2D moving-unit ghost must not be baked into the captured layers");
         } finally {
             SwingUtilities.invokeAndWait(() -> preferences.setShowMoveStep(moveStep));
         }
@@ -635,7 +666,7 @@ class GpuBoardSourceTest {
     }
 
     @Test
-    void planarCaptureRestoresClassicProjectionAndSpriteBounds() throws Exception {
+    void planarCaptureRestoresLegacy2DProjectionAndSpriteBounds() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         boolean original = preferences.getIsometricEnabled();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {

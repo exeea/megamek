@@ -2,7 +2,7 @@
 
 [Docs index](README.md). Human command behavior lives in
 [phaseDisplay](../megamek/src/megamek/client/ui/panels/phaseDisplay/).
-The classic and native boards expose the same phase operations.
+The Legacy 2D and native boards expose the same phase operations.
 
 ## Phase controllers and commands
 
@@ -14,7 +14,7 @@ actions for a hex or unit using the current game and phase.
 Start a behavior change here. For example, a movement tool must update the existing
 movement controller and path, while a firing action must use the existing weapon
 selection and attack declaration. The native UI presents those controls even when the
-classic board viewport is absent.
+Legacy 2D board viewport is absent.
 
 [GpuBoardActions](../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuBoardActions.java)
 captures descriptions of the existing controls for rendering. Execution returns to
@@ -97,12 +97,17 @@ bindings; `MegaMekController` dispatches them to the active handlers.
 owns client text. Keep command behavior with its controller and presentation settings
 with these existing preference/resource owners.
 
+The Tactical View's Overlays panel (`GpuTacticalOverlays`) follows the same rule: each row shows and changes one
+existing setting (a View-menu item, or a client setting in `GUIPreferences`) and keeps no copy of it.
+`H` (`KeyCommandBind.TACTICAL_OVERLAYS`) expands or collapses it in the Tactical View; see
+[GPU HUD](gpu-hud.md#5-the-tactical-view).
+
 ## Map editor
 
 [BoardEditorSession](../megamek/src/megamek/client/ui/boardeditor/BoardEditorSession.java)
 owns the document, tools, brush settings, file operations and undo history.
 The native view uses `GpuMapSource` to send picks back to those session commands. The
-classic 2D editor is gone; the editor's 2D Preview is a `BoardView` on the same document.
+Legacy 2D editor is gone; the editor's Legacy 2D Preview is a `BoardView` on the same document.
 
 A brush drag is one undo transaction. Wheel elevation changes also use the editor's
 stroke machinery, and finishing a gesture, losing focus or switching views must finish

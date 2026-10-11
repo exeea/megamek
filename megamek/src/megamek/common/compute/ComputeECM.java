@@ -47,6 +47,7 @@ import java.util.Vector;
 import megamek.common.ECCMComparator;
 import megamek.common.ECMComparator;
 import megamek.common.ECMInfo;
+import megamek.common.Player;
 import megamek.common.TemporaryECMField;
 import megamek.common.annotations.Nullable;
 import megamek.common.battleArmor.BattleArmor;
@@ -547,20 +548,11 @@ public class ComputeECM {
         ECMInfo worstECMEffects = null;
         // Loop through intervening coords, and find the worst effects
         for (Coords c : coords) {
-            ECMInfo affectedInfo = null;
+            ECMInfo start = null;
             if (c.equals(ae.getPosition()) && ae.isINarcedWith(INarcPod.ECM)) {
-                affectedInfo = new ECMInfo(0, 1, ae.getOwner(), c);
+                start = new ECMInfo(0, 1, ae.getOwner(), c);
             }
-            for (ECMInfo ecmInfo : allEcmInfo) {
-                // Is the ECMInfo in range of this position?
-                int dist = c.distance(ecmInfo.getPos());
-                if (dist <= ecmInfo.getRange()) {
-                    if (affectedInfo == null) {
-                        affectedInfo = new ECMInfo(0, 0, ae.getOwner(), c);
-                    }
-                    affectedInfo.addOpposingECMEffects(ecmInfo);
-                }
-            }
+            ECMInfo affectedInfo = getECMEffectsAt(start, ae.getOwner(), c, allEcmInfo);
             if ((worstECMEffects == null && affectedInfo != null)
                   || (affectedInfo != null && ecmComparator.compare(
                   affectedInfo, worstECMEffects) > 0)) {
@@ -568,6 +560,33 @@ public class ComputeECM {
             }
         }
         return worstECMEffects;
+    }
+
+    /**
+     * The combined E(C)CM effects in one hex for a unit of {@code owner}: the per-hex part of
+     * {@link #getECMEffects}, which checks every hex between attacker and target this way. Every field in range adds its
+     * enemy ECM and allied ECCM (fields without an owner count as enemy ECM).
+     *
+     * @param start  the effects already present in the hex, such as an iNarc ECM pod on the unit, or null
+     * @param owner  the player whose units would stand in the hex
+     * @param c      the hex
+     * @param allEcmInfo the fields to consider, as from {@link #computeAllEntitiesECMInfo(List)}
+     *
+     * @return the combined effects, or {@code start} when no field reaches the hex
+     */
+    public static @Nullable ECMInfo getECMEffectsAt(@Nullable ECMInfo start, @Nullable Player owner, Coords c,
+          List<ECMInfo> allEcmInfo) {
+        ECMInfo affectedInfo = start;
+        for (ECMInfo ecmInfo : allEcmInfo) {
+            // Is the ECMInfo in range of this position?
+            if (c.distance(ecmInfo.getPos()) <= ecmInfo.getRange()) {
+                if (affectedInfo == null) {
+                    affectedInfo = new ECMInfo(0, 0, owner, c);
+                }
+                affectedInfo.addOpposingECMEffects(ecmInfo);
+            }
+        }
+        return affectedInfo;
     }
 
     /**

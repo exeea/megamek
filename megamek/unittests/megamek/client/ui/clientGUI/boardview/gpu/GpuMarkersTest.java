@@ -188,7 +188,7 @@ class GpuMarkersTest {
     }
 
     @Test
-    void capturesExistingWarningsAboveBuildingsAndBridgesWithoutBakingTheClassicGlyph() throws Exception {
+    void capturesExistingWarningsAboveBuildingsAndBridgesWithoutBakingTheLegacy2DGlyph() throws Exception {
         Board board = new Board(7, 6);
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 6; y++) {

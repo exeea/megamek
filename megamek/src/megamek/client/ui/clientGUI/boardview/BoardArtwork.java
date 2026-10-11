@@ -130,8 +130,10 @@ public final class BoardArtwork implements AutoCloseable {
                             }
                         }
                         local.drawImage(overlay.apply(coords), 0, 0, HEX_W, HEX_H, null);
+                        // Coordinates and hex types whatever the views show, printed black on a white outline.
                         BoardHexText.draw(local, new Point(), HEX_W,
-                              BoardHexText.capture(coords, hex, board, 1, LABEL_FONT, LABEL_FONT));
+                              BoardHexText.capture(coords, hex, board, 1, LABEL_FONT, LABEL_FONT, true, true, true),
+                              true);
                         Point position = largeTileLocation(x, y, 1);
                         graphics.drawImage(tile, position.x, position.y, null);
                     }

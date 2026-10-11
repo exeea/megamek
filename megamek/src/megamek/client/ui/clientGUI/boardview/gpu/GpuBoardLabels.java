@@ -48,8 +48,10 @@ final class GpuBoardLabels implements GpuHud.Component {
     /** overlay.js mid(): a unit's middle at .55 of its height; the tip at .9 of the unit's height over its hex. */
     private static final float MIDDLE = .55f;
     private static final float TIP_HEIGHT = .9f;
-    /** The Tactical View lifts every point above the ground by .62 of the icon's side (view3d.js project). */
-    private static final float FLAT_LIFT = .62f;
+    /** The Tactical View anchors a unit's labels at its base ring's north point, half up its screen square. */
+    private static final float RING_NORTH = .5f;
+    /** In the Tactical View lines between units end on a circle just outside their base rings (r .88 apothems). */
+    private static final float RING_GAP = .88f / GpuUnitBases.RING;
     /** .tnb: bottom-centred 4 units above the head; 3 8 padding inside a 1-unit border; 6 between TN and odds. */
     private static final float BADGE_RISE = 4;
     private static final float BADGE_GAP = 6;
@@ -110,6 +112,12 @@ final class GpuBoardLabels implements GpuHud.Component {
     private static final Color TRACE_PRIMARY = UiTheme.alpha(Color.WHITE, .95f);
     private static final Color FLAT_TRACE = UiTheme.alpha(Color.WHITE, .9f);
     private static final Color FLAT_TRACE_SECONDARY = UiTheme.alpha(UiTheme.CORAL, .9f);
+    /** Spotting and TAG links: dotted light blue, 2.5 on and 4.5 off, with the link's icon on a disc halfway. */
+    private static final Color LINK = Color.valueOf("8CC4FF");
+    private static final float LINK_WIDTH = 1.6f;
+    private static final float LINK_DASH = 2.5f;
+    private static final float LINK_GAP = 4.5f;
+    private static final float LINK_DISC = 16;
     private static final Color LEADER = UiTheme.alpha(Color.WHITE, .8f);
     private static final Color DIAMOND_FILL = Color.valueOf("EC6F64");
     private static final Color PIN_FILL = Color.valueOf("F2F5F1");
@@ -140,6 +148,8 @@ final class GpuBoardLabels implements GpuHud.Component {
     /** The #fx layer: guides, traces and leaders. */
     private final Strokes strokes = new Strokes();
     private final Table tip = new Table();
+    /** The Tactical View's "REAR" chip two hexes behind the enemy whose arcs the ground layer shades. */
+    private final Table rear = new Table();
     private final Group pins = new Group();
     private final Group badges = new Group();
     /** The playback pop-ups, oldest first: they age, then stack. */
@@ -182,11 +192,16 @@ final class GpuBoardLabels implements GpuHud.Component {
         // Labels never take a press: the board below gets it, as the prototype's label layer lets it through.
         root.setTouchable(Touchable.disabled);
         tip.setName("route-tip");
+        rear.setName("rear-chip");
+        rear.setBackground(box(rgba(255, 196, 84, .92f), rgba(255, 214, 140, 1), 2, 7));
+        rear.add(ui.label(UiTheme.upper(text("GpuBoard.hud.labels.rear")), "hud-medium", 11, Color.valueOf("2A2112")));
+        rear.pack();
         tip.setBackground(box(rgba(20, 28, 29, .94f), rgba(232, 241, 235, .6f), 9, 12));
         for (Group layer : List.of(pins, badges, pops)) {
             layer.setTransform(false);
         }
         root.addActor(tip);
+        root.addActor(rear);
         root.addActor(pins);
         root.addActor(badges);
         root.addActor(pops);
@@ -216,9 +231,15 @@ final class GpuBoardLabels implements GpuHud.Component {
         cardHeads.clear();
         // The badged units in the order of the preview's and the orders' lists.
         Set<Integer> badged = new LinkedHashSet<>();
+        strokes.round = view.tactical();
+        rear(scene, inputs.frame().status(), view);
         plan(scene, panels.move(), view, inputs.panelBounds());
         preview(scene, panels.preview(), panels.move(), view, badged);
         fire(panels.fire(), view, badged);
+        if (inputs.preferences().overlays().unitLinks()) {
+            // View > Unit Links: the spotting and TAG lines, as the boards' C3 lines.
+            links(inputs.frame().status().links(), view);
+        }
         badgeActors.entrySet().removeIf(entry -> {
             boolean gone = !badged.contains(entry.getKey());
             if (gone) {
@@ -318,7 +339,10 @@ final class GpuBoardLabels implements GpuHud.Component {
         tip.setVisible(anchor != null);
         if (anchor != null) {
             showTip(move);
-            placeTip(anchor, panels);
+            // The Tactical View's tip also keeps clear of the units' bases (b11-design item 11).
+            List<Rectangle> obstacles = new ArrayList<>(panels);
+            if (view.tactical()) { obstacles.addAll(view.unitRects().values()); }
+            placeTip(anchor, obstacles);
         }
         List<GpuMovePlan.Step> shown = planned ? move.pins() : List.of();
         while (pinActors.size() < shown.size()) {
@@ -327,6 +351,22 @@ final class GpuBoardLabels implements GpuHud.Component {
         for (int index = 0; index < pinActors.size(); index++) {
             Vector2 hex = index < shown.size() ? plannedPoint(scene, shown.get(index), view) : null;
             pinActors.get(index).place(hex, view);
+        }
+    }
+
+    /**
+     * The "REAR" chip of the enemy whose arcs the Tactical View shades: two hexes behind it, opposite its facing;
+     * hidden without arcs or outside the Tactical View.
+     */
+    private void rear(BoardScene scene, GpuBattleStatus.Snapshot status, GpuHud.HudView view) {
+        GpuBattleStatus.Arc arc = status.arc();
+        GpuBattleStatus.UnitStatus unit = status.units().stream().filter(listed -> listed.id() == arc.unitId())
+              .findFirst().orElse(null);
+        Vector2 at = !view.tactical() || unit == null || unit.facing() < 0 || arc.origin() == null ? null
+              : hex(scene, arc.origin().translated((unit.facing() + 3) % 6, 2));
+        rear.setVisible(at != null);
+        if (at != null) {
+            rear.setPosition(Math.round(at.x - rear.getWidth() / 2), Math.round(at.y - rear.getHeight() / 2));
         }
     }
 
@@ -425,6 +465,21 @@ final class GpuBoardLabels implements GpuHud.Component {
                 strokes.add(new Vector2(target).sub(aside), new Vector2(source).sub(aside), enemy, body,
                       width, GUIDE_IN, GUIDE_DASH, GUIDE_DASH, true, false);
             }
+        }
+    }
+
+    /** The spotting and TAG links between units (b11-design item 16), with an eye or a crosshair halfway. */
+    private void links(List<GpuBattleStatus.Link> links, GpuHud.HudView view) {
+        for (GpuBattleStatus.Link link : links) {
+            Rectangle from = view.unitRects().get(link.fromId());
+            Rectangle to = view.unitRects().get(link.toId());
+            if (from == null || to == null) {
+                continue;
+            }
+            Vector2 start = from.getCenter(new Vector2());
+            Vector2 end = to.getCenter(new Vector2());
+            strokes.add(start, end, from, to, LINK_WIDTH, LINK, LINK_DASH, LINK_GAP, false, false);
+            strokes.mark(start.lerp(end, .5f), link.kind() == GpuBattleStatus.Link.Kind.SPOT ? "spotting" : "locate");
         }
     }
 
@@ -533,15 +588,35 @@ final class GpuBoardLabels implements GpuHud.Component {
 
     /** Trim a centre-to-centre segment at both units, after any paired-guide offset. Overlapping ends draw nothing. */
     static boolean clip(Vector2 from, Vector2 to, Rectangle source, Rectangle target) {
+        return clip(from, to, source, target, false);
+    }
+
+    /**
+     * As {@link #clip(Vector2, Vector2, Rectangle, Rectangle)}; {@code round}: the units are the Tactical View's bases,
+     * whose lines end on a circle just outside the ring their square bounds.
+     */
+    static boolean clip(Vector2 from, Vector2 to, Rectangle source, Rectangle target, boolean round) {
         Vector2 direction = new Vector2(to).sub(from);
         float length = direction.len();
         direction.nor();
-        float start = clearance(from, direction, source);
-        float end = clearance(to, new Vector2(direction).scl(-1), target);
+        float start = round ? ringClearance(from, direction, source) : clearance(from, direction, source);
+        float end = round ? ringClearance(to, new Vector2(direction).scl(-1), target)
+              : clearance(to, new Vector2(direction).scl(-1), target);
         if (length <= start + end) { return false; }
         from.mulAdd(direction, start);
         to.mulAdd(direction, -end);
         return true;
+    }
+
+    /** Distance from a point to the circle just outside a base's ring, centred in its square, along the line. */
+    private static float ringClearance(Vector2 point, Vector2 direction, Rectangle body) {
+        if (body == null) { return 0; }
+        Vector2 offset = new Vector2(point).sub(body.getCenter(new Vector2()));
+        float radius = body.width / 2 * RING_GAP;
+        // The far intersection of the line from the point with the circle: t^2 + 2bt + c = 0.
+        float b = offset.dot(direction);
+        float root = b * b - (offset.len2() - radius * radius);
+        return root < 0 ? 0 : Math.max(0, -b + (float) Math.sqrt(root));
     }
 
     /** Distance from a point inside the padded unit rectangle to its edge along the line. */
@@ -579,14 +654,14 @@ final class GpuBoardLabels implements GpuHud.Component {
 
     /**
      * A point over a hex at {@code fraction} of the unit's screen height, as the prototype anchors the unit's pose
-     * there (the Tactical View lifts it like a head); null off the board or behind the camera.
+     * there (the Tactical View at its base ring's north point, like a head); null off the board or behind the camera.
      */
     private Vector2 lifted(Vector2 ground, int unit, float fraction, GpuHud.HudView view) {
         Rectangle rect = view.unitRects().get(unit);
         if (ground == null) {
             return null;
         }
-        return ground.add(0, rect == null ? 0 : (view.tactical() ? FLAT_LIFT : fraction) * rect.height);
+        return ground.add(0, rect == null ? 0 : (view.tactical() ? RING_NORTH : fraction) * rect.height);
     }
 
     /** Movement labels follow the exact floor; the Tactical View keeps its flat board projection. */
@@ -653,7 +728,13 @@ final class GpuBoardLabels implements GpuHud.Component {
         private record Stroke(Vector2 from, Vector2 to, float width, Color color, float dash, float gap,
               boolean flowing, boolean round) { }
 
+        /** A link's icon on a disc. */
+        private record Mark(Vector2 at, String icon) { }
+
         private final List<Stroke> list = new ArrayList<>();
+        private final List<Mark> marks = new ArrayList<>();
+        /** The units are the Tactical View's bases: lines end on circles around their rings. */
+        boolean round;
         private final float[] vertices = new float[20];
         /** Seconds of the guides' flow. */
         private float clock;
@@ -664,15 +745,20 @@ final class GpuBoardLabels implements GpuHud.Component {
 
         void reset() {
             list.clear();
+            marks.clear();
         }
 
         void add(Vector2 from, Vector2 to, Rectangle source, Rectangle target, float width, Color color,
               float dash, float gap, boolean flowing, boolean round) {
             from = new Vector2(from);
             to = new Vector2(to);
-            if (clip(from, to, source, target)) {
+            if (clip(from, to, source, target, this.round)) {
                 list.add(new Stroke(from, to, width, color, dash, gap, flowing, round));
             }
+        }
+
+        void mark(Vector2 at, String icon) {
+            marks.add(new Mark(at, icon));
         }
 
         @Override
@@ -688,6 +774,16 @@ final class GpuBoardLabels implements GpuHud.Component {
             for (Stroke stroke : list) {
                 line(batch, stroke, x, y, parentAlpha);
             }
+            Color previous = batch.getColor().cpy();
+            for (Mark mark : marks) {
+                float half = LINK_DISC / 2;
+                batch.setColor(.09f, .13f, .13f, .92f * parentAlpha);
+                batch.draw(disc, x + mark.at().x - half, y + mark.at().y - half, LINK_DISC, LINK_DISC);
+                batch.setColor(LINK.r, LINK.g, LINK.b, parentAlpha);
+                ui.skin.getDrawable("icon-" + mark.icon()).draw(batch, x + mark.at().x - half + 2,
+                      y + mark.at().y - half + 2, LINK_DISC - 4, LINK_DISC - 4);
+            }
+            batch.setColor(previous);
             // Leaders run from the nearest point of a card to its target's anchor, unless the card covers it.
             for (Map.Entry<TargetKey, Vector2> entry : cardHeads.entrySet()) {
                 Rectangle card = cards.get(entry.getKey());

@@ -4,8 +4,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
 
@@ -25,18 +27,31 @@ import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.collision.BoundingBox;
+import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.common.board.Coords;
 
-/** Captured labels: HEIGHT shows through its own hex; top view also reveals the enabled ground labels. */
+/**
+ * Captured labels, each on its outline: a roof label (HEIGHT, or with Hex Types the structure line) shows through its
+ * own hex; top view also reveals the enabled ground labels. The Tactical View adds its own: water depths and
+ * structures' construction factors ({@link BoardHexText#tactical}).
+ */
 final class GpuHexText implements Disposable {
     /** Four vertices per glyph, with unsigned 16-bit indices. */
     private static final int PAGE_GLYPHS = 16_383;
     private static final int GLYPH_FLOATS = 20;
     private record Plane(int elevation, float headroom, boolean overlay) { }
-    private record Chunk(BitmapFontCache glyphs, BoundingBox bounds) { }
+    /** A chunk's glyph vertices, one array per page of the font, in drawing order. */
+    private record Chunk(List<FloatArray> pages, BoundingBox bounds) {
+        void add(BitmapFontCache glyphs) {
+            for (int page = 0; page < glyphs.getPageCount(); page++) {
+                if (pages.size() == page) { pages.add(new FloatArray()); }
+                pages.get(page).addAll(glyphs.getVertices(page), 0, glyphs.getVertexCount(page));
+            }
+        }
+    }
     private record Range(BoundingBox bounds, int offset, int count) { }
     /** Owns the static mesh; the font owns the texture. Ranges keep the original chunk/page drawing order. */
     private record Page(Texture texture, Mesh mesh, List<Range> ranges) {
@@ -72,6 +87,12 @@ final class GpuHexText implements Disposable {
     private List<BoardScene.Tile> tiles;
     private BitmapFont font;
     private int tuning = -1;
+    private boolean tactical;
+    private boolean types;
+    /** In the Tactical View, the hexes units stand on, whose own labels give way to them. */
+    private Set<Coords> covered = Set.of();
+    /** The roof each roof label was laid on at the last rebuild, by hex; null where the hex had none. */
+    private final Map<Coords, BoundingBox> roofs = new HashMap<>();
 
     GpuHexText() {
         shader = GpuShaderManager.program(GpuHexText::program, next -> shader = next);
@@ -85,20 +106,38 @@ final class GpuHexText implements Disposable {
         return GpuGlsl.compile("GPU hex text", vertex, fragment);
     }
 
-    /** The font and roof bounds are borrowed; labels are solely the existing board view's captured text. */
     void update(BoardScene scene, BitmapFont font, Function<Coords, BoundingBox> roofBounds) {
-        if (tiles == scene.tiles() && this.font == font && tuning == BoardGeometry.revision()) { return; }
+        update(scene, font, roofBounds, false, false);
+    }
+
+    /**
+     * The font and roof bounds are borrowed; labels are the existing board view's captured text and, in the Tactical
+     * View ({@code tactical}), its labels of the captured water depths and structures; with View > Hex Types on
+     * ({@code types}) the captured type block tells the depths instead.
+     */
+    void update(BoardScene scene, BitmapFont font, Function<Coords, BoundingBox> roofBounds, boolean tactical,
+          boolean types) {
+        Set<Coords> units = new HashSet<>();
+        if (tactical) { scene.units().forEach(unit -> units.addAll(unit.footprint())); }
+        boolean same = this.font == font && tuning == BoardGeometry.revision() && this.tactical == tactical
+              && this.types == types && covered.equals(units);
+        if (same && tiles != scene.tiles() && sameLabels(scene.tiles(), roofBounds)) { tiles = scene.tiles(); }
+        if (same && tiles == scene.tiles()) { return; }
         float scaleX = font.getData().scaleX, scaleY = font.getData().scaleY;
-        Color color = new Color(font.getColor());
+        Color color = new Color(font.getColor()), ringColor = new Color();
+        // One label at a time: the font's cache grows its arrays to the exact size at every text it adds, so a chunk's
+        // labels and their outline copies in one cache would copy them over and over (quadratic in the chunk's glyphs).
+        BitmapFontCache glyphs = new BitmapFontCache(font, false);
         Map<Plane, Map<Coords, Chunk>> next = new HashMap<>();
+        Map<Coords, BoundingBox> nextRoofs = new HashMap<>();
         try {
             for (BoardScene.Tile tile : scene.tiles()) {
-                for (BoardHexText label : tile.text()) {
+                for (BoardHexText label : labels(tile, tactical, types, units.contains(tile.coords()))) {
                     Plane plane = new Plane(tile.elevation() + label.elevation(), headroom(tile, label), label.elevation() > 0);
                     Coords cell = new Coords(tile.coords().getX() / GpuTerrain.CHUNK_SIZE,
                           tile.coords().getY() / GpuTerrain.CHUNK_SIZE);
                     Chunk chunk = next.computeIfAbsent(plane, key -> new HashMap<>())
-                          .computeIfAbsent(cell, key -> new Chunk(new BitmapFontCache(font, false), new BoundingBox().inf()));
+                          .computeIfAbsent(cell, key -> new Chunk(new ArrayList<>(), new BoundingBox().inf()));
                     float centerX = BoardGeometry.centerX(tile.coords()), centerY = BoardGeometry.centerY(tile.coords());
                     float z = plane.elevation() * BoardGeometry.level();
                     chunk.bounds().ext(centerX - BoardGeometry.width(), centerY - BoardGeometry.width(), z - 1)
@@ -111,6 +150,9 @@ final class GpuHexText implements Disposable {
                     float x = centerX;
                     float baseline = centerY + BoardGeometry.height() / 2 - label.baseline() * BoardGeometry.hexScale();
                     BoundingBox roof = label.elevation() > 0 ? roofBounds.apply(tile.coords()) : null;
+                    if (label.elevation() > 0) {
+                        nextRoofs.put(tile.coords(), roof == null ? null : new BoundingBox(roof));
+                    }
                     if (roof != null) {
                         float fit = Math.min(1, Math.max(8, roof.getWidth() - 4 * BoardGeometry.hexScale()) / layout.width);
                         font.getData().setScale(font.getData().scaleX * fit);
@@ -118,8 +160,17 @@ final class GpuHexText implements Disposable {
                         x = roof.getCenterX();
                         baseline = roof.getCenterY() - layout.height / 2;
                     }
-                    chunk.glyphs().addText(layout, x - layout.width / 2,
-                          label.fromTop() ? baseline : baseline + layout.height);
+                    float left = x - layout.width / 2, top = label.fromTop() ? baseline : baseline + layout.height;
+                    glyphs.clear();
+                    // The label's outline first: copies of the text in the outline's colour around it.
+                    Color.argb8888ToColor(ringColor, BoardHexText.outline(argb));
+                    GlyphLayout ring = new GlyphLayout(font, label.text(), ringColor, 0, Align.left, false);
+                    float[] offsets = BoardHexText.outlineOffsets(font.getData().scaleY * GpuBoardSkin.FONT_RESOLUTION);
+                    for (int copy = 0; copy < offsets.length; copy += 2) {
+                        glyphs.addText(ring, left + offsets[copy], top + offsets[copy + 1]);
+                    }
+                    glyphs.addText(layout, left, top);
+                    chunk.add(glyphs);
                 }
             }
         } finally {
@@ -135,9 +186,48 @@ final class GpuHexText implements Disposable {
         }
         clear();
         groups.putAll(uploaded);
+        roofs.clear();
+        roofs.putAll(nextRoofs);
         tiles = scene.tiles();
         this.font = font;
         tuning = BoardGeometry.revision();
+        this.tactical = tactical;
+        this.types = types;
+        covered = units;
+    }
+
+    /**
+     * Whether {@code next}, the scene's new tiles, give the labels the meshes hold, so that a rebuild would upload the
+     * same glyphs: only their markings changed (a path preview repaints the tactical images of the hexes it crosses,
+     * which recaptures equal labels) and every roof label's roof is where it was.
+     */
+    private boolean sameLabels(List<BoardScene.Tile> next, Function<Coords, BoundingBox> roofBounds) {
+        if (tiles == null || tiles.size() != next.size()) { return false; }
+        for (int index = 0; index < next.size(); index++) {
+            BoardScene.Tile old = tiles.get(index), tile = next.get(index);
+            if (old != tile && !(old.text().equals(tile.text())
+                  && old.withMarkings(tile.tactical(), tile.text()).equals(tile))) { return false; }
+        }
+        for (Map.Entry<Coords, BoundingBox> roof : roofs.entrySet()) {
+            BoundingBox now = roofBounds.apply(roof.getKey()), then = roof.getValue();
+            if (now == null ? then != null : then == null || !now.min.equals(then.min) || !now.max.equals(then.max)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * A tile's labels: its captured text, {@link BoardHexText#settled settled} so that the ground lines still end on
+     * the bottom edge while a roof label lies on its roof, and in the Tactical View its water depth (not with Hex
+     * Types, whose type block tells it) and its structure's CF chip, whose height the captured text decides.
+     */
+    static List<BoardHexText> labels(BoardScene.Tile tile, boolean tactical, boolean types, boolean covered) {
+        if (!tactical) { return BoardHexText.settled(tile.text(), tile.text()); }
+        int depth = !types && tile.liquid().present() && !tile.frozen() ? Math.max(0, tile.waterDepth()) : 0;
+        int structure = tile.cover().structure();
+        int cf = structure > 0 && structure != BoardScene.Cover.INDUSTRIAL ? tile.cover().cf() : 0;
+        return BoardHexText.tactical(tile.text(), depth, cf, tile.cover().height(), covered);
     }
 
     /** Upload the exact SpriteBatch vertices, joining only consecutive draws with the same font texture. */
@@ -148,9 +238,10 @@ final class GpuHexText implements Disposable {
         Texture texture = null;
         try {
             for (Chunk chunk : chunks) {
-                // Incremental fonts can gain atlas pages after an earlier chunk's cache was completed.
-                for (int region = 0; region < chunk.glyphs().getPageCount(); region++) {
-                    int remaining = chunk.glyphs().getVertexCount(region);
+                // Incremental fonts can gain atlas pages after an earlier chunk was completed.
+                for (int region = 0; region < chunk.pages().size(); region++) {
+                    FloatArray glyphs = chunk.pages().get(region);
+                    int remaining = glyphs.size;
                     Texture next = font.getRegions().get(region).getTexture();
                     int offset = 0;
                     while (remaining > 0) {
@@ -163,7 +254,7 @@ final class GpuHexText implements Disposable {
                         int count = Math.min(remaining, PAGE_GLYPHS * GLYPH_FLOATS - vertices.size);
                         ranges.add(new Range(chunk.bounds(), vertices.size / GLYPH_FLOATS * 6,
                               count / GLYPH_FLOATS * 6));
-                        vertices.addAll(chunk.glyphs().getVertices(region), offset, count);
+                        vertices.addAll(glyphs.items, offset, count);
                         offset += count;
                         remaining -= count;
                     }
@@ -268,6 +359,7 @@ final class GpuHexText implements Disposable {
     @Override
     public void dispose() {
         clear();
+        roofs.clear();
         tiles = null;
         font = null;
         GpuShaderManager.dispose(shader);

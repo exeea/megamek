@@ -63,6 +63,7 @@ import javax.swing.event.MouseInputAdapter;
 import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.ui.Messages;
 import megamek.client.ui.buttons.ColourSelectorButton;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ButtonOrderPreferences;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -418,6 +419,10 @@ public class CommonSettingsDialog extends AbstractButtonDialog
 
     private JComboBox<String> tileSetChoice;
     private List<String> tileSets;
+    /** The 3D board's graphics, in {@link BoardGraphics} order; the labels are the 3D Graphics menu's. */
+    private final JComboBox<String> boardGraphicsChoice = new JComboBox<>(new String[] {
+          Messages.getString("CommonMenuBar.viewGraphicsClassic"),
+          Messages.getString("CommonMenuBar.viewGraphicsEnhanced") });
     private MMComboBox<String> minimapTheme;
 
     private final SettingsCheckBox keyBindTabNavigation = createKeyBindTabNavigationControl();
@@ -1110,12 +1115,18 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         List<List<Component>> comps = new ArrayList<>();
         ArrayList<Component> row;
 
-        // Tileset
+        // Tileset (the Legacy 2D board's artwork) and the 3D board's graphics
         JLabel tileSetChoiceLabel = new JLabel(Messages.getString("CommonSettingsDialog.tileset"));
         tileSetChoice = new JComboBox<>();
         tileSetChoice.setMaximumSize(new Dimension(400, tileSetChoice.getMaximumSize().height));
+        tileSetChoice.setToolTipText(Messages.getString("CommonSettingsDialog.tileset.tooltip"));
+        JLabel boardGraphicsLabel = new JLabel(Messages.getString("CommonSettingsDialog.boardGraphics"));
+        String boardGraphicsTooltip = Messages.getString("CommonSettingsDialog.boardGraphics.tooltip");
+        boardGraphicsLabel.setToolTipText(boardGraphicsTooltip);
+        boardGraphicsChoice.setToolTipText(boardGraphicsTooltip);
+        boardGraphicsChoice.setMaximumSize(new Dimension(400, boardGraphicsChoice.getMaximumSize().height));
         comps.add(List.of(createGameBoardFieldGrid("CommonSettingsGameBoardTilesetGrid",
-              tileSetChoiceLabel, tileSetChoice)));
+              tileSetChoiceLabel, tileSetChoice, boardGraphicsLabel, boardGraphicsChoice)));
         addLineSpacer(comps);
 
         configureCheckBox(nagForNoAction, Messages.getString("CommonSettingsDialog.nagForNoAction.tooltip"));
@@ -2897,6 +2908,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             gameSummaryBV.setSelected(GUIP.getGameSummaryBoardView());
             gameSummaryMM.setSelected(GUIP.getGameSummaryMinimap());
             gifGameSummaryRecording.setSelectedIndex(GUIP.getGifGameSummaryRecording().ordinal());
+            boardGraphicsChoice.setSelectedIndex(GUIP.getBoardGraphics().ordinal());
             skinFiles.removeAllItems();
             ArrayList<String> xmlFiles = new ArrayList<>(filteredFiles(Configuration.skinsDir(), ".xml"));
 
@@ -3406,6 +3418,9 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         }
 
         CLIENT_PREFERENCES.setMinimapTheme(minimapTheme.getSelectedItem());
+        if (boardGraphicsChoice.getSelectedIndex() >= 0) {
+            GUIP.setBoardGraphics(BoardGraphics.values()[boardGraphicsChoice.getSelectedIndex()]);
+        }
 
         ToolTipManager.sharedInstance().setInitialDelay(GUIP.getTooltipDelay());
         if (GUIP.getTooltipDismissDelay() > 0) {

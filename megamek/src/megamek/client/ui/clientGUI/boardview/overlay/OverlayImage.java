@@ -12,7 +12,7 @@ public record OverlayImage(BufferedImage image, int x, int y, Fade fade, Transit
         this(image, x, y, fade, Transition.ZERO);
     }
 
-    /** Draw the same native-density layer in the classic view without baking animation into its artwork. */
+    /** Draw the same native-density layer in the Legacy 2D view without baking animation into its artwork. */
     public void draw(Graphics2D graphics, long now) {
         Graphics2D painter = (Graphics2D) graphics.create();
         try {

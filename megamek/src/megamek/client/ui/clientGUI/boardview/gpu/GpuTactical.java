@@ -46,6 +46,7 @@ import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
+import megamek.common.units.Entity;
 
 /** GL-owned geometry and cached text. Camera movement never rebuilds the surface meshes or label artwork. */
 final class GpuTactical implements Disposable {
@@ -81,6 +82,7 @@ final class GpuTactical implements Disposable {
     static final int RULER_BLOCKED = 0xD84959FF;
     private final GpuHexMasks hexMasks = new GpuHexMasks();
     private final GpuHexMasks deploymentTint = new GpuHexMasks();
+    private final GpuElectronicWarfare electronicWarfare = new GpuElectronicWarfare();
     private final SpriteBatch textBatch = new SpriteBatch();
     private final GpuTextures<List<BoardTactical.Text>> textures = new GpuTextures<>(true);
     private final Map<List<BoardTactical.Text>, TextImage> images = new HashMap<>();
@@ -134,14 +136,20 @@ final class GpuTactical implements Disposable {
         update(scene, detailChanged, hover, !scene.plannedPath().isEmpty());
     }
 
+    void update(BoardScene scene, boolean detailChanged, Coords hover, boolean planning) {
+        update(scene, detailChanged, hover, planning, Entity.NONE);
+    }
+
     /**
      * {@code planning} is true while a move is plotted: the battle HUD's route (GpuMovePlan), which the board view
-     * passes; the scene's own planned path is always empty there.
+     * passes; the scene's own planned path is always empty there. {@code hoveredUnit} is the unit under the pointer,
+     * whose E(C)CM field opens.
      */
-    void update(BoardScene scene, boolean detailChanged, Coords hover, boolean planning) {
+    void update(BoardScene scene, boolean detailChanged, Coords hover, boolean planning, int hoveredUnit) {
         boolean boardChanged = previous == null || previous.boardId() != scene.boardId()
               || previous.width() != scene.width() || previous.height() != scene.height();
         boolean terrainChanged = detailChanged || boardChanged || !sameTerrain(scene);
+        electronicWarfare.update(scene, terrainChanged ? surfaces(scene) : null, hover, hoveredUnit);
         Coords highlighted = !planning && hover != null && scene.tile(hover) != null && scene.tile(hover).impassable()
               ? hover : null;
         boolean markingChanged = boardChanged || !sameImpassable(scene) || planning != movementPlanning
@@ -193,9 +201,12 @@ final class GpuTactical implements Disposable {
         return true;
     }
 
+    private Function<Coords, BoardTacticalGeometry.Surface> surfaces(BoardScene scene) {
+        return terrain == null ? BoardTacticalGeometry.surfaces(scene) : terrain;
+    }
+
     private void rebuild(BoardScene scene, boolean reset, boolean terrainChanged) {
-        Function<Coords, BoardTacticalGeometry.Surface> surfaces = terrain == null
-              ? BoardTacticalGeometry.surfaces(scene) : terrain;
+        Function<Coords, BoardTacticalGeometry.Surface> surfaces = surfaces(scene);
         var clipper = new BoardTacticalGeometry.Clipper();
         Map<FillKey, FillGeometry> nextFills = new HashMap<>();
         Map<BoardTactical.Wall, WallGeometry> nextWalls = new HashMap<>();
@@ -206,7 +217,7 @@ final class GpuTactical implements Disposable {
         commands.addAll(BoardDeploymentGeometry.walls(scene, perimeter));
         commands = BoardRangeBorder.join(commands);
         deploymentTint.updateDeployment(scene, deployment.values(), surfaces);
-        // Unit icons draw in their own pass after this one (GpuUnitIcons), so the regular-border mask always applies.
+        // Unit bases draw in their own pass (GpuUnitBases), so the regular-border mask always applies.
         boolean masked = hexMasks.update(scene, surfaces, true);
         addFills(scene, masked ? List.of() : scene.tactical().fills(), new Group(0, null), groups, nextFills,
               surfaces, clipper, reset, terrainChanged);
@@ -503,15 +514,24 @@ final class GpuTactical implements Disposable {
 
     /** The Tactical View lays range walls flat on the surface; the 3D view keeps them upright at every angle. */
     void render(Camera camera, float deltaSeconds, boolean tacticalView) {
+        render(camera, deltaSeconds, tacticalView, BoardSource.UiPreferences.Overlays.DEFAULTS);
+    }
+
+    /** As {@link #render(Camera, float, boolean)}, the Tactical View's E(C)CM as the Overlays settings choose. */
+    void render(Camera camera, float deltaSeconds, boolean tacticalView, BoardSource.UiPreferences.Overlays overlays) {
         scrollDistance += deltaSeconds * outlineSpeed;
         for (Material ink : outlines.values()) {
             TextureAttribute texture = ink.get(TextureAttribute.class, TextureAttribute.Diffuse);
             double offset = -scrollDistance * texture.scaleU;
             texture.offsetU = (float) (offset - Math.floor(offset));
         }
-        if (pages.isEmpty() && !hexMasks.active() && !deploymentTint.active()) { return; }
+        if (pages.isEmpty() && !hexMasks.active() && !deploymentTint.active() && !electronicWarfare.active()) {
+            return;
+        }
         batch.begin(camera);
         deploymentTint.submit(batch, camera);
+        electronicWarfare.submit(batch, camera, deltaSeconds, tacticalView, overlays.ecmFields(),
+              overlays.ecmHatch());
         hexMasks.submit(batch, camera);
         renderPages(camera, presentation -> presentation == 0 || presentation == (tacticalView ? 2 : 1));
         batch.end();
@@ -688,11 +708,16 @@ final class GpuTactical implements Disposable {
         return deploymentTint.active();
     }
 
+    GpuElectronicWarfare electronicWarfare() {
+        return electronicWarfare;
+    }
+
     @Override
     public void dispose() {
         if (rulerShapes != null) { rulerShapes.dispose(); rulerShapes = null; }
         hexMasks.dispose();
         deploymentTint.dispose();
+        electronicWarfare.dispose();
         pages.values().forEach(group -> group.forEach(Page::dispose));
         pages = Map.of();
         outlines.values().forEach(ink ->

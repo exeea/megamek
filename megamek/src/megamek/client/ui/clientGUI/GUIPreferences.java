@@ -120,6 +120,20 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public static final String BOARD_ATTACK_ARROW_TRANSPARENCY = "BoardAttackArrowTransparency";
     public static final String BOARD_ECM_TRANSPARENCY = "BoardECMTransparency";
+    /** The 3D board's Tactical View hatches every hex where enemy ECM jams the player's units (its Overlays panel). */
+    public static final String BOARD_ECM_TACTICAL_HATCH = "BoardEcmTacticalHatch";
+    /** The Tactical View outlines every E(C)CM field; off, only the 3D view's mid-edge ticks (its Overlays panel). */
+    public static final String BOARD_ECM_TACTICAL_FIELDS = "BoardEcmTacticalFields";
+    /** The 3D board's Tactical View Overlays panel is expanded. */
+    public static final String TACTICAL_OVERLAYS_OPEN = "TacticalOverlaysOpen";
+    /** The Tactical View's unit bases show their status badges; rings, notches, elevation and wreck cross stay. */
+    public static final String TACTICAL_STATUS_BADGES = "TacticalStatusBadges";
+    /** The Tactical View shades the hovered or targeted enemy's rear and side arcs. */
+    public static final String TACTICAL_REAR_ARCS = "TacticalRearArcs";
+    /** The Tactical View's ground layer lightens each hex by its level. */
+    public static final String TACTICAL_LEVEL_SHADING = "TacticalLevelShading";
+    /** The boards draw the lines between units: C3 networks, spotting for indirect fire and TAG (View menu). */
+    public static final String SHOW_UNIT_LINKS = "ShowUnitLinks";
     public static final String BOARD_DARKEN_MAP_AT_NIGHT = "BoardDarkenMapAtNight";
     public static final String BOARD_TRANSLUCENT_HIDDEN_UNITS = "BoardTranslucentHiddenUnits";
     public static final String BOARD_TMM_PIP_MODE = "BoardTmmPipMode";
@@ -165,6 +179,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String USE_CAMO_OVERLAY = "UseCamoOverlay";
 
     public static final String SHOW_COORDS = "showCoords";
+    /** View > Hex Types: each hex's type as text at its bottom edge, under its level label (BoardHexText). */
+    public static final String SHOW_HEX_TYPES = "showHexTypes";
     public static final String HIGH_QUALITY_GRAPHICS = "HighQualityGraphics";
     public static final String SHADOW_MAP = "ShadowMap";
     public static final String INCLINES = "Inclines";
@@ -306,6 +322,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String GUI_SCALE = "GUIScale";
     public static final String BOARD_VIEW_3D = "BoardView3D";
     public static final String BOARD_VIEW_3D_GRAPHICS_CARD = "BoardView3DGraphicsCard";
+    /** The 3D board's graphics, a {@link BoardGraphics} name. */
+    public static final String BOARD_GRAPHICS = "BoardGraphics";
     /** The 3D board editor's Layers share of its right column; negative: their natural height. */
     public static final String BOARD_EDITOR_LAYERS_SPLIT = "BoardEditorLayersSplit";
     /** Whether the 3D board editor's side view is open, as the user last left it. */
@@ -605,6 +623,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(ADVANCED_KEY_REPEAT_RATE, 20);
         store.setDefault(ADVANCED_SHOW_FPS, false);
         store.setDefault(SHOW_COORDS, true);
+        store.setDefault(SHOW_HEX_TYPES, false);
 
         setDefault(PLANETARY_CONDITIONS_COLOR_TITLE, Color.WHITE);
         setDefault(PLANETARY_CONDITIONS_COLOR_TEXT, DEFAULT_PLANETARY_CONDITIONS_TEXT_COLOR);
@@ -693,6 +712,13 @@ public class GUIPreferences extends PreferenceStoreProxy {
         setDefault(BOARD_MOVE_FONT_STYLE, Font.BOLD);
         store.setDefault(BOARD_ATTACK_ARROW_TRANSPARENCY, 0x80);
         store.setDefault(BOARD_ECM_TRANSPARENCY, 0x80);
+        store.setDefault(BOARD_ECM_TACTICAL_HATCH, true);
+        store.setDefault(BOARD_ECM_TACTICAL_FIELDS, true);
+        store.setDefault(TACTICAL_OVERLAYS_OPEN, true);
+        store.setDefault(TACTICAL_STATUS_BADGES, true);
+        store.setDefault(TACTICAL_REAR_ARCS, true);
+        store.setDefault(TACTICAL_LEVEL_SHADING, false);
+        store.setDefault(SHOW_UNIT_LINKS, true);
         store.setDefault(BOARD_DARKEN_MAP_AT_NIGHT, true);
         store.setDefault(BOARD_TRANSLUCENT_HIDDEN_UNITS, true);
         setDefault(BOARD_TMM_PIP_MODE, 2); // show pips with colors based on move type
@@ -851,6 +877,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(GUI_SCALE, 1);
         store.setDefault(BOARD_VIEW_3D, true);
         store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "SYSTEM");
+        store.setDefault(BOARD_GRAPHICS, BoardGraphics.ENHANCED.name());
         store.setDefault(BOARD_EDITOR_LAYERS_SPLIT, -1f);
         store.setDefault(BOARD_EDITOR_SIDE_VIEW, true);
         store.setDefault(LOBBY_MEK_TABLE_UNIT_WIDTH, 170);
@@ -1321,6 +1348,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public boolean getCoordsEnabled() {
         return store.getBoolean(SHOW_COORDS);
+    }
+
+    public boolean getHexTypesEnabled() {
+        return store.getBoolean(SHOW_HEX_TYPES);
     }
 
     public boolean getGameSummaryBoardView() {
@@ -1884,6 +1915,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(BOARD_VIEW_3D_GRAPHICS_CARD, card);
     }
 
+    /** Classic or Enhanced 3D graphics; unlike the graphics card, a change applies at once. */
+    public BoardGraphics getBoardGraphics() {
+        return BoardGraphics.parse(store.getString(BOARD_GRAPHICS));
+    }
+
+    public void setBoardGraphics(BoardGraphics graphics) {
+        store.setValue(BOARD_GRAPHICS, graphics.name());
+    }
+
     public float getBoardEditorLayersSplit() {
         return store.getFloat(BOARD_EDITOR_LAYERS_SPLIT);
     }
@@ -2388,6 +2428,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void toggleCoords() {
         store.setValue(SHOW_COORDS, !getBoolean(SHOW_COORDS));
+    }
+
+    public void toggleHexTypes() {
+        store.setValue(SHOW_HEX_TYPES, !getHexTypesEnabled());
     }
 
     @Deprecated(since = "0.51.0", forRemoval = true)
@@ -3421,6 +3465,62 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setECMTransparency(int i) {
         store.setValue(BOARD_ECM_TRANSPARENCY, i);
+    }
+
+    public boolean getEcmTacticalHatch() {
+        return store.getBoolean(BOARD_ECM_TACTICAL_HATCH);
+    }
+
+    public void toggleEcmTacticalHatch() {
+        store.setValue(BOARD_ECM_TACTICAL_HATCH, !getEcmTacticalHatch());
+    }
+
+    public boolean getEcmTacticalFields() {
+        return store.getBoolean(BOARD_ECM_TACTICAL_FIELDS);
+    }
+
+    public void toggleEcmTacticalFields() {
+        store.setValue(BOARD_ECM_TACTICAL_FIELDS, !getEcmTacticalFields());
+    }
+
+    public boolean getTacticalOverlaysOpen() {
+        return store.getBoolean(TACTICAL_OVERLAYS_OPEN);
+    }
+
+    public void toggleTacticalOverlaysOpen() {
+        store.setValue(TACTICAL_OVERLAYS_OPEN, !getTacticalOverlaysOpen());
+    }
+
+    public boolean getTacticalStatusBadges() {
+        return store.getBoolean(TACTICAL_STATUS_BADGES);
+    }
+
+    public void toggleTacticalStatusBadges() {
+        store.setValue(TACTICAL_STATUS_BADGES, !getTacticalStatusBadges());
+    }
+
+    public boolean getTacticalRearArcs() {
+        return store.getBoolean(TACTICAL_REAR_ARCS);
+    }
+
+    public void toggleTacticalRearArcs() {
+        store.setValue(TACTICAL_REAR_ARCS, !getTacticalRearArcs());
+    }
+
+    public boolean getTacticalLevelShading() {
+        return store.getBoolean(TACTICAL_LEVEL_SHADING);
+    }
+
+    public void toggleTacticalLevelShading() {
+        store.setValue(TACTICAL_LEVEL_SHADING, !getTacticalLevelShading());
+    }
+
+    public boolean getShowUnitLinks() {
+        return store.getBoolean(SHOW_UNIT_LINKS);
+    }
+
+    public void toggleShowUnitLinks() {
+        store.setValue(SHOW_UNIT_LINKS, !getShowUnitLinks());
     }
 
     public boolean getDarkenMapAtNight() {

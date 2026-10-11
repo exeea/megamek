@@ -82,11 +82,9 @@ class GpuUnderwaterUnitPickSmokeTest {
                         assertPickedThroughWater(view);
                         GpuBoardTestUi.capture(new File(OUTPUT, "game-submarine-under-water.png"));
                         view.setTacticalView(true); frames(view);
-                        var icons = (GpuUnitIcons) field(view, "unitIcons");
-                        assertTrue(icons.active());
-                        ModelInstance icon = icons.instance(unit(view));
-                        assertEquals(SUBMARINE, entityAt(view, icon.transform.getTranslation(new Vector3())),
-                              "The Tactical View's icon takes the click");
+                        // Batch 11 draws the Tactical View's units as their models on bases, not as icons.
+                        assertEquals(SUBMARINE, entityAt(view, UnitBounds.world(model(view)).getCenter(new Vector3())),
+                              "The Tactical View's unit takes the click");
                     } catch (Throwable error) {
                         failure.set(error);
                     } finally {
@@ -100,11 +98,10 @@ class GpuUnderwaterUnitPickSmokeTest {
     }
 
     /** The ray at the submarine's centre meets the water's surface first, and the pick still takes the submarine. */
-    @SuppressWarnings("unchecked")
     private static void assertPickedThroughWater(GpuBattleView view) throws Exception {
         var scene = (BoardScene) field(view, "scene");
         var terrain = (GpuTerrain) field(view, "terrain");
-        var instance = ((Map<String, ModelInstance>) field(view, "unitInstances")).get(SUBMARINE + ":-1");
+        var instance = model(view);
         assertNotNull(instance, "The submarine is a 3D model");
         var bounds = UnitBounds.world(instance);
         float surface = BoardGeometry.waterZ(scene.tile(POSITION));
@@ -122,8 +119,10 @@ class GpuUnderwaterUnitPickSmokeTest {
         assertEquals(SUBMARINE, entityAt(view, centre), "The click takes the submarine beneath the surface");
     }
 
-    private static BoardScene.Unit unit(GpuBattleView view) throws Exception {
-        return ((BoardScene) field(view, "scene")).units().stream().filter(unit -> unit.id() == SUBMARINE).findFirst().orElseThrow();
+    /** The submarine's drawn model. */
+    @SuppressWarnings("unchecked")
+    private static ModelInstance model(GpuBattleView view) throws Exception {
+        return ((Map<String, ModelInstance>) field(view, "unitInstances")).get(SUBMARINE + ":-1");
     }
 
     /** The unit pickSelection takes at a world point's pixel. */

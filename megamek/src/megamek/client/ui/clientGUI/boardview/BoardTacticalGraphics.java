@@ -129,7 +129,7 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
         fill(shape, fills, metadata, argb(), owner);
     }
 
-    /** Tags only the native capture; classic painters keep their existing graphics state and behavior. */
+    /** Tags only the native capture; Legacy 2D painters keep their existing graphics state and behavior. */
     public static void draw(Graphics2D graphics, BoardTactical.Playback playback, Consumer<Graphics2D> painter) {
         if (!(graphics instanceof BoardTacticalGraphics)) {
             painter.accept(graphics);
@@ -144,7 +144,7 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
         }
     }
 
-    /** Only the selected deployer's existing painter supplies zone membership; classic drawing is unchanged. */
+    /** Only the selected deployer's existing painter supplies zone membership; Legacy 2D drawing is unchanged. */
     public static void drawDeployment(Graphics2D graphics, Consumer<Graphics2D> painter) {
         draw(graphics, BoardTactical.Playback.HIDE_DURING_MOVEMENT, local -> {
             if (local instanceof BoardTacticalGraphics tactical) { tactical.deploymentZone = true; }
@@ -163,7 +163,7 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
         return copy;
     }
 
-    /** Flat hex annotations share one owner plane in 3D; the classic painter still draws the same shapes. */
+    /** Flat hex annotations share one owner plane in 3D; the Legacy 2D painter still draws the same shapes. */
     public static Graphics2D onHexPlane(Graphics2D graph, Point location) {
         Graphics2D copy = at(graph, location);
         if (copy instanceof BoardTacticalGraphics tactical) {

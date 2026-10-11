@@ -127,8 +127,8 @@ class GpuBoardWindowSmokeTest {
     }
 
     @Test
-    void nativeGameplayRendersWithoutConstructingAClassicBoardOrInspector() throws Exception {
-        var classic = onSwing(() -> mockConstruction(BoardView.class));
+    void nativeGameplayRendersWithoutConstructingALegacy2DBoardOrInspector() throws Exception {
+        var legacy2D = onSwing(() -> mockConstruction(BoardView.class));
         var panels = onSwing(() -> mockConstruction(BoardViewPanel.class));
         var inspector = onSwing(() -> mockConstruction(UnitDisplayPanel.class));
         var inspectorDialog = onSwing(() -> mockConstruction(UnitDisplayDialog.class));
@@ -165,7 +165,7 @@ class GpuBoardWindowSmokeTest {
                 });
             }
             onSwing(() -> {
-                assertTrue(classic.constructed().isEmpty());
+                assertTrue(legacy2D.constructed().isEmpty());
                 assertTrue(panels.constructed().isEmpty());
                 assertTrue(inspector.constructed().isEmpty());
                 assertTrue(inspectorDialog.constructed().isEmpty());
@@ -184,7 +184,7 @@ class GpuBoardWindowSmokeTest {
                 weapons.close();
                 inspectorDialog.close();
                 inspector.close();
-                classic.close();
+                legacy2D.close();
                 return null;
             });
         }
@@ -567,18 +567,18 @@ class GpuBoardWindowSmokeTest {
                 await(() -> previewReady(source)); awaitNavigation();
                 input(() -> GpuBoardTestUi.click("utility-menu"));
                 captureMenu("preview-view-switch-menu.png");
-                onGl(() -> { GpuBoardTestUi.click("/viewClassicBoard"); return null; });
+                onGl(() -> { GpuBoardTestUi.click("/viewLegacy2D"); return null; });
                 await(() -> onSwing(() -> mapWindow("board-preview-2d") != null));
                 assertTrue(source.isClosed());
-                JDialog classic = onSwing(() -> (JDialog) mapWindow("board-preview-2d"));
-                captureClassic(classic, "preview-view-3d", "preview-view-switch-2d.png");
+                JDialog legacy2D = onSwing(() -> (JDialog) mapWindow("board-preview-2d"));
+                captureLegacy2D(legacy2D, "preview-view-3d", "preview-view-switch-2d.png");
                 Application nativeView = Gdx.app;
-                onSwing(() -> { namedButton(classic, "preview-view-3d").doClick(0); return null; });
+                onSwing(() -> { namedButton(legacy2D, "preview-view-3d").doClick(0); return null; });
                 await(() -> Gdx.app != null && Gdx.app != nativeView);
                 await(() -> previewSource() != null);
                 BoardSource resumed = previewSource();
                 await(() -> previewReady(resumed));
-                assertFalse(onSwing(classic::isDisplayable), "Each switch releases the old classic renderer");
+                assertFalse(onSwing(legacy2D::isDisplayable), "Each switch releases the old Legacy 2D renderer");
                 var field = GpuMapSource.class.getDeclaredField("game"); field.setAccessible(true);
                 assertSame(board, ((megamek.common.game.Game) field.get(resumed)).getBoard(), "Switching keeps the exact preview board");
                 assertEquals(3, resumed.takeFrame().scene().tile(new Coords(3, 4)).elevation());
@@ -659,7 +659,7 @@ class GpuBoardWindowSmokeTest {
             BoardEditorSession session = (BoardEditorSession) editorField.get(source);
             await(() -> previewReady(source)); awaitNavigation();
             input(() -> GpuBoardTestUi.click("utility-menu"));
-            onGl(() -> { GpuBoardTestUi.click("/viewClassicBoard"); return null; });
+            onGl(() -> { GpuBoardTestUi.click("/viewLegacy2D"); return null; });
             await(() -> onSwing(() -> mapWindow("board-editor-preview-2d") != null));
             JDialog preview = onSwing(() -> (JDialog) mapWindow("board-editor-preview-2d"));
             assertFalse(source.isClosed(), "The editor keeps running beside its 2D Preview");
@@ -688,7 +688,7 @@ class GpuBoardWindowSmokeTest {
 
             // A second request brings the same window to the front instead of opening another.
             input(() -> GpuBoardTestUi.click("utility-menu"));
-            onGl(() -> { GpuBoardTestUi.click("/viewClassicBoard"); return null; });
+            onGl(() -> { GpuBoardTestUi.click("/viewLegacy2D"); return null; });
             onSwing(() -> null);
             assertEquals(1L, onSwing(() -> Arrays.stream(Window.getWindows())
                   .filter(window -> "board-editor-preview-2d".equals(window.getName()) && window.isDisplayable()).count()));
@@ -817,10 +817,10 @@ class GpuBoardWindowSmokeTest {
               .findFirst().orElse(null);
     }
 
-    private static void captureClassic(Window window, String buttonName, String filename) throws Exception {
+    private static void captureLegacy2D(Window window, String buttonName, String filename) throws Exception {
         onSwing(() -> {
             AbstractButton button = namedButton(window, buttonName);
-            assertTrue(button.isShowing(), "The return control is visible in the classic view");
+            assertTrue(button.isShowing(), "The return control is visible in the Legacy 2D view");
             assertTrue(button.getVisibleRect().width > 0 && button.getVisibleRect().height > 0);
             var image = new BufferedImage(window.getWidth(), window.getHeight(), BufferedImage.TYPE_INT_RGB);
             var graphics = image.createGraphics();
@@ -865,7 +865,7 @@ class GpuBoardWindowSmokeTest {
     }
 
     @Test
-    void startsDirectlyInThreeDimensionsWithoutConstructingTheClassicViewport() throws Exception {
+    void startsDirectlyInThreeDimensionsWithoutConstructingTheLegacy2DViewport() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             ClientWindow ui = onSwing(() -> createClientWindow(fixture, false));
             try {
@@ -882,7 +882,7 @@ class GpuBoardWindowSmokeTest {
                     assertNull(ui.view().getPanel().getParent());
                     assertFalse(ui.frame().isVisible());
                     assertTrue(GpuBoardWindow.isActiveFor(ui.view().getClientgui()));
-                    GpuBoardWindow.showClassic(ui.view().getClientgui());
+                    GpuBoardWindow.showLegacy2D(ui.view().getClientgui());
                     return null;
                 });
                 await(() -> onSwing(() -> ui.frame().isVisible()));
@@ -972,7 +972,7 @@ class GpuBoardWindowSmokeTest {
                     });
                     Application restarting = Gdx.app;
                     onSwing(() -> {
-                        GpuBoardWindow.showClassic(gui);
+                        GpuBoardWindow.showLegacy2D(gui);
                         GpuBoardWindow.open(gui, phase::get);
                         return null;
                     });
@@ -1082,7 +1082,7 @@ class GpuBoardWindowSmokeTest {
     }
 
     @Test
-    void classicReportStaysHiddenUntilReturningFromTheNativeBoard() throws Exception {
+    void swingReportStaysHiddenUntilReturningFromTheNativeBoard() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         boolean enabled = preferences.getMiniReportEnabled();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -1096,7 +1096,7 @@ class GpuBoardWindowSmokeTest {
                     if (GpuBoardWindow.isActiveFor(gui)) {
                         invocation.callRealMethod();
                     } else {
-                        // The fixture has no classic split panes. Observe the restored visibility request instead.
+                        // The fixture has no Swing split panes. Observe the restored visibility request instead.
                         dialog.setVisible(invocation.getArgument(0));
                     }
                     return null;
@@ -1110,7 +1110,7 @@ class GpuBoardWindowSmokeTest {
                 await(() -> onSwing(() -> !ui.frame().isVisible()));
                 onSwing(() -> {
                     assertTrue(GpuBoardWindow.isActiveFor(gui));
-                    assertFalse(report.isVisible(), "Hide an already open classic report during the handoff");
+                    assertFalse(report.isVisible(), "Hide an already open Swing report during the handoff");
                     fixture.game.setPhase(GamePhase.FIRING_REPORT);
                     fixture.game.setAllReports(List.of(List.of(new Report(3000),
                           new Report(6065).addDesc(fixture.entity).add(10).add("Left Torso"))));
@@ -1119,11 +1119,11 @@ class GpuBoardWindowSmokeTest {
                     assertTrue(preferences.getMiniReportEnabled(), "Suppressing the old window preserves 2D preferences");
                     return null;
                 });
-                // The report phase opens the HUD's log, which stands for the classic report.
+                // The report phase opens the HUD's log, which stands for the Swing report.
                 await(() -> onGl(() -> GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("log-panel"))));
                 onSwing(() -> {
                     assertFalse(report.isVisible(), "The native log must not revive the old report");
-                    GpuBoardWindow.showClassic(gui);
+                    GpuBoardWindow.showLegacy2D(gui);
                     return null;
                 });
                 await(() -> onSwing(() -> ui.frame().isVisible() && report.isVisible()));
@@ -1143,7 +1143,7 @@ class GpuBoardWindowSmokeTest {
     }
 
     @Test
-    void switchesExclusiveWindowsThroughMenusAndNeverRestoresClassicOnClientDisposal() throws Exception {
+    void switchesExclusiveWindowsThroughMenusAndNeverRestoresLegacy2DOnClientDisposal() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             ClientWindow ui = onSwing(() -> createClientWindow(fixture));
             Coords position = fixture.entity.getPosition();
@@ -1176,7 +1176,7 @@ class GpuBoardWindowSmokeTest {
                 onSwing(() -> { ui.view().centerOnHex(position); return null; });
                 await(() -> onGl(() -> unitIsCentered(fixture)));
                 assertTrue(onSwing(() -> ui.frame().isDisplayable()), "Switching must preserve the original client");
-                // The classic window is hidden, so an allowed client dialog, here the About box, must be raised above
+                // The Swing window is hidden, so an allowed client dialog, here the About box, must be raised above
                 // the native window.
                 JDialog probe = onSwing(() -> {
                     JDialog dialog = new JOptionPane("GPU dialog probe").createDialog(ui.frame(),
@@ -1194,7 +1194,8 @@ class GpuBoardWindowSmokeTest {
                     long resizedFrame = onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames());
                     // Allow the EDT to publish the resized overlay and upload it on the render thread.
                     await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > resizedFrame + 15));
-                    assertFalse(onSwing(() -> ui.frame().isVisible()), "Resizing must not fall back to the classic board");
+                    assertFalse(onSwing(() -> ui.frame().isVisible()),
+                          "Resizing must not fall back to the Legacy 2D board");
                     // A client's request to centre on the unit, as Center camera gives it, keeps zoom and angle.
                     float zoom = onGl(() -> {
                         GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
@@ -1247,7 +1248,7 @@ class GpuBoardWindowSmokeTest {
                 });
                 input(() -> GpuBoardTestUi.click("utility-menu"));
                 onGl(() -> {
-                    GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.viewClassicBoard"));
+                    GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.viewLegacy2D"));
                     return null;
                 });
                 await(() -> onSwing(() -> ui.frame().isVisible()));
@@ -1261,7 +1262,7 @@ class GpuBoardWindowSmokeTest {
                 await(() -> onSwing(() -> !ui.frame().isVisible()));
                 awaitMaximizedWindow();
                 assertTrue(preferences.getUse3DBoard());
-                assertEquals(ClientGUI.VIEW_CLASSIC_BOARD, ui.gpuChoice().getActionCommand());
+                assertEquals(ClientGUI.VIEW_LEGACY_2D, ui.gpuChoice().getActionCommand());
                 onSwing(() -> {
                     GpuBoardWindow.closeFor(ui.view().getClientState());
                     ui.frame().dispose();
@@ -1314,7 +1315,7 @@ class GpuBoardWindowSmokeTest {
         return createClientWindow(fixture, true);
     }
 
-    private ClientWindow createClientWindow(GpuBoardFixture fixture, boolean classic) throws Exception {
+    private ClientWindow createClientWindow(GpuBoardFixture fixture, boolean legacy2D) throws Exception {
         fixture.source.close();
         ClientGUI gui = mock(ClientGUI.class, invocation -> switch (invocation.getMethod().getName()) {
             case "refreshAuxiliaryWindows", "setMapVisible", "setBotCommandsLocation",
@@ -1322,11 +1323,11 @@ class GpuBoardWindowSmokeTest {
             default -> org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
         });
         BoardViewsContainer container = mock(BoardViewsContainer.class);
-        when(container.isClassicViewEnabled()).thenAnswer(invocation -> !GpuBoardWindow.isActiveFor(gui));
+        when(container.isLegacy2DEnabled()).thenAnswer(invocation -> !GpuBoardWindow.isActiveFor(gui));
         setField(AbstractClientGUI.class, gui, "boardViewsContainer", container);
         setField(AbstractClientGUI.class, gui, "miniMaps", new HashMap<>());
         Client client = mock(Client.class);
-        JFrame frame = new JFrame("MegaMek - Classic board switch test");
+        JFrame frame = new JFrame("MegaMek - Legacy 2D board switch test");
         CommonMenuBar menus = CommonMenuBar.getMenuBarForGame();
         menus.setPhase(GamePhase.MOVEMENT);
         when(gui.getClient()).thenReturn(client);
@@ -1338,7 +1339,7 @@ class GpuBoardWindowSmokeTest {
         fixture.view = new BoardClientState(fixture.game, null, gui, 0, null);
         fixture.view.setLocalPlayer(fixture.player);
         BoardView renderer = new BoardView(fixture.view, null, gui);
-        if (classic) {
+        if (legacy2D) {
             frame.add(renderer.getComponent());
         }
         BoardView view = spy(renderer);
@@ -1354,12 +1355,12 @@ class GpuBoardWindowSmokeTest {
             if (invocation.getArgument(0, Boolean.class)) {
                 frame.add(view.getComponent());
             } else {
-                renderer.releaseClassicView();
-                view.releaseClassicView();
+                renderer.releaseLegacy2DView();
+                view.releaseLegacy2DView();
             }
             frame.validate();
             return null;
-        }).when(gui).setClassicBoardViewEnabled(anyBoolean());
+        }).when(gui).setLegacy2DViewEnabled(anyBoolean());
         when(gui.getMenuBar()).thenReturn(menus);
         doReturn(Optional.of(fixture.view)).when(gui).getCurrentBoardState();
         when(gui.boardViews()).thenReturn(List.of(view));
@@ -1383,14 +1384,14 @@ class GpuBoardWindowSmokeTest {
             if (event.getActionCommand().equals(ClientGUI.VIEW_GPU_BOARD)) {
                 GUIPreferences.getInstance().setUse3DBoard(true);
                 GpuBoardWindow.open(fixture.view, () -> fixture.panel);
-            } else if (event.getActionCommand().equals(ClientGUI.VIEW_CLASSIC_BOARD)) {
+            } else if (event.getActionCommand().equals(ClientGUI.VIEW_LEGACY_2D)) {
                 GUIPreferences.getInstance().setUse3DBoard(false);
-                GpuBoardWindow.showClassic(gui);
+                GpuBoardWindow.showLegacy2D(gui);
             }
         });
         frame.setJMenuBar(menus);
         frame.setSize(960, 700);
-        frame.setVisible(classic);
+        frame.setVisible(legacy2D);
         JMenu viewMenu = (JMenu) java.util.Arrays.stream(menus.getComponents())
               .filter(component -> component instanceof JMenu menu
                     && menu.getText().equals(Messages.getString("CommonMenuBar.ViewMenu"))).findFirst().orElseThrow();

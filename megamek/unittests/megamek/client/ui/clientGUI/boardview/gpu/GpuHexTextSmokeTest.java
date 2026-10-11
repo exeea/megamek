@@ -42,6 +42,7 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.collision.BoundingBox;
+import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.ScreenUtils;
@@ -203,14 +204,21 @@ class GpuHexTextSmokeTest {
             assertTrue(visible > 0 && visible < legacy.size(), "The close view must contain culled chunk ranges");
             parity(labels, legacy, batch, camera, depth);
 
-            // One font page over many chunks crosses both signed-short and unsigned-short index boundaries.
-            BoardScene large = textScene(48, "AAAAAAAA");
+            // One font page over many chunks crosses both signed-short and unsigned-short index boundaries (each
+            // label is nine copies of its text, eight of them its outline).
+            BoardScene large = textScene(48, "A");
             labels.update(large, font, coords -> null);
             List<Object> pages = pages(labels);
             assertEquals(2, pages.size(), "Consecutive chunks share bounded pages instead of individual draw calls");
             assertVertices(labels, legacy(large, font), font);
             labels.update(large, font, coords -> { throw new AssertionError("Unchanged labels must keep their meshes"); });
             assertSame(pages.getFirst(), pages(labels).getFirst());
+            // A path preview repaints the markings of the hexes: new tiles with the same labels keep the meshes too.
+            var marking = new BoardScene.Pixels(new java.awt.image.BufferedImage(2, 2,
+                  java.awt.image.BufferedImage.TYPE_INT_ARGB));
+            labels.update(new BoardScene(0, 48, 48, large.tiles().stream().map(tile -> tile.withTactical(marking))
+                  .toList(), List.of(), List.of(), -1, "", List.of()), font, coords -> null);
+            assertSame(pages.getFirst(), pages(labels).getFirst(), "New markings alone must not relabel the board");
             camera.fit(large);
             profiler.enable();
             try {
@@ -325,8 +333,16 @@ class GpuHexTextSmokeTest {
                           (argb & 255) / 255f, (argb >>> 24 & 255) / 255f);
                     GlyphLayout layout = new GlyphLayout(font, text.text());
                     float baseline = y + BoardGeometry.HEIGHT / 2 - text.baseline() * BoardGeometry.HEX_SCALE;
-                    chunk.glyphs().addText(layout, x - layout.width / 2,
-                          text.fromTop() ? baseline : baseline + layout.height);
+                    float left = x - layout.width / 2, top = text.fromTop() ? baseline : baseline + layout.height;
+                    // Every label's outline: eight copies in the outline's colour around it, then the text.
+                    var ring = new com.badlogic.gdx.graphics.Color();
+                    com.badlogic.gdx.graphics.Color.argb8888ToColor(ring, BoardHexText.outline(argb));
+                    GlyphLayout outline = new GlyphLayout(font, text.text(), ring, 0, Align.left, false);
+                    float[] offsets = BoardHexText.outlineOffsets(text.font().getSize2D());
+                    for (int copy = 0; copy < offsets.length; copy += 2) {
+                        chunk.glyphs().addText(outline, left + offsets[copy], top + offsets[copy + 1]);
+                    }
+                    chunk.glyphs().addText(layout, left, top);
                 }
             }
         } finally { font.getData().setScale(scaleX, scaleY); font.setColor(color); }
@@ -562,12 +578,12 @@ class GpuHexTextSmokeTest {
             for (boolean perspective : List.of(false, true)) {
                 camera.setPerspective(perspective);
                 ScreenUtils.clear(1, 1, 1, 1, true);
-                grid.render(camera, scene, false);
+                grid.render(camera, scene, false, false, GpuBattleStatus.Arc.NONE);
                 Pixmap expected = pixels();
                 Gdx.gl.glClearDepthf(0);
                 ScreenUtils.clear(1, 1, 1, 1, true);
                 Gdx.gl.glClearDepthf(1);
-                grid.render(camera, scene, false);
+                grid.render(camera, scene, false, false, GpuBattleStatus.Arc.NONE);
                 Pixmap covered = pixels();
                 try {
                     assertTrue(expected.getPixels().equals(covered.getPixels()), "The entire grid must ignore scene depth");
@@ -587,7 +603,7 @@ class GpuHexTextSmokeTest {
                 } else { camera.setIsometric(true); }
                 ScreenUtils.clear(1, 1, 1, 1, true);
                 Pixmap before = pixels();
-                grid.render(camera, scene, false);
+                grid.render(camera, scene, false, false, GpuBattleStatus.Arc.NONE);
                 Pixmap after = pixels();
                 try { assertTrue(before.getPixels().equals(after.getPixels()), "No overlay grid in angled view or when disabled"); }
                 finally { before.dispose(); after.dispose(); }

@@ -881,7 +881,8 @@ final class GpuBoardSource implements BoardSource {
               view.getBoardMarkers(), tacticalGeometry(move.planner()).withRuler(rulerSnapshot.ruler()),
               view.getWeaponRangeTextSprites().stream().map(sprite -> new BoardScene.RangeLabel(sprite.getPosition(),
                     FieldOfFireSprite.getFieldOfFireColor(sprite.getRangeBracket()).getRGB(),
-                    FieldOfFireSprite.getRangeText(sprite.getRangeBracket()))).toList(), fieldOfView);
+                    FieldOfFireSprite.getRangeText(sprite.getRangeBracket()))).toList(), fieldOfView,
+              view.electronicWarfare());
         // The report log before the chat, whose round lines read it with the status (plan O6).
         GpuReportLog.Snapshot log = captureReports();
         chat.roundLines(status, log);
@@ -897,6 +898,7 @@ final class GpuBoardSource implements BoardSource {
         if (!nextPanels.equals(panels)) {
             panels = nextPanels;
         }
+        status = battleStatus.arcs(arcTarget(status, hover, panels));
         Entity actor = view.game.getEntity(actorId);
         boolean knownActor = actor != null && identified(actor);
         return new Frame(scene, List.of(), nextContext, List.copyOf(nextGlobal), nextTooltip,
@@ -908,7 +910,7 @@ final class GpuBoardSource implements BoardSource {
      * EDT: the board state's tactical capture without MegaMek's sprites the HUD draws itself (G4, a consumer filter):
      * the firing solutions always (the board labels' to-hit badges), and the path's step arrows and costs while the
      * plan draws the route. MegaMek's movement envelope stays. 
-     * The sprites are hidden only for this capture, on the thread that paints the classic board.
+     * The sprites are hidden only for this capture, on the thread that paints the Legacy 2D board.
      */
     private BoardTactical tacticalGeometry(boolean planner) {
         List<Sprite> skipped = Stream.concat(view.getAllSprites().stream(), view.getPathSprites().stream())
@@ -921,6 +923,28 @@ final class GpuBoardSource implements BoardSource {
         } finally {
             skipped.forEach(sprite -> sprite.setHidden(false));
         }
+    }
+
+    /**
+     * EDT: the enemy whose arcs the Tactical View shades (b11-design item 15): the listed, identified enemy under the
+     * pointer, else the focused target of the fire orders or of the physical attack, as the board overlay focuses
+     * them; null for none, and while the Overlays panel's Rear arcs setting is off.
+     */
+    private Entity arcTarget(GpuBattleStatus.Snapshot status, Coords hover, GpuHudData shown) {
+        if (!uiPreferences.overlays().rearArcs()) {
+            return null;
+        }
+        Set<Integer> enemies = status.units().stream()
+              .filter(unit -> unit.side() == GpuBattleStatus.Side.ENEMY && !unit.sensorContact())
+              .map(GpuBattleStatus.UnitStatus::id).collect(Collectors.toSet());
+        if (hover != null) {
+            for (Entity entity : view.game.getEntitiesVector(hover, view.getBoardId())) {
+                if (enemies.contains(entity.getId())) { return entity; }
+            }
+        }
+        int focus = shown.fire().editable() ? shown.fire().focus().key().unitId()
+              : shown.physical().active() ? shown.physical().targetId() : Entity.NONE;
+        return enemies.contains(focus) ? view.game.getEntity(focus) : null;
     }
 
     /** EDT: the log of the game's reports, with the artillery rounds in the air the Rounds in the Air window lists. */
@@ -956,7 +980,7 @@ final class GpuBoardSource implements BoardSource {
         return image == null ? null : BoardScene.Pixels.copy(image);
     }
 
-    /** Raise the classic unit overview's SELECT_UNIT event; the phase display decides what selecting means. */
+    /** Raise the Legacy 2D unit overview's SELECT_UNIT event; the phase display decides what selecting means. */
     void selectUnit(int id) {
         SwingUtilities.invokeLater(() -> {
             Entity entity = acceptsInput() ? view.game.getEntity(id) : null;
@@ -967,7 +991,7 @@ final class GpuBoardSource implements BoardSource {
         });
     }
 
-    /** Centre on an own or visible unit as the classic unit overview does; an own unit's other board is shown. */
+    /** Centre on an own or visible unit as the Legacy 2D unit overview does; an own unit's other board is shown. */
     void locateUnit(int id) {
         SwingUtilities.invokeLater(() -> {
             Entity entity = acceptsInput() ? view.game.getEntity(id) : null;

@@ -24,7 +24,8 @@ import megamek.client.ui.gdx.UiTheme;
  * Top-right camera controls and utilities, the Tactical View chip and the
  * Tactical View's north mark (C.1 G4). They show the camera, the wireframe view, the minimap and contacts preferences,
  * the log's presented events and the HUD's open panels, and run the camera's Tactical View, the tuning model's
- * wireframe view, the View menu's minimap item, the contacts preference and the HUD's own toggles.
+ * wireframe view, the View menu's minimap item, the contacts preference and the HUD's own toggles. The Tactical View's
+ * overlays have their own panel, GpuTacticalOverlays.
  */
 final class GpuUtilityBar implements GpuHud.Component {
     /** The row's gap (#sys). */
@@ -47,6 +48,7 @@ final class GpuUtilityBar implements GpuHud.Component {
     private final Table root = new Table();
     private final Container<Label> north;
     private final Table chip = new Table();
+    private final UiButton isometric;
     private final UiButton tactical;
     private final UiButton wireframe;
     private final UiButton map;
@@ -64,7 +66,7 @@ final class GpuUtilityBar implements GpuHud.Component {
         root.setName("utility-bar");
         chip.setName("tactical-chip");
         UiKit ui = kit.ui;
-        cameraButtons(ui, root, camera, fitBoard);
+        isometric = cameraButtons(ui, root, camera, fitBoard);
         tactical = utility(ui, "tactical", "GpuBoard.hud.util.tactical", "utility-tactical");
         wireframe = utility(ui, "wireframe", "GpuBoard.hud.util.wireframe", "utility-wireframe");
         map = utility(ui, "map", "GpuBoard.hud.util.map", "utility-map");
@@ -132,14 +134,20 @@ final class GpuUtilityBar implements GpuHud.Component {
         return button;
     }
 
-    /** Camera presets and explicit fitting share their controls in every board workspace. */
-    static void cameraButtons(UiKit ui, Table row, BoardCamera camera, Runnable fitBoard) {
+    /**
+     * Camera presets and explicit fitting share their controls in every board workspace. Returns the Isometric
+     * button, which its owner disables while the camera's rotation is locked (the Tactical View).
+     */
+    static UiButton cameraButtons(UiKit ui, Table row, BoardCamera camera, Runnable fitBoard) {
         cameraButton(ui, row, "top", "hex", "Top view", () -> camera.setIsometric(false));
-        cameraButton(ui, row, "isometric", "layers", "Isometric view", () -> camera.setIsometric(true));
+        UiButton isometric = cameraButton(ui, row, "isometric", "layers", "Isometric view",
+              () -> camera.setIsometric(true));
         cameraButton(ui, row, "fit", "expand", "Fit board", fitBoard);
+        return isometric;
     }
 
-    private static void cameraButton(UiKit ui, Table row, String name, String icon, String caption, Runnable action) {
+    private static UiButton cameraButton(UiKit ui, Table row, String name, String icon, String caption,
+          Runnable action) {
         UiButton button = iconButton(ui, icon, caption, "map-view-" + name);
         float gap = row.getCells().isEmpty() ? 0 : GAP;
         row.add(button).size(HEIGHT).padLeft(gap);
@@ -147,6 +155,7 @@ final class GpuUtilityBar implements GpuHud.Component {
             if (button.getStage() != null) { button.getStage().setKeyboardFocus(null); }
             action.run();
         });
+        return button;
     }
 
     @Override
@@ -174,6 +183,7 @@ final class GpuUtilityBar implements GpuHud.Component {
         BoardScene.Command minimap = minimapCommand(inputs);
         // K12: the round's reviewable events the board has presented, which the log lists (C.6; game.js S.events)
         int reviewable = state.history.played().size();
+        isometric.setDisabled(camera.rotationLocked());
         tactical.pressed(tacticalView);
         wireframe.pressed(tuning.wireframe()).setDisabled(!GpuWireframe.supported());
         map.pressed(inputs.preferences().minimapEnabled()).setDisabled(minimap == null || !minimap.enabled());

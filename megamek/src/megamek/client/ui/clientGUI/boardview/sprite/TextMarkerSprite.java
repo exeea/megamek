@@ -91,7 +91,7 @@ public class TextMarkerSprite extends HexSprite {
         }
     }
 
-    /** Shared flat artwork for the classic sprite and the GPU's camera-facing range labels. */
+    /** Shared flat artwork for the Legacy 2D sprite and the GPU's camera-facing range labels. */
     public static void drawMarker(Graphics2D graph, String text, Color color, int width, int height, float scale) {
         UIUtil.setHighQualityRendering(graph);
         Font textFont = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 1000);

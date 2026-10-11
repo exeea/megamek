@@ -38,6 +38,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 import com.badlogic.gdx.utils.Pools;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
@@ -128,7 +129,7 @@ class GpuHelpMenuPlayersSmokeTest {
             GpuBoardSource.UiPreferences changed = new GpuBoardSource.UiPreferences(preferences.scale(),
                   preferences.reportKeywords(), preferences.reportFilterKeywords(), preferences.minimapEnabled(),
                   preferences.contactsEnabled(), preferences.conditionsVisible(),
-                  preferences.turnDetails(), binds, preferences.moveSprintRgb());
+                  preferences.turnDetails(), binds, preferences.moveSprintRgb(), BoardGraphics.ENHANCED);
             help.update(inputs(hud, frame(List.of(), GpuPlayers.Snapshot.EMPTY), changed, false));
             lines = lines(root);
             assertPair(lines, "F12", "KeyBinds.cmdNames.toggleKeybinds");

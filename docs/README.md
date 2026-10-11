@@ -2,7 +2,7 @@
 
 MegaMek's shared game model and server own rules and resolved state. Clients
 present that state and submit orders. This checkout includes a native libGDX board
-alongside the classic Swing view.
+alongside the Legacy 2D Swing view.
 
 Start with [Codebase](codebase.md) for the application and action flow.
 For native work, read [GPU board](gpu-board.md), then use the

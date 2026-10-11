@@ -193,9 +193,8 @@ class GpuBoardLabelsSmokeTest {
     void labelsOverTheBoardBesideTheMock() throws Exception {
         BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
-            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene, hud.theme.skin);
             GpuBoardOverlay overlay = new GpuBoardOverlay();
-            GpuUnitIcons icons = new GpuUnitIcons();
             try {
                 GpuBattleStatus.Snapshot moving = GpuHudFixtures.status();
                 Coords atlasHex = unit(scene, ATLAS).location().coords();
@@ -206,9 +205,9 @@ class GpuBoardLabelsSmokeTest {
                 GpuBoardSource.Frame frame = frameOf(scene, moving, panels(walk, GpuFireOrders.Snapshot.EMPTY,
                       shot02()), GpuReportLog.Snapshot.EMPTY);
                 frame(board, false, atlasHex, 118, 960, 675);
-                GpuHud.HudView view = draw(hud, board, overlay, icons, labels, frame);
+                GpuHud.HudView view = draw(hud, board, overlay, labels, frame);
                 labels.click(hud, "contacts-preview-" + TIMBER_WOLF);
-                view = draw(hud, board, overlay, icons, labels, frame);
+                view = draw(hud, board, overlay, labels, frame);
                 assertEquals(TIMBER_WOLF, labels.state.inspected, "The open row is the inspected enemy");
                 assertEquals(List.of("WALK " + DOT + " 2 / 3 MP " + DOT + " AUTO", "Heat +1 " + DOT + " TMM +0",
                       "Facing N " + DOT + " 0 pinned waypoints"), texts(labels.tip()));
@@ -235,7 +234,7 @@ class GpuBoardLabelsSmokeTest {
                 // The player selected the Panther during the turn, so it is the focus (its plate reads "moving").
                 labels.state.update(moving, GpuUnitRecord.Snapshot.EMPTY, false);
                 frame(board, false, unit(scene, PANTHER).location().coords(), 118, 1147, 660);
-                draw(hud, board, overlay, icons, labels, frame);
+                draw(hud, board, overlay, labels, frame);
                 assertEquals(List.of("RUN " + DOT + " 5 / 6 MP " + DOT + " AUTO", "Heat +2 " + DOT + " TMM +1",
                       "Facing NE " + DOT + " 1 pinned waypoint"), texts(labels.tip()));
                 destination = board.screen(ground(scene, run.destination()));
@@ -258,7 +257,7 @@ class GpuBoardLabelsSmokeTest {
                       GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY, sensorArcher(shot04())),
                       GpuReportLog.Snapshot.EMPTY);
                 frame(board, false, atlasHex, 118, 960, 675);
-                view = draw(hud, board, overlay, icons, labels, frame);
+                view = draw(hud, board, overlay, labels, frame);
                 assertFalse(labels.tip().isVisible(), "No tip outside the local movement turn");
                 preview = new HashMap<>(Map.of(TIMBER_WOLF, List.of("6+", "72%"), KING_CRAB, List.of("6+", "72%")));
                 preview.keySet().retainAll(view.unitHeads().keySet());
@@ -280,9 +279,9 @@ class GpuBoardLabelsSmokeTest {
                     labels = new Labels(hud, board.camera);
                     frame(board, tactical, atlasHex, tactical ? 60.8f : 118, tactical ? 868 : 925,
                           tactical ? 672 : 790);
-                    view = draw(hud, board, overlay, icons, labels, frame);
+                    view = draw(hud, board, overlay, labels, frame);
                     labels.labels.cards(cards(hud, view, Map.of(TIMBER_WOLF, 'A', BATTLEMASTER, 'B')));
-                    view = draw(hud, board, overlay, icons, labels, frame);
+                    view = draw(hud, board, overlay, labels, frame);
                     Map<Integer, List<String>> badges = new HashMap<>(Map.of(KING_CRAB, List.of("9+", "28%"),
                           ENEMY_LOCUST, List.of(OUT_OF_ARC)));
                     badges.keySet().retainAll(view.unitHeads().keySet());
@@ -311,9 +310,9 @@ class GpuBoardLabelsSmokeTest {
                 frame = frameOf(scene, declaring, panels(GpuMovePlan.Snapshot.EMPTY,
                       orders(fire(null), three, List.of()), GpuFirePreview.Snapshot.NONE), GpuReportLog.Snapshot.EMPTY);
                 frame(board, false, atlasHex, 118, 980, 850);
-                view = draw(hud, board, overlay, icons, labels, frame);
+                view = draw(hud, board, overlay, labels, frame);
                 labels.labels.cards(cards(hud, view, Map.of(TIMBER_WOLF, 'A', BATTLEMASTER, 'B', KING_CRAB, 'C')));
-                draw(hud, board, overlay, icons, labels, frame);
+                draw(hud, board, overlay, labels, frame);
                 capture(hud, "labels-06", "06-three-targets.jpg", new Crop("area", area(hud, 500, 60, 800, 800), 500,
                       60)).dispose();
                 labels.dispose();
@@ -324,9 +323,9 @@ class GpuBoardLabelsSmokeTest {
                       GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY, GpuFirePreview.Snapshot.NONE),
                       GpuReportLog.Snapshot.EMPTY);
                 frame(board, false, unit(scene, KING_CRAB).location().coords(), 118, 870, 200);
-                draw(hud, board, overlay, icons, labels, frame);
+                draw(hud, board, overlay, labels, frame);
                 labels.labels.show(hit(KING_CRAB, "Medium Laser", 5, new ResolvedAttack.Impact("CT", false, 5)));
-                draw(hud, board, overlay, icons, labels, frame);
+                draw(hud, board, overlay, labels, frame);
                 Actor pop = labels.pops().getFirst();
                 assertEquals(List.of("\u22125 CT", "MEDIUM LASER"), texts(pop));
                 capture(hud, "labels-08", "08-weapon-playback.jpg", new Crop("pop", pop, 897, 140),
@@ -339,12 +338,12 @@ class GpuBoardLabelsSmokeTest {
                       GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY, GpuFirePreview.Snapshot.NONE),
                       GpuReportLog.Snapshot.EMPTY);
                 frame(board, false, atlasHex, 118, 960, 505);
-                draw(hud, board, overlay, icons, labels, frame);
+                draw(hud, board, overlay, labels, frame);
                 opaque();
                 Pixmap with = hud.capture("labels-09");
                 labels.labels.fx().setVisible(false);
                 labels.root.setVisible(false);
-                draw(hud, board, overlay, icons, labels, frame);
+                draw(hud, board, overlay, labels, frame);
                 opaque();
                 Pixmap without = hud.capture("labels-09-without");
                 try {
@@ -357,7 +356,6 @@ class GpuBoardLabelsSmokeTest {
                 }
                 labels.dispose();
             } finally {
-                icons.dispose();
                 overlay.dispose();
                 board.dispose();
             }
@@ -602,15 +600,24 @@ class GpuBoardLabelsSmokeTest {
         });
     }
 
-    /** Both directions use the same centre line and clearance, independent of facing, twist and camera mode. */
+    /**
+     * Both directions use the same centre line and clearance, independent of facing and twist: in 3D the units'
+     * rectangles, in the Tactical View the circles just outside the base rings (the squares around them).
+     */
     @Test
     void guidesConnectCentresAndClearBothUnitsRegardlessOfFacing() {
         GpuHudTestStage.run(hud -> {
             Labels labels = new Labels(hud, null);
             try {
                 for (boolean tactical : new boolean[] { false, true }) {
-                    GpuHud.HudView view = view(tactical, Map.of(WARHAMMER, new Rectangle(400, 200, 40, 100),
-                          TIMBER_WOLF, new Rectangle(400, 700, 40, 100)));
+                    GpuHud.HudView view = tactical
+                          ? view(true, Map.of(WARHAMMER, new Rectangle(370, 200, 100, 100),
+                                TIMBER_WOLF, new Rectangle(370, 700, 100, 100)))
+                          : view(false, Map.of(WARHAMMER, new Rectangle(400, 200, 40, 100),
+                                TIMBER_WOLF, new Rectangle(400, 700, 40, 100)));
+                    // The Tactical View's circle: radius .88 / .80 of the half square, the pair 3 off the centre line.
+                    float near = tactical ? 250 + (float) Math.sqrt(55 * 55 - 9) : 303;
+                    float far = tactical ? 750 - (float) Math.sqrt(55 * 55 - 9) : 697;
                     for (int facing = 0; facing < 6; facing++) {
                         Side salvo = new Side("", facing - 2, false, 2, 2, 6, 72.22, List.of());
                         GpuFirePreview.Snapshot preview = new GpuFirePreview.Snapshot(true, true, WARHAMMER, false,
@@ -619,10 +626,10 @@ class GpuBoardLabelsSmokeTest {
                         labels.update(hud, frameOf(null, GpuHudFixtures.status(), panels(GpuMovePlan.Snapshot.EMPTY,
                               GpuFireOrders.Snapshot.EMPTY, preview), GpuReportLog.Snapshot.EMPTY), view);
                         assertEquals(2, guides(labels));
-                        assertEquals(new Vector2(423, 303), endpoint(labels, 0, "from"));
-                        assertEquals(new Vector2(423, 697), endpoint(labels, 0, "to"));
-                        assertEquals(new Vector2(417, 697), endpoint(labels, 1, "from"));
-                        assertEquals(new Vector2(417, 303), endpoint(labels, 1, "to"));
+                        assertTrue(new Vector2(423, near).epsilonEquals(endpoint(labels, 0, "from"), .01f));
+                        assertTrue(new Vector2(423, far).epsilonEquals(endpoint(labels, 0, "to"), .01f));
+                        assertTrue(new Vector2(417, far).epsilonEquals(endpoint(labels, 1, "from"), .01f));
+                        assertTrue(new Vector2(417, near).epsilonEquals(endpoint(labels, 1, "to"), .01f));
                     }
                 }
             } finally {
@@ -968,30 +975,23 @@ class GpuBoardLabelsSmokeTest {
     // Drawing and capturing.
 
     /**
-     * Draws the board with the G7 overlay as GpuBattleView orders it (in the Tactical View with the icons), then the
+     * Draws the board with the G7 overlay as GpuBattleView orders it (in the Tactical View on the bases), then the
      * HUD's labels layer with the view's facts of that draw, and returns them.
      */
     private static GpuHud.HudView draw(GpuHudTestStage hud, GpuBoardSpaceHarness board, GpuBoardOverlay overlay,
-          GpuUnitIcons icons, Labels labels, GpuBoardSource.Frame frame) {
+          Labels labels, GpuBoardSource.Frame frame) {
         boolean tactical = board.tactical();
         labels.state.update(frame.status(), GpuUnitRecord.Snapshot.EMPTY, false);
         overlay.update(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0),
               preferences(), labels.state);
-        Map<BoardScene.Unit, Vector3> iconAnchors = new HashMap<>();
         GpuFireOrders.Snapshot fire = frame.panels().fire();
+        board.basesStatus = frame.status();
         board.draw(camera -> {
-            if (!tactical) {
-                overlay.renderGhost(camera, board.instances::get);
-            }
+            overlay.renderGhost(camera, board.instances::get);
             overlay.renderMarks(camera, board.poses::get);
             overlay.render(camera);
-            if (tactical) {
-                icons.update(true, camera, board.scene, frame.status(), board.poses, iconAnchors);
-                icons.render(camera);
-                overlay.renderGhost(camera, icons::instance);
-            }
         });
-        GpuHud.HudView view = view(board, tactical ? iconAnchors : board.anchors, tactical);
+        GpuHud.HudView view = view(board, board.anchors, tactical);
         labels.update(hud, frame, view);
         hud.drawStage();
         return view;
@@ -1007,7 +1007,7 @@ class GpuBoardLabelsSmokeTest {
     /**
      * The board view's facts of the last harness draw, as I1b will hand them over: each drawn unit's head (its label
      * anchor) and its screen rectangle, in 3D from its hex's ground up to the head and .55 of a hex wide (the
-     * prototype's unitRect), in the Tactical View its icon's square; the hex's width on the screen.
+     * prototype's unitRect), in the Tactical View the square around its base's ring; the hex's width on the screen.
      */
     static GpuHud.HudView view(GpuBoardSpaceHarness board, Map<BoardScene.Unit, Vector3> anchors,
           boolean tactical) {
@@ -1016,7 +1016,7 @@ class GpuBoardLabelsSmokeTest {
         // Both views look north, so a world x span is a screen x span.
         float perUnit = (camera.project(new Vector3(1, 0, 0)).x - camera.project(new Vector3(0, 0, 0)).x) * density;
         float hex = BoardGeometry.WIDTH * perUnit;
-        float icon = GpuUnitIcons.SIZE_IN_HEXES * BoardGeometry.HEIGHT * perUnit;
+        float icon = GpuUnitBases.RING * BoardGeometry.HEIGHT * perUnit;
         Map<Integer, Vector2> heads = heads(camera, anchors);
         Map<Integer, Rectangle> rects = new HashMap<>();
         anchors.keySet().forEach(unit -> {

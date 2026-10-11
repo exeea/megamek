@@ -138,25 +138,25 @@ class UnitDisplayActionsTest {
     }
 
     @Test
-    void openingTheClassicInspectorRendersExistingSelectionWithoutResettingIt() throws Exception {
+    void openingTheSwingInspectorRendersExistingSelectionWithoutResettingIt() throws Exception {
         onSwing(() -> {
             UnitDisplayState state = gui.getUnitDisplayState();
             state.displayEntity(atlas);
             WeaponMounted weapon = atlas.getWeaponList().get(2);
             state.selectWeapon(weapon);
-            UnitDisplayPanel classic = new UnitDisplayPanel(gui);
+            UnitDisplayPanel inspector = new UnitDisplayPanel(gui);
             try {
-                classic.refreshFromState();
-                assertSame(atlas, classic.getCurrentEntity());
-                assertSame(weapon, classic.wPan.getSelectedWeapon());
-                assertEquals(2, classic.wPan.weaponList.getSelectedIndex());
-                classic.wPan.weaponList.setSelectedIndex(1);
+                inspector.refreshFromState();
+                assertSame(atlas, inspector.getCurrentEntity());
+                assertSame(weapon, inspector.wPan.getSelectedWeapon());
+                assertEquals(2, inspector.wPan.weaponList.getSelectedIndex());
+                inspector.wPan.weaponList.setSelectedIndex(1);
                 assertSame(atlas.getWeaponList().get(1), state.getSelectedWeapon());
             } finally {
-                classic.disposeDisplay();
+                inspector.disposeDisplay();
             }
             state.selectWeapon(weapon);
-            assertEquals(1, classic.wPan.weaponList.getSelectedIndex(), "Disposed views stop observing selection");
+            assertEquals(1, inspector.wPan.weaponList.getSelectedIndex(), "Disposed views stop observing selection");
             return null;
         });
     }

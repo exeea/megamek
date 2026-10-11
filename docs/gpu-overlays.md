@@ -55,7 +55,7 @@ and later scene changes wait for the appropriate visual checkpoint. Manual ruler
 LOS cursors and commands can remain live. A delayed visual scene must not become
 an alternate source of game state or visibility.
 
-Field-of-view classification is shared with the classic painter. The GPU uses
+Field-of-view classification is shared with the Legacy 2D painter. The GPU uses
 one texel per hex and applies the chosen grayscale, dimmed or fog-of-war style.
 The atmosphere composite reconstructs the visible surface from the existing scene
 depth and applies the mask there. Shading follows terrain slopes, cliffs and props;
@@ -76,10 +76,66 @@ Change classification in the client capture; change appearance in
 ## Point markers and labels
 
 `GpuHexText` uses only the labels captured by `BoardHexText`, preserving display preferences and the
-omission of LEVEL0. HEIGHT labels draw through content in their own hex, including units, while content
+omission of LEVEL 0. HEIGHT labels draw through content in their own hex, including units, while content
 in other hexes still occludes them. In top view, enabled ground labels ignore terrain, roofs, bridges
 and units. Angled ground labels retain scene depth, with the existing
 exception for their own decorative relief. Camera changes reuse the uploaded glyph meshes.
+
+One method decides a hex's labels: `BoardHexText.capture(..., coordinates, types, printed)`, with View > Hex Types
+(`GUIPreferences.SHOW_HEX_TYPES`, off by default; Swing and 3D View menus right after Hex Coords, and the Overlays
+panel's Type row) as its `types` parameter. Legacy 2D, Classic, Enhanced and the Tactical View follow the setting
+through the coordinates' refresh path. The lines stack down to the bottom edge (the last line on the edge, each
+centred, a line wider than the hex in a smaller font), top to bottom in the official map sheets' order and wording:
+the height line (`LEVEL n`, below level 0 `SUBLEVEL n`, an ultra sublevel `ULTRA` / `SUBLEVEL`), `DEPTH n`, the
+structures, the cover, the ground, the liquids, the modifiers, `FIRE`. Off, only today's labels follow the height
+line: `DEPTH n` unless 0 and without a basement, the tallest structure's `HEIGHT n` (on its roof in 3D) and `FOLIAGE`.
+On, the type block in the height line's colour: `DEPTH n` for every water hex, 0 and a basement of any type included;
+`SWAMP` (`QUICKSAND` for swamp 2 and 3), as the sheets' `DEPTH 1 / SWAMP`; each structure with its height after the CF
+chip's black triangle: `BRIDGE▲n`, the building type (`MEDIUM▲5`; a gun emplacement keeps its type, e.g. `HARDENED▲1`),
+`FUEL TANK▲n`, `INDUSTRIAL▲n`; the woods/jungle cover word (`FOLIAGE`, `LIGHT`, `HEAVY`, `SUPER HEAVY`); then
+`BoardHexText.BELOW_COVER` in order: `ROUGH` (`ULTRA ROUGH` for 2), `RUBBLE` (`U. RUBBLE` for 6), `PAVED` (not
+under a standing building or fuel tank), `SAND`, `MUD`, `TUNDRA`, `FIELDS`, `SNOW` (`DEEP SNOW` for 2), `ICE`, `BLACK
+ICE`, `MAGMA CRUST` (`LAVA` for 2), `RAPIDS` (`TORRENT` for 2), `HAZ. LIQUID`, `GEYSER` (`MAGMA VENT` for 3),
+`IMPASSABLE`, `FORTIFIED`, `ELEVATOR` (Solaris and industrial), `SPACE`, and `FIRE` last, as the sheets print it.
+Black ice is hidden information: the views write it once detected, by the hex tooltip's rule
+(`Terrain.isBlackIceDetected`), and the saved image (`printed`) never does. Building classes (hangar, fortress) and
+metal content write nothing. The tallest structure's line lies on its roof in 3D (its elevation is the height), where
+HEIGHT lies without types, as the model would hide it at the ground in every angled view; the rest of the block stays
+at the ground. The Tactical View then tells the depth and the height only in the type block (`BoardHexText.tactical`):
+no large depth number, and the roof chip shows `CF n` alone while the structure line goes back into the block at the
+ground, which the top view shows; off, the chip stays `CF n ▲h`. The chip drops its ▲h when a captured line already
+ends with it, so the tile's own labels decide, not the live setting: a tile still holding the other setting's capture
+(until the next refresh after a toggle, a hex just exposed by a pan, a scene held during playback) shows the height
+once too. The lines' ▲ comes from `BoardView1.hexType.structure` (`MEDIUM▲5`, no space), the chip's from `BoardView1.tacticalCfHeight` (`CF 150 ▲1`); Legacy 2D and the
+saved image draw it in AWT's Sans Serif (Dialog's fallback font has the glyph), the 3D board in the HUD font, as the
+chip did. The 3D board settles every hex's lines (`BoardHexText.settled`): the ground lines end on the edge, and a
+roof's HEIGHT, which it lays on the roof, takes the slot above them (drawn there only without a roof); so does the
+roof's structure line. The same rule moves the lines down where a view drops one: the Tactical View's DEPTH or roof
+HEIGHT, and the zero-gravity bed's DEPTH and the words of what it lost with the liquid: its vegetation (`FOLIAGE`, the
+cover, `FIELDS`, `TUNDRA`), its ice and snow (`ICE`, `BLACK ICE`, `SNOW`, `DEEP SNOW`) and its liquids (`SWAMP`,
+`QUICKSAND`, magma, `RAPIDS`, `TORRENT`, `HAZ. LIQUID`); there a bridge's `HEIGHT n` and `BRIDGE▲n` (on the deck) are
+raised by the depth, as its deck keeps its level.
+Every label is drawn on an outline in every view (`BoardHexText.outline`: white around dark text, black around light
+text): Legacy 2D, the saved image (`BoardHexText.draw`) and `GpuHexText` all draw the text eight times in the outline
+colour in a ring around it (`BoardHexText.outlineOffsets`, 0.09 of the font size out, about a stem's width), then the
+text. The label meshes therefore hold nine times the glyphs, and Legacy 2D, which draws its labels on every paint,
+spends about four to five times as long on them (a scratch benchmark of 400 hexes: about 6 ms instead of 1.5 ms; a
+`StringDrawer` stroke took 60 to 125 ms). `GpuHexText` builds the meshes one label at a time in one reused font cache
+and appends each label to its chunk: a font cache grows its arrays to the exact size at every text it adds, so the
+former cache per chunk copied them over and over, and with the outline a rebuild of the whole 48x48 board (coordinates
+on) took 0.3 to 2 s on the Iris Xe; now 36 to 86 ms, 8 to 30 ms without the outline (Types off and on, 3D and Tactical
+View, a scratch harness alternating both in one process at 1920 x 1080). It keeps its meshes when the scene's new
+tiles change only their markings and no roof moved (`sameLabels`), as a path preview's do: 3 to 7 ms even with every
+hex repainted. The outline adds about 1.5 to 2.3 ms to a frame showing that whole board (10th percentile; the medians
+are too noisy to tell). A line is fitted to the hex's width at its baseline, outline included: on the bottom edge (49
+px wide at the export's scale) the longest lines, such as `HARDENED▲12`, `FUEL TANK▲12` and `INDUSTRIAL▲3`, shrink
+below 10 points (about 6 points before the space before the ▲ was dropped), a line higher up less.
+Save Map as Image and the game summary images (`BoardArtwork.printable`) always print coordinates and types, black
+on white.
+Apart from the roof's structure line the type block is a ground label: angled views hide it under buildings. Tests:
+`BoardHexTextTest`, `BoardLunarTest`, `GpuBoardSourceTest`, `GpuBoardActionsTest`, `BoardEditorSessionTest` (the
+printed outline), `GpuHexTextSmokeTest` and `GpuTacticalViewSmokeTest.hexTypesLabelTheHexesInEveryView`
+(`hex-types-*.png`).
 
 `GpuHexGrid` repeats the existing terrain border pattern in top view after scene geometry and before
 labels. It shares the terrain's grid shading control, clips to the board footprint and does not write
