@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
@@ -288,6 +289,11 @@ final class GpuAttackEffects implements Disposable {
 
     /** Ages the artillery blasts, which outlive the attacks that landed them, by the frame's real time. */
     void advance(float seconds) { artilleryBlasts.advance(seconds); }
+
+    /** Scorch marks where artillery debris has just landed in the rings around its target hex. */
+    void artilleryGroundMarks(Consumer<GpuGroundDamage.Impact> receiver) {
+        artilleryBlasts.groundMarks(receiver);
+    }
 
     void setSmokeLight(Color light) {
         flames.setSmokeLight(light);
@@ -653,7 +659,7 @@ final class GpuAttackEffects implements Disposable {
         int seed = attack.event.result().id().hashCode() ^ Float.floatToIntBits(center.x);
         if (ammo.contains("M_FLARE")) { glow(center, 1 + (1 - fade) * 2, FLARE_GLOW, 1 - fade, fade); }
         else if (GpuArtilleryBlast.explodes(profile)) {
-            artilleryBlasts.detonate(center, profile, attack.event.result().equipmentName(), seed);
+            artilleryBlasts.detonate(center, profile, attack, seed);
         }
         else if (!smoke) { explosions.burst(center, 5.5f, 1 - fade, seed); }
         if (smoke || fire) {

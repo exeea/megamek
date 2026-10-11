@@ -734,6 +734,7 @@ class GpuBattleView extends ApplicationAdapter {
         // No craters in the Tactical View or on the Classic columns. TODO(b11 step 7): columns() for tacticalView().
         if (!terrain.tacticalView() && !boardCamera.tactical()) {
             attackEffects.groundImpacts(completedAttacks, impact -> terrain.impact(scene, impact));
+            attackEffects.artilleryGroundMarks(impact -> terrain.impact(scene, impact));
         }
         unitBounds.begin();
         List<ModelInstance> units = new ArrayList<>(unitInstances.values());

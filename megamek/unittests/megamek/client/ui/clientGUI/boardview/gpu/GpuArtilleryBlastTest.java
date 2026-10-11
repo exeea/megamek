@@ -84,20 +84,65 @@ class GpuArtilleryBlastTest {
     @Test
     void debrisReachesTheRingsTheShellDamages() {
         EquipmentType.initializeTypes();
-        assertEquals(2, GpuArtilleryBlast.hexRadius("ISLongTom", shot(true, "M_STANDARD")), "Long Tom 25/15/5 (R2)");
-        assertEquals(1, GpuArtilleryBlast.hexRadius("ISSniper", shot(true, "M_STANDARD")), "Sniper 20/10 (R1)");
-        assertEquals(1, GpuArtilleryBlast.hexRadius("ISThumper", shot(true, "M_STANDARD")), "Thumper 15/5 (R1)");
-        assertEquals(1, GpuArtilleryBlast.hexRadius("ISArrowIV", shot(true, "M_STANDARD")), "Arrow IV 20/10 (R1)");
-        assertEquals(1, GpuArtilleryBlast.hexRadius("ISLongTom", shot(true, "M_CLUSTER")), "Long Tom cluster 20/10 (R1)");
-        assertEquals(2, GpuArtilleryBlast.hexRadius("ISLongTom", shot(true)), "No munitions captured is standard");
+        assertEquals(2, radius("ISLongTom", shot(true, "M_STANDARD")), "Long Tom 25/15/5 (R2)");
+        assertEquals(1, radius("ISSniper", shot(true, "M_STANDARD")), "Sniper 20/10 (R1)");
+        assertEquals(1, radius("ISThumper", shot(true, "M_STANDARD")), "Thumper 15/5 (R1)");
+        assertEquals(1, radius("ISArrowIV", shot(true, "M_STANDARD")), "Arrow IV 20/10 (R1)");
+        assertEquals(1, radius("ISLongTom", shot(true, "M_CLUSTER")), "Long Tom cluster 20/10 (R1)");
+        assertEquals(2, radius("ISLongTom", shot(true)), "No munitions captured is standard");
     }
 
     @Test
     void anUnknownWeaponKeepsTheDebrisInItsHex() {
         EquipmentType.initializeTypes();
-        assertEquals(0, GpuArtilleryBlast.hexRadius("NoSuchWeapon", shot(true, "M_STANDARD")));
-        assertEquals(0, GpuArtilleryBlast.hexRadius(null, shot(true, "M_STANDARD")));
-        assertEquals(0, GpuArtilleryBlast.hexRadius("ISLongTom", null));
+        assertEquals(0, radius("NoSuchWeapon", shot(true, "M_STANDARD")));
+        assertEquals(0, radius(null, shot(true, "M_STANDARD")));
+        assertEquals(0, radius("ISLongTom", null));
+    }
+
+    /** Each ring's scorch mark is sized for the damage the table gives it: a Long Tom's 25/15/5. */
+    @Test
+    void ringMarksTakeTheRingsDamage() {
+        EquipmentType.initializeTypes();
+        var longTom = GpuArtilleryBlast.areaEffect("ISLongTom", shot(true, "M_STANDARD"));
+        assertEquals(25, longTom.ringDamage(0));
+        assertEquals(15, longTom.ringDamage(1));
+        assertEquals(5, longTom.ringDamage(2));
+    }
+
+    /** Every hex of every damaged ring takes one piece: 6 in the first ring and 12 in the second. */
+    @Test
+    void debrisHitsEveryHexOfEveryRing() {
+        var pieces = GpuArtilleryBlast.debrisPieces(2, 41);
+        long firstRing = pieces.stream().filter(piece -> piece.ring() == 1).count();
+        long secondRing = pieces.stream().filter(piece -> piece.ring() == 2).count();
+        assertEquals(6, firstRing);
+        assertEquals(12, secondRing);
+        float hex = BoardGeometry.height();
+        for (var piece : pieces) {
+            float distance = (float) Math.hypot(piece.offsetX(), piece.offsetY()) / hex;
+            assertTrue(Math.abs(distance - piece.ring()) < .45f, "A piece lands inside its ring's hex: " + piece);
+        }
+    }
+
+    /** The ring hexes are hit one after another, not all in the same instant. */
+    @Test
+    void debrisLandsAtDifferentMoments() {
+        var landings = GpuArtilleryBlast.debrisPieces(2, 41).stream().map(GpuArtilleryBlast.Piece::landing).sorted().toList();
+        assertTrue(landings.getLast() - landings.getFirst() > .5f, "Landings spread over more than half a second");
+        assertEquals(landings.size(), landings.stream().distinct().count(), "No two pieces land together");
+    }
+
+    @Test
+    void aShellDamagingOnlyItsHexKeepsItsDebrisThere() {
+        for (var piece : GpuArtilleryBlast.debrisPieces(0, 41)) {
+            assertEquals(0, piece.ring());
+            assertTrue(Math.hypot(piece.offsetX(), piece.offsetY()) < BoardGeometry.height() / 2);
+        }
+    }
+
+    private static int radius(String weapon, ResolvedAttack.Shot profile) {
+        return GpuArtilleryBlast.areaEffect(weapon, profile).hexRadius();
     }
 
     @Test

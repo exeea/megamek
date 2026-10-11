@@ -5,16 +5,20 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuExplosionEffects.Look;
 import megamek.common.ResolvedAttack;
 import megamek.common.annotations.Nullable;
+import megamek.common.board.Coords;
 import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponType;
 import megamek.common.weapons.handlers.AreaEffectHelper;
+import megamek.common.weapons.handlers.DamageFalloff;
 import megamek.logging.MMLogger;
 
 /**
@@ -26,6 +30,9 @@ import megamek.logging.MMLogger;
  * earth and fire with a dust skirt, a fireball rising into a mushroom on a thin stem, or a bright billowing fireball
  * over a dark base. The crown and the fireball leave a dark smoke mass that the wind carries off; the mushroom's cap
  * darkens into its own.</p>
+ *
+ * <p>The blast stays in the target hex. The hexes around it that the shell also damages each take a piece of debris,
+ * thrown on its own arc and landing at its own moment, which leaves a scorch mark sized for that ring's damage.</p>
  */
 final class GpuArtilleryBlast {
     private static final MMLogger LOGGER = MMLogger.create(GpuArtilleryBlast.class);
@@ -37,12 +44,18 @@ final class GpuArtilleryBlast {
     static final float SECONDS = 5.5f;
     /** At most this many blasts draw at once. A heavier barrage reuses the oldest blast's slot. */
     static final int MAX_BLASTS = 6;
+    /** At most this many pieces of debris per blast: every hex of four rings, a Cruise Missile/120's R4. */
+    static final int MAX_DEBRIS = 60;
     /** Rounds that do not explode on landing: they lay mines, screen with smoke or light the field. */
     private static final Set<String> NON_EXPLOSIVE = Set.of("M_FASCAM", "M_THUNDER", "M_THUNDER_ACTIVE",
           "M_THUNDER_AUGMENTED", "M_THUNDER_INFERNO", "M_THUNDER_VIBRABOMB", "M_SMOKE", "M_SMOKE_WARHEAD", "M_FLARE",
           "M_LASER_INHIB");
     /** Damage of the shell that draws at the reference size: a Sniper or an Arrow IV. */
     private static final float REFERENCE_DAMAGE = 20;
+    /** Pieces a shell damaging only its own hex throws, all landing inside that hex. */
+    private static final int TARGET_HEX_PIECES = 6;
+    /** Any hex away from the board's edge: its neighbours sit at the same offsets as every other hex's. */
+    private static final Coords LAYOUT_HEX = new Coords(10, 10);
 
     private static final Look FIRE = new Look(.85f, .75f, .1f);
     private static final Look BRIGHT_FIRE = new Look(.55f, 1, 0);
@@ -50,29 +63,81 @@ final class GpuArtilleryBlast {
     private static final Look SMOKE = new Look(1, .45f, .1f);
     private static final Look CAP = new Look(.9f, .4f, 0);
     private static final Look DEBRIS = new Look(.8f, .3f, .6f);
-    /** Debris thrown per ring of hexes the shell damages; a shell that damages only its own hex throws a few. */
-    private static final int DEBRIS_PER_RING = 8;
-    private static final int MAX_DEBRIS = 24;
 
     private final List<Blast> blasts = new ArrayList<>();
     private final Vector3 point = new Vector3();
     private final Vector3 axis = new Vector3();
 
+    /**
+     * The area a shell damages, as the Artillery Ordnance Table gives it: a Long Tom's high-explosive round is
+     * 25/15/5 (R2), so {@code damage} 25 in the target hex, {@code falloff} 10 less for each ring, {@code hexRadius} 2.
+     *
+     * @param hexRadius rings of hexes around the target that take damage
+     * @param damage    damage in the target hex
+     * @param falloff   damage lost for each ring outward
+     */
+    record AreaEffect(int hexRadius, int damage, int falloff) {
+        static final AreaEffect TARGET_HEX_ONLY = new AreaEffect(0, 0, 10);
+
+        /** The damage a hex {@code ring} rings out takes, never below 1 so its mark stays visible. */
+        int ringDamage(int ring) { return Math.max(1, damage - falloff * ring); }
+    }
+
+    /**
+     * One piece of debris, thrown at one hex.
+     *
+     * @param offsetX how far east of the target hex's centre it lands, in world units
+     * @param offsetY how far north of the target hex's centre it lands, in world units
+     * @param ring    the ring of hexes it lands in: 0 is the target hex
+     * @param launch  seconds after contact it leaves the crater
+     * @param flight  seconds it spends in the air
+     */
+    record Piece(float offsetX, float offsetY, int ring, float launch, float flight) {
+        float landing() { return launch + flight; }
+    }
+
     /** One shell's blast, as captured at contact, with its own clock in seconds. */
     private static final class Blast {
         final Vector3 ground = new Vector3();
         final float size;
-        final int hexRadius;
+        final AreaEffect area;
         final Style style;
         final int key;
+        /** The shot, {@code null} for a blast drawn without one. */
+        final ResolvedAttack.Shot profile;
+        /** The attack that landed the shell, {@code null} for a blast drawn without one. */
+        final UnitAttack attack;
+        final List<Piece> pieces;
+        /** Where each piece lands, on the terrain where it could be found, else level with the crater. */
+        final List<Vector3> landings;
+        /** Whether each landing was found on the terrain, which a scorch mark needs. */
+        final boolean[] onTerrain;
         float seconds;
+        /** One bit per piece of debris that has landed, whether or not it left a mark. */
+        long landed;
+        int marks;
+        boolean marksReported;
 
-        Blast(Vector3 ground, float size, int hexRadius, Style style, int key) {
+        Blast(Vector3 ground, @Nullable ResolvedAttack.Shot profile, @Nullable UnitAttack attack, int key) {
             this.ground.set(ground);
-            this.size = size;
-            this.hexRadius = hexRadius;
-            this.style = style;
+            this.profile = profile;
+            this.attack = attack;
             this.key = key;
+            size = size(profile);
+            area = areaEffect(attack == null ? null : attack.event.result().equipmentName(), profile);
+            style = style(profile, key);
+            pieces = debrisPieces(area.hexRadius(), key);
+            Vector3 hexCentre = attack == null ? ground : BoardGeometry.center(attack.event.destination().coords(), 0);
+            landings = new ArrayList<>(pieces.size());
+            onTerrain = new boolean[pieces.size()];
+            for (int index = 0; index < pieces.size(); index++) {
+                Piece piece = pieces.get(index);
+                float x = hexCentre.x + piece.offsetX();
+                float y = hexCentre.y + piece.offsetY();
+                Vector3 terrain = attack == null || attack.landscape == null ? null : terrain(attack, x, y, ground.z);
+                onTerrain[index] = terrain != null;
+                landings.add(terrain != null ? terrain : new Vector3(x, y, ground.z));
+            }
         }
     }
 
@@ -111,28 +176,29 @@ final class GpuArtilleryBlast {
     }
 
     /**
-     * How many rings of hexes around the target the shell damages, the R value of the Artillery Ordnance Table: 0 is
-     * the target hex alone, 2 is a Long Tom's target hex and the two rings around it. It is asked of the same rule the
-     * server deals the damage with, for the round whose munitions the shot carried.
+     * The area the shell damages, with the R value of the Artillery Ordnance Table: 0 is the target hex alone, 2 is a
+     * Long Tom's target hex and the two rings around it. It is asked of the same rule the server deals the damage with,
+     * for the round whose munitions the shot carried.
      *
      * @param weaponName the internal name of the weapon that fired, or {@code null} when unknown
      * @param profile    the shot, or {@code null} when unknown
      *
-     * @return the radius in hexes; 0 when the weapon or its round cannot be found
+     * @return the area; {@link AreaEffect#TARGET_HEX_ONLY} when the weapon or its round cannot be found
      */
-    static int hexRadius(@Nullable String weaponName, @Nullable ResolvedAttack.Shot profile) {
-        if (weaponName == null || profile == null) { return 0; }
+    static AreaEffect areaEffect(@Nullable String weaponName, @Nullable ResolvedAttack.Shot profile) {
+        if (weaponName == null || profile == null) { return AreaEffect.TARGET_HEX_ONLY; }
         if (!(EquipmentType.get(weaponName) instanceof WeaponType weapon)) {
             LOGGER.debug("[ArtilleryBlast] {} is not a weapon, the blast stays in its hex", weaponName);
-            return 0;
+            return AreaEffect.TARGET_HEX_ONLY;
         }
         AmmoType round = round(weapon, profile.munitions());
         if (round == null) {
             LOGGER.debug("[ArtilleryBlast] no {} round carries {}, the blast stays in its hex", weaponName,
                   profile.munitions());
-            return 0;
+            return AreaEffect.TARGET_HEX_ONLY;
         }
-        return Math.max(0, AreaEffectHelper.calculateDamageFallOff(round, 0, false).radius);
+        DamageFalloff falloff = AreaEffectHelper.calculateDamageFallOff(round, 0, false);
+        return new AreaEffect(Math.max(0, falloff.radius), falloff.damage, falloff.falloff);
     }
 
     /** The round of the weapon's ammunition family whose munitions are exactly those the shot carried. */
@@ -149,12 +215,52 @@ final class GpuArtilleryBlast {
     }
 
     /**
+     * The debris a shell throws: one piece at every hex of every ring it damages, each landing somewhere inside its
+     * hex and at its own moment, the outer rings a little later than the inner ones. A shell that damages only its own
+     * hex throws a few pieces that stay inside it.
+     */
+    static List<Piece> debrisPieces(int hexRadius, int seed) {
+        List<Piece> pieces = new ArrayList<>();
+        float hex = BoardGeometry.height();
+        if (hexRadius == 0) {
+            for (int piece = 0; piece < TARGET_HEX_PIECES; piece++) {
+                float bearing = piece * 2.399963f + random(seed, piece + 200);
+                float distance = hex * (.1f + .25f * random(seed, piece + 220));
+                pieces.add(new Piece(MathUtils.cos(bearing) * distance, MathUtils.sin(bearing) * distance, 0,
+                      launch(seed, piece), .55f + .3f * random(seed, piece + 260)));
+            }
+            return pieces;
+        }
+        Vector3 centre = BoardGeometry.center(LAYOUT_HEX, 0);
+        for (int ring = 1; ring <= hexRadius; ring++) {
+            for (Coords coords : LAYOUT_HEX.allAtDistance(ring)) {
+                int piece = pieces.size();
+                if (piece == MAX_DEBRIS) { return pieces; }
+                Vector3 hexCentre = BoardGeometry.center(coords, 0);
+                // Somewhere in the hex rather than its exact centre, so the marks do not form a neat grid.
+                float jitter = hex * .22f;
+                float offsetX = hexCentre.x - centre.x + (random(seed, piece + 300) - .5f) * 2 * jitter;
+                float offsetY = hexCentre.y - centre.y + (random(seed, piece + 320) - .5f) * 2 * jitter;
+                float flight = .55f + .3f * ring + .3f * random(seed, piece + 260);
+                pieces.add(new Piece(offsetX, offsetY, ring, launch(seed, piece), flight));
+            }
+        }
+        return pieces;
+    }
+
+    /** Pieces leave the crater over the first half second rather than all at once. */
+    private static float launch(int seed, int piece) {
+        return .05f + .5f * random(seed, piece + 240);
+    }
+
+    /**
      * Starts the blast of a shell landing at {@code ground}. The impact is reported on every frame of the attack's
      * contact window, so a {@code key} already blasting is ignored.
      *
-     * @param weaponName the internal name of the weapon that fired, or {@code null} when unknown
+     * @param attack the attack that landed the shell, which names the weapon, the target hex and the terrain for the
+     *               debris, or {@code null} for a blast with none of them
      */
-    void detonate(Vector3 ground, @Nullable ResolvedAttack.Shot profile, @Nullable String weaponName, int key) {
+    void detonate(Vector3 ground, @Nullable ResolvedAttack.Shot profile, @Nullable UnitAttack attack, int key) {
         for (Blast blast : blasts) {
             if (blast.key == key) { return; }
         }
@@ -162,10 +268,10 @@ final class GpuArtilleryBlast {
             LOGGER.debug("[ArtilleryBlast] {} blasts already drawing, the oldest makes way", MAX_BLASTS);
             blasts.removeFirst();
         }
-        var blast = new Blast(ground, size(profile), hexRadius(weaponName, profile), style(profile, key), key);
+        var blast = new Blast(ground, profile, attack, key);
         blasts.add(blast);
-        LOGGER.info("[ArtilleryBlast] {} blast of radius {} with debris over R{} at {}", blast.style, blast.size,
-              blast.hexRadius, ground);
+        LOGGER.info("[ArtilleryBlast] {} blast of radius {} with {} pieces of debris over R{} at {}", blast.style,
+              blast.size, blast.pieces.size(), blast.area.hexRadius(), ground);
     }
 
     /** Ages every blast and retires those whose smoke has cleared. */
@@ -181,19 +287,30 @@ final class GpuArtilleryBlast {
     /** Queues the volumes of every live blast. */
     void emit(GpuExplosionEffects explosions) {
         for (Blast blast : blasts) {
-            emit(explosions, blast.ground, blast.size, blast.hexRadius, blast.style, blast.seconds, blast.key);
+            emit(explosions, blast.ground, blast.size, blast.pieces, blast.landings, blast.style, blast.seconds,
+                  blast.key);
         }
     }
 
     /**
-     * Queues the volumes of one blast {@code seconds} after contact. The result depends only on its arguments, so the
-     * shader preview and the review sheets can show any moment of any blast. The blast itself stays in the target hex;
-     * its debris reaches the outer edge of the last ring of hexes that {@code hexRadius} says the shell damages.
+     * Queues the volumes of one blast {@code seconds} after contact, on level ground centred on its target hex. The
+     * result depends only on its arguments, so the shader preview and the review sheets can show any moment of any
+     * blast.
      */
     void emit(GpuExplosionEffects explosions, Vector3 ground, float size, int hexRadius, Style style, float seconds,
           int seed) {
+        List<Piece> pieces = debrisPieces(hexRadius, seed);
+        List<Vector3> landings = new ArrayList<>(pieces.size());
+        for (Piece piece : pieces) {
+            landings.add(new Vector3(ground.x + piece.offsetX(), ground.y + piece.offsetY(), ground.z));
+        }
+        emit(explosions, ground, size, pieces, landings, style, seconds, seed);
+    }
+
+    private void emit(GpuExplosionEffects explosions, Vector3 ground, float size, List<Piece> pieces,
+          List<Vector3> landings, Style style, float seconds, int seed) {
         if (seconds < 0 || seconds >= SECONDS) { return; }
-        debris(explosions, ground, size, hexRadius, seconds, seed);
+        debris(explosions, ground, size, pieces, landings, seconds, seed);
         switch (style) {
             case CROWN -> crown(explosions, ground, size, seconds, seed);
             case MUSHROOM -> mushroom(explosions, ground, size, seconds, seed);
@@ -291,43 +408,77 @@ final class GpuArtilleryBlast {
     }
 
     /**
-     * Earth and wreckage thrown out of the crater on high arcs, landing across the hexes the shell also damages, each
-     * kicking up a puff of dust where it comes down. The farthest pieces land near the outer edge of the last damaged
-     * ring, so a Long Tom's debris carries two hexes out and a Copperhead's stays in its own hex.
+     * Earth and wreckage thrown out of the crater, one piece at each hex the shell damages, each on its own arc and
+     * landing at its own moment with a puff of dust where it comes down.
      */
-    private void debris(GpuExplosionEffects explosions, Vector3 ground, float size, int hexRadius, float seconds,
-          int seed) {
-        float hex = BoardGeometry.height();
-        // The outer edge of the last damaged ring, measured from the target hex's centre.
-        float reach = hex * (hexRadius + .45f);
-        int pieces = Math.min(MAX_DEBRIS, DEBRIS_PER_RING * Math.max(1, hexRadius));
-        float launch = .08f;
-        for (int piece = 0; piece < pieces; piece++) {
-            float bearing = piece * 2.399963f + random(seed, piece + 200);
-            // Square root spreads the landings evenly over the area rather than crowding them near the crater.
-            float distance = reach * (float) Math.sqrt(MathUtils.lerp(.15f, 1, random(seed, piece + 220)));
-            float flight = .7f + .5f * distance / Math.max(1, reach) + .25f * random(seed, piece + 240);
-            float travel = (seconds - launch) / flight;
-            float cosine = MathUtils.cos(bearing);
-            float sine = MathUtils.sin(bearing);
+    private void debris(GpuExplosionEffects explosions, Vector3 ground, float size, List<Piece> pieces,
+          List<Vector3> landings, float seconds, int seed) {
+        for (int index = 0; index < pieces.size(); index++) {
+            Piece piece = pieces.get(index);
+            Vector3 landing = landings.get(index);
+            float travel = (seconds - piece.launch()) / piece.flight();
             if (travel > 0 && travel < 1) {
-                float apex = distance * MathUtils.lerp(.35f, .6f, random(seed, piece + 260)) + size * .3f;
-                point.set(ground).add(cosine * distance * travel, sine * distance * travel,
-                      size * .2f + 4 * apex * travel * (1 - travel));
+                float distance = (float) Math.hypot(landing.x - ground.x, landing.y - ground.y);
+                float apex = distance * MathUtils.lerp(.35f, .6f, random(seed, index + 280)) + size * .3f;
+                point.set(ground).lerp(landing, travel).add(0, 0, size * .2f * (1 - travel)
+                      + 4 * apex * travel * (1 - travel));
                 // Drawn out along its flight, so a piece reads as a streak of earth trailing dust.
-                float climb = 4 * apex * (1 - 2 * travel);
-                axis.set(cosine * distance, sine * distance, climb).nor().scl(1.4f);
-                float pieceSize = size * MathUtils.lerp(.07f, .12f, random(seed, piece + 280));
-                explosions.add(point, pieceSize, travel * .6f, .35f, .9f, seed + piece * 41, DEBRIS, axis);
+                float climb = 4 * apex * (1 - 2 * travel) + (landing.z - ground.z);
+                axis.set(landing.x - ground.x, landing.y - ground.y, climb).nor().scl(1.4f);
+                float pieceSize = size * MathUtils.lerp(.07f, .12f, random(seed, index + 290));
+                explosions.add(point, pieceSize, travel * .6f, .35f, .9f, seed + index * 41, DEBRIS, axis);
             }
-            float settle = (seconds - launch - flight) / 1.6f;
+            float settle = (seconds - piece.landing()) / 1.6f;
             if (settle >= 0 && settle < 1) {
-                point.set(ground).add(cosine * distance, sine * distance, size * .05f);
+                point.set(landing).add(0, 0, size * .05f);
                 float puffSize = size * (.14f + .18f * settle);
-                explosions.add(point, puffSize, settle, 0, .55f * fadeOut(settle, .3f), seed + piece * 43, EARTH,
+                explosions.add(point, puffSize, settle, 0, .55f * fadeOut(settle, .3f), seed + index * 43, EARTH,
                       Vector3.Zero);
             }
         }
+    }
+
+    /**
+     * Hands over a scorch mark for each piece of debris that has just landed in a ring around the target hex, sized for
+     * the damage that ring takes, so the burned ground shows how far the shell reached. Debris landing in the target
+     * hex leaves nothing more, as the shell's own crater already marks it. Each mark is handed over once.
+     */
+    void groundMarks(Consumer<GpuGroundDamage.Impact> receiver) {
+        for (Blast blast : blasts) {
+            if (!leavesRingMarks(blast)) { continue; }
+            for (int index = 0; index < blast.pieces.size(); index++) {
+                long bit = 1L << index;
+                Piece piece = blast.pieces.get(index);
+                boolean handled = (blast.landed & bit) != 0;
+                if (handled || blast.seconds < piece.landing()) { continue; }
+                blast.landed |= bit;
+                if (piece.ring() == 0 || !blast.onTerrain[index]) { continue; }
+                blast.marks++;
+                ResolvedAttack.Shot ringShot = blast.profile.withDamagePerHit(blast.area.ringDamage(piece.ring()));
+                receiver.accept(new GpuGroundDamage.Impact(blast.attack, "artillery-debris-" + index,
+                      blast.ground.cpy(), blast.landings.get(index).cpy(), "bomb", ringShot));
+            }
+            boolean allLanded = blast.landed == (1L << blast.pieces.size()) - 1;
+            if (allLanded && !blast.marksReported) {
+                blast.marksReported = true;
+                LOGGER.debug("[ArtilleryBlast] {} debris marks over R{} around {}", blast.marks,
+                      blast.area.hexRadius(), blast.ground);
+            }
+        }
+    }
+
+    /** Whether the blast has rings around its target to mark, and the attack and shot it needs to mark them. */
+    private static boolean leavesRingMarks(Blast blast) {
+        if (blast.area.hexRadius() == 0 || blast.profile == null) { return false; }
+        return blast.attack != null && blast.attack.landscape != null;
+    }
+
+    /** Where a vertical line through {@code x}, {@code y} meets the installed terrain, searching well above and below. */
+    private static @Nullable Vector3 terrain(UnitAttack attack, float x, float y, float near) {
+        float drop = BoardGeometry.height() * 8;
+        var ray = new Ray(new Vector3(x, y, near + drop / 2), new Vector3(0, 0, -1));
+        BoardGeometry.Hit hit = attack.landscape.apply(ray);
+        return hit == null ? null : ray.getEndPoint(new Vector3(), hit.distance());
     }
 
     /** The first instant: a hot, low core that flashes and swells before the shape of the blast takes over. */
