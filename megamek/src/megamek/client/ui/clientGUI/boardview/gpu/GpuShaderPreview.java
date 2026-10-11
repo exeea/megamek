@@ -194,7 +194,7 @@ final class GpuShaderPreview implements Disposable {
                       preset == Preset.SNOW ? .7f : 0, preset == Preset.HAIL ? .7f : 0, 0, 0, .15f, 90);
                 weather.render(camera, sampleScene, effects, Color.WHITE, seconds);
             } else if (preset == Preset.ARTILLERY) {
-                var style = renderArtillery(depth);
+                GpuArtilleryBlast.Style style = renderArtillery(depth);
                 return new Frame(image(), preset.title + " (" + style + ") - drag to orbit - wheel to zoom", preset, seconds);
             } else if (attack != null) {
                 attacks.update(attack, null, preset == Preset.EXPLOSION ? Map.of()
@@ -218,12 +218,13 @@ final class GpuShaderPreview implements Disposable {
      */
     private GpuArtilleryBlast.Style renderArtillery(GpuEffectDepth snapshot) {
         float loop = GpuArtilleryBlast.SECONDS + .5f;
-        var styles = GpuArtilleryBlast.Style.values();
-        var style = styles[(int) (seconds / loop) % styles.length];
+        GpuArtilleryBlast.Style[] styles = GpuArtilleryBlast.Style.values();
+        GpuArtilleryBlast.Style style = styles[(int) (seconds / loop) % styles.length];
         artilleryVolumes.begin();
         artilleryGround.set(focus.x, focus.y, 0);
-        artilleryBlast.emit(artilleryVolumes, artilleryGround,
-              GpuArtilleryBlast.size(null), style, seconds % loop, 23);
+        // A Sniper or Arrow IV round: its debris lands across the ring of hexes around the target.
+        artilleryBlast.emit(artilleryVolumes, artilleryGround, GpuArtilleryBlast.size(null), 1, style,
+              seconds % loop, 23);
         artilleryVolumes.render(camera, snapshot);
         return style;
     }
@@ -270,7 +271,7 @@ final class GpuShaderPreview implements Disposable {
             case MATERIAL, SMOKE, JET -> 92;
             case IMPACT -> 65;
             case EXPLOSION -> 95;
-            case ARTILLERY -> BoardGeometry.height() * 2.6f;
+            case ARTILLERY -> BoardGeometry.height() * 3.6f;
             case FIRE -> BoardGeometry.width() * 3;
             case RAIN, SNOW, HAIL -> 200;
             default -> 170;

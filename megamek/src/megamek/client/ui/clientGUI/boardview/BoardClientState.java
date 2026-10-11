@@ -2082,8 +2082,9 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
      * the ground would only cover the crater. The Tactical View draws no craters and keeps the icon.
      */
     private boolean isShownAsGpuCrater(SpecialHexDisplay display, Graphics2D graphics) {
-        return gpuCapture && !(graphics instanceof BoardTacticalGraphics)
-              && display.getType() == SpecialHexDisplay.Type.ARTILLERY_HIT;
+        boolean isTerrainCapture = gpuCapture && !(graphics instanceof BoardTacticalGraphics);
+        boolean isArtilleryHit = display.getType() == SpecialHexDisplay.Type.ARTILLERY_HIT;
+        return isTerrainCapture && isArtilleryHit;
     }
 
     public BoardMarker.Kind pointMarkerKind(SpecialHexDisplay display) {

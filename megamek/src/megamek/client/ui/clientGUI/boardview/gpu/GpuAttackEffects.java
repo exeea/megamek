@@ -450,8 +450,8 @@ final class GpuAttackEffects implements Disposable {
                 float flash = attack.contactFlash(contact);
                 if (impacts[index] && flash > 0) {
                     // Tube artillery is ballistic like an autocannon, but its shell explodes rather than sparking.
-                    boolean shell = GpuArtilleryBlast.explodes(profiles[index]);
-                    if ("bullet".equals(effect) && !shell) {
+                    boolean isShell = GpuArtilleryBlast.explodes(profiles[index]);
+                    if ("bullet".equals(effect) && !isShell) {
                         boolean targetHit = attack.event.result().hit() && attack.event.target() != null
                               && (profiles[index] == null || profiles[index].impact() == null);
                         ballisticImpact(start, target, flash, profiles[index], attack.event.result().id().hashCode() ^ index * 31, targetHit);
@@ -498,7 +498,9 @@ final class GpuAttackEffects implements Disposable {
                         float impact = attack.contactFlash(launch.endSeconds(index));
                         if (impact <= 0) { continue; }
                         var profile = launch.profile();
-                        if (profile != null && profile.ballistic() && !GpuArtilleryBlast.explodes(profile)) {
+                        boolean isSolidRound = profile != null && profile.ballistic();
+                        boolean isShell = GpuArtilleryBlast.explodes(profile);
+                        if (isSolidRound && !isShell) {
                             boolean targetHit = launch.hit(index) && attack.event.target() != null && profile.impact() == null;
                             ballisticImpact(launch.origins()[index % launch.origins().length], launch.targets()[index], impact,
                                   profile, launch.seed() ^ index * 31, targetHit);
@@ -650,7 +652,9 @@ final class GpuAttackEffects implements Disposable {
               || ammo.contains("M_INCENDIARY_LRM") || ammo.contains("M_THUNDER_INFERNO");
         int seed = attack.event.result().id().hashCode() ^ Float.floatToIntBits(center.x);
         if (ammo.contains("M_FLARE")) { glow(center, 1 + (1 - fade) * 2, FLARE_GLOW, 1 - fade, fade); }
-        else if (GpuArtilleryBlast.explodes(profile)) { artilleryBlasts.detonate(center, profile, seed); }
+        else if (GpuArtilleryBlast.explodes(profile)) {
+            artilleryBlasts.detonate(center, profile, attack.event.result().equipmentName(), seed);
+        }
         else if (!smoke) { explosions.burst(center, 5.5f, 1 - fade, seed); }
         if (smoke || fire) {
             for (int puff = 0; puff < 4; puff++) {

@@ -39,6 +39,11 @@ import org.junit.jupiter.api.Test;
 class GpuArtilleryBlastSmokeTest {
     private static final int SIZE = 256;
     private static final float[] MOMENTS = { .08f, .35f, .9f, 1.8f, 3.2f, 4.8f };
+    private static final GpuArtilleryBlast.Style[] STYLES = { GpuArtilleryBlast.Style.CROWN,
+          GpuArtilleryBlast.Style.MUSHROOM, GpuArtilleryBlast.Style.FIREBALL, GpuArtilleryBlast.Style.CROWN,
+          GpuArtilleryBlast.Style.CROWN };
+    /** The R value of each row: a Sniper's ring for the three shapes, then a Copperhead and a Long Tom. */
+    private static final int[] HEX_RADII = { 1, 1, 1, 0, 2 };
 
     @Test
     void drawsEachBlastShapeFromIgnitionToClearing() {
@@ -59,30 +64,31 @@ class GpuArtilleryBlastSmokeTest {
                     ground.transform.setToTranslation(0, 0, -.5f);
                     float size = GpuArtilleryBlast.size(null);
                     var camera = new PerspectiveCamera(40, SIZE, SIZE);
-                    camera.position.set(0, -size * 5, size * 1.2f);
+                    // Wide enough to show a Long Tom's debris landing two hexes out.
+                    camera.position.set(0, -size * 11, size * 2.4f);
                     camera.up.set(Vector3.Z);
-                    camera.lookAt(0, 0, size * .95f);
+                    camera.lookAt(0, 0, size * .7f);
                     camera.near = 1;
                     camera.far = size * 40;
                     camera.update();
                     volumes.setLightDirection(new Vector3(-.3f, .5f, -1).nor());
-                    var styles = GpuArtilleryBlast.Style.values();
-                    var sheet = new BufferedImage(SIZE * MOMENTS.length, SIZE * styles.length, BufferedImage.TYPE_INT_RGB);
+                    var sheet = new BufferedImage(SIZE * MOMENTS.length, SIZE * STYLES.length, BufferedImage.TYPE_INT_RGB);
                     var graphics = sheet.createGraphics();
                     var empty = frame(buffer, batch, ground, camera, volumes, () -> { });
                     try {
-                        for (int row = 0; row < styles.length; row++) {
-                            var style = styles[row];
+                        for (int row = 0; row < STYLES.length; row++) {
+                            GpuArtilleryBlast.Style style = STYLES[row];
+                            int hexRadius = HEX_RADII[row];
                             long firstWarmth = 0;
                             for (int column = 0; column < MOMENTS.length; column++) {
                                 float seconds = MOMENTS[column];
                                 var image = frame(buffer, batch, ground, camera, volumes,
-                                      () -> blast.emit(volumes, Vector3.Zero, size, style, seconds, 41));
+                                      () -> blast.emit(volumes, Vector3.Zero, size, hexRadius, style, seconds, 41));
                                 if (column == 0) {
                                     firstWarmth = warmth(image) - warmth(empty);
                                     assertTrue(different(image, empty) > 500, style + " must draw at ignition");
                                     var repeated = frame(buffer, batch, ground, camera, volumes,
-                                          () -> blast.emit(volumes, Vector3.Zero, size, style, seconds, 41));
+                                          () -> blast.emit(volumes, Vector3.Zero, size, hexRadius, style, seconds, 41));
                                     assertTrue(Arrays.equals(pixels(image), pixels(repeated)),
                                           style + " must not flicker while paused");
                                 }
@@ -91,10 +97,10 @@ class GpuArtilleryBlastSmokeTest {
                                 }
                                 graphics.drawImage(image, column * SIZE, row * SIZE, null);
                                 graphics.setColor(java.awt.Color.WHITE);
-                                graphics.drawString(style + " " + seconds + "s", column * SIZE + 8, row * SIZE + 16);
+                                graphics.drawString(style + " R" + hexRadius + " " + seconds + "s", column * SIZE + 8, row * SIZE + 16);
                             }
                             var cleared = frame(buffer, batch, ground, camera, volumes,
-                                  () -> blast.emit(volumes, Vector3.Zero, size, style, GpuArtilleryBlast.SECONDS, 41));
+                                  () -> blast.emit(volumes, Vector3.Zero, size, hexRadius, style, GpuArtilleryBlast.SECONDS, 41));
                             assertTrue(Arrays.equals(pixels(cleared), pixels(empty)), style + " must clear completely");
                         }
                     } finally { graphics.dispose(); }

@@ -10,6 +10,7 @@ import java.util.Set;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.ResolvedAttack;
+import megamek.common.equipment.EquipmentType;
 import org.junit.jupiter.api.Test;
 
 /** Which landings draw an artillery blast, which shape they take, and how long the blasts live. */
@@ -61,29 +62,49 @@ class GpuArtilleryBlastTest {
     void aShellReportedOnEveryFrameOfItsContactStartsOneBlast() {
         var blasts = new GpuArtilleryBlast();
         for (int frame = 0; frame < 10; frame++) {
-            blasts.detonate(Vector3.Zero, shot(true), 99);
+            blasts.detonate(Vector3.Zero, shot(true), null, 99);
             blasts.advance(.016f);
         }
         assertEquals(1, blasts.size());
-        blasts.detonate(Vector3.Zero, shot(true), 100);
+        blasts.detonate(Vector3.Zero, shot(true), null, 100);
         assertEquals(2, blasts.size());
     }
 
     @Test
     void blastsOutliveTheirAttackThenClear() {
         var blasts = new GpuArtilleryBlast();
-        blasts.detonate(Vector3.Zero, shot(true), 7);
+        blasts.detonate(Vector3.Zero, shot(true), null, 7);
         blasts.advance(1);
         assertEquals(1, blasts.size(), "Still burning a second after contact, long after the attack's own clock");
         blasts.advance(GpuArtilleryBlast.SECONDS);
         assertEquals(0, blasts.size());
     }
 
+    /** The R values of the Artillery Ordnance Table, asked of the same rule that deals the damage. */
+    @Test
+    void debrisReachesTheRingsTheShellDamages() {
+        EquipmentType.initializeTypes();
+        assertEquals(2, GpuArtilleryBlast.hexRadius("ISLongTom", shot(true, "M_STANDARD")), "Long Tom 25/15/5 (R2)");
+        assertEquals(1, GpuArtilleryBlast.hexRadius("ISSniper", shot(true, "M_STANDARD")), "Sniper 20/10 (R1)");
+        assertEquals(1, GpuArtilleryBlast.hexRadius("ISThumper", shot(true, "M_STANDARD")), "Thumper 15/5 (R1)");
+        assertEquals(1, GpuArtilleryBlast.hexRadius("ISArrowIV", shot(true, "M_STANDARD")), "Arrow IV 20/10 (R1)");
+        assertEquals(1, GpuArtilleryBlast.hexRadius("ISLongTom", shot(true, "M_CLUSTER")), "Long Tom cluster 20/10 (R1)");
+        assertEquals(2, GpuArtilleryBlast.hexRadius("ISLongTom", shot(true)), "No munitions captured is standard");
+    }
+
+    @Test
+    void anUnknownWeaponKeepsTheDebrisInItsHex() {
+        EquipmentType.initializeTypes();
+        assertEquals(0, GpuArtilleryBlast.hexRadius("NoSuchWeapon", shot(true, "M_STANDARD")));
+        assertEquals(0, GpuArtilleryBlast.hexRadius(null, shot(true, "M_STANDARD")));
+        assertEquals(0, GpuArtilleryBlast.hexRadius("ISLongTom", null));
+    }
+
     @Test
     void aHeavyBarrageIsBounded() {
         var blasts = new GpuArtilleryBlast();
         for (int key = 0; key < GpuArtilleryBlast.MAX_BLASTS + 3; key++) {
-            blasts.detonate(Vector3.Zero, shot(true), key);
+            blasts.detonate(Vector3.Zero, shot(true), null, key);
         }
         assertEquals(GpuArtilleryBlast.MAX_BLASTS, blasts.size());
     }
