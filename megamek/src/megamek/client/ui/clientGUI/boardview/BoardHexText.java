@@ -30,7 +30,7 @@ public record BoardHexText(String text, int baseline, Font font, int argb, boole
     /** The distance between the baselines of the stacked lines at the bottom edge, in artwork pixels. */
     private static final int LINE_SPACING = 10;
     /** How far every label's outline reaches out of its glyphs, as a share of its font size: about a stem's width. */
-    private static final float OUTLINE = 0.03f;
+    private static final float OUTLINE = 0.04f;
     /** The copies of a label's text, in a ring around it, that draw its outline. */
     private static final int OUTLINE_COPIES = 8;
     private static final Font TACTICAL_DEPTH_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 26);
