@@ -58,6 +58,8 @@ final class GpuShaderPreview implements Disposable {
         public String toString() { return title; }
         boolean ballistic() { return this == PROJECTILE || this == IMPACT; }
         boolean precipitation() { return this == RAIN || this == SNOW || this == HAIL; }
+        /** Samples drawn over the sample board's hex rather than at the stage's origin. */
+        boolean onBoardHex() { return this == EXPLOSION || this == ARTILLERY || this == FIRE || precipitation(); }
 
         static Preset forFile(String name) {
             if (name == null) { return NONE; }
@@ -285,7 +287,7 @@ final class GpuShaderPreview implements Disposable {
             default -> 10;
         });
         if (preset == Preset.IMPACT) { focus.set(55, 0, 12); }
-        if (preset == Preset.EXPLOSION || preset == Preset.ARTILLERY || preset == Preset.FIRE || preset.precipitation()) {
+        if (preset.onBoardHex()) {
             focus.x = BoardGeometry.centerX(new Coords(0, 0));
             focus.y = BoardGeometry.centerY(new Coords(0, 0));
         }
