@@ -717,6 +717,7 @@ class GpuBattleView extends ApplicationAdapter {
         markers.update(unitInstances.values(), boardCamera.camera);
         updateJumpJets();
         attackEffects.update(playback.attacks(), completedAttacks, unitModels, unitInstances);
+        attackEffects.advance(Gdx.graphics.getDeltaTime());
         // No craters in the Tactical View or on the Classic columns. TODO(b11 step 7): columns() for tacticalView().
         if (!terrain.tacticalView() && !boardCamera.tactical()) {
             attackEffects.groundImpacts(completedAttacks, impact -> terrain.impact(scene, impact));

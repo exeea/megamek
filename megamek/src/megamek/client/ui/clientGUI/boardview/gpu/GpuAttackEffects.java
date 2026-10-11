@@ -47,6 +47,7 @@ final class GpuAttackEffects implements Disposable {
     private Map<String, ModelInstance> instances = Map.of();
     private final GpuMissileEffects missiles = new GpuMissileEffects();
     private final GpuExplosionEffects explosions = new GpuExplosionEffects();
+    private final GpuArtilleryBlast artilleryBlasts = new GpuArtilleryBlast();
     private final GpuEffectBatch flames = new GpuEffectBatch(2048);
     private final GpuEffectBatch beams = new GpuEffectBatch(MAX_MUZZLES * 4, "beams");
     private final GpuEffectBatch projectiles = new GpuEffectBatch(512, "projectiles");
@@ -285,6 +286,9 @@ final class GpuAttackEffects implements Disposable {
     }
     int explosionCount() { return explosions.size(); }
 
+    /** Ages the artillery blasts, which outlive the attacks that landed them, by the frame's real time. */
+    void advance(float seconds) { artilleryBlasts.advance(seconds); }
+
     void setSmokeLight(Color light) {
         flames.setSmokeLight(light);
         missiles.setSmokeLight(light);
@@ -321,7 +325,7 @@ final class GpuAttackEffects implements Disposable {
         flames.begin();
         beams.begin();
         projectiles.begin();
-        if (volley.isEmpty()) { return; }
+        if (volley.isEmpty() && artilleryBlasts.size() == 0) { return; }
         this.camera = camera;
         for (var shot : volley) {
             if (shot.defensive() && shot.interception() != null) { continue; }
@@ -330,6 +334,7 @@ final class GpuAttackEffects implements Disposable {
             renderShot();
         }
         renderInterceptions();
+        artilleryBlasts.emit(explosions);
         missiles.render(camera);
         projectiles.render(camera, 0);
         if (depth == null) { explosions.render(camera); }
@@ -444,7 +449,9 @@ final class GpuAttackEffects implements Disposable {
                 float contact = contactSeconds(index);
                 float flash = attack.contactFlash(contact);
                 if (impacts[index] && flash > 0) {
-                    if ("bullet".equals(effect)) {
+                    // Tube artillery is ballistic like an autocannon, but its shell explodes rather than sparking.
+                    boolean shell = GpuArtilleryBlast.explodes(profiles[index]);
+                    if ("bullet".equals(effect) && !shell) {
                         boolean targetHit = attack.event.result().hit() && attack.event.target() != null
                               && (profiles[index] == null || profiles[index].impact() == null);
                         ballisticImpact(start, target, flash, profiles[index], attack.event.result().id().hashCode() ^ index * 31, targetHit);
@@ -491,7 +498,7 @@ final class GpuAttackEffects implements Disposable {
                         float impact = attack.contactFlash(launch.endSeconds(index));
                         if (impact <= 0) { continue; }
                         var profile = launch.profile();
-                        if (profile != null && profile.ballistic()) {
+                        if (profile != null && profile.ballistic() && !GpuArtilleryBlast.explodes(profile)) {
                             boolean targetHit = launch.hit(index) && attack.event.target() != null && profile.impact() == null;
                             ballisticImpact(launch.origins()[index % launch.origins().length], launch.targets()[index], impact,
                                   profile, launch.seed() ^ index * 31, targetHit);
@@ -643,6 +650,7 @@ final class GpuAttackEffects implements Disposable {
               || ammo.contains("M_INCENDIARY_LRM") || ammo.contains("M_THUNDER_INFERNO");
         int seed = attack.event.result().id().hashCode() ^ Float.floatToIntBits(center.x);
         if (ammo.contains("M_FLARE")) { glow(center, 1 + (1 - fade) * 2, FLARE_GLOW, 1 - fade, fade); }
+        else if (GpuArtilleryBlast.explodes(profile)) { artilleryBlasts.detonate(center, profile, seed); }
         else if (!smoke) { explosions.burst(center, 5.5f, 1 - fade, seed); }
         if (smoke || fire) {
             for (int puff = 0; puff < 4; puff++) {
@@ -701,6 +709,7 @@ final class GpuAttackEffects implements Disposable {
         groundComplete.clear();
         missiles.dispose();
         explosions.dispose();
+        artilleryBlasts.clear();
         flames.dispose();
         beams.dispose();
         projectiles.dispose();

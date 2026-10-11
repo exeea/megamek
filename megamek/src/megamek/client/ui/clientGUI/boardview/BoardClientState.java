@@ -2077,6 +2077,15 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                     .thenComparing(BoardMarker::label).thenComparingInt(BoardMarker::rgb)).toList();
     }
 
+    /**
+     * Whether the 3D terrain already shows this display as the crater the shell left, so painting its flat icon onto
+     * the ground would only cover the crater. The Tactical View draws no craters and keeps the icon.
+     */
+    private boolean isShownAsGpuCrater(SpecialHexDisplay display, Graphics2D graphics) {
+        return gpuCapture && !(graphics instanceof BoardTacticalGraphics)
+              && display.getType() == SpecialHexDisplay.Type.ARTILLERY_HIT;
+    }
+
     public BoardMarker.Kind pointMarkerKind(SpecialHexDisplay display) {
         if (isHeatMapMarker(display)) {
             return null;
@@ -2720,6 +2729,9 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                         continue;
                     }
                     if (gpuCapture && pointMarkerKind(shd) != null) {
+                        continue;
+                    }
+                    if (isShownAsGpuCrater(shd, graphics2D)) {
                         continue;
                     }
                     if (shd.drawNow(game.getPhase(), game.getRoundCount(), getLocalPlayer(), GUIP)) {

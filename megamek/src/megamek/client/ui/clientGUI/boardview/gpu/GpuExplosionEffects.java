@@ -18,7 +18,7 @@ import com.badlogic.gdx.utils.Disposable;
 
 /** Bounded, depth-clipped fire/smoke volumes. Owns its reusable coverage mesh; the caller owns the attack clock. */
 final class GpuExplosionEffects implements Disposable {
-    static final int CAPACITY = 128;
+    static final int CAPACITY = 192;
     private static final Comparator<Volume> BACK_TO_FRONT = Comparator.comparingDouble((Volume v) -> v.depth).reversed();
     private final Volume[] volumes = new Volume[CAPACITY];
     private final Vector3 burstCenter = new Vector3();
@@ -32,7 +32,20 @@ final class GpuExplosionEffects implements Disposable {
 
     private static final class Volume {
         final Vector3 center = new Vector3();
-        float radius, age, fire, alpha, seed, depth, stretch;
+        final Vector3 axis = new Vector3();
+        float radius, age, fire, alpha, seed, depth, stretch, elongation;
+        Look look = Look.PLAIN;
+    }
+
+    /**
+     * A volume's palette beyond the plain fireball. Each value runs from 0 to 1.
+     *
+     * @param soot  how dark the smoke is: 0 is the plain grey fireball smoke, 1 is the charcoal of a heavy shell
+     * @param ember how long fire keeps glowing inside the smoke after the blast has cooled
+     * @param dust  how far the smoke is browned toward thrown earth
+     */
+    record Look(float soot, float ember, float dust) {
+        static final Look PLAIN = new Look(0, 0, 0);
     }
 
     void begin() { count = 0; }
@@ -55,6 +68,14 @@ final class GpuExplosionEffects implements Disposable {
     }
 
     void add(Vector3 center, float radius, float age, float fire, float alpha, int seed) {
+        add(center, radius, age, fire, alpha, seed, Look.PLAIN, Vector3.Zero);
+    }
+
+    /**
+     * One volume with a palette, drawn out along {@code elongation}: its direction is the axis and its length how far
+     * the volume is stretched along it, so a zero vector keeps it round. The leading end tapers to a tip.
+     */
+    void add(Vector3 center, float radius, float age, float fire, float alpha, int seed, Look look, Vector3 elongation) {
         if (count == CAPACITY || radius <= 0 || alpha <= 0) { return; }
         Volume volume = volumes[count];
         if (volume == null) { volume = new Volume(); volumes[count] = volume; }
@@ -67,6 +88,10 @@ final class GpuExplosionEffects implements Disposable {
         volume.fire = MathUtils.clamp(fire, 0, 1);
         volume.alpha = MathUtils.clamp(alpha, 0, 1) / (1 + volume.stretch);
         volume.seed = Math.floorMod(seed, 4096) * .17f;
+        volume.look = look;
+        volume.elongation = elongation.len();
+        if (volume.elongation > 0) { volume.axis.set(elongation).scl(1 / volume.elongation); }
+        else { volume.axis.set(Vector3.Z); }
         count++;
     }
 
@@ -112,10 +137,13 @@ final class GpuExplosionEffects implements Disposable {
             shader.setUniformi("u_depth", 0);
             for (int i = 0; i < count; i++) {
                 Volume volume = volumes[i];
-                if (!camera.frustum.sphereInFrustum(volume.center, volume.radius * (1 + volume.stretch))) { continue; }
+                float reach = volume.radius * (1 + volume.stretch) * (1 + volume.elongation);
+                if (!camera.frustum.sphereInFrustum(volume.center, reach)) { continue; }
                 shader.setUniformf("u_centerRadius", volume.center.x, volume.center.y, volume.center.z, volume.radius);
                 shader.setUniformf("u_stretch", volume.stretch);
                 shader.setUniformf("u_effect", volume.age, volume.fire, volume.alpha, volume.seed);
+                shader.setUniformf("u_axis", volume.axis.x, volume.axis.y, volume.axis.z, volume.elongation);
+                shader.setUniformf("u_look", volume.look.soot(), volume.look.ember(), volume.look.dust(), 0);
                 proxy.render(shader, GL20.GL_TRIANGLES);
             }
         } finally {

@@ -45,7 +45,8 @@ final class GpuShaderPreview implements Disposable {
     private static final int[] CAPABILITIES = { GL20.GL_SCISSOR_TEST, GL20.GL_DEPTH_TEST, GL20.GL_CULL_FACE, GL20.GL_BLEND };
 
     enum Preset {
-        AUTO("Automatic", ""), EXPLOSION("Explosion", ""), LASER("Laser", "ISMediumLaser"), PPC("PPC", "ISPPC"),
+        AUTO("Automatic", ""), EXPLOSION("Explosion", ""), ARTILLERY("Artillery blast", ""),
+        LASER("Laser", "ISMediumLaser"), PPC("PPC", "ISPPC"),
         PROJECTILE("Autocannon", "ISAC5"), IMPACT("Ballistic impact", "ISAC5"),
         MISSILE("Missile salvo", "ISSRM6"), FLAME("Flamethrower", "ISFlamer"), SMOKE("Smoke particles", ""), JET("Jet flame", ""),
         FIRE("Ground fire / smoke", ""), RAIN("Rain", ""), SNOW("Snow", ""), HAIL("Hail", ""), MATERIAL("Material sphere", ""),
@@ -92,6 +93,9 @@ final class GpuShaderPreview implements Disposable {
     private final OrthographicCamera camera = new OrthographicCamera();
     private final Environment light = new Environment();
     private final GpuAttackEffects attacks = new GpuAttackEffects();
+    private final GpuExplosionEffects artilleryVolumes = new GpuExplosionEffects();
+    private final GpuArtilleryBlast artilleryBlast = new GpuArtilleryBlast();
+    private final Vector3 artilleryGround = new Vector3();
     private final GpuEffectDepth depth = new GpuEffectDepth();
     private final BoardSurface.Cache surfaces = new BoardSurface.Cache();
     private final Vector3 focus = new Vector3();
@@ -189,6 +193,9 @@ final class GpuShaderPreview implements Disposable {
                 var effects = new BoardAtmosphere.Effects(preset == Preset.RAIN ? .7f : 0,
                       preset == Preset.SNOW ? .7f : 0, preset == Preset.HAIL ? .7f : 0, 0, 0, .15f, 90);
                 weather.render(camera, sampleScene, effects, Color.WHITE, seconds);
+            } else if (preset == Preset.ARTILLERY) {
+                var style = renderArtillery(depth);
+                return new Frame(image(), preset.title + " (" + style + ") - drag to orbit - wheel to zoom", preset, seconds);
             } else if (attack != null) {
                 attacks.update(attack, null, preset == Preset.EXPLOSION ? Map.of()
                       : Map.of("1:-1", source, "2:-1", sphere));
@@ -204,6 +211,21 @@ final class GpuShaderPreview implements Disposable {
         } finally {
             restoreState();
         }
+    }
+
+    /**
+     * Plays one blast of each shape in turn, with a short pause between them, and names the shape that is showing.
+     */
+    private GpuArtilleryBlast.Style renderArtillery(GpuEffectDepth snapshot) {
+        float loop = GpuArtilleryBlast.SECONDS + .5f;
+        var styles = GpuArtilleryBlast.Style.values();
+        var style = styles[(int) (seconds / loop) % styles.length];
+        artilleryVolumes.begin();
+        artilleryGround.set(focus.x, focus.y, 0);
+        artilleryBlast.emit(artilleryVolumes, artilleryGround,
+              GpuArtilleryBlast.size(null), style, seconds % loop, 23);
+        artilleryVolumes.render(camera, snapshot);
+        return style;
     }
 
     private void initialize() {
@@ -248,19 +270,21 @@ final class GpuShaderPreview implements Disposable {
             case MATERIAL, SMOKE, JET -> 92;
             case IMPACT -> 65;
             case EXPLOSION -> 95;
+            case ARTILLERY -> BoardGeometry.height() * 2.6f;
             case FIRE -> BoardGeometry.width() * 3;
             case RAIN, SNOW, HAIL -> 200;
             default -> 170;
         };
         focus.set(0, 0, switch (preset) {
             case MATERIAL, EXPLOSION -> 18;
+            case ARTILLERY -> BoardGeometry.height() * .5f;
             case SMOKE, JET -> 30;
             case FIRE -> BoardGeometry.level() * 3;
             case RAIN, SNOW, HAIL -> 40;
             default -> 10;
         });
         if (preset == Preset.IMPACT) { focus.set(55, 0, 12); }
-        if (preset == Preset.EXPLOSION || preset == Preset.FIRE || preset.precipitation()) {
+        if (preset == Preset.EXPLOSION || preset == Preset.ARTILLERY || preset == Preset.FIRE || preset.precipitation()) {
             focus.x = BoardGeometry.centerX(new Coords(0, 0));
             focus.y = BoardGeometry.centerY(new Coords(0, 0));
         }
@@ -370,6 +394,7 @@ final class GpuShaderPreview implements Disposable {
     @Override
     public void dispose() {
         attacks.dispose();
+        artilleryVolumes.dispose();
         sampleParticles.dispose();
         depth.dispose();
         if (groundFire != null) { groundFire.dispose(); }

@@ -1,0 +1,160 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicReference;
+import javax.imageio.ImageIO;
+
+import com.badlogic.gdx.ApplicationAdapter;
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.PerspectiveCamera;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.Model;
+import com.badlogic.gdx.graphics.g3d.ModelBatch;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
+import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.ScreenUtils;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+
+/**
+ * Renders every artillery blast shape at several moments onto one review sheet, seen from a low angle over a grey
+ * ground like the reference sheet the effect was drawn from, and checks the blast actually draws, burns, cools and
+ * clears.
+ */
+@Tag("on-demand")
+class GpuArtilleryBlastSmokeTest {
+    private static final int SIZE = 256;
+    private static final float[] MOMENTS = { .08f, .35f, .9f, 1.8f, 3.2f, 4.8f };
+
+    @Test
+    void drawsEachBlastShapeFromIgnitionToClearing() {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var volumes = new GpuExplosionEffects();
+                var blast = new GpuArtilleryBlast();
+                var batch = new ModelBatch();
+                Model groundModel = null;
+                FrameBuffer buffer = null;
+                try {
+                    buffer = GpuAtmosphere.buffer(SIZE, SIZE, true);
+                    groundModel = new ModelBuilder().createBox(2000, 2000, 1,
+                          new Material(ColorAttribute.createDiffuse(.3f, .3f, .31f, 1)), VertexAttributes.Usage.Position);
+                    var ground = new ModelInstance(groundModel);
+                    ground.transform.setToTranslation(0, 0, -.5f);
+                    float size = GpuArtilleryBlast.size(null);
+                    var camera = new PerspectiveCamera(40, SIZE, SIZE);
+                    camera.position.set(0, -size * 5, size * 1.2f);
+                    camera.up.set(Vector3.Z);
+                    camera.lookAt(0, 0, size * .95f);
+                    camera.near = 1;
+                    camera.far = size * 40;
+                    camera.update();
+                    volumes.setLightDirection(new Vector3(-.3f, .5f, -1).nor());
+                    var styles = GpuArtilleryBlast.Style.values();
+                    var sheet = new BufferedImage(SIZE * MOMENTS.length, SIZE * styles.length, BufferedImage.TYPE_INT_RGB);
+                    var graphics = sheet.createGraphics();
+                    var empty = frame(buffer, batch, ground, camera, volumes, () -> { });
+                    try {
+                        for (int row = 0; row < styles.length; row++) {
+                            var style = styles[row];
+                            long firstWarmth = 0;
+                            for (int column = 0; column < MOMENTS.length; column++) {
+                                float seconds = MOMENTS[column];
+                                var image = frame(buffer, batch, ground, camera, volumes,
+                                      () -> blast.emit(volumes, Vector3.Zero, size, style, seconds, 41));
+                                if (column == 0) {
+                                    firstWarmth = warmth(image) - warmth(empty);
+                                    assertTrue(different(image, empty) > 500, style + " must draw at ignition");
+                                    var repeated = frame(buffer, batch, ground, camera, volumes,
+                                          () -> blast.emit(volumes, Vector3.Zero, size, style, seconds, 41));
+                                    assertTrue(Arrays.equals(pixels(image), pixels(repeated)),
+                                          style + " must not flicker while paused");
+                                }
+                                if (column == MOMENTS.length - 1) {
+                                    assertTrue(warmth(image) - warmth(empty) < firstWarmth, style + " must cool to smoke");
+                                }
+                                graphics.drawImage(image, column * SIZE, row * SIZE, null);
+                                graphics.setColor(java.awt.Color.WHITE);
+                                graphics.drawString(style + " " + seconds + "s", column * SIZE + 8, row * SIZE + 16);
+                            }
+                            var cleared = frame(buffer, batch, ground, camera, volumes,
+                                  () -> blast.emit(volumes, Vector3.Zero, size, style, GpuArtilleryBlast.SECONDS, 41));
+                            assertTrue(Arrays.equals(pixels(cleared), pixels(empty)), style + " must clear completely");
+                        }
+                    } finally { graphics.dispose(); }
+                    File output = new File(System.getProperty("megamek.gpu.screenshots"), "artillery-blast-review.png");
+                    assertTrue(output.getParentFile().isDirectory() || output.getParentFile().mkdirs());
+                    ImageIO.write(sheet, "png", output);
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally {
+                    volumes.dispose();
+                    batch.dispose();
+                    if (groundModel != null) { groundModel.dispose(); }
+                    if (buffer != null) { buffer.dispose(); }
+                    Gdx.app.exit();
+                }
+            }
+        }, GpuBoardWindow.configuration(false));
+        if (failure.get() != null) { throw new AssertionError("Artillery blast review failed", failure.get()); }
+    }
+
+    private static BufferedImage frame(FrameBuffer buffer, ModelBatch batch, ModelInstance ground,
+          PerspectiveCamera camera, GpuExplosionEffects volumes, Runnable enqueue) {
+        buffer.begin();
+        try {
+            ScreenUtils.clear(new Color(.62f, .63f, .65f, 1), true);
+            batch.begin(camera);
+            batch.render(ground);
+            batch.end();
+            volumes.begin();
+            enqueue.run();
+            volumes.render(camera);
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            return snapshot();
+        } finally { buffer.end(); }
+    }
+
+    private static BufferedImage snapshot() {
+        Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, SIZE, SIZE);
+        try {
+            BufferedImage image = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_RGB);
+            for (int y = 0; y < SIZE; y++) {
+                for (int x = 0; x < SIZE; x++) { image.setRGB(x, SIZE - 1 - y, pixels.getPixel(x, y) >>> 8); }
+            }
+            return image;
+        } finally { pixels.dispose(); }
+    }
+
+    private static int[] pixels(BufferedImage image) { return image.getRGB(0, 0, SIZE, SIZE, null, 0, SIZE); }
+
+    private static long warmth(BufferedImage image) {
+        return Arrays.stream(pixels(image)).mapToLong(pixel -> Math.max(0, (pixel >> 16 & 255) - (pixel & 255))).sum();
+    }
+
+    private static long different(BufferedImage left, BufferedImage right) {
+        int[] leftPixels = pixels(left);
+        int[] rightPixels = pixels(right);
+        long count = 0;
+        for (int index = 0; index < leftPixels.length; index++) {
+            if (leftPixels[index] != rightPixels[index]) { count++; }
+        }
+        return count;
+    }
+}
