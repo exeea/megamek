@@ -163,6 +163,8 @@ interface BoardSource extends AutoCloseable {
     default List<Coords> editorBrush(Coords coords, long generation) { return List.of(); }
     default void adjustEditorElevation(Coords coords, int levels, long generation) { }
     default void endEditorStroke() { }
+    /** Drops the route the editor's drag draws by hand, unbuilt (Esc or a right click during the drag). */
+    default void cancelEditorStroke() { }
     default megamek.client.ui.boardeditor.BoardEditorSession.Snapshot editorState() { return null; }
     default List<String> editorThemes() { return List.of(); }
     default void editorCommand(megamek.client.ui.boardeditor.BoardEditorSession.Command command, long generation) { }

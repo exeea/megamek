@@ -474,7 +474,7 @@ final class GpuMapSource implements BoardSource {
         if (next != shownPreview) {
             shownPreview = next;
             previewData = GpuEditorPreview.data(next, state.tool() == BoardEditorSession.Tool.ERASE,
-                  (coords, hex) -> terrain.preview(board, coords, hex));
+                  state.activeBrush().label(), (coords, hex) -> terrain.preview(board, coords, hex));
         }
         return previewData;
     }
@@ -584,6 +584,15 @@ final class GpuMapSource implements BoardSource {
                 if (editor != null) { editor.release(); }
                 refresh();
             }
+        });
+    }
+
+    @Override
+    public void cancelEditorStroke() {
+        onSwing(() -> {
+            if (closed || editor == null) { return; }
+            editor.cancelStroke();
+            endEditorStroke();
         });
     }
 

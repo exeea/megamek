@@ -24,7 +24,10 @@ class RailRouteEditorTest {
         send(session, Action.BRUSH_VALUE, "object:offset", "2.5");
         var start = new Coords(2, 1); var end = new Coords(2, 6);
         session.pointer(start, .3, .2, false);
-        session.pointer(end, -.2, .4, true);
+        session.pointer(end, -.1, .2, true);
+        session.finishStroke();
+        // A second stroke back over the route repaints its markers (dragging back within one stroke would retrace).
+        session.pointer(end, 0, 0, false);
         session.pointer(start, 0, 0, true);
         session.finishStroke();
         for (var at : Coords.intervening(start, end)) {
@@ -36,6 +39,7 @@ class RailRouteEditorTest {
             assertEquals(2.5, route.placement().offset());
             assertFalse(hex.containsAnyTerrainOf(Terrains.ROAD, Terrains.BRIDGE));
         }
+        // The repaint changed nothing, so it is no undo step: one Undo takes the route back.
         send(session, Action.UNDO, "", "");
         for (var at : Coords.intervening(start, end)) { assertNull(RailRoute.find(session.board().getHex(at), RailRoute.Kind.MAGLEV)); }
         send(session, Action.REDO, "", "");
@@ -619,8 +623,8 @@ class RailRouteEditorTest {
     }
 
     /**
-     * A refused step's notice stays for the rest of its drag and after it; the next stroke clears it. Editing a maglev's
-     * name or a pillared brush's level keeps its Pillars.
+     * A refused step's notice shows in the preview of the route being drawn, for the rest of its drag, and stays after
+     * its release; the next stroke clears it. Editing a maglev's name or a pillared brush's level keeps its Pillars.
      */
     @Test void aRefusalStaysShownForItsStrokeAndEditsKeepPillars() {
         var session = new BoardEditorSession();
@@ -634,9 +638,9 @@ class RailRouteEditorTest {
         session.pointer(south, 0, 0, true);
         session.pointer(centre, 0, 0, true);
         String refused = megamek.client.ui.Messages.getString("BoardEditor.routeSideUsed", "N", 2.0);
-        assertEquals(refused, session.snapshot().message());
+        assertEquals(refused, session.preview(centre, 0, 0, "ground").notice());
         session.pointer(centre, .1, .1, true);
-        assertEquals(refused, session.snapshot().message(), "a later move of the same drag");
+        assertEquals(refused, session.preview(centre, .1, .1, "ground").notice(), "a later move of the same drag");
         session.finishStroke();
         assertEquals(refused, session.snapshot().message(), "after the stroke");
         stroke(session, new Coords(1, 1), new Coords(1, 2));

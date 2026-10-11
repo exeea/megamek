@@ -148,14 +148,15 @@ public final class BoardEditorSession {
      * document's rules and placement problems in hex order, as of the last committed edit. {@code levels} are the
      * selected hex's heights, bottom to top. {@code tags} are the board's tags, sorted, and {@code roadsAutoExit} its
      * "exit roads to pavement" option; {@code boardComponents} are the blueprint components that the whole-board Remove
-     * offers, those some hex holds ({@link #boardComponents()}).
+     * offers, those some hex holds ({@link #boardComponents()}). {@code drawsRoutes}: a Paint drag with the active brush
+     * draws a route by hand, built on its release ({@link #pointer}).
      */
     public record Snapshot(long revision, String title, boolean dirty, boolean canUndo, boolean canRedo,
           Tool tool, String component, String asset, int brush, Coords selected, int elevation, String theme,
           List<Property> properties, Map<String, HexAppearance> appearance, List<BoardDecoration> objects,
           String object, String message, int width, int height, Brush activeBrush, List<Selection> selection,
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<BoardIssue> issues,
-          List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents) {
+          List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents, boolean drawsRoutes) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
         public boolean arena() { return tags.contains(BoardClassifier.ARENA_TAG); }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -168,10 +169,52 @@ public final class BoardEditorSession {
     /**
      * What the next Paint or Erase pointer event would do ({@link #preview}): each hex it changes as the document holds it
      * now ({@code before}) and as the event and its stroke's completion would leave it ({@code after}), in the order the
-     * event changes them. The hexes are copies the caller owns; {@code at} is the hex the event lands on.
+     * event changes them. The hexes are copies the caller owns; {@code at} is the hex the event lands on. While a route is
+     * drawn by hand, {@code path} is the waypoints a release at {@code at} builds (else empty), {@code notice} says why
+     * the release would leave a hex or side of it out, and {@code next} is the step past the path's end that the preview
+     * shows too, where the pointer heads (batch 10), but a release does not build (else null).
      */
-    public record Preview(Coords at, Map<Coords, Hex> before, Map<Coords, Hex> after) {
-        public static final Preview NONE = new Preview(null, Map.of(), Map.of());
+    public record Preview(Coords at, Map<Coords, Hex> before, Map<Coords, Hex> after, List<Coords> path, String notice,
+          Coords next) {
+        public static final Preview NONE = new Preview(null, Map.of(), Map.of(), List.of(), "", null);
+
+        /**
+         * The hexes where the event leaves a rail or maglev with a side that ends in a stub and did not before: a turn
+         * sharper than a gentle pair ({@link RailRoute#stranded} of the sides the route builder draws), which the editor
+         * marks red before the release. While a route is drawn by hand, those its release leaves: without the side only
+         * the step to {@code next} draws.
+         */
+        public List<Coords> stubs() {
+            List<Coords> result = new ArrayList<>();
+            after.forEach((at, hex) -> {
+                Hex was = before.get(at);
+                int step = stepSide(at);
+                for (BoardDecoration marker : hex.getDecorations()) {
+                    if (!RailRoute.isRoute(marker)) { continue; }
+                    int had = was.getDecorations().stream().filter(old -> old.id().equals(marker.id()))
+                          .mapToInt(old -> RailRoute.drawnSides(old, was)).findFirst().orElse(0);
+                    int sides = RailRoute.drawnSides(marker, hex) & ~(step & ~had);
+                    if ((RailRoute.stranded(sides) & ~RailRoute.stranded(had)) != 0) {
+                        result.add(at);
+                        break;
+                    }
+                }
+            });
+            return result;
+        }
+
+        /** The side of {@code at} that only the step from the path's end to {@code next} draws, as a mask; else 0. */
+        private int stepSide(Coords at) {
+            if (next == null) { return 0; }
+            Coords end = path.getLast(), other = at.equals(end) ? next : at.equals(next) ? end : null;
+            if (other == null) { return 0; }
+            for (int i = 1; i < path.size(); i++) {
+                Coords from = path.get(i - 1), to = path.get(i);
+                // The path steps between them itself, so it draws that side too.
+                if (from.equals(end) && to.equals(next) || from.equals(next) && to.equals(end)) { return 0; }
+            }
+            return RailRoute.side(at.direction(other));
+        }
 
         /** The objects the event adds or changes, each with the hex it belongs to afterwards. */
         public List<Map.Entry<Coords, BoardDecoration>> placed() {
@@ -242,8 +285,18 @@ public final class BoardEditorSession {
     private long boardComponentsId = -1;
     private Coords dragOrigin, moveTarget, routePaintFrom;
     private double dragX, dragY;
-    /** Where a route stroke's pointer entered {@link #routePaintFrom} (or pressed in it), as {@link #pointer} takes it. */
+    /**
+     * Where a route stroke's pointer entered {@link #routePaintFrom}, or took or came back into the last hex of
+     * {@link #drawing} (or pressed in it), as {@link #pointer} takes it.
+     */
     private double routeEntryX, routeEntryY;
+    /** A route drawn by hand that is not released yet ({@link #draw}): the document holds none of it; null otherwise. */
+    private RoutePath drawing;
+    /**
+     * The hex the last event of {@link #drawing} landed in, taken or not: the release builds the route on into it, as the
+     * preview shows it ({@link #finishStroke}).
+     */
+    private Coords drawingAt;
     private Coords selected;
     private int brush = 1;
     private Path path;
@@ -292,6 +345,8 @@ public final class BoardEditorSession {
     private List<Object> previewFor = List.of();
     /** Moved less than this share of a hex width in its hex, a route stroke's pointer heads for no side ({@link #heading}). */
     private static final double HEADING = .2;
+    /** How far from its centre towards its sides a hex's core reaches, as a share of the way ({@link #core}). */
+    private static final double CORE = .6;
 
     public BoardEditorSession() { this(BoardEditorBlueprint.get()); }
     public BoardEditorSession(BoardEditorBlueprint blueprint) {
@@ -329,7 +384,7 @@ public final class BoardEditorSession {
               properties(hex), hex == null ? Map.of() : hex.getAppearance(), hex == null ? List.of() : contentsOrder(hex),
               selectedObject, message, board().getWidth(), board().getHeight(), active, List.copyOf(selection), movePreview(),
               selectionGroups(), groupSizes(hex), issueList, levels(hex), board().getTags().stream().sorted().toList(),
-              board().getRoadsAutoExit(), boardComponents());
+              board().getRoadsAutoExit(), boardComponents(), drawsRoutes());
     }
 
     /**
@@ -445,7 +500,7 @@ public final class BoardEditorSession {
      * are reset and every hex is validated.
      */
     private void install(Board board) {
-        stroke.clear(); painted.clear(); routeStroke.clear(); routeBrush = null; strokeNotice = "";
+        stroke.clear(); painted.clear(); routeStroke.clear(); routeBrush = null; strokeNotice = ""; drawing = null;
         selected = null; selectedObject = ""; placed = false;
         selection.clear(); movingObjects.clear(); dragOrigin = moveTarget = null; pendingDrill = null;
         game.setBoard(board);
@@ -1015,10 +1070,90 @@ public final class BoardEditorSession {
         pointer(at, x, y, drag, pickedObject, additive, receiver, false);
     }
 
-    /** {@code invert} (Ctrl at the press) swaps Sculpt's raise and lower; other tools ignore it. */
+    /**
+     * {@code invert} (Ctrl at the press) swaps Sculpt's raise and lower; other tools ignore it. Paint with a rail, maglev or
+     * road brush draws the route by hand ({@link #draw}); every other event applies at once.
+     */
     public void pointer(Coords at, double x, double y, boolean drag, String pickedObject, boolean additive, String receiver,
           boolean invert) {
         if (at == null || !board().contains(at)) { return; }
+        if (drawsRoutes()) { draw(at, x, y, drag); }
+        else { event(at, x, y, drag, pickedObject, additive, receiver, invert); }
+    }
+
+    /**
+     * Whether a Paint drag with the active brush draws a route by hand: a rail or maglev brush, or the Road card (the user's
+     * design of 2026-10-11). Erase, and every other brush, applies each event at once.
+     */
+    private boolean drawsRoutes() {
+        if (tool != Tool.PAINT || sampledHex != null) { return false; }
+        var objects = paintTemplate.getDecorations();
+        return objects.isEmpty() ? brushComponent.equals("road") && stampLayout() == null : RailRoute.kind(objects.getFirst()) != null;
+    }
+
+    /**
+     * A pointer event of a route drawn by hand: the press starts its path, and each hex the drag enters is its next
+     * waypoint ({@link RoutePath#enter}: a skipped hex filled by a straight line, a step back into the previous hex taking
+     * the last waypoint back), once the pointer is in its core ({@link #core}), so grazing a hex's corner adds no
+     * waypoint and no sharp turn. A hex the pointer crossed only by its border on its way to a hex two from the path's
+     * end is taken when the pointer lands there, so the route bends through the hex the pointer went through. The
+     * document is untouched until the release builds the route as one undo step ({@link #finishStroke}), so the user can
+     * retrace to fix it first; {@link #preview} shows it meanwhile, and {@link #cancelStroke} drops it.
+     */
+    private void draw(Coords at, double x, double y, boolean drag) {
+        RoutePath was = drawing;
+        if (!drag || drawing == null) {
+            // A press while a route is pending (no release in between) builds that one into the stroke first.
+            buildDrawing();
+            drawing = RoutePath.start(at);
+        } else {
+            drawing = crossed(at);
+            if (!at.equals(drawing.end()) && core(x, y)) { drawing = drawing.enter(at, board()::contains); }
+        }
+        // The preview's heading is the pointer's movement since it took, or came back into, the path's last hex (heading).
+        if (at.equals(drawing.end()) && (drawing != was || !at.equals(drawingAt))) { routeEntryX = x; routeEntryY = y; }
+        drawingAt = at;
+        if (drawing != was) { revision++; }
+    }
+
+    /**
+     * The route drawn by hand with the pointer landing in {@code at}, before it takes that hex: where {@code at} lies two
+     * from the path's end, the hex of the drag's last event beside both is the one the pointer crossed on its way there,
+     * so it is taken first (else the path as it is).
+     */
+    private RoutePath crossed(Coords at) {
+        Coords end = drawing.end();
+        return drawingAt != null && end.distance(at) == 2 && end.distance(drawingAt) == 1 && drawingAt.distance(at) == 1
+              ? drawing.enter(drawingAt, board()::contains) : drawing;
+    }
+
+    /** Builds the route drawn by hand as its preview shows it: on into the hex its pointer is in, taken or not. */
+    private void buildDrawing() {
+        if (drawing != null && drawingAt != null) { drawing = drawing.enter(drawingAt, board()::contains); }
+        drawPath();
+    }
+
+    /** Builds the pending route drawn by hand into the stroke: its waypoints as one press and its drag, as before. */
+    private void drawPath() {
+        if (drawing == null) { return; }
+        List<Coords> hexes = drawing.hexes();
+        drawing = null;
+        for (int i = 0; i < hexes.size(); i++) { event(hexes.get(i), 0, 0, i > 0, null, false, "ground", false); }
+    }
+
+    /**
+     * Drops the route being drawn by hand (Esc or a right click during its drag): nothing of it was built, so the document
+     * stays as it is. Any other stroke is left to its release.
+     */
+    public void cancelStroke() {
+        if (drawing == null) { return; }
+        drawing = null;
+        revision++;
+    }
+
+    /** One pointer event, applied to the document at once (a route drawn by hand applies its waypoints on release). */
+    private void event(Coords at, double x, double y, boolean drag, String pickedObject, boolean additive, String receiver,
+          boolean invert) {
         // Why a route stroke left a hex or side out (it ends open there): kept for the whole stroke, so the drag's later
         // events do not wipe it.
         String notice = strokeNotice;
@@ -1178,39 +1313,65 @@ public final class BoardEditorSession {
      * editor's hover preview. It is computed by that event itself and its stroke's completion ({@link #completeStroke}),
      * run on the document without telling the board's listeners ({@link Board#quietly}) and undone at once with every
      * stroke field, so the preview is exactly what the event does and nothing else sees it. Before a press it previews
-     * the press; while a route stroke is drawn, the step into the neighbour its pointer heads for ({@link #heading}: its
-     * movement since it entered the stroke's last hex) once the pointer is in that hex; during any other stroke, and for
-     * the other tools, nothing. The result is kept until the document, the brush, the hex or the pointer the event
-     * depends on changes.
+     * the press. While a route is drawn by hand, it previews the release of the route as drawn ({@code path}) with its
+     * next step: into {@code at} where the pointer has not taken that hex yet (a release there builds it too), else into
+     * the neighbour it heads for ({@link #heading}: its movement since it took, or came back into, the path's last hex)
+     * unless that step goes back. While an Erase route stroke is drawn, the step into the neighbour its pointer heads
+     * for. During any other stroke, and for the other tools, nothing. The result is kept until the document, the brush,
+     * the path, the hex or the pointer the event depends on changes.
      */
     public Preview preview(Coords at, double x, double y, String receiver) {
         boolean routing = routePaintFrom != null;
-        boolean idle = stroke.isEmpty() && painted.isEmpty() && !placed && movingObjects.isEmpty() && dragOrigin == null;
-        if (at == null || !board().contains(at) || tool != Tool.PAINT && tool != Tool.ERASE || !routing && !idle) {
+        boolean idle = drawing == null && stroke.isEmpty() && painted.isEmpty() && !placed && movingObjects.isEmpty()
+              && dragOrigin == null;
+        if (at == null || !board().contains(at) || tool != Tool.PAINT && tool != Tool.ERASE
+              || drawing == null && !routing && !idle) {
             return Preview.NONE;
         }
-        Coords target = at;
-        if (routing && at.equals(routePaintFrom)) {
-            int side = heading(x - routeEntryX, y - routeEntryY);
-            target = side < 0 ? null : at.translated(side);
-            if (target == null || !board().contains(target)) { return Preview.NONE; }
+        Coords target = at, step = null;
+        List<Coords> path = List.of(), events;
+        if (drawing != null) {
+            // The route as a release builds it, into the hex the pointer is in; in its last hex, the step it heads for too.
+            path = crossed(at).enter(at, board()::contains).hexes();
+            events = path;
+            int side = at.equals(drawing.end()) ? heading(x - routeEntryX, y - routeEntryY) : -1;
+            Coords next = side < 0 ? null : at.translated(side);
+            if (next != null && board().contains(next) && (path.size() < 2 || !next.equals(path.get(path.size() - 2)))) {
+                events = new ArrayList<>(path);
+                events.add(next);
+                step = next;
+            }
+            target = events.getLast();
+        } else {
+            if (routing && at.equals(routePaintFrom)) {
+                int side = heading(x - routeEntryX, y - routeEntryY);
+                target = side < 0 ? null : at.translated(side);
+                if (target == null || !board().contains(target)) { return Preview.NONE; }
+            }
+            events = List.of(target);
         }
         // Only a precisely painted object depends on the pointer's place within its hex (Erase never does).
         boolean exact = tool == Tool.PAINT && precision && sampledHex == null && !paintTemplate.getDecorations().isEmpty()
               && RailRoute.kind(paintTemplate.getDecorations().getFirst()) == null;
         double pointX = exact ? x : 0, pointY = exact ? y : 0;
         String support = receiver == null ? "ground" : receiver;
-        List<Object> key = List.of(revision, target, pointX, pointY, support);
+        List<Object> key = List.of(revision, events, pointX, pointY, support);
         if (key.equals(previewFor)) { return preview; }
         Saved saved = save();
         Map<Coords, Hex> originals = new LinkedHashMap<>(), after = new LinkedHashMap<>();
         Coords event = target;
+        List<Coords> drawn = events;
+        String[] notice = { "" };
+        boolean hand = drawing != null;
         dryRun = originals;
         try {
             board().quietly(() -> {
                 try {
-                    pointer(event, pointX, pointY, routing, null, false, support);
+                    // A route drawn by hand is built as its release builds it; any other event is the event itself.
+                    if (drawsRoutes()) { drawing = new RoutePath(drawn); drawPath(); }
+                    else { pointer(event, pointX, pointY, routing, null, false, support); }
                     if (!stroke.isEmpty()) { completeStroke(); }
+                    if (hand) { notice[0] = strokeNotice; }
                     originals.keySet().forEach(cell -> after.put(cell, board().getHex(cell).duplicate()));
                 } finally {
                     dryRun = null;
@@ -1227,10 +1388,26 @@ public final class BoardEditorSession {
                 changed.put(cell, hex);
             }
         });
-        preview = changed.isEmpty() ? Preview.NONE : new Preview(target, java.util.Collections.unmodifiableMap(before),
-              java.util.Collections.unmodifiableMap(changed));
+        // A route drawn over track it does not change still shows its path.
+        preview = changed.isEmpty() && path.isEmpty() ? Preview.NONE : new Preview(target,
+              java.util.Collections.unmodifiableMap(before), java.util.Collections.unmodifiableMap(changed), path, notice[0],
+              step);
         previewFor = key;
         return preview;
+    }
+
+    /**
+     * Whether the pointer at {@code x, y} (hex widths and heights from its hex's centre, as {@link #pointer} takes them)
+     * lies in its hex's core: no farther than {@link #CORE} of the way from the centre to any side. A route drawn by hand
+     * takes a hex there ({@link #draw}).
+     */
+    static boolean core(double x, double y) {
+        double px = x * HexTile.WIDTH, py = y * HexTile.HEIGHT;
+        for (int direction = 0; direction < 6; direction++) {
+            float[] border = RailRoute.border(direction);
+            if ((px * border[0] + py * border[1]) / (border[0] * border[0] + border[1] * border[1]) > CORE) { return false; }
+        }
+        return true;
     }
 
     /**
@@ -1256,13 +1433,13 @@ public final class BoardEditorSession {
     private record Saved(Coords selected, String selectedObject, String component, String message, String strokeNotice,
           long revision, List<Selection> selection, Set<Coords> painted, Map<Coords, RouteCell> routeStroke,
           BoardDecoration routeBrush, Coords routePaintFrom, double routeEntryX, double routeEntryY, boolean placed,
-          Map<Coords, Hex> stroke, List<BoardIssue> importIssues) { }
+          Map<Coords, Hex> stroke, List<BoardIssue> importIssues, RoutePath drawing) { }
 
     private Saved save() {
         // Hash copies, not Set.copyOf or Map.copyOf, whose probing is slow for runs of Coords (finishStroke).
         return new Saved(selected, selectedObject, component, message, strokeNotice, revision, new ArrayList<>(selection),
               new java.util.HashSet<>(painted), new java.util.HashMap<>(routeStroke), routeBrush, routePaintFrom,
-              routeEntryX, routeEntryY, placed, new LinkedHashMap<>(stroke), importIssues);
+              routeEntryX, routeEntryY, placed, new LinkedHashMap<>(stroke), importIssues, drawing);
     }
 
     private void restore(Saved saved) {
@@ -1274,7 +1451,7 @@ public final class BoardEditorSession {
         routeBrush = saved.routeBrush(); routePaintFrom = saved.routePaintFrom(); placed = saved.placed();
         routeEntryX = saved.routeEntryX(); routeEntryY = saved.routeEntryY();
         stroke.clear(); stroke.putAll(saved.stroke());
-        importIssues = saved.importIssues();
+        importIssues = saved.importIssues(); drawing = saved.drawing();
     }
 
     /**
@@ -2511,7 +2688,12 @@ public final class BoardEditorSession {
         }
     }
 
+    /**
+     * Ends the stroke as one undo step; a route drawn by hand is built now, on its release ({@link #draw}), as its preview
+     * shows it.
+     */
     public void finishStroke() {
+        buildDrawing();
         if (!movingObjects.isEmpty()) {
             Map<Selection, BoardDecoration> destinations = new LinkedHashMap<>();
             for (Selection item : movingObjects.keySet()) {
