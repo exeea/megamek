@@ -44,7 +44,7 @@ interface BoardSource extends AutoCloseable {
               boolean ecmHatch, boolean levelShading, boolean unitLinks, boolean hexTypes, boolean hexLabelOutline) {
             /** The settings' defaults. */
             public static final Overlays DEFAULTS = new Overlays(true, true, true, true, true, false, true, false,
-                  true);
+                  false);
 
             static Overlays capture(GUIPreferences gui) {
                 return new Overlays(gui.getTacticalOverlaysOpen(), gui.getTacticalStatusBadges(),
@@ -124,6 +124,8 @@ interface BoardSource extends AutoCloseable {
 
     record PhaseStatus(String text, boolean blocking) { }
     Frame takeFrame();
+    /** A printable snapshot queued by the EDT, consumed once by the render thread; none for game views. */
+    default GpuBoardPrint.Request takePrintRequest() { return null; }
     void refresh();
     /** EDT-only: discard file-backed artwork caches before publishing a fresh snapshot. */
     default void reloadAssets() throws java.io.IOException { refresh(); }
@@ -163,6 +165,8 @@ interface BoardSource extends AutoCloseable {
     default List<Coords> editorBrush(Coords coords, long generation) { return List.of(); }
     default void adjustEditorElevation(Coords coords, int levels, long generation) { }
     default void endEditorStroke() { }
+    /** Drops the route the editor's drag draws by hand, unbuilt (Esc or a right click during the drag). */
+    default void cancelEditorStroke() { }
     default megamek.client.ui.boardeditor.BoardEditorSession.Snapshot editorState() { return null; }
     default List<String> editorThemes() { return List.of(); }
     default void editorCommand(megamek.client.ui.boardeditor.BoardEditorSession.Command command, long generation) { }

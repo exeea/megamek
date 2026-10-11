@@ -357,6 +357,13 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
 
     static float apronLength() { return BoardRelief.metres(APRON_METRES) / BoardGeometry.hexScale(); }
 
+    /** The built deck's complete support, shared by its drawing and neighboring rail or object placement. */
+    BoardBridge.Shape withDeck(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck,
+          TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
+        var support = deck.sloped() ? BoardBridgeSlope.build(tile, deck, this) : shape;
+        return withPiers(scene, tile, deck, support, lod, surfaces);
+    }
+
     static BoardBridgeFooting build(BoardScene scene, BoardScene.Tile tile, TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
         float level = tile.elevation() + BoardBridge.feature(tile).elevation();
         float scale = BoardGeometry.hexScale();

@@ -211,7 +211,7 @@ final class LOSModifierCalculator {
         return measure(game, attackInfo, targetHeight, localPlayer, trace);
     }
 
-    /** Native endpoints use LOS levels above the hex, with zero at the surface, rather than TW unit heights. */
+    /** Accepts engine-relative sight heights (physical ground-unit heights minus one), or absolute aero altitude. */
     static Measurement measureAtHeights(Game game, int boardId, Coords attackerPos, Coords targetPos,
           int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
           boolean attackerIsAltitude, boolean targetIsAltitude, @Nullable Player localPlayer, boolean trace) {

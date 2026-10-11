@@ -108,7 +108,9 @@ final class GpuHexGrid implements Disposable {
         }
         Gdx.gl.glDepthMask(false);
         Gdx.gl.glEnable(GL20.GL_BLEND);
-        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+        // Source-over alpha keeps opaque terrain opaque beneath antialiased grid edges in PNG exports.
+        Gdx.gl.glBlendFuncSeparate(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA, GL20.GL_ONE,
+              GL20.GL_ONE_MINUS_SRC_ALPHA);
         try {
             shader.bind();
             shader.setUniformMatrix("u_projTrans", camera.camera.combined);

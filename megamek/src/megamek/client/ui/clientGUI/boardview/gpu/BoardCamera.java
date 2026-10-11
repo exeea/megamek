@@ -346,9 +346,9 @@ final class BoardCamera {
         update();
     }
 
-    /** Sets the isometric or the straight-down, north-up angle; the Tactical View keeps the latter. */
+    /** Sets the isometric or the straight-down, north-up angle; the Tactical View only allows the latter. */
     void setIsometric(boolean value) {
-        if (value && rotationLocked()) { return; }
+        if (value && tactical()) { return; }
         setFirstPerson(false);
         stopFraming();
         stopRotation();
@@ -363,18 +363,10 @@ final class BoardCamera {
     }
 
     /**
-     * The Tactical View holds its north-up top view (user, 2026-10-10): nothing orbits, tilts or turns it, neither
-     * the held keys, the mouse and minimap orbits nor the isometric preset.
-     */
-    boolean rotationLocked() {
-        return tactical();
-    }
-
-    /**
      * Enters or leaves the Tactical View. Entering turns the camera straight down, north up, and keeps the focus and
      * zoom (or the fit to the window); leaving restores the replaced 3D pose, including that fit, exactly. A turn or
      * framing move in progress counts as finished, so the 3D view returns where it was heading. In between, the
-     * camera pans and zooms as in the 3D view and holds its angle ({@link #rotationLocked()}).
+     * camera pans, zooms and rotates while continuing to look straight down.
      */
     void setTactical(boolean enabled, BoardScene scene) {
         if (enabled == tactical()) { return; }
@@ -450,24 +442,22 @@ final class BoardCamera {
             look(rotation, -inclination);
             return;
         }
-        if (rotationLocked()) { return; }
         stopRotation();
         anchorOrbit();
         azimuth = wrapDegrees(azimuth + rotation);
         tilt(inclination);
     }
 
-    /** Changes only the viewing angle, so holding a tilt key does not interrupt a keyboard turn in progress. */
+    /** Changes only the tilt, keeping Tactical View overhead without interrupting a keyboard turn in progress. */
     void tilt(float inclination) {
         if (firstPerson) {
             look(0, -inclination);
             return;
         }
-        if (rotationLocked()) { return; }
         stopFraming();
         fitToWindow = false;
         anchorOrbit();
-        tilt = MathUtils.clamp(tilt + inclination, 0, MAX_TILT);
+        tilt = tactical() ? 0 : MathUtils.clamp(tilt + inclination, 0, MAX_TILT);
         updateCamera();
     }
 
@@ -482,7 +472,6 @@ final class BoardCamera {
             look(direction * ROTATION_STEP, 0);
             return;
         }
-        if (rotationLocked()) { return; }
         stopFraming();
         fitToWindow = false;
         anchorOrbit();

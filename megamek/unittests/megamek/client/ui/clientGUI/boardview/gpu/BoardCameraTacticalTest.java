@@ -16,8 +16,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Tactical View's camera: it enters at the north-up top view, holds it while it pans, zooms and frames, and hands
- * the replaced 3D pose back unchanged.
+ * The Tactical View's camera: it enters north up, rotates while looking straight down, and hands the replaced 3D
+ * pose back unchanged.
  */
 class BoardCameraTacticalTest {
     private static final float TOLERANCE = 0.0001f;
@@ -46,7 +46,7 @@ class BoardCameraTacticalTest {
     }
 
     @Test
-    void entersTheNorthUpTopViewHoldsItAndRestoresTheReplacedPoseExactly() {
+    void entersTheNorthUpTopViewAllowsRotationAndRestoresTheReplacedPoseExactly() {
         BoardCamera view = orbiting();
         Vector3 focus = view.focus.cpy();
         float zoom = view.camera.zoom;
@@ -67,32 +67,37 @@ class BoardCameraTacticalTest {
         view.zoom(2);
         assertEquals(2 * zoom, view.camera.zoom, TOLERANCE);
 
-        assertTrue(view.rotationLocked());
-        Vector3 panned = view.focus.cpy();
-        // The mouse, minimap and held-key orbit, the tilt keys, a turn step and the isometric preset.
+        // Mouse, minimap and keyboard turns rotate the top view; tilt and the isometric preset cannot incline it.
         view.orbit(35, 20);
-        assertTopView(view);
+        assertEquals(35, view.azimuth(), TOLERANCE);
+        assertEquals(0, view.tilt(), TOLERANCE);
+        assertTrue(view.camera.direction.epsilonEquals(0, 0, -1, TOLERANCE));
+        assertFalse(view.camera.up.epsilonEquals(0, 1, 0, TOLERANCE), "The camera rotates, not just its stored azimuth");
         view.tilt(15);
-        assertTopView(view);
+        assertEquals(35, view.azimuth(), TOLERANCE);
+        assertEquals(0, view.tilt(), TOLERANCE);
         view.rotateStep(1);
-        assertFalse(view.isRotating(), "No turn starts");
+        assertTrue(view.isRotating(), "A keyboard turn starts in the Tactical View");
         view.advance(BoardCamera.ROTATION_SECONDS);
-        assertTopView(view);
+        assertEquals(35 + BoardCamera.ROTATION_STEP, view.azimuth(), TOLERANCE);
+        assertEquals(0, view.tilt(), TOLERANCE);
         view.setIsometric(true);
-        assertTopView(view);
+        assertFalse(view.isIsometric());
+        assertEquals(35 + BoardCamera.ROTATION_STEP, view.azimuth(), TOLERANCE,
+              "The unavailable isometric preset preserves the tactical rotation");
+        assertTrue(view.camera.direction.epsilonEquals(0, 0, -1, TOLERANCE));
         assertTrue(view.tactical(), "Only setTactical leaves the Tactical View");
-        assertEquals(panned, view.focus, "The locked controls leave the view where it was");
         assertEquals(2 * zoom, view.camera.zoom, TOLERANCE);
 
         view.setTactical(false, null);
         assertFalse(view.tactical());
-        assertFalse(view.rotationLocked());
         assertEquals(focus, view.focus);
         assertEquals(zoom, view.camera.zoom);
         assertEquals(azimuth, view.azimuth());
         assertEquals(tilt, view.tilt());
         view.orbit(10, 5);
         assertEquals(azimuth + 10, view.azimuth(), TOLERANCE, "The 3D view orbits on from its own pose");
+        assertEquals(tilt + 5, view.tilt(), TOLERANCE, "The 3D view can still tilt");
     }
 
     @Test

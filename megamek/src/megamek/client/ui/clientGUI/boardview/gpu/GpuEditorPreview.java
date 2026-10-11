@@ -52,12 +52,13 @@ import megamek.common.units.Terrains;
 final class GpuEditorPreview implements Disposable {
     /**
      * The preview as the render thread draws it, made on the EDT ({@link #data}): the hex the event lands on, whether it
-     * erases, the hexes it changes, the objects it shows by hex (Paint: each changed hex's objects afterwards; Erase: those
-     * that go), the terrain stand-ins, their tint (rgba8888) and the label at {@link #at}.
+     * erases, the hexes it changes (while a route is drawn by hand, the hexes of its path), the objects it shows by hex
+     * (Paint: each changed hex's objects afterwards; Erase: those that go), the terrain stand-ins, their tint (rgba8888),
+     * the label at {@link #at} and the hexes where the route ends in a new stub (marked red).
      */
     record Data(Coords at, boolean erase, List<Coords> hexes, Map<Coords, List<BoardScene.Feature>> objects,
-          List<StandIn> standIns, int tint, String label) {
-        static final Data NONE = new Data(null, false, List.of(), Map.of(), List.of(), 0, "");
+          List<StandIn> standIns, int tint, String label, List<Coords> stubs) {
+        static final Data NONE = new Data(null, false, List.of(), Map.of(), List.of(), 0, "", List.of());
     }
 
     /**
@@ -105,10 +106,13 @@ final class GpuEditorPreview implements Disposable {
 
     /**
      * {@code preview} as the render thread draws it ({@link Data}); {@code capture} makes a hex the tile it would be at its
-     * coords (BoardTiles#preview), whose minimap colour ({@link GpuMinimap#colour}) tints Paint's stand-ins. On the EDT.
+     * coords (BoardTiles#preview), whose minimap colour ({@link GpuMinimap#colour}) tints Paint's stand-ins. A route drawn by
+     * hand is labelled with what it lays ({@code brush} where no terrain names it), its length and the session's notice.
+     * On the EDT.
      */
-    static Data data(BoardEditorSession.Preview preview, boolean erase, BiFunction<Coords, Hex, BoardScene.Tile> capture) {
-        if (preview.after().isEmpty()) { return Data.NONE; }
+    static Data data(BoardEditorSession.Preview preview, boolean erase, String brush,
+          BiFunction<Coords, Hex, BoardScene.Tile> capture) {
+        if (preview.after().isEmpty() && preview.path().isEmpty()) { return Data.NONE; }
         Set<String> removed = preview.removed().stream().map(BoardEditorSession.Selection::object).collect(Collectors.toSet());
         Map<Coords, List<BoardScene.Feature>> objects = new LinkedHashMap<>();
         List<StandIn> standIns = new ArrayList<>();
@@ -136,10 +140,16 @@ final class GpuEditorPreview implements Disposable {
             label = label.isEmpty() ? count : label + ", " + count;
         }
         if (erase && !label.isEmpty()) { label = Messages.getString("BoardEditor.previewRemoves", label); }
+        List<Coords> hexes = List.copyOf(preview.after().keySet());
+        if (!preview.path().isEmpty()) {
+            label = Messages.getString("BoardEditor.previewPath", label.isEmpty() ? brush : label, preview.path().size());
+            if (!preview.notice().isEmpty()) { label += " \u00B7 " + preview.notice(); }
+            hexes = preview.path().stream().distinct().toList();
+        }
         int tint = erase ? Color.rgba8888(ERASE) : labelled == null ? 0
               : GpuMinimap.colour(capture.apply(labelled, preview.after().get(labelled)));
-        return new Data(labelled == null ? preview.at() : labelled, erase, List.copyOf(preview.after().keySet()),
-              objects, List.copyOf(standIns), tint, label);
+        return new Data(labelled == null ? preview.at() : labelled, erase, hexes, objects, List.copyOf(standIns), tint, label,
+              preview.stubs());
     }
 
     /** A hex's file form without its objects: what a terrain card changes. */
@@ -266,7 +276,8 @@ final class GpuEditorPreview implements Disposable {
                     ghost = terrain.editorGhost(at, feature);
                 }
                 if (ghost == null) { continue; }
-                for (Material material : ghost.materials) { ghostly(material, data.erase()); }
+                // Where a drawn route ends in a new stub (a turn too sharp to lay), its ghost is red, as Erase's.
+                for (Material material : ghost.materials) { ghostly(material, data.erase() || data.stubs().contains(at)); }
                 ghosts.add(ghost);
                 if (data.erase()) { outlines.add(ghost.calculateBoundingBox(new BoundingBox()).mul(ghost.transform)); }
             }

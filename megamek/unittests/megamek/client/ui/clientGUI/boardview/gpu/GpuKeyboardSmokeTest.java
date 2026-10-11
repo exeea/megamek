@@ -107,10 +107,15 @@ class GpuKeyboardSmokeTest {
                             processor.keyDown(Input.Keys.F9);
                             processor.keyUp(Input.Keys.F9);
                             assertEquals(GpuHudState.Dialog.HELP, hud.state.dialog, "F9 opens Help now");
+                            // Help consumes every key while open; close it before checking board-key forwarding.
+                            processor.keyDown(Input.Keys.ESCAPE);
+                            processor.keyUp(Input.Keys.ESCAPE);
+                            assertEquals(GpuHudState.Dialog.NONE, hud.state.dialog);
+                            super.render();
                             press(keyboard, InputEvent.CTRL_DOWN_MASK);
                             processor.keyDown(Input.Keys.K);
                             processor.keyUp(Input.Keys.K);
-                            assertEquals(GpuHudState.Dialog.HELP, hud.state.dialog, "Ctrl+K no longer toggles Help");
+                            assertEquals(GpuHudState.Dialog.NONE, hud.state.dialog, "Ctrl+K no longer toggles Help");
                             verify(source).key(KeyEvent.VK_K, true, InputEvent.CTRL_DOWN_MASK);
                             press(keyboard, 0);
                             processor.keyDown(Input.Keys.I);
@@ -125,8 +130,7 @@ class GpuKeyboardSmokeTest {
                             verify(source, never()).key(KeyEvent.VK_I, true, InputEvent.SHIFT_DOWN_MASK);
                             verify(source, never()).key(KeyEvent.VK_F9, true, 0);
 
-                            // Both Shift keys boost WASD in 3D, Tactical View and Free Flight, and Q/E in 3D and Free
-                            // Flight. The Tactical View holds north up: there Q/E turn nothing, boosted or not.
+                            // Both Shift keys boost WASD and Q/E in 3D, Tactical View and Free Flight.
                             source.uiPreferences = GpuHudInputTest.preferences();
                             super.render();
                             clearInvocations(source);
@@ -140,11 +144,7 @@ class GpuKeyboardSmokeTest {
                                 }
                                 for (int key : new int[] { Input.Keys.W, Input.Keys.A, Input.Keys.S, Input.Keys.D,
                                       Input.Keys.Q, Input.Keys.E }) {
-                                    if (mode == 1 && (key == Input.Keys.Q || key == Input.Keys.E)) {
-                                        assertLocked(keyboard, processor, key);
-                                    } else {
-                                        assertCameraBoost(keyboard, processor, key);
-                                    }
+                                    assertCameraBoost(keyboard, processor, key);
                                 }
                             }
                             var start = boardCamera.camera.position.cpy();
@@ -200,18 +200,6 @@ class GpuKeyboardSmokeTest {
                         assertEquals(0, advanceCamera(key), .001f, "Releasing the camera key stops movement");
                         when(keyboard.isKeyPressed(shift)).thenReturn(false);
                     }
-                }
-
-                /** A held turn key, plain and with Shift, leaves the Tactical View's north-up camera where it is. */
-                private void assertLocked(Input keyboard, InputProcessor processor, int key) {
-                    for (boolean shift : new boolean[] { false, true }) {
-                        when(keyboard.isKeyPressed(Input.Keys.SHIFT_LEFT)).thenReturn(shift);
-                        processor.keyDown(key);
-                        assertEquals(0, advanceCamera(key), "The Tactical View does not turn");
-                        processor.keyUp(key);
-                        assertEquals(0, boardCamera.azimuth(), "North stays up");
-                    }
-                    when(keyboard.isKeyPressed(Input.Keys.SHIFT_LEFT)).thenReturn(false);
                 }
 
                 private float advanceCamera(int key) {

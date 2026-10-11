@@ -103,7 +103,7 @@ final class GpuUtilityBar implements GpuHud.Component {
               UiTheme.MINT)).padLeft(CHIP_GAP);
         north = new Container<>(ui.label(Messages.getString("GpuBoard.hud.minimap.north"), "hud-medium", 12, NORTH));
         north.setName("tactical-north");
-        // Turned with the camera, so it points north while the view orbits.
+        // Turned with the camera, so it points north while the view rotates.
         north.setTransform(true);
         // Part of the board drawing in the prototype: presses pass through it to the board.
         north.setTouchable(Touchable.disabled);
@@ -134,10 +134,7 @@ final class GpuUtilityBar implements GpuHud.Component {
         return button;
     }
 
-    /**
-     * Camera presets and explicit fitting share their controls in every board workspace. Returns the Isometric
-     * button, which its owner disables while the camera's rotation is locked (the Tactical View).
-     */
+    /** Shared camera controls; the owner disables the returned isometric preset in the Tactical View. */
     static UiButton cameraButtons(UiKit ui, Table row, BoardCamera camera, Runnable fitBoard) {
         cameraButton(ui, row, "top", "hex", "Top view", () -> camera.setIsometric(false));
         UiButton isometric = cameraButton(ui, row, "isometric", "layers", "Isometric view",
@@ -183,7 +180,7 @@ final class GpuUtilityBar implements GpuHud.Component {
         BoardScene.Command minimap = minimapCommand(inputs);
         // K12: the round's reviewable events the board has presented, which the log lists (C.6; game.js S.events)
         int reviewable = state.history.played().size();
-        isometric.setDisabled(camera.rotationLocked());
+        isometric.setDisabled(camera.tactical());
         tactical.pressed(tacticalView);
         wireframe.pressed(tuning.wireframe()).setDisabled(!GpuWireframe.supported());
         map.pressed(inputs.preferences().minimapEnabled()).setDisabled(minimap == null || !minimap.enabled());

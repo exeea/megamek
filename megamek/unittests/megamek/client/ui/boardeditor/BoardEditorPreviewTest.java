@@ -116,9 +116,10 @@ class BoardEditorPreviewTest {
     }
 
     /**
-     * While a route is drawn, the preview is the step into the neighbour the pointer heads for, the gentle piece or a
-     * tight step's stubs, exactly as the stroke then draws it when the pointer enters that hex; barely moved from where
-     * it entered its hex (here the centre) it heads nowhere. Other strokes and tools preview nothing.
+     * While a route is drawn, the preview is the route drawn so far and the step into the neighbour the pointer heads for,
+     * the gentle piece or a tight step's stubs, exactly as the release then builds it once the pointer has entered that
+     * hex; barely moved from where it entered its hex (here the centre) it heads nowhere, and the preview is the route as
+     * drawn. Other strokes and tools preview nothing.
      */
     @Test void aRouteStrokePreviewsTheStepThePointerHeadsFor() {
         for (int side : new int[] { 3, 2, 1 }) {
@@ -127,7 +128,10 @@ class BoardEditorPreviewTest {
             Coords start = new Coords(5, 2), turn = start.translated(3);
             session.pointer(start, 0, 0, false);
             session.pointer(turn, 0, 0, true);
-            assertSame(Preview.NONE, session.preview(turn, .05, .05, "ground"), "Near the centre the pointer heads nowhere");
+            Preview drawn = session.preview(turn, .05, .05, "ground");
+            assertEquals(List.of(start, turn), drawn.path());
+            assertEquals(turn, drawn.at(), "Near the centre the pointer heads nowhere");
+            assertEquals(java.util.Set.of(start, turn), drawn.after().keySet(), "No step ahead");
             float[] border = RailRoute.border(side);
             double x = border[0] / megamek.common.board.HexTile.WIDTH * .6, y = border[1] / megamek.common.board.HexTile.HEIGHT * .6;
             assertEquals(side, BoardEditorSession.heading(x, y));
@@ -154,21 +158,25 @@ class BoardEditorPreviewTest {
     }
 
     /**
-     * The step a route stroke previews follows the pointer's movement, not its place: just inside the hex it entered,
-     * the pointer still lies in the half it came in by, centred or off-centre. There it heads nowhere (not back, nor
-     * into a side neighbour by a tight turn) until it moves; moving on straight, even with a little drift, it heads
-     * straight on.
+     * The step a route stroke previews follows the pointer's movement, not its place: where it takes the hex it entered
+     * (just inside that hex's core), the pointer still lies in the half it came in by, centred or off-centre. There it
+     * heads nowhere (not back, nor into a side neighbour by a tight turn) until it moves; moving on straight, even with a
+     * little drift, it heads straight on. Just inside the hex's border, before its core, the hex is not taken yet: the
+     * preview is the step into it, which a release there builds.
      */
     @Test void aRouteStrokeHeadsWhereItsPointerMovesNotWhereItLies() {
-        for (double across : new double[] { 0, .22, -.22 }) {
+        for (double across : new double[] { 0, .15, -.15 }) {
             var session = new BoardEditorSession();
             brush(session, Action.ASSET, "", RailRoute.Kind.RAIL.asset);
             Coords start = new Coords(5, 2), turn = start.translated(3);
             session.pointer(start, 0, 0, false);
-            // The pointer enters the hex to the south just inside its north border.
-            double y = .42;
+            session.pointer(turn, across, .42, true);
+            assertEquals(List.of(start, turn), session.preview(turn, across, .42, "ground").path(), "A release builds it");
+            assertEquals(turn, session.preview(turn, across, .42, "ground").at(), "The step into it");
+            // The pointer reaches the core of the hex to the south just inside it, in its north half.
+            double y = .25;
             session.pointer(turn, across, y, true);
-            assertSame(Preview.NONE, session.preview(turn, across, y, "ground"), "Entering at " + across + " heads nowhere yet");
+            assertEquals(turn, session.preview(turn, across, y, "ground").at(), "Entering at " + across + " heads nowhere yet");
             assertEquals(turn.translated(3), session.preview(turn, across, y - .3, "ground").at(), "Moving south from " + across);
             assertEquals(turn.translated(3), session.preview(turn, across + .1, y - .3, "ground").at(), "with drift");
         }

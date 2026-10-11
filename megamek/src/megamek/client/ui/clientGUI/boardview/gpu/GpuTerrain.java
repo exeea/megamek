@@ -2729,20 +2729,33 @@ final class GpuTerrain implements Disposable {
                     continue;
                 }
                 var footing = BoardBridgeFooting.build(scene, tile, lod, surfaces);
-                var slope = deck.sloped() ? BoardBridgeSlope.build(tile, deck, footing) : null;
-                var shape = BoardBridgeFooting.withPiers(scene, tile, deck, slope != null ? slope : footing.shape(), lod, surfaces);
+                var shape = footing.withDeck(scene, tile, deck, lod, surfaces);
                 if (!shape.facets().isEmpty()) { bridgeShapes.put(tile.coords(), shape); }
                 BoardRoad road = footing.road(deck, tile.coords());
                 for (var patch : GpuRoads.deckPatches(tile, deck, road, footing)) {
                     check.run();
                     if (patch.shape().isEmpty()) { continue; }
                     patches.add(new RoadPatch(patch, masks.share(GpuRoads.mask(road, patch)),
-                          GpuRoads.deck(tile, feature, patch, footing, surfaces, slope), true));
+                          GpuRoads.deck(tile, feature, patch, footing, surfaces, deck.sloped() ? shape : null), true));
                 }
             }
             if (!patches.isEmpty()) { roads.put(tile.coords(), patches); }
             progress.advance();
         }));
+        // A ground rail can ride a ramp owned by a reused bridge or one in the next chunk. Prepare that
+        // support on this worker too; route building must not depend on which chunk installs first.
+        for (var tile : chunkTiles) {
+            for (var feature : tile.features()) {
+                for (var next : BoardRail.approaches(scene, tile, feature)) {
+                    check.run();
+                    bridgeShapes.computeIfAbsent(next.coords(), at -> {
+                        var deck = BoardBridge.deck(scene, next);
+                        return deck.natural() ? BoardNaturalBridge.build(scene, next, deck, lod, surfaces)
+                              : BoardBridgeFooting.build(scene, next, lod, surfaces).withDeck(scene, next, deck, lod, surfaces);
+                    });
+                }
+            }
+        }
         progress.begin("water", 2);
         var water = GpuWaterShader.Field.prepare(scene, currents, surfaces);
         progress.advance();
@@ -3098,7 +3111,7 @@ final class GpuTerrain implements Disposable {
             boolean placedObject = feature.decoration() != null;
             boolean editable = placedObject && !BoardFeatures.terrainOwned(feature.decoration());
             Model model = BoardRail.route(feature) ? assets.route(BoardRail.layout(scene, tile, feature, surface,
-                        prepared.bridgeShapes().get(tile.coords())))
+                        prepared.bridgeShapes()::get))
                   : placedObject ? assets.slotted(feature.asset())
                   : generatedIndustrial ? assets.industrial(BoardIndustrial.layout(scene, tile, feature))
                   : building != null ? building.model(0)
@@ -5351,7 +5364,10 @@ final class GpuTerrain implements Disposable {
         if (mesh == null) { return null; }
         return installedSettings.call(() -> {
             Chunk chunk = chunks.get(tile.coords().getX() / CHUNK_SIZE * chunkRows + tile.coords().getY() / CHUNK_SIZE);
-            var layout = BoardRail.layout(scene, tile, feature, new BoardSurface(scene, tile, chunk.lod), mesh.bridgeShape);
+            var layout = BoardRail.layout(scene, tile, feature, new BoardSurface(scene, tile, chunk.lod), at -> {
+                TileMesh support = editorTile(at);
+                return support == null ? null : support.bridgeShape;
+            });
             ModelInstance ghost = new ModelInstance(new Model(BoardRail.model(layout)));
             ghost.transform.setToTranslation(BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()),
                         BoardRail.level(tile, feature) * BoardGeometry.level())

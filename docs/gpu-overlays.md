@@ -116,9 +116,9 @@ cover, `FIELDS`, `TUNDRA`), its ice and snow (`ICE`, `BLACK ICE`, `SNOW`, `DEEP 
 `QUICKSAND`, magma, `RAPIDS`, `TORRENT`, `HAZ. LIQUID`); there a bridge's `HEIGHT n` and `BRIDGE▲n` (on the deck) are
 raised by the depth, as its deck keeps its level.
 Every label is drawn on an outline in every view (`BoardHexText.outline`: white around dark text, black around light
-text): Legacy 2D, the saved image (`BoardHexText.draw`) and `GpuHexText` all draw the text eight times in the outline
-colour in a ring around it (`BoardHexText.outlineOffsets`, 0.09 of the font size out, about a stem's width), then the
-text. The label meshes therefore hold nine times the glyphs, and Legacy 2D, which draws its labels on every paint,
+text): Legacy 2D and the saved image (`BoardHexText.draw`) draw the text eight times in the outline
+colour in a ring around it (`BoardHexText.outlineOffsets`), then the text. `GpuHexText` draws a bordered font under
+the plain font instead. Legacy 2D, which draws its labels on every paint,
 spends about four to five times as long on them (a scratch benchmark of 400 hexes: about 6 ms instead of 1.5 ms; a
 `StringDrawer` stroke took 60 to 125 ms). `GpuHexText` builds the meshes one label at a time in one reused font cache
 and appends each label to its chunk: a font cache grows its arrays to the exact size at every text it adds, so the
@@ -132,9 +132,17 @@ px wide at the export's scale) the longest lines, such as `HARDENED▲12`, `FUEL
 below 10 points (about 6 points before the space before the ▲ was dropped), a line higher up less.
 Save Map as Image and the game summary images (`BoardArtwork.printable`) always print coordinates and types, black
 on white.
+
+The 3D fill and outline fonts use `UiTheme.worldFont`: 60-texel glyphs with trilinear mip filtering and up to 8×
+anisotropy where supported. Their theme-owned atlas pages keep 64 transparent-white texels between glyphs; each
+quad includes eight texels of that margin so filtered edges are not clipped. Sampling stops at mip level 3 to
+avoid averaging unrelated glyphs together. These are still bitmap labels: sufficiently distant or edge-on text
+can lose detail. Incremental glyph uploads, including fallback characters and new atlas pages, retain the same
+filtering and refresh mipmaps. HUD fonts keep their separate atlas and existing mip-level-1 limit.
 Apart from the roof's structure line the type block is a ground label: angled views hide it under buildings. Tests:
 `BoardHexTextTest`, `BoardLunarTest`, `GpuBoardSourceTest`, `GpuBoardActionsTest`, `BoardEditorSessionTest` (the
-printed outline), `GpuHexTextSmokeTest` and `GpuTacticalViewSmokeTest.hexTypesLabelTheHexesInEveryView`
+printed outline), `GpuHexTextSmokeTest`, `GpuHexTextFilteringSmokeTest` (angled filtering and incremental atlas uploads),
+and `GpuTacticalViewSmokeTest.hexTypesLabelTheHexesInEveryView`
 (`hex-types-*.png`).
 
 `GpuHexGrid` repeats the existing terrain border pattern in top view after scene geometry and before

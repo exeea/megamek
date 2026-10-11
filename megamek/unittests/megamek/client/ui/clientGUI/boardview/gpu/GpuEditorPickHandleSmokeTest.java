@@ -18,7 +18,10 @@ import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import com.badlogic.gdx.scenes.scene2d.Group;
 import megamek.client.ui.boardeditor.BoardEditorSession;
+import megamek.client.ui.boardeditor.BoardEditorSession.Action;
+import megamek.client.ui.boardeditor.BoardEditorSession.Command;
 import megamek.client.ui.gdx.UiButton;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -37,7 +40,7 @@ import org.junit.jupiter.api.Test;
 class GpuEditorPickHandleSmokeTest {
     private static final File OUTPUT = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
     private static final Coords DECAL = new Coords(2, 4), WATER = new Coords(6, 4), CAR = new Coords(4, 5), LOT = new Coords(6, 6),
-          PAD = new Coords(2, 6);
+          PAD = new Coords(2, 6), BRIDGE = new Coords(4, 2);
 
     @Test
     void decalsAndObjectsUnderWaterSelectAndTheHandleTurnsTheSelection() throws Exception {
@@ -45,6 +48,7 @@ class GpuEditorPickHandleSmokeTest {
         var setup = new FutureTask<GpuMapSource>(() -> {
             var editor = new BoardEditorSession();
             Board board = Board.createEmptyBoard(9, 9);
+            board.setHex(BRIDGE, new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:2", ""));
             board.getHex(DECAL).setDecorations(List.of(new BoardDecoration("emblem", "decal", "decal/emblems/star-league",
                   null, 0, 0, 0, false, .5, BoardDecoration.Placement.ground(), 0)));
             board.getHex(PAD).setDecorations(List.of(new BoardDecoration("pad", "decal", "decal/emblems/star-league", null,
@@ -74,6 +78,7 @@ class GpuEditorPickHandleSmokeTest {
                         view.boardCamera.fit(source.takeFrame().scene());
                         settle(view, source);
                         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
+                        groundSelection(view, source, session.get());
                         decal(view, source);
                         underWater(view, source);
                         handle(view, source, session.get());
@@ -83,6 +88,65 @@ class GpuEditorPickHandleSmokeTest {
             }, configuration);
         } finally { SwingUtilities.invokeAndWait(source::close); }
         if (failure.get() != null) { throw new AssertionError("Editor picking and rotation handle", failure.get()); }
+    }
+
+    /** A board click selects Ground even after another component; no selected layer leaves Edit empty. */
+    private static void groundSelection(GpuBattleView view, GpuMapSource source, BoardEditorSession session) throws Exception {
+        Group root = GpuBoardTestUi.stage().getRoot();
+        Group details = root.findActor("editor-details");
+        assertNull(source.editorState().selected());
+        assertFalse(details.hasChildren(), "Before a hex is selected the inspector is empty");
+        assertInspectorHidden();
+
+        Coords plain = new Coords(4, 4);
+        click(view, plain); settle(view, source);
+        SwingUtilities.invokeAndWait(() -> session.command(new Command(Action.COMPONENT, "bridge"), null));
+        settle(view, source);
+        assertEquals("bridge", source.editorState().component());
+        assertNull(root.findActor("editor-component-bridge"), "The plain hex has no Bridge layer");
+        assertFalse(((UiButton) root.findActor("editor-component-ground")).isChecked());
+        assertFalse(details.hasChildren(), "An absent component has no heading, placeholder or Add Bridge button");
+        click(view, plain); settle(view, source);
+        assertGroundSelected(source, plain);
+
+        click(view, BRIDGE); settle(view, source);
+        GpuBoardTestUi.click("editor-component-bridge"); settle(view, source);
+        assertEquals("bridge", source.editorState().component());
+        assertTrue(((UiButton) root.findActor("editor-component-bridge")).isChecked());
+        assertTrue(GpuBoardTestUi.texts(details).contains("BRIDGE"), "A selected, present Bridge still has its controls");
+        click(view, plain); settle(view, source);
+        assertGroundSelected(source, plain);
+        GpuBoardTestUi.capture(new File(OUTPUT, "editor-ground-selected.png"));
+
+        assertTrue(GpuBoardTestUi.stage().setKeyboardFocus(root.findActor("editor-contents")));
+        SwingUtilities.invokeAndWait(() -> session.command(new Command(Action.CLEAR_SELECTION), null));
+        settle(view, source);
+        assertTrue(source.editorState().selection().isEmpty());
+        assertFalse(details.hasChildren(), "Clearing the selection empties the inspector");
+        assertInspectorHidden();
+        assertNull(GpuBoardTestUi.stage().getKeyboardFocus(), "Hiding the inspector releases its keyboard focus");
+        assertFalse(((UiButton) root.findActor("editor-component-ground")).isChecked(), "No layer remains highlighted");
+        click(view, plain); settle(view, source);
+        assertGroundSelected(source, plain);
+    }
+
+    private static void assertInspectorHidden() {
+        var stage = GpuBoardTestUi.stage();
+        Group inspector = stage.getRoot().findActor("editor-inspector");
+        assertFalse(GpuBoardTestUi.shown(inspector), "Without a selection the whole inspector is hidden");
+        Vector2 point = inspector.localToStageCoordinates(new Vector2(inspector.getWidth() / 2, inspector.getHeight() / 2));
+        var hit = stage.hit(point.x, point.y, true);
+        assertTrue(hit == null || !hit.isDescendantOf(inspector), "The hidden inspector does not intercept board clicks");
+    }
+
+    private static void assertGroundSelected(GpuMapSource source, Coords coords) {
+        assertEquals(List.of(new BoardEditorSession.Selection(coords, "")), source.editorState().selection());
+        assertEquals("ground", source.editorState().component());
+        Group root = GpuBoardTestUi.stage().getRoot();
+        assertTrue(GpuBoardTestUi.shown(root.findActor("editor-inspector")), "A board hex selection shows the inspector");
+        UiButton ground = root.findActor("editor-component-ground");
+        assertTrue(GpuBoardTestUi.shown(ground) && ground.isChecked(), "Ground is highlighted in Layers");
+        assertTrue(GpuBoardTestUi.texts(root.findActor("editor-details")).contains("GROUND"), "Ground has its inspector controls");
     }
 
     /** (a) The decal is an installed object with its paint's flat box; a click on it selects it like an object. */

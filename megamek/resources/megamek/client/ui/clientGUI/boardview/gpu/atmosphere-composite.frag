@@ -23,6 +23,7 @@ uniform vec2 u_fogSize;
 uniform float u_edgeScale;
 uniform vec3 u_sky;
 uniform vec3 u_horizon;
+uniform float u_transparentBackground;
 // GROUND_LAYER
 // WEATHER_SAND
 
@@ -76,6 +77,8 @@ void main() {
     float coverage = depth < 1.0 ? 1.0 : clamp(scene.a, 0.0, 1.0);
     vec3 sky = mix(u_horizon, u_sky, smoothstep(0.0, 1.0, v_uv.y));
     vec3 color = scene.rgb + (sky - u_sky) * (1.0 - coverage);
+    // Exports store straight alpha: remove the clear sky from partially covered silhouette pixels before grading.
+    if (u_transparentBackground > 0.5) color = (scene.rgb - u_sky * (1.0 - coverage)) / max(coverage, 0.00001);
     vec3 linear = pow(max(color, vec3(0.0)), vec3(2.2));
     vec3 heat = vec3(0.0);
     if (u_heatEnabled > 0.5) {
@@ -96,7 +99,7 @@ void main() {
     linear += sunGlare() * u_exposure;
     color = displayScene(linear);
     if (u_fovEnabled > 0.5) color = fieldOfView(color, depth);
-    fragColor = vec4(color, 1.0);
+    fragColor = vec4(color, mix(1.0, coverage, u_transparentBackground));
     // Reuse the scene's hardware depth for weather and tactical occlusion in this same draw.
     DEPTH = depth;
 }

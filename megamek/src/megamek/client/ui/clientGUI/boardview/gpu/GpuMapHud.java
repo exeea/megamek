@@ -183,7 +183,7 @@ final class GpuMapHud implements GpuBoardHud {
         boardGeneration = frame.boardGeneration();
         // Only an open menu pins the hex card; every dismissal path returns it to the latest hover.
         if (!contextMenu.isVisible() && frame.context() != null) { source.inspect(null); }
-        isometric.setDisabled(camera.rotationLocked());
+        isometric.setDisabled(camera.tactical());
         tactical.pressed(camera.tactical());
         wireframe.pressed(tuningModel.wireframe()).setDisabled(!GpuWireframe.supported());
         menu.pressed(state.dialog == Dialog.MENU);
