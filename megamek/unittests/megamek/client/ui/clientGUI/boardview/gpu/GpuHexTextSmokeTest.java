@@ -182,7 +182,12 @@ class GpuHexTextSmokeTest {
             assertEquals(1, font.getRegions().size);
             labels.update(scene, font, font, coords -> null);
             assertEquals(2, font.getRegions().size, "Later chunks introduce another incremental font atlas page");
-            List<LegacyChunk> legacy = legacy(scene, font);
+            List<LegacyChunk> legacy = legacy(scene, font, true);
+            assertVertices(labels, legacy, font);
+            // Client Settings > Hex label outline off: the text alone, one run of glyphs instead of outline then text.
+            labels.update(scene, font, font, coords -> null, false, false, false);
+            assertVertices(labels, legacy(scene, font, false), font);
+            labels.update(scene, font, font, coords -> null);
             assertVertices(labels, legacy, font);
             ShaderProgram previous = batch.getShader();
             camera.fit(scene);
@@ -211,7 +216,7 @@ class GpuHexTextSmokeTest {
             labels.update(large, font, font, coords -> null);
             List<Object> pages = pages(labels);
             assertEquals(4, pages.size(), "Consecutive chunks share bounded pages instead of individual draw calls");
-            assertVertices(labels, legacy(large, font), font);
+            assertVertices(labels, legacy(large, font, true), font);
             labels.update(large, font, font, coords -> { throw new AssertionError("Unchanged labels must keep their meshes"); });
             assertSame(pages.getFirst(), pages(labels).getFirst());
             // A path preview repaints the markings of the hexes: new tiles with the same labels keep the meshes too.
@@ -315,9 +320,9 @@ class GpuHexTextSmokeTest {
 
     /**
      * Independent copy of the previous single-plane layout/draw input, without static mesh construction: every chunk's
-     * outlines (drawn with {@code font} as the outline font too), then every chunk's text.
+     * outlines (drawn with {@code font} as the outline font too) when {@code outlined}, then every chunk's text.
      */
-    private static List<LegacyChunk> legacy(BoardScene scene, BitmapFont font) {
+    private static List<LegacyChunk> legacy(BoardScene scene, BitmapFont font, boolean outlined) {
         Map<Coords, LegacyChunk> chunks = new HashMap<>(), outlines = new HashMap<>();
         float scaleX = font.getData().scaleX, scaleY = font.getData().scaleY;
         var color = new com.badlogic.gdx.graphics.Color(font.getColor());
@@ -349,7 +354,7 @@ class GpuHexTextSmokeTest {
                 }
             }
         } finally { font.getData().setScale(scaleX, scaleY); font.setColor(color); }
-        List<LegacyChunk> drawn = new ArrayList<>(outlines.values());
+        List<LegacyChunk> drawn = new ArrayList<>(outlined ? outlines.values() : List.of());
         drawn.addAll(chunks.values());
         return drawn;
     }

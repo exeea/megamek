@@ -181,6 +181,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SHOW_COORDS = "showCoords";
     /** View > Hex Types: each hex's type as text at its bottom edge, under its level label (BoardHexText). */
     public static final String SHOW_HEX_TYPES = "showHexTypes";
+    /** The outline around the hex labels in Legacy 2D and on the 3D board; the saved board image always has it. */
+    public static final String HEX_LABEL_OUTLINE = "hexLabelOutline";
     public static final String HIGH_QUALITY_GRAPHICS = "HighQualityGraphics";
     public static final String SHADOW_MAP = "ShadowMap";
     public static final String INCLINES = "Inclines";
@@ -624,6 +626,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(ADVANCED_SHOW_FPS, false);
         store.setDefault(SHOW_COORDS, true);
         store.setDefault(SHOW_HEX_TYPES, false);
+        store.setDefault(HEX_LABEL_OUTLINE, true);
 
         setDefault(PLANETARY_CONDITIONS_COLOR_TITLE, Color.WHITE);
         setDefault(PLANETARY_CONDITIONS_COLOR_TEXT, DEFAULT_PLANETARY_CONDITIONS_TEXT_COLOR);
@@ -1352,6 +1355,18 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public boolean getHexTypesEnabled() {
         return store.getBoolean(SHOW_HEX_TYPES);
+    }
+
+    public void setHexTypesEnabled(boolean enabled) {
+        store.setValue(SHOW_HEX_TYPES, enabled);
+    }
+
+    public boolean getHexLabelOutline() {
+        return store.getBoolean(HEX_LABEL_OUTLINE);
+    }
+
+    public void setHexLabelOutline(boolean outline) {
+        store.setValue(HEX_LABEL_OUTLINE, outline);
     }
 
     public boolean getGameSummaryBoardView() {

@@ -246,23 +246,58 @@ class BoardHexTextTest {
     void everyLabelIsDrawnOnAnOutlineThatContrastsWithIt() {
         // Dark text on white, light text (a space board's) on black, and the saved image's black on white.
         record Case(int argb, boolean printed, int text, int outline) { }
-        for (Case drawn : List.of(new Case(0xFF000000, false, 0x000000, 0xFFFFFF),
-              new Case(0xFFC8C8C8, false, 0xC8C8C8, 0x000000), new Case(0xFFFFD700, true, 0x000000, 0xFFFFFF))) {
-            BufferedImage image = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D graphics = image.createGraphics();
-            BoardHexText.draw(graphics, new Point(), HEX_W,
-                  List.of(new BoardHexText("LEVEL 3", BOTTOM, FONT, drawn.argb(), false, 0)), drawn.printed());
-            graphics.dispose();
-            int text = 0, outline = 0;
-            for (int y = 0; y < HEX_H; y++) {
-                for (int x = 0; x < HEX_W; x++) {
-                    int pixel = image.getRGB(x, y);
-                    if (pixel >>> 24 > 230 && near(pixel, drawn.text())) { text++; }
-                    if (pixel >>> 24 > 230 && near(pixel, drawn.outline())) { outline++; }
-                }
+        withOutline(true, () -> {
+            for (Case drawn : List.of(new Case(0xFF000000, false, 0x000000, 0xFFFFFF),
+                  new Case(0xFFC8C8C8, false, 0xC8C8C8, 0x000000), new Case(0xFFFFD700, true, 0x000000, 0xFFFFFF))) {
+                int[] pixels = pixels(drawn.argb(), drawn.printed(), drawn.text(), drawn.outline());
+                assertTrue(pixels[0] > 15 && pixels[1] > 40,
+                      drawn + ": " + pixels[0] + " text and " + pixels[1] + " outline pixels");
             }
-            assertTrue(text > 15 && outline > 40, drawn + ": " + text + " text and " + outline + " outline pixels");
+        });
+    }
+
+    @Test
+    void withTheOutlineSettingOffTheViewsDrawPlainTextButTheSavedImageKeepsItsOutline() {
+        withOutline(false, () -> {
+            int[] view = pixels(0xFF000000, false, 0x000000, 0xFFFFFF);
+            assertTrue(view[0] > 15 && view[1] == 0, view[0] + " text and " + view[1] + " outline pixels in a view");
+            int[] printed = pixels(0xFFFFD700, true, 0x000000, 0xFFFFFF);
+            assertTrue(printed[0] > 15 && printed[1] > 40,
+                  printed[0] + " text and " + printed[1] + " outline pixels in the saved image");
+        });
+    }
+
+    /** Runs {@code check} with Client Settings > Hex label outline set to {@code outline}, then restores it. */
+    private static void withOutline(boolean outline, Runnable check) {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        boolean before = preferences.getHexLabelOutline();
+        preferences.setHexLabelOutline(outline);
+        try {
+            check.run();
+        } finally {
+            preferences.setHexLabelOutline(before);
         }
+    }
+
+    /**
+     * The opaque pixels of {@code text} and of {@code outline} colour in a label 3 of colour {@code argb}, its font large
+     * enough for the outline (a small share of its size) to reach past a whole pixel.
+     */
+    private static int[] pixels(int argb, boolean printed, int text, int outline) {
+        BufferedImage image = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        BoardHexText.draw(graphics, new Point(), HEX_W, List.of(new BoardHexText("3", BOTTOM,
+              FONT.deriveFont(30f), argb, false, 0)), printed);
+        graphics.dispose();
+        int[] counts = new int[2];
+        for (int y = 0; y < HEX_H; y++) {
+            for (int x = 0; x < HEX_W; x++) {
+                int pixel = image.getRGB(x, y);
+                if (pixel >>> 24 > 230 && near(pixel, text)) { counts[0]++; }
+                if (pixel >>> 24 > 230 && near(pixel, outline)) { counts[1]++; }
+            }
+        }
+        return counts;
     }
 
     private record Line(String text, int baseline) { }
