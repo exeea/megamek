@@ -167,8 +167,27 @@ public final class RulerModel {
         return unit != null && DiagramUnitType.fromEntity(unit).isMek();
     }
 
-    /** Ground endpoints use the same relative sight level as LosEffects, including prone/elevated units. */
-    private static int entityHeight(Entity unit) { return altitude(unit) ? unit.getAltitude() : unit.relHeight(); }
+    private static boolean elevation(Entity unit) {
+        return unit != null && DiagramUnitType.fromEntity(unit).isElevationUnit();
+    }
+
+    /** Display physical ground-unit heights (standing Mek = 2); airborne elevation/altitude stays unchanged. */
+    private static int entityHeight(Entity unit) {
+        return altitude(unit) ? unit.getAltitude() : elevation(unit) ? unit.relHeight() : unit.relHeight() + 1;
+    }
+
+    /**
+     * Convert the displayed endpoint only at the rules boundary. LosEffects uses ground-unit heights one lower
+     * than their physical height. A bare hex at height zero keeps the engine's surface-hex convention; negative
+     * manual elevations and airborne elevation/altitude are already engine levels. Known units retain their exact
+     * relative height, including submerged units, when the other endpoint is measured manually.
+     */
+    private static int engineHeight(Endpoint endpoint, Entity unit) {
+        if (altitude(unit)) { return endpoint.height(); }
+        if (unit != null && endpoint.height() == entityHeight(unit)) { return unit.relHeight(); }
+        if (elevation(unit) || endpoint.height() <= 0) { return endpoint.height(); }
+        return LOSHeightCalculation.toAbsoluteHeight(endpoint.height(), 0);
+    }
 
     private Endpoint endpoint(Point point, boolean first) {
         if (point == null) { return null; }
@@ -181,7 +200,7 @@ public final class RulerModel {
         point.identified = known;
         int height = point.height != null ? point.height : known ? entityHeight(unit) : 0;
         boolean alt = known && altitude(unit);
-        String label = alt ? "Altitude" : known && DiagramUnitType.fromEntity(unit).isElevationUnit() ? "Elevation" : "Height";
+        String label = alt ? "Altitude" : known && elevation(unit) ? "Elevation" : "Height";
         String terrain = terrainName(hex);
         String name = unit == null ? terrain : known ? unit.getDisplayName() : Messages.getString("BoardView1.sensorReturn");
         List<String> details = new ArrayList<>();
@@ -252,7 +271,8 @@ public final class RulerModel {
     private LOSModifierCalculator.Measurement measure(Endpoint from, Endpoint to, Entity first, Entity second,
           boolean actualHeights, boolean trace) {
         return actualHeights ? LOSModifierCalculator.measureEntities(game, first, second, trace)
-              : LOSModifierCalculator.measureAtHeights(game, boardId, from.coords(), to.coords(), from.height(), to.height(),
+              : LOSModifierCalculator.measureAtHeights(game, boardId, from.coords(), to.coords(),
+                    engineHeight(from, first), engineHeight(to, second),
                     mek(first), mek(second), altitude(first), altitude(second), player, trace);
     }
 }
