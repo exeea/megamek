@@ -34,7 +34,7 @@ import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.common.board.Coords;
 
 /**
- * Captured labels, each on its outline: a roof label (HEIGHT, or with Hex Types the structure line) shows through its
+ * Captured labels, each on its outline unless that setting is off: a roof label (HEIGHT, or with Hex Types the structure line) shows through its
  * own hex; top view also reveals the enabled ground labels. The Tactical View adds its own: water depths and
  * structures' construction factors ({@link BoardHexText#tactical}).
  */
@@ -90,6 +90,7 @@ final class GpuHexText implements Disposable {
     private int tuning = -1;
     private boolean tactical;
     private boolean types;
+    private boolean outlined;
     /** In the Tactical View, the hexes units stand on, whose own labels give way to them. */
     private Set<Coords> covered = Set.of();
     /** The roof each roof label was laid on at the last rebuild, by hex; null where the hex had none. */
@@ -108,21 +109,23 @@ final class GpuHexText implements Disposable {
     }
 
     void update(BoardScene scene, BitmapFont font, BitmapFont outline, Function<Coords, BoundingBox> roofBounds) {
-        update(scene, font, outline, roofBounds, false, false);
+        update(scene, font, outline, roofBounds, false, false, true);
     }
 
     /**
      * The fonts and roof bounds are borrowed; {@code outline} is {@code font} with a border of
-     * {@link GpuBoardSkin#OUTLINE} texels ({@link GpuBoardSkin#OUTLINE_FONT}). Labels are the existing board view's
-     * captured text and, in the Tactical View ({@code tactical}), its labels of the captured water depths and
-     * structures; with View > Hex Types on ({@code types}) the captured type block tells the depths instead.
+     * {@link GpuBoardSkin#OUTLINE} texels ({@link GpuBoardSkin#OUTLINE_FONT}), drawn under every label when
+     * {@code outlined} (Client Settings > Hex label outline). Labels are the existing board view's captured text and,
+     * in the Tactical View ({@code tactical}), its labels of the captured water depths and structures; with View > Hex
+     * Types on ({@code types}) the captured type block tells the depths instead.
      */
     void update(BoardScene scene, BitmapFont font, BitmapFont outline, Function<Coords, BoundingBox> roofBounds,
-          boolean tactical, boolean types) {
+          boolean tactical, boolean types, boolean outlined) {
         Set<Coords> units = new HashSet<>();
         if (tactical) { scene.units().forEach(unit -> units.addAll(unit.footprint())); }
         boolean same = this.font == font && this.outline == outline && tuning == BoardGeometry.revision()
-              && this.tactical == tactical && this.types == types && covered.equals(units);
+              && this.tactical == tactical && this.types == types && this.outlined == outlined
+              && covered.equals(units);
         if (same && tiles != scene.tiles() && sameLabels(scene.tiles(), roofBounds)) { tiles = scene.tiles(); }
         if (same && tiles == scene.tiles()) { return; }
         float scaleX = font.getData().scaleX, scaleY = font.getData().scaleY;
@@ -165,14 +168,16 @@ final class GpuHexText implements Disposable {
                         baseline = roof.getCenterY() - layout.height / 2;
                     }
                     float left = x - layout.width / 2, top = label.fromTop() ? baseline : baseline + layout.height;
-                    // The outline: the bordered glyphs in the outline's colour. A line starts at its first glyph's
-                    // border, so they go OUTLINE texels left to put each glyph's ink on the text's.
-                    outline.getData().setScale(font.getData().scaleX, font.getData().scaleY);
-                    Color.argb8888ToColor(ringColor, BoardHexText.outline(argb));
-                    rings.clear();
-                    rings.addText(new GlyphLayout(outline, label.text(), ringColor, 0, Align.left, false),
-                          left - GpuBoardSkin.OUTLINE * outline.getData().scaleX, top);
-                    Chunk.add(chunk.outlines(), rings);
+                    if (outlined) {
+                        // The outline: the bordered glyphs in the outline's colour. A line starts at its first glyph's
+                        // border, so they go OUTLINE texels left to put each glyph's ink on the text's.
+                        outline.getData().setScale(font.getData().scaleX, font.getData().scaleY);
+                        Color.argb8888ToColor(ringColor, BoardHexText.outline(argb));
+                        rings.clear();
+                        rings.addText(new GlyphLayout(outline, label.text(), ringColor, 0, Align.left, false),
+                              left - GpuBoardSkin.OUTLINE * outline.getData().scaleX, top);
+                        Chunk.add(chunk.outlines(), rings);
+                    }
                     glyphs.clear();
                     glyphs.addText(layout, left, top);
                     Chunk.add(chunk.pages(), glyphs);
@@ -206,6 +211,7 @@ final class GpuHexText implements Disposable {
         tuning = BoardGeometry.revision();
         this.tactical = tactical;
         this.types = types;
+        this.outlined = outlined;
         covered = units;
     }
 

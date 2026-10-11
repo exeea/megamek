@@ -180,7 +180,7 @@ class GpuTacticalOverlaysTest {
             show(1920, 1080, true, GamePhase.MOVEMENT, Overlays.capture(preferences), true);
             settings.forEach((row, value) -> assertEquals(value.getAsBoolean(), box(row).isTicked(), row));
             show(1920, 1080, true, GamePhase.MOVEMENT,
-                  new Overlays(true, false, false, false, false, true, true, false), true);
+                  new Overlays(true, false, false, false, false, true, true, false, true), true);
             assertFalse(box("overlay-statusBadges").isTicked());
             assertTrue(box("overlay-levelShading").isTicked());
         } finally {
@@ -207,7 +207,8 @@ class GpuTacticalOverlaysTest {
         assertFalse(preferences.getDefaultBoolean(GUIPreferences.TACTICAL_LEVEL_SHADING), "level shading starts off");
         assertTrue(preferences.getDefaultBoolean(GUIPreferences.SHOW_UNIT_LINKS));
         assertFalse(preferences.getDefaultBoolean(GUIPreferences.SHOW_HEX_TYPES), "hex types start off");
-        assertEquals(new Overlays(true, true, true, true, true, false, true, false), Overlays.DEFAULTS);
+        assertTrue(preferences.getDefaultBoolean(GUIPreferences.HEX_LABEL_OUTLINE), "hex labels start outlined");
+        assertEquals(new Overlays(true, true, true, true, true, false, true, false, true), Overlays.DEFAULTS);
         boolean level = preferences.getTacticalLevelShading();
         try {
             preferences.toggleTacticalLevelShading();
@@ -251,8 +252,8 @@ class GpuTacticalOverlaysTest {
         // Collapsed: the header only, in the same place and width; the right column keeps its places.
         Rectangle expanded = bounds(panel());
         float contactsTop = top(find("contacts-panel"));
-        show(1920, 1080, true, GamePhase.MOVEMENT, new Overlays(false, true, true, true, true, false, true, false),
-              true);
+        show(1920, 1080, true, GamePhase.MOVEMENT,
+              new Overlays(false, true, true, true, true, false, true, false, true), true);
         assertTrue(shown(panel()));
         assertFalse(expanded("overlay-envelope"), "collapsed, the header only");
         Rectangle collapsed = bounds(panel());
