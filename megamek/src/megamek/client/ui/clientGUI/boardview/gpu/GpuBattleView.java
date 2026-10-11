@@ -72,6 +72,8 @@ class GpuBattleView extends ApplicationAdapter {
     /** Floating units are tied to their hex with this faint solid stem; solid, so it needs no blending state. */
     private static final Color TETHER_COLOR = Color.valueOf("A9B8B8");
     private static final float PAN_PIXELS_PER_SECOND = 750;
+    /** How near the board area's edge (unscaled window pixels) a route's drag scrolls the board ({@link #edgePan}). */
+    private static final float EDGE_PAN_MARGIN = 48;
     private static final float FLIGHT_HEXES_PER_SECOND = 1.5f;
     private static final float CAMERA_SPEED_BOOST = 4;
     private static final float TILT_DEGREES_PER_SECOND = 60;
@@ -680,6 +682,7 @@ class GpuBattleView extends ApplicationAdapter {
                     default -> { }
                 }
             }
+            boardInput.autoPan(Gdx.graphics.getDeltaTime());
         }
         if (changedTiles || hoverCameraRevision != boardCamera.revision()) {
             source.setVisibleArea(boardCamera.visibleArea(scene));
@@ -865,7 +868,7 @@ class GpuBattleView extends ApplicationAdapter {
                 boardInput.pressedKeys.clear();
                 source.stopKeys();
             }
-            if (boardInput.boardGesture) { boardInput.reset(); }
+            if (boardInput.boardGesture) { boardInput.interrupt(); }
         }
         if (ui instanceof GpuHud hud && frame.scene() != null) {
             overlay.update(frame.withScene(scene), view, source.uiPreferences(), hud.state);
@@ -992,6 +995,14 @@ class GpuBattleView extends ApplicationAdapter {
             lines.setColor(1, preview.erase() ? .33f : 1, preview.erase() ? .3f : 1, alpha);
             for (Coords coords : preview.hexes()) {
                 if (scene.tile(coords) != null) { ring(coords, BoardTacticalGeometry.floatingZ(scene, coords)); }
+            }
+            // A drawn route's turns too sharp to lay, which end in stubs on release: red, twice.
+            lines.setColor(1, .33f, .3f, alpha);
+            for (Coords coords : preview.stubs()) {
+                if (scene.tile(coords) == null) { continue; }
+                float z = BoardTacticalGeometry.floatingZ(scene, coords);
+                ring(coords, z);
+                for (int edge = 0; edge < 6; edge++) { ringEdge(coords, z, edge, HOVER_HEX_INSET + .05f); }
             }
             for (var box : preview == GpuEditorPreview.Data.NONE ? List.<com.badlogic.gdx.math.collision.BoundingBox>of()
                   : editorPreview.outlines()) {
@@ -2057,6 +2068,8 @@ class GpuBattleView extends ApplicationAdapter {
             }
             var hit = editorHit(ray, state);
             if (hit == null) { return; }
+            // A route drawn by hand: the hover, which shows its preview, follows the drag (mouseMoved leaves it alone).
+            if (drawingRoute()) { hovered = hit.coords(); hoverZ = Float.NaN; source.setHover(hovered); }
             Vector3 point = ray.getEndPoint(new Vector3(), (float) Math.sqrt(hit.distance()));
             if (!drag && !additive && state != null && state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.SELECT) {
                 editorHexGrab = hit.coords(); editorPlaneZ = point.z;
@@ -2244,6 +2257,10 @@ class GpuBattleView extends ApplicationAdapter {
         @Override
         public boolean touchDown(int x, int y, int pointer, int button) {
             if (reloadingAssets || assetReloadFailed) { return true; }
+            if (button == Input.Buttons.RIGHT && drawingRoute()) {
+                cancelRoute();
+                return true;
+            }
             if (boardGesture || ui.hit(x, y)) {
                 return false;
             }
@@ -2292,8 +2309,10 @@ class GpuBattleView extends ApplicationAdapter {
             if (source.isEditor() && gestureButton == Input.Buttons.LEFT && !measurementGesture) {
                 if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < DRAG_THRESHOLD * layoutScale) { return true; }
                 dragged = true;
+                dragX = x;
+                dragY = y;
                 if (rotationGrab != null) { turn(x, y); return true; }
-                if (marquee) { dragX = x; dragY = y; return true; }
+                if (marquee) { return true; }
                 // The board editor's left drag paints every hex it crosses, from the press on.
                 if (!ui.hit(x, y)) {
                     editorPointer(x, y, true);
@@ -2383,6 +2402,48 @@ class GpuBattleView extends ApplicationAdapter {
         }
 
         /**
+         * Whether the left button's gesture draws a route by hand in the editor (Paint with a rail, maglev or road brush,
+         * which the session builds on the release): Esc or a right click drops it, and near the board area's edge its drag
+         * scrolls the board ({@link #autoPan}).
+         */
+        private boolean drawingRoute() {
+            var state = source.editorState();
+            return boardGesture && gestureButton == Input.Buttons.LEFT && !measurementGesture && !marquee && rotationGrab == null
+                  && source.isEditor() && state != null && state.drawsRoutes();
+        }
+
+        /** Drops the route the drag draws, unbuilt, and ends the gesture, so its release does nothing more. */
+        private void cancelRoute() {
+            source.cancelEditorStroke();
+            reset();
+        }
+
+        /**
+         * Ends the gesture the window takes away (focus lost, a modal menu), whose release never comes here: a route drawn
+         * by hand is dropped unbuilt, as Esc drops it, so no later command or press builds it.
+         */
+        void interrupt() {
+            if (drawingRoute()) { cancelRoute(); }
+            else { reset(); }
+        }
+
+        /**
+         * Each frame of a route's drag ({@link #drawingRoute}) with the pointer near or past the edge of the board area
+         * the panels leave free (as Fit board frames it): the board scrolls towards that edge ({@link #edgePan}), at most
+         * as fast as the keyboard scrolls it, and the route follows the hex then under the pointer. Over a panel the drag
+         * sends no events, so the route could not follow: there the board stays.
+         */
+        void autoPan(float seconds) {
+            if (!dragged || ui == null || !drawingRoute() || ui.hit(dragX, dragY)) { return; }
+            // The drag's last pointer, which stays where it is while the board scrolls under it.
+            Vector2 pan = edgePan(dragX, dragY, ui.framingLeft(), ui.framingTop(), ui.framingLeft() + ui.framingWidth(),
+                  Gdx.graphics.getHeight() - ui.framingBottom(), EDGE_PAN_MARGIN * layoutScale, PAN_PIXELS_PER_SECOND * seconds);
+            if (pan.isZero()) { return; }
+            boardCamera.pan(pan.x, pan.y);
+            editorPointer(dragX, dragY, true);
+        }
+
+        /**
          * One box selection of the objects whose anchors, and the hexes whose centres, in the scene the frame drew,
          * project inside the rectangle; the session takes the objects, or the hexes when the box holds no object.
          */
@@ -2435,9 +2496,10 @@ class GpuBattleView extends ApplicationAdapter {
 
         @Override
         public boolean mouseMoved(int x, int y) {
-            // Camera refreshes must not replace an editor drag's projected destination with a new cursor hit.
+            // Camera refreshes must not replace an editor drag's projected destination, or the hex of a route drawn by
+            // hand (editorPointer: a drag sends no mouse-moves), with a new cursor hit, which past the board is none.
             if (source.isEditor() && boardGesture && gestureButton == Input.Buttons.LEFT && !measurementGesture
-                  && (editorGrab != null || editorHexGrab != null || rotationGrab != null)) { return true; }
+                  && (editorGrab != null || editorHexGrab != null || rotationGrab != null || drawingRoute())) { return true; }
             boolean overHud = ui.hit(x, y);
             Pick picked = overHud ? new Pick(null, Entity.NONE, Float.NaN, false) : pickSelection(x, y);
             hovered = picked.coords();
@@ -2500,6 +2562,11 @@ class GpuBattleView extends ApplicationAdapter {
             if (pressedKeys.containsKey(key) || cameraKeys.containsKey(key)) {
                 return true;
             }
+            // Esc drops a route being drawn by hand before the HUD's Esc chain sees it.
+            if (key == Input.Keys.ESCAPE && drawingRoute()) {
+                cancelRoute();
+                return true;
+            }
             int awt = awtKey(key);
             int modifiers = modifiers();
             // Resolve Shift as camera acceleration before HUD hotkeys can turn or twist a unit with Shift+A/D.
@@ -2509,8 +2576,11 @@ class GpuBattleView extends ApplicationAdapter {
                   && GpuHud.binds(captured, awt, 0).stream().anyMatch(GpuBattleView::heldCameraCommand)) {
                 bindModifiers = 0;
             }
+            // While a route is drawn by hand only the camera takes keys: a hotkey or an editor command (Undo, a tool
+            // key) would end the stroke and so build the route before its release.
+            boolean drawing = drawingRoute();
             // The HUD first (C.4): a pending dialog, the Esc chain, a focused field or list, the hotkeys.
-            if (ui.keyDown(key, awt, bindModifiers)) {
+            if (!drawing && ui.keyDown(key, awt, bindModifiers)) {
                 return true;
             }
             if (reloadingAssets || assetReloadFailed) { return true; }
@@ -2521,6 +2591,7 @@ class GpuBattleView extends ApplicationAdapter {
                     return true;
                 }
             }
+            if (drawing) { return true; }
             if (isMoving() && binds.contains(KeyCommandBind.CENTER_ON_SELECTED)) {
                 playback.finish();
             }
@@ -2591,6 +2662,20 @@ class GpuBattleView extends ApplicationAdapter {
             return ui.keyTyped(character);
         }
     }
+
+    /**
+     * An edge scroll's pan (window pixels, as {@link BoardCamera#pan} takes a drag's) for the pointer at x, y (input
+     * coordinates, y down) in the area from {@code left, top} to {@code right, bottom}: towards each edge the pointer lies
+     * within {@code margin} of, or past, by up to {@code distance}, in proportion to how deep it is in the margin; zero
+     * farther inside. A positive pan moves the board right or down, bringing in what lies beyond the left or top edge.
+     */
+    static Vector2 edgePan(float x, float y, float left, float top, float right, float bottom, float margin, float distance) {
+        return new Vector2((depth(left + margin - x, margin) - depth(x - right + margin, margin)) * distance,
+              (depth(top + margin - y, margin) - depth(y - bottom + margin, margin)) * distance);
+    }
+
+    /** How deep (0 to 1) a point lies {@code into} a margin of {@code margin}. */
+    private static float depth(float into, float margin) { return MathUtils.clamp(into / margin, 0, 1); }
 
     private static boolean heldCameraCommand(KeyCommandBind command) {
         return switch (command) {
@@ -2717,7 +2802,7 @@ class GpuBattleView extends ApplicationAdapter {
     public void pause() {
         cameraKeys.clear();
         boardInput.pressedKeys.clear();
-        boardInput.reset();
+        boardInput.interrupt();
         if (ui != null) {
             ui.focusLost();
         }

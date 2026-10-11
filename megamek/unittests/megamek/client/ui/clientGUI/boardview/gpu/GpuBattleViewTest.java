@@ -50,6 +50,24 @@ class GpuBattleViewTest {
               "A token at its tile surface has nothing to point at");
     }
 
+    /**
+     * A route's drag scrolls the board only near or past the edge of the area the panels leave free (here 300..1300 by
+     * 100..900 with a 50 px margin): towards that edge, faster the deeper, at most the full distance; nothing inside.
+     */
+    @Test
+    void edgeAutoPanMovesTheCameraOnlyNearTheEdge() {
+        assertTrue(GpuBattleView.edgePan(800, 500, 300, 100, 1300, 900, 50, 12).isZero(), "Inside: no scroll");
+        assertTrue(GpuBattleView.edgePan(351, 151, 300, 100, 1300, 900, 50, 12).isZero(), "Just inside the margin's start");
+        var left = GpuBattleView.edgePan(325, 500, 300, 100, 1300, 900, 50, 12);
+        assertEquals(6, left.x, 1e-4, "Half way into the left margin: half the distance, the board moving right");
+        assertEquals(0, left.y, 1e-4);
+        assertEquals(-12, GpuBattleView.edgePan(1400, 500, 300, 100, 1300, 900, 50, 12).x, 1e-4, "Past the right edge: all of it");
+        var corner = GpuBattleView.edgePan(1300, 100, 300, 100, 1300, 900, 50, 12);
+        assertEquals(-12, corner.x, 1e-4, "A corner scrolls both ways");
+        assertEquals(12, corner.y, 1e-4);
+        assertEquals(-12, GpuBattleView.edgePan(800, 900, 300, 100, 1300, 900, 50, 12).y, 1e-4, "The bottom edge brings in what lies below");
+    }
+
     private static BoardScene.Unit unit(boolean airborne) {
         return new BoardScene.Unit(1, -1, "test", new BoardScene.Waypoint(new Coords(0, 0), 0, 0), null, false, null, 1,
               airborne);

@@ -953,7 +953,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         controls.add(clearOnly(brush));
         brushRows.add(controls);
         brushRow(hint(UiKit.text(brush.sampledHex() != null ? "BoardEditor.hint.paintStamp"
-              : zone != null ? "BoardEditor.deploymentZoneHint" : "BoardEditor.hint.paint")));
+              : zone != null ? "BoardEditor.deploymentZoneHint"
+              : snapshot.drawsRoutes() ? "BoardEditor.hint.road" : "BoardEditor.hint.paint")));
     }
 
     /** The old editor's "Only overwrite clear hexes", for Paint and Sculpt: hexes that hold terrain are left as they are. */
