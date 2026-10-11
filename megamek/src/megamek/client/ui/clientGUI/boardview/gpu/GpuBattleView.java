@@ -1902,8 +1902,8 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     private void renderHexText() {
-        hexText.update(scene, theme.skin.getFont("default-font"), terrain::roofBounds, boardCamera.tactical(),
-              source.uiPreferences().overlays().hexTypes());
+        hexText.update(scene, theme.skin.getFont("default-font"), theme.skin.getFont(GpuBoardSkin.OUTLINE_FONT),
+              terrain::roofBounds, boardCamera.tactical(), source.uiPreferences().overlays().hexTypes());
         hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0);
     }
 
