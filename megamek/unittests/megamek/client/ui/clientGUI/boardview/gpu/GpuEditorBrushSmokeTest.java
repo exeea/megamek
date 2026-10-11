@@ -93,7 +93,10 @@ class GpuEditorBrushSmokeTest {
                         super.render();
                         assertTrue(System.nanoTime() < deadline, "Brush smoke stalled at " + step);
                         GpuTerrain terrain = terrain();
-                        if (!applied.get() || GpuBoardTestUi.loading(this) || terrain.busy() || frames() < after) { return; }
+                        // Count the frames from the EDT applying the commands, not from sending them: commands applied
+                        // while this frame rendered reach only the frames taken after it.
+                        if (!applied.get()) { after = frames() + 8; return; }
+                        if (GpuBoardTestUi.loading(this) || terrain.busy() || frames() < after) { return; }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         var root = GpuBoardTestUi.stage().getRoot();
                         if (step > 0 && step < 13) {
