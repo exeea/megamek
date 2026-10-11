@@ -2,8 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -52,18 +50,13 @@ class GpuTilesetTerrainTest {
     }
 
     @Test
-    void changingConcreteFittingRefreshesColumnsAndKeepsArtworkInsideItsHex() {
+    void fittedConcreteKeepsEachHexsArtworkInsideItsHex() {
+        // A change of the fitting mode is a terrain revision (BoardGeometry.terrainChanged): GpuTerrain rebuilds every
+        // chunk, the Classic columns too.
         BoardScene scene = GpuRiverTerrainSmokeTest.dockScene();
         BoardConcrete.Mode original = BoardConcrete.mode();
-        GpuTilesetTerrain terrain = new GpuTilesetTerrain();
         try {
-            Coords at = new Coords(10, 3);
-            float floor = BoardGeometry.floor(scene);
-            BoardConcrete.tune(BoardConcrete.Mode.OFF);
-            var hex = terrain.surface(scene, at, floor);
             BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
-            var fitted = terrain.surface(scene, at, floor);
-            assertNotSame(hex, fitted, "Fitting changes invalidate Tactical View even when the board snapshot is unchanged");
             BoardConcrete shape = BoardConcrete.of(scene);
             for (var tile : scene.tiles()) {
                 Vector3 center = BoardGeometry.center(tile.coords(), 0);
@@ -78,7 +71,6 @@ class GpuTilesetTerrainTest {
             }
         } finally {
             BoardConcrete.tune(original);
-            terrain.dispose();
         }
     }
 
@@ -296,26 +288,6 @@ class GpuTilesetTerrainTest {
                 }
             }
         }
-    }
-
-    @Test
-    void changingLandMaterialInvalidatesItsBorrowingBankButKeepsDistantColumns() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.scene(BoardScene.Surface.GRASS);
-        GpuTilesetTerrain terrain = new GpuTilesetTerrain();
-        try {
-            Coords river = new Coords(2, 1), land = river.translated(4), distant = new Coords(10, 10);
-            float floor = BoardGeometry.floor(scene);
-            var before = terrain.surface(scene, river, floor);
-            var retained = terrain.surface(scene, distant, floor);
-            var repainted = new ArrayList<>(scene.tiles());
-            // The adjacent bank must refresh when its source land material changes.
-            var original = scene.tile(land);
-            repainted.set(land.getX() * scene.height() + land.getY(), new BoardScene.Tile(land, original.elevation(), -1,
-                  false, 0, BoardScene.Surface.SAND, original.ground(), null, null, List.of(), List.of()));
-            scene = scene.withTiles(repainted);
-            assertNotSame(before, terrain.surface(scene, river, floor));
-            assertSame(retained, terrain.surface(scene, distant, floor));
-        } finally { terrain.dispose(); }
     }
 
     @Test

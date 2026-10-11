@@ -169,15 +169,14 @@ class GpuWireframeSmokeTest {
         render(view, "wireframe-tactical.png");
         assertFalse(tuning.wireframe(), "Entering the Tactical View leaves the wireframe view");
         assertTrue(view.boardCamera.tactical(), "The Tactical View shows the units on their bases");
-        // TODO(b11 step 7): columns() replaces tacticalView(), today's Classic flip.
-        assertFalse(((GpuTerrain) field(view, "terrain")).tacticalView(), "over the terrain the graphics chose");
+        assertFalse(((GpuTerrain) field(view, "terrain")).columns(), "over the terrain the graphics chose");
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Tactical View after wireframe");
 
         toggle("utility-wireframe");
         assertTrue(tuning.wireframe());
         assertFalse(view.boardCamera.tactical(), "Turning the wireframe on leaves the Tactical View");
         render(view, "wireframe-after-tactical.png");
-        assertFalse(((GpuTerrain) field(view, "terrain")).tacticalView());
+        assertFalse(((GpuTerrain) field(view, "terrain")).columns());
 
         toggle("utility-wireframe");
         assertFalse(tuning.wireframe());

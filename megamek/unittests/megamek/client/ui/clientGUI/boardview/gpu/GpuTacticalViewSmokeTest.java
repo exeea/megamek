@@ -17,6 +17,7 @@ import java.awt.Component;
 import java.awt.Rectangle;
 import java.io.File;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -35,6 +36,7 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
@@ -77,8 +79,8 @@ import org.junit.jupiter.api.Test;
  * grass; the bases show the side, the facing, the done and destroyed states; units are picked by their meeples; T
  * again restores the 3D view's models and its exact pose. A second test captures the mock-up battle in the movement and
  * firing phases (b11 tactical mock-ups) for review, a third drives its overlays through the Overlays panel and
- * captures the panel's places. The fluff GpuTerrain itself hides (trees, props, decals, water
- * pages) waits for step 7 (TODO(b11 step 7): assert no tree, scatter or water draw once setFluffHidden exists).
+ * captures the panel's places. The terrain draws no tree, scatter, grass, placed object, building model or water there
+ * (GpuTerrain#setFluffHidden), in either graphics, and still picks and drapes as before.
  */
 @Tag("on-demand")
 class GpuTacticalViewSmokeTest {
@@ -389,6 +391,9 @@ class GpuTacticalViewSmokeTest {
         render(view);
         var terrain = (GpuTerrain) field(view, "terrain");
         var bases = (GpuUnitBases) field(view, "unitBases");
+        var drawn3d = audit(view);
+        assertTrue(drawn3d.getOrDefault("instanced-trees", 0) > 0, "The 3D view draws its woods: " + drawn3d);
+        assertTrue(drawn3d.keySet().stream().anyMatch(family -> family.startsWith("water-")), "and its river: " + drawn3d);
         var scene = (BoardScene) field(view, "scene");
         var models = (Map<String, ModelInstance>) field(view, "unitInstances");
         var model = models.get("1:-1");
@@ -420,14 +425,15 @@ class GpuTacticalViewSmokeTest {
         }
         assertSame(BoardAtmosphere.TACTICAL, ((GpuAtmosphere) field(view, "atmosphere")).lighting(),
               "The fixed north-west light");
-        assertFalse((boolean) field(terrain, "grass"), "No grass in the Tactical View");
         assertFalse(((List<?>) field(terrain, "shadowModels")).isEmpty(), "The meeples cast shadows");
-        // TODO(b11 step 7): columns() replaces tacticalView(), today's Classic flip.
-        assertFalse(terrain.tacticalView(), "T leaves the terrain to the graphics setting");
+        assertFalse(terrain.columns(), "T leaves the terrain to the graphics setting");
+        assertTrue(terrain.fluffHidden(), "The Tactical View's draw rule");
+        verifyFluffHidden(view, terrain, scene);
         verifyBases(view, scene, bases);
         capture("tactical-view-top-enhanced.png");
         graphics(view, BoardGraphics.CLASSIC);
-        assertTrue(terrain.tacticalView(), "The Classic graphics draw the tileset columns");
+        assertTrue(terrain.columns(), "The Classic graphics build the tileset columns");
+        verifyFluffHidden(view, terrain, scene);
         capture("tactical-view-top-classic.png");
         verifyFieldOfView(view, scene);
         verifyPicking(view, scene);
@@ -442,7 +448,8 @@ class GpuTacticalViewSmokeTest {
         assertEquals(azimuth, view.boardCamera.azimuth());
         assertEquals(tilt, view.boardCamera.tilt());
         assertFalse(MeepleVisual.isMeeple(models.get("1:-1")), "The Atlas's model is back");
-        assertFalse(terrain.tacticalView());
+        assertFalse(terrain.columns());
+        assertFalse(terrain.fluffHidden(), "Leaving the Tactical View shows the fluff again");
         capture("tactical-view-restored.png");
 
         // Straight down and zoomed far out, the 3D view still shows its models: only T switches to the meeples.
@@ -453,7 +460,8 @@ class GpuTacticalViewSmokeTest {
         render(view);
         assertFalse(view.boardCamera.tactical());
         assertFalse(MeepleVisual.isMeeple(models.get("1:-1")), "No zoom or angle turns the 3D models into meeples");
-        assertFalse(terrain.tacticalView(), "No zoom or angle turns the terrain into tileset columns");
+        assertFalse(terrain.columns(), "No zoom or angle turns the terrain into tileset columns");
+        assertFalse(terrain.fluffHidden(), "No zoom or angle hides the fluff");
         SwingUtilities.invokeAndWait(() -> {
             assertEquals(OWN, fixture.entity.getPosition());
             assertEquals(0, fixture.entity.getFacing());
@@ -579,10 +587,55 @@ class GpuTacticalViewSmokeTest {
         }
     }
 
-    /** Chooses the graphics on the Swing thread, as the menus do, and renders the frames that apply the choice. */
+    /**
+     * Chooses the graphics on the Swing thread, as the menus do, and renders until the rebuild the choice starts behind
+     * the loading stage commits.
+     */
     private static void graphics(GpuBattleView view, BoardGraphics graphics) throws Exception {
         SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().setBoardGraphics(graphics));
         render(view);
+        var terrain = (GpuTerrain) field(view, "terrain");
+        long deadline = System.nanoTime() + 120_000_000_000L;
+        while (terrain.busy()) {
+            assertTrue(System.nanoTime() < deadline, "The graphics switch completes");
+            view.render();
+        }
+        render(view);
+    }
+
+    /** The terrain's draws, by source and family, over one frame of the view ({@link GpuDrawCallAudit#totals}). */
+    private static Map<String, Integer> audit(GpuBattleView view) {
+        try (var audit = new GpuDrawCallAudit(view)) {
+            view.render();
+            return audit.totals();
+        }
+    }
+
+    /**
+     * In the Tactical View the terrain draws no tree, placed object, building model, scatter, grass or water, while a
+     * click on any hex picks the same hex and floor, and the overlays and labels drape on the same surfaces, as with the
+     * fluff shown: the rule hides at draw time only.
+     */
+    private static void verifyFluffHidden(GpuBattleView view, GpuTerrain terrain, BoardScene scene) throws Exception {
+        var drawn = audit(view);
+        for (String source : List.of("instanced-trees", "grass", "scatter", "water")) {
+            assertEquals(0, drawn.getOrDefault(source, 0), "The Tactical View draws no " + source + ": " + drawn);
+        }
+        assertTrue(drawn.keySet().stream().noneMatch(family -> family.startsWith("water-")), "No water: " + drawn);
+        List<Object> hidden = new ArrayList<>(), shown = new ArrayList<>();
+        for (boolean fluff : new boolean[] { true, false }) {
+            terrain.setFluffHidden(fluff);
+            for (BoardScene.Tile tile : scene.tiles()) {
+                Vector3 centre = BoardGeometry.center(tile.coords(), 0);
+                var down = new Ray(new Vector3(centre.x, centre.y, 1000), new Vector3(0, 0, -1));
+                List<Object> picks = fluff ? hidden : shown;
+                picks.add(terrain.selectionHit(scene, down));
+                picks.add(terrain.walkableHit(scene, down));
+                picks.add(terrain.tacticalSurface(tile.coords()));
+            }
+        }
+        terrain.setFluffHidden(true);
+        assertEquals(shown, hidden, "Hiding the fluff changes no pick and no draped surface");
     }
 
     private static void capture(String name) {

@@ -99,8 +99,8 @@ GPU Tuning's General tab has a **Unit display** selector, applied live in both c
 - **Mek Meeples** is the default: Meks use tokens; other units use their existing 3D models.
 - **3D Models** restores the existing authored-model presentation, including flat artwork when a model is unavailable.
 
-The Defaults button restores Mek Meeples. Sensor contacts retain their anonymous markers, and tactical overview
-icons still follow the overview setting. The token mesh reuses the libGDX branch's alpha-contour extrusion through
+The Defaults button restores Mek Meeples. Sensor contacts retain their anonymous markers. The Tactical View draws
+every unit as its meeple on a base, whatever the selector shows ([HUD](gpu-hud.md#5-the-tactical-view)). The token mesh reuses the libGDX branch's alpha-contour extrusion through
 `GpuCutout`. Both cameras use the same posed geometry for drawing, picking, shadows, attachments and effects.
 
 `MeepleVisual` owns token geometry, wall paint and attachment sockets. `MeepleAnimator` supplies rigid token poses;
@@ -166,42 +166,78 @@ and ground support, so their vertical gradient is an approximation across the fo
 run the thermal shader or queue thermal draws. Turning Wireframe off retains the shader
 cache until renderer disposal; no additional unit meshes or full-screen buffers are made.
 
+## Graphics: Classic and Enhanced
+
+The 3D Graphics setting (View > 3D Graphics, Client Settings; `GUIPreferences.BOARD_GRAPHICS`, published to the render
+thread as `BoardSource.UiPreferences.graphics`) chooses what `GpuTerrain` builds. `GpuBattleView` calls
+`GpuTerrain.setColumns(graphics == CLASSIC)` before each `update`, so a game saved as Classic never builds the 3D terrain
+first. Enhanced, the default, builds the 3D relief, water and lava fields, trees, scatter, ground cover, biomes and every
+feature. Classic, for low-end computers, is a build mode of the same chunk pipeline (b11-design 2.4):
+
+- **Art.** The update plan composes each hex's column art on a terrain worker: its Saxarba tileset art
+  (`BoardScene.Tile.tileset`, which `BoardArtwork` composes from the 3D board's own tileset, never the 2D board) with
+  `BoardRim.column`'s incline mask along each edge above a lower neighbour, or its high-incline mask where the drop
+  exceeds two levels or the map marks a cliff side there. It goes into the hex's base slot of the ground atlas, which a
+  water neighbour's bank borrows as in Enhanced. The tileset decals, object sprites and bridge art (`Tile.bridge`) go into
+  the decal atlas; Enhanced no longer packs or builds them.
+- **Geometry.** A Classic chunk's worker job is `GpuTerrain.prepareColumns`: each hex's `GpuTilesetTerrain.column`, a
+  plain column at its level, walled in its material down to lower neighbours or the board's floor. A road leaving a hex
+  toward one of another level ramps through their shared edge to the height `BoardSurface.roadEdgeElevation` gives both,
+  between banks, and the walls and rims leave that mouth open. Natural shores round into land-textured banks and sandy
+  shallows; concrete quays keep their fitted corners (`BoardConcrete`). No relief, sculpting, water or lava field, plant,
+  road or bridge footing is prepared.
+- **Chunk.** The GL thread's collection step writes each column (`GpuTilesetTerrain.write`) into the chunk's opaque
+  layer (tops, walls, banks, sand shallows, the bridge's deck art at its deck height, molten liquid) and its liquid
+  layer (open water in its animated frames, `BoardLiquid.textures`, moving with its river's current, and the falls over
+  each drop into the liquid below; hazardous liquid is tinted green). Of the hex's features it builds only buildings,
+  fuel tanks, industrial plants, rail and maglev routes and placed objects other than plants
+  (`GpuTerrain.columnFeature`), standing on the column (`GpuTerrain.GroundView`); a rail lies on its carrier plane and a
+  maglev has no piers. Tileset decals and sprites, authored paint and the tactical markings lie on the columns.
+- **Shared.** Everything else is the Enhanced path: the opaque layer draws, casts and receives shadows through the
+  terrain pages and the depth snapshot, the liquid layer through the transparent pass, liquids animate with the
+  terrain's clocks, picking and overlay draping (`GpuTerrain.tacticalSurface`) read the column, the wireframe draws it,
+  and an edit rebuilds only the chunks it touches; the change scan also notices the tileset art, bridge art, tileset
+  decals and sprites, which only a Classic build reads. Classic chunks have one level of detail, so the camera never
+  refines them. The board-wide biome map, ground cover and wave simulations are not created, and are released on a
+  switch to Classic.
+- **Switching.** A change of the setting is a full rebuild either way: `update` sees the wanted graphics differ from
+  the installed ones and starts a new build, cancelling running jobs; `ready` stays false until it commits, so the view
+  shows its loading stage (overall progress and section grid) and the build uploads with the opening's frame slice;
+  the commit retires the other build's chunks. Camera, Tactical View, selection, orders, HUD and units stay. The
+  editor's palette and terrain previews stay Enhanced. Measured costs: [performance](gpu-board-performance.md#classic-and-enhanced-graphics).
+- **Cliffs.** The Classic tops carry no cliff stroke; the Tactical View's ground layer strokes cliffs in both graphics.
+- **Limits.** A Classic bridge hex is picked on its column, under the deck art (no 3D deck); placed objects, decals
+  and paint on the bridge take the plane of the deck art over the whole hex. The atmosphere (grading, fog, weather,
+  glare, lightning) applies as in Enhanced; fire and smoke particles are left out, since the tileset art shows them.
+
+Tests: `GpuGraphicsModeSmokeTest` (a game started in Classic builds no water or lava field, wave simulation, tree,
+scatter, grass, biome map or sculpted material and no sculpted shader warm-up; the building stands on its column;
+overlays drape on and picks hit the column tops; a switch either way shows the loading stage and retires the other
+build; T starts no rebuild), `GpuTilesetTerrainSmokeTest` (an edit rebuilds only the chunks of its hex and of the
+neighbours that read it; water stays inside the shore picking uses; review captures), `GpuTilesetTerrainTest` (column
+geometry), `BoardRimTest.classicColumnsBakeNoCliffStroke`. `GpuTerrainLoadBenchmarkTest` with
+`-Dmegamek.gpu.benchmarkGraphics=CLASSIC` times `prepareColumns` and digests the columns in the region's order.
+
 ## Tactical View
 
 The HUD's Tactical view utility and the Toggle Tactical View key (T) switch the camera to the Tactical View, a
 north-up top view that does not orbit, tilt or turn, and back ([HUD](gpu-hud.md#5-the-tactical-view)). The terrain
-does not follow the view: the 3D Graphics setting chooses it. With Classic, at every zoom and in both views,
-`GpuTilesetTerrain` replaces the shaded terrain, as the libGDX branch drew the board: each
-hex is a plain column at its level, topped by its Saxarba tileset art (`BoardScene.Tile.tileset`, which `BoardArtwork`
-composes from the 3D board's own tileset, never the 2D board) and walled in its material down to lower neighbours or
-the board's floor. The tileset's own incline and cliff edges are left out of that art: `BoardRim` lays its incline
-mask along each edge above a lower neighbour, or its high-incline mask where the drop exceeds two levels or the map
-marks a cliff side there. A road leaving a hex toward one of another level ramps through their shared edge to the
-height `BoardSurface.roadEdgeElevation` gives both, between banks, and the walls and rims leave that mouth open; a
-bridge's art (`BoardScene.Tile.bridge`) lies on its deck, where its approaches' ramps arrive. Open liquid shows its
-animated frames (`BoardLiquid.textures`) over its art, reaching every bank without fading and moving with its
-river's current (`BoardFlow`). Water stays translucent; hazardous liquid is tinted green; magma is opaque and glowing.
-Water artwork uses the full-water variant at its authored depth, without a painted shore on the lakebed; the column
-walls supply the banks. Game water exits remain unchanged. Over each drop into the open liquid it joins, a fall curves
-over the edge, hangs just clear of the wall and spreads into the pool below, its frames running down it. These liquids
-cast no shadow, and `GpuTerrain` animates them with its own. Buildings, fuel tanks and industrial structures stay
-the 3D board's own models (a custom kit's modular building where one exists), and their art is left out of the hex's
-tileset image: they fade around units inside, show their struts and floors, take picks with the hovered level's
-cutaway, and cast shadows, as in the 3D view. Toggling the view recaches each section's props, so their caches hold
-only the structures while it is on. The hex grid lies on the columns at every angle, behind whatever stands nearer.
-Cliff outlines are strokes in the upper hex's artwork, so they follow the same top and depth at every camera angle.
-They use `BoardRim`'s cliff classification (a drop above two levels, or a manual `CLIFF_TOP` exit), leave road mouths
-open, and update with the terrain's artwork cache. Ordinary slopes keep their rim shading without a bold outline.
-The columns have no relief, blends, 3D water surfaces, trees, scatter or other feature models. While the view is on, `GpuTerrain` draws, picks and drapes overlays on these same columns, and lights them
-with its own batch and environment: the hour's sun or moon, ambient, cloud shadows and lava glow, as on the 3D board
-(tops face up, walls and banks outward). The geometry shadow map holds the columns, bridge decks and 3D units in
-place of the 3D terrain, through the same fit and caches, so higher columns shade lower ones and units shade the
-columns. The 3D terrain stays built, so the switch needs no rebuild, only a shadow redraw; the columns and their art
-atlases are built on first use. An edit rebuilds only the terrain sections (`GpuTerrain.CHUNK_SIZE` hexes square)
-holding a changed hex and, when what its neighbours read of it changed (levels, roads, liquid, bridge), those
-neighbours, plus the sections of hexes whose current the edit turned, and redraws the shadow. The atmosphere (grading, fog, sand, weather, heat glow, glare, lightning) applies
-as in the 3D view; only fire and smoke particles are left out, since the tileset art shows them. Units are flat icons
-(`GpuUnitIcons`) throughout the view.
+does not follow the view: the 3D Graphics setting chooses it, and T never rebuilds it. Every unit is its meeple on a
+`GpuUnitBases` base (side ring, facing and twist notches, status badges, wreck cross), the ground layer of `GpuHexGrid`
+marks cliffs (including Cliff Top exits, by `BoardRim.high`), 1- and 2-level steps, woods, roofs with their CF, water
+by depth, smoke and fire, and the fixed north-west light (`BoardAtmosphere.TACTICAL`) replaces the hour's.
+
+`GpuBattleView` calls `GpuTerrain.setFluffHidden(boardCamera.tactical())` every frame. The rule is a draw rule only
+(b11-design 4.3): trees, scatter, grass and biome vegetation, building, industrial, fuel tank and placed object models,
+decals and authored paint, combat scars and ground damage, water (Enhanced water pages and ice, Classic liquid frames),
+the ocean and lava wave simulations, spores and geysers hide; the relief or the columns, roads, bridges (3D decks or
+Classic deck art), rough, rubble and fortifications (`Prop.tactical`), tunnel portals and rail and maglev routes stay.
+Molten lava and magma lie in the opaque layer in both graphics and stay, still (their waves stop). T neither rebuilds
+nor recaches: the 3D prop caches and their pages stay, and the passes draw each chunk's kept props instead, packed on
+the view's first draw of the chunk (`GpuTerrain.Chunk#keptProps`), so only the shadow map is redrawn. Picking is
+unchanged: a click picks the same hex and floor (a building's roof included) and overlays drape on the same surfaces as
+in the 3D view (`GpuTacticalViewSmokeTest.verifyFluffHidden`, which also audits that one Tactical View frame submits no
+tree, placed object, building module, scatter, grass or water draw, in both graphics).
 
 ## Threads and update ownership
 

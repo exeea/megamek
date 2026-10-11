@@ -120,12 +120,14 @@ class GpuSmallObjectSmokeTest {
                     camera.setPerspective(false);
                     checkReusedTile(terrain, edited, camera, profiler, 2 * car, "view");
                     checkScar(terrain, edited, camera, profiler);
-                    terrain.setTacticalView(true);
+                    // The Classic graphics build the placed objects too, which follow the same rule there.
+                    terrain.setColumns(true);
+                    terrain.update(edited);
                     zoom(camera, 16);
                     assertEquals(0, hidden(terrain, camera, profiler));
                     zoom(camera, 9);
-                    assertEquals(2 * car, hidden(terrain, camera, profiler), "The Tactical View's objects follow the rule");
-                    terrain.setTacticalView(false);
+                    assertEquals(2 * car, hidden(terrain, camera, profiler), "The Classic graphics' objects follow the rule");
+                    terrain.setColumns(false);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);

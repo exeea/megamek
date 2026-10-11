@@ -79,7 +79,6 @@ class GpuLegacyArtSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    terrain.setTacticalView(false);
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
                     for (var shot : shots.entrySet()) {

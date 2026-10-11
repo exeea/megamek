@@ -460,15 +460,15 @@ class GpuLegacyImportSmokeTest {
             var scene = (BoardScene) field(view, "scene");
             var down = new com.badlogic.gdx.math.collision.Ray(new Vector3(dropped).add(0, 0, 500), new Vector3(0, 0, -1));
             assertEquals(tree.get(), terrain.decorationHit(scene, down).id(), "Object picking finds the stand tree");
-            // The Tactical View hides placed plants as every other plant (b13): no part of the trees draws there, and a
-            // pick passes through them.
-            int standing = objectParts(terrain);
-            terrain.setTacticalView(true);
+            // The Tactical View hides every placed object, plants included (b11-design 4.3): no object part draws there,
+            // and the editor's object pick passes through the tree.
+            assertTrue(objectParts(terrain) > 0, "The 3D view draws the other placed objects");
+            terrain.setFluffHidden(true);
             try {
                 var shown = terrain.decorationHit(scene, down);
                 assertTrue(shown == null || !shown.id().equals(tree.get()), "A Tactical View pick passes through the placed tree");
-                assertEquals(standing, objectParts(terrain), "The trees draw no object parts there");
-            } finally { terrain.setTacticalView(false); }
+                assertEquals(0, objectParts(terrain), "No placed object draws there");
+            } finally { terrain.setFluffHidden(false); }
 
             // The bridge's Pillars toggle, from its Edit panel: the imported span has its piers; off removes them from the
             // whole span, Undo brings them back. A pier is the bridge in the side view too.
@@ -908,13 +908,27 @@ class GpuLegacyImportSmokeTest {
     }
 
     /** The placed objects' parts the chunks draw through the object path, instanced or loose. */
+    /** The placed object parts the terrain draws now: those whose object passes its draw rule ({@link #drawn}). */
     private static int objectParts(GpuTerrain terrain) throws Exception {
         int parts = 0;
         for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            parts += ((com.badlogic.gdx.utils.Array<?>) field(chunk, "decorationRenderables")).size
-                  + ((com.badlogic.gdx.utils.Array<?>) field(chunk, "looseDecorations")).size;
+            for (String owners : List.of("decorationOwners", "looseOwners")) {
+                for (Object owner : (com.badlogic.gdx.utils.Array<?>) field(chunk, owners)) {
+                    if (drawn(terrain, owner)) { parts++; }
+                }
+            }
         }
         return parts;
+    }
+
+    /**
+     * Whether every colour pass draws this placed object now: GpuTerrain#drawn, the one rule the passes apply to the
+     * object parts they gather (the zoom's size rule and the Tactical View's).
+     */
+    static boolean drawn(GpuTerrain terrain, Object prop) throws ReflectiveOperationException {
+        var rule = GpuTerrain.class.getDeclaredMethod("drawn", prop.getClass(), boolean.class);
+        rule.setAccessible(true);
+        return (boolean) rule.invoke(terrain, prop, false);
     }
 
     private static int opaqueDraws(GpuBattleView view) {

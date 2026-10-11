@@ -74,7 +74,6 @@ class GpuDecalPlacementSmokeTest {
                         BoardScene control = controls.get(i), scene = decorated.get(i);
                         Vector3 center = BoardGeometry.center(CENTER, 0);
                         var ray = new Ray(new Vector3(center.x, center.y, 1000), new Vector3(0, 0, -1));
-                        terrain.setTacticalView(false);
                         frame.prepare(terrain, camera, control);
                         terrain.update(control);
                         var hit = terrain.selectionHit(control, ray);
@@ -84,7 +83,9 @@ class GpuDecalPlacementSmokeTest {
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         for (boolean tactical : new boolean[] { false, true, false }) {
-                            terrain.setTacticalView(tactical);
+                            // The tileset decals are the Classic graphics': a build of their own.
+                            terrain.setColumns(tactical);
+                            terrain.update(scene);
                             float expected = tactical && sample.name().startsWith("bridge")
                                   ? GpuTilesetTerrain.deckZ(scene.tile(CENTER)) : support;
                             // Paint and terrain-owned sprites are overlays; art the conversion turned into placed

@@ -52,7 +52,7 @@ class GpuSceneryCarSmokeTest {
                         var cars = scene.tile(coords).features().stream()
                               .filter(f -> f.asset().startsWith("scenery/vehicles/car")).toList();
                         assertEquals(BoardSceneryCarTest.COUNTS.get(index).intValue(), cars.size());
-                        terrain.setTacticalView(false);
+                        terrain.setColumns(false);
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         var installed = new ArrayList<ModelInstance>();
@@ -73,7 +73,9 @@ class GpuSceneryCarSmokeTest {
                         }
                         for (int view = 0; view < 3; view++) {
                             boolean artwork = view == 0;
-                            terrain.setTacticalView(artwork);
+                            // The tileset art: the Classic graphics, a build of their own.
+                            terrain.setColumns(artwork);
+                            terrain.update(scene);
                             camera.setIsometric(view == 2);
                             camera.center(BoardGeometry.center(coords, 0));
                             camera.camera.zoom = .10f;

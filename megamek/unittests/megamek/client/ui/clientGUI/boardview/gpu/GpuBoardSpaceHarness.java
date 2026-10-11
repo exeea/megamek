@@ -116,7 +116,7 @@ final class GpuBoardSpaceHarness implements Disposable {
         camera.setTactical(tactical, scene);
         camera.setIsometric(!tactical);
         camera.fit(scene);
-        terrain.setTacticalView(tactical);
+        terrain.setFluffHidden(tactical);
     }
 
     boolean tactical() {

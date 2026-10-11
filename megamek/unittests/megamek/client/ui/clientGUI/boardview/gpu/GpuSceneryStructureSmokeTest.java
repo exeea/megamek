@@ -49,7 +49,6 @@ class GpuSceneryStructureSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    terrain.setTacticalView(false);
                     for (int index = 0; index < scenes.size(); index++) {
                         var scene = scenes.get(index);
                         frame.prepare(terrain, camera, scene);

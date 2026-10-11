@@ -78,7 +78,7 @@ class GpuBoardFileSmokeTest {
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
                 boolean tactical = Boolean.getBoolean("megamek.gpu.boards.tactical");
-                terrain.setTacticalView(tactical);
+                terrain.setColumns(tactical);
                 GpuReviewFrame frame = new GpuReviewFrame(new BoardAtmosphere.Settings(hour, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
