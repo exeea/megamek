@@ -181,10 +181,10 @@ class GpuChatToastModalSmokeTest {
                 assertEquals(DRAFT, field.getText());
                 assertSame(field, hud.focus());
                 assertEquals(List.of(system, lines.get(0).text(), system, lines.get(1).text()), messages(panel));
-                assertEquals(new Rectangle(1560, 66, 340, 320), GpuHudTestStage.bounds(panel),
-                      "right 20, bottom 66, 340 x 320 (r1 section 2)");
+                assertEquals(new Rectangle(1570, 66, 340, 320), GpuHudTestStage.bounds(panel),
+                      "right 10, bottom 66, 340 x 320");
                 Rectangle place = GpuHudTestStage.bounds(button);
-                assertEquals(1900, place.x + place.width, .01f, "the button keeps the right gap");
+                assertEquals(1910, place.x + place.width, .01f, "the button keeps the right gap");
                 assertEquals(18, place.y, .01f, "and stands 18 above the bottom");
                 UiTestStage.assertTexts(panel);
                 UiTestStage.assertTexts(button);
@@ -236,10 +236,10 @@ class GpuChatToastModalSmokeTest {
                 hud.show(frame(new GpuChat.Snapshot(lines)), null);
                 hud.show(frame(new GpuChat.Snapshot(lines)), null);
                 List<String> shown = messages(panel);
-                assertEquals(2 * lines.size(), shown.size());
+                assertEquals(lines.size() + 3, shown.size(), "two system headers and one for consecutive player messages");
                 assertEquals(List.of(system, lines.get(0).text(), system, lines.get(1).text(), "Player", DRAFT),
                       shown.subList(0, 6), "the history stays, oldest first");
-                assertEquals(List.of("Player", "Line 14"), shown.subList(shown.size() - 2, shown.size()));
+                assertEquals(List.of("Line 13", "Line 14"), shown.subList(shown.size() - 2, shown.size()));
                 ScrollPane scroll = all(panel, ScrollPane.class).getFirst();
                 assertTrue(scroll.getMaxY() > 0, "the lines overflow the panel");
                 assertEquals(scroll.getMaxY(), scroll.getScrollY(), .5f, "the newest line is in view");
@@ -249,6 +249,7 @@ class GpuChatToastModalSmokeTest {
                 Label notice = all(panel, Label.class).stream().filter(label -> label.textEquals(system))
                       .findFirst().orElseThrow();
                 assertEquals(UiTheme.MUTED, notice.getStyle().fontColor, "MegaMek's own lines are muted");
+                UiTestStage.capture("chat-grouped-messages", harness.width(), harness.height()).dispose();
 
                 // A line that arrives while the chat is closed lights the dot until the chat opens.
                 hud.key(Input.Keys.ESCAPE, KeyEvent.VK_ESCAPE);
@@ -1017,7 +1018,7 @@ class GpuChatToastModalSmokeTest {
         return rows.stream().map(row -> all(row, Label.class).getLast().getText().toString()).toList();
     }
 
-    /** The chat's messages as sender, text, sender, text, oldest first. */
+    /** The chat's sender headings and message texts, oldest first. */
     private static List<String> messages(Actor panel) {
         ScrollPane scroll = all(panel, ScrollPane.class).getFirst();
         return texts(scroll.getActor());
