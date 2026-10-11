@@ -204,7 +204,7 @@ public final class UiTheme implements Disposable {
         // Transparent white keeps linearly filtered glyph edges from darkening.
         hudGlyphs.setTransparentColor(new Color(1, 1, 1, 0));
         for (HudFont hud : HUD_FONTS) {
-            BitmapFont face = font(hud.name(), ROBOTO, hud.instance(), hud.size(), hud.tracking(), hudGlyphs);
+            BitmapFont face = font(hud.name(), ROBOTO, hud.instance(), hud.size(), hud.tracking(), 0, hudGlyphs);
             skin.add(hud.name(), new Label.LabelStyle(face, hud.color()));
         }
         hudGlyphs.getPages().forEach(page -> bindGlyphPage(page.getTexture()));
@@ -851,7 +851,16 @@ public final class UiTheme implements Disposable {
      * directory at {@code size} stage units, on pages of its own, with the theme's fallback faces.
      */
     public BitmapFont font(String name, String path, float size) {
-        return font(name, path, 0, size, 0, null);
+        return font(name, path, 0, size, 0, 0, null);
+    }
+
+    /**
+     * {@link #font(String, String, float)} with FreeType's round white border {@code border} stage units wide around
+     * every glyph, for drawing tinted under the borderless font as its outline. Its glyphs advance as the borderless
+     * font's do, but a line's first glyph starts at its border, {@code border} to the left of the borderless ink.
+     */
+    public BitmapFont font(String name, String path, float size, float border) {
+        return font(name, path, 0, size, 0, border, null);
     }
 
     /**
@@ -863,12 +872,17 @@ public final class UiTheme implements Disposable {
      * texels of the packer's transparent margin, and their pages are sampled from mip level 0 or 1 (see
      * bindGlyphPage), whichever is nearer.
      */
-    private BitmapFont font(String name, String path, int instance, float size, float tracking, PixmapPacker packer) {
+    private BitmapFont font(String name, String path, int instance, float size, float tracking, float border,
+          PixmapPacker packer) {
         FreeTypeFontGenerator generator = new Generator(fontFile(fonts, path), instance, 1, fallback);
         generators.add(generator);
         FreeTypeFontGenerator.FreeTypeFontParameter settings = new FreeTypeFontGenerator.FreeTypeFontParameter();
         settings.size = Math.round(size * 4);
-        settings.spaceX = Math.round(tracking * size * 4);
+        settings.borderWidth = Math.round(border * 4);
+        settings.borderColor = Color.WHITE;
+        settings.borderStraight = false;
+        // FreeType widens every glyph's advance by the border; take it back so the text keeps its width.
+        settings.spaceX = Math.round(tracking * size * 4) - (int) settings.borderWidth;
         settings.packer = packer;
         settings.incremental = true;
         settings.minFilter = Texture.TextureFilter.Linear;

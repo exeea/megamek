@@ -52,6 +52,10 @@ final class GpuBoardSkin implements Disposable {
     static final Color BAND_LONG = Color.valueOf("9FB2F0");
     /** The hex labels' font size in texels: UiTheme.font rasterises the 15 units of default-font at 4x. */
     static final int FONT_RESOLUTION = 60;
+    /** The hex labels' outline font: default-font with a white border, which GpuHexText tints under each label. */
+    static final String OUTLINE_FONT = "default-font-outline";
+    /** Its border in texels: 0.05 of the font size, a little over the ring BoardHexText draws (0.04). */
+    static final int OUTLINE = 3;
     /** The Contacts utility's icon-enemy: the skull of mm-data's misc images, black on transparent. */
     private static final String ENEMY_ICON = "challenge_estimate_full.png";
 
@@ -64,6 +68,7 @@ final class GpuBoardSkin implements Disposable {
         skin = theme.skin;
         // Noto Sans stays the default font: the 3D hex labels and the window's loading message use it.
         BitmapFont font = theme.font("default-font", "Noto Sans/NotoSans-Regular.ttf", 15);
+        theme.font(OUTLINE_FONT, "Noto Sans/NotoSans-Regular.ttf", 15, 15f * OUTLINE / FONT_RESOLUTION);
         theme.add("default", new Label.LabelStyle(font, TEXT), Label.LabelStyle.class);
         Pixmap enemy = new Pixmap(new FileHandle(new File(Configuration.miscImagesDir(), ENEMY_ICON)));
         try {
