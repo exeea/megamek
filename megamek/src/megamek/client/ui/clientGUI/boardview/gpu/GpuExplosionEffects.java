@@ -58,6 +58,15 @@ final class GpuExplosionEffects implements Disposable {
         wind.set(MathUtils.sinDeg(weather.windDirection()), MathUtils.cosDeg(weather.windDirection()), weather.wind());
     }
 
+    /**
+     * Carries {@code point} as far downwind as the board's wind takes free smoke in {@code seconds}: nothing in calm
+     * air, and most of a hex a second at full strength, along the same bearing the weather gives the shader.
+     */
+    Vector3 downwind(Vector3 point, float seconds) {
+        float distance = wind.z * BoardGeometry.height() * .8f * seconds;
+        return point.add(wind.x * distance, wind.y * distance, 0);
+    }
+
     /** One expanding, buoyant fire-to-smoke volume, sampled entirely from the caller's normalized attack clock. */
     void burst(Vector3 center, float radius, float age, int seed) {
         if (age < 0 || age >= 1) { return; }

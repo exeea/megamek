@@ -247,7 +247,7 @@ final class GpuArtilleryBlast {
                 float bearing = piece * 2.399963f + random(seed, piece + 200);
                 float distance = hex * (.1f + .3f * random(seed, piece + 220));
                 pieces.add(new Piece(MathUtils.cos(bearing) * distance, MathUtils.sin(bearing) * distance, 0,
-                      launch(seed, piece), .45f + .3f * random(seed, piece + 260), false));
+                      launch(seed, piece), fragmentFlight(0, seed, piece), false));
             }
             return pieces;
         }
@@ -267,7 +267,7 @@ final class GpuArtilleryBlast {
                     float bearing = random(seed, piece + 320) * MathUtils.PI2;
                     float offsetX = hexCentre.x - centre.x + MathUtils.cos(bearing) * spread;
                     float offsetY = hexCentre.y - centre.y + MathUtils.sin(bearing) * spread;
-                    float flight = .45f + .25f * ring + .3f * random(seed, piece + 260);
+                    float flight = fragmentFlight(ring, seed, piece);
                     pieces.add(new Piece(offsetX, offsetY, ring, launch(seed, piece), flight, fragment == 0));
                 }
             }
@@ -322,9 +322,14 @@ final class GpuArtilleryBlast {
         return explodes(profile) && areaEffect(weaponName, profile).cluster();
     }
 
-    /** Pieces leave the crater over the first half second rather than all at once. */
+    /** Fragments leave the burst within its first tenth of a second. */
     private static float launch(int seed, int piece) {
-        return .05f + .5f * random(seed, piece + 240);
+        return .02f + .08f * random(seed, piece + 240);
+    }
+
+    /** Seconds a fragment flies to a hex {@code ring} rings out: a fraction of a second, a little longer farther out. */
+    private static float fragmentFlight(int ring, int seed, int piece) {
+        return .07f + .1f * ring + .06f * random(seed, piece + 260);
     }
 
     /**
@@ -416,10 +421,15 @@ final class GpuArtilleryBlast {
                   BRIGHT_FIRE, Vector3.Zero);
         }
         // Smoke follows its flash rather than sharing its centre and moment, which would cover the flash's bright core.
-        float casingSmokeAge = (seconds - .25f) / 3;
+        // The casing's smoke swells fast and thins as it spreads, and the wind carries it off.
+        float smokeSeconds = seconds - .2f;
+        float casingSmokeAge = smokeSeconds / 2.4f;
         if (casingSmokeAge >= 0 && casingSmokeAge < 1) {
-            explosions.add(burst, hex * (.12f + .2f * casingSmokeAge), casingSmokeAge, .2f,
-                  .8f * fadeOut(casingSmokeAge, .4f), seed + 2, BURST_SMOKE, Vector3.Zero);
+            float swell = 1 - (float) Math.exp(-smokeSeconds * 1.8f);
+            point.set(burst).add(0, 0, hex * .12f * casingSmokeAge);
+            explosions.downwind(point, smokeSeconds);
+            explosions.add(point, hex * (.15f + .6f * swell), casingSmokeAge, .15f,
+                  .85f * fadeOut(casingSmokeAge, .15f), seed + 2, BURST_SMOKE, Vector3.Zero);
         }
         for (int index = 0; index < pieces.size(); index++) {
             Piece piece = pieces.get(index);
@@ -441,6 +451,7 @@ final class GpuArtilleryBlast {
             float smokeAge = (seconds - piece.landing() - .4f) / 2.4f;
             if (smokeAge >= 0 && smokeAge < 1) {
                 point.set(landing).add(0, 0, hex * (.06f + .1f * smokeAge));
+                explosions.downwind(point, seconds - piece.landing() - .4f);
                 explosions.add(point, hex * (.08f + .1f * smokeAge), smokeAge, .1f, .6f * fadeOut(smokeAge, .35f),
                       seed + index * 47, BURST_SMOKE, Vector3.Zero);
             }
@@ -533,33 +544,33 @@ final class GpuArtilleryBlast {
     }
 
     /**
-     * Earth and wreckage thrown out of the crater, one piece at each hex the shell damages, each on its own arc and
-     * landing at its own moment with a puff of dust where it comes down.
+     * Shell fragments: too fast to follow, so in flight each is only a faint streak on a nearly straight line, and
+     * they strike the damaged hexes as a quick ripple outward, inner ring first, within about a third of a second.
+     * Where one strikes, it kicks a thin spurt of dirt up off the ground that falls back and fades in half a second;
+     * the fragment that marks its hex kicks a slightly larger one.
      */
     private void debris(GpuExplosionEffects explosions, Vector3 ground, float size, List<Piece> pieces,
           List<Vector3> landings, float seconds, int seed) {
+        float hex = BoardGeometry.height();
         for (int index = 0; index < pieces.size(); index++) {
             Piece piece = pieces.get(index);
             Vector3 landing = landings.get(index);
             float travel = (seconds - piece.launch()) / piece.flight();
             if (travel > 0 && travel < 1) {
-                float distance = (float) Math.hypot(landing.x - ground.x, landing.y - ground.y);
-                // A low, flat spray of dirt rather than lobbed shells: the arc rises about a sixth of its length.
-                float apex = distance * MathUtils.lerp(.12f, .22f, random(seed, index + 280)) + size * .1f;
-                point.set(ground).lerp(landing, travel).add(0, 0, size * .2f * (1 - travel)
-                      + 4 * apex * travel * (1 - travel));
-                // Drawn out along its flight, so a piece reads as a streak of earth trailing dust.
-                float climb = 4 * apex * (1 - 2 * travel) + (landing.z - ground.z);
-                axis.set(landing.x - ground.x, landing.y - ground.y, climb).nor().scl(1.4f);
-                float pieceSize = size * MathUtils.lerp(.03f, .055f, random(seed, index + 290));
-                explosions.add(point, pieceSize, travel * .6f, .35f, .9f, seed + index * 41, DEBRIS, axis);
+                // Fragments leave the burst at about the height of its core and fly almost flat.
+                point.set(ground).lerp(landing, travel).add(0, 0, size * .25f * (1 - travel));
+                axis.set(landing).sub(ground).nor().scl(3);
+                explosions.add(point, hex * .012f, .5f, .2f, .6f, seed + index * 41, DEBRIS, axis);
             }
-            float settle = (seconds - piece.landing()) / 1.6f;
-            if (settle >= 0 && settle < 1) {
-                point.set(landing).add(0, 0, size * .05f);
-                float puffSize = size * (piece.marksGround() ? .1f + .14f * settle : .05f + .08f * settle);
-                explosions.add(point, puffSize, settle, 0, .55f * fadeOut(settle, .3f), seed + index * 43, EARTH,
-                      Vector3.Zero);
+            float kickAge = (seconds - piece.landing()) / .55f;
+            if (kickAge >= 0 && kickAge < 1) {
+                float scale = piece.marksGround() ? 1.4f : 1;
+                float rise = 1 - (float) Math.exp(-kickAge * 6);
+                point.set(landing).add(0, 0, hex * (.02f + .1f * rise) * scale);
+                // Drawn up out of the ground, so it reads as a sharp spurt rather than a round puff.
+                axis.set(Vector3.Z).scl(2.2f * (1 - .5f * kickAge));
+                float spurt = hex * (.022f + .02f * kickAge) * scale;
+                explosions.add(point, spurt, kickAge, 0, .75f * fadeOut(kickAge, .25f), seed + index * 43, EARTH, axis);
             }
         }
     }

@@ -158,6 +158,8 @@ class GpuArtilleryBlastSmokeTest {
             }
         } finally { graphics.dispose(); }
         ImageIO.write(sheet, "png", new File(folder, "artillery-cluster-review.png"));
+        // The animations blow in a moderate eastward wind, so the drift of the smoke can be judged.
+        volumes.setWind(new BoardAtmosphere.Effects(0, 0, 0, 0, 0, .6f, 90));
         writeAnimation(buffer, batch, ground, volumes, blast, size, oblique, GpuArtilleryBlast.Style.CLUSTER, 1,
               new File(folder, "artillery-cluster-frames"));
         // Wide enough for a Long Tom's debris landing two rings out.

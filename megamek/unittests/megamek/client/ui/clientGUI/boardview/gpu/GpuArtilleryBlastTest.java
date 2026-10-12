@@ -141,9 +141,28 @@ class GpuArtilleryBlastTest {
     /** The ring hexes are hit one after another, not all in the same instant. */
     @Test
     void debrisLandsAtDifferentMoments() {
-        var landings = GpuArtilleryBlast.debrisPieces(2, 41).stream().map(GpuArtilleryBlast.Piece::landing).sorted().toList();
-        assertTrue(landings.getLast() - landings.getFirst() > .5f, "Landings spread over more than half a second");
-        assertEquals(landings.size(), landings.stream().distinct().count(), "No two pieces land together");
+        var pieces = GpuArtilleryBlast.debrisPieces(2, 41);
+        var landings = pieces.stream().map(GpuArtilleryBlast.Piece::landing).sorted().toList();
+        assertTrue(landings.getLast() - landings.getFirst() > .1f, "The strikes ripple rather than land together");
+        assertTrue(landings.getLast() < .5f, "Fragments are fast: every hex is struck within half a second");
+        assertEquals(landings.size(), landings.stream().distinct().count(), "No two fragments land together");
+        double innerRing = pieces.stream().filter(piece -> piece.ring() == 1)
+              .mapToDouble(GpuArtilleryBlast.Piece::landing).average().orElseThrow();
+        double outerRing = pieces.stream().filter(piece -> piece.ring() == 2)
+              .mapToDouble(GpuArtilleryBlast.Piece::landing).average().orElseThrow();
+        assertTrue(innerRing < outerRing, "The ripple runs outward: the inner ring is struck first");
+    }
+
+    /** The casing smoke of a cluster round drifts with the board's wind, and stays put in calm air. */
+    @Test
+    void downwindFollowsTheWeather() {
+        var explosions = new GpuExplosionEffects();
+        explosions.setWind(new BoardAtmosphere.Effects(0, 0, 0, 0, 0, 1, 90));
+        var drifted = explosions.downwind(new Vector3(), 1);
+        assertTrue(drifted.x > BoardGeometry.height() * .5f, "A full eastward wind carries smoke most of a hex east");
+        assertEquals(0, drifted.y, .001f);
+        explosions.setWind(new BoardAtmosphere.Effects(0, 0, 0, 0, 0, 0, 90));
+        assertEquals(0, explosions.downwind(new Vector3(), 1).len(), .001f, "Calm air leaves it where it is");
     }
 
     @Test
