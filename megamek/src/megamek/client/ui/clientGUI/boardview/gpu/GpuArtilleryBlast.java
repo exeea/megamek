@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.DoubleFunction;
 import java.util.function.Function;
 
 import com.badlogic.gdx.math.MathUtils;
@@ -81,6 +82,15 @@ final class GpuArtilleryBlast {
     private static final float DISPENSER_LEAD = .15f;
     /** How fast the opened shell carries on along its line of flight, in hexes a second. */
     private static final float DISPENSER_SPEED = 1.2f;
+    /** Flight samples searched for the moment a round comes down to its opening height. */
+    private static final int OPENING_SAMPLES = 64;
+    /** Halvings that then pin that moment down. */
+    private static final int OPENING_REFINEMENTS = 12;
+    /**
+     * The earliest share of its flight a round may open at: a flat path that never climbs past its opening height
+     * would otherwise open by the launcher, so it opens over its target as before.
+     */
+    private static final float EARLIEST_OPENING = .5f;
     /** The heading of a blast drawn without an attack, such as in the shader preview: due east. Never modified. */
     private static final Vector3 DEFAULT_HEADING = new Vector3(1, 0, 0);
     /** Damage of the shell that draws at the reference size: a Sniper or an Arrow IV. */
@@ -174,14 +184,21 @@ final class GpuArtilleryBlast {
         final boolean[] onTerrain;
         /** The shell's direction of travel across the ground, which a minefield round's mines stream out along. */
         final Vector3 heading;
+        /**
+         * Where the round opened in the air, its flight having ended there; {@code null} when it came down to the
+         * ground, and a cluster burst or minefield dispenser opens above its target as drawn without a flight.
+         */
+        final Vector3 opening;
         float seconds;
         /** One bit per piece of debris that has landed, whether or not it left a mark. */
         long landed;
         int marks;
         boolean marksReported;
 
-        Blast(Vector3 ground, @Nullable ResolvedAttack.Shot profile, @Nullable UnitAttack attack, int key) {
+        Blast(Vector3 ground, @Nullable Vector3 opening, @Nullable ResolvedAttack.Shot profile,
+              @Nullable UnitAttack attack, int key) {
             this.ground.set(ground);
+            this.opening = opening == null ? null : opening.cpy();
             this.profile = profile;
             this.attack = attack;
             this.key = key;
@@ -470,6 +487,17 @@ final class GpuArtilleryBlast {
      *               debris, or {@code null} for a blast with none of them
      */
     void detonate(Vector3 ground, @Nullable ResolvedAttack.Shot profile, @Nullable UnitAttack attack, int key) {
+        detonate(ground, null, profile, attack, key);
+    }
+
+    /**
+     * Starts the blast of a round that opened in the air at {@code opening}, its flight ended there, over its target
+     * at {@code ground}: a cluster round bursts and a minefield round's dispenser opens at that point.
+     *
+     * @param opening where the round opened, or {@code null} for a round that came down to the ground
+     */
+    void detonate(Vector3 ground, @Nullable Vector3 opening, @Nullable ResolvedAttack.Shot profile,
+          @Nullable UnitAttack attack, int key) {
         for (Blast blast : blasts) {
             if (blast.key == key) { return; }
         }
@@ -477,10 +505,69 @@ final class GpuArtilleryBlast {
             LOGGER.debug("[ArtilleryBlast] {} blasts already drawing, the oldest makes way", MAX_BLASTS);
             blasts.removeFirst();
         }
-        var blast = new Blast(ground, profile, attack, key);
+        var blast = new Blast(ground, opening, profile, attack, key);
         blasts.add(blast);
         LOGGER.info("[ArtilleryBlast] {} blast of radius {} with {} pieces of debris over R{} at {}", blast.style,
               blast.size, blast.pieces.size(), blast.area.hexRadius(), ground);
+    }
+
+    /**
+     * How far above its target a round opens in the air: a cluster round bursts at {@link #AIR_BURST_HEXES} and a
+     * minefield round's dispenser opens at {@link #DISPENSER_HEXES}. A round that bursts on the ground opens at none.
+     *
+     * @param weaponName the internal name of the weapon that fired, or {@code null} when unknown
+     * @param profile    the shot, or {@code null} when unknown
+     *
+     * @return the height in board units, {@code 0} for a round that comes down to the ground
+     */
+    static float openingHeight(@Nullable String weaponName, @Nullable ResolvedAttack.Shot profile) {
+        if (laysMines(profile)) {
+            return BoardGeometry.height() * DISPENSER_HEXES;
+        }
+        if (scattersBomblets(weaponName, profile)) {
+            return BoardGeometry.height() * AIR_BURST_HEXES;
+        }
+        return 0;
+    }
+
+    /**
+     * The share of its flight at which a round coming down onto {@code aim} reaches {@code height} above it, where it
+     * opens and its flight ends.
+     *
+     * @param path   the round's position at each share of its flight, from {@code 0} to {@code 1}
+     * @param aim    where the flight would end on the ground
+     * @param height the opening height above {@code aim}, from {@link #openingHeight}
+     *
+     * @return the share of the flight, or {@code -1} when the round opens on the ground: no opening height, or a
+     *       flight that does not come down from above it in its second half
+     */
+    static float openingProgress(DoubleFunction<Vector3> path, Vector3 aim, float height) {
+        if (height <= 0) {
+            return -1;
+        }
+        float level = aim.z + height;
+        // The last sample still above the opening height; the flight comes down through it after that.
+        int above = -1;
+        for (int sample = OPENING_SAMPLES; sample >= 0; sample--) {
+            if (path.apply((double) sample / OPENING_SAMPLES).z >= level) {
+                above = sample;
+                break;
+            }
+        }
+        if ((above < 0) || (above == OPENING_SAMPLES)) {
+            return -1;
+        }
+        float high = (float) above / OPENING_SAMPLES;
+        float low = (float) (above + 1) / OPENING_SAMPLES;
+        for (int refinement = 0; refinement < OPENING_REFINEMENTS; refinement++) {
+            float middle = (high + low) / 2;
+            if (path.apply(middle).z >= level) {
+                high = middle;
+            } else {
+                low = middle;
+            }
+        }
+        return high < EARLIEST_OPENING ? -1 : high;
     }
 
     /** Ages every blast and retires those whose smoke has cleared. */
@@ -496,7 +583,7 @@ final class GpuArtilleryBlast {
     /** Queues the volumes of every live blast. */
     void emit(GpuExplosionEffects explosions) {
         for (Blast blast : blasts) {
-            var scatter = new Scatter(blast.pieces, blast.landings, blast.heading);
+            var scatter = new Scatter(blast.pieces, blast.landings, blast.heading, blast.opening);
             emit(explosions, blast.ground, blast.size, scatter, blast.style, blast.seconds, blast.drawSeed);
         }
     }
@@ -508,7 +595,7 @@ final class GpuArtilleryBlast {
      * @param landings where each piece lands
      * @param heading  the shell's direction of travel across the ground, a unit vector
      */
-    private record Scatter(List<Piece> pieces, List<Vector3> landings, Vector3 heading) { }
+    private record Scatter(List<Piece> pieces, List<Vector3> landings, Vector3 heading, @Nullable Vector3 opening) { }
 
     /** The direction from {@code from} to {@code to} across the ground, or the default heading if they coincide. */
     private static Vector3 heading(Vector3 from, Vector3 to) {
@@ -532,7 +619,7 @@ final class GpuArtilleryBlast {
         for (Piece piece : pieces) {
             landings.add(new Vector3(ground.x + piece.offsetX(), ground.y + piece.offsetY(), ground.z));
         }
-        emit(explosions, ground, size, new Scatter(pieces, landings, DEFAULT_HEADING), style, seconds, seed);
+        emit(explosions, ground, size, new Scatter(pieces, landings, DEFAULT_HEADING, null), style, seconds, seed);
     }
 
     private void emit(GpuExplosionEffects explosions, Vector3 ground, float size, Scatter scatter, Style style,
@@ -543,7 +630,7 @@ final class GpuArtilleryBlast {
             return;
         }
         if (style == Style.CLUSTER) {
-            cluster(explosions, ground, scatter.pieces(), scatter.landings(), seconds, seed);
+            cluster(explosions, ground, scatter, seconds, seed);
             return;
         }
         debris(explosions, ground, size, scatter.pieces(), scatter.landings(), seconds, seed);
@@ -569,8 +656,13 @@ final class GpuArtilleryBlast {
     private void minefield(GpuExplosionEffects explosions, Vector3 ground, Scatter scatter, float seconds, int seed) {
         float hex = BoardGeometry.height();
         Vector3 heading = scatter.heading();
-        // The shell opens a little short of the hex's centre, so its stream of mines passes over the middle.
-        burst.set(ground).mulAdd(heading, -hex * DISPENSER_LEAD).add(0, 0, hex * DISPENSER_HEXES);
+        if (scatter.opening() != null) {
+            // The round's flight ended where it came down to the dispenser's height: it opens right there.
+            burst.set(scatter.opening());
+        } else {
+            // The shell opens a little short of the hex's centre, so its stream of mines passes over the middle.
+            burst.set(ground).mulAdd(heading, -hex * DISPENSER_LEAD).add(0, 0, hex * DISPENSER_HEXES);
+        }
         float popAge = seconds / .15f;
         if (popAge < 1) {
             explosions.add(burst, hex * (.07f + .05f * popAge), popAge, .3f, .8f * fadeOut(popAge, .3f), seed + 1,
@@ -617,10 +709,16 @@ final class GpuArtilleryBlast {
      * streaks across the target hex and the ring around it, and each pops in a small sharp flash where it lands,
      * leaving a puff of smoke. The puffs drift together into a thin haze; there is no single fireball.
      */
-    private void cluster(GpuExplosionEffects explosions, Vector3 ground, List<Piece> pieces, List<Vector3> landings,
-          float seconds, int seed) {
+    private void cluster(GpuExplosionEffects explosions, Vector3 ground, Scatter scatter, float seconds, int seed) {
         float hex = BoardGeometry.height();
-        burst.set(ground).add(0, 0, hex * AIR_BURST_HEXES);
+        List<Piece> pieces = scatter.pieces();
+        List<Vector3> landings = scatter.landings();
+        // Where the round's flight ended at the burst height, else straight above its target.
+        if (scatter.opening() != null) {
+            burst.set(scatter.opening());
+        } else {
+            burst.set(ground).add(0, 0, hex * AIR_BURST_HEXES);
+        }
         float flashAge = seconds / .35f;
         if (flashAge < 1) {
             explosions.add(burst, hex * (.18f + .3f * flashAge), flashAge, 1, fadeOut(flashAge, .3f), seed + 1,

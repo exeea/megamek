@@ -16,9 +16,11 @@ import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
+import megamek.logging.MMLogger;
 
 /** Bounded procedural effects using the posed assembly's actual muzzle/launcher emitters. No rules or hit tests. */
 final class GpuAttackEffects implements Disposable {
+    private static final MMLogger LOGGER = MMLogger.create(GpuAttackEffects.class);
     private static final int MAX_MUZZLES = 512;
     private static final int FLAME_PUFFS = 32;
     private static final float MUZZLE_BLAST_SECONDS = .11f;
@@ -63,8 +65,18 @@ final class GpuAttackEffects implements Disposable {
     private final Vector3 flameSide = new Vector3(), flameUp = new Vector3();
     private final Vector3 sparkAxis = new Vector3(), sparkSide = new Vector3(), sparkUp = new Vector3(), sparkVelocity = new Vector3();
     private Camera camera;
-    record Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact, Vector3 aim, float progress) {
+    /**
+     * A round's flight.
+     *
+     * @param opening whether the round opened in the air at {@code target}, short of its {@code aim}: a cluster burst or
+     *                a minefield dispenser
+     */
+    record Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact, Vector3 aim, float progress,
+          boolean opening) {
         Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact) { this(origin, forward, target, impact, target, 1); }
+        Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact, Vector3 aim, float progress) {
+            this(origin, forward, target, impact, aim, progress, false);
+        }
         Vector3 position(float at, boolean arc, Vector3 result) {
             return at >= 1 ? result.set(target) : UnitAttack.projectile(origin, aim, at * progress, arc, result);
         }
@@ -217,6 +229,7 @@ final class GpuAttackEffects implements Disposable {
                   ? attack.landscapeContact(t -> UnitAttack.projectile(start, aim, (float) t, arc, new Vector3()), arc ? 32 : 1) : null;
             trace = new Trace(start, forwards[muzzleCount].cpy(), contact == null ? finish : contact.point(), impact,
                   aim, contact == null ? 1 : contact.progress());
+            trace = openInTheAir(trace, profile, arc);
             paths.put(key, trace);
         }
         origin(muzzleCount).set(trace == null ? muzzles[muzzleCount] : trace.origin());
@@ -229,6 +242,28 @@ final class GpuAttackEffects implements Disposable {
         profiles[muzzleCount] = profile;
         emissionKeys[muzzleCount] = key;
         effects[muzzleCount++] = effect;
+    }
+
+    /**
+     * Ends a cluster or minefield shell's flight where it comes down to its opening height, so its burst or dispenser
+     * opens where the shell is. A shell that strikes the landscape before then, or never climbs that high, keeps its
+     * flight.
+     */
+    private Trace openInTheAir(Trace trace, ResolvedAttack.Shot profile, boolean arc) {
+        float height = GpuArtilleryBlast.openingHeight(attack.event.result().equipmentName(), profile);
+        if (height <= 0) {
+            return trace;
+        }
+        float progress = GpuArtilleryBlast.openingProgress(
+              t -> UnitAttack.projectile(trace.origin(), trace.aim(), (float) t, arc, new Vector3()), trace.aim(), height);
+        if ((progress < 0) || (progress >= trace.progress())) {
+            LOGGER.debug("[ArtilleryBlast] shell opens over its target: it never comes down from its opening height"
+                  + " or strikes the landscape first");
+            return trace;
+        }
+        Vector3 opening = UnitAttack.projectile(trace.origin(), trace.aim(), progress, arc, new Vector3());
+        LOGGER.debug("[ArtilleryBlast] shell opens in the air {} of the way along its flight, at {}", progress, opening);
+        return new Trace(trace.origin(), trace.forward(), opening, trace.impact(), trace.aim(), progress, true);
     }
 
     private static boolean firingEmitter(UnitModelDescriptor.Emitter emitter) {
@@ -480,7 +515,11 @@ final class GpuAttackEffects implements Disposable {
                               && (profiles[index] == null || profiles[index].impact() == null);
                         ballisticImpact(start, target, flash, profiles[index], attack.event.result().id().hashCode() ^ index * 31, targetHit);
                     } else if ("energy".equals(effect)) { glow(target, 1.5f + (1 - flash) * 3, ENERGY_GLOW, 1 - flash, flash); }
-                    else { impact(target, flash, profiles[index]); }
+                    else {
+                        Trace flight = emitted[index];
+                        boolean opened = (flight != null) && flight.opening();
+                        impact(target, opened ? flight.aim() : target, flash, profiles[index]);
+                    }
                 }
                 if (attack.seconds >= contact) { continue; }
                 float t = MathUtils.clamp(age / Math.max(.0001f, contact - UnitAttack.ANTICIPATION_SECONDS - roundDelays[index]), 0, 1);
@@ -519,7 +558,10 @@ final class GpuAttackEffects implements Disposable {
                     int step = Math.max(1, launch.missiles() / 12);
                     for (int index = 0; index < launch.missiles(); index += step) {
                         if (launch.intercepted(index)) { continue; }
-                        float impact = attack.contactFlash(launch.endSeconds(index));
+                        boolean opened = GpuMissileEffects.openedInTheAir(launch, index);
+                        // A round that opens in the air bursts there; its spent body lands later with no blast.
+                        float impact = attack.contactFlash(
+                              opened ? launch.openingSeconds(index) : launch.endSeconds(index));
                         if (impact <= 0) { continue; }
                         var profile = launch.profile();
                         boolean isSolidRound = profile != null && profile.ballistic();
@@ -528,7 +570,11 @@ final class GpuAttackEffects implements Disposable {
                             boolean targetHit = launch.hit(index) && attack.event.target() != null && profile.impact() == null;
                             ballisticImpact(launch.origins()[index % launch.origins().length], launch.targets()[index], impact,
                                   profile, launch.seed() ^ index * 31, targetHit);
-                        } else { impact(launch.targets()[index], impact, profile); }
+                        } else if (opened) {
+                            impact(GpuMissileEffects.openingPoint(launch, index), launch.aims()[index], impact, profile);
+                        } else {
+                            impact(launch.targets()[index], launch.targets()[index], impact, profile);
+                        }
                     }
                 }
             }
@@ -668,8 +714,13 @@ final class GpuAttackEffects implements Disposable {
         }
     }
 
-    /** Transient presentation of the observed munition. Persistent fire, smoke and minefields belong to the board. */
-    private void impact(Vector3 center, float fade, ResolvedAttack.Shot profile) {
+    /**
+     * Transient presentation of the observed munition. Persistent fire, smoke and minefields belong to the board.
+     *
+     * @param center where the round's flight ended
+     * @param ground the ground it was aimed at: {@code center} itself, unless it opened in the air there
+     */
+    private void impact(Vector3 center, Vector3 ground, float fade, ResolvedAttack.Shot profile) {
         var ammo = profile == null ? java.util.Set.<String>of() : profile.munitions();
         boolean smoke = ammo.contains("M_SMOKE") || ammo.contains("M_SMOKE_WARHEAD");
         boolean fire = ammo.contains("M_INFERNO") || ammo.contains("M_INFERNO_IV") || ammo.contains("M_INCENDIARY")
@@ -677,7 +728,8 @@ final class GpuAttackEffects implements Disposable {
         int seed = attack.event.result().id().hashCode() ^ Float.floatToIntBits(center.x);
         if (ammo.contains("M_FLARE")) { glow(center, 1 + (1 - fade) * 2, FLARE_GLOW, 1 - fade, fade); }
         else if (GpuArtilleryBlast.drawsLanding(profile)) {
-            artilleryBlasts.detonate(center, profile, attack, seed);
+            boolean opened = !ground.equals(center);
+            artilleryBlasts.detonate(ground, opened ? center : null, profile, attack, seed);
         }
         else if (!smoke) { explosions.burst(center, 5.5f, 1 - fade, seed); }
         if (smoke || fire) {

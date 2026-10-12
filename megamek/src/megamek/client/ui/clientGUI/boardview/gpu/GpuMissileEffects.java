@@ -46,8 +46,15 @@ final class GpuMissileEffects implements Disposable {
     private static final String MISSILE_MODEL = "models/effects/missile-body.glb";
     /** An Arrow IV round, authored in metres: 4 m long and twice its true thickness, so it reads at board zoom. */
     private static final String ARROW_IV_MODEL = "models/effects/arrow-iv.glb";
+    /**
+     * One weapon's missiles in flight.
+     *
+     * @param openings for each missile, the share of its flight at which a cluster or minefield round opened in the
+     *                 air, or {@code -1} for one that did not; its spent body flies on to the ground after that
+     */
     record Launch(UnitAttack attack, Vector3[] origins, Vector3[] targets, int missiles, int hits, boolean indirect, int seed,
-          ResolvedAttack.Shot profile, int intercepted, Vector3[] aims, UnitAttack.Contact[] contacts) {
+          ResolvedAttack.Shot profile, int intercepted, Vector3[] aims, UnitAttack.Contact[] contacts,
+          float[] openings) {
         boolean hit(int missile) { return Math.floorMod(seed - missile, missiles) < hits; }
         boolean intercepted(int missile) {
             int rank = Math.floorMod(seed - missile, missiles);
@@ -60,8 +67,28 @@ final class GpuMissileEffects implements Disposable {
         }
 
         float endSeconds(int missile) {
+            return secondsAt(missile, endProgress(missile));
+        }
+
+        /** Whether the missile opened in the air, a cluster burst or a minefield dispenser. */
+        boolean opened(int missile) { return openings[missile] >= 0; }
+
+        /** The moment the missile opened in the air; only for one that {@link #opened} did. */
+        float openingSeconds(int missile) {
+            return secondsAt(missile, openings[missile]);
+        }
+
+        /**
+         * How far the missile flies under power, trailing flame and smoke: to its opening, after which its spent
+         * body falls on without either, or else to the end of its flight.
+         */
+        float poweredProgress(int missile) {
+            return opened(missile) ? openings[missile] : endProgress(missile);
+        }
+
+        private float secondsAt(int missile, float progress) {
             float start = UnitAttack.ANTICIPATION_SECONDS + launchDelay(this, missile);
-            return MathUtils.lerp(start, attack.roundContactSeconds(profile, 0), endProgress(missile));
+            return MathUtils.lerp(start, attack.roundContactSeconds(profile, 0), progress);
         }
     }
 
@@ -80,8 +107,11 @@ final class GpuMissileEffects implements Disposable {
           boolean indirect, int seed, ResolvedAttack.Shot profile, int intercepted) {
         hits = MathUtils.clamp(hits, 0, missiles);
         var launch = new Launch(attack, origins, new Vector3[missiles], missiles, hits, indirect, seed, profile,
-              MathUtils.clamp(intercepted, 0, missiles - hits), new Vector3[missiles], new UnitAttack.Contact[missiles]);
+              MathUtils.clamp(intercepted, 0, missiles - hits), new Vector3[missiles], new UnitAttack.Contact[missiles],
+              new float[missiles]);
+        Arrays.fill(launch.openings, -1);
         int hitOrdinal = 0;
+        float openingHeight = GpuArtilleryBlast.openingHeight(attack.event.result().equipmentName(), profile);
         for (int missile = 0; missile < missiles; missile++) {
             Vector3 origin = origins[missile % origins.length];
             // Observed artillery landings and counterfire retain their own targets rather than a body surface.
@@ -95,8 +125,44 @@ final class GpuMissileEffects implements Disposable {
                 launch.contacts[missile] = contact;
                 if (contact != null) { launch.targets[missile] = contact.point(); }
             }
+            if ((openingHeight > 0) && !launch.intercepted(missile)) {
+                openInTheAir(launch, missile, openingHeight);
+            }
         }
         return launch;
+    }
+
+    /**
+     * Opens a cluster or minefield round where it comes down to its opening height, so its burst or dispenser opens
+     * where the round is, not above a spot it has flown through. Its spent body falls on along its flight to the
+     * ground and vanishes there. A round that strikes the landscape before it can open does not.
+     */
+    private static void openInTheAir(Launch launch, int missile, float height) {
+        float progress = GpuArtilleryBlast.openingProgress(t -> position(launch, missile, (float) t, new Vector3()),
+              launch.aims[missile], height);
+        if (progress < 0) {
+            LOGGER.debug("[ArtilleryBlast] missile {} never comes down from its opening height, it opens over its"
+                  + " target", missile);
+            return;
+        }
+        UnitAttack.Contact landscape = launch.contacts[missile];
+        if ((landscape != null) && (landscape.progress() <= progress)) {
+            LOGGER.debug("[ArtilleryBlast] missile {} strikes the landscape before it can open", missile);
+            return;
+        }
+        launch.openings[missile] = progress;
+        LOGGER.debug("[ArtilleryBlast] missile {} opens in the air {} of the way along its flight, at {}", missile,
+              progress, openingPoint(launch, missile));
+    }
+
+    /** Whether the missile opened in the air, a cluster burst or minefield dispenser, before it landed. */
+    static boolean openedInTheAir(Launch launch, int missile) {
+        return launch.opened(missile);
+    }
+
+    /** Where the missile opened in the air; only for one that {@link Launch#opened} did. */
+    static Vector3 openingPoint(Launch launch, int missile) {
+        return position(launch, missile, launch.openings[missile], new Vector3());
     }
     private static final class Puff {
         final Vector3 center = new Vector3();
@@ -175,7 +241,8 @@ final class GpuMissileEffects implements Disposable {
                 for (int puff = 0; puff < perMissile && smokeCount < SMOKE_BUDGET; puff++) {
                     float birth = newest - puff * interval;
                     float at = progress(launch, missile, birth);
-                    if (at < 0 || at >= launch.endProgress(missile)) { continue; }
+                    // A spent body leaves no smoke after it has opened.
+                    if (at < 0 || at >= launch.poweredProgress(missile)) { continue; }
                     float age = time - birth, remaining = Math.max(0, 1 - age / SMOKE_LIFE_SECONDS);
                     Puff sample = smoke[smokeCount];
                     if (sample == null) { sample = new Puff(); smoke[smokeCount] = sample; }
@@ -201,7 +268,7 @@ final class GpuMissileEffects implements Disposable {
         for (var launch : launches) {
             for (int missile = 0; missile < launch.missiles && flames < MISSILES_PER_BATCH; missile++) {
                 float t = progress(launch, missile, launch.attack.seconds);
-                if (t < 0 || t >= launch.endProgress(missile)) { continue; }
+                if (t < 0 || t >= launch.poweredProgress(missile)) { continue; }
                 position(launch, missile, t, point);
                 position(launch, missile, Math.max(0, t - .003f), direction).sub(point).nor();
                 width.set(right).scl(.5f);

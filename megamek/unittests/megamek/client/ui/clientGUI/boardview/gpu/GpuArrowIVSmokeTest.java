@@ -19,6 +19,13 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.Model;
+import com.badlogic.gdx.graphics.g3d.ModelBatch;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
+import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
@@ -89,6 +96,8 @@ class GpuArrowIVSmokeTest {
                         ImageIO.write(frame(buffer, effects, shot, board, seconds), "png",
                               new File(frames, String.format("frame-%03d.png", index)));
                     }
+                    reviewOpening(buffer, "M_CLUSTER", new File(folder, "arrow-iv-cluster-frames"));
+                    reviewOpening(buffer, "M_FASCAM", new File(folder, "arrow-iv-fascam-frames"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
@@ -103,6 +112,58 @@ class GpuArrowIVSmokeTest {
         }, GpuBoardWindow.configuration(false));
         if (failure.get() != null) {
             throw new AssertionError("Arrow IV review failed", failure.get());
+        }
+    }
+
+    /**
+     * Frames at 15 a second of a 20-hex Arrow IV flight's last stretch and what follows: the cluster burst or
+     * minefield dispenser should open where the round is, and its spent body fall on to the ground and vanish.
+     */
+    private static void reviewOpening(FrameBuffer buffer, String munition, File folder) throws java.io.IOException {
+        assertTrue(folder.isDirectory() || folder.mkdirs());
+        var effects = new GpuAttackEffects();
+        var batch = new ModelBatch();
+        Model groundModel = new ModelBuilder().createBox(20000, 20000, 1,
+              new Material(ColorAttribute.createDiffuse(.36f, .38f, .33f, 1)), VertexAttributes.Usage.Position);
+        try {
+            var ground = new ModelInstance(groundModel);
+            ground.transform.setToTranslation(0, 0, -.5f);
+            var shot = GpuAirOpeningTest.attack("ISArrowIV", GpuAirOpeningTest.round(munition, 1));
+            effects.update(List.of(shot), null, Map.of());
+            effects.groundImpacts(List.of(), ignored -> { });
+            var launch = effects.missileLaunches(shot).getFirst();
+            assertTrue(GpuMissileEffects.openedInTheAir(launch, 0), munition + " opens in the air");
+            float hex = BoardGeometry.height();
+            Vector3 opening = GpuMissileEffects.openingPoint(launch, 0);
+            Vector3 aim = launch.aims()[0];
+            var flight = GpuMissileEffects.position(launch, 0, .9f, new Vector3()).sub(opening).nor();
+            var side = new Vector3(flight.x, flight.y, 0).crs(Vector3.Z).nor();
+            var centre = opening.cpy().lerp(aim, .5f);
+            var camera = camera(centre.cpy().mulAdd(side, hex * 6).add(0, 0, hex * 1.6f), centre);
+            float first = timeAt(launch, .87f);
+            float opened = launch.openingSeconds(0);
+            int count = Math.round((opened - first + 3.2f) * 15);
+            for (int index = 0; index < count; index++) {
+                float seconds = first + index / 15f;
+                effects.advance(1 / 15f);
+                buffer.begin();
+                try {
+                    ScreenUtils.clear(new Color(.62f, .66f, .72f, 1), true);
+                    batch.begin(camera);
+                    batch.render(ground);
+                    batch.end();
+                    shot.seconds = Math.min(seconds, shot.duration);
+                    effects.update(List.of(shot), null, Map.of());
+                    effects.render(camera);
+                    ImageIO.write(snapshot(), "png", new File(folder, String.format("frame-%03d.png", index)));
+                } finally {
+                    buffer.end();
+                }
+            }
+        } finally {
+            effects.dispose();
+            batch.dispose();
+            groundModel.dispose();
         }
     }
 
