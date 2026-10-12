@@ -158,6 +158,22 @@ class GpuArtilleryBlastSmokeTest {
             }
         } finally { graphics.dispose(); }
         ImageIO.write(sheet, "png", new File(folder, "artillery-cluster-review.png"));
+        writeAnimation(buffer, batch, ground, volumes, blast, size, oblique, GpuArtilleryBlast.Style.CLUSTER, 1,
+              new File(folder, "artillery-cluster-frames"));
+    }
+
+    /** Numbered frames at 15 a second over the blast's life, for stitching into an animation to review. */
+    private static void writeAnimation(FrameBuffer buffer, ModelBatch batch, ModelInstance ground,
+          GpuExplosionEffects volumes, GpuArtilleryBlast blast, float size, PerspectiveCamera camera,
+          GpuArtilleryBlast.Style style, int hexRadius, File folder) throws java.io.IOException {
+        assertTrue(folder.isDirectory() || folder.mkdirs());
+        int frames = Math.round(GpuArtilleryBlast.SECONDS * 15);
+        for (int index = 0; index < frames; index++) {
+            float seconds = index / 15f;
+            var image = frame(buffer, batch, ground, camera, volumes,
+                  () -> blast.emit(volumes, Vector3.Zero, size, hexRadius, style, seconds, 41));
+            ImageIO.write(image, "png", new File(folder, String.format("frame-%03d.png", index)));
+        }
     }
 
     private static BufferedImage frame(FrameBuffer buffer, ModelBatch batch, ModelInstance ground,
