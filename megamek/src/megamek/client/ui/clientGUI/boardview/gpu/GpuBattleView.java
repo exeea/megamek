@@ -2407,6 +2407,8 @@ class GpuBattleView extends ApplicationAdapter {
          * scrolls the board ({@link #autoPan}).
          */
         private boolean drawingRoute() {
+            // The window can pause or close while it still shows the loading screen, before any map is attached.
+            if (source == null) { return false; }
             var state = source.editorState();
             return boardGesture && gestureButton == Input.Buttons.LEFT && !measurementGesture && !marquee && rotationGrab == null
                   && source.isEditor() && state != null && state.drawsRoutes();
