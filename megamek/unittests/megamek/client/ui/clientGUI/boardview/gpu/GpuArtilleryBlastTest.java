@@ -1,0 +1,260 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import com.badlogic.gdx.math.Vector3;
+import megamek.common.ResolvedAttack;
+import megamek.common.equipment.EquipmentType;
+import org.junit.jupiter.api.Test;
+
+/** Which landings draw an artillery blast, which shape they take, and how long the blasts live. */
+class GpuArtilleryBlastTest {
+
+    private static ResolvedAttack.Shot shot(boolean artillery, String... munitions) {
+        return new ResolvedAttack.Shot("", Set.of(munitions), artillery, false, 1, 0, artillery, null, null, null,
+              true, 20, false, false, false, null, 20);
+    }
+
+    @Test
+    void highExplosiveArtilleryExplodes() {
+        assertTrue(GpuArtilleryBlast.explodes(shot(true)));
+        assertTrue(GpuArtilleryBlast.explodes(shot(true, "M_STANDARD")));
+    }
+
+    @Test
+    void directFireWeaponsAndMissingProfilesDoNotExplode() {
+        assertFalse(GpuArtilleryBlast.explodes(shot(false)));
+        assertFalse(GpuArtilleryBlast.explodes(null));
+    }
+
+    @Test
+    void minesSmokeAndFlaresKeepTheirOwnPresentation() {
+        for (String munition : new String[] { "M_FASCAM", "M_THUNDER", "M_SMOKE", "M_FLARE", "M_LASER_INHIB" }) {
+            assertFalse(GpuArtilleryBlast.explodes(shot(true, munition)), munition);
+        }
+    }
+
+    @Test
+    void specialWarheadsChooseTheirShape() {
+        assertEquals(GpuArtilleryBlast.Style.MUSHROOM, GpuArtilleryBlast.style(shot(true, "M_DAVY_CROCKETT_M"), 1));
+        assertEquals(GpuArtilleryBlast.Style.FIREBALL, GpuArtilleryBlast.style(shot(true, "M_FAE"), 1));
+        assertEquals(GpuArtilleryBlast.Style.FIREBALL, GpuArtilleryBlast.style(shot(true, "M_ADA"), 1));
+    }
+
+    @Test
+    void aBarrageUsesEveryShapeAndTheSameShellAlwaysLooksTheSame() {
+        var seen = EnumSet.noneOf(GpuArtilleryBlast.Style.class);
+        for (int seed = 0; seed < 64; seed++) {
+            var style = GpuArtilleryBlast.style(shot(true), seed);
+            assertEquals(style, GpuArtilleryBlast.style(shot(true), seed));
+            seen.add(style);
+        }
+        // CLUSTER belongs to cluster rounds alone, never to a high-explosive shell.
+        assertEquals(EnumSet.of(GpuArtilleryBlast.Style.CROWN, GpuArtilleryBlast.Style.MUSHROOM,
+              GpuArtilleryBlast.Style.FIREBALL), seen);
+    }
+
+    @Test
+    void aShellReportedOnEveryFrameOfItsContactStartsOneBlast() {
+        var blasts = new GpuArtilleryBlast();
+        for (int frame = 0; frame < 10; frame++) {
+            blasts.detonate(Vector3.Zero, shot(true), null, 99);
+            blasts.advance(.016f);
+        }
+        assertEquals(1, blasts.size());
+        blasts.detonate(Vector3.Zero, shot(true), null, 100);
+        assertEquals(2, blasts.size());
+    }
+
+    @Test
+    void blastsOutliveTheirAttackThenClear() {
+        var blasts = new GpuArtilleryBlast();
+        blasts.detonate(Vector3.Zero, shot(true), null, 7);
+        blasts.advance(1);
+        assertEquals(1, blasts.size(), "Still burning a second after contact, long after the attack's own clock");
+        blasts.advance(GpuArtilleryBlast.SECONDS);
+        assertEquals(0, blasts.size());
+    }
+
+    /** The R values of the Artillery Ordnance Table, asked of the same rule that deals the damage. */
+    @Test
+    void debrisReachesTheRingsTheShellDamages() {
+        EquipmentType.initializeTypes();
+        assertEquals(2, radius("ISLongTom", shot(true, "M_STANDARD")), "Long Tom 25/15/5 (R2)");
+        assertEquals(1, radius("ISSniper", shot(true, "M_STANDARD")), "Sniper 20/10 (R1)");
+        assertEquals(1, radius("ISThumper", shot(true, "M_STANDARD")), "Thumper 15/5 (R1)");
+        assertEquals(1, radius("ISArrowIV", shot(true, "M_STANDARD")), "Arrow IV 20/10 (R1)");
+        assertEquals(1, radius("ISLongTom", shot(true, "M_CLUSTER")), "Long Tom cluster 20/10 (R1)");
+        assertEquals(2, radius("ISLongTom", shot(true)), "No munitions captured is standard");
+    }
+
+    @Test
+    void anUnknownWeaponKeepsTheDebrisInItsHex() {
+        EquipmentType.initializeTypes();
+        assertEquals(0, radius("NoSuchWeapon", shot(true, "M_STANDARD")));
+        assertEquals(0, radius(null, shot(true, "M_STANDARD")));
+        assertEquals(0, radius("ISLongTom", null));
+    }
+
+    /** Each ring's scorch mark is sized for the damage the table gives it: a Long Tom's 25/15/5. */
+    @Test
+    void ringMarksTakeTheRingsDamage() {
+        EquipmentType.initializeTypes();
+        var longTom = GpuArtilleryBlast.areaEffect("ISLongTom", shot(true, "M_STANDARD"));
+        assertEquals(25, longTom.ringDamage(0));
+        assertEquals(15, longTom.ringDamage(1));
+        assertEquals(5, longTom.ringDamage(2));
+    }
+
+    /** Every hex of every damaged ring takes one piece: 6 in the first ring and 12 in the second. */
+    @Test
+    void debrisHitsEveryHexOfEveryRing() {
+        var pieces = GpuArtilleryBlast.debrisPieces(2, 41);
+        var markers = pieces.stream().filter(GpuArtilleryBlast.Piece::marksGround).toList();
+        long firstRing = markers.stream().filter(piece -> piece.ring() == 1).count();
+        long secondRing = markers.stream().filter(piece -> piece.ring() == 2).count();
+        assertEquals(6, firstRing, "One marking fragment per first-ring hex");
+        assertEquals(12, secondRing, "One marking fragment per second-ring hex");
+        assertEquals(54, pieces.size(), "A dense spray: three fragments in each of the 18 hexes");
+        float hex = BoardGeometry.height();
+        for (var piece : pieces) {
+            float distance = (float) Math.hypot(piece.offsetX(), piece.offsetY()) / hex;
+            // A ring's hexes sit between about 0.87 and 1 times its number of hexes out; a fragment stays within
+            // 0.4 of a hex of its hex's centre.
+            float nearest = piece.ring() * .86f - .4f;
+            float farthest = piece.ring() + .4f;
+            assertTrue(distance > nearest && distance < farthest, "A fragment lands inside its ring: " + piece);
+        }
+        assertEquals(30, GpuArtilleryBlast.debrisPieces(1, 41).size(), "Five fragments in each first-ring hex for R1");
+    }
+
+    /** The ring hexes are hit one after another, not all in the same instant. */
+    @Test
+    void debrisLandsAtDifferentMoments() {
+        var landings = GpuArtilleryBlast.debrisPieces(2, 41).stream().map(GpuArtilleryBlast.Piece::landing).sorted().toList();
+        assertTrue(landings.getLast() - landings.getFirst() > .5f, "Landings spread over more than half a second");
+        assertEquals(landings.size(), landings.stream().distinct().count(), "No two pieces land together");
+    }
+
+    @Test
+    void aShellDamagingOnlyItsHexKeepsItsDebrisThere() {
+        for (var piece : GpuArtilleryBlast.debrisPieces(0, 41)) {
+            assertEquals(0, piece.ring());
+            assertTrue(Math.hypot(piece.offsetX(), piece.offsetY()) < BoardGeometry.height() / 2);
+        }
+    }
+
+    /**
+     * A Long Tom landing on flat ground marks all 18 hexes of its two rings, each mark on the ground in its own ring.
+     * The landscape reports squared distances, as the board's does; reading them as plain distances buried every mark.
+     */
+    @Test
+    void ringMarksLandOnTheGroundInEveryDamagedHex() {
+        EquipmentType.initializeTypes();
+        var profile = shot(true, "M_STANDARD");
+        var attack = GroundDamagePlaybackTest.shot("ISLongTom", true, profile);
+        var targetHex = attack.event.destination().coords();
+        var crater = BoardGeometry.center(targetHex, 0);
+        var blasts = new GpuArtilleryBlast();
+        blasts.detonate(crater, profile, attack, 5);
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        blasts.groundMarks(marks::add);
+        assertEquals(0, marks.size(), "Nothing has landed at contact");
+        blasts.advance(GpuArtilleryBlast.SECONDS - .1f);
+        blasts.groundMarks(marks::add);
+        assertEquals(18, marks.size(), "Every hex of both rings is marked");
+        Set<Vector3> spots = new HashSet<>();
+        float hex = BoardGeometry.height();
+        for (var mark : marks) {
+            assertEquals(0, mark.point().z, .01f, "The mark lies on the ground: " + mark.point());
+            float rings = mark.point().dst(crater) / hex;
+            assertTrue(rings > .5f && rings < 2.5f, "The mark lies in a damaged ring: " + rings);
+            assertTrue(mark.shot().damagePerHit() == 15 || mark.shot().damagePerHit() == 5, "Sized for its ring");
+            spots.add(mark.point());
+        }
+        assertEquals(18, spots.size(), "No two marks share a spot");
+        blasts.groundMarks(marks::add);
+        assertEquals(18, marks.size(), "Each mark is handed over once");
+    }
+
+    /** All cluster munitions are R1, and the rule that deals their damage says so; high explosive is not cluster. */
+    @Test
+    void clusterRoundsAreRecognisedByTheDamageRule() {
+        EquipmentType.initializeTypes();
+        var longTomCluster = GpuArtilleryBlast.areaEffect("ISLongTom", shot(true, "M_CLUSTER"));
+        assertTrue(longTomCluster.cluster());
+        assertEquals(1, longTomCluster.hexRadius());
+        assertEquals(20, longTomCluster.ringDamage(0), "Long Tom cluster 20/10");
+        assertEquals(10, longTomCluster.ringDamage(1));
+        assertTrue(GpuArtilleryBlast.scattersBomblets("ISLongTom", shot(true, "M_CLUSTER")));
+        assertFalse(GpuArtilleryBlast.scattersBomblets("ISLongTom", shot(true, "M_STANDARD")));
+    }
+
+    /** A Long Tom cluster round scatters eight bomblets in its target hex and 27 over the six around it. */
+    @Test
+    void bombletsCoverTheTargetHexAndItsRingMoreDenselyWhereDamageIsHigher() {
+        EquipmentType.initializeTypes();
+        var area = GpuArtilleryBlast.areaEffect("ISLongTom", shot(true, "M_CLUSTER"));
+        var bomblets = GpuArtilleryBlast.bomblets(area, 41);
+        long inTargetHex = bomblets.stream().filter(bomblet -> bomblet.ring() == 0).count();
+        long inRing = bomblets.stream().filter(bomblet -> bomblet.ring() == 1).count();
+        assertEquals(8, inTargetHex);
+        assertEquals(27, inRing, "4.5 a hex: three ring hexes get five and three get four");
+        var landings = bomblets.stream().map(GpuArtilleryBlast.Piece::landing).sorted().toList();
+        assertTrue(landings.getLast() - landings.getFirst() > .3f, "The pops ripple rather than going off together");
+    }
+
+    /** A cluster round leaves no crater, but every bomblet marks the ground, the target hex included. */
+    @Test
+    void aClusterRoundFrecklesTheGroundInsteadOfLeavingACrater() {
+        EquipmentType.initializeTypes();
+        var cluster = shot(true, "M_CLUSTER");
+        var standard = shot(true, "M_STANDARD");
+        assertEquals(0, craters("ISLongTom", cluster), "No single crater for a cluster round");
+        assertEquals(1, craters("ISLongTom", standard), "A high-explosive shell still leaves its crater");
+
+        var attack = GroundDamagePlaybackTest.shot("ISLongTom", true, cluster);
+        var blasts = new GpuArtilleryBlast();
+        blasts.detonate(BoardGeometry.center(attack.event.destination().coords(), 0), cluster, attack, 9);
+        blasts.advance(GpuArtilleryBlast.SECONDS - .1f);
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        blasts.groundMarks(marks::add);
+        assertEquals(35, marks.size(), "Every bomblet marks the ground, the target hex's eight included");
+        for (var mark : marks) {
+            assertTrue(mark.shot().damagePerHit() <= 4, "Each mark is one bomblet's share: " + mark.shot().damagePerHit());
+        }
+    }
+
+    private static int craters(String weapon, ResolvedAttack.Shot profile) {
+        var attack = GroundDamagePlaybackTest.shot(weapon, false, profile);
+        attack.seconds = attack.contactSeconds + UnitAttack.RECOVERY_SECONDS / 2;
+        var effects = new GpuAttackEffects();
+        effects.update(List.of(attack), null, Map.of());
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        effects.groundImpacts(List.of(), marks::add);
+        return marks.size();
+    }
+
+    private static int radius(String weapon, ResolvedAttack.Shot profile) {
+        return GpuArtilleryBlast.areaEffect(weapon, profile).hexRadius();
+    }
+
+    @Test
+    void aHeavyBarrageIsBounded() {
+        var blasts = new GpuArtilleryBlast();
+        for (int key = 0; key < GpuArtilleryBlast.MAX_BLASTS + 3; key++) {
+            blasts.detonate(Vector3.Zero, shot(true), null, key);
+        }
+        assertEquals(GpuArtilleryBlast.MAX_BLASTS, blasts.size());
+    }
+}

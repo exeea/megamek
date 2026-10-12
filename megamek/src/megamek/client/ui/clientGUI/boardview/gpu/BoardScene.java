@@ -837,11 +837,19 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         public int boardId() { return scene.boardId(); }
     }
 
-    /** Target type is captured with the visible event, independently of its chosen model or sprite. */
+    /**
+     * Target type is captured with the visible event, independently of its chosen model or sprite. An attacker off the
+     * map (off-board artillery) has no place on the board to show, so the camera frames only its target.
+     */
     record Combat(megamek.common.ResolvedAttack result, Unit attacker, Unit target, Waypoint destination,
-          boolean conventionalInfantryTarget) implements Animation {
+          boolean conventionalInfantryTarget, boolean attackerOffBoard) implements Animation {
         Combat(megamek.common.ResolvedAttack result, Unit attacker, Unit target, Waypoint destination) {
-            this(result, attacker, target, destination, false);
+            this(result, attacker, target, destination, false, false);
+        }
+
+        Combat(megamek.common.ResolvedAttack result, Unit attacker, Unit target, Waypoint destination,
+              boolean conventionalInfantryTarget) {
+            this(result, attacker, target, destination, conventionalInfantryTarget, false);
         }
 
         @Override
