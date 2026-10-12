@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.badlogic.gdx.math.Vector3;
@@ -57,7 +59,9 @@ class GpuArtilleryBlastTest {
             assertEquals(style, GpuArtilleryBlast.style(shot(true), seed));
             seen.add(style);
         }
-        assertEquals(EnumSet.allOf(GpuArtilleryBlast.Style.class), seen);
+        // CLUSTER belongs to cluster rounds alone, never to a high-explosive shell.
+        assertEquals(EnumSet.of(GpuArtilleryBlast.Style.CROWN, GpuArtilleryBlast.Style.MUSHROOM,
+              GpuArtilleryBlast.Style.FIREBALL), seen);
     }
 
     @Test
@@ -174,6 +178,64 @@ class GpuArtilleryBlastTest {
         assertEquals(18, spots.size(), "No two marks share a spot");
         blasts.groundMarks(marks::add);
         assertEquals(18, marks.size(), "Each mark is handed over once");
+    }
+
+    /** All cluster munitions are R1, and the rule that deals their damage says so; high explosive is not cluster. */
+    @Test
+    void clusterRoundsAreRecognisedByTheDamageRule() {
+        EquipmentType.initializeTypes();
+        var longTomCluster = GpuArtilleryBlast.areaEffect("ISLongTom", shot(true, "M_CLUSTER"));
+        assertTrue(longTomCluster.cluster());
+        assertEquals(1, longTomCluster.hexRadius());
+        assertEquals(20, longTomCluster.ringDamage(0), "Long Tom cluster 20/10");
+        assertEquals(10, longTomCluster.ringDamage(1));
+        assertTrue(GpuArtilleryBlast.scattersBomblets("ISLongTom", shot(true, "M_CLUSTER")));
+        assertFalse(GpuArtilleryBlast.scattersBomblets("ISLongTom", shot(true, "M_STANDARD")));
+    }
+
+    /** A Long Tom cluster round scatters five bomblets in its target hex and three in each of the six around it. */
+    @Test
+    void bombletsCoverTheTargetHexAndItsRingMoreDenselyWhereDamageIsHigher() {
+        EquipmentType.initializeTypes();
+        var area = GpuArtilleryBlast.areaEffect("ISLongTom", shot(true, "M_CLUSTER"));
+        var bomblets = GpuArtilleryBlast.bomblets(area, 41);
+        long inTargetHex = bomblets.stream().filter(bomblet -> bomblet.ring() == 0).count();
+        long inRing = bomblets.stream().filter(bomblet -> bomblet.ring() == 1).count();
+        assertEquals(5, inTargetHex);
+        assertEquals(18, inRing);
+        var landings = bomblets.stream().map(GpuArtilleryBlast.Piece::landing).sorted().toList();
+        assertTrue(landings.getLast() - landings.getFirst() > .3f, "The pops ripple rather than going off together");
+    }
+
+    /** A cluster round leaves no crater, but every bomblet marks the ground, the target hex included. */
+    @Test
+    void aClusterRoundFrecklesTheGroundInsteadOfLeavingACrater() {
+        EquipmentType.initializeTypes();
+        var cluster = shot(true, "M_CLUSTER");
+        var standard = shot(true, "M_STANDARD");
+        assertEquals(0, craters("ISLongTom", cluster), "No single crater for a cluster round");
+        assertEquals(1, craters("ISLongTom", standard), "A high-explosive shell still leaves its crater");
+
+        var attack = GroundDamagePlaybackTest.shot("ISLongTom", true, cluster);
+        var blasts = new GpuArtilleryBlast();
+        blasts.detonate(BoardGeometry.center(attack.event.destination().coords(), 0), cluster, attack, 9);
+        blasts.advance(GpuArtilleryBlast.SECONDS - .1f);
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        blasts.groundMarks(marks::add);
+        assertEquals(23, marks.size(), "Every bomblet marks the ground, the target hex's five included");
+        for (var mark : marks) {
+            assertTrue(mark.shot().damagePerHit() <= 4, "Each mark is one bomblet's share: " + mark.shot().damagePerHit());
+        }
+    }
+
+    private static int craters(String weapon, ResolvedAttack.Shot profile) {
+        var attack = GroundDamagePlaybackTest.shot(weapon, false, profile);
+        attack.seconds = attack.contactSeconds + UnitAttack.RECOVERY_SECONDS / 2;
+        var effects = new GpuAttackEffects();
+        effects.update(List.of(attack), null, Map.of());
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        effects.groundImpacts(List.of(), marks::add);
+        return marks.size();
     }
 
     private static int radius(String weapon, ResolvedAttack.Shot profile) {

@@ -37,8 +37,11 @@ import megamek.logging.MMLogger;
 final class GpuArtilleryBlast {
     private static final MMLogger LOGGER = MMLogger.create(GpuArtilleryBlast.class);
 
-    /** The blast shapes, after the reference sheet the effect was drawn from. */
-    enum Style { CROWN, MUSHROOM, FIREBALL }
+    /**
+     * The blast shapes: the first three after the reference sheet the effect was drawn from, and CLUSTER for a round
+     * that bursts in the air and scatters bomblets over its target hex and the ring around it.
+     */
+    enum Style { CROWN, MUSHROOM, FIREBALL, CLUSTER }
 
     /** How long the slowest layer of a blast (its smoke) lasts. */
     static final float SECONDS = 5.5f;
@@ -63,10 +66,18 @@ final class GpuArtilleryBlast {
     private static final Look SMOKE = new Look(1, .45f, .1f);
     private static final Look CAP = new Look(.9f, .4f, 0);
     private static final Look DEBRIS = new Look(.8f, .3f, .6f);
+    private static final Look BURST_SMOKE = new Look(.55f, .1f, 0);
+    /** Height of a cluster round's air burst above its target, in hexes. */
+    private static final float AIR_BURST_HEXES = 1.3f;
+    /** A cluster round's damage that one bomblet stands for: a 20-damage hex gets five, a 5-damage hex two. */
+    private static final float DAMAGE_PER_BOMBLET = 4;
+    /** The cluster round the shader preview shows: a Long Tom's, 20/10 over one ring. */
+    static final AreaEffect PREVIEW_CLUSTER = new AreaEffect(1, 20, 10, true);
 
     private final List<Blast> blasts = new ArrayList<>();
     private final Vector3 point = new Vector3();
     private final Vector3 axis = new Vector3();
+    private final Vector3 burst = new Vector3();
 
     /**
      * The area a shell damages, as the Artillery Ordnance Table gives it: a Long Tom's high-explosive round is
@@ -75,9 +86,10 @@ final class GpuArtilleryBlast {
      * @param hexRadius rings of hexes around the target that take damage
      * @param damage    damage in the target hex
      * @param falloff   damage lost for each ring outward
+     * @param cluster   whether the round scatters bomblets instead of blasting once
      */
-    record AreaEffect(int hexRadius, int damage, int falloff) {
-        static final AreaEffect TARGET_HEX_ONLY = new AreaEffect(0, 0, 10);
+    record AreaEffect(int hexRadius, int damage, int falloff, boolean cluster) {
+        static final AreaEffect TARGET_HEX_ONLY = new AreaEffect(0, 0, 10, false);
 
         /** The damage a hex {@code ring} rings out takes, never below 1 so its mark stays visible. */
         int ringDamage(int ring) { return Math.max(1, damage - falloff * ring); }
@@ -125,8 +137,8 @@ final class GpuArtilleryBlast {
             this.key = key;
             size = size(profile);
             area = areaEffect(attack == null ? null : attack.event.result().equipmentName(), profile);
-            style = style(profile, key);
-            pieces = debrisPieces(area.hexRadius(), key);
+            style = area.cluster() ? Style.CLUSTER : style(profile, key);
+            pieces = area.cluster() ? bomblets(area, key) : debrisPieces(area.hexRadius(), key);
             Vector3 hexCentre = attack == null ? ground : BoardGeometry.center(attack.event.destination().coords(), 0);
             landings = new ArrayList<>(pieces.size());
             onTerrain = new boolean[pieces.size()];
@@ -198,7 +210,8 @@ final class GpuArtilleryBlast {
             return AreaEffect.TARGET_HEX_ONLY;
         }
         DamageFalloff falloff = AreaEffectHelper.calculateDamageFallOff(round, 0, false);
-        return new AreaEffect(Math.max(0, falloff.radius), falloff.damage, falloff.falloff);
+        return new AreaEffect(Math.max(0, falloff.radius), falloff.damage, falloff.falloff,
+              falloff.clusterMunitionsFlag);
     }
 
     /** The round of the weapon's ammunition family whose munitions are exactly those the shot carried. */
@@ -248,6 +261,47 @@ final class GpuArtilleryBlast {
         return pieces;
     }
 
+    /**
+     * The bomblets of a cluster round: a few in every hex it damages, more where it deals more damage, each landing
+     * somewhere inside its hex. They leave the casing over a quarter second and fall for different times, so their
+     * pops ripple across the area for about a second instead of going off together.
+     */
+    static List<Piece> bomblets(AreaEffect area, int seed) {
+        List<Piece> pieces = new ArrayList<>();
+        float hex = BoardGeometry.height();
+        Vector3 centre = BoardGeometry.center(LAYOUT_HEX, 0);
+        for (int ring = 0; ring <= area.hexRadius(); ring++) {
+            List<Coords> hexes = ring == 0 ? List.of(LAYOUT_HEX) : LAYOUT_HEX.allAtDistance(ring);
+            int perHex = bombletsPerHex(area.ringDamage(ring));
+            for (Coords coords : hexes) {
+                Vector3 hexCentre = BoardGeometry.center(coords, 0);
+                for (int bomblet = 0; bomblet < perHex; bomblet++) {
+                    int piece = pieces.size();
+                    if (piece == MAX_DEBRIS) { return pieces; }
+                    float bearing = random(seed, piece + 400) * MathUtils.PI2;
+                    // Square root spreads the bomblets evenly over the hex rather than crowding its centre.
+                    float out = hex * .38f * (float) Math.sqrt(random(seed, piece + 420));
+                    float offsetX = hexCentre.x - centre.x + MathUtils.cos(bearing) * out;
+                    float offsetY = hexCentre.y - centre.y + MathUtils.sin(bearing) * out;
+                    float release = .08f + .25f * random(seed, piece + 440);
+                    float fall = .35f + .3f * random(seed, piece + 460);
+                    pieces.add(new Piece(offsetX, offsetY, ring, release, fall));
+                }
+            }
+        }
+        return pieces;
+    }
+
+    /** Bomblets for a hex taking {@code damage}: one for about every four points, at least two and at most five. */
+    static int bombletsPerHex(int damage) {
+        return MathUtils.clamp(Math.round(damage / DAMAGE_PER_BOMBLET), 2, 5);
+    }
+
+    /** Whether the shot is a cluster round, which scatters bomblets and leaves no single crater. */
+    static boolean scattersBomblets(@Nullable String weaponName, @Nullable ResolvedAttack.Shot profile) {
+        return explodes(profile) && areaEffect(weaponName, profile).cluster();
+    }
+
     /** Pieces leave the crater over the first half second rather than all at once. */
     private static float launch(int seed, int piece) {
         return .05f + .5f * random(seed, piece + 240);
@@ -295,11 +349,11 @@ final class GpuArtilleryBlast {
     /**
      * Queues the volumes of one blast {@code seconds} after contact, on level ground centred on its target hex. The
      * result depends only on its arguments, so the shader preview and the review sheets can show any moment of any
-     * blast.
+     * blast. A {@link Style#CLUSTER} blast shows a Long Tom's cluster round ({@link #PREVIEW_CLUSTER}).
      */
     void emit(GpuExplosionEffects explosions, Vector3 ground, float size, int hexRadius, Style style, float seconds,
           int seed) {
-        List<Piece> pieces = debrisPieces(hexRadius, seed);
+        List<Piece> pieces = style == Style.CLUSTER ? bomblets(PREVIEW_CLUSTER, seed) : debrisPieces(hexRadius, seed);
         List<Vector3> landings = new ArrayList<>(pieces.size());
         for (Piece piece : pieces) {
             landings.add(new Vector3(ground.x + piece.offsetX(), ground.y + piece.offsetY(), ground.z));
@@ -310,16 +364,66 @@ final class GpuArtilleryBlast {
     private void emit(GpuExplosionEffects explosions, Vector3 ground, float size, List<Piece> pieces,
           List<Vector3> landings, Style style, float seconds, int seed) {
         if (seconds < 0 || seconds >= SECONDS) { return; }
+        if (style == Style.CLUSTER) {
+            cluster(explosions, ground, pieces, landings, seconds, seed);
+            return;
+        }
         debris(explosions, ground, size, pieces, landings, seconds, seed);
         switch (style) {
             case CROWN -> crown(explosions, ground, size, seconds, seed);
             case MUSHROOM -> mushroom(explosions, ground, size, seconds, seed);
             case FIREBALL -> fireball(explosions, ground, size, seconds, seed);
+            default -> { }
         }
         // A mushroom's cap is its smoke: it darkens where it is instead of leaving a second column under it.
         // The fireball's own smoke follows once it burns down; drawn earlier, the column cuts a dark streak through it.
         if (style == Style.CROWN) { smokeColumn(explosions, ground, size, seconds, seed, .4f); }
         if (style == Style.FIREBALL) { smokeColumn(explosions, ground, size, seconds, seed, 1.9f); }
+    }
+
+    /**
+     * A cluster round: the casing bursts in a flash and a puff of smoke above the target, its bomblets fall as dark
+     * streaks across the target hex and the ring around it, and each pops in a small sharp flash where it lands,
+     * leaving a puff of smoke. The puffs drift together into a thin haze; there is no single fireball.
+     */
+    private void cluster(GpuExplosionEffects explosions, Vector3 ground, List<Piece> pieces, List<Vector3> landings,
+          float seconds, int seed) {
+        float hex = BoardGeometry.height();
+        burst.set(ground).add(0, 0, hex * AIR_BURST_HEXES);
+        float flashAge = seconds / .35f;
+        if (flashAge < 1) {
+            explosions.add(burst, hex * (.18f + .3f * flashAge), flashAge, 1, fadeOut(flashAge, .3f), seed + 1,
+                  BRIGHT_FIRE, Vector3.Zero);
+        }
+        float casingSmokeAge = seconds / 3;
+        if (casingSmokeAge < 1) {
+            explosions.add(burst, hex * (.12f + .2f * casingSmokeAge), casingSmokeAge, .2f,
+                  .8f * fadeOut(casingSmokeAge, .4f), seed + 2, BURST_SMOKE, Vector3.Zero);
+        }
+        for (int index = 0; index < pieces.size(); index++) {
+            Piece piece = pieces.get(index);
+            Vector3 landing = landings.get(index);
+            float travel = (seconds - piece.launch()) / piece.flight();
+            if (travel > 0 && travel < 1) {
+                // Slow out of the casing, fast into the ground.
+                point.set(burst).lerp(landing, travel * travel);
+                axis.set(landing).sub(burst).nor().scl(2.2f);
+                explosions.add(point, hex * .04f, .5f, 0, .9f, seed + index * 41, DEBRIS, axis);
+            }
+            float popAge = (seconds - piece.landing()) / .7f;
+            if (popAge >= 0 && popAge < 1) {
+                point.set(landing).add(0, 0, hex * .05f);
+                float popSize = hex * (.05f + .09f * (1 - (float) Math.exp(-popAge * 8)));
+                explosions.add(point, popSize, popAge, 1, fadeOut(popAge, .4f), seed + index * 43, BRIGHT_FIRE,
+                      Vector3.Zero);
+            }
+            float smokeAge = (seconds - piece.landing() - .1f) / 2.6f;
+            if (smokeAge >= 0 && smokeAge < 1) {
+                point.set(landing).add(0, 0, hex * (.06f + .1f * smokeAge));
+                explosions.add(point, hex * (.08f + .1f * smokeAge), smokeAge, .1f, .6f * fadeOut(smokeAge, .35f),
+                      seed + index * 47, BURST_SMOKE, Vector3.Zero);
+            }
+        }
     }
 
     /** Spikes of fire and earth thrown up and out in a cone around a low core, with a dust skirt racing outward. */
@@ -452,11 +556,14 @@ final class GpuArtilleryBlast {
                 boolean handled = (blast.landed & bit) != 0;
                 if (handled || blast.seconds < piece.landing()) { continue; }
                 blast.landed |= bit;
-                if (piece.ring() == 0 || !blast.onTerrain[index]) { continue; }
+                // A high-explosive shell's own crater marks its target hex; a cluster round has none, so its
+                // bomblets mark the target hex too.
+                boolean isCraterHex = piece.ring() == 0 && !blast.area.cluster();
+                if (isCraterHex || !blast.onTerrain[index]) { continue; }
                 blast.marks++;
-                ResolvedAttack.Shot ringShot = blast.profile.withDamagePerHit(blast.area.ringDamage(piece.ring()));
+                ResolvedAttack.Shot markShot = blast.profile.withDamagePerHit(markDamage(blast.area, piece.ring()));
                 receiver.accept(new GpuGroundDamage.Impact(blast.attack, "artillery-debris-" + index,
-                      blast.ground.cpy(), blast.landings.get(index).cpy(), "bomb", ringShot));
+                      blast.ground.cpy(), blast.landings.get(index).cpy(), "bomb", markShot));
             }
             boolean allLanded = blast.landed == (1L << blast.pieces.size()) - 1;
             if (allLanded && !blast.marksReported) {
@@ -465,6 +572,15 @@ final class GpuArtilleryBlast {
                       blast.area.hexRadius(), blast.ground);
             }
         }
+    }
+
+    /**
+     * The damage one mark is sized for: a ring's damage for a high-explosive shell's debris, and a bomblet's share of
+     * its hex's damage for a cluster round, so a cluster round freckles the ground with small marks.
+     */
+    static double markDamage(AreaEffect area, int ring) {
+        int damage = area.ringDamage(ring);
+        return area.cluster() ? (double) damage / bombletsPerHex(damage) : damage;
     }
 
     /** Whether the blast has rings around its target to mark, and the attack and shot it needs to mark them. */

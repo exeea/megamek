@@ -41,9 +41,9 @@ class GpuArtilleryBlastSmokeTest {
     private static final float[] MOMENTS = { .08f, .35f, .9f, 1.8f, 3.2f, 4.8f };
     private static final GpuArtilleryBlast.Style[] STYLES = { GpuArtilleryBlast.Style.CROWN,
           GpuArtilleryBlast.Style.MUSHROOM, GpuArtilleryBlast.Style.FIREBALL, GpuArtilleryBlast.Style.CROWN,
-          GpuArtilleryBlast.Style.CROWN };
-    /** The R value of each row: a Sniper's ring for the three shapes, then a Copperhead and a Long Tom. */
-    private static final int[] HEX_RADII = { 1, 1, 1, 0, 2 };
+          GpuArtilleryBlast.Style.CROWN, GpuArtilleryBlast.Style.CLUSTER };
+    /** The R value of each row: a Sniper ring for the three shapes, a Copperhead, a Long Tom, a Long Tom cluster. */
+    private static final int[] HEX_RADII = { 1, 1, 1, 0, 2, 1 };
 
     @Test
     void drawsEachBlastShapeFromIgnitionToClearing() {

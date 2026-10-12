@@ -256,10 +256,13 @@ final class GpuAttackEffects implements Disposable {
                     if (unitHit || !impacts[index] || shot.seconds < contactSeconds(index)) { continue; }
                     String effect = effects[index];
                     if (!List.of("bullet", "laser", "ppc", "energy", "missile", "cluster", "bomb", "flame").contains(effect)) { continue; }
+                    // A cluster round leaves no crater: its bomblets freckle the ground (GpuArtilleryBlast.groundMarks).
+                    if (GpuArtilleryBlast.scattersBomblets(shot.event.result().equipmentName(), profile)) { continue; }
                     receiver.accept(new GpuGroundDamage.Impact(shot, emissionKeys[index], origins[index], endpoints[index], effect, profile));
                 }
                 for (var entry : launches.getOrDefault(shot, Map.of()).entrySet()) {
                     var launch = entry.getValue();
+                    if (GpuArtilleryBlast.scattersBomblets(shot.event.result().equipmentName(), launch.profile())) { continue; }
                     // Sample actual ground arrivals, so a single miss in a mostly hitting rack cannot be skipped.
                     var arrivals = new java.util.ArrayList<Integer>();
                     for (int index = 0; index < launch.missiles(); index++) {

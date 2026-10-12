@@ -18,7 +18,7 @@ import com.badlogic.gdx.utils.Disposable;
 
 /** Bounded, depth-clipped fire/smoke volumes. Owns its reusable coverage mesh; the caller owns the attack clock. */
 final class GpuExplosionEffects implements Disposable {
-    static final int CAPACITY = 384;
+    static final int CAPACITY = 448;
     private static final Comparator<Volume> BACK_TO_FRONT = Comparator.comparingDouble((Volume v) -> v.depth).reversed();
     private final Volume[] volumes = new Volume[CAPACITY];
     private final Vector3 burstCenter = new Vector3();
