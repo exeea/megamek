@@ -257,12 +257,12 @@ final class GpuAttackEffects implements Disposable {
                     String effect = effects[index];
                     if (!List.of("bullet", "laser", "ppc", "energy", "missile", "cluster", "bomb", "flame").contains(effect)) { continue; }
                     // A cluster round leaves no crater: its bomblets freckle the ground (GpuArtilleryBlast.groundMarks).
-                    if (GpuArtilleryBlast.scattersBomblets(shot.event.result().equipmentName(), profile)) { continue; }
+                    if (GpuArtilleryBlast.leavesNoCrater(shot.event.result().equipmentName(), profile)) { continue; }
                     receiver.accept(new GpuGroundDamage.Impact(shot, emissionKeys[index], origins[index], endpoints[index], effect, profile));
                 }
                 for (var entry : launches.getOrDefault(shot, Map.of()).entrySet()) {
                     var launch = entry.getValue();
-                    if (GpuArtilleryBlast.scattersBomblets(shot.event.result().equipmentName(), launch.profile())) { continue; }
+                    if (GpuArtilleryBlast.leavesNoCrater(shot.event.result().equipmentName(), launch.profile())) { continue; }
                     // Sample actual ground arrivals, so a single miss in a mostly hitting rack cannot be skipped.
                     var arrivals = new java.util.ArrayList<Integer>();
                     for (int index = 0; index < launch.missiles(); index++) {
@@ -459,7 +459,7 @@ final class GpuAttackEffects implements Disposable {
                 float flash = attack.contactFlash(contact);
                 if (impacts[index] && flash > 0) {
                     // Tube artillery is ballistic like an autocannon, but its shell explodes rather than sparking.
-                    boolean isShell = GpuArtilleryBlast.explodes(profiles[index]);
+                    boolean isShell = GpuArtilleryBlast.drawsLanding(profiles[index]);
                     if ("bullet".equals(effect) && !isShell) {
                         boolean targetHit = attack.event.result().hit() && attack.event.target() != null
                               && (profiles[index] == null || profiles[index].impact() == null);
@@ -508,7 +508,7 @@ final class GpuAttackEffects implements Disposable {
                         if (impact <= 0) { continue; }
                         var profile = launch.profile();
                         boolean isSolidRound = profile != null && profile.ballistic();
-                        boolean isShell = GpuArtilleryBlast.explodes(profile);
+                        boolean isShell = GpuArtilleryBlast.drawsLanding(profile);
                         if (isSolidRound && !isShell) {
                             boolean targetHit = launch.hit(index) && attack.event.target() != null && profile.impact() == null;
                             ballisticImpact(launch.origins()[index % launch.origins().length], launch.targets()[index], impact,
@@ -661,7 +661,7 @@ final class GpuAttackEffects implements Disposable {
               || ammo.contains("M_INCENDIARY_LRM") || ammo.contains("M_THUNDER_INFERNO");
         int seed = attack.event.result().id().hashCode() ^ Float.floatToIntBits(center.x);
         if (ammo.contains("M_FLARE")) { glow(center, 1 + (1 - fade) * 2, FLARE_GLOW, 1 - fade, fade); }
-        else if (GpuArtilleryBlast.explodes(profile)) {
+        else if (GpuArtilleryBlast.drawsLanding(profile)) {
             artilleryBlasts.detonate(center, profile, attack, seed);
         }
         else if (!smoke) { explosions.burst(center, 5.5f, 1 - fade, seed); }

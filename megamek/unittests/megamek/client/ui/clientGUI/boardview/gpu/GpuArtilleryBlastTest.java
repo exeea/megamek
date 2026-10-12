@@ -254,6 +254,42 @@ class GpuArtilleryBlastTest {
         }
     }
 
+    /** FASCAM and Vibrabomb-IV lay mines: no blast, no crater, but a landing that is drawn. */
+    @Test
+    void minefieldRoundsLayMinesInsteadOfExploding() {
+        EquipmentType.initializeTypes();
+        for (String munition : new String[] { "M_FASCAM", "M_VIBRABOMB_IV" }) {
+            var round = shot(true, munition);
+            assertTrue(GpuArtilleryBlast.laysMines(round), munition);
+            assertFalse(GpuArtilleryBlast.explodes(round), munition + " must not draw a high-explosive blast");
+            assertTrue(GpuArtilleryBlast.drawsLanding(round), munition);
+        }
+        assertFalse(GpuArtilleryBlast.laysMines(shot(true, "M_STANDARD")));
+        assertFalse(GpuArtilleryBlast.laysMines(shot(false, "M_FASCAM")), "Only artillery lays a minefield this way");
+        assertEquals(0, craters("ISLongTom", shot(true, "M_FASCAM")), "Mines leave no crater");
+    }
+
+    /** A minefield round's mines land in the hex it hit and nowhere else, and leave no scorch marks. */
+    @Test
+    void minesStayInTheHexTheRoundLandedOn() {
+        EquipmentType.initializeTypes();
+        var round = shot(true, "M_FASCAM");
+        var attack = GroundDamagePlaybackTest.shot("ISLongTom", true, round);
+        var blasts = new GpuArtilleryBlast();
+        blasts.detonate(BoardGeometry.center(attack.event.destination().coords(), 0), round, attack, 3);
+        blasts.advance(GpuArtilleryBlast.SECONDS - .1f);
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        blasts.groundMarks(marks::add);
+        assertEquals(0, marks.size(), "Mines scorch nothing");
+        var mines = GpuArtilleryBlast.mines(3);
+        assertTrue(mines.size() >= 6, "A handful of mines");
+        for (var mine : mines) {
+            assertEquals(0, mine.ring());
+            assertTrue(Math.hypot(mine.offsetX(), mine.offsetY()) < BoardGeometry.height() * .45f,
+                  "Every mine lands inside the hex: " + mine);
+        }
+    }
+
     private static int craters(String weapon, ResolvedAttack.Shot profile) {
         var attack = GroundDamagePlaybackTest.shot(weapon, false, profile);
         attack.seconds = attack.contactSeconds + UnitAttack.RECOVERY_SECONDS / 2;
