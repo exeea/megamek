@@ -337,8 +337,8 @@ public class SelectArtyAutoHitHexDisplay extends StatusBarPhaseDisplay {
 
     /**
      * Done ends the phase for good, and a hex that was not designated now cannot be later. When the player designated
-     * none of the hexes they may, asks first, as the other phases ask before a turn with no action (the same "nag for no
-     * action" preference turns both off). A turn timer that ran out ends the phase without asking.
+     * none of the hexes they may, asks first, as the other phases ask before a turn with no action (the same "nag for
+     * no action" preference turns both off). A turn timer that ran out ends the phase without asking.
      *
      * @return {@code true} to end the phase
      */
