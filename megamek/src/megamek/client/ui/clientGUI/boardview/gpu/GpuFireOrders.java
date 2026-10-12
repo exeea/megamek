@@ -61,6 +61,7 @@ import megamek.common.units.Entity;
 import megamek.common.units.Mek;
 import megamek.common.units.Tank;
 import megamek.common.units.Targetable;
+import megamek.logging.MMLogger;
 
 /**
  * EDT service for weapon declarations (rebuild plan A.8): an immutable snapshot of the local actor's orders, read from
@@ -72,6 +73,7 @@ import megamek.common.units.Targetable;
  * of the phase (H6).
  */
 final class GpuFireOrders implements AutoCloseable {
+    private static final MMLogger LOGGER = MMLogger.create(GpuFireOrders.class);
     /** How far the front-arc outline reaches without a weapon displayed (the prototype's 12 hexes, overlay.js:58). */
     static final int FRONT_ARC_RADIUS = 12;
     /** At most this many TN badges, the best first (the prototype's top 10, overlay.js:133). */
@@ -260,6 +262,9 @@ final class GpuFireOrders implements AutoCloseable {
     // order of its first assignment, so letters close gaps but never follow the primary or the fire order.
     private WeaponDeclarationDisplay display;
     private int lettersActor = Entity.NONE;
+    /** The weapons last hidden for the phase, and whose: logged only when they change. */
+    private int lastHiddenWeapons = -1;
+    private int lastHiddenActor = Entity.NONE;
     private final Map<TargetKey, Integer> serials = new HashMap<>();
     private int serial;
     /** A command runs: a capture inside its dialog's nested loop keeps the last snapshot (the queue is half-done). */
@@ -415,7 +420,8 @@ final class GpuFireOrders implements AutoCloseable {
             }
         }
         List<WeaponRow> rows = new ArrayList<>();
-        for (WeaponMounted weapon : WeaponDisplayData.listedWeapons(actor)) {
+        List<WeaponMounted> declarable = declarableWeapons(game, actor);
+        for (WeaponMounted weapon : declarable) {
             if (weapon.getEntity() != actor) {
                 // A handheld weapon has no number on the actor; it keeps the Swing controls.
                 continue;
@@ -439,6 +445,10 @@ final class GpuFireOrders implements AutoCloseable {
             }
         }
         WeaponMounted selected = selectedWeapon(fd, actor);
+        if ((selected != null) && !declarable.contains(selected)) {
+            // The Unit Display may still have, say, a laser selected; it cannot fire in this phase, so none is.
+            selected = null;
+        }
         int selectedNum = (selected == null) ? -1 : actor.getEquipmentNum(selected);
         Set<TargetKey> carded = carded(lettered, focusKey);
         // The arcs are drawn on the shown board only
@@ -600,7 +610,7 @@ final class GpuFireOrders implements AutoCloseable {
             }
             // Retarget existing attacks in fire order before a new last weapon can auto-end the turn.
             List<EntityAction> before = fd.getAttacks();
-            List<WeaponMounted> weapons = WeaponDisplayData.listedWeapons(actor).stream()
+            List<WeaponMounted> weapons = declarableWeapons(actor.getGame(), actor).stream()
                   .filter(weapon -> weapon.getEntity() == actor)
                   .sorted(Comparator.comparingInt(weapon -> {
                       WeaponAttackAction attack = queued(before, actor, actor.getEquipmentNum(weapon));
@@ -1452,6 +1462,29 @@ final class GpuFireOrders implements AutoCloseable {
     private @Nullable Targetable focus(WeaponDeclarationDisplay fd) {
         Targetable target = fd.getTarget();
         return ((target instanceof Entity unit) && !source.identified(unit)) ? null : target;
+    }
+
+    /**
+     * The actor's listed weapons that can be declared in this phase: in the Targeting phase only its artillery and
+     * capital weapons, in the Off-board phase only its TAG, otherwise all of them. The rest cannot fire now, so the
+     * panel does not offer them.
+     */
+    private List<WeaponMounted> declarableWeapons(Game game, Entity actor) {
+        List<WeaponMounted> listed = WeaponDisplayData.listedWeapons(actor);
+        List<WeaponMounted> declarable = new ArrayList<>();
+        for (WeaponMounted weapon : listed) {
+            if (WeaponDisplayData.isDeclarableIn(game.getPhase(), weapon)) {
+                declarable.add(weapon);
+            }
+        }
+        int hidden = listed.size() - declarable.size();
+        if ((hidden != lastHiddenWeapons) || (actor.getId() != lastHiddenActor)) {
+            lastHiddenWeapons = hidden;
+            lastHiddenActor = actor.getId();
+            LOGGER.debug("[FireOrders] {} in {}: {} of {} weapons can fire in this phase, {} hidden",
+                  actor.getShortName(), game.getPhase(), declarable.size(), listed.size(), hidden);
+        }
+        return declarable;
     }
 
     /** The actor's listed weapon with that number, or null. */

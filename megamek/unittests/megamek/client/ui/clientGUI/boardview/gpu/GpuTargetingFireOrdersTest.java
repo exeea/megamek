@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.File;
 import java.util.List;
 
+import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.common.Configuration;
 import megamek.common.HexTarget;
 import megamek.common.actions.ArtilleryAttackAction;
@@ -18,6 +19,7 @@ import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.AmmoType;
+import megamek.common.equipment.WeaponMounted;
 import megamek.common.units.Targetable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -59,6 +61,36 @@ class GpuTargetingFireOrdersTest {
             GpuFireOrders.WeaponRow longTom = row(orders, eqNum(targeting));
             assertTrue(longTom.usable(), "The Long Tom may be assigned in the Targeting phase");
             assertFalse(longTom.ammo().isEmpty(), "Its ammunition is offered to switch between");
+        }
+    }
+
+    /**
+     * In the Targeting phase the panel lists only the weapons that can fire in it: the Long Tom, not the unit's lasers
+     * and missiles, which the attack rules refuse until the Firing phase.
+     */
+    @Test
+    void theTargetingPanelListsOnlyTheWeaponsThatCanFireInIt() throws Exception {
+        try (GpuTargetingFixture targeting = GpuTargetingFixture.create()) {
+            GpuFireOrders.Snapshot orders = capture(targeting);
+            List<WeaponMounted> listed = onSwing(() -> WeaponDisplayData.listedWeapons(targeting.attacker));
+            assertTrue(listed.size() > 1, "The unit carries more than its Long Tom");
+            assertEquals(List.of(eqNum(targeting)),
+                  orders.weapons().stream().map(GpuFireOrders.WeaponRow::eqNum).toList(), "Only the Long Tom");
+        }
+    }
+
+    /** Each phase's rule: artillery in the Targeting phase, TAG alone in the Off-board phase, anything when firing. */
+    @Test
+    void eachPhaseDeclaresOnlyTheWeaponsItsRulesAllow() throws Exception {
+        try (GpuTargetingFixture targeting = GpuTargetingFixture.create()) {
+            WeaponMounted other = onSwing(() -> WeaponDisplayData.listedWeapons(targeting.attacker).stream()
+                  .filter(weapon -> weapon != targeting.longTom).findFirst().orElseThrow());
+            WeaponMounted longTom = targeting.longTom;
+            assertTrue(WeaponDisplayData.isDeclarableIn(GamePhase.TARGETING, longTom));
+            assertFalse(WeaponDisplayData.isDeclarableIn(GamePhase.TARGETING, other), other.getName());
+            assertFalse(WeaponDisplayData.isDeclarableIn(GamePhase.OFFBOARD, longTom), "Only TAG off-board");
+            assertTrue(WeaponDisplayData.isDeclarableIn(GamePhase.FIRING, longTom));
+            assertTrue(WeaponDisplayData.isDeclarableIn(GamePhase.FIRING, other));
         }
     }
 
