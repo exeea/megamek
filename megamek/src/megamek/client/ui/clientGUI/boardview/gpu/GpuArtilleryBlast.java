@@ -49,7 +49,7 @@ final class GpuArtilleryBlast {
      * opens above the hex it lands on and lets its mines drift down into that hex alone.
      */
     /** {@link #DUD}: a round that came down without going off, a homing round with no TAG to follow. */
-    enum Style { CROWN, MUSHROOM, FIREBALL, CLUSTER, MINES, DUD }
+    enum Style { CROWN, MUSHROOM, FIREBALL, CLUSTER, MINES, DUD, FUEL_AIR }
 
     /** How long the slowest layer of a blast (its smoke) lasts. */
     static final float SECONDS = 5.5f;
@@ -109,6 +109,22 @@ final class GpuArtilleryBlast {
     private static final Look FIRE = new Look(.85f, .75f, .1f);
     private static final Look BRIGHT_FIRE = new Look(.55f, 1, 0);
     private static final Look EARTH = new Look(.35f, 0, .9f);
+    /** A fuel-air round's dispersed fuel: a pale, low vapour before it lights. */
+    private static final Look FUEL_HAZE = new Look(0, 0, .15f);
+    /** Its ignition and roiling column: violent fire, churning and flecked with burning metal. */
+    private static final Look FUEL_FIRE = new Look(.35f, .6f, 0, 1);
+    private static final Look FUEL_COLUMN = new Look(.9f, .75f, .05f, 1);
+    /** The heavy black soot it leaves, still churning a little. */
+    private static final Look FUEL_SOOT = new Look(1, .2f, 0, .5f);
+    /** Burning chunks it throws out. */
+    private static final Look FUEL_CHUNK = new Look(.2f, 1, 0, .6f);
+    /** Seconds after landing a fuel-air round's dispersed fuel lights; its terrain changes show then too. */
+    static final float FUEL_AIR_IGNITION_SECONDS = .25f;
+    /** How strongly a fuel-air blast draws in thin air, where it does half damage. */
+    private static final float THIN_AIR_INTENSITY = .65f;
+    private static final int FUEL_AIR_CHUNKS = 12;
+    /** The hex a fuel-air blast drawn without an attack, such as in the shader preview, is laid out around. */
+    private static final Coords PREVIEW_HEX = new Coords(6, 6);
     /** Clods of earth a dud throws up where it strikes. */
     private static final int DUD_CLODS = 7;
     private static final Look SMOKE = new Look(1, .45f, .1f);
@@ -128,6 +144,8 @@ final class GpuArtilleryBlast {
     static final AreaEffect PREVIEW_CLUSTER = new AreaEffect(1, 20, 10, true);
 
     private final List<Blast> blasts = new ArrayList<>();
+    /** How fuel-air rounds burn in the board's atmosphere, which the rules and this blast both follow. */
+    private AreaEffectHelper.FuelAirStrength fuelAirStrength = AreaEffectHelper.FuelAirStrength.FULL;
     /** The mines lying in each known minefield hex, placed on the installed terrain once, by hex. */
     private final Map<Coords, List<Vector3>> restingMines = new HashMap<>();
     private final Vector3 point = new Vector3();
@@ -195,6 +213,8 @@ final class GpuArtilleryBlast {
          * ground, and a cluster burst or minefield dispenser opens above its target as drawn without a flight.
          */
         final Vector3 opening;
+        /** How strongly it draws: 1, or less for a fuel-air round in thin air. */
+        final float intensity;
         float seconds;
         /** One bit per piece of debris that has landed, whether or not it left a mark. */
         long landed;
@@ -202,7 +222,7 @@ final class GpuArtilleryBlast {
         boolean marksReported;
 
         Blast(Vector3 ground, @Nullable Vector3 opening, @Nullable ResolvedAttack.Shot profile,
-              @Nullable UnitAttack attack, int key) {
+              @Nullable UnitAttack attack, int key, AreaEffectHelper.FuelAirStrength fuelAirStrength) {
             this.ground.set(ground);
             this.opening = opening == null ? null : opening.cpy();
             this.profile = profile;
@@ -210,14 +230,19 @@ final class GpuArtilleryBlast {
             this.key = key;
             size = size(profile);
             area = areaEffect(weaponName(attack), profile);
-            style = isDud(profile) ? Style.DUD : laysMines(profile) ? Style.MINES : area.cluster() ? Style.CLUSTER
-                  : style(profile, key);
+            boolean fuelAir = isFuelAir(profile);
+            // A fuel-air round in vacuum or thinner than thin air does nothing, as the rules say: a dud.
+            boolean noFuelAirBurn = fuelAir && (fuelAirStrength == AreaEffectHelper.FuelAirStrength.NONE);
+            style = (isDud(profile) || noFuelAirBurn) ? Style.DUD : laysMines(profile) ? Style.MINES
+                  : area.cluster() ? Style.CLUSTER : fuelAir ? Style.FUEL_AIR : style(profile, key);
+            intensity = (fuelAirStrength == AreaEffectHelper.FuelAirStrength.HALF) && fuelAir ? THIN_AIR_INTENSITY : 1;
             targetHex = attack == null ? null : attack.event.destination().coords();
             drawSeed = ((style == Style.MINES) && (targetHex != null)) ? mineSeed(targetHex) : key;
             pieces = switch (style) {
                 case MINES -> mines(drawSeed, minesFor(minefieldDensity(weaponName(attack), profile)));
                 case CLUSTER -> bomblets(area, key);
                 case DUD -> List.of();
+                case FUEL_AIR -> fuelAirHexes(targetHex, area.hexRadius());
                 default -> debrisPieces(area.hexRadius(), key);
             };
             Vector3 hexCentre = attack == null ? ground : BoardGeometry.center(attack.event.destination().coords(), 0);
@@ -265,13 +290,22 @@ final class GpuArtilleryBlast {
 
     /** Whether the landing leaves no single crater: a cluster round's bomblets, or mines, which make none. */
     static boolean leavesNoCrater(@Nullable String weaponName, @Nullable ResolvedAttack.Shot profile) {
-        return laysMines(profile) || scattersBomblets(weaponName, profile) || isDud(profile);
+        return laysMines(profile) || scattersBomblets(weaponName, profile) || isDud(profile) || isFuelAir(profile);
     }
 
     /**
      * Whether the round came down without going off: an explosive artillery round the server sent as dealing no
      * damage, which it does only for a homing round with no TAG to follow. It throws up dirt and leaves no crater.
      */
+    static boolean isFuelAir(@Nullable ResolvedAttack.Shot profile) {
+        return explodes(profile) && profile.munitions().contains("M_FAE") && !isDud(profile);
+    }
+
+    /** Sets how fuel-air rounds burn in the board's atmosphere ({@link AreaEffectHelper#fuelAirStrength}). */
+    void setFuelAirStrength(AreaEffectHelper.FuelAirStrength strength) {
+        fuelAirStrength = strength;
+    }
+
     static boolean isDud(@Nullable ResolvedAttack.Shot profile) {
         return explodes(profile) && (profile.damagePerHit() == 0);
     }
@@ -293,7 +327,8 @@ final class GpuArtilleryBlast {
     static Style style(@Nullable ResolvedAttack.Shot profile, int seed) {
         Set<String> munitions = profile == null ? Set.of() : profile.munitions();
         if (munitions.contains("M_DAVY_CROCKETT_M")) { return Style.MUSHROOM; }
-        if (munitions.contains("M_FAE") || munitions.contains("M_ADA")) { return Style.FIREBALL; }
+        if (munitions.contains("M_FAE")) { return Style.FUEL_AIR; }
+        if (munitions.contains("M_ADA")) { return Style.FIREBALL; }
         // Crowns are what a shell landing in earth mostly throws up; the other two keep a barrage varied.
         float pick = random(seed, 7);
         return pick < .5f ? Style.CROWN : pick < .75f ? Style.MUSHROOM : Style.FIREBALL;
@@ -522,7 +557,7 @@ final class GpuArtilleryBlast {
             LOGGER.debug("[ArtilleryBlast] {} blasts already drawing, the oldest makes way", MAX_BLASTS);
             blasts.removeFirst();
         }
-        var blast = new Blast(ground, opening, profile, attack, key);
+        var blast = new Blast(ground, opening, profile, attack, key, fuelAirStrength);
         blasts.add(blast);
         LOGGER.info("[ArtilleryBlast] {} blast of radius {} with {} pieces of debris over R{} at {}", blast.style,
               blast.size, blast.pieces.size(), blast.area.hexRadius(), ground);
@@ -600,7 +635,7 @@ final class GpuArtilleryBlast {
     /** Queues the volumes of every live blast. */
     void emit(GpuExplosionEffects explosions) {
         for (Blast blast : blasts) {
-            var scatter = new Scatter(blast.pieces, blast.landings, blast.heading, blast.opening);
+            var scatter = new Scatter(blast.pieces, blast.landings, blast.heading, blast.opening, blast.intensity);
             emit(explosions, blast.ground, blast.size, scatter, blast.style, blast.seconds, blast.drawSeed);
         }
     }
@@ -612,7 +647,8 @@ final class GpuArtilleryBlast {
      * @param landings where each piece lands
      * @param heading  the shell's direction of travel across the ground, a unit vector
      */
-    private record Scatter(List<Piece> pieces, List<Vector3> landings, Vector3 heading, @Nullable Vector3 opening) { }
+    private record Scatter(List<Piece> pieces, List<Vector3> landings, Vector3 heading, @Nullable Vector3 opening,
+          float intensity) { }
 
     /** The direction from {@code from} to {@code to} across the ground, or the default heading if they coincide. */
     private static Vector3 heading(Vector3 from, Vector3 to) {
@@ -631,13 +667,14 @@ final class GpuArtilleryBlast {
             case MINES -> mines(seed, minesFor(PREVIEW_MINE_DENSITY));
             case CLUSTER -> bomblets(PREVIEW_CLUSTER, seed);
             case DUD -> List.of();
+            case FUEL_AIR -> fuelAirHexes(null, hexRadius);
             default -> debrisPieces(hexRadius, seed);
         };
         List<Vector3> landings = new ArrayList<>(pieces.size());
         for (Piece piece : pieces) {
             landings.add(new Vector3(ground.x + piece.offsetX(), ground.y + piece.offsetY(), ground.z));
         }
-        emit(explosions, ground, size, new Scatter(pieces, landings, DEFAULT_HEADING, null), style, seconds, seed);
+        emit(explosions, ground, size, new Scatter(pieces, landings, DEFAULT_HEADING, null, 1), style, seconds, seed);
     }
 
     private void emit(GpuExplosionEffects explosions, Vector3 ground, float size, Scatter scatter, Style style,
@@ -655,6 +692,10 @@ final class GpuArtilleryBlast {
             dud(explosions, ground, seconds, seed);
             return;
         }
+        if (style == Style.FUEL_AIR) {
+            fuelAir(explosions, ground, scatter, seconds, seed);
+            return;
+        }
         debris(explosions, ground, size, scatter.pieces(), scatter.landings(), seconds, seed);
         switch (style) {
             case CROWN -> crown(explosions, ground, size, seconds, seed);
@@ -666,6 +707,112 @@ final class GpuArtilleryBlast {
         // The fireball's own smoke follows once it burns down; drawn earlier, the column cuts a dark streak through it.
         if (style == Style.CROWN) { smokeColumn(explosions, ground, size, seconds, seed, .4f); }
         if (style == Style.FIREBALL) { smokeColumn(explosions, ground, size, seconds, seed, 1.9f); }
+    }
+
+    /**
+     * One piece for every hex a fuel-air round covers, the target hex and each ring out to {@code hexRadius}, at the
+     * hex's centre. Each lights at ignition and leaves its hex charred.
+     *
+     * @param target the target hex, or {@code null} for a blast drawn without an attack, laid out around a fixed hex
+     */
+    static List<Piece> fuelAirHexes(@Nullable Coords target, int hexRadius) {
+        Coords centre = target == null ? PREVIEW_HEX : target;
+        Vector3 origin = BoardGeometry.center(centre, 0);
+        List<Piece> pieces = new ArrayList<>();
+        for (int ring = 0; ring <= hexRadius; ring++) {
+            for (Coords hex : ring == 0 ? List.of(centre) : centre.allAtDistance(ring)) {
+                Vector3 hexCentre = BoardGeometry.center(hex, 0);
+                pieces.add(new Piece(hexCentre.x - origin.x, hexCentre.y - origin.y, ring, 0,
+                      FUEL_AIR_IGNITION_SECONDS, true));
+            }
+        }
+        return pieces;
+    }
+
+    /**
+     * A fuel-air round, in four beats. Its fuel spreads as a pale, low haze over every hex in its radius; a quarter
+     * second after landing the whole cloud lights at once, a sheet of fire over each hex, brightest at the centre. The
+     * fire rolls up into a tall, churning orange-and-black column flecked with burning metal, while a ring of dust
+     * races out to the radius and burning chunks streak away. Heavy black soot is left to drift off on the wind.
+     */
+    private void fuelAir(GpuExplosionEffects explosions, Vector3 ground, Scatter scatter, float seconds, int seed) {
+        float hex = BoardGeometry.height();
+        float intensity = scatter.intensity();
+        List<Piece> hexes = scatter.pieces();
+        int radius = 0;
+        for (Piece piece : hexes) { radius = Math.max(radius, piece.ring()); }
+        float reach = .6f + .25f * radius;
+        for (int index = 0; index < hexes.size(); index++) {
+            Piece piece = hexes.get(index);
+            Vector3 landing = scatter.landings().get(index);
+            // The fuel reaches the outer rings a moment after the inner ones.
+            float spread = MathUtils.clamp((seconds - piece.ring() * .04f) / FUEL_AIR_IGNITION_SECONDS, 0, 1);
+            // The fuel burns away the instant it lights.
+            float hazeFade = seconds < FUEL_AIR_IGNITION_SECONDS ? 1 : 1 - (seconds - FUEL_AIR_IGNITION_SECONDS) / .04f;
+            if (spread > 0 && hazeFade > 0) {
+                // Wide enough that neighbouring hexes' haze merges into one low, pale cloud.
+                point.set(landing).add(0, 0, hex * .1f);
+                explosions.addFlat(point, hex * .85f * spread, .1f, 0, .3f * hazeFade, seed + index * 13, FUEL_HAZE,
+                      .35f);
+            }
+            float sheet = (seconds - FUEL_AIR_IGNITION_SECONDS) / .75f;
+            if (sheet >= 0 && sheet < 1) {
+                // The sheet draws in and up as it burns, rolling into the column over the target hex.
+                float ringFade = 1 - .22f * piece.ring();
+                point.set(landing).lerp(ground, .35f * sheet).add(0, 0, hex * (.12f + .45f * sheet));
+                explosions.addFlat(point, hex * .6f * intensity * (1 - .3f * sheet), sheet, 1,
+                      fadeOut(sheet, .45f) * ringFade, seed + index * 17, FUEL_FIRE, .45f + .4f * sheet);
+            }
+        }
+        float columnSeconds = seconds - FUEL_AIR_IGNITION_SECONDS;
+        float columnAge = columnSeconds / 2.4f;
+        if (columnAge >= 0 && columnAge < 1) {
+            // It lights with the sheet and grows as the sheet rolls into it, so the two read as one fire.
+            float rise = 1 - (float) Math.exp(-columnSeconds * 1.8f);
+            float fire = MathUtils.clamp(1.15f - columnAge * 1.5f, 0, 1);
+            for (int level = 0; level < 3; level++) {
+                point.set(ground).add(0, 0, hex * (.3f + .6f * level) * rise * intensity * reach);
+                explosions.downwind(point, columnSeconds * .5f);
+                axis.set(Vector3.Z).scl(.35f);
+                explosions.add(point, hex * (.85f - .12f * level) * (.45f + .6f * rise) * intensity * reach,
+                      columnAge, fire, fadeOut(columnAge, .35f), seed + 300 + level * 29, FUEL_COLUMN, axis);
+            }
+        }
+        float ringAge = (seconds - FUEL_AIR_IGNITION_SECONDS) / .9f;
+        if (ringAge >= 0 && ringAge < 1) {
+            float out = hex * (radius + .6f) * (1 - (1 - ringAge) * (1 - ringAge));
+            for (int puff = 0; puff < 12; puff++) {
+                float bearing = puff * MathUtils.PI2 / 12 + random(seed, puff + 700) * .3f;
+                point.set(ground).add(MathUtils.cos(bearing) * out, MathUtils.sin(bearing) * out, hex * .05f);
+                explosions.add(point, hex * (.05f + .07f * ringAge), ringAge, 0, .5f * fadeOut(ringAge, .2f),
+                      seed + 400 + puff, EARTH, Vector3.Zero);
+            }
+        }
+        for (int chunk = 0; chunk < FUEL_AIR_CHUNKS; chunk++) {
+            float launch = FUEL_AIR_IGNITION_SECONDS + .02f * (chunk % 4);
+            float travel = (seconds - launch) / (.8f + .3f * random(seed, chunk + 720));
+            if (travel <= 0 || travel >= 1) {
+                continue;
+            }
+            float bearing = chunk * 2.399963f + random(seed, chunk + 740);
+            float out = hex * (radius + .3f) * (.6f + .4f * random(seed, chunk + 760)) * travel;
+            float up = hex * (.5f + .4f * random(seed, chunk + 780)) * 4 * travel * (1 - travel);
+            point.set(ground).add(MathUtils.cos(bearing) * out, MathUtils.sin(bearing) * out, up + hex * .1f);
+            axis.set(MathUtils.cos(bearing), MathUtils.sin(bearing), (1 - 2 * travel) * 1.2f).nor().scl(2.5f);
+            explosions.add(point, hex * .022f, .5f, 1, .9f * fadeOut(travel, .4f), seed + 500 + chunk, FUEL_CHUNK,
+                  axis);
+        }
+        float sootSeconds = seconds - 1.4f;
+        float sootAge = sootSeconds / (SECONDS - 1.4f);
+        if (sootAge >= 0 && sootAge < 1) {
+            float swell = 1 - (float) Math.exp(-sootSeconds * .9f);
+            for (int level = 0; level < 3; level++) {
+                point.set(ground).add(0, 0, hex * (1 + .7f * level) * (.7f + .5f * swell) * intensity * reach);
+                explosions.downwind(point, sootSeconds);
+                explosions.add(point, hex * (.5f + .4f * swell) * (1 - .1f * level) * intensity * reach, sootAge, 0,
+                      .95f * fadeOut(sootAge, .55f), seed + 600 + level * 31, FUEL_SOOT, Vector3.Zero);
+            }
+        }
     }
 
     /**
@@ -949,7 +1096,10 @@ final class GpuArtilleryBlast {
                 // A cluster round has no crater, so every bomblet marks, the target hex's included.
                 if (!piece.marksGround() || !blast.onTerrain[index]) { continue; }
                 blast.marks++;
-                ResolvedAttack.Shot markShot = blast.profile.withDamagePerHit(markDamage(blast.area, piece.ring()));
+                double damage = blast.style == Style.FUEL_AIR
+                      ? fuelAirMarkDamage(blast.area, piece.ring(), blast.intensity)
+                      : markDamage(blast.area, piece.ring());
+                ResolvedAttack.Shot markShot = blast.profile.withDamagePerHit(damage);
                 receiver.accept(new GpuGroundDamage.Impact(blast.attack, "artillery-debris-" + index,
                       blast.ground.cpy(), blast.landings.get(index).cpy(), "bomb", markShot));
             }
@@ -966,6 +1116,15 @@ final class GpuArtilleryBlast {
      * The damage one mark is sized for: a ring's damage for a high-explosive shell's debris, and a bomblet's share of
      * its hex's damage for a cluster round, so a cluster round freckles the ground with small marks.
      */
+    /**
+     * The damage a fuel-air round does in a ring, which sets how dark its charring is there: the fuel-air table's,
+     * not the usual falloff (an Arrow IV's 20, 10 and 5), halved in thin air.
+     */
+    static double fuelAirMarkDamage(AreaEffect area, int ring, float intensity) {
+        int damage = AreaEffectHelper.fuelAirRingDamage(area.hexRadius(), ring);
+        return intensity < 1 ? Math.ceil(damage / 2.0) : damage;
+    }
+
     static double markDamage(AreaEffect area, int ring) {
         int damage = area.ringDamage(ring);
         return area.cluster() ? (double) damage / bombletsPerHex(damage) : damage;

@@ -60,6 +60,11 @@ final class GpuGroundDamage implements Disposable {
     }
 
     /** Miss endpoints and contact times are supplied by the existing attack effects, never rolled here. */
+    /** A fuel-air round's charring covers nearly all of each 30 m hex in its radius. */
+    static final float FUEL_AIR_CHAR_METRES = 13;
+    /** The ring damage at which fuel-air charring is darkest: a Sniper's or an Arrow IV's target hex. */
+    static final float FUEL_AIR_DARKEST_DAMAGE = 20;
+
     /** The damage at which an artillery crater keeps the size every blast crater has: a Sniper's. */
     static final float ARTILLERY_CRATER_DAMAGE = 20;
 
@@ -67,7 +72,8 @@ final class GpuGroundDamage implements Disposable {
         Style style() {
             // Captured weapon flags take precedence over a mesh's generic energy/bullet emitter.
             if (shot != null) {
-                if (shot.artillery()) { return Style.BLAST; }
+                // Fuel-air ordnance burns rather than digs: it chars the ground of every hex in its radius.
+                if (shot.artillery()) { return fuelAir() ? Style.BURN : Style.BLAST; }
                 if (shot.plasma()) { return Style.PLASMA; }
                 if (shot.ppc()) { return Style.PPC; }
             }
@@ -120,6 +126,9 @@ final class GpuGroundDamage implements Disposable {
         float radius(Style style) {
             // Zero-damage weapons still leave a visible scar; the captured game value stays unchanged.
             float damage = shot == null ? cut() ? 5 : 1 : (float) Math.max(1, shot.damagePerHit());
+            if ((style == Style.BURN) && fuelAir()) {
+                return BoardRelief.metres(FUEL_AIR_CHAR_METRES);
+            }
             if ((style == Style.BLAST) && (shot != null) && shot.artillery()) {
                 // An artillery crater, and the scorch marks in its rings, grow in step with damage as its blast does.
                 return BoardRelief.metres(blastCraterMetres(ARTILLERY_CRATER_DAMAGE) * damage / ARTILLERY_CRATER_DAMAGE);
@@ -141,8 +150,18 @@ final class GpuGroundDamage implements Disposable {
         }
 
         float strength() {
+            if (fuelAir()) {
+                // A fuel-air round chars its target hex black and its outer rings lighter, as its damage falls.
+                double damage = Math.max(0, shot.damagePerHit());
+                return MathUtils.clamp(.4f + .6f * (float) damage / FUEL_AIR_DARKEST_DAMAGE, .4f, 1);
+            }
             // A readable burn, lighter than an opaque crater; damage changes the footprint only.
             return burn() ? .65f : 1;
+        }
+
+        /** Whether the mark is a fuel-air round's charring of one hex in its radius. */
+        boolean fuelAir() {
+            return (shot != null) && shot.artillery() && shot.munitions().contains("M_FAE");
         }
     }
 

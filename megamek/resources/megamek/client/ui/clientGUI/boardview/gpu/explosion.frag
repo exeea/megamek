@@ -42,7 +42,9 @@ vec2 medium(vec3 p) {
     float age = u_effect.x;
     float radius = length(p);
     if (radius >= 1.0) return vec2(0.0);
-    vec3 flow = p * 3.2 + vec3(u_effect.w, u_effect.w * 0.7, -age * 2.2);
+    // A violent (fuel-air) blast churns in small cells at first that grow into large billows as it ages.
+    float frequency = 3.2 * mix(1.0, mix(1.9, 0.7, age), u_look.w);
+    vec3 flow = p * frequency + vec3(u_effect.w, u_effect.w * 0.7, -age * 2.2);
     // Upward advection and radial roll break up the silhouette without crawling over the proxy's triangles.
     flow.xy += vec2(sin(p.z * 3.0 + age * 4.0), cos(p.z * 3.0 - age * 3.0)) * 0.45;
     flow.z += sin(length(p.xy) * 5.0 - age * 4.0) * 0.4;
@@ -52,7 +54,8 @@ vec2 medium(vec3 p) {
     vec3 shape = p;
     // A thrown spike narrows toward its leading tip, so a crown of them reads as jagged rather than as round lobes.
     float along = dot(p, u_axis.xyz);
-    float taper = 1.6 * min(u_axis.w, 1.0) * max(along, 0.0);
+    // Only a stretch tapers; a squashed (flattened) volume keeps its round edge.
+    float taper = 1.6 * clamp(u_axis.w, 0.0, 1.0) * max(along, 0.0);
     shape += (p - u_axis.xyz * along) * taper;
     shape.xy *= 1.0 + age * (0.18 - p.z * 0.32);
     float edge = length(shape) + (0.5 - billow) * 0.5 + (0.5 - detail) * 0.18;
@@ -113,6 +116,9 @@ void main() {
             float heat = cooling * mediumSample.y;
             vec3 fire = mix(vec3(0.7, 0.018, 0.001), vec3(1.55, 0.38, 0.012), smoothstep(0.08, 0.5, heat));
             fire = mix(fire, vec3(2.1, 1.65, 0.7), smoothstep(0.5, 0.95, heat));
+            // Burning metal in a violent blast: small blinding pockets flicker through its fire.
+            float pocket = smoothstep(0.78, 0.86, noise(p * 13.0 + vec3(u_effect.w * 3.1, 0.0, -u_effect.x * 9.0)));
+            fire += vec3(2.6, 2.3, 1.7) * pocket * u_look.w * smoothstep(0.2, 0.6, heat);
             smoke += vec3(0.22, 0.045, 0.006) * cooling * mediumSample.y;
             vec3 source = mix(smoke, fire, smoothstep(0.08, 0.5, heat));
             radiance += transmission * absorption * source;

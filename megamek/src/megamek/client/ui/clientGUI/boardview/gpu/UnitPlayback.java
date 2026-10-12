@@ -37,6 +37,8 @@ final class UnitPlayback {
     private final List<Reaction> reactions = new ArrayList<>();
     private final List<UnitAttack> visibleAttacks = java.util.Collections.unmodifiableList(attacks);
     private double combatSeconds, combatDuration, combatContact;
+    /** When the terrain the action changed shows its change: its contact, or a fuel-air round's ignition after it. */
+    private double combatTerrainRelease;
     private BoardScene volleyScene;
     private UnitConversion conversion;
     private UnitAttachmentMotion attachment;
@@ -171,6 +173,7 @@ final class UnitPlayback {
                     combatSeconds = 0;
                     combatDuration = attack.duration;
                     combatContact = attack.contactSeconds;
+                    combatTerrainRelease = terrainRelease();
                     if (attack.shot()) { volley.add(attack, 0); }
                     collectVolley();
                 } else if (active instanceof BoardScene.Conversion change) {
@@ -376,12 +379,22 @@ final class UnitPlayback {
             volley.add(shot, (float) combatSeconds);
             combatDuration = attacks.stream().mapToDouble(item -> item.delay + item.duration).max().orElseThrow();
             combatContact = attacks.stream().mapToDouble(item -> item.delay + item.contactSeconds).max().orElseThrow();
+            combatTerrainRelease = terrainRelease();
             completed = false;
             hold = 0;
         }
     }
 
     private boolean beforeImpact() { return attack == null || combatSeconds + 1e-7 < combatContact; }
+
+    /** The latest moment a shot in the volley changes the terrain, never after the volley ends. */
+    private double terrainRelease() {
+        double release = attacks.stream()
+              .mapToDouble(item -> item.delay + item.contactSeconds + item.terrainDelaySeconds()).max().orElseThrow();
+        return Math.min(release, combatDuration);
+    }
+
+    private boolean beforeTerrainRelease() { return attack == null || combatSeconds + 1e-7 < combatTerrainRelease; }
 
     private boolean sameVolley(BoardScene.Combat next) {
         var primary = attacks.stream().filter(shot -> !shot.defensive()).findFirst().orElse(attack);
@@ -499,7 +512,7 @@ final class UnitPlayback {
                 settledScene = settledScene.withUnits(shown);
             }
         }
-        if (active != null && !completed && beforeImpact()) {
+        if (active != null && !completed && beforeTerrainRelease()) {
             return;
         }
         if (volleyScene != null) {
@@ -560,7 +573,8 @@ final class UnitPlayback {
         // overlays between events; the final completion hold does not delay their return.
         boolean movementPending = active instanceof BoardScene.Movement && !completed
               || pending.stream().anyMatch(BoardScene.Movement.class::isInstance);
-        boolean awaitingAction = active != null && !completed && beforeImpact()
+        // Until the action's terrain change is due (its contact, or a fuel-air round's ignition) the settled scene shows.
+        boolean awaitingAction = active != null && !completed && beforeTerrainRelease()
               || pending.stream().anyMatch(event -> !(event instanceof BoardScene.SceneUpdate));
         if (awaitingAction) {
             // Review fixtures without checkpoints cannot supply history for their first combat frame.

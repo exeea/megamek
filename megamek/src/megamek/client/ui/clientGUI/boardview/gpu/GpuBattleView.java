@@ -53,6 +53,7 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
+import megamek.common.weapons.handlers.AreaEffectHelper;
 import megamek.logging.MMLogger;
 
 /** GPU board and Scene2D controls. The source remains the sole bridge to the existing client. */
@@ -626,6 +627,8 @@ class GpuBattleView extends ApplicationAdapter {
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(tuning.fovStyle(), tuning.fovDarkness(), tuning.sensorStyle(), tuning.sensorDarkness());
         attackEffects.setWind(atmosphereSettings.effects());
+        // The board's pressure already reads as vacuum in space or at zero gravity.
+        attackEffects.setFuelAirStrength(AreaEffectHelper.fuelAirStrength(atmosphereSettings.pressure(), false));
         terrain.setNormalMaps(tuning.normalMaps());
         terrain.setTerrainWear(tuning.terrainWear());
         // The Tactical View hides what has no gameplay value. Grass and water effects are the terrain's live switches.
