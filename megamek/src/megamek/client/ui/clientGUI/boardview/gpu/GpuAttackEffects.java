@@ -23,12 +23,6 @@ final class GpuAttackEffects implements Disposable {
     private static final float PPC_BEAM_WIDTH = 4.3f;
     // Beam shader kinds; particle kinds belong to the separate particle shader.
     private static final int LASER = 0, PPC = 1, PPC_GLOW = 2;
-    /** A TAG's laser designator: a thin deep-red line, and the spot it puts on what it hits (beams.frag). */
-    private static final int DESIGNATOR = 3, DESIGNATOR_SPOT = 4;
-    /** About a weapon laser's width: any thinner falls between pixel rows at board zoom and vanishes. */
-    private static final float DESIGNATOR_WIDTH = .55f;
-    private static final float DESIGNATOR_SPOT_RADIUS = 4.5f;
-    private static final float DESIGNATOR_PULSES_PER_SECOND = 2.5f;
     /** A TAG that misses only flickers, faintly and briefly, off past its target. */
     private static final float DESIGNATOR_MISS_SECONDS = .3f;
     // projectiles.frag kinds. Fractional parts carry animation phase from the existing attack clock.
@@ -628,16 +622,14 @@ final class GpuAttackEffects implements Disposable {
         }
         if (!hit) {
             if (on < DESIGNATOR_MISS_SECONDS) {
-                beam(muzzle, target, DESIGNATOR_WIDTH, DESIGNATOR, .35f * (1 - on / DESIGNATOR_MISS_SECONDS));
+                beam(muzzle, target, GpuDesignators.WIDTH, GpuDesignators.LINE, .35f * (1 - on / DESIGNATOR_MISS_SECONDS));
             }
             return;
         }
         float fadeIn = MathUtils.clamp(on / .08f, 0, 1);
         float fadeOut = MathUtils.clamp((attack.duration - attack.seconds) / .3f, 0, 1);
-        float pulse = .6f + .4f * MathUtils.sin(on * DESIGNATOR_PULSES_PER_SECOND * MathUtils.PI2);
-        float alpha = fadeIn * fadeOut * pulse;
-        beam(muzzle, target, DESIGNATOR_WIDTH, DESIGNATOR, alpha);
-        beams.billboard(camera, target, DESIGNATOR_SPOT_RADIUS * (.85f + .15f * pulse), DESIGNATOR_SPOT, alpha);
+        float pulse = GpuDesignators.pulse(on);
+        GpuDesignators.draw(beams, camera, muzzle, target, fadeIn * fadeOut * pulse, pulse);
     }
 
     private void beam(Vector3 start, Vector3 finish, float width, float kind, float alpha) {

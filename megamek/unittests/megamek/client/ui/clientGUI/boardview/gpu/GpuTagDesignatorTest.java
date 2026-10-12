@@ -10,6 +10,7 @@ import javax.swing.SwingUtilities;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.common.ResolvedAttack;
 import megamek.common.TagInfo;
+import megamek.common.enums.GamePhase;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.units.Targetable;
 import org.junit.jupiter.api.BeforeAll;
@@ -71,6 +72,41 @@ class GpuTagDesignatorTest {
             });
             assertEquals(0, tagged(fixture).size());
         }
+    }
+
+    /**
+     * A TAG that hit keeps its designator line on the target through the Firing phase and its report, when
+     * semi-guided and homing rounds use it, and drops it once the Physical phase begins.
+     */
+    @Test
+    void aHitTagKeepsItsDesignatorLineUntilTheFiringPhaseEnds() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            SwingUtilities.invokeAndWait(() -> fixture.game.addTagInfo(
+                  new TagInfo(fixture.entity.getId(), Targetable.TYPE_ENTITY, fixture.entity, false)));
+            for (GamePhase phase : List.of(GamePhase.OFFBOARD_REPORT, GamePhase.FIRING, GamePhase.FIRING_REPORT)) {
+                assertEquals(1, designations(fixture, phase).size(), phase.name());
+            }
+            assertEquals(0, designations(fixture, GamePhase.PHYSICAL).size(), "Gone after the Firing phase");
+            assertEquals(0, designations(fixture, GamePhase.MOVEMENT).size());
+        }
+    }
+
+    @Test
+    void aMissedTagLeavesNoDesignatorLine() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            SwingUtilities.invokeAndWait(() -> fixture.game.addTagInfo(
+                  new TagInfo(fixture.entity.getId(), Targetable.TYPE_ENTITY, fixture.entity, true)));
+            assertEquals(0, designations(fixture, GamePhase.FIRING).size());
+        }
+    }
+
+    private static List<BoardScene.Designation> designations(GpuBoardFixture fixture, GamePhase phase)
+          throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            fixture.game.setPhase(phase);
+            fixture.source.refresh();
+        });
+        return fixture.source.takeFrame().scene().designations();
     }
 
     private static List<BoardMarker> tagged(GpuBoardFixture fixture) {
