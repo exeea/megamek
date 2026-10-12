@@ -37,14 +37,10 @@ import java.awt.event.ActionEvent;
 import java.io.Serial;
 import java.util.List;
 import javax.swing.AbstractAction;
-import javax.swing.JCheckBox;
-import javax.swing.JOptionPane;
 
-import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.TurnDetailsOverlay;
-import megamek.client.ui.dialogs.ConfirmDialog;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.UIUtil;
 import megamek.client.ui.widget.MegaMekButton;
@@ -221,27 +217,7 @@ public abstract class ActionPhaseDisplay extends StatusBarPhaseDisplay {
      * {@code setNag} on Yes with the box ticked. Returns true when the player declined.
      */
     protected boolean doYesNoBotherDialog(String title, String body, Runnable setNag) {
-        JCheckBox dontBother = new JCheckBox(Messages.getString("ConfirmDialog.dontBother"));
-        Integer answer = clientgui.askYesNo(body, title, dontBother);
-        boolean confirmed;
-        boolean showAgain;
-        if (answer != null) {
-            confirmed = answer == JOptionPane.YES_OPTION;
-            showAgain = !dontBother.isSelected();
-        } else {
-            ConfirmDialog nag = clientgui.doYesNoBotherDialog(title, body);
-            confirmed = nag.getAnswer();
-            showAgain = nag.getShowAgain();
-        }
-        if (confirmed) {
-            // do they want to be bothered again?
-            if (!showAgain) {
-                setNag.run();
-            }
-        } else {
-            return true;
-        }
-        return false;
+        return !NagDialogs.confirm(clientgui, title, body, setNag);
     }
 
     protected boolean checkNagForNoAction(String title, String body) {
