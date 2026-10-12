@@ -151,9 +151,8 @@ final class GpuHintLine implements GpuHud.Component {
                   text("GpuBoard.hud.mouse.shiftClick"), text("GpuBoard.hud.hint.orientation")));
         }
         if (inputs.view().tactical()) {
-            // The Tactical View holds its angle (BoardCamera.rotationLocked): no orbit gesture. Its Overlays panel opens
-            // and collapses on a key.
             items.addAll(List.of(text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.panMap"),
+                  text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.rotate"),
                   text("GpuBoard.hud.mouse.wheel"), text("GpuBoard.hud.hint.zoom"),
                   key(preferences, KeyCommandBind.TACTICAL_OVERLAYS), text("GpuBoard.hud.hint.overlays"),
                   key(preferences, KeyCommandBind.TOGGLE_ISO), text("GpuBoard.hud.util.backTo3d")));

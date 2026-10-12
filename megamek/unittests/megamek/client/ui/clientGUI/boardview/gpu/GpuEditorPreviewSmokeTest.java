@@ -201,7 +201,10 @@ class GpuEditorPreviewSmokeTest {
                         super.render();
                         assertTrue(System.nanoTime() < deadline, "Preview smoke stalled at " + item + "/" + stage + ": "
                               + source.editorPreview().objects().keySet() + " " + source.editorPreview().hexes());
-                        if (!applied.get() || GpuBoardTestUi.loading(this) || terrain().busy() || frames() < after) { return; }
+                        // Count the frames from the EDT applying the commands, not from sending them: commands applied
+                        // while this frame rendered reach only the frames taken after it.
+                        if (!applied.get()) { after = frames() + 8; return; }
+                        if (GpuBoardTestUi.loading(this) || terrain().busy() || frames() < after) { return; }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         if (aimed != null) { pointer = screen(aimed); hover(pointer); }
                         var preview = source.editorPreview();
@@ -243,7 +246,10 @@ class GpuEditorPreviewSmokeTest {
                     }
                 }
 
-                /** A rail drawn south from STEP; in the next hex the pointer heads south-east: the ghost is the step's track. */
+                /**
+                 * A rail drawn south from STEP; in the next hex the pointer heads south-east: the ghost is the route drawn so
+                 * far and the step's track.
+                 */
                 private void routeStep(GpuEditorPreview.Data preview) throws Exception {
                     Coords turn = STEP.translated(3), ahead = turn.translated(2);
                     switch (stage) {
@@ -271,9 +277,10 @@ class GpuEditorPreviewSmokeTest {
                         }
                         case 3 -> {
                             if (!preview.objects().containsKey(ahead) || !built(preview, ahead)) { return; }
-                            assertTrue(preview.objects().containsKey(turn), "The ghost lays the turn's piece and the next hex's");
+                            assertTrue(preview.objects().containsKey(turn) && preview.objects().containsKey(STEP),
+                                  "The ghost lays the route drawn so far, the turn's piece and the next hex's");
                             ghosts = boxes(ghostInstances());
-                            assertEquals(3, ghosts.size(), "The turn's piece, the next hex's and the buffer stop at its end");
+                            assertEquals(5, ghosts.size(), "Three pieces and the buffer stops at both ends");
                             GpuBoardTestUi.capture(new File(OUTPUT, "preview-route-direction.png"));
                             Vector3 into = over(ahead, 0, 0, 0);
                             drag(into); release(into);
@@ -282,8 +289,8 @@ class GpuEditorPreviewSmokeTest {
                         default -> {
                             // The buffer stop is the rail's, never an object of its own: the two pieces are the markers'.
                             List<BoundingBox> drawn = installed(turn);
-                            assertEquals(2, ghosts.stream().filter(box -> drawn.stream().anyMatch(other -> other.min.epsilonEquals(box.min, .01f)
-                                  && other.max.epsilonEquals(box.max, .01f))).count(), "The route step's two pieces are laid as their ghosts");
+                            assertEquals(3, ghosts.stream().filter(box -> drawn.stream().anyMatch(other -> other.min.epsilonEquals(box.min, .01f)
+                                  && other.max.epsilonEquals(box.max, .01f))).count(), "The route's three pieces are laid as their ghosts");
                             command(Action.BRUSH, "", "6");
                             nextItem();
                         }

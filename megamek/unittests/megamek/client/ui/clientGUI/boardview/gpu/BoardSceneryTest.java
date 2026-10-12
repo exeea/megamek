@@ -37,11 +37,11 @@ class BoardSceneryTest {
         for (var entry : catalog) {
             var layout = BoardSceneryLayouts.layout(entry.name);
             assertEquals(entry.size, layout.components().size());
-            // The conversion places the meshes; a car park's lane decal is paint, a rail route marker's track generated.
-            var meshes = layout.components().stream().filter(c -> !c.decal() && !rail(c)).toList();
-            var natural = layout.chosen(coords, BoardTreeDistribution.PARK, true).stream().filter(c -> !c.decal() && !rail(c)).toList();
-            var planted = layout.chosen(coords, BoardTreeDistribution.PARK, false).stream().filter(c -> !c.decal() && !rail(c)).toList();
-            assertEquals(natural, layout.chosen(coords, BoardTreeDistribution.PARK, true).stream().filter(c -> !c.decal() && !rail(c)).toList());
+            // The conversion places the meshes; a car park's lane decal is paint, a route marker's track generated.
+            var meshes = layout.components().stream().filter(c -> !c.decal() && !c.route()).toList();
+            var natural = layout.chosen(coords, BoardTreeDistribution.PARK, true).stream().filter(c -> !c.decal() && !c.route()).toList();
+            var planted = layout.chosen(coords, BoardTreeDistribution.PARK, false).stream().filter(c -> !c.decal() && !c.route()).toList();
+            assertEquals(natural, layout.chosen(coords, BoardTreeDistribution.PARK, true).stream().filter(c -> !c.decal() && !c.route()).toList());
             for (int i = 0; i < meshes.size(); i++) {
                 var authored = meshes.get(i);
                 var component = natural.get(i);
@@ -72,10 +72,6 @@ class BoardSceneryTest {
         assertEquals(381, catalog.size);
         assertEquals(422, trees);
         assertTrue(picnicTables > 10, "The same picnic-table mesh is reused by picnic and courtyard layouts");
-    }
-
-    private static boolean rail(BoardSceneryLayouts.Component row) {
-        return megamek.common.board.RailRoute.Kind.of(row.asset()) == megamek.common.board.RailRoute.Kind.RAIL;
     }
 
     @Test

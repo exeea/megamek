@@ -17,6 +17,8 @@ import megamek.common.units.Entity;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class RulerModelTest {
     private static final Coords START = new Coords(0, 0), END = new Coords(0, 6);
@@ -146,6 +148,93 @@ class RulerModelTest {
     }
 
     @Test
+    void minesScreenshotCountsBothLightWoodsAtTwoLevelEndpointHeights() {
+        Game game = new Game();
+        Board board = new Board();
+        board.load(new File("data/boards/Deserts/16x17 Mines 1.board"));
+        game.setBoard(board);
+        Coords from = new Coords(13, 4), to = new Coords(6, 2);
+        assertEquals(1, board.getHex(from).getLevel());
+        assertEquals(3, board.getHex(to).getLevel());
+        for (Coords woods : new Coords[] { new Coords(7, 2), new Coords(8, 3) }) {
+            assertEquals(3, board.getHex(woods).getLevel());
+            assertEquals(1, board.getHex(woods).terrainLevel(Terrains.WOODS));
+            assertEquals(2, board.getHex(woods).terrainLevel(Terrains.FOLIAGE_ELEV));
+        }
+
+        RulerModel ruler = new RulerModel(game, 0, null);
+        ruler.addPoint(from, 2); ruler.addPoint(to, 2); ruler.compare(true);
+        var result = ruler.capture();
+        assertEquals(7, result.distance());
+        assertTrue(result.clear());
+        assertEquals(3, result.ruler().startHeight());
+        assertEquals(5, result.ruler().endHeight());
+        assertEquals("+2 · 2 intervening light woods", result.modifierSummary());
+        assertTrue(result.forward().contains("2 intervening light woods"));
+        assertEquals(result.forward(), result.reverse());
+        assertEquals(result.forward(), result.comparison().getFirst().forward());
+        assertEquals(result.reverse(), result.comparison().getFirst().reverse());
+        ruler.flip();
+        assertEquals(result.reverse(), ruler.capture().forward());
+        assertEquals(result.forward(), ruler.capture().reverse());
+
+        ruler.height(true, 3); ruler.height(false, 3);
+        var raised = ruler.capture();
+        assertTrue(raised.clear());
+        assertTrue(raised.modifierSummary().isEmpty());
+        assertEquals(raised.forward(), raised.reverse());
+        assertEquals(raised.forward(), raised.comparison().getFirst().forward());
+    }
+
+    @ParameterizedTest(name = "density {0}, foliage height {1}, endpoint height {2}, modifier {3}")
+    @CsvSource({ "1, 2, 2, 1", "1, 1, 2, 0", "2, 2, 2, 2", "3, 3, 3, -1", "3, 3, 4, 0" })
+    void interveningFoliageUsesItsPhysicalHeight(int density, int foliageHeight, int endpointHeight,
+          int expectedModifier) {
+        Game game = new Game();
+        game.setBoard(Board.createEmptyBoard(1, 7));
+        Coords woods = new Coords(0, 3);
+        game.getBoard().getHex(woods).addTerrain(new Terrain(Terrains.WOODS, density));
+        game.getBoard().getHex(woods).addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, foliageHeight));
+        RulerModel ruler = new RulerModel(game, 0, null);
+        ruler.addPoint(START, endpointHeight); ruler.addPoint(END, endpointHeight);
+        var result = ruler.capture();
+        assertEquals(expectedModifier >= 0, result.clear());
+        assertEquals(result.forward(), result.reverse());
+        if (expectedModifier < 0) {
+            assertEquals(woods, result.ruler().blockedAt());
+            assertTrue(result.forward().contains("blocked"));
+        } else if (expectedModifier == 0) {
+            assertTrue(result.modifierSummary().isEmpty());
+        } else {
+            assertTrue(result.modifierSummary().startsWith("+" + expectedModifier + " ·"));
+            assertTrue(result.forward().contains("intervening"));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({ "SOAR VTOL.blk, false, Elevation", "Slayer SL-CX1.blk, true, Altitude" })
+    void mixedManualEndpointsKeepKnownUnitElevationAndAltitude(String file, boolean altitude, String label)
+          throws Exception {
+        Game game = new Game();
+        game.setBoard(Board.createEmptyBoard(1, 7));
+        game.getBoard().getHex(new Coords(0, 1)).setLevel(2);
+        Player owner = new Player(0, "Local"); game.addPlayer(owner.getId(), owner);
+        Entity unit = new MekFileParser(new File("testresources/megamek/common/units/" + file)).getEntity();
+        unit.setId(1); unit.setOwner(owner); unit.setPosition(START); unit.setDeployed(true);
+        if (altitude) { unit.setAltitude(2); } else { unit.setElevation(2); }
+        game.addEntity(unit, false);
+        RulerModel ruler = new RulerModel(game, 0, owner);
+        ruler.measure(START, END, unit.getId(), 2);
+        var result = ruler.capture();
+        assertFalse(result.entityBased());
+        assertEquals(label, result.start().heightLabel());
+        assertEquals(2, result.start().height());
+        assertTrue(result.clear(), "A level-2 hill is below the unit's unchanged engine sight height");
+        ruler.height(true, 1);
+        assertFalse(ruler.capture().clear(), "Lowering the known endpoint makes the adjacent hill block LOS");
+    }
+
+    @Test
     void compactModifiersFollowTheDirectionHeightAndBlockingState() {
         Game game = new Game(); game.setBoard(Board.createEmptyBoard(1, 7));
         game.getBoard().getHex(END).addTerrain(new Terrain(Terrains.WOODS, 2));
@@ -167,6 +256,8 @@ class RulerModelTest {
     void actualUnitsAndComparisonsUseTheGameLosPathAtTheirActualSightHeights() throws Exception {
         Game game = new Game();
         game.setBoard(Board.createEmptyBoard(1, 7));
+        game.getBoard().getHex(new Coords(0, 3)).addTerrain(new Terrain(Terrains.WOODS, 1));
+        game.getBoard().getHex(new Coords(0, 3)).addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
         Player owner = new Player(0, "Local"); game.addPlayer(owner.getId(), owner);
         Entity attacker = new MekFileParser(new File("testresources/megamek/common/units/Atlas AS7-D.mtf")).getEntity();
         Entity target = new MekFileParser(new File("testresources/megamek/common/units/Atlas AS7-D.mtf")).getEntity();
@@ -179,14 +270,35 @@ class RulerModelTest {
             target.setProne(prone);
             var result = ruler.capture();
             assertTrue(result.entityBased());
-            assertEquals(attacker.relHeight(), result.start().height());
-            assertEquals(target.relHeight(), result.end().height());
-            assertEquals(target.relHeight(), result.ruler().endHeight());
+            assertEquals(attacker.relHeight() + 1, result.start().height());
+            assertEquals(target.relHeight() + 1, result.end().height());
+            assertEquals(target.relHeight() + 1, result.ruler().endHeight());
+            assertTrue(result.forward().contains("1 intervening light woods"));
             assertEquals(LOSModifierCalculator.computeEntityBasedModifiers(game, attacker, target), result.forward());
             assertEquals(result.forward(), result.comparison().getFirst().forward());
         }
         ruler.height(false, 4);
         assertFalse(ruler.capture().entityBased());
         assertEquals(4, ruler.capture().ruler().endHeight());
+
+        target.setProne(false);
+        ruler.select(false, Entity.NONE); ruler.height(false, 2);
+        var mixed = ruler.capture();
+        assertFalse(mixed.entityBased());
+        assertEquals(LOSModifierCalculator.computeEntityBasedModifiers(game, attacker, target), mixed.forward());
+        ruler.select(true, Entity.NONE); ruler.height(true, 2);
+        var manual = ruler.capture();
+        assertFalse(manual.entityBased());
+        assertEquals(mixed.forward(), manual.forward());
+        assertEquals("+1 · 1 intervening light woods", manual.modifierSummary());
+
+        game.getBoard().getHex(START).addTerrain(new Terrain(Terrains.WATER, 2));
+        attacker.setElevation(-2);
+        ruler.select(true, attacker.getId());
+        assertEquals(0, ruler.capture().start().height());
+        assertFalse(ruler.capture().clear(), "A submerged unit's physical height 0 must retain its negative sight level");
+        attacker.setElevation(-1);
+        assertEquals(1, ruler.capture().start().height());
+        assertTrue(ruler.capture().clear(), "A unit reaching the water surface can see the manual target again");
     }
 }

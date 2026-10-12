@@ -176,6 +176,10 @@ public final class UiTheme implements Disposable {
     // Texels between two hud glyphs' quads: mip level 1 (2x2-texel averages), filtered bilinearly, reaches up to 3
     // texels past a quad, so with the next glyph's own GLYPH_PAD it never meets that glyph's ink.
     private static final int GLYPH_PADDING = 2;
+    // Board labels shrink along both axes and at oblique angles. Their quads include eight transparent texels;
+    // the wider atlas gap also leaves room for trilinear/anisotropic samples at the deepest permitted mip (3).
+    private static final int WORLD_GLYPH_PAD = 8;
+    private static final int WORLD_GLYPH_PADDING = 64;
 
     /** The skin of the hud-* styles and drawables; it holds every texture and font the theme makes. */
     public final Skin skin = new Skin();
@@ -184,6 +188,8 @@ public final class UiTheme implements Disposable {
     // The hud-* fonts share glyph pages instead of allocating a 1024x1024 page each.
     private final PixmapPacker hudGlyphs = new PixmapPacker(1024, 1024, Pixmap.Format.RGBA8888,
           GLYPH_PADDING + 2 * GLYPH_PAD, false, new PixmapPacker.GuillotineStrategy());
+    private final PixmapPacker worldGlyphs = new PixmapPacker(1024, 1024, Pixmap.Format.RGBA8888,
+          WORLD_GLYPH_PADDING, false, new PixmapPacker.GuillotineStrategy());
     // The first face of the FALLBACK_FONTS chain; every font of this theme draws the characters it lacks from it.
     private final Generator fallback;
 
@@ -203,11 +209,12 @@ public final class UiTheme implements Disposable {
         fallback = next;
         // Transparent white keeps linearly filtered glyph edges from darkening.
         hudGlyphs.setTransparentColor(new Color(1, 1, 1, 0));
+        worldGlyphs.setTransparentColor(new Color(1, 1, 1, 0));
         for (HudFont hud : HUD_FONTS) {
-            BitmapFont face = font(hud.name(), ROBOTO, hud.instance(), hud.size(), hud.tracking(), hudGlyphs);
+            BitmapFont face = font(hud.name(), ROBOTO, hud.instance(), hud.size(), hud.tracking(), 0, hudGlyphs);
             skin.add(hud.name(), new Label.LabelStyle(face, hud.color()));
         }
-        hudGlyphs.getPages().forEach(page -> bindGlyphPage(page.getTexture()));
+        hudGlyphs.getPages().forEach(page -> bindGlyphPage(page.getTexture(), false));
 
         hudDrawables();
         TextButton.TextButtonStyle hud = quietButton("hud-button", 8, 12, 36);
@@ -851,7 +858,21 @@ public final class UiTheme implements Disposable {
      * directory at {@code size} stage units, on pages of its own, with the theme's fallback faces.
      */
     public BitmapFont font(String name, String path, float size) {
-        return font(name, path, 0, size, 0, null);
+        return font(name, path, 0, size, 0, 0, null);
+    }
+
+    /**
+     * {@link #font(String, String, float)} with FreeType's round white border {@code border} stage units wide around
+     * every glyph, for drawing tinted under the borderless font as its outline. Its glyphs advance as the borderless
+     * font's do, but a line's first glyph starts at its border, {@code border} to the left of the borderless ink.
+     */
+    public BitmapFont font(String name, String path, float size, float border) {
+        return font(name, path, 0, size, 0, border, null);
+    }
+
+    /** A board label font, with an optional outline, on padded, mipmapped and anisotropically filtered pages. */
+    public BitmapFont worldFont(String name, String path, float size, float border) {
+        return font(name, path, 0, size, 0, border, worldGlyphs);
     }
 
     /**
@@ -863,26 +884,36 @@ public final class UiTheme implements Disposable {
      * texels of the packer's transparent margin, and their pages are sampled from mip level 0 or 1 (see
      * bindGlyphPage), whichever is nearer.
      */
-    private BitmapFont font(String name, String path, int instance, float size, float tracking, PixmapPacker packer) {
-        FreeTypeFontGenerator generator = new Generator(fontFile(fonts, path), instance, 1, fallback);
+    private BitmapFont font(String name, String path, int instance, float size, float tracking, float border,
+          PixmapPacker packer) {
+        boolean world = packer == worldGlyphs;
+        FreeTypeFontGenerator generator = new Generator(fontFile(fonts, path), instance, 1, fallback, world);
         generators.add(generator);
         FreeTypeFontGenerator.FreeTypeFontParameter settings = new FreeTypeFontGenerator.FreeTypeFontParameter();
         settings.size = Math.round(size * 4);
-        settings.spaceX = Math.round(tracking * size * 4);
+        settings.borderWidth = Math.round(border * 4);
+        settings.borderColor = Color.WHITE;
+        settings.borderStraight = false;
+        // FreeType widens every glyph's advance by the border; take it back so the text keeps its width.
+        settings.spaceX = Math.round(tracking * size * 4) - (int) settings.borderWidth;
         settings.packer = packer;
         settings.incremental = true;
         settings.minFilter = Texture.TextureFilter.Linear;
         settings.magFilter = Texture.TextureFilter.Linear;
-        boolean hud = packer != null;
-        if (hud) {
+        boolean mipmapped = packer != null;
+        if (mipmapped) {
             settings.genMipMaps = true;
-            settings.minFilter = Texture.TextureFilter.MipMapLinearNearest;
+            settings.minFilter = world ? Texture.TextureFilter.MipMapLinearLinear
+                  : Texture.TextureFilter.MipMapLinearNearest;
         }
         BitmapFont font = generator.generateFont(settings);
-        if (hud) {
+        if (mipmapped) {
             // GlyphLayout subtracts these from a line's first and last glyph, so lines measure their ink as before.
-            font.getData().padLeft = GLYPH_PAD;
-            font.getData().padRight = GLYPH_PAD;
+            font.getData().padLeft = world ? WORLD_GLYPH_PAD : GLYPH_PAD;
+            font.getData().padRight = font.getData().padLeft;
+        }
+        if (world) {
+            worldGlyphs.getPages().forEach(page -> bindGlyphPage(page.getTexture(), true));
         }
         font.getData().setScale(0.25f);
         font.setUseIntegerPositions(false);
@@ -892,87 +923,102 @@ public final class UiTheme implements Disposable {
     @Override
     public void dispose() {
         skin.dispose();
-        // The shared glyph pages belong to the theme, not to the hud fonts packed into them.
-        for (PixmapPacker.Page page : hudGlyphs.getPages()) {
-            if (page.getTexture() != null) {
-                page.getTexture().dispose();
+        // The shared glyph pages belong to the theme, not to the fonts packed into them.
+        for (PixmapPacker packer : List.of(hudGlyphs, worldGlyphs)) {
+            for (PixmapPacker.Page page : packer.getPages()) {
+                if (page.getTexture() != null) {
+                    page.getTexture().dispose();
+                }
             }
+            packer.dispose();
         }
-        hudGlyphs.dispose();
         generators.forEach(FreeTypeFontGenerator::dispose);
     }
 
     /**
      * A generator that takes each character its face lacks from the first face of its fallback chain that has it. That
      * face renders it at its share of this font's size, on this font's baseline and into this font's pages, so one
-     * BitmapFont draws the whole text. A hud glyph's quad grows by GLYPH_PAD on every side with its ink kept in place,
+     * BitmapFont draws the whole text. A mipmapped glyph's quad grows into its margin with its ink kept in place,
      * and a glyph written straight into a mipmapped page texture (incremental glyphs after the first layout) rebuilds
      * that page's mipmaps.
      */
     private static final class Generator extends FreeTypeFontGenerator {
         private final float size;
         private final Generator fallback;
+        private final boolean world;
 
         /** size is the face's share of the size of the fonts it serves as a fallback. */
         Generator(FileHandle file, int instance, float size, Generator fallback) {
+            this(file, instance, size, fallback, false);
+        }
+
+        Generator(FileHandle file, int instance, float size, Generator fallback, boolean world) {
             // FreeType takes the named instance from bits 16-30 of the face index.
             super(file, instance << 16);
             this.size = size;
             this.fallback = fallback;
+            this.world = world;
         }
 
         @Override
         protected BitmapFont.Glyph createGlyph(char c, FreeTypeBitmapFontData data, FreeTypeFontParameter parameter,
+              FreeType.Stroker stroker, float baseLine, PixmapPacker packer) {
+            BitmapFont.Glyph glyph = createUnpaddedGlyph(c, data, parameter, stroker, baseLine, packer);
+            if (glyph == null || !parameter.genMipMaps) {
+                return glyph;
+            }
+            // The requesting font owns the margins and filtering, including for a borrowed fallback glyph.
+            int pad = world ? WORLD_GLYPH_PAD : GLYPH_PAD;
+            if (glyph.width > 0 && glyph.height > 0) {
+                glyph.srcX -= pad;
+                glyph.srcY -= pad;
+                glyph.width += 2 * pad;
+                glyph.height += 2 * pad;
+                glyph.yoffset -= pad;
+            } else {
+                // An inkless glyph, such as the space, spans its advance, as libGDX makes the space's width.
+                glyph.width = glyph.xadvance + 2 * pad;
+            }
+            glyph.xoffset -= pad;
+            Texture page = packer.getPages().get(glyph.page).getTexture();
+            if (page != null) {
+                bindGlyphPage(page, world);
+                if (packer.getPackToTexture()) { Gdx.gl.glGenerateMipmap(GL20.GL_TEXTURE_2D); }
+            }
+            return glyph;
+        }
+
+        private BitmapFont.Glyph createUnpaddedGlyph(char c, FreeTypeBitmapFontData data, FreeTypeFontParameter parameter,
               FreeType.Stroker stroker, float baseLine, PixmapPacker packer) {
             if (c != 0 && !hasGlyph(c)) {
                 for (Generator next = fallback; next != null; next = next.fallback) {
                     if (next.hasGlyph(c)) {
                         // A fallback face serves fonts of every size; scaleForPixelHeight is the public way to size it.
                         next.scaleForPixelHeight(Math.round(parameter.size * next.size));
-                        return next.createGlyph(c, data, parameter, stroker, baseLine, packer);
+                        return next.createUnpaddedGlyph(c, data, parameter, stroker, baseLine, packer);
                     }
                 }
                 // No shipped face has it: its lookalike, drawn under its own code.
                 Character lookalike = LOOKALIKES.get(c);
                 BitmapFont.Glyph glyph = lookalike == null ? null
-                      : createGlyph(lookalike, data, parameter, stroker, baseLine, packer);
+                      : createUnpaddedGlyph(lookalike, data, parameter, stroker, baseLine, packer);
                 if (glyph != null) {
                     glyph.id = c;
                 }
                 return glyph;
             }
-            BitmapFont.Glyph glyph = super.createGlyph(c, data, parameter, stroker, baseLine, packer);
-            if (glyph == null || !parameter.genMipMaps) {
-                return glyph;
-            }
-            // The hud packer keeps GLYPH_PADDING + 2 * GLYPH_PAD texels of transparent white around each glyph's ink.
-            if (glyph.width > 0 && glyph.height > 0) {
-                glyph.srcX -= GLYPH_PAD;
-                glyph.srcY -= GLYPH_PAD;
-                glyph.width += 2 * GLYPH_PAD;
-                glyph.height += 2 * GLYPH_PAD;
-                glyph.yoffset -= GLYPH_PAD;
-            } else {
-                // An inkless glyph, such as the space, spans its advance, as libGDX makes the space's width.
-                glyph.width = glyph.xadvance + 2 * GLYPH_PAD;
-            }
-            glyph.xoffset -= GLYPH_PAD;
-            Texture page = packer.getPages().get(glyph.page).getTexture();
-            if (page != null && packer.getPackToTexture()) {
-                bindGlyphPage(page);
-                Gdx.gl.glGenerateMipmap(GL20.GL_TEXTURE_2D);
-            }
-            return glyph;
+            return super.createGlyph(c, data, parameter, stroker, baseLine, packer);
         }
     }
 
     /**
-     * Binds a mipmapped hud glyph page and limits its sampling to mip level 1 (2x2-texel averages): at 1 pixel per unit
-     * that level keeps every stroke of 3 texels or more, while level 2 blurred the text by about a pixel.
+     * HUD pages stop at mip 1 to retain thin strokes at 1 pixel per stage unit. World pages use trilinear/anisotropic
+     * sampling through mip 3; deeper levels would average unrelated glyphs together across even their wider margins.
      */
-    private static void bindGlyphPage(Texture page) {
+    private static void bindGlyphPage(Texture page, boolean world) {
         page.bind();
-        Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAX_LEVEL, 1);
+        Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAX_LEVEL, world ? 3 : 1);
+        if (world) { page.setAnisotropicFilter(8); }
     }
 
     /** Physical pixels per stage unit, from the orthographic projection the stage draws with. */

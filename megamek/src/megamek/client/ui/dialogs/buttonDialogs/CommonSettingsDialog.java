@@ -292,6 +292,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private final JCheckBox useAutoSelectNext = new JCheckBox(Messages.getString(
           "CommonSettingsDialog.useAutoSelectNext"));
     private final JCheckBox levelHighlight = new JCheckBox(Messages.getString("CommonSettingsDialog.levelHighlight"));
+    private final JCheckBox showHexTypes = new JCheckBox(Messages.getString("CommonSettingsDialog.showHexTypes"));
+    private final JCheckBox hexLabelOutline = new JCheckBox(Messages.getString("CommonSettingsDialog.hexLabelOutline"));
     private final JCheckBox shadowMap = new JCheckBox(Messages.getString("CommonSettingsDialog.useShadowMap"));
     private final JCheckBox hexInclines = new JCheckBox(Messages.getString("CommonSettingsDialog.useInclines"));
     private final JCheckBox mouseWheelZoom = new JCheckBox(Messages.getString("CommonSettingsDialog.mouseWheelZoom"));
@@ -596,6 +598,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private boolean savedShadowMap;
     private boolean savedHexInclines;
     private boolean savedLevelHighlight;
+    private boolean savedShowHexTypes;
+    private boolean savedHexLabelOutline;
     private boolean savedFloatingIso;
     private boolean savedMmSymbol;
     private boolean savedDrawFacingArrowsOnMiniMap;
@@ -1238,6 +1242,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         configureCheckBox(shadowMap, Messages.getString("CommonSettingsDialog.useShadowMap.tooltip"));
         configureCheckBox(hexInclines, Messages.getString("CommonSettingsDialog.useInclines.tooltip"));
         configureCheckBox(levelHighlight, Messages.getString("CommonSettingsDialog.levelHighlight.tooltip"));
+        configureCheckBox(showHexTypes, Messages.getString("CommonSettingsDialog.showHexTypes.tooltip"));
+        configureCheckBox(hexLabelOutline, Messages.getString("CommonSettingsDialog.hexLabelOutline.tooltip"));
         configureCheckBox(floatingIso, Messages.getString("CommonSettingsDialog.floatingIso.tooltip"));
         configureCheckBox(darkenMapAtNight, null);
         darkenMapAtNight.setSelected(GUIP.getDarkenMapAtNight());
@@ -1288,6 +1294,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
                   darkenMapAtNight, translucentHiddenUnits,
                   artilleryDisplayMisses, artilleryDisplayDriftedHits, artilleryDisplayDriftArrows,
                   bombsDisplayMisses, bombsDisplayDrifts),
+              List.of(showHexTypes, hexLabelOutline),
               List.of(csbMapSheetColor, csbBoardTextColor, csbBoardSpaceTextColor, csbBuildingTextColor,
                   csbLowFoliageColor, csbDemolitionChargeColor),
             List.of(demolitionChargeHazardOutline))));
@@ -2880,6 +2887,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             paintBordersOnMiniMap.setSelected(GUIP.paintBorders());
             showUnitDisplayNamesOnMinimap.setSelected(GUIP.showUnitDisplayNamesOnMinimap());
             levelHighlight.setSelected(GUIP.getLevelHighlight());
+            showHexTypes.setSelected(GUIP.getHexTypesEnabled());
+            hexLabelOutline.setSelected(GUIP.getHexLabelOutline());
             shadowMap.setSelected(GUIP.getShadowMap());
             hexInclines.setSelected(GUIP.getHexInclines());
             useSoftCenter.setSelected(GUIP.getSoftCenter());
@@ -2968,6 +2977,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             savedShadowMap = GUIP.getShadowMap();
             savedHexInclines = GUIP.getHexInclines();
             savedLevelHighlight = GUIP.getLevelHighlight();
+            savedShowHexTypes = GUIP.getHexTypesEnabled();
+            savedHexLabelOutline = GUIP.getHexLabelOutline();
             savedFloatingIso = GUIP.getFloatingIso();
             savedMmSymbol = GUIP.getMmSymbol();
             savedDrawFacingArrowsOnMiniMap = GUIP.getDrawFacingArrowsOnMiniMap();
@@ -3015,6 +3026,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         GUIP.setShadowMap(savedShadowMap);
         GUIP.setHexInclines(savedHexInclines);
         GUIP.setLevelHighlight(savedLevelHighlight);
+        GUIP.setHexTypesEnabled(savedShowHexTypes);
+        GUIP.setHexLabelOutline(savedHexLabelOutline);
         GUIP.setFloatingIso(savedFloatingIso);
         GUIP.setMmSymbol(savedMmSymbol);
         GUIP.setDrawSensorRangeOnMiniMap(savedDrawSensorRangeOnMiniMap);
@@ -3372,6 +3385,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         GUIP.setFloatingIso(floatingIso.isSelected());
         GUIP.setMmSymbol(mmSymbol.isSelected());
         GUIP.setLevelHighlight(levelHighlight.isSelected());
+        GUIP.setHexTypesEnabled(showHexTypes.isSelected());
+        GUIP.setHexLabelOutline(hexLabelOutline.isSelected());
         GUIP.setShadowMap(shadowMap.isSelected());
         GUIP.setHexInclines(hexInclines.isSelected());
         GUIP.setSoftCenter(useSoftCenter.isSelected());
@@ -3713,6 +3728,10 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             GUIP.setHexInclines(hexInclines.isSelected());
         } else if (source.equals(levelHighlight)) {
             GUIP.setLevelHighlight(levelHighlight.isSelected());
+        } else if (source.equals(showHexTypes)) {
+            GUIP.setHexTypesEnabled(showHexTypes.isSelected());
+        } else if (source.equals(hexLabelOutline)) {
+            GUIP.setHexLabelOutline(hexLabelOutline.isSelected());
         } else if (source.equals(floatingIso)) {
             GUIP.setFloatingIso(floatingIso.isSelected());
         } else if (source.equals(mmSymbol)) {

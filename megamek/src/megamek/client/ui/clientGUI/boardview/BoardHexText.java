@@ -30,7 +30,7 @@ public record BoardHexText(String text, int baseline, Font font, int argb, boole
     /** The distance between the baselines of the stacked lines at the bottom edge, in artwork pixels. */
     private static final int LINE_SPACING = 10;
     /** How far every label's outline reaches out of its glyphs, as a share of its font size: about a stem's width. */
-    private static final float OUTLINE = 0.09f;
+    private static final float OUTLINE = 0.05f;
     /** The copies of a label's text, in a ring around it, that draw its outline. */
     private static final int OUTLINE_COPIES = 8;
     private static final Font TACTICAL_DEPTH_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 26);
@@ -47,20 +47,24 @@ public record BoardHexText(String text, int baseline, Font font, int argb, boole
     }
 
     /**
-     * Draws the labels centred in a hex {@code width} wide, each on its {@link #outline}; {@code printed} draws them
-     * black, so on a white outline, as the saved board image does.
+     * Draws the labels centred in a hex {@code width} wide, each on its {@link #outline} unless Client Settings >
+     * Hex label outline is off; {@code printed} draws them black, always on a white outline, as the saved board image
+     * does.
      */
     public static void draw(Graphics2D graphics, Point origin, int width, List<BoardHexText> labels, boolean printed) {
+        boolean outlined = printed || GUIP.getHexLabelOutline();
         for (BoardHexText label : labels) {
             int argb = printed ? 0xFF000000 : label.argb();
             graphics.setFont(label.font());
             var metrics = graphics.getFontMetrics();
             int x = origin.x + (width - metrics.stringWidth(label.text())) / 2;
             int baseline = origin.y + label.baseline() + (label.fromTop() ? metrics.getAscent() : 0);
-            graphics.setColor(new Color(outline(argb), true));
-            float[] offsets = outlineOffsets(label.font().getSize2D());
-            for (int copy = 0; copy < offsets.length; copy += 2) {
-                graphics.drawString(label.text(), x + offsets[copy], baseline + offsets[copy + 1]);
+            if (outlined) {
+                graphics.setColor(new Color(outline(argb), true));
+                float[] offsets = outlineOffsets(label.font().getSize2D());
+                for (int copy = 0; copy < offsets.length; copy += 2) {
+                    graphics.drawString(label.text(), x + offsets[copy], baseline + offsets[copy + 1]);
+                }
             }
             graphics.setColor(new Color(argb, true));
             graphics.drawString(label.text(), x, baseline);
@@ -75,9 +79,9 @@ public record BoardHexText(String text, int baseline, Font font, int argb, boole
 
     /**
      * Where the copies of a label's text that draw its outline go, as x, y pairs in the units of its font, which is
-     * {@code size} large: a ring around the text, close enough for the copies to join into one outline. Every view
-     * draws the outline so (Legacy 2D and the saved image here, the 3D board in GpuHexText): far cheaper than stroking
-     * the glyphs' outlines for Legacy 2D, which draws its labels on every paint.
+     * {@code size} large: a ring around the text, close enough for the copies to join into one outline. Legacy 2D and
+     * the saved image draw the outline so: far cheaper than stroking the glyphs' outlines for Legacy 2D, which draws
+     * its labels on every paint. The 3D board draws a real stroke instead (GpuHexText, GpuBoardSkin.OUTLINE_FONT).
      */
     public static float[] outlineOffsets(float size) {
         float[] offsets = new float[2 * OUTLINE_COPIES];

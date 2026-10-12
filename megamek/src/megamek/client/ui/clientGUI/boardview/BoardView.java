@@ -796,6 +796,7 @@ public final class BoardView extends AbstractBoardView
             case GUIPreferences.LEVEL_HIGHLIGHT:
             case GUIPreferences.SHOW_COORDS:
             case GUIPreferences.SHOW_HEX_TYPES:
+            case GUIPreferences.HEX_LABEL_OUTLINE:
             case GUIPreferences.FOV_DARKEN:
             case GUIPreferences.FOV_DARKEN_ALPHA:
             case GUIPreferences.FOV_GRAYSCALE:

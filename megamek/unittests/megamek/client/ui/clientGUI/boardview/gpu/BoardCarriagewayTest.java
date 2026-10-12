@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -80,7 +81,7 @@ class BoardCarriagewayTest {
             for (Coords at : List.of(AT, AT.translated(0))) {
                 var tile = rails.tile(at);
                 var feature = BoardRail.route(tile);
-                var layout = BoardRail.layout(rails, tile, feature, new BoardSurface(rails, tile), null);
+                var layout = BoardRail.layout(rails, tile, feature, new BoardSurface(rails, tile), coords -> null);
                 var road = new BoardSurface(roads, roads.tile(at));
                 float base = BoardRail.level(tile, feature) * BoardGeometry.level(), scale = BoardGeometry.hexScale();
                 int points = 0;
@@ -101,7 +102,7 @@ class BoardCarriagewayTest {
         // Flat ground: every point on the plane, and every flat straight of a kind shares one layout.
         var flat = line(false, 0);
         var south = flat.tile(AT.translated(3));
-        var layout = BoardRail.layout(flat, south, BoardRail.route(south), new BoardSurface(flat, south), null);
+        var layout = BoardRail.layout(flat, south, BoardRail.route(south), new BoardSurface(flat, south), coords -> null);
         assertTrue(layout.paths().stream().flatMap(List::stream).allMatch(p -> Math.abs(p.z) < 1e-4f));
     }
 
@@ -113,11 +114,75 @@ class BoardCarriagewayTest {
               : tile(at, 0, 0, false, List.of()));
         var tile = scene.tile(AT);
         assertEquals(0, tile.railExits(), "a deck rail does not shape the ground beneath");
-        var layout = BoardRail.layout(scene, tile, deck, new BoardSurface(scene, tile), null);
+        var layout = BoardRail.layout(scene, tile, deck, new BoardSurface(scene, tile), coords -> null);
         float expected = (BoardBridge.deckZ(tile) - BoardRail.level(tile, deck) * BoardGeometry.level()) / BoardGeometry.hexScale();
         assertEquals(1, layout.paths().size(), "only the bridge's N-S exits carry track");
         for (var point : layout.paths().getFirst()) { assertEquals(expected, point.z, 1e-4f); }
         assertEquals(1 + 8, BoardRail.drawnSides(tile, deck));
+    }
+
+    @Test
+    void groundRailsClimbTheBridgeOwnedRampAndMeetTheDeckInEveryDirection() {
+        for (int x : new int[] { 3, 4 }) {
+            var bankAt = new Coords(x, 4);
+            for (int direction = 0; direction < 6; direction++) {
+                var bridgeAt = bankAt.translated(direction);
+                int sides = RailRoute.side(direction) | RailRoute.side((direction + 3) % 6);
+                var bridge = new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, 1, BoardScene.FeatureKind.PROP, sides);
+                var deckRail = rail(bridgeAt, sides, BoardDecoration.Placement.on("bridge", 0));
+                var scene = BoardSurfaceBlendTest.scene(at -> at.equals(bankAt) ? tile(at, 0, sides, false, List.of())
+                      : tile(at, 0, 0, false, at.equals(bridgeAt) ? List.of(bridge, deckRail) : List.of()));
+                var bank = scene.tile(bankAt);
+                var span = scene.tile(bridgeAt);
+                var marker = BoardRail.route(bank);
+                for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
+                    var surfaces = new HashMap<Coords, BoardSurface>();
+                    var footing = BoardBridgeFooting.build(scene, span, lod, surfaces);
+                    var shape = BoardBridgeSlope.build(span, BoardBridge.deck(scene, span), footing);
+                    var shapes = Map.of(bridgeAt, shape);
+                    var ground = surfaces.computeIfAbsent(bankAt, at -> new BoardSurface(scene, bank, lod));
+                    var approach = BoardRail.layout(scene, bank, marker, ground, shapes::get);
+                    var deck = BoardRail.layout(scene, span, deckRail, new BoardSurface(scene, span, lod), shapes::get);
+                    float scale = BoardGeometry.hexScale();
+                    var center = BoardGeometry.center(bankAt, BoardRail.level(bank, marker));
+                    var seam = new Vector3(center).lerp(BoardGeometry.center(bridgeAt, 0), .5f);
+                    float rampTop = BoardBridge.top(shape, seam.x, seam.y);
+                    assertEquals(BoardBridge.deckZ(.5f), rampTop, .001f);
+                    assertEquals(0, BoardSurface.sampleHeight(ground.groundFaces(), seam.x, seam.y, Float.NaN), .001f,
+                          "The bank stays flat beneath the solid approach");
+                    for (var point : approach.paths().getFirst()) {
+                        var world = new Vector3(point).scl(scale).add(center);
+                        float support = Math.max(BoardSurface.sampleHeight(ground.groundFaces(), world.x, world.y, 0),
+                              BoardBridge.top(shape, world.x, world.y));
+                        assertEquals(support, world.z, .001f, "Rail follows the drawn support: " + direction + " " + lod);
+                    }
+                    for (var layout : List.of(approach, deck)) {
+                        var origin = layout == approach ? center : BoardGeometry.center(bridgeAt, BoardRail.level(span, deckRail));
+                        var endpoint = layout.paths().getFirst().stream().map(p -> new Vector3(p).scl(scale).add(origin))
+                              .filter(p -> Math.hypot(p.x - seam.x, p.y - seam.y) < .001f).findFirst().orElseThrow();
+                        assertEquals(rampTop, endpoint.z, .001f, "The two rails meet on the ramp at the hex boundary");
+                    }
+                    // A separate marker with no exit toward the bridge must retain its own ground support.
+                    var other = rail(bankAt, 0, BoardDecoration.Placement.ground());
+                    assertTrue(BoardRail.approaches(scene, bank, other).isEmpty());
+                }
+            }
+        }
+    }
+
+    @Test
+    void groundTrackContinuingUnderABridgeDoesNotClimbItsApproach() {
+        var bridgeAt = AT.translated(0);
+        var bridge = new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, 1, BoardScene.FeatureKind.PROP, 9);
+        var scene = BoardSurfaceBlendTest.scene(at -> tile(at, 0, at.equals(AT) || at.equals(bridgeAt) ? 9 : 0,
+              false, at.equals(bridgeAt) ? List.of(bridge) : List.of()));
+        var bank = scene.tile(AT);
+        var marker = BoardRail.route(bank);
+        assertTrue(BoardRail.approaches(scene, bank, marker).isEmpty());
+        var shape = BoardBridgeFooting.build(scene, scene.tile(bridgeAt), TerrainLod.FULL, new HashMap<>()).shape();
+        var layout = BoardRail.layout(scene, bank, marker, new BoardSurface(scene, bank), Map.of(bridgeAt, shape)::get);
+        assertTrue(layout.paths().stream().flatMap(List::stream).allMatch(p -> Math.abs(p.z) < .001f),
+              "Ground continuation takes precedence over the overhead deck");
     }
 
     @Test
@@ -130,7 +195,7 @@ class BoardCarriagewayTest {
               : tile(at, 0, 0, false, List.of()));
         var tile = scene.tile(AT);
         assertEquals(18 | 9, tile.wayExits());
-        var layout = BoardRail.layout(scene, tile, BoardRail.route(tile), new BoardSurface(scene, tile), null);
+        var layout = BoardRail.layout(scene, tile, BoardRail.route(tile), new BoardSurface(scene, tile), coords -> null);
         var street = layout.streets().getFirst();
         assertTrue(street.contains(true) && street.contains(false));
         assertFalse(street.getFirst() && street.getLast(), "the ends beyond the road keep their ballast");
@@ -191,7 +256,7 @@ class BoardCarriagewayTest {
             });
             var scene = BoardRailTest.scene(nodes, sides, RailRoute.Kind.RAIL);
             var tile = scene.tile(AT);
-            var layout = BoardRail.layout(scene, tile, BoardRail.route(tile), new BoardSurface(scene, tile), null);
+            var layout = BoardRail.layout(scene, tile, BoardRail.route(tile), new BoardSurface(scene, tile), coords -> null);
             var mesh = BoardRail.model(layout).meshes.first();
             assertTrue(mesh.vertices.length / 7 < 65_536, "mask " + mask);
             for (int i = 0; i < mesh.vertices.length; i += 7) {
@@ -203,7 +268,7 @@ class BoardCarriagewayTest {
             var other = BoardRailTest.scene(Map.of(AT.translated(3), 0.0), Map.of(AT.translated(3), mask), RailRoute.Kind.RAIL);
             var otherTile = other.tile(AT.translated(3));
             if (Integer.bitCount(mask) < 2) { continue; }
-            var shared = BoardRail.layout(other, otherTile, BoardRail.route(otherTile), new BoardSurface(other, otherTile), null);
+            var shared = BoardRail.layout(other, otherTile, BoardRail.route(otherTile), new BoardSurface(other, otherTile), coords -> null);
             assertEquals(layout.paths(), shared.paths(), "mask " + mask);
         }
     }

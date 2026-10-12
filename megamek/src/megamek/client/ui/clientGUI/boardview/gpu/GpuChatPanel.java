@@ -18,9 +18,9 @@ import megamek.client.ui.gdx.UiTheme;
 
 /**
  * Chat panel above its bottom-right button (C.1 G15, r1 3.20, r2 8.5, plan A.15 O6; shot 16): the game's chat lines
- * (GpuChat), each sender over its text, mint for a player and muted for MegaMek's own lines, then the message field
- * and Send. Enter or Send posts the draft through the board chat's send, which keeps it in the chat history, and the
- * field keeps the focus. The draft stays in the field while the panel closes and opens again. The list shows the
+ * (GpuChat), each sender over its consecutive messages, mint for a player and muted for MegaMek's own lines, then
+ * the message field and Send. Enter or Send posts the draft through the board chat's send, which keeps it in the
+ * chat history, and the field keeps the focus. The draft stays while the panel closes and opens again. The list shows the
  * newest line; while the panel is closed, a newer line than the last one seen puts the unread dot on the button.
  */
 final class GpuChatPanel implements GpuHud.Component {
@@ -107,7 +107,13 @@ final class GpuChatPanel implements GpuHud.Component {
         if (chat != shown) {
             shown = chat;
             lines.clearChildren();
-            chat.lines().forEach(this::line);
+            GpuChat.ChatLine previous = null;
+            for (GpuChat.ChatLine line : chat.lines()) {
+                boolean continued = previous != null && !previous.system() && !line.system()
+                      && previous.sender().equals(line.sender());
+                line(line, !continued);
+                previous = line;
+            }
             scrollDown = true;
         }
         if (state.chatOpen != open) {
@@ -130,12 +136,14 @@ final class GpuChatPanel implements GpuHud.Component {
         }
     }
 
-    /** One message (.msg: padding 5 0): the sender (700 12 condensed) over the text (12.5). */
-    private void line(GpuChat.ChatLine line) {
+    /** One message: show the sender above the first message of each player group and every system notice. */
+    private void line(GpuChat.ChatLine line, boolean showSender) {
         Table message = new Table();
-        message.pad(5, 0, 5, 0);
+        message.pad(showSender ? 5 : 0, 0, 5, 0);
         message.defaults().left().growX();
-        message.add(ui.label(line.sender(), "hud-name", 12, line.system() ? UiTheme.MUTED : UiTheme.MINT)).row();
+        if (showSender) {
+            message.add(ui.label(line.sender(), "hud-name", 12, line.system() ? UiTheme.MUTED : UiTheme.MINT)).row();
+        }
         Label text = ui.label(line.text(), "hud-body", 12.5f, UiTheme.TEXT);
         text.setWrap(true);
         message.add(text);

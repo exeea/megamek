@@ -206,6 +206,11 @@ feature. Classic, for low-end computers, is a build mode of the same chunk pipel
   the commit retires the other build's chunks. Camera, Tactical View, selection, orders, HUD and units stay. The
   editor's palette and terrain previews stay Enhanced. Measured costs: [performance](gpu-board-performance.md#classic-and-enhanced-graphics).
 - **Cliffs.** The Classic tops carry no cliff stroke; the Tactical View's ground layer strokes cliffs in both graphics.
+- **Print.** Menu > Print (`GpuBoardPrint`) builds its own terrain with the live view's installed graphics
+  (`setColumns(lender.columns())`; the print starts only once the live terrain is ready), so a Classic print shows the
+  columns and an Enhanced print the 3D terrain. It keeps the 3D view's fluff in the Tactical View too and draws the
+  plain grid, not the ground layer, so a print strokes no cliff in either graphics; its labels give the levels.
+  `GpuBoardPrintSmokeTest` prints in Enhanced (preview and editor) and in Classic.
 - **Limits.** A Classic bridge hex is picked on its column, under the deck art (no 3D deck); placed objects, decals
   and paint on the bridge take the plane of the deck art over the whole hex. The atmosphere (grading, fog, weather,
   glare, lightning) applies as in Enhanced; fire and smoke particles are left out, since the tileset art shows them.

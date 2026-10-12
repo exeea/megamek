@@ -766,6 +766,57 @@ class BoardEditorSessionTest {
         assertFalse(snapshot.grouped(solo)); assertTrue(snapshot.grouped(pair));
     }
 
+    @Test void groundClicksSelectGroundAfterInspectingAnotherComponent() {
+        var session = session();
+        Coords east = new Coords(2, 1);
+        send(session, Action.ADD_COMPONENT, "", "bridge");
+        send(session, Action.COMPONENT, "", "bridge");
+        assertEquals("bridge", session.snapshot().component(), "Layers and the side view can select a present bridge");
+
+        click(session, at, null, false);
+        assertEquals("ground", session.snapshot().component(), "Clicking ground in the same hex selects Ground");
+        assertEquals(List.of(new BoardEditorSession.Selection(at, "")), session.snapshot().selection());
+
+        send(session, Action.COMPONENT, "", "bridge");
+        click(session, east, null, false);
+        assertEquals(east, session.snapshot().selected());
+        assertEquals("ground", session.snapshot().component(), "A clear hex cannot inherit the previous hex's bridge");
+
+        click(session, at, null, false);
+        send(session, Action.COMPONENT, "", "bridge");
+        click(session, east, null, true);
+        assertEquals("ground", session.snapshot().component(), "Shift-click also inspects the newly selected ground");
+        assertEquals(List.of(new BoardEditorSession.Selection(at, ""), new BoardEditorSession.Selection(east, "")),
+              session.snapshot().selection());
+
+        session.board().getHex(east).setDecorations(List.of(prop("car", 0, 0)));
+        click(session, east, "car", false);
+        assertEquals("car", session.snapshot().object(), "A picked object keeps priority over the ground");
+        assertEquals(List.of(new BoardEditorSession.Selection(east, "car")), session.snapshot().selection());
+        click(session, east, "car", true);
+        assertTrue(session.snapshot().selection().isEmpty());
+        assertEquals("", session.snapshot().object(), "Shift-clicking the last object clears its inspector too");
+    }
+
+    @Test void issueAndBoxHexSelectionsDoNotInheritTheInspectedComponent() {
+        var session = session();
+        Coords east = new Coords(2, 1);
+        send(session, Action.ADD_COMPONENT, "", "bridge");
+        send(session, Action.COMPONENT, "", "bridge");
+        send(session, Action.SELECT_AT, east.getX() + "," + east.getY(), "");
+        assertEquals(east, session.snapshot().selected());
+        assertEquals("ground", session.snapshot().component());
+        assertEquals("", session.snapshot().object());
+
+        click(session, at, null, false);
+        send(session, Action.COMPONENT, "", "bridge");
+        var hexes = List.of(new BoardEditorSession.Selection(east, ""), new BoardEditorSession.Selection(at, ""));
+        session.select(hexes, BoardEditorSession.SelectMode.REPLACE);
+        assertEquals(hexes, session.snapshot().selection());
+        assertEquals(east, session.snapshot().selected());
+        assertEquals("ground", session.snapshot().component(), "A box over hexes inspects Ground");
+    }
+
     @Test void onlyASelectedItemMovesAndABoxTakesObjectsBeforeHexes() {
         var session = session();
         Coords east = new Coords(2, 1), far = new Coords(6, 6);
@@ -1593,21 +1644,35 @@ class BoardEditorSessionTest {
     }
 
     /**
-     * The saved image prints every hex's coordinates and type whatever the views show (both switched off here), black
-     * on a white outline: hex 0302, depth-0 water, has DEPTH 0 at its bottom edge and its number at its top.
+     * The saved image prints every hex's coordinates and type on an outline even with all three view options off:
+     * hex 0302, depth-0 water, has DEPTH 0 at its bottom edge and its number at its top.
      */
     @Test void saveAsImagePrintsCoordinatesAndHexTypesBlackOnAWhiteOutline() throws Exception {
         var preferences = megamek.client.ui.clientGUI.GUIPreferences.getInstance();
         boolean coords = preferences.getCoordsEnabled(), types = preferences.getHexTypesEnabled();
+        boolean outline = preferences.getHexLabelOutline();
         try {
             if (coords) { preferences.toggleCoords(); }
             if (types) { preferences.toggleHexTypes(); }
+            preferences.setHexLabelOutline(false);
             var session = session();
             send(session, Action.NEW, "", "5x4");
             session.board().setHex(new Coords(2, 1), new Hex(0, "water:0", ""));
             Path file = directory.resolve("types.png");
             session.saveImage(file);
             var image = javax.imageio.ImageIO.read(file.toFile());
+            assertFalse(preferences.getCoordsEnabled());
+            assertFalse(preferences.getHexTypesEnabled());
+            assertFalse(preferences.getHexLabelOutline());
+            preferences.toggleCoords();
+            preferences.toggleHexTypes();
+            preferences.setHexLabelOutline(true);
+            Path withOptionsFile = directory.resolve("types-options-on.png");
+            session.saveImage(withOptionsFile);
+            var withOptions = javax.imageio.ImageIO.read(withOptionsFile.toFile());
+            assertArrayEquals(image.getRGB(0, 0, image.getWidth(), image.getHeight(), null, 0, image.getWidth()),
+                  withOptions.getRGB(0, 0, withOptions.getWidth(), withOptions.getHeight(), null, 0, withOptions.getWidth()),
+                  "Print always includes coordinates, hex types and outlines, independently of the view options");
             // The tile of hex 0302 starts at (126, 72); its bottom line and its top line, each about 13 pixels high.
             for (int top : new int[] { 72 + 56, 72 + 5 }) {
                 int black = 0, white = 0;
@@ -1618,11 +1683,14 @@ class BoardEditorSessionTest {
                         if (Math.min(r, Math.min(g, b)) > 225) { white++; }
                     }
                 }
-                assertTrue(black > 8 && white > 20, "Black text on white at row " + top + ": " + black + "/" + white);
+                // At 10 points the outline is subpixel: rasterization determines its near-white pixel count.
+                // Check its presence here; BoardHexTextTest checks outline colour on a larger controlled glyph.
+                assertTrue(black > 8 && white > 0, "Black text on white at row " + top + ": " + black + "/" + white);
             }
         } finally {
             if (preferences.getCoordsEnabled() != coords) { preferences.toggleCoords(); }
             if (preferences.getHexTypesEnabled() != types) { preferences.toggleHexTypes(); }
+            preferences.setHexLabelOutline(outline);
         }
     }
 

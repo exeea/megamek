@@ -92,12 +92,13 @@ class GpuHexTextSmokeTest {
             BoardScene scene = scene(false, true);
             terrain.update(scene);
             var font = skin.skin.getFont("default-font");
+            var outline = skin.skin.getFont(GpuBoardSkin.OUTLINE_FONT);
             for (boolean isometric : List.of(false, true)) {
                 camera.setIsometric(isometric);
                 camera.camera.zoom = .20f;
                 camera.center(BoardGeometry.center(LABELED, 2));
                 terrain.renderShadows(camera.camera, List.of());
-                labels.update(scene, font, terrain::roofBounds);
+                labels.update(scene, font, outline, terrain::roofBounds);
                 frame(terrain, atmosphere, camera, scene, null);
                 labels.render(batch, camera, atmosphere.depthTexture(), BOTTOM);
                 Pixmap actual = pixels();
@@ -113,7 +114,7 @@ class GpuHexTextSmokeTest {
                     assertTrue(missing <= total * .01, "Own relief must not cut through lettering in "
                           + (isometric ? "isometric" : "top") + ": " + missing + "/" + total);
                     // Negative control: the previous flat depth test must fail on exactly the same rocks and glyphs.
-                    labels.update(scene(false, false), font, terrain::roofBounds);
+                    labels.update(scene(false, false), font, outline, terrain::roofBounds);
                     frame(terrain, atmosphere, camera, scene, null);
                     labels.render(batch, camera, atmosphere.depthTexture(), BOTTOM);
                     Pixmap flat = pixels();
@@ -132,7 +133,7 @@ class GpuHexTextSmokeTest {
             // A foreground plateau is a different hex even where its wall lies on the exact shared boundary.
             BoardScene cliff = scene(true, true);
             terrain.update(cliff);
-            labels.update(cliff, font, terrain::roofBounds);
+            labels.update(cliff, font, outline, terrain::roofBounds);
             camera.setIsometric(true);
             camera.center(BoardGeometry.center(LABELED, 2));
             frame(terrain, atmosphere, camera, cliff, null);
@@ -144,7 +145,7 @@ class GpuHexTextSmokeTest {
 
             // Top view reveals both ground labels through a roof well above their relief envelope.
             terrain.update(scene);
-            labels.update(scene, font, terrain::roofBounds);
+            labels.update(scene, font, outline, terrain::roofBounds);
             camera.setIsometric(false);
             camera.center(BoardGeometry.center(LABELED, 2));
             frame(terrain, atmosphere, camera, scene, object);
@@ -153,7 +154,7 @@ class GpuHexTextSmokeTest {
             try { assertTrue(pink(covered) > 250, "Top-view coordinates and LEVEL must show through a taller object"); }
             finally { covered.dispose(); }
             checkUnitOcclusion(terrain, atmosphere, camera, scene, labels, batch);
-            checkHeightOcclusion(terrain, atmosphere, labels, font, batch, camera);
+            checkHeightOcclusion(terrain, atmosphere, labels, font, outline, batch, camera);
             checkTopGrid(camera, scene);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Overlay drawing must leave valid GL state");
             checkStaticMeshes(batch);
@@ -179,9 +180,14 @@ class GpuHexTextSmokeTest {
             Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
             BoardScene scene = textScene(24, "ABAB");
             assertEquals(1, font.getRegions().size);
-            labels.update(scene, font, coords -> null);
+            labels.update(scene, font, font, coords -> null);
             assertEquals(2, font.getRegions().size, "Later chunks introduce another incremental font atlas page");
-            List<LegacyChunk> legacy = legacy(scene, font);
+            List<LegacyChunk> legacy = legacy(scene, font, true);
+            assertVertices(labels, legacy, font);
+            // Client Settings > Hex label outline off: the text alone, one run of glyphs instead of outline then text.
+            labels.update(scene, font, font, coords -> null, false, false, false);
+            assertVertices(labels, legacy(scene, font, false), font);
+            labels.update(scene, font, font, coords -> null);
             assertVertices(labels, legacy, font);
             ShaderProgram previous = batch.getShader();
             camera.fit(scene);
@@ -205,19 +211,19 @@ class GpuHexTextSmokeTest {
             parity(labels, legacy, batch, camera, depth);
 
             // One font page over many chunks crosses both signed-short and unsigned-short index boundaries (each
-            // label is nine copies of its text, eight of them its outline).
-            BoardScene large = textScene(48, "A");
-            labels.update(large, font, coords -> null);
+            // label's eight glyphs are drawn twice, its outline then its text, each over every chunk).
+            BoardScene large = textScene(48, "AAAAAAAA");
+            labels.update(large, font, font, coords -> null);
             List<Object> pages = pages(labels);
-            assertEquals(2, pages.size(), "Consecutive chunks share bounded pages instead of individual draw calls");
-            assertVertices(labels, legacy(large, font), font);
-            labels.update(large, font, coords -> { throw new AssertionError("Unchanged labels must keep their meshes"); });
+            assertEquals(4, pages.size(), "Consecutive chunks share bounded pages instead of individual draw calls");
+            assertVertices(labels, legacy(large, font, true), font);
+            labels.update(large, font, font, coords -> { throw new AssertionError("Unchanged labels must keep their meshes"); });
             assertSame(pages.getFirst(), pages(labels).getFirst());
             // A path preview repaints the markings of the hexes: new tiles with the same labels keep the meshes too.
             var marking = new BoardScene.Pixels(new java.awt.image.BufferedImage(2, 2,
                   java.awt.image.BufferedImage.TYPE_INT_ARGB));
             labels.update(new BoardScene(0, 48, 48, large.tiles().stream().map(tile -> tile.withTactical(marking))
-                  .toList(), List.of(), List.of(), -1, "", List.of()), font, coords -> null);
+                  .toList(), List.of(), List.of(), -1, "", List.of()), font, font, coords -> null);
             assertSame(pages.getFirst(), pages(labels).getFirst(), "New markings alone must not relabel the board");
             camera.fit(large);
             profiler.enable();
@@ -225,13 +231,13 @@ class GpuHexTextSmokeTest {
                 ScreenUtils.clear(.1f, .2f, .3f, 1, true);
                 profiler.reset();
                 labels.render(batch, camera, depth, 0);
-                assertEquals(2, profiler.getDrawCalls(), "All visible ranges merge into one draw per static mesh page");
+                assertEquals(4, profiler.getDrawCalls(), "All visible ranges merge into one draw per static mesh page");
                 camera.center(new com.badlogic.gdx.math.Vector3(-10000, 10000, 0));
                 profiler.reset();
                 labels.render(batch, camera, depth, 0);
                 assertEquals(0, profiler.getDrawCalls(), "An off-board view must submit no glyph meshes");
             } finally { profiler.disable(); }
-            labels.update(textScene(1, ""), font, coords -> null);
+            labels.update(textScene(1, ""), font, font, coords -> null);
             assertEquals(meshesBefore, Mesh.getManagedStatus(), "Replacing text releases all old static meshes");
             assertTrue(Gdx.gl.glIsTexture(first.getTextureObjectHandle()));
             assertTrue(Gdx.gl.glIsTexture(second.getTextureObjectHandle()), "Font atlas pages are borrowed, not disposed");
@@ -312,9 +318,12 @@ class GpuHexTextSmokeTest {
         }
     }
 
-    /** Independent copy of the previous single-plane layout/draw input, without static mesh construction. */
-    private static List<LegacyChunk> legacy(BoardScene scene, BitmapFont font) {
-        Map<Coords, LegacyChunk> chunks = new HashMap<>();
+    /**
+     * Independent copy of the previous single-plane layout/draw input, without static mesh construction: every chunk's
+     * outlines (drawn with {@code font} as the outline font too) when {@code outlined}, then every chunk's text.
+     */
+    private static List<LegacyChunk> legacy(BoardScene scene, BitmapFont font, boolean outlined) {
+        Map<Coords, LegacyChunk> chunks = new HashMap<>(), outlines = new HashMap<>();
         float scaleX = font.getData().scaleX, scaleY = font.getData().scaleY;
         var color = new com.badlogic.gdx.graphics.Color(font.getColor());
         try {
@@ -324,6 +333,8 @@ class GpuHexTextSmokeTest {
                           tile.coords().getY() / GpuTerrain.CHUNK_SIZE);
                     LegacyChunk chunk = chunks.computeIfAbsent(cell,
                           key -> new LegacyChunk(new BitmapFontCache(font, false), new BoundingBox().inf()));
+                    LegacyChunk outline = outlines.computeIfAbsent(cell,
+                          key -> new LegacyChunk(new BitmapFontCache(font, false), chunk.bounds()));
                     float x = BoardGeometry.centerX(tile.coords()), y = BoardGeometry.centerY(tile.coords());
                     chunk.bounds().ext(x - BoardGeometry.WIDTH, y - BoardGeometry.WIDTH, -1)
                           .ext(x + BoardGeometry.WIDTH, y + BoardGeometry.WIDTH, 1);
@@ -334,19 +345,18 @@ class GpuHexTextSmokeTest {
                     GlyphLayout layout = new GlyphLayout(font, text.text());
                     float baseline = y + BoardGeometry.HEIGHT / 2 - text.baseline() * BoardGeometry.HEX_SCALE;
                     float left = x - layout.width / 2, top = text.fromTop() ? baseline : baseline + layout.height;
-                    // Every label's outline: eight copies in the outline's colour around it, then the text.
+                    // Every label's outline: the bordered text in the outline's colour, from its first glyph's border.
                     var ring = new com.badlogic.gdx.graphics.Color();
                     com.badlogic.gdx.graphics.Color.argb8888ToColor(ring, BoardHexText.outline(argb));
-                    GlyphLayout outline = new GlyphLayout(font, text.text(), ring, 0, Align.left, false);
-                    float[] offsets = BoardHexText.outlineOffsets(text.font().getSize2D());
-                    for (int copy = 0; copy < offsets.length; copy += 2) {
-                        chunk.glyphs().addText(outline, left + offsets[copy], top + offsets[copy + 1]);
-                    }
+                    outline.glyphs().addText(new GlyphLayout(font, text.text(), ring, 0, Align.left, false),
+                          left - GpuBoardSkin.OUTLINE * font.getData().scaleX, top);
                     chunk.glyphs().addText(layout, left, top);
                 }
             }
         } finally { font.getData().setScale(scaleX, scaleY); font.setColor(color); }
-        return List.copyOf(chunks.values());
+        List<LegacyChunk> drawn = new ArrayList<>(outlined ? outlines.values() : List.of());
+        drawn.addAll(chunks.values());
+        return drawn;
     }
 
     private static BoardScene textScene(int size, String text) {
@@ -469,10 +479,10 @@ class GpuHexTextSmokeTest {
     }
 
     private static void checkHeightOcclusion(GpuTerrain terrain, GpuAtmosphere atmosphere, GpuHexText labels,
-          BitmapFont font, SpriteBatch batch, BoardCamera camera) {
+          BitmapFont font, BitmapFont outline, SpriteBatch batch, BoardCamera camera) {
         BoardScene scene = scene(false, true, 2);
         terrain.update(scene);
-        labels.update(scene, font, terrain::roofBounds);
+        labels.update(scene, font, outline, terrain::roofBounds);
         // Keep the rectangular object entirely inside the hex, including its tapered corners.
         Model model = new ModelBuilder().createBox(.75f * BoardGeometry.WIDTH, .5f * BoardGeometry.HEIGHT,
               8 * BoardGeometry.LEVEL, new Material(ColorAttribute.createDiffuse(.1f, .2f, .1f, 1)),
@@ -539,7 +549,7 @@ class GpuHexTextSmokeTest {
                 camera.setIsometric(isometric);
                 camera.center(BoardGeometry.center(LABELED, 4));
                 for (int height : List.of(0, 2)) {
-                    labels.update(scene(false, true, height), font, c -> null);
+                    labels.update(scene(false, true, height), font, outline, c -> null);
                     ScreenUtils.clear(0, 0, 0, 1, true);
                     labels.render(batch, camera, depth, depth, BOTTOM);
                     Pixmap expected = pixels();
@@ -559,7 +569,7 @@ class GpuHexTextSmokeTest {
                     } finally { expected.dispose(); covered.dispose(); }
                 }
             }
-            labels.update(textScene(1, ""), font, c -> null);
+            labels.update(textScene(1, ""), font, outline, c -> null);
             ScreenUtils.clear(0, 0, 0, 1, true);
             labels.render(batch, camera, depth, BOTTOM);
             Pixmap empty = pixels();
