@@ -63,6 +63,12 @@ final class GpuArtilleryBlast {
     private static final int MINES_PER_ROUND = 9;
     /** Height of a minefield round's dispenser above its hex, in hexes: lower and quieter than a cluster air burst. */
     private static final float DISPENSER_HEXES = .9f;
+    /** How far short of the hex centre the shell opens, in hexes, so its stream of mines passes over the middle. */
+    private static final float DISPENSER_LEAD = .15f;
+    /** How fast the opened shell carries on along its line of flight, in hexes a second. */
+    private static final float DISPENSER_SPEED = 1.2f;
+    /** The heading of a blast drawn without an attack, such as in the shader preview: due east. Never modified. */
+    private static final Vector3 DEFAULT_HEADING = new Vector3(1, 0, 0);
     /** Damage of the shell that draws at the reference size: a Sniper or an Arrow IV. */
     private static final float REFERENCE_DAMAGE = 20;
     /** Pieces a shell damaging only its own hex throws, all landing inside that hex. */
@@ -143,6 +149,8 @@ final class GpuArtilleryBlast {
         final List<Vector3> landings;
         /** Whether each landing was found on the terrain, which a scorch mark needs. */
         final boolean[] onTerrain;
+        /** The shell's direction of travel across the ground, which a minefield round's mines stream out along. */
+        final Vector3 heading;
         float seconds;
         /** One bit per piece of debris that has landed, whether or not it left a mark. */
         long landed;
@@ -163,6 +171,8 @@ final class GpuArtilleryBlast {
                 default -> debrisPieces(area.hexRadius(), key);
             };
             Vector3 hexCentre = attack == null ? ground : BoardGeometry.center(attack.event.destination().coords(), 0);
+            heading = attack == null ? DEFAULT_HEADING
+                  : heading(BoardGeometry.center(attack.event.attacker().location().coords(), 0), hexCentre);
             landings = new ArrayList<>(pieces.size());
             onTerrain = new boolean[pieces.size()];
             for (int index = 0; index < pieces.size(); index++) {
@@ -357,7 +367,8 @@ final class GpuArtilleryBlast {
             float bearing = mine * 2.399963f + random(seed, mine + 500);
             // Inside a circle that fits the hex, spread evenly over it rather than crowding its centre.
             float out = hex * .4f * (float) Math.sqrt(MathUtils.lerp(.05f, 1, random(seed, mine + 520)));
-            float release = .1f + .25f * random(seed, mine + 540);
+            // They leave in turn over a quarter second, so the shell trails them out as a stream.
+            float release = .05f + .25f * mine / (MINES_PER_ROUND - 1) + .02f * random(seed, mine + 540);
             float fall = .8f + .4f * random(seed, mine + 560);
             pieces.add(new Piece(MathUtils.cos(bearing) * out, MathUtils.sin(bearing) * out, 0, release, fall, false));
         }
@@ -421,9 +432,24 @@ final class GpuArtilleryBlast {
     /** Queues the volumes of every live blast. */
     void emit(GpuExplosionEffects explosions) {
         for (Blast blast : blasts) {
-            emit(explosions, blast.ground, blast.size, blast.pieces, blast.landings, blast.style, blast.seconds,
-                  blast.key);
+            var scatter = new Scatter(blast.pieces, blast.landings, blast.heading);
+            emit(explosions, blast.ground, blast.size, scatter, blast.style, blast.seconds, blast.key);
         }
+    }
+
+    /**
+     * What a blast throws or drops, and where it all lands.
+     *
+     * @param pieces   the fragments, bomblets or mines
+     * @param landings where each piece lands
+     * @param heading  the shell's direction of travel across the ground, a unit vector
+     */
+    private record Scatter(List<Piece> pieces, List<Vector3> landings, Vector3 heading) { }
+
+    /** The direction from {@code from} to {@code to} across the ground, or the default heading if they coincide. */
+    private static Vector3 heading(Vector3 from, Vector3 to) {
+        var heading = new Vector3(to.x - from.x, to.y - from.y, 0);
+        return heading.isZero(.001f) ? DEFAULT_HEADING : heading.nor();
     }
 
     /**
@@ -442,21 +468,21 @@ final class GpuArtilleryBlast {
         for (Piece piece : pieces) {
             landings.add(new Vector3(ground.x + piece.offsetX(), ground.y + piece.offsetY(), ground.z));
         }
-        emit(explosions, ground, size, pieces, landings, style, seconds, seed);
+        emit(explosions, ground, size, new Scatter(pieces, landings, DEFAULT_HEADING), style, seconds, seed);
     }
 
-    private void emit(GpuExplosionEffects explosions, Vector3 ground, float size, List<Piece> pieces,
-          List<Vector3> landings, Style style, float seconds, int seed) {
+    private void emit(GpuExplosionEffects explosions, Vector3 ground, float size, Scatter scatter, Style style,
+          float seconds, int seed) {
         if (seconds < 0 || seconds >= SECONDS) { return; }
         if (style == Style.MINES) {
-            minefield(explosions, ground, pieces, landings, seconds, seed);
+            minefield(explosions, ground, scatter, seconds, seed);
             return;
         }
         if (style == Style.CLUSTER) {
-            cluster(explosions, ground, pieces, landings, seconds, seed);
+            cluster(explosions, ground, scatter.pieces(), scatter.landings(), seconds, seed);
             return;
         }
-        debris(explosions, ground, size, pieces, landings, seconds, seed);
+        debris(explosions, ground, size, scatter.pieces(), scatter.landings(), seconds, seed);
         switch (style) {
             case CROWN -> crown(explosions, ground, size, seconds, seed);
             case MUSHROOM -> mushroom(explosions, ground, size, seconds, seed);
@@ -470,37 +496,43 @@ final class GpuArtilleryBlast {
     }
 
     /**
-     * A minefield round: a soft pop and a pale puff above the hex as the dispenser opens, no fireball, then its mines
-     * drift down into that hex alone, each settling with a small puff of dust and lying there as a small dark shape
-     * until the blast is over. The minefield marker shows the field after that, to the players who know of it.
+     * A minefield round: no blast, only the small charge that pushes the mines out of the back of the shell in the
+     * air above the hex, a brief pop and a thin puff that clears within a second. The mines leave one after another
+     * as the shell carries on, a short stream along its line of flight, then fan out and drift down into that hex
+     * alone, each settling with a small puff of dust and lying there as a small dark shape until the blast is over.
+     * The minefield marker shows the field after that, to the players who know of it.
      */
-    private void minefield(GpuExplosionEffects explosions, Vector3 ground, List<Piece> pieces, List<Vector3> landings,
-          float seconds, int seed) {
+    private void minefield(GpuExplosionEffects explosions, Vector3 ground, Scatter scatter, float seconds, int seed) {
         float hex = BoardGeometry.height();
-        burst.set(ground).add(0, 0, hex * DISPENSER_HEXES);
-        float popAge = seconds / .25f;
+        Vector3 heading = scatter.heading();
+        // The shell opens a little short of the hex's centre, so its stream of mines passes over the middle.
+        burst.set(ground).mulAdd(heading, -hex * DISPENSER_LEAD).add(0, 0, hex * DISPENSER_HEXES);
+        float popAge = seconds / .15f;
         if (popAge < 1) {
-            explosions.add(burst, hex * (.18f + .08f * popAge), popAge, .5f, fadeOut(popAge, .2f), seed + 1, PALE_SMOKE,
-                  Vector3.Zero);
-        }
-        float puffSeconds = seconds - .05f;
-        float puffAge = puffSeconds / 2.6f;
-        if (puffAge >= 0 && puffAge < 1) {
-            float swell = 1 - (float) Math.exp(-puffSeconds * 1.6f);
-            point.set(burst).add(0, 0, hex * .08f * puffAge);
-            explosions.downwind(point, puffSeconds);
-            explosions.add(point, hex * (.18f + .35f * swell), puffAge, 0, .6f * fadeOut(puffAge, .15f), seed + 2,
+            explosions.add(burst, hex * (.07f + .05f * popAge), popAge, .3f, .8f * fadeOut(popAge, .3f), seed + 1,
                   PALE_SMOKE, Vector3.Zero);
         }
+        float puffSeconds = seconds - .03f;
+        float puffAge = puffSeconds / 1.2f;
+        if (puffAge >= 0 && puffAge < 1) {
+            float swell = 1 - (float) Math.exp(-puffSeconds * 3);
+            point.set(burst).mulAdd(heading, hex * .1f * swell);
+            explosions.downwind(point, puffSeconds);
+            explosions.add(point, hex * (.07f + .12f * swell), puffAge, 0, .3f * fadeOut(puffAge, .1f), seed + 2,
+                  PALE_SMOKE, Vector3.Zero);
+        }
+        List<Piece> pieces = scatter.pieces();
         for (int index = 0; index < pieces.size(); index++) {
             Piece piece = pieces.get(index);
-            Vector3 landing = landings.get(index);
+            Vector3 landing = scatter.landings().get(index);
             float mineSize = hex * .028f;
             float travel = (seconds - piece.launch()) / piece.flight();
             if (travel > 0 && travel < 1) {
-                // Drifting down, slowing as it nears the ground, and pushed a little downwind on the way.
+                // Each mine leaves where the shell has got to by its release, so together they form a stream along
+                // the line of flight; then it falls, slowing as it nears the ground, pushed a little downwind.
+                point.set(burst).mulAdd(heading, hex * DISPENSER_SPEED * piece.launch());
                 float eased = 1 - (1 - travel) * (1 - travel);
-                point.set(burst).lerp(landing, eased);
+                point.lerp(landing, eased);
                 explosions.downwind(point, .25f * travel * (1 - travel));
                 explosions.add(point, mineSize, .5f, 0, 1, seed + index * 41, MINE, Vector3.Zero);
             } else if (travel >= 1) {

@@ -90,8 +90,9 @@ class GpuArtilleryBlastSmokeTest {
                                     ImageIO.write(image, "png", new File(System.getProperty("megamek.gpu.screenshots"),
                                           "artillery-ignition-" + style + ".png"));
                                     long drawn = different(image, empty);
-                                    // A minefield round's dispenser opens quietly, smaller than any fiery blast.
-                                    assertTrue(drawn > 250, style + " must draw at ignition, changed pixels " + drawn);
+                                    // A minefield round only pops its mines out, far smaller than any fiery blast.
+                                    long minimum = style == GpuArtilleryBlast.Style.MINES ? 40 : 500;
+                                    assertTrue(drawn > minimum, style + " must draw at ignition, changed pixels " + drawn);
                                     var repeated = frame(buffer, batch, ground, camera, volumes,
                                           () -> blast.emit(volumes, Vector3.Zero, size, hexRadius, style, seconds, 41));
                                     assertTrue(Arrays.equals(pixels(image), pixels(repeated)),
