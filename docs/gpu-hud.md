@@ -262,10 +262,9 @@ the held nameplate key, the log's open state and the playback history. It is pre
    (board labels, target cards, popovers, the Tuning panel) take presses on their widgets only. While a dialog is
    pending, the scrim takes every press.
 2. A press on the board calls `GpuHud.boardPress()`, which ends a keyboard focus and closes the context menu. Right
-   drags pan and middle drags orbit; Shift held at the press swaps the two. In the Tactical View, which holds its
-   angle, both pan. A drag starts past 6 pixels times the layout scale. A left drag moves nothing and cancels its
+   drags pan and middle drags orbit; Shift held at the press swaps the two. A drag starts past 6 pixels times the layout scale. A left drag moves nothing and cancels its
    click. A middle drag on the minimap's map orbits the camera as well, by the same `GpuBattleView.ORBIT_DEGREES` per
-   unit (in the Tactical View it centres the camera as a left one does). An orbit (in free flight a look) hides the
+   unit. An orbit (in free flight a look) hides the
    cursor and holds it in place (`UiCursorCapture`), so the screen's edge
    never stops it: the board's from the drag's start, so a click keeps the cursor, the minimap's from the press. The
    cursor reappears where it was held on release, focus loss, a modal dialog or a new board. A pan keeps the visible
@@ -408,7 +407,7 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 | `GpuConditionsCard` | beside the left column | the planetary conditions overlay's lines while its View preference is on | its close button runs that View item |
 | `GpuUtilityBar` | top right | "Tactical view", "Wireframe" (an open grid icon: three lines each way, no border), "Map", "Log" (amber count of the round's reviewable events the board has presented), "Help", "Menu"; the Tactical View chip and north mark | the camera's Tactical View, the tuning model's wireframe view (without the cosmetic scatter), View > minimap, the HUD's toggles |
 | `GpuInitiativeCard` | centre, initiative phase | each side's reported roll, "Wins", "Moves first", the turn order in pages of eight (double blind hides the order and "Moves first") | none |
-| `GpuMinimap` | under the utilities | the board in its tileset colours, units at their animated positions, the planned route, the camera's ground area; its close button straight on the panel's corner | a left press or drag centres the camera, a middle drag orbits it (in the Tactical View it centres too) and the wheel zooms it as on the board, about the view's centre; no order changes |
+| `GpuMinimap` | under the utilities | the board in its tileset colours, units at their animated positions, the planned route, the camera's ground area; its close button straight on the panel's corner | a left press or drag centres the camera, a middle drag orbits it and the wheel zooms it as on the board, about the view's centre; no order changes |
 | `GpuTacticalOverlays` | Tactical View only: top right, left of the right column's top panel (the minimap, else the contacts, weapons or log panel that moves up in its place), level with its top; at the right edge when the right column is empty | "OVERLAYS" and a chevron; one column of twelve checkboxes in four groups, each with a tooltip: Units (Status badges, Links), Combat (Envelope, Rear arcs, LOS shading, Sensor ranges), ECM (Fields, Jamming), Map (Coordinates, Type, Level shading, Distance rings). Collapsed: the header only, same place and width. The layout shows it collapsed for the frame while the window is too short for its rows or the solution or initiative card beside the right column needs the room | a row runs its View-menu item (Unit Links, Movement Envelope, FOV darken, Sensor Range, Hex Coordinates, Hex Types, FOV highlight) or toggles its client setting on Swing (`TacticalStatusBadges`, `TacticalRearArcs`, `BoardEcmTacticalFields`, `BoardEcmTacticalHatch`, `TacticalLevelShading`); the header and H toggle `TacticalOverlaysOpen` |
 | `GpuContactsPanel` | right column | enemy units; with the movement fire preview, where the unit fires from, each enemy's best salvo both ways and the guide toggles | selection rule, unit menu |
 | `GpuWeaponsPanel` | right column, local weapon declaration | target pills with wrapping names, one row per weapon with its roll and slots (an assigned slot in its target's colour); a fixed footer holds HEAT IF FIRED and ALPHA STRIKE, which assigns or retargets all available weapons to the focused target; only the weapon list scrolls, and the minimap shrinks in short windows to leave a complete weapon row visible; no assign line while a weapon is armed, which its row shows selected; on another player's turn the focus unit's draft, read-only. Declaring never ends the turn by default: MegaMek's auto-end firing (`GUIPreferences.AUTO_END_FIRING`, now stored as `AutoEndFiringAfterLastWeapon` so that the old `AutoEndFiring` value is ignored) defaults to off, so FIRE WEAPONS sends the attacks | fire orders |
@@ -560,7 +559,7 @@ handler runs.
 
 ## 5. The Tactical View
 
-The Tactical View is the board seen straight down, north up, with a locked camera. The scene, picking and animation
+The Tactical View is the board seen straight down. The scene, picking and animation
 timeline stay the 3D view's own; every unit is its meeple on a base. The terrain is the 3D Graphics setting's (Classic
 the tileset columns, Enhanced the shaded 3D terrain), without the fluff that has no gameplay value.
 
@@ -593,11 +592,8 @@ the tileset columns, Enhanced the shaded 3D terrain), without the fluff that has
     overlay on the mock-up battle with the game's View menu; `tactical-overlays-*.png`); `GpuElectronicWarfareSmokeTest`
     (Fields and Jamming).
 - **Camera.** `BoardCamera.setTactical(enabled, scene)` saves the full 3D pose (focus, zoom, azimuth, tilt, whether
-  the view fits the window) and turns the same orthographic camera straight down, north up. Pan, zoom, reset, fit
-  and automatic framing work as usual; framing keeps the top view. Orbit, tilt and the turn keys are ignored: one
-  lock, `BoardCamera.rotationLocked()`, stops `orbit`, `tilt`, `rotateStep` and `setIsometric(true)`, so the held
-  keys, the mouse and minimap orbits and the Isometric preset turn nothing. A middle drag pans the board there and
-  centres the camera on the minimap; the Isometric button is disabled and the hint line names no orbit. Zoom has the
+  the view fits the window) and turns the same orthographic camera straight down. Pan, zoom, reset, fit
+  and automatic framing work as usual; framing keeps the top view. Zoom has the
   3D view's limits.
   Leaving restores the saved pose exactly; after a board change it fits the new board from the saved angle. The flag
   is render-thread state and is never saved.

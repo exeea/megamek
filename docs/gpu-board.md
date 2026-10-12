@@ -227,8 +227,7 @@ review captures), `GpuTilesetTerrainTest` (column geometry), `BoardRimTest.class
 
 ## Tactical View
 
-The HUD's Tactical view utility and the Toggle Tactical View key (T) switch the camera to the Tactical View, a
-north-up top view that does not orbit, tilt or turn, and back ([HUD](gpu-hud.md#5-the-tactical-view)). The terrain
+The HUD's Tactical view utility and the Toggle Tactical View key (T) switch the camera to the Tactical View, a top view, and back ([HUD](gpu-hud.md#5-the-tactical-view)). The terrain
 does not follow the view: the 3D Graphics setting chooses it, and T never rebuilds it. Every unit is its meeple on a
 `GpuUnitBases` base (side ring, facing and twist notches, status badges, wreck cross), the ground layer of `GpuHexGrid`
 marks cliffs (including Cliff Top exits, by `BoardRim.high`), 1- and 2-level steps, woods, roofs with their CF, water
