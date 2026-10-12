@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.Set;
 
 import com.badlogic.gdx.math.Vector3;
@@ -139,6 +141,39 @@ class GpuArtilleryBlastTest {
             assertEquals(0, piece.ring());
             assertTrue(Math.hypot(piece.offsetX(), piece.offsetY()) < BoardGeometry.height() / 2);
         }
+    }
+
+    /**
+     * A Long Tom landing on flat ground marks all 18 hexes of its two rings, each mark on the ground in its own ring.
+     * The landscape reports squared distances, as the board's does; reading them as plain distances buried every mark.
+     */
+    @Test
+    void ringMarksLandOnTheGroundInEveryDamagedHex() {
+        EquipmentType.initializeTypes();
+        var profile = shot(true, "M_STANDARD");
+        var attack = GroundDamagePlaybackTest.shot("ISLongTom", true, profile);
+        var targetHex = attack.event.destination().coords();
+        var crater = BoardGeometry.center(targetHex, 0);
+        var blasts = new GpuArtilleryBlast();
+        blasts.detonate(crater, profile, attack, 5);
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        blasts.groundMarks(marks::add);
+        assertEquals(0, marks.size(), "Nothing has landed at contact");
+        blasts.advance(GpuArtilleryBlast.SECONDS - .1f);
+        blasts.groundMarks(marks::add);
+        assertEquals(18, marks.size(), "Every hex of both rings is marked");
+        Set<Vector3> spots = new HashSet<>();
+        float hex = BoardGeometry.height();
+        for (var mark : marks) {
+            assertEquals(0, mark.point().z, .01f, "The mark lies on the ground: " + mark.point());
+            float rings = mark.point().dst(crater) / hex;
+            assertTrue(rings > .5f && rings < 2.5f, "The mark lies in a damaged ring: " + rings);
+            assertTrue(mark.shot().damagePerHit() == 15 || mark.shot().damagePerHit() == 5, "Sized for its ring");
+            spots.add(mark.point());
+        }
+        assertEquals(18, spots.size(), "No two marks share a spot");
+        blasts.groundMarks(marks::add);
+        assertEquals(18, marks.size(), "Each mark is handed over once");
     }
 
     private static int radius(String weapon, ResolvedAttack.Shot profile) {

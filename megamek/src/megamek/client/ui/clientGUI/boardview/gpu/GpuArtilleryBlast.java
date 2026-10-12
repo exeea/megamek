@@ -478,7 +478,8 @@ final class GpuArtilleryBlast {
         float drop = BoardGeometry.height() * 8;
         var ray = new Ray(new Vector3(x, y, near + drop / 2), new Vector3(0, 0, -1));
         BoardGeometry.Hit hit = attack.landscape.apply(ray);
-        return hit == null ? null : ray.getEndPoint(new Vector3(), hit.distance());
+        // A hit's distance is squared, as every landscape query reports it.
+        return hit == null ? null : ray.getEndPoint(new Vector3(), (float) Math.sqrt(hit.distance()));
     }
 
     /** The first instant: a hot, low core that flashes and swells before the shape of the blast takes over. */
