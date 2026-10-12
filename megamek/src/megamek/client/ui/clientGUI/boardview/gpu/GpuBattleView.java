@@ -107,6 +107,10 @@ class GpuBattleView extends ApplicationAdapter {
     private final BoardSurface.Cache groundSurfaces = new BoardSurface.Cache();
     private final Map<Integer, UnitMotion> motions = playback.motions;
     private final GpuAttackEffects attackEffects = new GpuAttackEffects();
+    /** A frame slower than this is logged with what it drew, so a playtest log shows what a stutter came from. */
+    private static final long SLOW_FRAME_MILLIS = 40;
+    private List<BoardScene.Tile> lastFrameTiles;
+    private boolean tilesChangedThisFrame;
     private final GpuTerrainEffects terrainEffects = new GpuTerrainEffects();
     private final GpuEffectDepth effectDepth = new GpuEffectDepth();
     private final GpuWaterImpacts waterImpacts = new GpuWaterImpacts();
@@ -439,10 +443,24 @@ class GpuBattleView extends ApplicationAdapter {
             return;
         }
         try (TerrainSettings.Scope settings = TerrainSettings.use(terrain == null ? null : terrain.settings())) {
+            long start = System.nanoTime();
             renderFrame(settings);
+            logSlowFrame((System.nanoTime() - start) / 1_000_000);
         } catch (RuntimeException failure) {
             if (!reloadingAssets) { throw failure; }
             assetReloadFailed(failure);
+        }
+    }
+
+    /**
+     * Logs a frame slower than {@link #SLOW_FRAME_MILLIS} with what it drew: the artillery blasts and their volumes, and
+     * whether the terrain changed, so a playtest's stutter can be traced to its cause from the log alone.
+     */
+    private void logSlowFrame(long millis) {
+        if (millis > SLOW_FRAME_MILLIS) {
+            LOGGER.debug("[GpuFrame] {} ms: {} artillery blasts, {} blast volumes, terrain {}", millis,
+                  attackEffects.artilleryBlastCount(), attackEffects.explosionCount(),
+                  tilesChangedThisFrame ? "changed" : "unchanged");
         }
     }
 
@@ -616,6 +634,8 @@ class GpuBattleView extends ApplicationAdapter {
         }
         if (boardPrint != null && boardPrint.update()) { boardPrint = null; }
         scene = terrain.presentation(scene);
+        tilesChangedThisFrame = scene.tiles() != lastFrameTiles;
+        lastFrameTiles = scene.tiles();
         boolean changedTiles = previousTiles != scene.tiles();
         if (changedTiles || cameraTerrainRevision != BoardGeometry.revision()) {
             boardCamera.terrainChanged(scene);

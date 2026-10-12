@@ -330,6 +330,7 @@ final class GpuAttackEffects implements Disposable {
               emitted[index] == null ? 1 : emitted[index].progress());
     }
     int explosionCount() { return explosions.size(); }
+    int artilleryBlastCount() { return artilleryBlasts.size(); }
 
     /** Ages the artillery blasts, which outlive the attacks that landed them, by the frame's real time. */
     void advance(float seconds) { artilleryBlasts.advance(seconds); }

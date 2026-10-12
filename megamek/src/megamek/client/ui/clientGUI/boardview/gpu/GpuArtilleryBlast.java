@@ -750,8 +750,9 @@ final class GpuArtilleryBlast {
             Vector3 landing = scatter.landings().get(index);
             // The fuel reaches the outer rings a moment after the inner ones.
             float spread = MathUtils.clamp((seconds - piece.ring() * .04f) / FUEL_AIR_IGNITION_SECONDS, 0, 1);
-            // The fuel burns away the instant it lights.
-            float hazeFade = seconds < FUEL_AIR_IGNITION_SECONDS ? 1 : 1 - (seconds - FUEL_AIR_IGNITION_SECONDS) / .04f;
+            // The fuel thins as it is about to light and is gone when the sheet of fire appears, so the two never
+            // overlap: drawing both at once was the blast's costliest moment.
+            float hazeFade = MathUtils.clamp((FUEL_AIR_IGNITION_SECONDS - seconds) / .08f, 0, 1);
             if (spread > 0 && hazeFade > 0) {
                 // Wide enough that neighbouring hexes' haze merges into one low, pale cloud.
                 point.set(landing).add(0, 0, hex * .1f);

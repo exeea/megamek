@@ -96,6 +96,7 @@ class GpuFuelAirSmokeTest {
                                     seconds, 41)), "png", new File(frames, String.format("frame-%03d.png", index)));
                     }
                     budget(buffer, batch, ground, camera, volumes, blast, size, hex);
+                    fullScreen(batch, ground, volumes, blast, size, hex);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
@@ -138,6 +139,51 @@ class GpuFuelAirSmokeTest {
         System.out.println("[FuelAir] three rounds at once: at most " + most + " of " + GpuExplosionEffects.CAPACITY
               + " volumes, slowest frame " + slowest / 1_000_000 + " ms at " + SIZE + " px");
         assertTrue(most < GpuExplosionEffects.CAPACITY, "Three fuel-air rounds fit the volume budget: " + most);
+    }
+
+    /**
+     * One fuel-air round of the largest radius (R3) drawn at full HD from the usual board distance: how long each
+     * moment takes to draw, to find whether its size on screen is what stutters.
+     */
+    private static void fullScreen(ModelBatch batch, ModelInstance ground, GpuExplosionEffects volumes,
+          GpuArtilleryBlast blast, float size, float hex) {
+        int width = 1920, height = 1080;
+        FrameBuffer large = GpuAtmosphere.buffer(width, height, true);
+        try {
+            var camera = new PerspectiveCamera(40, width, height);
+            camera.position.set(0, -hex * 7, hex * 3.2f);
+            camera.up.set(Vector3.Z);
+            camera.lookAt(0, 0, hex * .7f);
+            camera.near = 1;
+            camera.far = hex * 60;
+            camera.update();
+            StringBuilder timings = new StringBuilder();
+            for (float seconds = 0; seconds < GpuArtilleryBlast.SECONDS; seconds += .25f) {
+                float moment = seconds;
+                long best = Long.MAX_VALUE;
+                int drawn = 0;
+                for (int repeat = 0; repeat < 3; repeat++) {
+                    large.begin();
+                    ScreenUtils.clear(new Color(.62f, .66f, .72f, 1), true);
+                    batch.begin(camera);
+                    batch.render(ground);
+                    batch.end();
+                    volumes.begin();
+                    blast.emit(volumes, Vector3.Zero, size, 3, GpuArtilleryBlast.Style.FUEL_AIR, moment, 41);
+                    drawn = volumes.size();
+                    Gdx.gl.glFinish();
+                    long start = System.nanoTime();
+                    volumes.render(camera);
+                    Gdx.gl.glFinish();
+                    best = Math.min(best, System.nanoTime() - start);
+                    large.end();
+                }
+                timings.append(String.format(" %.2fs:%dv/%.1fms", moment, drawn, best / 1e6));
+            }
+            System.out.println("[FuelAir] R3 at 1920x1080:" + timings);
+        } finally {
+            large.dispose();
+        }
     }
 
     private static BufferedImage frame(FrameBuffer buffer, ModelBatch batch, ModelInstance ground,
