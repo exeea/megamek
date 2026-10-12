@@ -419,6 +419,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String NAG_FOR_MECHANICAL_FALL_DAMAGE = "NagForMechanicalFallDamage";
     public static final String NAG_FOR_DOOMED = "NagForDoomed";
     public static final String NAG_FOR_DOOMED_MOVE = "NagForDoomedMove";
+    public static final String NAG_FOR_NO_ARTILLERY_DESIGNATION = "NagForNoArtilleryDesignation";
     public static final String NAG_FOR_AUTO_EJECT = "NagForAutoEject";
     public static final String NAG_FOR_DISHONOR = "NagForDishonor";
     public static final String NAG_FOR_WIGE_LANDING = "NagForWiGELanding";
@@ -981,6 +982,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
         store.setDefault(NAG_FOR_CRUSHING_BUILDINGS, true);
         store.setDefault(NAG_FOR_DOOMED_MOVE, true);
+        store.setDefault(NAG_FOR_NO_ARTILLERY_DESIGNATION, true);
         store.setDefault(NAG_FOR_AUTO_EJECT, true);
         store.setDefault(NAG_FOR_MASC, true);
         store.setDefault(NAG_FOR_NO_ACTION, true);
@@ -1742,6 +1744,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setNagForDoomedMove(boolean shouldNag) {
         store.setValue(NAG_FOR_DOOMED_MOVE, shouldNag);
+    }
+
+    /** @return whether to confirm ending the artillery designation phase with no hexes designated */
+    public boolean getNagForNoArtilleryDesignation() {
+        return store.getBoolean(NAG_FOR_NO_ARTILLERY_DESIGNATION);
+    }
+
+    public void setNagForNoArtilleryDesignation(boolean shouldNag) {
+        store.setValue(NAG_FOR_NO_ARTILLERY_DESIGNATION, shouldNag);
     }
 
     public boolean getNagForAutoEject() {

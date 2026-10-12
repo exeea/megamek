@@ -337,20 +337,21 @@ public class SelectArtyAutoHitHexDisplay extends StatusBarPhaseDisplay {
 
     /**
      * Done ends the phase for good, and a hex that was not designated now cannot be later. When the player designated
-     * none of the hexes they may, asks first, as the other phases ask before a turn with no action (the same "nag for
-     * no action" preference turns both off). A turn timer that ran out ends the phase without asking.
+     * none of the hexes they may, asks first. It has its own preference, apart from the routine "no action this turn"
+     * questions, as it comes once a game and cannot be undone. A turn timer that ran out ends the phase without
+     * asking.
      *
      * @return {@code true} to end the phase
      */
     private boolean confirmNoHexesDesignated() {
         boolean designatedNone = plannedAutoHits.isEmpty() && (allowedNumberOfHexes > 0);
-        if (!designatedNone || !GUIP.getNagForNoAction() || isTimerExpired()) {
+        if (!designatedNone || !GUIP.getNagForNoArtilleryDesignation() || isTimerExpired()) {
             return true;
         }
         boolean confirmed = NagDialogs.confirm(clientgui,
               Messages.getString("SelectArtyAutoHitHexDisplay.NoHexesDesignated.title"),
               Messages.getString("SelectArtyAutoHitHexDisplay.NoHexesDesignated.message", allowedNumberOfHexes),
-              () -> GUIP.setNagForNoAction(false));
+              () -> GUIP.setNagForNoArtilleryDesignation(false));
         LOGGER.debug("[ArtyAutoHit] {} hexes allowed, none designated: player {} ending the phase",
               allowedNumberOfHexes, confirmed ? "confirmed" : "cancelled");
         return confirmed;

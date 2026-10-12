@@ -198,6 +198,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
           "CommonSettingsDialog.nagForDoomedDeployment"));
     private final JCheckBox nagForDoomedMove = new JCheckBox(Messages.getString(
           "CommonSettingsDialog.nagForDoomedMove"));
+    private final JCheckBox nagForNoArtilleryDesignation = new JCheckBox(Messages.getString(
+          "CommonSettingsDialog.nagForNoArtilleryDesignation"));
     private final JCheckBox nagForAutoEject = new JCheckBox(Messages.getString(
           "CommonSettingsDialog.nagForAutoEject"));
     private final JCheckBox animateMove = new JCheckBox(Messages.getString("CommonSettingsDialog.animateMove"));
@@ -1155,13 +1157,15 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             Messages.getString("CommonSettingsDialog.nagForDoomedDeployment.tooltip"));
         configureCheckBox(nagForDoomedMove,
             Messages.getString("CommonSettingsDialog.nagForDoomedMove.tooltip"));
+        configureCheckBox(nagForNoArtilleryDesignation,
+            Messages.getString("CommonSettingsDialog.nagForNoArtilleryDesignation.tooltip"));
         configureCheckBox(nagForAutoEject,
             Messages.getString("CommonSettingsDialog.nagForAutoEject.tooltip"));
         comps.add(List.of(createGameBoardOptionGrid("CommonSettingsGameBoardConfirmationsGrid",
               nagForNoAction, nagForPSR, nagForMASC, nagForSprint,
               nagForCrushingBuildings, nagForMechanicalJumpFallDamage, nagForWiGELanding,
               nagForNoUnJamRAC, nagForLaunchDoors, nagForOverheat, nagForDishonor, nagForOddSizedBoard,
-              nagForDoomedDeployment, nagForDoomedMove, nagForAutoEject)));
+              nagForDoomedDeployment, nagForDoomedMove, nagForAutoEject, nagForNoArtilleryDesignation)));
 
         addLineSpacer(comps);
 
@@ -2803,6 +2807,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             nagForOddSizedBoard.setSelected(GUIP.getNagForOddSizedBoard());
             nagForDoomedDeployment.setSelected(GUIP.getNagForDoomed());
             nagForDoomedMove.setSelected(GUIP.getNagForDoomedMove());
+            nagForNoArtilleryDesignation.setSelected(GUIP.getNagForNoArtilleryDesignation());
             nagForAutoEject.setSelected(GUIP.getNagForAutoEject());
             animateMove.setSelected(GUIP.getShowMoveStep());
             showWrecks.setSelected(GUIP.getShowWrecks());
@@ -3246,6 +3251,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         GUIP.setNagForOddSizedBoard(nagForOddSizedBoard.isSelected());
         GUIP.setNagForDoomed(nagForDoomedDeployment.isSelected());
         GUIP.setNagForDoomedMove(nagForDoomedMove.isSelected());
+        GUIP.setNagForNoArtilleryDesignation(nagForNoArtilleryDesignation.isSelected());
         GUIP.setNagForAutoEject(nagForAutoEject.isSelected());
         GUIP.setShowMoveStep(animateMove.isSelected());
         GUIP.setShowWrecks(showWrecks.isSelected());

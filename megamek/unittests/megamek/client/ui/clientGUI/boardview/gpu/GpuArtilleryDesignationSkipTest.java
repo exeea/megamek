@@ -36,13 +36,13 @@ import org.junit.jupiter.api.Timeout;
 import org.mockito.MockedStatic;
 
 /**
- * Done in the phase that designates artillery auto-hit hexes ends it for good, so with none designated it asks first,
- * as the other phases ask before a turn with no action; the same "nag for no action" preference turns it off.
+ * Done in the phase that designates artillery auto-hit hexes ends it for good, so with none designated it asks first.
+ * Its own preference turns it off, apart from the routine "no action this turn" questions.
  */
 @Timeout(120)
 class GpuArtilleryDesignationSkipTest {
     private static File originalDataDir;
-    private final boolean originalNag = GUIPreferences.getInstance().getNagForNoAction();
+    private final boolean originalNag = GUIPreferences.getInstance().getNagForNoArtilleryDesignation();
     private GpuBoardFixture board;
     private ClientGUI gui;
     private Client client;
@@ -74,7 +74,7 @@ class GpuArtilleryDesignationSkipTest {
         when(gui.getMenuBar()).thenReturn(menu);
         when(gui.boardStates()).thenReturn(List.of());
         gui.controller = mock(MegaMekController.class);
-        GUIPreferences.getInstance().setNagForNoAction(true);
+        GUIPreferences.getInstance().setNagForNoArtilleryDesignation(true);
         display = onSwing(() -> {
             board.game.setPhase(GamePhase.SET_ARTILLERY_AUTO_HIT_HEXES);
             SelectArtyAutoHitHexDisplay created;
@@ -90,7 +90,7 @@ class GpuArtilleryDesignationSkipTest {
 
     @AfterEach
     void restore() throws Exception {
-        GUIPreferences.getInstance().setNagForNoAction(originalNag);
+        GUIPreferences.getInstance().setNagForNoArtilleryDesignation(originalNag);
         board.close();
     }
 
@@ -115,9 +115,30 @@ class GpuArtilleryDesignationSkipTest {
         verify(client, times(1)).sendArtyAutoHitHexes(any());
     }
 
+    /**
+     * The routine "no action this turn" question being off does not silence this one: it has its own preference, as
+     * it comes once a game and cannot be undone (a player with that question off skipped the phase unasked).
+     */
+    @Test
+    void itAsksEvenWithTheNoActionQuestionTurnedOff() throws Exception {
+        boolean noActionNag = GUIPreferences.getInstance().getNagForNoAction();
+        GUIPreferences.getInstance().setNagForNoAction(false);
+        try {
+            when(gui.askYesNo(anyString(), anyString(), any())).thenReturn(JOptionPane.NO_OPTION);
+            onSwing(() -> {
+                display.ready();
+                return null;
+            });
+            verify(gui, times(1)).askYesNo(anyString(), anyString(), any());
+            verify(client, never()).sendArtyAutoHitHexes(any());
+        } finally {
+            GUIPreferences.getInstance().setNagForNoAction(noActionNag);
+        }
+    }
+
     @Test
     void withTheNagTurnedOffDoneEndsThePhaseWithoutAsking() throws Exception {
-        GUIPreferences.getInstance().setNagForNoAction(false);
+        GUIPreferences.getInstance().setNagForNoArtilleryDesignation(false);
         onSwing(() -> {
             display.ready();
             return null;
