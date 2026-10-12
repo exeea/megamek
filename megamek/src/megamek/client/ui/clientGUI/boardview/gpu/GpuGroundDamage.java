@@ -42,6 +42,13 @@ final class GpuGroundDamage implements Disposable {
     static final int TILE_INTERIOR = TILE_SIZE - 2 * TILE_BORDER;
     static final float TILE_METRES = 8;
     static final int STAMPS_PER_FRAME = 8;
+    /**
+     * Texels the marks one frame paints may cover, at least one mark's worth: a few craters fit in a frame, while a
+     * fuel-air round's charring of every hex in its radius is spread over many frames instead of stalling one.
+     */
+    static final int STAMP_TEXELS_PER_FRAME = 120_000;
+    /** A frame whose mark painting takes longer than this is logged. */
+    private static final long SLOW_STAMPING_MILLIS = 20;
     private static final int MAX_PENDING_STAMPS = 256;
     private static final int MAX_EVENTS = UnitPlayback.MAX_PENDING_EVENTS * 2;
     private static final int MAX_MARKS_PER_EVENT = 64;
@@ -60,8 +67,11 @@ final class GpuGroundDamage implements Disposable {
     }
 
     /** Miss endpoints and contact times are supplied by the existing attack effects, never rolled here. */
-    /** A fuel-air round's charring covers nearly all of each 30 m hex in its radius. */
-    static final float FUEL_AIR_CHAR_METRES = 13;
+    /**
+     * A fuel-air round's charring of each 30 m hex in its radius: its soft edge reaches most of the hex. Kept to 9 m,
+     * as one mark is painted in one frame and a 13 m mark took about 45 ms.
+     */
+    static final float FUEL_AIR_CHAR_METRES = 9;
     /** The ring damage at which fuel-air charring is darkest: a Sniper's or an Arrow IV's target hex. */
     static final float FUEL_AIR_DARKEST_DAMAGE = 20;
 
@@ -478,10 +488,26 @@ final class GpuGroundDamage implements Disposable {
     void upload() {
         // Large salvos/instant playback must not rasterize every scar in one render frame. Retain newest arrivals
         // on overload; only compact stamp data waits here, never the attack's unit/model snapshots.
+        long start = System.nanoTime();
+        int budget = STAMP_TEXELS_PER_FRAME;
+        int stamped = 0;
+        int painted = 0;
         for (int count = 0; count < STAMPS_PER_FRAME && !pending.isEmpty(); count++) {
+            int texels = texels(pending.peekFirst());
+            if ((stamped > 0) && (texels > budget)) {
+                break;
+            }
+            budget -= texels;
+            painted += texels;
             var mark = pending.removeFirst();
             stamp(mark);
             marks++;
+            stamped++;
+        }
+        long millis = (System.nanoTime() - start) / 1_000_000;
+        if (millis > SLOW_STAMPING_MILLIS) {
+            LOGGER.debug("[GroundDamage] painted {} marks ({} texels) in {} ms, {} waiting", stamped, painted, millis,
+                  pending.size());
         }
         if (directory.isEmpty() || !directoryDirty && dirty.isEmpty()) { return; }
         int required = directory.size() + tiles.size();
@@ -502,6 +528,12 @@ final class GpuGroundDamage implements Disposable {
         }
         directoryDirty = false;
         dirty.clear();
+    }
+
+    /** About how many texels a mark paints: the square it spans at the scars' resolution. */
+    private int texels(Stamp mark) {
+        float side = 2 * mark.radius() * TILE_INTERIOR / Math.max(tileWorldSize, 1e-6f);
+        return (int) Math.min(Integer.MAX_VALUE, side * side);
     }
 
     private static void uploadTile(int layer, int level, Pixmap pixels) {
