@@ -71,6 +71,8 @@ final class GpuArtilleryBlast {
     private static final float AIR_BURST_HEXES = 1.3f;
     /** A cluster round's damage that one bomblet stands for: a 20-damage hex gets five, a 5-damage hex two. */
     private static final float DAMAGE_PER_BOMBLET = 4;
+    /** Bomblets drawn for each one the damage alone calls for. */
+    private static final float BOMBLET_DENSITY = 1.5f;
     /** The cluster round the shader preview shows: a Long Tom's, 20/10 over one ring. */
     static final AreaEffect PREVIEW_CLUSTER = new AreaEffect(1, 20, 10, true);
 
@@ -272,10 +274,13 @@ final class GpuArtilleryBlast {
         Vector3 centre = BoardGeometry.center(LAYOUT_HEX, 0);
         for (int ring = 0; ring <= area.hexRadius(); ring++) {
             List<Coords> hexes = ring == 0 ? List.of(LAYOUT_HEX) : LAYOUT_HEX.allAtDistance(ring);
-            int perHex = bombletsPerHex(area.ringDamage(ring));
-            for (Coords coords : hexes) {
-                Vector3 hexCentre = BoardGeometry.center(coords, 0);
-                for (int bomblet = 0; bomblet < perHex; bomblet++) {
+            // The ring's whole share, spread as evenly as whole bomblets allow: a share of 4.5 per hex gives three
+            // hexes five and three hexes four, rather than rounding every hex the same way.
+            int ringTotal = Math.round(bombletsPerHex(area.ringDamage(ring)) * hexes.size());
+            for (int hexIndex = 0; hexIndex < hexes.size(); hexIndex++) {
+                Vector3 hexCentre = BoardGeometry.center(hexes.get(hexIndex), 0);
+                int inHex = ringTotal / hexes.size() + (hexIndex < ringTotal % hexes.size() ? 1 : 0);
+                for (int bomblet = 0; bomblet < inHex; bomblet++) {
                     int piece = pieces.size();
                     if (piece == MAX_DEBRIS) { return pieces; }
                     float bearing = random(seed, piece + 400) * MathUtils.PI2;
@@ -292,9 +297,12 @@ final class GpuArtilleryBlast {
         return pieces;
     }
 
-    /** Bomblets for a hex taking {@code damage}: one for about every four points, at least two and at most five. */
-    static int bombletsPerHex(int damage) {
-        return MathUtils.clamp(Math.round(damage / DAMAGE_PER_BOMBLET), 2, 5);
+    /**
+     * Bomblets for a hex taking {@code damage}, on average: one for about every four points, at least two and at most
+     * five, then half as many again ({@link #BOMBLET_DENSITY}) so the area reads as densely covered.
+     */
+    static float bombletsPerHex(int damage) {
+        return MathUtils.clamp(Math.round(damage / DAMAGE_PER_BOMBLET), 2, 5) * BOMBLET_DENSITY;
     }
 
     /** Whether the shot is a cluster round, which scatters bomblets and leaves no single crater. */

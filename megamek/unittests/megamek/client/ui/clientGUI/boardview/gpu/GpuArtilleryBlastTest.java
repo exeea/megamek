@@ -193,7 +193,7 @@ class GpuArtilleryBlastTest {
         assertFalse(GpuArtilleryBlast.scattersBomblets("ISLongTom", shot(true, "M_STANDARD")));
     }
 
-    /** A Long Tom cluster round scatters five bomblets in its target hex and three in each of the six around it. */
+    /** A Long Tom cluster round scatters eight bomblets in its target hex and 27 over the six around it. */
     @Test
     void bombletsCoverTheTargetHexAndItsRingMoreDenselyWhereDamageIsHigher() {
         EquipmentType.initializeTypes();
@@ -201,8 +201,8 @@ class GpuArtilleryBlastTest {
         var bomblets = GpuArtilleryBlast.bomblets(area, 41);
         long inTargetHex = bomblets.stream().filter(bomblet -> bomblet.ring() == 0).count();
         long inRing = bomblets.stream().filter(bomblet -> bomblet.ring() == 1).count();
-        assertEquals(5, inTargetHex);
-        assertEquals(18, inRing);
+        assertEquals(8, inTargetHex);
+        assertEquals(27, inRing, "4.5 a hex: three ring hexes get five and three get four");
         var landings = bomblets.stream().map(GpuArtilleryBlast.Piece::landing).sorted().toList();
         assertTrue(landings.getLast() - landings.getFirst() > .3f, "The pops ripple rather than going off together");
     }
@@ -222,7 +222,7 @@ class GpuArtilleryBlastTest {
         blasts.advance(GpuArtilleryBlast.SECONDS - .1f);
         var marks = new ArrayList<GpuGroundDamage.Impact>();
         blasts.groundMarks(marks::add);
-        assertEquals(23, marks.size(), "Every bomblet marks the ground, the target hex's five included");
+        assertEquals(35, marks.size(), "Every bomblet marks the ground, the target hex's eight included");
         for (var mark : marks) {
             assertTrue(mark.shot().damagePerHit() <= 4, "Each mark is one bomblet's share: " + mark.shot().damagePerHit());
         }
