@@ -107,6 +107,7 @@ class GpuArtilleryBlastSmokeTest {
                     File output = new File(System.getProperty("megamek.gpu.screenshots"), "artillery-blast-review.png");
                     assertTrue(output.getParentFile().isDirectory() || output.getParentFile().mkdirs());
                     ImageIO.write(sheet, "png", output);
+                    reviewCluster(buffer, batch, ground, volumes, blast, size, output.getParentFile());
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally {
@@ -119,6 +120,44 @@ class GpuArtilleryBlastSmokeTest {
             }
         }, GpuBoardWindow.configuration(false));
         if (failure.get() != null) { throw new AssertionError("Artillery blast review failed", failure.get()); }
+    }
+
+    /**
+     * A close-up of a Long Tom cluster round from its air burst to its haze, at an angle and from straight above, so
+     * the spread of the pops over the target hex and its ring can be judged.
+     */
+    private static void reviewCluster(FrameBuffer buffer, ModelBatch batch, ModelInstance ground,
+          GpuExplosionEffects volumes, GpuArtilleryBlast blast, float size, File folder) throws java.io.IOException {
+        float[] moments = { .05f, .2f, .4f, .6f, .8f, 1.1f, 1.6f, 2.6f };
+        float hex = BoardGeometry.height();
+        var oblique = new PerspectiveCamera(40, SIZE, SIZE);
+        oblique.position.set(0, -hex * 4.2f, hex * 2.2f);
+        oblique.lookAt(0, 0, hex * .5f);
+        var above = new PerspectiveCamera(40, SIZE, SIZE);
+        above.position.set(0, -.01f, hex * 6.5f);
+        above.lookAt(0, 0, 0);
+        PerspectiveCamera[] cameras = { oblique, above };
+        var sheet = new BufferedImage(SIZE * moments.length, SIZE * cameras.length, BufferedImage.TYPE_INT_RGB);
+        var graphics = sheet.createGraphics();
+        try {
+            for (int row = 0; row < cameras.length; row++) {
+                PerspectiveCamera camera = cameras[row];
+                camera.up.set(Vector3.Z);
+                camera.near = 1;
+                camera.far = size * 40;
+                camera.update();
+                for (int column = 0; column < moments.length; column++) {
+                    float seconds = moments[column];
+                    var image = frame(buffer, batch, ground, camera, volumes,
+                          () -> blast.emit(volumes, Vector3.Zero, size, 1, GpuArtilleryBlast.Style.CLUSTER, seconds, 41));
+                    graphics.drawImage(image, column * SIZE, row * SIZE, null);
+                    graphics.setColor(java.awt.Color.WHITE);
+                    graphics.drawString((row == 0 ? "Cluster " : "From above ") + seconds + "s", column * SIZE + 8,
+                          row * SIZE + 16);
+                }
+            }
+        } finally { graphics.dispose(); }
+        ImageIO.write(sheet, "png", new File(folder, "artillery-cluster-review.png"));
     }
 
     private static BufferedImage frame(FrameBuffer buffer, ModelBatch batch, ModelInstance ground,

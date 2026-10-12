@@ -395,8 +395,9 @@ final class GpuArtilleryBlast {
             explosions.add(burst, hex * (.18f + .3f * flashAge), flashAge, 1, fadeOut(flashAge, .3f), seed + 1,
                   BRIGHT_FIRE, Vector3.Zero);
         }
-        float casingSmokeAge = seconds / 3;
-        if (casingSmokeAge < 1) {
+        // Smoke follows its flash rather than sharing its centre and moment, which would cover the flash's bright core.
+        float casingSmokeAge = (seconds - .25f) / 3;
+        if (casingSmokeAge >= 0 && casingSmokeAge < 1) {
             explosions.add(burst, hex * (.12f + .2f * casingSmokeAge), casingSmokeAge, .2f,
                   .8f * fadeOut(casingSmokeAge, .4f), seed + 2, BURST_SMOKE, Vector3.Zero);
         }
@@ -417,7 +418,7 @@ final class GpuArtilleryBlast {
                 explosions.add(point, popSize, popAge, 1, fadeOut(popAge, .4f), seed + index * 43, BRIGHT_FIRE,
                       Vector3.Zero);
             }
-            float smokeAge = (seconds - piece.landing() - .1f) / 2.6f;
+            float smokeAge = (seconds - piece.landing() - .4f) / 2.4f;
             if (smokeAge >= 0 && smokeAge < 1) {
                 point.set(landing).add(0, 0, hex * (.06f + .1f * smokeAge));
                 explosions.add(point, hex * (.08f + .1f * smokeAge), smokeAge, .1f, .6f * fadeOut(smokeAge, .35f),
