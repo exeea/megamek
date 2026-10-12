@@ -151,7 +151,11 @@ on the Iris Xe) after load.
   4.1 / 3.6 s before (the 3D terrain stayed and the columns were built on the render thread) against 15.2 / 1.0 s;
   11.6 / 1.8 s after. Classic to Enhanced 3.8 / 3.2 s; 3.0 / 2.4 s before (the 3D terrain was already built) against
   85 / 3.6 s; 42.6 / 2.5 s after, a full build behind the loading stage. After a switch the other build's chunks are
-  retired (Valencia heap 549-552 MiB after a switch to Classic, 447 MiB after a switch to Enhanced).
+  retired over the next frames: the Valencia heap after a switch to Classic reads 549-552 MiB in the first scenario
+  and settles at 420-421 MiB by its Tactical View scenarios (a Classic load: 391-393), after a switch to Enhanced
+  447-450 MiB (an Enhanced load: 444). A switch does not free `GpuAssets`: it keeps the Enhanced texture arrays (sculpt,
+  road, magma) and the loaded models until the renderer closes, since the print and the editor previews borrow it.
+  GPU memory after a switch was not sampled once settled (the last samples fall in the build or the shutdown).
 - Entering the Tactical View on Valencia (settle / longest frame): NVIDIA Enhanced 0.9-1.6 / 0.7-1.3 s before,
   1.0-1.4 / 0.9-1.1 s after; Iris Xe Enhanced 1.3-1.4 / 0.7-0.9 s before, 1.4-1.6 / 0.9-1.5 s after; Iris Xe Classic
   0.9-1.4 / 0.7-1.2 s before, 0.5-0.7 / 0.4-0.5 s after.

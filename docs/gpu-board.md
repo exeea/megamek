@@ -203,8 +203,10 @@ feature. Classic, for low-end computers, is a build mode of the same chunk pipel
 - **Switching.** A change of the setting is a full rebuild either way: `update` sees the wanted graphics differ from
   the installed ones and starts a new build, cancelling running jobs; `ready` stays false until it commits, so the view
   shows its loading stage (overall progress and section grid) and the build uploads with the opening's frame slice;
-  the commit retires the other build's chunks. Camera, Tactical View, selection, orders, HUD and units stay. The
-  editor's palette and terrain previews stay Enhanced. Measured costs: [performance](gpu-board-performance.md#classic-and-enhanced-graphics).
+  the commit retires the other build's chunks. A switch reversed after its build packed the ground and decal atlases
+  for the other graphics (`GpuTerrain.atlasColumns`) is such a rebuild too, since every chunk's atlas regions moved.
+  Camera, Tactical View, selection, orders, HUD and units stay. The editor's palette and terrain previews stay Enhanced.
+  Measured costs: [performance](gpu-board-performance.md#classic-and-enhanced-graphics).
 - **Cliffs.** The Classic tops carry no cliff stroke; the Tactical View's ground layer strokes cliffs in both graphics.
 - **Print.** Menu > Print (`GpuBoardPrint`) builds its own terrain with the live view's installed graphics
   (`setColumns(lender.columns())`; the print starts only once the live terrain is ready), so a Classic print shows the
@@ -218,9 +220,9 @@ feature. Classic, for low-end computers, is a build mode of the same chunk pipel
 Tests: `GpuGraphicsModeSmokeTest` (a game started in Classic builds no water or lava field, wave simulation, tree,
 scatter, grass, biome map or sculpted material and no sculpted shader warm-up; the building stands on its column;
 overlays drape on and picks hit the column tops; a switch either way shows the loading stage and retires the other
-build; T starts no rebuild), `GpuTilesetTerrainSmokeTest` (an edit rebuilds only the chunks of its hex and of the
-neighbours that read it; water stays inside the shore picking uses; review captures), `GpuTilesetTerrainTest` (column
-geometry), `BoardRimTest.classicColumnsBakeNoCliffStroke`. `GpuTerrainLoadBenchmarkTest` with
+build, also when reversed after its atlases were packed; T starts no rebuild), `GpuTilesetTerrainSmokeTest` (an edit
+rebuilds only the chunks of its hex and of the neighbours that read it; water stays inside the shore picking uses;
+review captures), `GpuTilesetTerrainTest` (column geometry), `BoardRimTest.classicColumnsBakeNoCliffStroke`. `GpuTerrainLoadBenchmarkTest` with
 `-Dmegamek.gpu.benchmarkGraphics=CLASSIC` times `prepareColumns` and digests the columns in the region's order.
 
 ## Tactical View
@@ -242,7 +244,8 @@ nor recaches: the 3D prop caches and their pages stay, and the passes draw each 
 the view's first draw of the chunk (`GpuTerrain.Chunk#keptProps`), so only the shadow map is redrawn. Picking is
 unchanged: a click picks the same hex and floor (a building's roof included) and overlays drape on the same surfaces as
 in the 3D view (`GpuTacticalViewSmokeTest.verifyFluffHidden`, which also audits that one Tactical View frame submits no
-tree, placed object, building module, scatter, grass or water draw, in both graphics).
+tree, placed object, building module, scatter, grass, water or packed prop draw, in both graphics, and draws the
+Enhanced bridge from the kept props).
 
 ## Threads and update ownership
 

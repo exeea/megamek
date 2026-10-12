@@ -121,6 +121,29 @@ class GpuGraphicsModeSmokeTest {
         assertTrue(((List<?>) get(terrain, "chunks")).stream().noneMatch(relief::contains), "The 3D chunks are retired");
         verifyClassic(terrain, scene);
 
+        // A switch reversed after its build packed the atlases for the other graphics: one full rebuild behind the
+        // loading stage, not a background repack of every chunk while the old board shows.
+        graphics(BoardGraphics.ENHANCED);
+        Object switching = null;
+        for (int frame = 0; frame < 600 && switching == null; frame++) {
+            view.render();
+            Object rebuild = get(terrain, "rebuild");
+            if (rebuild != null && get(rebuild, "plan") != null) { switching = rebuild; }
+        }
+        assertNotNull(switching, "The switch's build packs its atlases before it commits");
+        assertTrue(terrain.columns(), "while the columns are still installed");
+        List<Object> columns = new ArrayList<>((List<?>) get(terrain, "chunks"));
+        graphics(BoardGraphics.CLASSIC);
+        view.render();
+        assertFalse(terrain.ready(scene), "The reversal rebuilds the columns");
+        assertTrue(GpuBoardTestUi.loading(view), "behind the loading stage");
+        GpuBoardTestUi.present(view);
+        frames(view, 3);
+        assertTrue(terrain.columns());
+        assertFalse(terrain.busy(), "No rebuild is left running");
+        assertTrue(((List<?>) get(terrain, "chunks")).stream().noneMatch(columns::contains), "Every chunk is rebuilt");
+        verifyClassic(terrain, scene);
+
         // The Tactical View hides the fluff without a rebuild, in either graphics.
         view.setTacticalView(true);
         frames(view, 3);

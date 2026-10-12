@@ -757,6 +757,11 @@ final class GpuTerrain implements Disposable {
     private boolean columns;
     /** Whether the installed chunks are the Classic columns; set when a build commits. */
     private boolean installedColumns;
+    /**
+     * The graphics the ground and decal atlases are packed for, set when a build packs them: a switch reversed after
+     * that has to rebuild every chunk, as a switch does.
+     */
+    private boolean atlasColumns;
     /** The Tactical View's draw rule ({@link #setFluffHidden}); it never rebuilds the terrain. */
     private boolean fluffHidden;
     private boolean terrainMaterialsReady;
@@ -1781,7 +1786,8 @@ final class GpuTerrain implements Disposable {
 
     /** The installed terrain shows {@code scene}'s board in the wanted graphics: a switch either way shows the loading stage. */
     boolean ready(BoardScene scene) {
-        return materialsReady() && coverScene != null && sameBoard(coverScene, scene) && installedColumns == columns;
+        return materialsReady() && coverScene != null && sameBoard(coverScene, scene) && installedColumns == columns
+              && atlasColumns == columns;
     }
 
     int buildProgress() {
@@ -2210,7 +2216,7 @@ final class GpuTerrain implements Disposable {
         // two-millisecond budget.
         long deadline = System.nanoTime() + (coverScene == null ? 8_000_000
               : editing && (requested != null || rebuild != null) ? 12_000_000
-              : installedColumns != columns ? 8_000_000 : 2_000_000);
+              : installedColumns != columns || atlasColumns != columns ? 8_000_000 : 2_000_000);
         drainRetired(deadline);
         if (requested == null && rebuild == null && detailJob == null) { return false; }
         do {
@@ -2300,9 +2306,9 @@ final class GpuTerrain implements Disposable {
                 Map<GroundSlot, BoardScene.Pixels> colors = terrainPixels, normals = normalPixels;
                 Map<DecalSlot, BoardScene.Pixels> overlays = decalPixels;
                 BoardScene.Pixels incline = assets.inclineMask(), highIncline = assets.highInclineMask();
-                // A graphics switch rebuilds every chunk, as a new board does.
-                boolean changedTuning = installedSettings == null
-                      || !sameSettings(installedSettings, request.settings()) || installedColumns != request.columns();
+                // A graphics switch rebuilds every chunk, as a new board does; so does one reversed after its atlases.
+                boolean changedTuning = installedSettings == null || !sameSettings(installedSettings, request.settings())
+                      || installedColumns != request.columns() || atlasColumns != request.columns();
                 boolean changedLimbScale = installedSettings != null
                       && installedSettings.geometry().unitScale() != request.settings().geometry().unitScale();
                 TerrainLoadProgress progress = new TerrainLoadProgress();
@@ -2527,6 +2533,7 @@ final class GpuTerrain implements Disposable {
         progress.advance();
         markingChanges.addAll(updateMarkingsAtlas(scene));
         progress.advance();
+        atlasColumns = rebuild.request.columns();
     }
 
     private void commitRebuild() {

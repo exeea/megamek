@@ -612,14 +612,18 @@ class GpuTacticalViewSmokeTest {
     }
 
     /**
-     * In the Tactical View the terrain draws no tree, placed object, building model, scatter, grass or water, while a
-     * click on any hex picks the same hex and floor, and the overlays and labels drape on the same surfaces, as with the
-     * fluff shown: the rule hides at draw time only.
+     * In the Tactical View the terrain draws no tree, placed object, building model, scatter, grass or water and none of
+     * the packed props (fuel tank, industry), only the kept ones (the Enhanced bridge), while a click on any hex picks
+     * the same hex and floor, and the overlays and labels drape on the same surfaces, as with the fluff shown: the rule
+     * hides at draw time only.
      */
     private static void verifyFluffHidden(GpuBattleView view, GpuTerrain terrain, BoardScene scene) throws Exception {
         var drawn = audit(view);
-        for (String source : List.of("instanced-trees", "grass", "scatter", "water")) {
+        for (String source : List.of("instanced-trees", "grass", "scatter", "water", "props", "props-batched")) {
             assertEquals(0, drawn.getOrDefault(source, 0), "The Tactical View draws no " + source + ": " + drawn);
+        }
+        if (!terrain.columns()) {
+            assertTrue(drawn.getOrDefault("kept-props", 0) > 0, "The bridge's model is kept: " + drawn);
         }
         assertTrue(drawn.keySet().stream().noneMatch(family -> family.startsWith("water-")), "No water: " + drawn);
         List<Object> hidden = new ArrayList<>(), shown = new ArrayList<>();
