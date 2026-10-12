@@ -455,6 +455,29 @@ class GpuPlaybackCameraTest {
         }
     }
 
+    /** Off-board artillery taking its turn in the Targeting phase: the camera stays on the map the player aims at. */
+    @Test
+    void selectingAUnitOffTheMapLeavesTheCameraOnTheBoard() {
+        var first = UnitPlaybackTest.unit(1, 0);
+        var onMap = UnitPlaybackTest.unit(3, 11);
+        var offBoard = UnitPlaybackTest.unit(4, -18);
+        var view = view(false);
+        try {
+            view.updateCameraFocus(scene(first.id(), first, onMap, offBoard), INITIAL_CENTER);
+            view.boardCamera.center(BoardGeometry.center(first.location().coords(), 0));
+            view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+            var before = view.boardCamera.focus.cpy();
+            view.updateCameraFocus(scene(offBoard.id(), first, onMap, offBoard), INITIAL_CENTER);
+            assertFalse(view.boardCamera.isFraming(), "A unit off the map must not start a camera move");
+            view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+            assertEquals(before, view.boardCamera.focus, "The camera stays where it was");
+            view.updateCameraFocus(scene(onMap.id(), first, onMap, offBoard), INITIAL_CENTER);
+            assertTrue(view.boardCamera.isFraming(), "Selecting a unit on the map still frames it");
+        } finally {
+            view.dispose();
+        }
+    }
+
     private static GpuBattleView view(boolean isometric) {
         var view = new GpuBattleView(mock(GpuBoardSource.class));
         view.boardCamera.resize(800, 600);

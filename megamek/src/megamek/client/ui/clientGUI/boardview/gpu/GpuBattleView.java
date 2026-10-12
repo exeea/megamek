@@ -1384,6 +1384,14 @@ class GpuBattleView extends ApplicationAdapter {
 
     private float cameraWidth() { return boardCamera.camera.viewportWidth; }
 
+    /**
+     * Whether the unit stands on the map. Off-board artillery is placed past the map's edge, as far out as its
+     * off-board distance, and framing it would fly the camera away from the board the player is aiming at.
+     */
+    private static boolean onMap(BoardScene scene, BoardScene.Unit unit) {
+        return scene.tile(unit.location().coords()) != null;
+    }
+
     /** Only replay framing consumes HUD clearance; all ordinary navigation uses the full viewport. */
     private float playbackCameraWidth() {
         if (boardCamera.firstPerson()) { return cameraWidth(); }
@@ -1445,7 +1453,7 @@ class GpuBattleView extends ApplicationAdapter {
             }
             var active = scene.units().stream().filter(unit -> unit.id() == playback.activeEntityId())
                   .findFirst().orElse(null);
-            if (active != null) {
+            if (active != null && onMap(scene, active)) {
                 playbackCameraWidth();
                 var motion = motions.get(active.id());
                 Vector3 position = motion != null && motion.isMoving() ? motion.surfacePosition(scene).cpy()
@@ -1469,13 +1477,17 @@ class GpuBattleView extends ApplicationAdapter {
         centerSequence = request.sequence();
         cameraSelection = scene.selectedId();
         cameraFollowingPlayback = false;
-        if (selection != null) {
+        if (selection != null && !onMap(scene, selection)) {
+            // Off-board artillery taking its turn: the player aims at the map, so the camera stays on it.
+            LOGGER.debug("[SelectionCamera] {} is off the map, the camera stays", selection.name());
+        } else if (selection != null) {
             boardCamera.viewableArea(0, cameraWidth());
             boardCamera.frameSelection(selection, cameraWidth());
         } else if (instantAction instanceof BoardScene.Combat combat && combat.result().kind() == ResolvedAttack.Kind.SHOT) {
             boardCamera.frameAttacks(List.of(new UnitAttack(combat)), playbackCameraWidth());
         } else if (instantAction != null) {
             scene.units().stream().filter(unit -> unit.id() == instantAction.entityId()).findFirst()
+                  .filter(unit -> onMap(scene, unit))
                   .ifPresent(unit -> boardCamera.frameSelection(unit, playbackCameraWidth()));
         } else if (center != null && scene.tile(center) != null) {
             boardCamera.viewableArea(0, cameraWidth());
