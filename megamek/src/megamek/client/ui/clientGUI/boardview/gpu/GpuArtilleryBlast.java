@@ -56,7 +56,9 @@ final class GpuArtilleryBlast {
     /** Damage of the shell that draws at the reference size: a Sniper or an Arrow IV. */
     private static final float REFERENCE_DAMAGE = 20;
     /** Pieces a shell damaging only its own hex throws, all landing inside that hex. */
-    private static final int TARGET_HEX_PIECES = 6;
+    private static final int TARGET_HEX_PIECES = 12;
+    /** At most this many fragments land in one damaged hex; wide blasts share the debris budget more thinly. */
+    private static final int MAX_FRAGMENTS_PER_HEX = 5;
     /** Any hex away from the board's edge: its neighbours sit at the same offsets as every other hex's. */
     private static final Coords LAYOUT_HEX = new Coords(10, 10);
 
@@ -105,8 +107,10 @@ final class GpuArtilleryBlast {
      * @param ring    the ring of hexes it lands in: 0 is the target hex
      * @param launch  seconds after contact it leaves the crater
      * @param flight  seconds it spends in the air
+     * @param marksGround whether it leaves a scorch mark where it lands: one piece per damaged hex does, so a dense
+     *                    spray does not turn into a dense carpet of marks
      */
-    record Piece(float offsetX, float offsetY, int ring, float launch, float flight) {
+    record Piece(float offsetX, float offsetY, int ring, float launch, float flight, boolean marksGround) {
         float landing() { return launch + flight; }
     }
 
@@ -230,9 +234,10 @@ final class GpuArtilleryBlast {
     }
 
     /**
-     * The debris a shell throws: one piece at every hex of every ring it damages, each landing somewhere inside its
-     * hex and at its own moment, the outer rings a little later than the inner ones. A shell that damages only its own
-     * hex throws a few pieces that stay inside it.
+     * The debris a shell throws: a spray of small fragments at every hex of every ring it damages, each landing
+     * somewhere inside its hex and at its own moment, the outer rings a little later than the inner ones. Each hex
+     * takes as many fragments as the budget allows, up to five, and the first of them leaves the hex's scorch mark. A
+     * shell that damages only its own hex throws a spray that stays inside it.
      */
     static List<Piece> debrisPieces(int hexRadius, int seed) {
         List<Piece> pieces = new ArrayList<>();
@@ -240,24 +245,31 @@ final class GpuArtilleryBlast {
         if (hexRadius == 0) {
             for (int piece = 0; piece < TARGET_HEX_PIECES; piece++) {
                 float bearing = piece * 2.399963f + random(seed, piece + 200);
-                float distance = hex * (.1f + .25f * random(seed, piece + 220));
+                float distance = hex * (.1f + .3f * random(seed, piece + 220));
                 pieces.add(new Piece(MathUtils.cos(bearing) * distance, MathUtils.sin(bearing) * distance, 0,
-                      launch(seed, piece), .55f + .3f * random(seed, piece + 260)));
+                      launch(seed, piece), .45f + .3f * random(seed, piece + 260), false));
             }
             return pieces;
         }
+        int hexes = 3 * hexRadius * (hexRadius + 1);
+        int perHex = MathUtils.clamp(MAX_DEBRIS / hexes, 1, MAX_FRAGMENTS_PER_HEX);
         Vector3 centre = BoardGeometry.center(LAYOUT_HEX, 0);
         for (int ring = 1; ring <= hexRadius; ring++) {
             for (Coords coords : LAYOUT_HEX.allAtDistance(ring)) {
-                int piece = pieces.size();
-                if (piece == MAX_DEBRIS) { return pieces; }
                 Vector3 hexCentre = BoardGeometry.center(coords, 0);
-                // Somewhere in the hex rather than its exact centre, so the marks do not form a neat grid.
-                float jitter = hex * .22f;
-                float offsetX = hexCentre.x - centre.x + (random(seed, piece + 300) - .5f) * 2 * jitter;
-                float offsetY = hexCentre.y - centre.y + (random(seed, piece + 320) - .5f) * 2 * jitter;
-                float flight = .55f + .3f * ring + .3f * random(seed, piece + 260);
-                pieces.add(new Piece(offsetX, offsetY, ring, launch(seed, piece), flight));
+                for (int fragment = 0; fragment < perHex; fragment++) {
+                    int piece = pieces.size();
+                    if (piece == MAX_DEBRIS) { return pieces; }
+                    // Somewhere in the hex rather than its exact centre, so neither the spray nor the marks form a
+                    // neat grid. Within a circle that fits inside the hex, so no fragment strays into a neighbour;
+                    // the marking fragment stays nearer the middle so its mark sits clearly in its hex.
+                    float spread = hex * (fragment == 0 ? .25f : .4f) * (float) Math.sqrt(random(seed, piece + 300));
+                    float bearing = random(seed, piece + 320) * MathUtils.PI2;
+                    float offsetX = hexCentre.x - centre.x + MathUtils.cos(bearing) * spread;
+                    float offsetY = hexCentre.y - centre.y + MathUtils.sin(bearing) * spread;
+                    float flight = .45f + .25f * ring + .3f * random(seed, piece + 260);
+                    pieces.add(new Piece(offsetX, offsetY, ring, launch(seed, piece), flight, fragment == 0));
+                }
             }
         }
         return pieces;
@@ -290,7 +302,7 @@ final class GpuArtilleryBlast {
                     float offsetY = hexCentre.y - centre.y + MathUtils.sin(bearing) * out;
                     float release = .08f + .25f * random(seed, piece + 440);
                     float fall = .35f + .3f * random(seed, piece + 460);
-                    pieces.add(new Piece(offsetX, offsetY, ring, release, fall));
+                    pieces.add(new Piece(offsetX, offsetY, ring, release, fall, true));
                 }
             }
         }
@@ -532,19 +544,20 @@ final class GpuArtilleryBlast {
             float travel = (seconds - piece.launch()) / piece.flight();
             if (travel > 0 && travel < 1) {
                 float distance = (float) Math.hypot(landing.x - ground.x, landing.y - ground.y);
-                float apex = distance * MathUtils.lerp(.35f, .6f, random(seed, index + 280)) + size * .3f;
+                // A low, flat spray of dirt rather than lobbed shells: the arc rises about a sixth of its length.
+                float apex = distance * MathUtils.lerp(.12f, .22f, random(seed, index + 280)) + size * .1f;
                 point.set(ground).lerp(landing, travel).add(0, 0, size * .2f * (1 - travel)
                       + 4 * apex * travel * (1 - travel));
                 // Drawn out along its flight, so a piece reads as a streak of earth trailing dust.
                 float climb = 4 * apex * (1 - 2 * travel) + (landing.z - ground.z);
                 axis.set(landing.x - ground.x, landing.y - ground.y, climb).nor().scl(1.4f);
-                float pieceSize = size * MathUtils.lerp(.07f, .12f, random(seed, index + 290));
+                float pieceSize = size * MathUtils.lerp(.03f, .055f, random(seed, index + 290));
                 explosions.add(point, pieceSize, travel * .6f, .35f, .9f, seed + index * 41, DEBRIS, axis);
             }
             float settle = (seconds - piece.landing()) / 1.6f;
             if (settle >= 0 && settle < 1) {
                 point.set(landing).add(0, 0, size * .05f);
-                float puffSize = size * (.14f + .18f * settle);
+                float puffSize = size * (piece.marksGround() ? .1f + .14f * settle : .05f + .08f * settle);
                 explosions.add(point, puffSize, settle, 0, .55f * fadeOut(settle, .3f), seed + index * 43, EARTH,
                       Vector3.Zero);
             }
@@ -565,10 +578,9 @@ final class GpuArtilleryBlast {
                 boolean handled = (blast.landed & bit) != 0;
                 if (handled || blast.seconds < piece.landing()) { continue; }
                 blast.landed |= bit;
-                // A high-explosive shell's own crater marks its target hex; a cluster round has none, so its
-                // bomblets mark the target hex too.
-                boolean isCraterHex = piece.ring() == 0 && !blast.area.cluster();
-                if (isCraterHex || !blast.onTerrain[index]) { continue; }
+                // One fragment per ring hex marks it, and a high-explosive shell's own crater marks its target hex.
+                // A cluster round has no crater, so every bomblet marks, the target hex's included.
+                if (!piece.marksGround() || !blast.onTerrain[index]) { continue; }
                 blast.marks++;
                 ResolvedAttack.Shot markShot = blast.profile.withDamagePerHit(markDamage(blast.area, piece.ring()));
                 receiver.accept(new GpuGroundDamage.Impact(blast.attack, "artillery-debris-" + index,

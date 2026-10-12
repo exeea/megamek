@@ -120,15 +120,22 @@ class GpuArtilleryBlastTest {
     @Test
     void debrisHitsEveryHexOfEveryRing() {
         var pieces = GpuArtilleryBlast.debrisPieces(2, 41);
-        long firstRing = pieces.stream().filter(piece -> piece.ring() == 1).count();
-        long secondRing = pieces.stream().filter(piece -> piece.ring() == 2).count();
-        assertEquals(6, firstRing);
-        assertEquals(12, secondRing);
+        var markers = pieces.stream().filter(GpuArtilleryBlast.Piece::marksGround).toList();
+        long firstRing = markers.stream().filter(piece -> piece.ring() == 1).count();
+        long secondRing = markers.stream().filter(piece -> piece.ring() == 2).count();
+        assertEquals(6, firstRing, "One marking fragment per first-ring hex");
+        assertEquals(12, secondRing, "One marking fragment per second-ring hex");
+        assertEquals(54, pieces.size(), "A dense spray: three fragments in each of the 18 hexes");
         float hex = BoardGeometry.height();
         for (var piece : pieces) {
             float distance = (float) Math.hypot(piece.offsetX(), piece.offsetY()) / hex;
-            assertTrue(Math.abs(distance - piece.ring()) < .45f, "A piece lands inside its ring's hex: " + piece);
+            // A ring's hexes sit between about 0.87 and 1 times its number of hexes out; a fragment stays within
+            // 0.4 of a hex of its hex's centre.
+            float nearest = piece.ring() * .86f - .4f;
+            float farthest = piece.ring() + .4f;
+            assertTrue(distance > nearest && distance < farthest, "A fragment lands inside its ring: " + piece);
         }
+        assertEquals(30, GpuArtilleryBlast.debrisPieces(1, 41).size(), "Five fragments in each first-ring hex for R1");
     }
 
     /** The ring hexes are hit one after another, not all in the same instant. */

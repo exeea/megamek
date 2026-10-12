@@ -160,6 +160,16 @@ class GpuArtilleryBlastSmokeTest {
         ImageIO.write(sheet, "png", new File(folder, "artillery-cluster-review.png"));
         writeAnimation(buffer, batch, ground, volumes, blast, size, oblique, GpuArtilleryBlast.Style.CLUSTER, 1,
               new File(folder, "artillery-cluster-frames"));
+        // Wide enough for a Long Tom's debris landing two rings out.
+        var wide = new PerspectiveCamera(40, SIZE, SIZE);
+        wide.position.set(0, -hex * 6.5f, hex * 2.6f);
+        wide.up.set(Vector3.Z);
+        wide.lookAt(0, 0, hex * .4f);
+        wide.near = 1;
+        wide.far = size * 40;
+        wide.update();
+        writeAnimation(buffer, batch, ground, volumes, blast, size, wide, GpuArtilleryBlast.Style.CROWN, 2,
+              new File(folder, "artillery-longtom-frames"));
     }
 
     /** Numbered frames at 15 a second over the blast's life, for stitching into an animation to review. */
