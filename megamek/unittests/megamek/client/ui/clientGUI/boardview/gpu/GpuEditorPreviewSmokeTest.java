@@ -33,7 +33,7 @@ import org.junit.jupiter.api.Test;
  * (a car put down precisely, one on a roof, a wagon riding the rail, a train stamp's every member, a decal's paint)
  * stands exactly where its click then installs the object; the route direction ghost is exactly the track the stroke
  * then lays; every terrain card shows a stand-in in each hex its click changes; Erase outlines exactly the objects its
- * click removes. Hovering rebuilds no chunk and changes no tile. Captures: {@code b10-f2/preview-*.png}.
+ * click removes. Hovering rebuilds no chunk and changes no tile.
  */
 @Tag("on-demand")
 class GpuEditorPreviewSmokeTest {

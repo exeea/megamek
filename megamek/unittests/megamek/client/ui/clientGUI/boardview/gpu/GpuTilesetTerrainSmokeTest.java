@@ -34,7 +34,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Classic graphics' columns (b11-design 2.4), built as GpuTerrain chunks: a board edit rebuilds only the chunks of
+ * The Classic graphics' columns, built as GpuTerrain chunks: a board edit rebuilds only the chunks of
  * its hex and of the neighbours that read it (the chunk pipeline's change scan, which the tileset art joins), and the
  * liquid stays inside the shore that picking uses.
  */

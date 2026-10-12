@@ -400,7 +400,7 @@ class GpuSceneryColourSmokeTest {
     }
 
     /**
-     * The Tactical View hides every placed object, plants included (b11-design 4.3, GpuTerrain#setFluffHidden): no part
+     * The Tactical View hides every placed object, plants included (GpuTerrain#setFluffHidden): no part
      * is drawn and the editor cannot pick them there; back in 3D they draw and pick again. Game picking (hover and
      * selection) finds the same hexes in both views and looks through objects as before.
      */
@@ -443,7 +443,7 @@ class GpuSceneryColourSmokeTest {
                         }
                         System.out.printf("PLANTS %s: %d plant parts, %d other object parts%n", view, plants, objects);
                         assertEquals(tactical, plants == 0, view + ": placed plants' parts");
-                        // The Tactical View hides every placed object (b11-design 4.3), the 3D view draws them all.
+                        // The Tactical View hides every placed object, the 3D view draws them all.
                         assertTrue(tactical ? objects == 0 : objects > 100, view + ": the other objects' parts");
                         for (var at : List.of(LEVEL_CORAL, LEVEL_TREE, snowTree)) {
                             assertEquals(!tactical, hit(terrain, scene, at, true) != null, view + ": the plant of " + at.getBoardNum());

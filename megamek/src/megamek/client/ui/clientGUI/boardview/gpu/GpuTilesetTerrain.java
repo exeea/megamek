@@ -27,7 +27,7 @@ import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.board.Coords;
 
 /**
- * The Classic graphics' terrain (b11-design 2.4-2.5), as the libGDX board drew it: every hex a plain column at its
+ * The Classic graphics' terrain, as the libGDX board drew it: every hex a plain column at its
  * level, topped by its Saxarba tileset art with the cliff-top rim along each drop and walled in its material down to
  * its lower neighbours or the board's floor. A road meeting a hex of another level ramps through the edge between them,
  * and a bridge's art lies on its deck. Open liquid moves in its animated frames above a recessed bed and pours into the

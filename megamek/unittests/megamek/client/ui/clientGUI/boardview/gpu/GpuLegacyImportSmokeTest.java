@@ -460,7 +460,7 @@ class GpuLegacyImportSmokeTest {
             var scene = (BoardScene) field(view, "scene");
             var down = new com.badlogic.gdx.math.collision.Ray(new Vector3(dropped).add(0, 0, 500), new Vector3(0, 0, -1));
             assertEquals(tree.get(), terrain.decorationHit(scene, down).id(), "Object picking finds the stand tree");
-            // The Tactical View hides every placed object, plants included (b11-design 4.3): no object part draws there,
+            // The Tactical View hides every placed object, plants included: no object part draws there,
             // and the editor's object pick passes through the tree.
             assertTrue(objectParts(terrain) > 0, "The 3D view draws the other placed objects");
             terrain.setFluffHidden(true);

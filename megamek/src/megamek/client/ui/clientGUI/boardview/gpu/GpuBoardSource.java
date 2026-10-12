@@ -926,7 +926,7 @@ final class GpuBoardSource implements BoardSource {
     }
 
     /**
-     * EDT: the enemy whose arcs the Tactical View shades (b11-design item 15): the listed, identified enemy under the
+     * EDT: the enemy whose arcs the Tactical View shades: the listed, identified enemy under the
      * pointer, else the focused target of the fire orders or of the physical attack, as the board overlay focuses
      * them; null for none, and while the Overlays panel's Rear arcs setting is off.
      */

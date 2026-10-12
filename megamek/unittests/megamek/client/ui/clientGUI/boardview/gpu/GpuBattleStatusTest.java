@@ -151,7 +151,7 @@ class GpuBattleStatusTest {
     }
 
     /**
-     * The Tactical View's facts (b11-design items 2, 10, 15, 16): the hovered enemy's arcs are its own side table for
+     * The Tactical View's facts: the hovered enemy's arcs are its own side table for
      * every hex within reach, kept while nothing they depend on changes, and gone with the pointer; an own spotter links
      * to its target; the own unit carries its twist, its movement colour and whether its modifier shows.
      */

@@ -568,7 +568,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
         boardGeneration = frame.boardGeneration();
         var atmosphereSettings = tuning.atmosphere();
-        // The Tactical View has clear air and its one fixed light: no clouds, fog, haze or weather (b11-design 4.3).
+        // The Tactical View has clear air and its one fixed light: no clouds, fog, haze or weather.
         atmosphere.configure(boardCamera.tactical() ? BoardAtmosphere.DEFAULTS : atmosphereSettings);
         atmosphere.setOptions(tuning.atmosphereOptions());
         // Material readiness includes live lighting/cloud flags, before any visible terrain is submitted.
@@ -631,7 +631,7 @@ class GpuBattleView extends ApplicationAdapter {
         attackEffects.setWind(atmosphereSettings.effects());
         terrain.setNormalMaps(tuning.normalMaps());
         terrain.setTerrainWear(tuning.terrainWear());
-        // The Tactical View hides what has no gameplay value (b11-design 4.3), by one draw rule and without a rebuild.
+        // The Tactical View hides what has no gameplay value, by one draw rule and without a rebuild.
         terrain.setFluffHidden(boardCamera.tactical());
         terrain.setGrass(tuning.grass());
         terrain.setWaterEffects(tuning.waterEffects());
@@ -772,7 +772,7 @@ class GpuBattleView extends ApplicationAdapter {
             terrain.render(boardCamera.camera, false);
         }
         if (boardCamera.tactical()) {
-            // The Tactical View's ground marks, then the bases, which the meeples cover (b11-design 4.4).
+            // The Tactical View's ground marks, then the bases, which the meeples cover.
             renderStage("ground layer");
             hexGrid.render(boardCamera, scene, terrain.columns(), true, frame.status().arc(),
                   source.uiPreferences().overlays().levelShading());

@@ -388,7 +388,7 @@ class GpuLegacyArtReportSmokeTest {
                     Hex hex = board.getHex(x, y);
                     var taken = BoardSceneryLayouts.takenTokens(hex);
                     if (!taken.containsValue(BoardSceneryLayouts.Taken.DESIGN)) { continue; }
-                    // The designs the conversion gives the tokens (withoutTakenTokens adds none since b10-f3).
+                    // The designs the conversion gives the tokens (withoutTakenTokens adds none).
                     Hex designed = hex.duplicate();
                     BoardSceneryLayouts.designTypedTokens(hex, designed);
                     Map<String, HexAppearance> added = new TreeMap<>(designed.getAppearance());

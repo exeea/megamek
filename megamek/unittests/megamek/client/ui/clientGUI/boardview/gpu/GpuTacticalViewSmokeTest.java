@@ -74,7 +74,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Tactical View (b11-design 4.2-4.7) on the real capture. T turns every unit into its meeple on its GpuUnitBases
+ * The Tactical View on the real capture. T turns every unit into its meeple on its GpuUnitBases
  * base over the ground layer, on the terrain the graphics setting chose, lit by the fixed north-west light without
  * grass; the bases show the side, the facing, the done and destroyed states; units are picked by their meeples; T
  * again restores the 3D view's models and its exact pose. A second test captures the mock-up battle in the movement and

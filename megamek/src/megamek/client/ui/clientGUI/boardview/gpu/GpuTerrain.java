@@ -113,7 +113,7 @@ final class GpuTerrain implements Disposable {
     private final GpuUnitModels unitModels;
     /**
      * A hex's ground art: its top with the rims (Enhanced), or its base, the art a water neighbour's bank borrows; a
-     * Classic hex keeps its column art there (b11-design 2.4), which its banks borrow alike.
+     * Classic hex keeps its column art there, which its banks borrow alike.
      */
     private record GroundSlot(Coords coords, boolean rims) { }
     /**
@@ -2053,7 +2053,7 @@ final class GpuTerrain implements Disposable {
             terrainPixels.put(baseSlot, tile.ground());
             if (material.normal() != null) { normalPixels.put(topSlot, material.normal()); } else { normalPixels.remove(topSlot); }
             if (tile.normals() != null) { normalPixels.put(baseSlot, tile.normals()); } else { normalPixels.remove(baseSlot); }
-            // Enhanced paints the legacy paint only; the tileset art is Classic's (b11-design 2.4).
+            // Enhanced paints the legacy paint only; the tileset art is Classic's.
             DecalSlot slot = new DecalSlot(tile.coords(), 0);
             if (BoardDecals.legacyPaint(tile) != null) { decalPixels.put(slot, BoardDecals.legacyPaint(tile)); }
             else { decalPixels.remove(slot); }
@@ -2068,7 +2068,7 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * A Classic hex's artwork, composed on a terrain worker (b11-design 2.4): its column art with the rims of its drops
+     * A Classic hex's artwork, composed on a terrain worker: its column art with the rims of its drops
      * in its base slot, which a water neighbour's bank borrows, and its tileset decals, object sprites and bridge deck
      * art.
      */
@@ -2458,7 +2458,7 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * The CPU side of one Classic chunk (b11-design 2.4): each rebuilt hex's tileset column, which its meshes, picking
+     * The CPU side of one Classic chunk: each rebuilt hex's tileset column, which its meshes, picking
      * and draped overlays share, with the board's {@code currents} for its liquid and its {@code paint}. No relief,
      * sculpting, water or lava field, plant or road: a Classic build draws none.
      */
@@ -2914,7 +2914,7 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * A Classic hex (b11-design 2.4): its tileset column, then the features a Classic build keeps
+     * A Classic hex: its tileset column, then the features a Classic build keeps
      * ({@link #columnFeature}) standing and painted on that column.
      */
     private void collectColumn(ChunkBuild build, BoardScene.Tile tile) {
@@ -3208,7 +3208,7 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * What a hex's placements stand and paint on (b11-design 2.4): the faces of its 3D surface, or with the Classic
+     * What a hex's placements stand and paint on: the faces of its 3D surface, or with the Classic
      * graphics its column's, the height of the ground where none covers a point, and its bridge's deck (the 3D shape, or
      * the plane of the Classic deck art), or null.
      */
@@ -3239,7 +3239,7 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * What the Classic graphics build of a hex's features (b11-design 2.4): buildings, fuel tanks and industrial
+     * What the Classic graphics build of a hex's features: buildings, fuel tanks and industrial
      * plants, rail and maglev routes, and placed objects other than plants. The tileset art draws the rest.
      */
     private boolean columnFeature(BoardScene.Feature feature) {
@@ -6007,7 +6007,7 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * The 3D Graphics (b11-design 2.4): with {@code columns} (Classic) every later build lays each hex as its tileset
+     * The 3D Graphics: with {@code columns} (Classic) every later build lays each hex as its tileset
      * column ({@link GpuTilesetTerrain}) and keeps only its structures, routes and placed objects: no relief, water or
      * lava field, plant, road or biome. The next {@link #update} after a change rebuilds the whole board, and until it
      * commits {@link #ready} is false, so the view shows its loading stage either way.
@@ -6018,7 +6018,7 @@ final class GpuTerrain implements Disposable {
     boolean columns() { return installedColumns; }
 
     /**
-     * The Tactical View's draw rule (b11-design 4.3), with no rebuild: trees, scatter, grass and biome vegetation,
+     * The Tactical View's draw rule, with no rebuild: trees, scatter, grass and biome vegetation,
      * building, industrial, fuel tank and placed object models, decals and paint, scars and ground damage, water and its
      * wave simulations, spores and geysers hide; the terrain, roads, bridges, rough, rubble, fortifications, tunnel
      * portals and routes stay. Picking still sees what it hides, so a click picks the same hex and floor as before.

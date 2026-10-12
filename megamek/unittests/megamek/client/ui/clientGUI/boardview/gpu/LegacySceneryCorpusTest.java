@@ -278,7 +278,6 @@ class LegacySceneryCorpusTest {
         assertEquals(Map.of(), untaken, "Batch 10: the conversion takes every legacy art token");
         designs.forEach((design, count) -> System.out.printf("CORPUS design %7d hexes  %s%n", count, design));
         families.forEach((family, count) -> System.out.printf("CORPUS batch-10 family %7d  %s%n", count, family));
-        // b10-design section 1, as converted (one row per family; a hex can be in two).
         assertEquals(new TreeMap<>(Map.of("building/legacy-art-N", 9_759, "building model (art the model was chosen beside)", 108,
               "ground/blend/*", 6_705, "ground/quay-*", 66, "road/horizontal", 1_760, "road/rounded", 19_749,
               "rough/felled-trees", 967, "rough/obstacles", 1_314, "woods/no-trees", 4_224, "woods/orchard", 4_291)), designs);
@@ -335,7 +334,7 @@ class LegacySceneryCorpusTest {
         return (type == Terrains.FLUFF || type == Terrains.GROUND_FLUFF) && hex.terrainLevel(type) >= 2000;
     }
 
-    /** A design's family as section 1 of b10-design counts it. */
+    /** A design's family */
     private static String designFamily(String variant) {
         if (variant.startsWith("building/legacy-art-")) { return "building/legacy-art-N"; }
         if (variant.startsWith("buildings/")) { return "building model (art the model was chosen beside)"; }

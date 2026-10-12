@@ -59,7 +59,7 @@ public class SensorRangeSprite extends FieldOfFireSprite {
     public final static int SENSORS_AIR = 1;
     public final static int VISUAL = 2;
     public final static int VISUAL_DARK = 3;
-    /** The reach of the unit's active probe (b11-design item 22), in the sensor range colour. */
+    /** The reach of the unit's active probe, in the sensor range colour. */
     public final static int ACTIVE_PROBE = 4;
 
     /** Upright GPU visual-range boundary, often clipped to a straight line at the map edge. */

@@ -34,7 +34,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The 3D Graphics as a build mode of the terrain (b11-design 2.4, section 8): a game that starts in Classic builds
+ * The 3D Graphics as a build mode of the terrain: a game that starts in Classic builds
  * only what Classic draws (no relief, water or lava field, wave simulation, tree, scatter, grass, biome or sculpted
  * material); a switch either way rebuilds the board behind the loading stage and retires the other build; the Tactical
  * View never changes the build.

@@ -339,7 +339,7 @@ final class GpuBoardLabels implements GpuHud.Component {
         tip.setVisible(anchor != null);
         if (anchor != null) {
             showTip(move);
-            // The Tactical View's tip also keeps clear of the units' bases (b11-design item 11).
+            // The Tactical View's tip also keeps clear of the units' bases.
             List<Rectangle> obstacles = new ArrayList<>(panels);
             if (view.tactical()) { obstacles.addAll(view.unitRects().values()); }
             placeTip(anchor, obstacles);
@@ -468,7 +468,7 @@ final class GpuBoardLabels implements GpuHud.Component {
         }
     }
 
-    /** The spotting and TAG links between units (b11-design item 16), with an eye or a crosshair halfway. */
+    /** The spotting and TAG links between units, with an eye or a crosshair halfway. */
     private void links(List<GpuBattleStatus.Link> links, GpuHud.HudView view) {
         for (GpuBattleStatus.Link link : links) {
             Rectangle from = view.unitRects().get(link.fromId());

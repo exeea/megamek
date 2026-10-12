@@ -263,7 +263,7 @@ public record BoardHexText(String text, int baseline, Font font, int argb, boole
     }
 
     /**
-     * A hex's labels in the Tactical View (b11-design 4.6): {@code labels}, the board's, with a water hex's depth large
+     * A hex's labels in the Tactical View: {@code labels}, the board's, with a water hex's depth large
      * in its middle instead of its DEPTH label, and a structure's construction factor and height on its roof
      * ({@code elevation} is the height, so the 3D board lays it on the roof) instead of the roof's own label; the
      * other lines {@link #settled settle} at the bottom edge. {@code depth} and {@code cf} are 0 for none; with Hex

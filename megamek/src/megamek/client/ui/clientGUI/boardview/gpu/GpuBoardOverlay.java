@@ -56,7 +56,7 @@ import megamek.common.units.Entity;
 final class GpuBoardOverlay implements Disposable {
     /** One prototype pixel in hex radii at the prototype's Tactical View zoom, where 38 pixels are 1.25 radii. */
     static final float PIXEL = 1.25f / 38;
-    // overlay.js:10-12, the palette of both views (b11-design 1.1); a jump takes the client's jump colour.
+    // overlay.js:10-12, the palette of both views; a jump takes the client's jump colour.
     private static final Color MINT = new Color(.45f, .92f, .80f, 1);
     private static final Color RUN = new Color(.93f, .76f, .40f, 1);
     private static final Color CORAL = new Color(1, .44f, .40f, 1);

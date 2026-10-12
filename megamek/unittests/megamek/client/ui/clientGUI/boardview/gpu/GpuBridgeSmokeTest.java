@@ -523,7 +523,7 @@ class GpuBridgeSmokeTest {
      * alternatives, the joint where a deck continues and the end post at a bank, a road landing or an open end, and a ray
      * that meets only an undrawn alternative passes it (picking sees what is drawn); sloped decks draw their steel in the
      * span's colour; the piers stand as under the standard deck; a decal on a flat truss deck lies on its road surface,
-     * not on the chords. Captures {@code b10-f1/truss-<case>-iso.png} and {@code -side.png}.
+     * not on the chords.
      */
     @Test
     void trussSpansDrawOneJointOrEndPerExitInTheirColour() throws Exception {
@@ -582,8 +582,7 @@ class GpuBridgeSmokeTest {
     /**
      * The Trainjob's rail bridge made a blue truss in the editor (Built: Truss, then a colour: two undo steps), saved as
      * .board2 and loaded the game's way: the truss in its colour, the rail riding the deck between the trusses; opened
-     * the editor's way it gives the same tiles, which the same renderer draws (b13). Capture
-     * {@code b10-f1/truss-trainjob-game.png}.
+     * the editor's way it gives the same tiles, which the same renderer draws.
      */
     @Test
     void trussCarriesTheTrainjobRail() throws Exception {

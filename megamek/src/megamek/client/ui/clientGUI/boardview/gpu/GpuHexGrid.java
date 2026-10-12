@@ -16,7 +16,7 @@ import megamek.server.SmokeCloud;
 /**
  * One hexagon instance per tile, three uses. Outside the Tactical View: the top view's grid over the completed scene,
  * and the grid on the Classic columns' tops at every angle. In the Tactical View: the ground layer, one instanced draw
- * that marks what plays (b11-design 4.6): cliffs, Cliff Top exits included, stroked inside the upper hex with
+ * that marks what play: cliffs, Cliff Top exits included, stroked inside the upper hex with
  * hachures into the lower one, thin lines for 1- and 2-level steps, woods and jungle tinted by density, roofs with
  * their outline, water shaded by depth, ice, magma, smoke and fire, and the hovered or focused enemy's rear and side
  * arcs, and on request each hex lightened by its level. The masks follow the existing rules (BoardRim.high is the one

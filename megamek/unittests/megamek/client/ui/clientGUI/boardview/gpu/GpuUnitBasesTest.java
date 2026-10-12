@@ -18,7 +18,7 @@ import megamek.common.units.Entity;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Tactical View's bases show what the client decided (b11-design 4.7): the facing and twist, the done and ready
+ * The Tactical View's bases show what the client decided: the facing and twist, the done and ready
  * states, the destroyed cross, the modifier's chevrons once it shows, the heat pip, the elevation and the two most
  * severe conditions, from the battle status alone.
  */

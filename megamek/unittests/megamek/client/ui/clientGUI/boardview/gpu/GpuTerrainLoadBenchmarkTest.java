@@ -63,7 +63,7 @@ class GpuTerrainLoadBenchmarkTest {
         float floor = settings.call(() -> BoardGeometry.floor(scene));
         System.out.printf("PERF terrain-prepare board=%s region=%s workers=%d graphics=%s%n", file.getName(),
               Arrays.toString(region), workers, graphics);
-        // A Classic build prepares the tileset columns in place of the 3D chunks (b11-design 2.4), which have no level
+        // A Classic build prepares the tileset columns in place of the 3D chunks, which have no level
         // of detail.
         for (int repeat = 0; graphics == BoardGraphics.CLASSIC && repeat < repeats; repeat++) {
             columns(scene, settings, currents, floor, region, workers);

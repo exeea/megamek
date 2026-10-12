@@ -18,7 +18,7 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Tactical View's ground layer marks the hexes the captured board describes (b11-design 4.6): cliffs by the one
+ * The Tactical View's ground layer marks the hexes the captured board describes: cliffs by the one
  * cliff rule (BoardRim.high, Cliff Top exits included) on both sides of their hexside, 1- and 2-level steps, woods,
  * water and structures with their outline, smoke and fire, and the enemy's arcs from the captured side table.
  */
