@@ -425,6 +425,26 @@ class GpuArtilleryBlastTest {
         assertEquals(25f / 15, crater(25) / crater(15), .001f, "A Long Tom's crater against a Thumper's");
     }
 
+    /**
+     * A homing round with no TAG to follow is sent as dealing no damage, and draws as a dud: a burst of dirt, no crater
+     * and no scorch marks in any ring. Smoke and other rounds that never explode are not duds.
+     */
+    @Test
+    void aZeroDamageExplosiveRoundIsADudThatLeavesNoMarks() {
+        EquipmentType.initializeTypes();
+        assertTrue(GpuArtilleryBlast.isDud(damage(0)));
+        assertFalse(GpuArtilleryBlast.isDud(damage(20)), "A round that deals damage explodes");
+        assertFalse(GpuArtilleryBlast.isDud(shot(true, "M_SMOKE").withDamagePerHit(0)), "Smoke never explodes");
+        assertEquals(0, craters("ISArrowIV", damage(0)), "A dud leaves no crater");
+        var attack = GroundDamagePlaybackTest.shot("ISArrowIV", false, damage(0));
+        var blasts = new GpuArtilleryBlast();
+        blasts.detonate(BoardGeometry.center(attack.event.destination().coords(), 0), damage(0), attack, 5);
+        blasts.advance(GpuArtilleryBlast.SECONDS - .1f);
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        blasts.groundMarks(marks::add);
+        assertEquals(0, marks.size(), "and no scorch marks");
+    }
+
     private static ResolvedAttack.Shot damage(double damage) {
         return new ResolvedAttack.Shot("", Set.of("M_STANDARD"), true, false, 1, 0, true, null, null, null, true, 20,
               false, false, false, null, damage);

@@ -190,6 +190,9 @@ class GpuArtilleryBlastSmokeTest {
         close.update();
         writeAnimation(buffer, batch, ground, volumes, blast, size, close, GpuArtilleryBlast.Style.MINES, 0,
               new File(folder, "artillery-mines-frames"));
+        // A homing round with no TAG to follow: a dud's dirt burst.
+        writeAnimation(buffer, batch, ground, volumes, blast, size, close, GpuArtilleryBlast.Style.DUD, 0,
+              new File(folder, "artillery-dud-frames"));
     }
 
     /** Numbered frames at 15 a second over the blast's life, for stitching into an animation to review. */

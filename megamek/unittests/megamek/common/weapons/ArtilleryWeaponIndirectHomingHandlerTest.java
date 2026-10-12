@@ -32,21 +32,27 @@
  */
 package megamek.common.weapons;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Hashtable;
+import java.util.List;
 import java.util.Vector;
 import java.util.stream.Collectors;
 
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.Report;
+import megamek.common.ResolvedAttack;
 import megamek.common.ToHitData;
 import megamek.common.actions.ArtilleryAttackAction;
 import megamek.common.actions.WeaponAttackAction;
@@ -62,6 +68,8 @@ import megamek.common.equipment.enums.BombType.BombTypeEnum;
 import megamek.common.exceptions.LocationFullException;
 import megamek.common.game.Game;
 import megamek.common.loaders.EntityLoadingException;
+import megamek.common.net.enums.PacketCommand;
+import megamek.common.net.packets.Packet;
 import megamek.common.options.GameOptions;
 import megamek.common.options.OptionsConstants;
 import megamek.common.options.PilotOptions;
@@ -267,6 +275,77 @@ class ArtilleryWeaponIndirectHomingHandlerTest {
      * through one Homing Arrow IV bomb launch, the subsequent tagging turn, and the homing attack conversion /
      * handling.
      */
+    /**
+     * A homing round with no TAG to follow deals no damage, as before, but the server now shows it coming down in a hex
+     * beside the one it was aimed at, as a round dealing no damage, which the 3D board draws as a dud: a dirt burst.
+     */
+    @Test
+    void aHomingRoundWithNoTagComesDownHarmlesslyBesideItsAim() throws Exception {
+        AeroSpaceFighter attacker = createASF("ATT-10", "Buzzsaw", "Alyce", aPlayer);
+        loadBombOnASF(attacker, BombTypeEnum.HOMING);
+        Mek defender = createMek("TGT-1A", "Targeto", "Bob", dPlayer);
+        Coords aimed = new Coords(8, 1);
+        attacker.setPosition(new Coords(8, 15));
+        defender.setPosition(aimed);
+        List<ResolvedAttack> shown = resolveHomingRound(attacker, defender, null);
+
+        assertFalse(shown.isEmpty(), "The lost round is shown");
+        for (ResolvedAttack result : shown) {
+            assertEquals(0, result.shot().damagePerHit(), "Sent as dealing no damage");
+            assertFalse(result.hit());
+            assertEquals(1, aimed.distance(result.shot().impact().coords()), "It comes down beside its aim hex");
+        }
+        assertFalse(defender.isDestroyed(), "And it still deals no damage");
+    }
+
+    /** With a TAG that hit, the round homes in as it always has and is not shown as a dud. */
+    @Test
+    void aHomingRoundWithATagIsNotShownAsADud() throws Exception {
+        AeroSpaceFighter attacker = createASF("ATT-10", "Buzzsaw", "Alyce", aPlayer);
+        loadBombOnASF(attacker, BombTypeEnum.HOMING);
+        Mek tagger = createMek("TAG-3R", "Taggity", "Taggart", aPlayer, 1, 1);
+        Mounted<?> tagWeapon = tagger.addEquipment(tagType, Mek.LOC_CENTER_TORSO);
+        Mek defender = createMek("TGT-1A", "Targeto", "Bob", dPlayer);
+        attacker.setPosition(new Coords(8, 15));
+        tagger.setPosition(new Coords(1, 1));
+        defender.setPosition(new Coords(8, 1));
+        TAGHandler tagHandler = new TAGHandler(makeTHD(2), makeWAA(tagger, defender, tagWeapon), game, gameManager);
+        List<ResolvedAttack> shown = resolveHomingRound(attacker, defender, tagHandler);
+
+        assertTrue(shown.stream().noneMatch(result -> (result.shot() != null)
+              && (result.shot().damagePerHit() == 0)), "No dud when the round has a TAG to follow");
+    }
+
+    /**
+     * Fires the attacker's homing round at the defender, lets an optional TAG fire in the Off-board phase it lands in,
+     * and returns the attack animations the server sent.
+     */
+    private List<ResolvedAttack> resolveHomingRound(Entity attacker, Entity defender, TAGHandler tagHandler)
+          throws Exception {
+        List<ResolvedAttack> shown = new ArrayList<>();
+        TWGameManager capturing = spy(gameManager);
+        doAnswer(call -> {
+            Packet packet = call.getArgument(1);
+            if (packet.command() == PacketCommand.ENTITY_ATTACK_RESOLVED) {
+                shown.add((ResolvedAttack) packet.getObject(0));
+            }
+            return null;
+        }).when(capturing).send(anyInt(), any(Packet.class));
+        ArtilleryAttackAction attack = makeArtilleryWAA(attacker, defender, attacker.getWeapon(0));
+        var handler = new megamek.common.weapons.handlers.artillery.ArtilleryWeaponDistantHomingHandler(
+              makeAutoHitHomingTHD(), attack, game, capturing);
+        Vector<Report> reports = new Vector<>();
+        game.setPhase(GamePhase.TARGETING);
+        handler.handle(game.getPhase(), reports);
+        game.setPhase(GamePhase.OFFBOARD);
+        handler.handle(game.getPhase(), reports);
+        if (tagHandler != null) {
+            tagHandler.handle(game.getPhase(), reports);
+        }
+        handler.handle(game.getPhase(), reports);
+        return shown;
+    }
+
     @Test
     void handleArrowIVHomingBombTargetMekWithTAG() throws LocationFullException, EntityLoadingException {
         // Create and load entities

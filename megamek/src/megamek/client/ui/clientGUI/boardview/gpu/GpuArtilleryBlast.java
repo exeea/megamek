@@ -48,7 +48,8 @@ final class GpuArtilleryBlast {
      * bursts in the air and scatters bomblets over its target hex and the ring around it, and MINES for a round that
      * opens above the hex it lands on and lets its mines drift down into that hex alone.
      */
-    enum Style { CROWN, MUSHROOM, FIREBALL, CLUSTER, MINES }
+    /** {@link #DUD}: a round that came down without going off, a homing round with no TAG to follow. */
+    enum Style { CROWN, MUSHROOM, FIREBALL, CLUSTER, MINES, DUD }
 
     /** How long the slowest layer of a blast (its smoke) lasts. */
     static final float SECONDS = 5.5f;
@@ -108,6 +109,8 @@ final class GpuArtilleryBlast {
     private static final Look FIRE = new Look(.85f, .75f, .1f);
     private static final Look BRIGHT_FIRE = new Look(.55f, 1, 0);
     private static final Look EARTH = new Look(.35f, 0, .9f);
+    /** Clods of earth a dud throws up where it strikes. */
+    private static final int DUD_CLODS = 7;
     private static final Look SMOKE = new Look(1, .45f, .1f);
     private static final Look CAP = new Look(.9f, .4f, 0);
     private static final Look DEBRIS = new Look(.8f, .3f, .6f);
@@ -207,12 +210,14 @@ final class GpuArtilleryBlast {
             this.key = key;
             size = size(profile);
             area = areaEffect(weaponName(attack), profile);
-            style = laysMines(profile) ? Style.MINES : area.cluster() ? Style.CLUSTER : style(profile, key);
+            style = isDud(profile) ? Style.DUD : laysMines(profile) ? Style.MINES : area.cluster() ? Style.CLUSTER
+                  : style(profile, key);
             targetHex = attack == null ? null : attack.event.destination().coords();
             drawSeed = ((style == Style.MINES) && (targetHex != null)) ? mineSeed(targetHex) : key;
             pieces = switch (style) {
                 case MINES -> mines(drawSeed, minesFor(minefieldDensity(weaponName(attack), profile)));
                 case CLUSTER -> bomblets(area, key);
+                case DUD -> List.of();
                 default -> debrisPieces(area.hexRadius(), key);
             };
             Vector3 hexCentre = attack == null ? ground : BoardGeometry.center(attack.event.destination().coords(), 0);
@@ -260,7 +265,15 @@ final class GpuArtilleryBlast {
 
     /** Whether the landing leaves no single crater: a cluster round's bomblets, or mines, which make none. */
     static boolean leavesNoCrater(@Nullable String weaponName, @Nullable ResolvedAttack.Shot profile) {
-        return laysMines(profile) || scattersBomblets(weaponName, profile);
+        return laysMines(profile) || scattersBomblets(weaponName, profile) || isDud(profile);
+    }
+
+    /**
+     * Whether the round came down without going off: an explosive artillery round the server sent as dealing no
+     * damage, which it does only for a homing round with no TAG to follow. It throws up dirt and leaves no crater.
+     */
+    static boolean isDud(@Nullable ResolvedAttack.Shot profile) {
+        return explodes(profile) && (profile.damagePerHit() == 0);
     }
 
     /**
@@ -617,6 +630,7 @@ final class GpuArtilleryBlast {
         List<Piece> pieces = switch (style) {
             case MINES -> mines(seed, minesFor(PREVIEW_MINE_DENSITY));
             case CLUSTER -> bomblets(PREVIEW_CLUSTER, seed);
+            case DUD -> List.of();
             default -> debrisPieces(hexRadius, seed);
         };
         List<Vector3> landings = new ArrayList<>(pieces.size());
@@ -637,6 +651,10 @@ final class GpuArtilleryBlast {
             cluster(explosions, ground, scatter, seconds, seed);
             return;
         }
+        if (style == Style.DUD) {
+            dud(explosions, ground, seconds, seed);
+            return;
+        }
         debris(explosions, ground, size, scatter.pieces(), scatter.landings(), seconds, seed);
         switch (style) {
             case CROWN -> crown(explosions, ground, size, seconds, seed);
@@ -648,6 +666,36 @@ final class GpuArtilleryBlast {
         // The fireball's own smoke follows once it burns down; drawn earlier, the column cuts a dark streak through it.
         if (style == Style.CROWN) { smokeColumn(explosions, ground, size, seconds, seed, .4f); }
         if (style == Style.FIREBALL) { smokeColumn(explosions, ground, size, seconds, seed, 1.9f); }
+    }
+
+    /**
+     * A round that came down without going off, a homing round with no TAG to follow: a short burst of dirt where it
+     * struck, a few clods thrown up and falling back, and a low dust cloud that settles. No flash, no smoke column.
+     */
+    private void dud(GpuExplosionEffects explosions, Vector3 ground, float seconds, int seed) {
+        float hex = BoardGeometry.height();
+        for (int clod = 0; clod < DUD_CLODS; clod++) {
+            float age = (seconds - clod * .03f) / 1.4f;
+            if ((age < 0) || (age >= 1)) {
+                continue;
+            }
+            float bearing = clod * 2.399963f + random(seed, clod + 600);
+            float out = hex * .14f * (.4f + .6f * random(seed, clod + 620)) * (1 - (1 - age) * (1 - age));
+            // Up and back down, a quick arc.
+            float rise = hex * (.16f + .12f * random(seed, clod + 640)) * 4 * age * (1 - age);
+            point.set(ground).add(MathUtils.cos(bearing) * out, MathUtils.sin(bearing) * out, rise + hex * .02f);
+            explosions.add(point, hex * (.03f + .04f * age), age, 0, .75f * fadeOut(age, .3f), seed + clod * 37,
+                  EARTH, Vector3.Zero);
+        }
+        float dustSeconds = seconds - .05f;
+        float dustAge = dustSeconds / 2.2f;
+        if ((dustAge >= 0) && (dustAge < 1)) {
+            float swell = 1 - (float) Math.exp(-dustSeconds * 2.5f);
+            point.set(ground).add(0, 0, hex * .04f);
+            explosions.downwind(point, dustSeconds);
+            explosions.add(point, hex * (.06f + .14f * swell), dustAge, 0, .45f * fadeOut(dustAge, .2f), seed + 1,
+                  EARTH, Vector3.Zero);
+        }
     }
 
     /**
