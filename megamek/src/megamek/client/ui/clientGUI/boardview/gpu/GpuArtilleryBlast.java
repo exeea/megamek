@@ -95,6 +95,9 @@ final class GpuArtilleryBlast {
     private static final Vector3 DEFAULT_HEADING = new Vector3(1, 0, 0);
     /** Damage of the shell that draws at the reference size: a Sniper or an Arrow IV. */
     private static final float REFERENCE_DAMAGE = 20;
+    /** The smallest and largest blasts, against the 20-damage one: a 7-damage round and a 32-damage one. */
+    private static final float SMALLEST_SCALE = .35f;
+    private static final float LARGEST_SCALE = 1.6f;
     /** Pieces a shell damaging only its own hex throws, all landing inside that hex. */
     private static final int TARGET_HEX_PIECES = 12;
     /** At most this many fragments land in one damaged hex; wide blasts share the debris budget more thinly. */
@@ -262,11 +265,12 @@ final class GpuArtilleryBlast {
 
     /**
      * The radius, in world units, of the blast of this shell. A 20-damage shell spans about a hex; lighter and heavier
-     * shells scale with their damage, within limits that keep a cannon round visible and a Long Tom on the map.
+     * shells scale in step with their damage, so a Long Tom (25) draws well over a Thumper (15) and over three times a
+     * Thumper Cannon (5), within limits that keep a cannon round visible and a Long Tom on the map.
      */
     static float size(@Nullable ResolvedAttack.Shot profile) {
         double damage = profile == null || profile.damagePerHit() <= 0 ? REFERENCE_DAMAGE : profile.damagePerHit();
-        float scale = MathUtils.clamp((float) Math.sqrt(damage / REFERENCE_DAMAGE), .65f, 1.35f);
+        float scale = MathUtils.clamp((float) (damage / REFERENCE_DAMAGE), SMALLEST_SCALE, LARGEST_SCALE);
         if (profile != null && profile.munitions().contains("M_DAVY_CROCKETT_M")) { scale = 2.5f; }
         else if (profile != null && profile.munitions().contains("M_FAE")) { scale *= 1.3f; }
         return BoardGeometry.height() * .55f * scale;

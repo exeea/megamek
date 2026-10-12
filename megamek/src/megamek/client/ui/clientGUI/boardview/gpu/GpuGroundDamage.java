@@ -4,11 +4,11 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.io.File;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,8 +26,8 @@ import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.TextureArrayData;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.BufferUtils;
+import com.badlogic.gdx.utils.Disposable;
 import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
@@ -60,6 +60,9 @@ final class GpuGroundDamage implements Disposable {
     }
 
     /** Miss endpoints and contact times are supplied by the existing attack effects, never rolled here. */
+    /** The damage at which an artillery crater keeps the size every blast crater has: a Sniper's. */
+    static final float ARTILLERY_CRATER_DAMAGE = 20;
+
     record Impact(UnitAttack attack, String key, Vector3 origin, Vector3 point, String effect, ResolvedAttack.Shot shot) {
         Style style() {
             // Captured weapon flags take precedence over a mesh's generic energy/bullet emitter.
@@ -117,9 +120,12 @@ final class GpuGroundDamage implements Disposable {
         float radius(Style style) {
             // Zero-damage weapons still leave a visible scar; the captured game value stays unchanged.
             float damage = shot == null ? cut() ? 5 : 1 : (float) Math.max(1, shot.damagePerHit());
+            if ((style == Style.BLAST) && (shot != null) && shot.artillery()) {
+                // An artillery crater, and the scorch marks in its rings, grow in step with damage as its blast does.
+                return BoardRelief.metres(blastCraterMetres(ARTILLERY_CRATER_DAMAGE) * damage / ARTILLERY_CRATER_DAMAGE);
+            }
             if (style == Style.BLAST || style == Style.PLASMA) {
-                // One power curve through 2.7 m diameter at 1 damage and 12 m at 25 damage.
-                return BoardRelief.metres(1.35f * (float) Math.pow(damage, .4634086426));
+                return BoardRelief.metres(blastCraterMetres(damage));
             }
             // Gouges are 5:1. Their perpendicular blast diameter is twice the gouge width.
             float scale = switch (style) {
@@ -127,6 +133,11 @@ final class GpuGroundDamage implements Disposable {
                 default -> 1;
             };
             return BoardRelief.metres(1.5f * (float) Math.sqrt(damage) * scale);
+        }
+
+        /** A blast crater's radius in metres: one power curve through 2.7 m diameter at 1 damage and 12 m at 25. */
+        static float blastCraterMetres(float damage) {
+            return 1.35f * (float) Math.pow(damage, .4634086426);
         }
 
         float strength() {

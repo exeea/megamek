@@ -408,6 +408,33 @@ class GpuArtilleryBlastTest {
         assertEquals(before.subList(0, 6), after, "The mines left lie where they did");
     }
 
+    /**
+     * A blast, its crater and its ring scorches grow in step with the shell's damage: a Long Tom (25) draws clearly over
+     * a Sniper (20) and a Thumper (15), not all three about the same size.
+     */
+    @Test
+    void blastsAndCratersGrowInStepWithDamage() {
+        float sniper = GpuArtilleryBlast.size(damage(20));
+        assertEquals(25f / 20, GpuArtilleryBlast.size(damage(25)) / sniper, .001f, "Long Tom");
+        assertEquals(15f / 20, GpuArtilleryBlast.size(damage(15)) / sniper, .001f, "Thumper");
+        assertEquals(10f / 20, GpuArtilleryBlast.size(damage(10)) / sniper, .001f, "Sniper Cannon");
+        assertEquals(.35f, GpuArtilleryBlast.size(damage(5)) / sniper, .001f, "A Thumper Cannon stays visible");
+        float sniperCrater = crater(20);
+        assertEquals(BoardRelief.metres(GpuGroundDamage.Impact.blastCraterMetres(20)), sniperCrater, .001f,
+              "A Sniper's crater keeps its size");
+        assertEquals(25f / 15, crater(25) / crater(15), .001f, "A Long Tom's crater against a Thumper's");
+    }
+
+    private static ResolvedAttack.Shot damage(double damage) {
+        return new ResolvedAttack.Shot("", Set.of("M_STANDARD"), true, false, 1, 0, true, null, null, null, true, 20,
+              false, false, false, null, damage);
+    }
+
+    private static float crater(double damage) {
+        return new GpuGroundDamage.Impact(null, "crater", new Vector3(), new Vector3(), "bullet", damage(damage))
+              .radius();
+    }
+
     /** Level ground at height 0 that reports squared distances, as the board's landscape does. */
     private static BoardGeometry.Hit flatGround(Ray ray) {
         if (ray.direction.z >= 0) {
