@@ -24,15 +24,28 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
+import megamek.common.equipment.AmmoType;
+import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.WeaponType;
+import megamek.logging.MMLogger;
 
-/** Four triangles per missile; all bodies and smoke are batched. Trails sample the same immutable flight curve. */
+/**
+ * Missile bodies and their smoke, all batched. A plain missile is four triangles; an Arrow IV round is drawn as the
+ * real thing, 4 m long. Trails sample the same immutable flight curve.
+ */
 final class GpuMissileEffects implements Disposable {
+    private static final MMLogger LOGGER = MMLogger.create(GpuMissileEffects.class);
     static final float LAUNCH_JITTER_SECONDS = .06f;
     static final int SMOKE_BUDGET = 7680;
     static final int SMOKE_PER_MISSILE = 20;
     static final float SMOKE_LIFE_SECONDS = .3f;
     private static final int MISSILES_PER_BATCH = 512;
     private static final int STRIDE = 7;
+    /** Arrow IV rounds a batch holds before it is drawn; a volley rarely has more than a few. */
+    private static final int ARROW_IV_PER_BATCH = 32;
+    private static final String MISSILE_MODEL = "models/effects/missile-body.glb";
+    /** An Arrow IV round, authored in metres: 4 m long and twice its true thickness, so it reads at board zoom. */
+    private static final String ARROW_IV_MODEL = "models/effects/arrow-iv.glb";
     record Launch(UnitAttack attack, Vector3[] origins, Vector3[] targets, int missiles, int hits, boolean indirect, int seed,
           ResolvedAttack.Shot profile, int intercepted, Vector3[] aims, UnitAttack.Contact[] contacts) {
         boolean hit(int missile) { return Math.floorMod(seed - missile, missiles) < hits; }
@@ -97,6 +110,8 @@ final class GpuMissileEffects implements Disposable {
     private final Vector3 right = new Vector3(), width = new Vector3(), length = new Vector3();
     private float[] vertices;
     private float[] body;
+    /** The Arrow IV round, or empty when its model is missing, which draws the plain missile instead. */
+    private float[] arrowIVBody;
     private Mesh mesh;
     private ShaderProgram shader;
     private int offset, smokeCount, missileCount;
@@ -145,12 +160,13 @@ final class GpuMissileEffects implements Disposable {
         int ordinal = 0;
         for (var launch : launches) {
             float time = launch.attack.seconds;
+            boolean arrowIV = firesArrowIV(launch);
             for (int missile = 0; missile < launch.missiles; missile++, ordinal++) {
                 float t = progress(launch, missile, time);
                 if (t >= 0 && t < launch.endProgress(missile)) {
                     position(launch, missile, t, point);
                     position(launch, missile, Math.min(1, t + .002f), direction).sub(point).nor();
-                    missile(camera, point, direction);
+                    missile(camera, point, direction, arrowIV);
                     missileCount++;
                 }
                 if (ordinal % smokeStride != 0) { continue; }
@@ -197,19 +213,39 @@ final class GpuMissileEffects implements Disposable {
         exhaust.render(camera, drawnSmoke);
     }
 
-    private void missile(Camera camera, Vector3 center, Vector3 forward) {
+    /**
+     * Whether the launch's missiles are Arrow IV rounds: any shot from an Arrow IV launcher, or an aircraft's Arrow IV
+     * homing missile, which is the same round.
+     */
+    static boolean firesArrowIV(Launch launch) {
+        String weaponName = launch.attack.event.result().equipmentName();
+        if ((weaponName == null) || !(EquipmentType.get(weaponName) instanceof WeaponType weapon)) {
+            return false;
+        }
+        AmmoType.AmmoTypeEnum ammoType = weapon.getAmmoType();
+        return (ammoType == AmmoType.AmmoTypeEnum.ARROW_IV) || (ammoType == AmmoType.AmmoTypeEnum.ARROW_IV_BOMB);
+    }
+
+    /**
+     * Queues one missile body, its base at {@code center}, pointing along {@code forward}. An Arrow IV round's model
+     * is in metres, so it is scaled to the board's metres; the plain missile is already in board units.
+     */
+    private void missile(Camera camera, Vector3 center, Vector3 forward, boolean arrowIV) {
         if (mesh == null) { create(); }
-        if (offset == vertices.length) { flush(camera); }
+        boolean drawsArrowIV = arrowIV && (arrowIVBody.length > 0);
+        float[] template = drawsArrowIV ? arrowIVBody : body;
+        float scale = drawsArrowIV ? BoardRelief.metres(1) : 1;
+        if (offset + template.length > vertices.length) { flush(camera); }
         side.set(forward).crs(Vector3.Z);
         if (side.isZero(.001f)) { side.set(Vector3.X); }
         side.nor();
         up.set(side).crs(forward).nor();
-        for (int i = 0; i < body.length; i += STRIDE) {
-            float x = body[i], y = body[i + 1], z = body[i + 2];
+        for (int i = 0; i < template.length; i += STRIDE) {
+            float x = template[i] * scale, y = template[i + 1] * scale, z = template[i + 2] * scale;
             vertices[offset++] = center.x + side.x * x + forward.x * y + up.x * z;
             vertices[offset++] = center.y + side.y * x + forward.y * y + up.y * z;
             vertices[offset++] = center.z + side.z * x + forward.z * y + up.z * z;
-            System.arraycopy(body, i + 3, vertices, offset, 4);
+            System.arraycopy(template, i + 3, vertices, offset, 4);
             offset += 4;
         }
     }
@@ -228,16 +264,39 @@ final class GpuMissileEffects implements Disposable {
     }
 
     private void create() {
-        var file = new FileHandle(new File(Configuration.dataDir(), "models/effects/missile-body.glb"));
+        body = template(MISSILE_MODEL);
+        if (body.length == 0) { throw new IllegalArgumentException("Empty missile body"); }
+        arrowIVBody = arrowIVTemplate();
+        shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU missile",
+              GpuShaderSource.read("missile.vert"), GpuShaderSource.read("missile.frag")), next -> shader = next);
+        vertices = new float[Math.max(MISSILES_PER_BATCH * body.length, ARROW_IV_PER_BATCH * arrowIVBody.length)];
+        mesh = new Mesh(false, vertices.length / STRIDE, 0, VertexAttribute.Position(), VertexAttribute.ColorUnpacked());
+    }
+
+    /** The vertices of a missile model, its authored transforms baked in. */
+    private static float[] template(String path) {
+        var file = new FileHandle(new File(Configuration.dataDir(), path));
         var data = RigidGlb.loadLods(file).getFirst();
         var points = new com.badlogic.gdx.utils.FloatArray();
         for (var node : data.nodes) { body(data, node, new Matrix4(), points); }
-        body = points.toArray();
-        if (body.length == 0) { throw new IllegalArgumentException("Empty missile body"); }
-        shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU missile",
-              GpuShaderSource.read("missile.vert"), GpuShaderSource.read("missile.frag")), next -> shader = next);
-        vertices = new float[MISSILES_PER_BATCH * body.length];
-        mesh = new Mesh(false, vertices.length / STRIDE, 0, VertexAttribute.Position(), VertexAttribute.ColorUnpacked());
+        return points.toArray();
+    }
+
+    /** The Arrow IV round, or an empty template when its model cannot be read, so it falls back to the plain missile. */
+    private static float[] arrowIVTemplate() {
+        if (!new File(Configuration.dataDir(), ARROW_IV_MODEL).isFile()) {
+            LOGGER.warn("[ArrowIV] {} is missing, Arrow IV rounds fly as plain missiles", ARROW_IV_MODEL);
+            return new float[0];
+        }
+        try {
+            float[] template = template(ARROW_IV_MODEL);
+            LOGGER.info("[ArrowIV] loaded the Arrow IV round, {} triangles", template.length / STRIDE / 3);
+            return template;
+        } catch (RuntimeException exception) {
+            LOGGER.warn(exception, "[ArrowIV] {} could not be read, Arrow IV rounds fly as plain missiles",
+                  ARROW_IV_MODEL);
+            return new float[0];
+        }
     }
 
     /** Bake the authored rigid transforms once; the dynamic batch only rotates/translates this template. */
@@ -276,6 +335,7 @@ final class GpuMissileEffects implements Disposable {
         if (shader != null) { GpuShaderManager.dispose(shader); shader = null; }
         vertices = null;
         body = null;
+        arrowIVBody = null;
         Arrays.fill(smoke, null);
     }
 }

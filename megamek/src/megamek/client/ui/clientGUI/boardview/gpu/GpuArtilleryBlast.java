@@ -295,7 +295,13 @@ final class GpuArtilleryBlast {
     /** The round of the weapon's ammunition family whose munitions are exactly those the shot carried. */
     private static @Nullable AmmoType round(WeaponType weapon, Set<String> munitions) {
         AmmoType standard = null;
-        for (AmmoType candidate : AmmoType.getMunitionsFor(weapon.getAmmoType())) {
+        List<AmmoType> rounds = AmmoType.getMunitionsFor(weapon.getAmmoType());
+        if (rounds == null) {
+            // An aircraft's Arrow IV homing missile, for one, has no list of munitions to choose from.
+            LOGGER.debug("[ArtilleryBlast] {} has no munitions list, its round is unknown", weapon.getInternalName());
+            return null;
+        }
+        for (AmmoType candidate : rounds) {
             Set<String> names = new HashSet<>();
             for (AmmoType.Munitions munition : candidate.getMunitionType()) { names.add(munition.name()); }
             if (names.equals(munitions)) { return candidate; }
