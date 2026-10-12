@@ -92,6 +92,7 @@ import megamek.common.ECMInfo;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.SpecialHexDisplay;
+import megamek.common.TagInfo;
 import megamek.common.actions.ArtilleryAttackAction;
 import megamek.common.actions.AttackAction;
 import megamek.common.actions.EntityAction;
@@ -180,6 +181,8 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     private static final int HEAT_MAP_MAX_HEAT_UNITS = 5;
     private static final float HEAT_MAP_FILL_ALPHA = 0.55f;
     private static final MMLogger LOGGER = MMLogger.create(BoardClientState.class);
+    /** The units last found tagged, so the tag markers log only when they change. */
+    private Set<Integer> lastTagged = Set.of();
     public static final int BOARD_HEX_CLICK = 1, BOARD_HEX_DOUBLE_CLICK = 2, BOARD_HEX_DRAG = 3, BOARD_HEX_POPUP = 4;
     final List<BoardViewListener> listeners = new ArrayList<>();
     final LinkedHashSet<IDisplayable> overlays = new LinkedHashSet<>();
@@ -952,6 +955,36 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                 drawDemolitionChargeLabel(graphics2D, getHexLocation(marker.coords()), marker.label());
             }
         }
+    }
+
+    /**
+     * A marker on every unit a TAG has hit this round that the local player can see, where it stands now. The tags
+     * arrive at the end of the Off-board phase and are cleared at the next round's Initiative, so the marker lasts
+     * through the Firing phase, when homing and semi-guided rounds use it.
+     */
+    public List<BoardMarker> tagMarkers() {
+        List<BoardMarker> result = new ArrayList<>();
+        Set<Integer> tagged = new HashSet<>();
+        for (TagInfo tag : game.getTagInfo()) {
+            boolean isUnitTag = !tag.missed && (tag.targetType == Targetable.TYPE_ENTITY) && (tag.target != null);
+            Entity unit = isUnitTag ? game.getEntity(tag.target.getId()) : null;
+            if ((unit == null) || !tagged.add(unit.getId()) || !isShownTagged(unit)) {
+                continue;
+            }
+            result.add(boardMarker(BoardMarker.Kind.TAGGED, unit.getPosition(), ""));
+        }
+        if (!tagged.equals(lastTagged)) {
+            lastTagged = tagged;
+            LOGGER.debug("[TAG] tagged units this round: {}, {} shown on this board", tagged, result.size());
+        }
+        return result;
+    }
+
+    /** Whether a tagged unit's marker belongs on this board: on it, placed, and seen by the local player. */
+    private boolean isShownTagged(Entity unit) {
+        boolean isPlaced = (unit.getPosition() != null) && (unit.getBoardId() == boardId)
+              && getBoard().contains(unit.getPosition());
+        return isPlaced && EntityVisibilityUtils.detectedOrHasVisual(localPlayer, game, unit);
     }
 
     public List<BoardMarker> demolitionMarkers() {
@@ -2059,6 +2092,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         result.addAll(minefieldMarkers());
         result.addAll(demolitionMarkers());
         result.addAll(artilleryMarkers());
+        result.addAll(tagMarkers());
         for (Enumeration<OrbitalBombardment> attacks = game.getOrbitalBombardmentAttacks(); attacks.hasMoreElements();) {
             OrbitalBombardment attack = attacks.nextElement();
             result.add(boardMarker(BoardMarker.Kind.ORBITAL_INCOMING, new Coords(attack.getX(), attack.getY()), ""));

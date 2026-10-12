@@ -23,6 +23,14 @@ final class GpuAttackEffects implements Disposable {
     private static final float PPC_BEAM_WIDTH = 4.3f;
     // Beam shader kinds; particle kinds belong to the separate particle shader.
     private static final int LASER = 0, PPC = 1, PPC_GLOW = 2;
+    /** A TAG's laser designator: a thin deep-red line, and the spot it puts on what it hits (beams.frag). */
+    private static final int DESIGNATOR = 3, DESIGNATOR_SPOT = 4;
+    /** About a weapon laser's width: any thinner falls between pixel rows at board zoom and vanishes. */
+    private static final float DESIGNATOR_WIDTH = .55f;
+    private static final float DESIGNATOR_SPOT_RADIUS = 4.5f;
+    private static final float DESIGNATOR_PULSES_PER_SECOND = 2.5f;
+    /** A TAG that misses only flickers, faintly and briefly, off past its target. */
+    private static final float DESIGNATOR_MISS_SECONDS = .3f;
     // projectiles.frag kinds. Fractional parts carry animation phase from the existing attack clock.
     static final int TRACER = 0, ENERGY_TRAIL = 1, ENERGY_GLOW = 2, FLARE_GLOW = 3, SPRAY = 4, SCREEN = 5, CONTACT_GLOW = 6;
     static final int IMPACT_SPARK = 7;
@@ -144,7 +152,9 @@ final class GpuAttackEffects implements Disposable {
                     float size = MathUtils.clamp(UnitBounds.subtree(attachment).getDimensions(point).len()
                           * instance.transform.getScaleX() * .5f, 1.5f, 14);
                     String key = binding.node() + ":" + (barrel + 1) + (bullet && index > 0 ? ":round-" + index : "");
-                    emission(paths, key, emitter.effect(), profile, victim, size, bullet ? attack.roundDelay(index, profile) : 0);
+                    // A TAG is a designator whatever its model's emitter says.
+                    String effect = attack.firesTag(owner, binding.index()) ? "designator" : emitter.effect();
+                    emission(paths, key, effect, profile, victim, size, bullet ? attack.roundDelay(index, profile) : 0);
                 }
             }
         }
@@ -203,12 +213,13 @@ final class GpuAttackEffects implements Disposable {
             var start = muzzles[muzzleCount].cpy();
             var finish = new Vector3();
             boolean impact;
-            if ("laser".equals(effect) || "ppc".equals(effect)) { impact = attack.beamEndpoint(victim, start, key.hashCode(), finish); }
+            boolean isBeam = "laser".equals(effect) || "ppc".equals(effect) || "designator".equals(effect);
+            if (isBeam) { impact = attack.beamEndpoint(victim, start, key.hashCode(), finish); }
             else { attack.endpoint(victim, start, !attack.event.result().hit(), key.hashCode(), finish); impact = true; }
             boolean missed = !attack.event.result().hit() && !attack.defensive();
             boolean arc = profile != null && (profile.indirect() || profile.artillery());
             var aim = finish.cpy();
-            var contact = missed && !"laser".equals(effect) && !"ppc".equals(effect)
+            var contact = missed && !isBeam
                   ? attack.landscapeContact(t -> UnitAttack.projectile(start, aim, (float) t, arc, new Vector3()), arc ? 32 : 1) : null;
             trace = new Trace(start, forwards[muzzleCount].cpy(), contact == null ? finish : contact.point(), impact,
                   aim, contact == null ? 1 : contact.progress());
@@ -444,6 +455,10 @@ final class GpuAttackEffects implements Disposable {
                     if (impacts[index] && flash > 0) { electricGlow(target, 3 + (1 - flash) * 5, flash); }
                     continue;
                 }
+                if ("designator".equals(effect)) {
+                    designator(muzzles[index], target, attack.event.result().hit());
+                    continue;
+                }
                 if (attack.seconds < UnitAttack.ANTICIPATION_SECONDS) { continue; }
                 if ("flame".equals(effect)) {
                     flame(start, target, flameSizes[index]);
@@ -602,6 +617,29 @@ final class GpuAttackEffects implements Disposable {
     }
 
     /** Constant width even when a missed beam continues far off-board. */
+    /**
+     * A TAG's laser designator. One that hits holds a thin red line on its target, pulsing, with a red spot where it
+     * lands, until the attack ends; one that misses only flickers faintly past its target for a moment.
+     */
+    private void designator(Vector3 muzzle, Vector3 target, boolean hit) {
+        float on = attack.seconds - UnitAttack.ANTICIPATION_SECONDS;
+        if (on < 0) {
+            return;
+        }
+        if (!hit) {
+            if (on < DESIGNATOR_MISS_SECONDS) {
+                beam(muzzle, target, DESIGNATOR_WIDTH, DESIGNATOR, .35f * (1 - on / DESIGNATOR_MISS_SECONDS));
+            }
+            return;
+        }
+        float fadeIn = MathUtils.clamp(on / .08f, 0, 1);
+        float fadeOut = MathUtils.clamp((attack.duration - attack.seconds) / .3f, 0, 1);
+        float pulse = .6f + .4f * MathUtils.sin(on * DESIGNATOR_PULSES_PER_SECOND * MathUtils.PI2);
+        float alpha = fadeIn * fadeOut * pulse;
+        beam(muzzle, target, DESIGNATOR_WIDTH, DESIGNATOR, alpha);
+        beams.billboard(camera, target, DESIGNATOR_SPOT_RADIUS * (.85f + .15f * pulse), DESIGNATOR_SPOT, alpha);
+    }
+
     private void beam(Vector3 start, Vector3 finish, float width, float kind, float alpha) {
         beams.ribbon(camera, start, finish, width, kind, alpha);
     }
