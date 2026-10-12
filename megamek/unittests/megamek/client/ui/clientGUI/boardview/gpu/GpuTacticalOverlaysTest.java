@@ -207,8 +207,8 @@ class GpuTacticalOverlaysTest {
         assertFalse(preferences.getDefaultBoolean(GUIPreferences.TACTICAL_LEVEL_SHADING), "level shading starts off");
         assertTrue(preferences.getDefaultBoolean(GUIPreferences.SHOW_UNIT_LINKS));
         assertFalse(preferences.getDefaultBoolean(GUIPreferences.SHOW_HEX_TYPES), "hex types start off");
-        assertTrue(preferences.getDefaultBoolean(GUIPreferences.HEX_LABEL_OUTLINE), "hex labels start outlined");
-        assertEquals(new Overlays(true, true, true, true, true, false, true, false, true), Overlays.DEFAULTS);
+        assertFalse(preferences.getDefaultBoolean(GUIPreferences.HEX_LABEL_OUTLINE), "hex labels start without an outline");
+        assertEquals(new Overlays(true, true, true, true, true, false, true, false, false), Overlays.DEFAULTS);
         boolean level = preferences.getTacticalLevelShading();
         try {
             preferences.toggleTacticalLevelShading();

@@ -137,7 +137,7 @@ class BoardSceneryDecodeDataTest {
         // One full image per emblem, the 8 standard car parks and the rubble path; emblem pieces are decode-only. Batch 10:
         // runway markings and landing pads (Airfield), letters and digits, courts, the level crossing; elevator plates and
         // cleared-rubble gravel belong to their rule terrain and have no palette entry.
-        assertEquals(Map.of("Airfield", 39, "Lettering", 36, "Emblems", 13, "Ground details", 8, "Sport and pools", 4,
-              "Transport", 1, "Damage and debris", 1), visibleDecals);
+        assertEquals(Map.of("Airfield", 39, "Lettering", 36, "Emblems", 13, "Ground details", 16, "Sport and pools", 4,
+              "Transport", 1, "Damage and debris", 7, "Industrial markings", 8, "Spaceport markings", 4), visibleDecals);
     }
 }
