@@ -34,7 +34,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `BoardRelief` | Computes canonical shared corners, cliff profiles, transition bands, shores and decorative rock placement. |
 | `BoardConcrete` | Fits constructed slabs and their boundary joins to adjoining terrain. |
 | `BoardRampMesh` | Removes redundant ramp samples while retaining boundary vertices and bounded height error. |
-| `BoardRim` | Builds CPU cliff-rim shading masks during bounded terrain preparation. |
+| `BoardRim` | Builds CPU cliff-rim shading masks, for the 3D tops and the Classic columns, during bounded terrain preparation. |
 
 ## Roads, bridges and authored terrain
 
@@ -74,7 +74,8 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 
 | Code | What it does |
 | --- | --- |
-| `GpuTerrain` | Owns chunk preparation/install/replacement, terrain resources, queries and terrain render passes. |
+| `GpuTerrain` | Owns chunk preparation/install/replacement (the 3D relief, or with the Classic graphics the tileset columns: `setColumns`), terrain resources, queries and terrain render passes, and the Tactical View's draw rule (`setFluffHidden`). |
+| `GpuTilesetTerrain` | The Classic graphics' geometry: each hex's tileset column (tops, walls, banks, shallows, falls, deck art) and the writer that puts it into a GpuTerrain chunk's layers; no GL state of its own. |
 | `GpuAssets` | Owns shared board models, material maps and liquid assets; instances borrow these resources. |
 | `GpuTextures` | Owns shared atlas allocation and texture lifetime. |
 | `GpuTerrainPages`, `GpuMeshPage` | Pack nearby static ranges into spatial pages; visibility changes select ranges rather than rebuilding the page. |
@@ -140,7 +141,8 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `UnitDamageDisplay` | Hides lost locations or applies damage artwork to one unit instance. |
 | `UnitCamouflage`, `GpuUnitCamouflage` | Resolve visible camouflage images on Swing, then own native texture/per-instance paint data. |
 | `GpuUnitShader` | Shades unit paint/damage with the common lighting and shadows. |
-| `GpuUnitIcons` | Shows optional flat unit artwork near overhead, following the existing animated poses and shared picking. |
+| `GpuUnitBases` | The Tactical View's base under each meeple (side ring, facing and twist notches, glows) and its badges (heat, elevation, armour, TMM, conditions, E(C)CM source, wreck cross), rebuilt only when the unit's spec changes. |
+| `GpuHexGrid` | The hex grid; in the Tactical View the ground layer (cliffs, steps, woods, roofs with CF, water by depth, smoke and fire, rear arcs) in one instanced draw. |
 | `GpuCutout` | Extrudes the alpha silhouette of raised sensor and location-symbol artwork. |
 | `GpuUnitVisibility` | Draws occluded portions of authorized visible units/markers; it does not discover hidden entities. |
 | `FormationLod` | Chooses body/figure mesh detail from projected size while preserving the instance's animation state. |

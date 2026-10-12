@@ -173,10 +173,10 @@ existing painter/handler, provide artwork and an outline choice in `GpuMarkers`,
 and suppress the equivalent flat symbol during native capture. Keep area
 footprints and route lines in the tactical layer.
 
-The optional top-view unit icons use `GpuUnitIcons` and the existing animated
-poses. `GpuBoardTuning` controls their projected-size threshold; labels and
-picking follow the displayed icon. This is separate from the anonymous sensor
-symbol and from the flat sprite fallback for a missing 3D asset.
+The Tactical View draws each unit as its meeple on a `GpuUnitBases` base, posed
+by the same animation ([HUD](gpu-hud.md#5-the-tactical-view)); labels hang from
+the ring's north point and picking is the meeple's. This is separate from the
+anonymous sensor symbol and from the flat sprite fallback for a missing 3D asset.
 
 ## Building cutaways and see-through outlines
 

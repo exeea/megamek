@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.field;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,6 +26,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -35,7 +37,10 @@ import megamek.common.planetaryConditions.Weather;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** The preview and editor print through their live renderer without changing its camera or label preferences. */
+/**
+ * The preview and editor print through their live renderer without changing its camera or label preferences; a print
+ * builds the live view's 3D Graphics (Classic columns or the Enhanced terrain).
+ */
 @Tag("on-demand")
 class GpuBoardPrintSmokeTest {
     @Test
@@ -45,6 +50,7 @@ class GpuBoardPrintSmokeTest {
         boolean coordinates = preferences.getCoordsEnabled();
         boolean types = preferences.getHexTypesEnabled();
         boolean outlined = preferences.getHexLabelOutline();
+        BoardGraphics graphics = preferences.getBoardGraphics();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         SwingUtilities.invokeAndWait(() -> {
             preferences.setCoordsEnabled(false);
@@ -58,7 +64,8 @@ class GpuBoardPrintSmokeTest {
                 @Override
                 public void create() {
                     try {
-                        for (boolean editor : List.of(false, true)) { checkPrint(editor); }
+                        for (boolean editor : List.of(false, true)) { checkPrint(editor, BoardGraphics.ENHANCED); }
+                        checkPrint(false, BoardGraphics.CLASSIC);
                     } catch (Throwable error) {
                         failure.set(error);
                     } finally {
@@ -71,14 +78,16 @@ class GpuBoardPrintSmokeTest {
                 preferences.setCoordsEnabled(coordinates);
                 preferences.setHexTypesEnabled(types);
                 preferences.setHexLabelOutline(outlined);
+                preferences.setBoardGraphics(graphics);
             });
         }
         if (failure.get() != null) { throw new AssertionError("Native 3D board print", failure.get()); }
     }
 
-    private static void checkPrint(boolean editing) throws Exception {
+    private static void checkPrint(boolean editing, BoardGraphics graphics) throws Exception {
         AtomicReference<GpuMapSource> captured = new AtomicReference<>();
         SwingUtilities.invokeAndWait(() -> {
+            GUIPreferences.getInstance().setBoardGraphics(graphics);
             BoardEditorSession editor = editing ? new BoardEditorSession() : null;
             Game game = editor == null ? new Game() : editor.game();
             Hex[] hexes = new Hex[12 * 9];
@@ -132,17 +141,26 @@ class GpuBoardPrintSmokeTest {
                 printed.set(image);
             }, failed::set));
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120);
+            boolean printedColumns = false;
             while (printed.get() == null && failed.get() == null) {
                 assertTrue(System.nanoTime() < deadline, "Printing must complete while the view continues to render");
                 view.render();
+                Object print = field(view, "boardPrint");
+                if (print != null && field(print, "terrain") instanceof GpuTerrain printTerrain) {
+                    printedColumns |= printTerrain.columns();
+                }
                 SwingUtilities.invokeAndWait(() -> { });
             }
             if (failed.get() != null) { throw new AssertionError("Print rendering failed", failed.get()); }
+            assertEquals(graphics == BoardGraphics.CLASSIC, printedColumns,
+                  "The print builds the live view's 3D Graphics: " + graphics);
             BufferedImage image = printed.get();
             assertNotNull(image);
             File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
             assertTrue(output.isDirectory() || output.mkdirs());
-            File outputFile = new File(output, editing ? "board-print-editor.png" : "board-print-preview.png");
+            String name = (editing ? "board-print-editor" : "board-print-preview")
+                  + (graphics == BoardGraphics.CLASSIC ? "-classic" : "");
+            File outputFile = new File(output, name + ".png");
             GpuMapSource.writePrint(image, outputFile.toPath(), GpuBoardPrint.PIXELS_PER_METRE);
             BufferedImage saved = ImageIO.read(outputFile);
             assertEquals(2775, image.getWidth(), "Twelve columns at 1.125-inch pitch plus the edge, at 200 DPI");
@@ -184,8 +202,7 @@ class GpuBoardPrintSmokeTest {
             // The offscreen job borrows assets; a normal frame after it finishes must still use valid resources.
             view.render();
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-            GpuBoardTestUi.capture(new File(output,
-                  editing ? "board-print-editor-live.png" : "board-print-preview-live.png"));
+            GpuBoardTestUi.capture(new File(output, name + "-live.png"));
         } finally {
             view.dispose();
             SwingUtilities.invokeAndWait(source::close);

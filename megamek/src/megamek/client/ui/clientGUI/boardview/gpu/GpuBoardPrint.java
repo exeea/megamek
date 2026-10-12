@@ -104,7 +104,8 @@ final class GpuBoardPrint implements Disposable {
         }
         image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         terrain = new GpuTerrain(lender);
-        terrain.setTacticalView(lender.tacticalView());
+        // The live view's 3D Graphics (it is ready, so they are installed); a print keeps the fluff of the 3D view.
+        terrain.setColumns(lender.columns());
         terrain.setGravity(lighting.gravity());
         atmosphere = new GpuAtmosphere();
         atmosphere.configure(lighting);
@@ -159,7 +160,7 @@ final class GpuBoardPrint implements Disposable {
         atmosphere.end(camera.camera, terrain, scene, 0, null, false, target);
         target.begin();
         try {
-            grid.render(camera, scene, terrain.tacticalView(), false, GpuBattleStatus.Arc.NONE);
+            grid.render(camera, scene, terrain.columns(), false, GpuBattleStatus.Arc.NONE);
             text.update(scene, font, outline, terrain::roofBounds, false, true, true);
             text.render(batch, camera, atmosphere.depthTexture(), 0);
             Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, width, height);

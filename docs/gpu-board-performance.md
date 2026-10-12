@@ -114,6 +114,67 @@ Wind, water waves, cloud motion and most lighting changes update existing unifor
 or textures. Grass and plant buffers depend only on the installed plants of their
 chunk; camera movement and time should not upload them again.
 
+## Classic and Enhanced graphics
+
+The 3D Graphics setting is a build mode of the same chunk pipeline ([GPU board](gpu-board.md#graphics-classic-and-enhanced)).
+A Classic build prepares each hex's tileset column on the terrain workers (`GpuTerrain.prepareColumns`) and composes its
+art in the update plan's texture pass; it builds no relief, sculpted material, water or lava field, wave simulation,
+plant, road, biome map or ground cover, and its chunks have one level of detail, so the camera never refines them.
+Enhanced builds no Classic data (no tileset decals, sprites or column art). A switch either way is a full rebuild
+behind the loading stage; it gets the opening's 8 ms upload slice per frame instead of camera refinement's 2 ms.
+The Tactical View hides fluff at draw time (`GpuTerrain.setFluffHidden`): the 3D prop caches and their pages stay,
+and each chunk's few kept props are packed once on the view's first draw (`Chunk#keptProps`). Recaching every chunk's
+props with the keep rule instead (the design's first plan) cost about 1 s more on entering the view on Valencia
+(longest frame 1.9-2.3 s against 0.7-1.3 s before, RTX 4070) and rebuilt the prop pages both ways.
+
+Measured 2026-10-12 on the user's laptop (RTX 4070 Laptop with `-Dmegamek.gpu.card=DISCRETE`, Intel Iris Xe with
+`INTEGRATED`), 1920x1080 hidden window, `glFinish` per frame, 15 warm-up and 30 sample frames, before = 79273ff075,
+after = this change, in `GpuBoardPerformanceSmokeTest.measuresTheCompleteBoardViewWithLiveCapture` with
+`-Dmegamek.gpu.performanceGraphics` (one JVM loads one graphics, then switches to the other) and
+`-Dmegamek.gpu.performanceTactical=true` (overview, close and moving in the 3D view, then in the Tactical View). Other
+sessions' builds and, for long stretches, an interactive MegaMek client on the Iris Xe shared the machine: a scenario
+during which a foreign Gradle test JVM ran, or other processes put 10 % or more 3D load on the card, is left out.
+Ranges over 1-6 runs (NVIDIA) and 1-4 (Iris Xe). "Load" is the first frame to three frames without a terrain job;
+memory is the used heap after `System.gc()` and the Windows GPU process memory (dedicated on the NVIDIA card, shared
+on the Iris Xe) after load.
+
+| Board | Loaded as | Load s, before / after (NVIDIA; Iris Xe) | Heap MiB | GPU MiB (NVIDIA; Iris Xe) |
+|---|---|---|---|---|
+| Valencia 128x192 | Classic | 64.1 / 28.4; 43.2 / 13.2 | 490 / 391-392 | 5512 / 1193; 6677 / 1278 |
+| Valencia 128x192 | Enhanced | 53.9-78.3 / 63.7; 47.0 / 42.8 | 444 / 444 | 5616-5628 / 5556; 7214 / 6882 |
+| MesaCity1 96x102 | Classic | 17.1-34.3 / 10.5; 16.7 / 5.0 | 231-232 / 211 | 1400-1402 / 440; 1926 / 402 |
+| MesaCity1 96x102 | Enhanced | 23.0-29.9 / 20.8; 16.6 / 15.2 | 206-207 / 206-207 | 980-1669 / 1243; 2187 / 2144 |
+| 48x48 lake | Classic | 19.5-19.9 / 7.7; 13.9 / 5.4 | 254-255 / 227 | 1247-1262 / 228; 1515 / 461 |
+| 48x48 lake | Enhanced | 13.8-19.9 / 20.0; 21.4 / 15.8-20.3 | 251-252 / 251-252 | 981-1276 / 875; 1650 / 1354-1733 |
+
+- Runtime switch on Valencia (settle / longest frame, NVIDIA; Iris Xe): Enhanced to Classic 4.5-7.9 / 4.2-7.3 s;
+  4.1 / 3.6 s before (the 3D terrain stayed and the columns were built on the render thread) against 15.2 / 1.0 s;
+  11.6 / 1.8 s after. Classic to Enhanced 3.8 / 3.2 s; 3.0 / 2.4 s before (the 3D terrain was already built) against
+  85 / 3.6 s; 42.6 / 2.5 s after, a full build behind the loading stage. After a switch the other build's chunks are
+  retired over the next frames: the Valencia heap after a switch to Classic reads 549-552 MiB in the first scenario
+  and settles at 420-421 MiB by its Tactical View scenarios (a Classic load: 391-393), after a switch to Enhanced
+  447-450 MiB (an Enhanced load: 444). A switch does not free `GpuAssets`: it keeps the Enhanced texture arrays (sculpt,
+  road, magma) and the loaded models until the renderer closes, since the print and the editor previews borrow it.
+  GPU memory after a switch was not sampled once settled (the last samples fall in the build or the shutdown).
+- Entering the Tactical View on Valencia (settle / longest frame): NVIDIA Enhanced 0.9-1.6 / 0.7-1.3 s before,
+  1.0-1.4 / 0.9-1.1 s after; Iris Xe Enhanced 1.3-1.4 / 0.7-0.9 s before, 1.4-1.6 / 0.9-1.5 s after; Iris Xe Classic
+  0.9-1.4 / 0.7-1.2 s before, 0.5-0.7 / 0.4-0.5 s after.
+- Frame time: the Tactical View's Valencia overview dropped in both graphics on both cards (median ms, before / after:
+  NVIDIA Enhanced 24.8-42.0 / 15.8-24.7, Classic 20.4-41.0 / 16.8-18.3; Iris Xe Enhanced 71.4-72.3 / 42.3-47.1,
+  Classic 45.8-46.3 / 23.5-24.9), as did the Iris Xe's 48x48 Classic Tactical View (overview 21.6-24.7 / 9.7-19.9).
+  The other cells whose ranges do not overlap go both ways, by up to about 30 %, among them 3D cells whose drawing
+  this change does not touch (Iris Xe Valencia Enhanced overview 81.0-81.1 / 82.1-105.0, close 17.6-19.2 / 20.0-22.1),
+  and within a run the stages it does not touch (HUD, overlays, atmosphere) move by the same factor: that spread is the
+  machine's state. Classic 3D close views read slower after (Valencia NVIDIA 7.6-12.0 / 12.3, Iris Xe 7.8-9.2 /
+  10.6-11.6; MesaCity1 Iris Xe 6.5-8.0 / 8.8-9.0) with the same draws and vertices; in the Valencia Iris Xe pair the
+  terrain's own GPU time rose 14 % against 23-24 % for the untouched stages, so no cost of the change is shown there.
+  Entering the Tactical View packs each chunk's kept props once; later entries reuse them (the harness times the
+  first).
+- CPU preparation (`gpuTerrainLoadBenchmark`, Valencia region 64,16,32,32, 8 workers): the Enhanced chunk checksums
+  are unchanged (DISTANT `f1c708af`, FULL `35b92066` before and after); a Classic build prepares the columns only,
+  18-25 ms for the 1024 hexes with the column checksum unchanged (`d374c543`), where before it prepared the 3D chunks
+  as Enhanced does (1.2-2.3 s per level) and built the columns on the render thread at the first Classic frame.
+
 ## Choosing the right place to investigate
 
 If a stationary view rebuilds terrain, follow request equality, generation and

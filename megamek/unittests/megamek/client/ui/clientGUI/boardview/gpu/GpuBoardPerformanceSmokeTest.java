@@ -260,9 +260,13 @@ class GpuBoardPerformanceSmokeTest {
         }
         int scenarioFrames = warmupFrames + sampleFrames;
         boolean comparePages = Boolean.getBoolean("megamek.gpu.performanceComparePages");
-        // The 3D Graphics of each scenario's variants, the first also loads the board (for example CLASSIC,ENHANCED);
-        // none keeps the saved choice. TODO(b11 step 7): Classic is still the draw-time flip to the tileset columns.
+        // The 3D Graphics of the run's variants, the first also loads the board (for example CLASSIC,ENHANCED); none
+        // keeps the saved choice. Each variant runs every scenario, the first variant's before the second's: the one
+        // switch rebuilds the terrain behind the loading stage, within the second variant's first overview warm-up
+        // frame (its detail-settle).
         List<BoardGraphics> graphics = graphics();
+        // The Tactical View's overview, close and moving scenarios after the 3D view's, in the same JVM.
+        int views = Boolean.getBoolean("megamek.gpu.performanceTactical") ? 6 : 3;
         if (comparePages && graphics.size() > 1) {
             throw new IllegalArgumentException("One comparison per run: the terrain pages or the graphics");
         }
@@ -381,29 +385,42 @@ class GpuBoardPerformanceSmokeTest {
                     try {
                         Gdx.input = fixedInput;
                         int phase = frame % scenarioFrames;
-                        int view = frame / (scenarioFrames * variants);
-                        if (comparePages && phase == 0) {
-                            setPages(this, frame / scenarioFrames % variants == 1);
+                        // Every scenario of the first variant, then every scenario of the second.
+                        int variant = frame / (scenarioFrames * views);
+                        int view = frame / scenarioFrames % views;
+                        // Overview, close and moving: in the 3D view, then (views 3-5) in the Tactical View.
+                        int shot = view % 3;
+                        if (comparePages && phase == 0) { setPages(this, variant == 1); }
+                        BoardGraphics shown = graphics.isEmpty() ? null : graphics.get(variant);
+                        if (variant > 0 && view == 0 && phase == 0) {
+                            // The next variant starts from the 3D view's fitted overview, as the first did.
+                            setTacticalView(false);
+                            boardCamera.setIsometric(!Boolean.getBoolean("megamek.gpu.performanceTopView"));
+                            boardCamera.fit(fixture.source.takeFrame().scene());
                         }
-                        BoardGraphics shown = graphics.isEmpty() ? null : graphics.get(frame / scenarioFrames % variants);
                         // The switch takes effect in this warmup frame, which builds what the variant first draws.
-                        if (graphics.size() > 1 && phase == 0) { setGraphics(shown); }
+                        if (graphics.size() > 1 && view == 0 && phase == 0) { setGraphics(shown); }
                         if (frame == 1) {
                             boardCamera.setIsometric(!Boolean.getBoolean("megamek.gpu.performanceTopView"));
                             boardCamera.fit(fixture.source.takeFrame().scene());
                         }
-                        // Each variant of the moving view pans the same path.
-                        if (frame == scenarioFrames * variants || variants > 1 && view == 2 && phase == 0) {
+                        if (view == 3 && phase == 0) {
+                            // T: the locked top view with meeples and the ground layer, framed as the 3D overview.
+                            setTacticalView(true);
+                            boardCamera.fit(fixture.source.takeFrame().scene());
+                        }
+                        // The close view starts at the board's centre; each variant's moving view pans on from there.
+                        if (shot == 1 && phase == 0) {
                             boardCamera.camera.zoom = Float.parseFloat(System.getProperty("megamek.gpu.performanceZoom", ".5"));
                             BoardScene scene = fixture.source.takeFrame().scene();
                             boardCamera.center(BoardGeometry.center(new Coords(scene.width() / 2, scene.height() / 2), 0));
                         }
                         // Keep the original total pan distance when taking more samples, independent of frame time.
-                        if (view == 2) {
+                        if (shot == 2) {
                             boardCamera.pan(BoardGeometry.WIDTH * .25f * 45 / scenarioFrames, 0);
                         }
-                        String scenario = view == 0 ? "overview" : view == 1 ? "close" : "moving";
-                        if (comparePages) { scenario += frame / scenarioFrames % variants == 0 ? "-original" : "-pages"; }
+                        String scenario = (view >= 3 ? "tactical-" : "") + (shot == 0 ? "overview" : shot == 1 ? "close" : "moving");
+                        if (comparePages) { scenario += variant == 0 ? "-original" : "-pages"; }
                         if (shown != null) { scenario += "-" + shown.name().toLowerCase(Locale.ROOT); }
                         if (phase == 0 && detailFrames == 0) {
                             phase(frame == 0 ? "terrain-build" : scenario + "-warmup");
@@ -421,7 +438,7 @@ class GpuBoardPerformanceSmokeTest {
                         previousFrameStart = frameStart;
                         if (phase == drawCountFrame) {
                             draws.setLength(0);
-                            if (Boolean.getBoolean("megamek.gpu.performanceDrawAudit") && view != 2) {
+                            if (Boolean.getBoolean("megamek.gpu.performanceDrawAudit") && shot != 2) {
                                 drawAudit = new GpuDrawCallAudit(this);
                             }
                             profiler.enable();
@@ -452,7 +469,7 @@ class GpuBoardPerformanceSmokeTest {
                         // Camera changes may queue several meshes. Measure steady frames only after they settle;
                         // three idle frames avoid mistaking the gap between two chunk jobs for completion.
                         // The moving scenario intentionally includes refinement during panning.
-                        if (phase < drawCountFrame && view != 2
+                        if (phase < drawCountFrame && shot != 2
                               && (phase == 0 || detailFrames > 0 || detailPending(this))) {
                             detailQuietFrames = detailPending(this) ? 0 : detailQuietFrames + 1;
                             detailFrames++;
@@ -512,7 +529,7 @@ class GpuBoardPerformanceSmokeTest {
                             }
                         }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-                        if (++frame == 3 * scenarioFrames * variants) { phase("done"); Gdx.app.exit(); }
+                        if (++frame == views * scenarioFrames * variants) { phase("done"); Gdx.app.exit(); }
                     } catch (Throwable error) {
                         failure.set(error);
                         Gdx.app.exit();

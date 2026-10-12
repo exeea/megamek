@@ -63,37 +63,58 @@ class GpuTerrainLoadBenchmarkTest {
         float floor = settings.call(() -> BoardGeometry.floor(scene));
         System.out.printf("PERF terrain-prepare board=%s region=%s workers=%d graphics=%s%n", file.getName(),
               Arrays.toString(region), workers, graphics);
-        // Today a Classic game prepares the same 3D chunks and builds the tileset columns on the render thread when
-        // it first draws them, so CLASSIC adds that column geometry. TODO(b11 step 7): CLASSIC prepares the columns
-        // in place of the 3D chunks.
+        // A Classic build prepares the tileset columns in place of the 3D chunks (b11-design 2.4), which have no level
+        // of detail.
+        for (int repeat = 0; graphics == BoardGraphics.CLASSIC && repeat < repeats; repeat++) {
+            columns(scene, settings, currents, floor, region, workers);
+        }
         for (String name : System.getProperty("megamek.gpu.benchmarkLods", "DISTANT,FULL").split(",")) {
             TerrainLod lod = TerrainLod.valueOf(name.trim());
-            for (int repeat = 0; repeat < repeats; repeat++) {
+            for (int repeat = 0; graphics != BoardGraphics.CLASSIC && repeat < repeats; repeat++) {
                 prepare(scene, settings, currents, floor, lod, region, workers);
             }
         }
-        for (int repeat = 0; graphics == BoardGraphics.CLASSIC && repeat < repeats; repeat++) {
-            columns(scene, settings, floor, region);
-        }
     }
 
-    /** Times and digests the region's tileset column geometry, hex by hex as the render thread builds it. */
-    private static void columns(BoardScene scene, TerrainSettings settings, float floor, int[] region) {
-        Sink out = new Sink();
-        int hexes = 0;
-        long faces = 0;
-        long start = System.nanoTime();
-        for (int x = region[0]; x < Math.min(scene.width(), region[0] + region[2]); x++) {
-            for (int y = region[1]; y < Math.min(scene.height(), region[1] + region[3]); y++) {
-                BoardScene.Tile tile = scene.tile(new Coords(x, y));
-                BoardTacticalGeometry.Surface column = settings.call(() -> GpuTilesetTerrain.column(scene, tile, floor));
-                hexes++;
-                faces += column.top().size() + column.faces().size() + column.walls().size();
-                surface(out, column);
+    /**
+     * Times the region's Classic chunks as the terrain workers prepare them (GpuTerrain#prepareColumns), then digests
+     * their columns hex by hex in the region's order, as the step-4 baseline digested GpuTilesetTerrain#column: an
+     * equal checksum is the same column geometry.
+     */
+    private static void columns(BoardScene scene, TerrainSettings settings, Map<Coords, BoardFlow.Current> currents,
+          float floor, int[] region, int workers) throws Exception {
+        ForkJoinPool pool = TerrainSettings.workers(workers);
+        try {
+            List<CompletableFuture<GpuTerrain.Prepared>> results = new ArrayList<>();
+            long start = System.nanoTime();
+            for (int x = region[0]; x < Math.min(scene.width(), region[0] + region[2]); x += TerrainLod.CHUNK_SIZE) {
+                for (int y = region[1]; y < Math.min(scene.height(), region[1] + region[3]); y += TerrainLod.CHUNK_SIZE) {
+                    int chunkX = x, chunkY = y;
+                    results.add(CompletableFuture.supplyAsync(() -> settings.call(() -> GpuTerrain.prepareColumns(scene,
+                          chunkX, chunkY, floor, currents, Set.of(), Map.of(), Map.of(), () -> { },
+                          new TerrainLoadProgress())), pool));
+                }
             }
+            Map<Coords, BoardTacticalGeometry.Surface> columns = new HashMap<>();
+            for (var result : results) { columns.putAll(result.join().topography()); }
+            double prepared = (System.nanoTime() - start) / 1e6;
+            Sink out = new Sink();
+            int hexes = 0;
+            long faces = 0;
+            for (int x = region[0]; x < Math.min(scene.width(), region[0] + region[2]); x++) {
+                for (int y = region[1]; y < Math.min(scene.height(), region[1] + region[3]); y++) {
+                    BoardTacticalGeometry.Surface column = columns.get(new Coords(x, y));
+                    hexes++;
+                    faces += column.top().size() + column.faces().size() + column.walls().size();
+                    surface(out, column);
+                }
+            }
+            System.out.printf("PERF terrain-columns hexes=%d chunks=%d workers=%d prepare=%.1f ms withDigest=%.1f ms faces=%d"
+                        + " checksum=%08x%n", hexes, results.size(), workers, prepared, (System.nanoTime() - start) / 1e6,
+                  faces, out.value());
+        } finally {
+            pool.shutdownNow();
         }
-        System.out.printf("PERF terrain-columns hexes=%d withDigest=%.1f ms faces=%d checksum=%08x%n", hexes,
-              (System.nanoTime() - start) / 1e6, faces, out.value());
     }
 
     /** The live capture without artwork: structures keep a model name so their hexes get the same footprint. */

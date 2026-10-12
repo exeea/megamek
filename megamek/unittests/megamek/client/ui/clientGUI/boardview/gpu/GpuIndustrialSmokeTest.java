@@ -133,7 +133,9 @@ class GpuIndustrialSmokeTest {
                 camera.zoom(.55f);
                 camera.center(BoardGeometry.center(new Coords(4, 3), 2));
                 for (boolean tactical : new boolean[] { false, true }) {
-                    terrain.setTacticalView(tactical);
+                    // The Classic graphics build the tileset columns and keep the industrial structures.
+                    terrain.setColumns(tactical);
+                    terrain.update(scene);
                     frame.prepare(terrain, camera, scene);
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     assertTrue(terrain.ready(scene));
@@ -186,7 +188,7 @@ class GpuIndustrialSmokeTest {
                     camera.zoom(.2f);
                 }
             }
-            terrain.setTacticalView(false);
+            terrain.setColumns(false);
             BoardScene connected = scene(4);
             terrain.update(connected);
             var port = BoardIndustrialTest.layout(connected, SITES.getFirst()).ports().getFirst();

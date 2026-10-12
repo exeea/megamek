@@ -3,28 +3,28 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttributes.Usage;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.utils.NumberUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -33,82 +33,85 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** The Tactical View's columns follow board edits section by section. */
+/**
+ * The Classic graphics' columns (b11-design 2.4), built as GpuTerrain chunks: a board edit rebuilds only the chunks of
+ * its hex and of the neighbours that read it (the chunk pipeline's change scan, which the tileset art joins), and the
+ * liquid stays inside the shore that picking uses.
+ */
 @Tag("on-demand")
 class GpuTilesetTerrainSmokeTest {
-    /** At least two sections each way. */
+    /** At least two chunks each way. */
     private static final int WIDTH = 40, HEIGHT = 20;
 
     @Test
-    void anEditRebuildsOnlyTheSectionsOfItsHexAndItsNeighbours() {
+    void anEditRebuildsOnlyTheChunksOfItsHexAndItsNeighbours() {
         var failure = new AtomicReference<Throwable>();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override public void create() {
-                var terrain = new GpuTilesetTerrain();
-                var assets = new GpuAssets();
+                var terrain = new GpuTerrain();
                 try {
-                    verify(terrain, assets);
+                    verify(terrain);
                 } catch (Throwable error) { failure.set(error); }
                 finally {
                     terrain.dispose();
-                    assets.dispose();
                     Gdx.app.exit();
                 }
             }
         }, GpuBoardWindow.configuration(false));
-        if (failure.get() != null) { throw new AssertionError("Tactical View sections", failure.get()); }
+        if (failure.get() != null) { throw new AssertionError("Classic chunks", failure.get()); }
     }
 
-    private static void verify(GpuTilesetTerrain terrain, GpuAssets assets) throws Exception {
+    private static void verify(GpuTerrain terrain) throws Exception {
         BoardScene.Pixels art = pixels(0xff60a040);
         int size = GpuTerrain.CHUNK_SIZE, rows = (HEIGHT + size - 1) / size;
         BoardScene scene = scene(Map.of(), Map.of(), art);
-        float floor = BoardGeometry.floor(scene);
-        terrain.update(scene, floor, assets);
-        Map<?, ?> chunks = (Map<?, ?>) field(terrain, "chunks");
+        terrain.setColumns(true);
+        terrain.update(scene);
+        assertTrue(terrain.columns(), "A Classic build installs the columns");
+        List<?> chunks = (List<?>) field(terrain, "chunks");
         assertEquals((WIDTH + size - 1) / size * rows, chunks.size());
 
-        // Inside the first section, the hex and all its neighbours stay there.
+        // Inside the first chunk, the hex and all its neighbours stay there.
         Coords inside = new Coords(size / 2, size / 2), edge = new Coords(size - 1, size / 2);
         scene = scene(Map.of(inside, 2), Map.of(), art);
-        assertEquals(Set.of(0), rebuilt(terrain, chunks, scene, floor, assets));
-        for (var face : terrain.surface(scene, inside, floor).top()) {
+        assertEquals(Set.of(0), rebuilt(terrain, chunks, scene));
+        for (var face : terrain.tacticalSurface(inside).top()) {
             assertEquals(2 * BoardGeometry.level(), face.a().z, .0001f, "The edited column stands at its new level");
         }
-        // Raised on the section's eastern edge, it walls down to the neighbours across that edge too.
+        // Raised on the chunk's eastern edge, it walls down to the neighbours across that edge too.
         scene = scene(Map.of(inside, 2, edge, 1), Map.of(), art);
-        assertEquals(Set.of(0, rows), rebuilt(terrain, chunks, scene, floor, assets));
-        // New art at the same height leaves the neighbours' walls and rims as they were.
+        assertEquals(Set.of(0, rows), rebuilt(terrain, chunks, scene));
+        // New tileset art at the same height leaves the neighbours' walls and rims as they were.
         scene = scene(Map.of(inside, 2, edge, 1), Map.of(edge, pixels(0xff806040)), art);
-        assertEquals(Set.of(0), rebuilt(terrain, chunks, scene, floor, assets));
+        assertEquals(Set.of(0), rebuilt(terrain, chunks, scene));
         // New markings change no column.
         List<BoardScene.Tile> marked = new ArrayList<>(scene.tiles());
         marked.replaceAll(tile -> tile.withTactical(pixels(0x80ff0000)));
         scene = scene.withTiles(marked);
-        assertEquals(Set.of(), rebuilt(terrain, chunks, scene, floor, assets));
+        assertEquals(Set.of(), rebuilt(terrain, chunks, scene));
 
-        // Deepening water keeps the liquid level fixed, but changes the neighbours' underwater walls across a section edge.
+        // A shallower pool on the chunk's edge keeps its water level and the board's floor, but changes the walls
+        // under the water of its neighbours across that edge.
         List<BoardScene.Tile> water = new ArrayList<>();
-        for (var tile : scene.tiles()) { water.add(pool(tile.coords(), 2, art)); }
+        for (var tile : scene.tiles()) { water.add(pool(tile.coords(), 4, art)); }
         scene = scene.withTiles(water);
-        float bedFloor = -6 * BoardGeometry.level();
-        terrain.update(scene, bedFloor, assets);
+        terrain.update(scene);
         water = new ArrayList<>(water);
-        water.set(edge.getX() * HEIGHT + edge.getY(), pool(edge, 4, art));
+        water.set(edge.getX() * HEIGHT + edge.getY(), pool(edge, 2, art));
         scene = scene.withTiles(water);
-        assertEquals(Set.of(0, rows), rebuilt(terrain, chunks, scene, bedFloor, assets));
-        for (var face : terrain.surface(scene, edge, bedFloor).faces()) {
-            assertEquals(-4 * BoardGeometry.level(), face.a().z, .001f, "The artwork follows the edited bed depth");
+        assertEquals(Set.of(0, rows), rebuilt(terrain, chunks, scene));
+        for (var face : terrain.tacticalSurface(edge).faces()) {
+            assertEquals(-2 * BoardGeometry.level(), face.a().z, .001f, "The artwork follows the edited bed depth");
         }
 
-        // A bank borrows land art across a section boundary, even when only the land's pixels changed.
+        // A bank borrows land art across a chunk boundary, even when only the land's art changed.
         water.set(edge.getX() * HEIGHT + edge.getY(), land(edge, art));
         scene = scene.withTiles(water);
-        terrain.update(scene, bedFloor, assets);
+        terrain.update(scene);
         water = new ArrayList<>(water);
         water.set(edge.getX() * HEIGHT + edge.getY(), land(edge, pixels(0xff907050)));
         scene = scene.withTiles(water);
-        assertEquals(Set.of(0, rows), rebuilt(terrain, chunks, scene, bedFloor, assets));
+        assertEquals(Set.of(0, rows), rebuilt(terrain, chunks, scene));
 
         // Sand fades over the solid bank; liquid keeps its existing opacity right up to its fitted boundary.
         Coords center = new Coords(1, 1);
@@ -121,26 +124,30 @@ class GpuTilesetTerrainSmokeTest {
                             List.of(), List.of(), BoardLiquid.NONE, art));
             }
             scene = new BoardScene(0, 3, 3, shore, List.of(), List.of(), -1, "", List.of());
-            terrain.update(scene, bedFloor, assets);
-            var liquid = (ModelInstance) field(chunks.values().iterator().next(), "liquid");
-            var support = terrain.surface(scene, center, bedFloor);
+            terrain.update(scene);
+            var support = terrain.tacticalSurface(center);
             int vertices = 0;
-            for (var mesh : liquid.model.meshes) {
-                int stride = mesh.getVertexSize() / Float.BYTES;
-                int alpha = mesh.getVertexAttribute(Usage.ColorUnpacked).offset / Float.BYTES + 3;
-                int position = mesh.getVertexAttribute(Usage.Position).offset / Float.BYTES;
-                float[] data = new float[mesh.getNumVertices() * stride];
-                mesh.getVertices(data);
-                for (int i = 0; i < mesh.getNumVertices(); i++) {
-                    assertEquals(1, data[i * stride + alpha], .0001f, "Water must not fade beside " + bank);
-                    float x = data[i * stride + position], y = data[i * stride + position + 1];
-                    assertTrue(support.water().stream().anyMatch(face -> Float.isFinite(face.height(x, y))),
-                          "Uploaded water stays inside the same shore boundary used by picking: " + bank);
-                    vertices++;
+            for (Object instance : (List<?>) field(((List<?>) field(terrain, "chunks")).getFirst(), "water")) {
+                for (Mesh mesh : ((ModelInstance) instance).model.meshes) {
+                    int stride = mesh.getVertexSize() / Float.BYTES;
+                    int colour = mesh.getVertexAttribute(Usage.ColorPacked).offset / Float.BYTES;
+                    int position = mesh.getVertexAttribute(Usage.Position).offset / Float.BYTES;
+                    float[] data = new float[mesh.getNumVertices() * stride];
+                    mesh.getVertices(data);
+                    for (int i = 0; i < mesh.getNumVertices(); i++) {
+                        // A packed colour keeps seven bits of alpha: white packs to 254.
+                        int alpha = NumberUtils.floatToIntColor(data[i * stride + colour]) >>> 24;
+                        assertTrue(alpha >= 254, "Water must not fade beside " + bank + ": " + alpha);
+                        float x = data[i * stride + position], y = data[i * stride + position + 1];
+                        assertTrue(support.water().stream().anyMatch(face -> Float.isFinite(face.height(x, y))),
+                              "Uploaded water stays inside the same shore boundary used by picking: " + bank);
+                        vertices++;
+                    }
                 }
             }
             assertTrue(vertices > 0, "Inspect the actual uploaded liquid mesh");
         }
+        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
     }
 
     @Test
@@ -172,14 +179,15 @@ class GpuTilesetTerrainSmokeTest {
                         Files.createDirectories(output.toPath());
                         BoardCamera camera = new BoardCamera();
                         camera.resize(1440, 1080);
-                        terrain.update(scene);
                         Coords pool = new Coords(8, 4);
-                        var original = terrain.tacticalSurface(pool);
-                        terrain.setTacticalView(true);
-                        assertNotSame(original, terrain.tacticalSurface(pool));
-                        terrain.setTacticalView(false);
-                        assertSame(original, terrain.tacticalSurface(pool), "Switching views retains the exact 3D terrain");
-                        terrain.setTacticalView(true);
+                        terrain.update(scene);
+                        assertFalse(terrain.columns());
+                        terrain.setColumns(true);
+                        terrain.update(scene);
+                        assertTrue(terrain.columns());
+                        float floor = BoardGeometry.floor(scene);
+                        assertEquals(GpuTilesetTerrain.column(scene, scene.tile(pool), floor).top(),
+                              terrain.tacticalSurface(pool).top(), "A Classic hex's support is its column");
                         for (boolean oblique : new boolean[] { false, true }) {
                             camera.setIsometric(oblique);
                             camera.camera.zoom = .65f;
@@ -203,7 +211,7 @@ class GpuTilesetTerrainSmokeTest {
                 }
             }, config);
         }
-        if (failure.get() != null) { throw new AssertionError("Tactical shore review", failure.get()); }
+        if (failure.get() != null) { throw new AssertionError("Classic shore review", failure.get()); }
     }
 
     private static BoardScene.Tile pool(Coords coords, int depth, BoardScene.Pixels art) {
@@ -216,19 +224,18 @@ class GpuTilesetTerrainSmokeTest {
               List.of(), List.of(), BoardLiquid.NONE, art);
     }
 
-    /** The indices of the sections whose meshes an update to {@code scene} replaced. */
-    private static Set<Object> rebuilt(GpuTilesetTerrain terrain, Map<?, ?> chunks, BoardScene scene, float floor,
-          GpuAssets assets) {
-        Map<Object, Object> before = new HashMap<>(chunks);
-        boolean reported = terrain.update(scene, floor, assets);
-        Set<Object> result = chunks.keySet().stream().filter(index -> chunks.get(index) != before.get(index))
-              .collect(Collectors.toSet());
-        // GpuTerrain redraws the shadow map on this report.
-        assertEquals(!result.isEmpty(), reported, "The update reports exactly when it rebuilt a section");
+    /** The indices of the chunks a blocking update of the terrain to {@code scene} replaced. */
+    private static Set<Integer> rebuilt(GpuTerrain terrain, List<?> chunks, BoardScene scene) {
+        List<Object> before = new ArrayList<>(chunks);
+        terrain.update(scene);
+        Set<Integer> result = new HashSet<>();
+        for (int index = 0; index < chunks.size(); index++) {
+            if (chunks.get(index) != before.get(index)) { result.add(index); }
+        }
         return result;
     }
 
-    /** A level board with the given hexes raised or repainted; the floor stays below the lowest hex. */
+    /** A level board with the given hexes raised or given other tileset art. */
     private static BoardScene scene(Map<Coords, Integer> raised, Map<Coords, BoardScene.Pixels> painted,
           BoardScene.Pixels art) {
         List<BoardScene.Tile> tiles = new ArrayList<>();

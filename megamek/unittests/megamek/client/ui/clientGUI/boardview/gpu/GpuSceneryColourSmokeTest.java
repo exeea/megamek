@@ -187,7 +187,6 @@ class GpuSceneryColourSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    terrain.setTacticalView(false);
                     // Grass blades are planted asynchronously; a capture may catch a blade another run has not yet.
                     terrain.setGrass(false);
                     frame.prepare(terrain, camera, scene);
@@ -401,12 +400,12 @@ class GpuSceneryColourSmokeTest {
     }
 
     /**
-     * The Tactical View hides placed plants as it hides every other plant (b13: the game's rule, now the editor's too):
-     * their parts are not drawn and the editor cannot pick them there, while the other objects stay drawn and pickable;
-     * back in 3D the plants draw and pick again. Game picking (hover and selection) looks through objects as before.
+     * The Tactical View hides every placed object, plants included (b11-design 4.3, GpuTerrain#setFluffHidden): no part
+     * is drawn and the editor cannot pick them there; back in 3D they draw and pick again. Game picking (hover and
+     * selection) finds the same hexes in both views and looks through objects as before.
      */
     @Test
-    void theTacticalViewHidesPlacedPlantsAndKeepsTheOtherObjects() throws Exception {
+    void theTacticalViewHidesEveryPlacedObjectAndPicksTheSameHexes() throws Exception {
         var scene = GpuLegacyImportSmokeTest.scene(imported());
         Coords snowTree = new Coords(1, 8);
         var failure = new AtomicReference<Throwable>();
@@ -428,7 +427,7 @@ class GpuSceneryColourSmokeTest {
                     terrain.update(scene);
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     for (boolean tactical : new boolean[] { false, true, false }) {
-                        terrain.setTacticalView(tactical);
+                        terrain.setFluffHidden(tactical);
                         GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         String view = tactical ? "Tactical View" : "3D view";
@@ -437,20 +436,25 @@ class GpuSceneryColourSmokeTest {
                         for (Object chunk : (List<?>) field(terrain, "chunks")) {
                             for (String owners : List.of("decorationOwners", "looseOwners")) {
                                 for (Object owner : (Array<?>) field(chunk, owners)) {
+                                    if (!GpuLegacyImportSmokeTest.drawn(terrain, owner)) { continue; }
                                     if (plant(owner)) { plants++; } else { objects++; }
                                 }
                             }
                         }
                         System.out.printf("PLANTS %s: %d plant parts, %d other object parts%n", view, plants, objects);
                         assertEquals(tactical, plants == 0, view + ": placed plants' parts");
-                        assertTrue(objects > 100, view + " keeps the other objects");
+                        // The Tactical View hides every placed object (b11-design 4.3), the 3D view draws them all.
+                        assertTrue(tactical ? objects == 0 : objects > 100, view + ": the other objects' parts");
                         for (var at : List.of(LEVEL_CORAL, LEVEL_TREE, snowTree)) {
                             assertEquals(!tactical, hit(terrain, scene, at, true) != null, view + ": the plant of " + at.getBoardNum());
                             assertEquals(!tactical, terrain.editorObjects(at).getFirst().shown(), view + " shows " + at.getBoardNum());
                         }
                         for (var at : List.of(MIRRORED, FAR)) {
-                            assertEquals(at, hit(terrain, scene, at, true).coords(), view + ": the car of " + at.getBoardNum());
-                            // Game picking finds the car's hex; the hover outline looks through the car to the ground.
+                            // The editor's object pick follows what the view draws; game picking finds the car's hex in
+                            // both views, and the hover outline looks through the car to the ground.
+                            var car = hit(terrain, scene, at, true);
+                            assertEquals(tactical ? null : at, car == null ? null : car.coords(), view + ": the car of "
+                                  + at.getBoardNum());
                             assertEquals(at, hit(terrain, scene, at, false).coords(), view + ": the hex of the car");
                         }
                     }
@@ -621,7 +625,6 @@ class GpuSceneryColourSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    terrain.setTacticalView(false);
                     terrain.setGrass(false);
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene);

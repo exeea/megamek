@@ -171,51 +171,24 @@ class BoardRimTest {
               "A column without a lower neighbour keeps its art");
     }
 
+    /**
+     * The Classic column's art bakes no cliff stroke: the Tactical View's ground layer strokes cliffs, in both graphics
+     * (b11-scope: in Classic the stroke appears only in the Tactical View). Neutral rims isolate a stroke from the rims'
+     * own shading, on every drop, with and without a manual cliff exit.
+     */
     @Test
-    void tacticalStrokesMarkOnlyTheUpperCliffEdgeIncludingAuthoredShortDrops() {
-        BoardScene.Pixels mask = pixels(0xff808080); // Neutral rims isolate the stroke from decorative shading.
-        BoardRim rims = new BoardRim();
-        for (int edge = 0; edge < 6; edge++) {
-            int direction = BoardGeometry.edgeDirection(edge);
-            int border = probe(edge, .5f, .75f), inside = probe(edge, .5f, 5);
-            for (int drop = 1; drop <= 3; drop++) {
-                BoardScene scene = scene(edge, false, 2 - drop, ground, null);
-                BoardScene.Pixels art = rims.column(scene, scene.tile(CENTER), ground, mask, mask);
-                assertEquals(drop > 2, art.rgba(border) != ground.rgba(border), "Drop " + drop + ", edge " + edge);
-                assertEquals(ground.rgba(inside), art.rgba(inside), "The stroke stays at the edge");
-
-                BoardScene cliff = cliffTop(scene, direction);
-                BoardScene.Pixels marked = rims.column(cliff, cliff.tile(CENTER), ground, mask, mask);
-                assertTrue((marked.rgba(border) >>> 24) < (ground.rgba(border) >>> 24),
-                      "A manual cliff exit outlines even a one-level drop");
-                assertEquals(ground.rgba(border) & 255, marked.rgba(border) & 255, "Preserve artwork coverage");
-                var lower = cliff.tile(CENTER.translated(direction));
-                assertSame(ground, rims.column(cliff, lower, ground, mask, mask), "Only the upper hex owns the stroke");
-
-                BoardScene wrongExit = cliffTop(scene, (direction + 1) % 6);
-                assertEquals(art, rims.column(wrongExit, wrongExit.tile(CENTER), ground, mask, mask),
-                      "An exit on a different edge does not outline a slope");
-            }
-            for (int neighbor : new int[] { 2, 3 }) {
-                BoardScene noDrop = cliffTop(scene(edge, false, neighbor, ground, null), direction);
-                assertSame(ground, rims.column(noDrop, noDrop.tile(CENTER), ground, mask, mask),
-                      "A cliff exit without a drop has no stroke");
-            }
-        }
-    }
-
-    @Test
-    void tacticalCliffStrokeLeavesRoadMouthsOpenAndDoesNotChangeSculptedArtwork() {
+    void classicColumnsBakeNoCliffStroke() {
         BoardScene.Pixels mask = pixels(0xff808080);
         BoardRim rims = new BoardRim();
         for (int edge = 0; edge < 6; edge++) {
-            BoardScene scene = cliffTop(scene(edge, true, 1, ground, null), BoardGeometry.edgeDirection(edge));
-            BoardScene.Pixels art = rims.column(scene, scene.tile(CENTER), ground, mask, mask);
-            int mouth = probe(edge, .5f, .75f), shoulder = probe(edge, .12f, .75f);
-            assertEquals(ground.rgba(mouth), art.rgba(mouth), "The road through the edge remains clear");
-            assertTrue((art.rgba(shoulder) >>> 24) < (ground.rgba(shoulder) >>> 24), "The cliff beside it has a stroke");
-            BoardScene.Pixels sculpted = rims.material(scene, scene.tile(CENTER), BoardGeometry.floor(scene), mask, mask).color();
-            assertEquals(ground.rgba(shoulder), sculpted.rgba(shoulder), "Only Tactical View carries the stroke");
+            int border = probe(edge, .5f, .75f);
+            for (int drop = 1; drop <= 3; drop++) {
+                BoardScene scene = scene(edge, false, 2 - drop, ground, null);
+                for (BoardScene board : List.of(scene, cliffTop(scene, BoardGeometry.edgeDirection(edge)))) {
+                    BoardScene.Pixels art = rims.column(board, board.tile(CENTER), ground, mask, mask);
+                    assertEquals(ground.rgba(border), art.rgba(border), "No stroke on a " + drop + "-level drop, edge " + edge);
+                }
+            }
         }
     }
 

@@ -366,7 +366,6 @@ class GpuRailSmokeTest {
                         if (scene != installed) {
                             if (terrain != null) { terrain.dispose(); }
                             terrain = new GpuTerrain();
-                            terrain.setTacticalView(false);
                             frame.prepare(terrain, camera, scene);
                             terrain.update(scene);
                             installed = scene;

@@ -18,8 +18,6 @@ final class BoardRim {
     static final float GROUND_UV_SCALE = 0.96f; // MUST NOT TOUCH!!! With 1.0f we have some black pixels in the textures around the borders!
     /** The board's own incline split: a drop of up to two levels is an incline, anything deeper a high incline. */
     private static final int INCLINE_LEVELS = 2;
-    /** Tactical cliff strokes lie inside the top's edge, in unscaled artwork pixels. */
-    private static final float CLIFF_STROKE_WIDTH = 2;
 
     record Images(BoardScene.Pixels color, BoardScene.Pixels normal) { }
     private record Triangle(float ax, float ay, float bx, float by, float cx, float cy) {
@@ -31,7 +29,7 @@ final class BoardRim {
         }
     }
     private record Patch(int edge, float from, float to, boolean high) { }
-    private record Key(Images ground, BitSet coverage, List<Patch> patches, boolean cliffStroke) { }
+    private record Key(Images ground, BitSet coverage, List<Patch> patches) { }
 
     private final Map<Key, Images> cache = new ConcurrentHashMap<>();
     private final Set<Key> used = ConcurrentHashMap.newKeySet();
@@ -71,7 +69,7 @@ final class BoardRim {
                   : quantize(new Vector3(side.b()).sub(a).dot(along) / BoardGeometry.hexScale());
             patches.add(new Patch(side.edge(), from, to, highDrop(scene, tile, side)));
         }
-        Key key = new Key(ground, coverage, List.copyOf(patches), false);
+        Key key = new Key(ground, coverage, List.copyOf(patches));
         used.add(key);
         return cache.computeIfAbsent(key,
               ignored -> compose(key, incline, highIncline));
@@ -97,9 +95,9 @@ final class BoardRim {
     }
 
     /**
-     * The Tactical View's plain hex: its whole art, with the rim along every edge above a lower neighbour. Liquid
-     * keeps its art, as in {@link #material}. Only cliffs get a dark stroke, carried by this same top at every camera
-     * angle rather than a separate overlay sampling the sculpted terrain.
+     * The Classic column's plain hex: its whole art, with the rim along every edge above a lower neighbour. Liquid
+     * keeps its art, as in {@link #material}. Cliffs get no stroke here: the Tactical View's ground layer strokes them
+     * (GpuHexGrid), in both graphics (b11-scope).
      */
     BoardScene.Pixels column(BoardScene scene, BoardScene.Tile tile, BoardScene.Pixels art,
           BoardScene.Pixels incline, BoardScene.Pixels highIncline) {
@@ -126,7 +124,7 @@ final class BoardRim {
         int height = Math.max(art.height(), (int) BoardGeometry.TILE_HEIGHT);
         BitSet coverage = new BitSet(width * height);
         coverage.set(0, width * height);
-        Key key = new Key(new Images(art, null), coverage, List.copyOf(patches), true);
+        Key key = new Key(new Images(art, null), coverage, List.copyOf(patches));
         used.add(key);
         return cache.computeIfAbsent(key, ignored -> compose(key, incline, highIncline)).color();
     }
@@ -201,7 +199,6 @@ final class BoardRim {
             for (int x = 0; x < width; x++) {
                 int rgba = texel(ground, x, y, width, height, albedo);
                 float red = rgba >>> 24, green = rgba >>> 16 & 255, blue = rgba >>> 8 & 255;
-                float stroke = 0;
                 float px = ((x + 0.5f) / width - 0.5f) * BoardGeometry.TILE_WIDTH / GROUND_UV_SCALE;
                 float py = (0.5f - (y + 0.5f) / height) * BoardGeometry.TILE_HEIGHT / GROUND_UV_SCALE;
                 if (key.coverage().get(y * width + x)) {
@@ -215,11 +212,6 @@ final class BoardRim {
                         float position = (px - a.x) * tx + (py - a.y) * ty;
                         if (distance > 26 || position < patch.from() || position > patch.to()) { continue; }
                         coveredEdges |= 1 << patch.edge();
-                        if (key.cliffStroke() && patch.high()) {
-                            // Union adjoining strokes: a corner must not darken twice. Extend through the clipped
-                            // edge so texture filtering cannot leave a gap between the stroke and the wall.
-                            stroke = Math.max(stroke, Math.clamp(CLIFF_STROKE_WIDTH + .5f - distance, 0, 1));
-                        }
                         BoardScene.Pixels rim = patch.high() ? high : incline;
                         float u = 0.25f + position / (2 * length);
                         float v = 1 - distance / BoardGeometry.TILE_HEIGHT;
@@ -233,10 +225,6 @@ final class BoardRim {
                         blue *= shade;
                     }
                 }
-                float opacity = stroke * .7f;
-                red += (20 - red) * opacity;
-                green += (30 - green) * opacity;
-                blue += (24 - blue) * opacity;
                 color.setRGB(x, y, ((rgba & 255) << 24) | (channel(red) << 16) | (channel(green) << 8) | channel(blue));
                 if (normal != null) {
                     int packed = texel(baseNormal, x, y, width, height, albedo);

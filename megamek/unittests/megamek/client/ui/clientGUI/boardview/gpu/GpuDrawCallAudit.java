@@ -127,6 +127,19 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
         }
     }
 
+    /**
+     * The audited draws by source ("instanced-trees" for trees, placed objects and building modules, "grass", "scatter",
+     * "water", ...) and by family ("water-..." for every water surface), summed over the passes.
+     */
+    Map<String, Integer> totals() {
+        Map<String, Integer> result = new HashMap<>();
+        rows.forEach((row, counts) -> {
+            result.merge(row.category(), counts.draws, Integer::sum);
+            result.merge(row.family(), counts.draws, Integer::sum);
+        });
+        return result;
+    }
+
     void report(String scenario) {
         System.out.printf("DRAW AUDIT %s: terrain colour ModelBatch only; stage/category submitted draws=%s%n",
               scenario, categories);
@@ -214,6 +227,11 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
                 for (Object value : (Array<?>) field(chunk, cache)) {
                     addOrigin(((Renderable) value).meshPart.mesh, "props", index);
                 }
+            }
+            // The Tactical View's packed props (Chunk#keptProps), null until its first draw of the chunk.
+            Object kept = field(chunk, "keptProps", true);
+            if (kept != null) {
+                for (Object value : (Array<?>) kept) { addOrigin(((Renderable) value).meshPart.mesh, "kept-props", index); }
             }
             for (Object prop : (Set<?>) field(chunk, "faded")) {
                 for (Mesh mesh : ((ModelInstance) field(prop, "instance")).model.meshes) {

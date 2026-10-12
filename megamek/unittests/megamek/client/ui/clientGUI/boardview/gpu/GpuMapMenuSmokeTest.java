@@ -224,12 +224,14 @@ class GpuMapMenuSmokeTest {
         }
     }
 
-    /** Whether the view's terrain draws the tileset columns, after the frames that apply a changed choice. */
+    /** Whether the view's terrain is built as the tileset columns, once the rebuild a changed choice starts commits. */
     private static boolean columns(GpuBattleView view) throws Exception {
         var field = GpuBattleView.class.getDeclaredField("terrain");
         field.setAccessible(true);
-        // TODO(b11 step 7): GpuTerrain.columns() replaces today's tacticalView() flip.
-        return ((GpuTerrain) field.get(view)).tacticalView();
+        var terrain = (GpuTerrain) field.get(view);
+        long deadline = System.nanoTime() + 120_000_000_000L;
+        while (terrain.busy() && System.nanoTime() < deadline) { view.render(); }
+        return terrain.columns();
     }
 
     /**
