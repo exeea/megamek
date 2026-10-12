@@ -52,7 +52,7 @@ final class GpuAttackEffects implements Disposable {
     private final GpuMissileEffects missiles = new GpuMissileEffects();
     private final GpuExplosionEffects explosions = new GpuExplosionEffects();
     private final GpuArtilleryBlast artilleryBlasts = new GpuArtilleryBlast();
-    private List<Coords> minedHexes = List.of();
+    private Map<Coords, Integer> minefields = Map.of();
     private Function<Ray, BoardGeometry.Hit> minedLandscape = ray -> null;
     private final GpuEffectBatch flames = new GpuEffectBatch(2048);
     private final GpuEffectBatch beams = new GpuEffectBatch(MAX_MUZZLES * 4, "beams");
@@ -299,11 +299,11 @@ final class GpuAttackEffects implements Disposable {
     void advance(float seconds) { artilleryBlasts.advance(seconds); }
 
     /**
-     * The hexes with a minefield the local player knows of, whose mines lie on the ground until it is gone, and the
-     * terrain they lie on. An empty list draws none.
+     * The density of each minefield the local player knows of, by hex, whose mines lie on the ground until it is
+     * gone, and the terrain they lie on. An empty map draws none.
      */
-    void setMinefields(List<Coords> mined, Function<Ray, BoardGeometry.Hit> landscape) {
-        minedHexes = List.copyOf(mined);
+    void setMinefields(Map<Coords, Integer> minefields, Function<Ray, BoardGeometry.Hit> landscape) {
+        this.minefields = Map.copyOf(minefields);
         minedLandscape = landscape;
     }
 
@@ -348,7 +348,7 @@ final class GpuAttackEffects implements Disposable {
         flames.begin();
         beams.begin();
         projectiles.begin();
-        if (volley.isEmpty() && artilleryBlasts.size() == 0 && minedHexes.isEmpty()) { return; }
+        if (volley.isEmpty() && artilleryBlasts.size() == 0 && minefields.isEmpty()) { return; }
         this.camera = camera;
         for (var shot : volley) {
             if (shot.defensive() && shot.interception() != null) { continue; }
@@ -358,7 +358,7 @@ final class GpuAttackEffects implements Disposable {
         }
         renderInterceptions();
         artilleryBlasts.emit(explosions);
-        artilleryBlasts.restingMines(explosions, minedHexes, minedLandscape);
+        artilleryBlasts.restingMines(explosions, minefields, minedLandscape);
         missiles.render(camera);
         projectiles.render(camera, 0);
         if (depth == null) { explosions.render(camera); }

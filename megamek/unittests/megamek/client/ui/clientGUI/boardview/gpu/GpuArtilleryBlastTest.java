@@ -18,6 +18,7 @@ import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.WeaponType;
 import org.junit.jupiter.api.Test;
 
 /** Which landings draw an artillery blast, which shape they take, and how long the blasts live. */
@@ -284,7 +285,7 @@ class GpuArtilleryBlastTest {
         var marks = new ArrayList<GpuGroundDamage.Impact>();
         blasts.groundMarks(marks::add);
         assertEquals(0, marks.size(), "Mines scorch nothing");
-        var mines = GpuArtilleryBlast.mines(3);
+        var mines = GpuArtilleryBlast.mines(3, GpuArtilleryBlast.minesFor(round.rackSize()));
         assertTrue(mines.size() >= 6, "A handful of mines");
         for (var mine : mines) {
             assertEquals(0, mine.ring());
@@ -300,18 +301,18 @@ class GpuArtilleryBlastTest {
         var blasts = new GpuArtilleryBlast();
         var explosions = new GpuExplosionEffects();
         explosions.begin();
-        blasts.restingMines(explosions, List.of(hex), GpuArtilleryBlastTest::flatGround);
+        blasts.restingMines(explosions, Map.of(hex, 20), GpuArtilleryBlastTest::flatGround);
         int mines = explosions.size();
         assertTrue(mines >= 6, "The minefield's mines lie there: " + mines);
-        for (Vector3 mine : GpuArtilleryBlast.placeMines(hex, GpuArtilleryBlastTest::flatGround)) {
+        for (Vector3 mine : GpuArtilleryBlast.placeMines(hex, 8, GpuArtilleryBlastTest::flatGround)) {
             assertEquals(0, mine.z, .01f, "On the ground");
             assertTrue(mine.dst(BoardGeometry.center(hex, 0)) < BoardGeometry.height() * .45f, "Inside the hex");
         }
         explosions.begin();
-        blasts.restingMines(explosions, List.of(hex), GpuArtilleryBlastTest::flatGround);
+        blasts.restingMines(explosions, Map.of(hex, 20), GpuArtilleryBlastTest::flatGround);
         assertEquals(mines, explosions.size(), "Still there a frame later, with no blast to keep them");
         explosions.begin();
-        blasts.restingMines(explosions, List.of(), GpuArtilleryBlastTest::flatGround);
+        blasts.restingMines(explosions, Map.of(), GpuArtilleryBlastTest::flatGround);
         assertEquals(0, explosions.size(), "Gone once the minefield is detonated or cleared");
     }
 
@@ -326,20 +327,63 @@ class GpuArtilleryBlastTest {
         blasts.detonate(BoardGeometry.center(hex, 0), round, attack, 3);
         var explosions = new GpuExplosionEffects();
         explosions.begin();
-        blasts.restingMines(explosions, List.of(hex), GpuArtilleryBlastTest::flatGround);
+        blasts.restingMines(explosions, Map.of(hex, 20), GpuArtilleryBlastTest::flatGround);
         assertEquals(0, explosions.size(), "The drop draws this hex's mines itself");
         blasts.advance(GpuArtilleryBlast.SECONDS);
         explosions.begin();
-        blasts.restingMines(explosions, List.of(hex), GpuArtilleryBlastTest::flatGround);
+        blasts.restingMines(explosions, Map.of(hex, 20), GpuArtilleryBlastTest::flatGround);
         assertTrue(explosions.size() > 0, "After the drop, the minefield's mines stay");
     }
 
     @Test
-    void onlyMinefieldMarkersHaveMines() {
+    void onlyMinefieldMarkersHaveMinesAndTheyCarryTheirDensity() {
         Coords mined = new Coords(2, 2);
-        List<BoardMarker> markers = List.of(new BoardMarker(BoardMarker.Kind.MINEFIELD, mined, 0),
+        List<BoardMarker> markers = List.of(new BoardMarker(BoardMarker.Kind.MINEFIELD, mined, 0, 0, "", 15),
               new BoardMarker(BoardMarker.Kind.ARTILLERY_TARGET, new Coords(4, 4), 0));
-        assertEquals(List.of(mined), GpuArtilleryBlast.minedHexes(markers));
+        assertEquals(Map.of(mined, 15), GpuArtilleryBlast.minefields(markers));
+    }
+
+    /** One mine for every two and a half points of density, never fewer than two or more than twelve. */
+    @Test
+    void theNumberOfMinesFollowsTheDensity() {
+        assertEquals(2, GpuArtilleryBlast.minesFor(5));
+        assertEquals(4, GpuArtilleryBlast.minesFor(10));
+        assertEquals(8, GpuArtilleryBlast.minesFor(20));
+        assertEquals(10, GpuArtilleryBlast.minesFor(25));
+        assertEquals(12, GpuArtilleryBlast.minesFor(30));
+        assertEquals(2, GpuArtilleryBlast.minesFor(0), "A field the client knows no density for still shows");
+        assertEquals(12, GpuArtilleryBlast.minesFor(100));
+    }
+
+    /** A Long Tom's FASCAM round drops as many mines as then lie in the field it lays (density = its rack size). */
+    @Test
+    void theDropShowsAsManyMinesAsTheFieldItLays() {
+        EquipmentType.initializeTypes();
+        var longTom = (WeaponType) EquipmentType.get("ISLongTom");
+        assertEquals(10, GpuArtilleryBlast.minesFor(longTom.getRackSize()));
+        Coords hex = new Coords(3, 6);
+        var blasts = new GpuArtilleryBlast();
+        var explosions = new GpuExplosionEffects();
+        explosions.begin();
+        blasts.restingMines(explosions, Map.of(hex, longTom.getRackSize()), GpuArtilleryBlastTest::flatGround);
+        assertEquals(10, explosions.size());
+    }
+
+    /** As detonations thin a field the mines drawn there fall, and the ones left stay where they lay. */
+    @Test
+    void aThinnedMinefieldLosesMinesWithoutMovingTheRest() {
+        Coords hex = new Coords(3, 6);
+        var blasts = new GpuArtilleryBlast();
+        var explosions = new GpuExplosionEffects();
+        explosions.begin();
+        blasts.restingMines(explosions, Map.of(hex, 20), GpuArtilleryBlastTest::flatGround);
+        assertEquals(8, explosions.size());
+        explosions.begin();
+        blasts.restingMines(explosions, Map.of(hex, 15), GpuArtilleryBlastTest::flatGround);
+        assertEquals(6, explosions.size(), "Density 20 less 5 for a detonation");
+        List<Vector3> before = GpuArtilleryBlast.placeMines(hex, 8, GpuArtilleryBlastTest::flatGround);
+        List<Vector3> after = GpuArtilleryBlast.placeMines(hex, 6, GpuArtilleryBlastTest::flatGround);
+        assertEquals(before.subList(0, 6), after, "The mines left lie where they did");
     }
 
     /** Level ground at height 0 that reports squared distances, as the board's landscape does. */

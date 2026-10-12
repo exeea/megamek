@@ -2,9 +2,9 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -64,8 +64,12 @@ final class GpuArtilleryBlast {
     private static final Set<String> NON_EXPLOSIVE = Set.of("M_FASCAM", "M_VIBRABOMB_IV", "M_ACTIVE_IV", "M_THUNDER",
           "M_THUNDER_ACTIVE", "M_THUNDER_AUGMENTED", "M_THUNDER_INFERNO", "M_THUNDER_VIBRABOMB", "M_SMOKE",
           "M_SMOKE_WARHEAD", "M_FLARE", "M_LASER_INHIB");
-    /** Mines a minefield round drops into its hex. */
-    private static final int MINES_PER_ROUND = 9;
+    /** Density points each mine drawn stands for: a density 20 field shows 8 mines, a density 5 one 2. */
+    private static final float DENSITY_PER_MINE = 2.5f;
+    private static final int FEWEST_MINES = 2;
+    private static final int MOST_MINES = 12;
+    /** The density of the minefield the shader preview and review sheets drop: a Long Tom's FASCAM round. */
+    private static final int PREVIEW_MINE_DENSITY = 25;
     /** A mine's radius, in hexes. */
     private static final float MINE_SIZE = .028f;
     /** Height of a minefield round's dispenser above its hex, in hexes: lower and quieter than a cluster air burst. */
@@ -184,7 +188,7 @@ final class GpuArtilleryBlast {
             targetHex = attack == null ? null : attack.event.destination().coords();
             drawSeed = ((style == Style.MINES) && (targetHex != null)) ? mineSeed(targetHex) : key;
             pieces = switch (style) {
-                case MINES -> mines(drawSeed);
+                case MINES -> mines(drawSeed, minesFor(profile == null ? 0 : profile.rackSize()));
                 case CLUSTER -> bomblets(area, key);
                 default -> debrisPieces(area.hexRadius(), key);
             };
@@ -377,21 +381,33 @@ final class GpuArtilleryBlast {
     /**
      * The mines of a minefield round: a handful that drift down into the hex the round landed on, never into a
      * neighbour, spread over most of it. They leave the dispenser over a quarter second and fall slowly, settling over
-     * about a second.
+     * about a second. A smaller count draws the first mines of the same seed's larger one, so a minefield thinned by
+     * detonations loses mines rather than moving them.
+     *
+     * @param count the number of mines, from {@link #minesFor(int)}
      */
-    static List<Piece> mines(int seed) {
+    static List<Piece> mines(int seed, int count) {
         List<Piece> pieces = new ArrayList<>();
         float hex = BoardGeometry.height();
-        for (int mine = 0; mine < MINES_PER_ROUND; mine++) {
+        for (int mine = 0; mine < count; mine++) {
             float bearing = mine * 2.399963f + random(seed, mine + 500);
             // Inside a circle that fits the hex, spread evenly over it rather than crowding its centre.
             float out = hex * .4f * (float) Math.sqrt(MathUtils.lerp(.05f, 1, random(seed, mine + 520)));
             // They leave in turn over a quarter second, so the shell trails them out as a stream.
-            float release = .05f + .25f * mine / (MINES_PER_ROUND - 1) + .02f * random(seed, mine + 540);
+            float release = .05f + .25f * mine / Math.max(1, count - 1) + .02f * random(seed, mine + 540);
             float fall = .8f + .4f * random(seed, mine + 560);
             pieces.add(new Piece(MathUtils.cos(bearing) * out, MathUtils.sin(bearing) * out, 0, release, fall, false));
         }
         return pieces;
+    }
+
+    /**
+     * The mines drawn for a minefield of {@code density}: one for every {@link #DENSITY_PER_MINE} points, at least
+     * {@link #FEWEST_MINES} and at most {@link #MOST_MINES}. A minefield round's density is its shell's rack size,
+     * as the server lays it, so its drop shows as many mines as then lie in the hex.
+     */
+    static int minesFor(int density) {
+        return MathUtils.clamp(Math.round(density / DENSITY_PER_MINE), FEWEST_MINES, MOST_MINES);
     }
 
     /**
@@ -479,7 +495,7 @@ final class GpuArtilleryBlast {
     void emit(GpuExplosionEffects explosions, Vector3 ground, float size, int hexRadius, Style style, float seconds,
           int seed) {
         List<Piece> pieces = switch (style) {
-            case MINES -> mines(seed);
+            case MINES -> mines(seed, minesFor(PREVIEW_MINE_DENSITY));
             case CLUSTER -> bomblets(PREVIEW_CLUSTER, seed);
             default -> debrisPieces(hexRadius, seed);
         };
@@ -792,36 +808,39 @@ final class GpuArtilleryBlast {
         return hit == null ? null : ray.getEndPoint(new Vector3(), (float) Math.sqrt(hit.distance()));
     }
 
-    /** The hexes the markers show a minefield in: the minefields the local player knows of. */
-    static List<Coords> minedHexes(List<BoardMarker> markers) {
-        List<Coords> mined = new ArrayList<>();
+    /** The density of each minefield the markers show, by hex: the minefields the local player knows of. */
+    static Map<Coords, Integer> minefields(List<BoardMarker> markers) {
+        Map<Coords, Integer> minefields = new LinkedHashMap<>();
         for (BoardMarker marker : markers) {
             if (marker.kind() == BoardMarker.Kind.MINEFIELD) {
-                mined.add(marker.coords());
+                minefields.put(marker.coords(), marker.density());
             }
         }
-        return mined;
+        return minefields;
     }
 
     /**
      * Queues the mines lying in each hex with a minefield the local player knows of, for as long as it lasts: the
      * client knows only the minefields its player may, and a hex leaves {@code mined} once its field is detonated or
-     * cleared. A hex whose mines are still being dropped is left to its drop, which lays them in the same places.
+     * cleared. A hex whose mines are still being dropped is left to its drop, which lays them in the same places. As
+     * detonations thin a field its density falls, and so does the number of mines drawn there.
      *
-     * @param mined     the hexes with a known minefield
+     * @param minefields the density of each known minefield, by hex
      * @param landscape finds the installed terrain under a mine
      */
-    void restingMines(GpuExplosionEffects explosions, Collection<Coords> mined,
+    void restingMines(GpuExplosionEffects explosions, Map<Coords, Integer> minefields,
           Function<Ray, BoardGeometry.Hit> landscape) {
-        restingMines.keySet().retainAll(mined);
+        restingMines.keySet().retainAll(minefields.keySet());
         float mineSize = BoardGeometry.height() * MINE_SIZE;
-        for (Coords hex : mined) {
+        for (Map.Entry<Coords, Integer> minefield : minefields.entrySet()) {
+            Coords hex = minefield.getKey();
             if (beingDropped(hex)) {
                 continue;
             }
+            int count = minesFor(minefield.getValue());
             List<Vector3> mines = restingMines.get(hex);
-            if (mines == null) {
-                mines = placeMines(hex, landscape);
+            if ((mines == null) || (mines.size() != count)) {
+                mines = placeMines(hex, count, landscape);
                 if (mines.isEmpty()) {
                     // The terrain under the hex is not installed yet; a later frame places them.
                     continue;
@@ -848,10 +867,10 @@ final class GpuArtilleryBlast {
     }
 
     /** Where the mines of the hex lie: where its drop lays them, on the installed terrain. */
-    static List<Vector3> placeMines(Coords hex, Function<Ray, BoardGeometry.Hit> landscape) {
+    static List<Vector3> placeMines(Coords hex, int count, Function<Ray, BoardGeometry.Hit> landscape) {
         Vector3 centre = BoardGeometry.center(hex, 0);
         List<Vector3> placed = new ArrayList<>();
-        for (Piece mine : mines(mineSeed(hex))) {
+        for (Piece mine : mines(mineSeed(hex), count)) {
             Vector3 ground = terrain(landscape, centre.x + mine.offsetX(), centre.y + mine.offsetY(), centre.z);
             if (ground != null) {
                 placed.add(ground);
