@@ -74,6 +74,8 @@ class GpuArtilleryBlastSmokeTest {
                     volumes.setLightDirection(new Vector3(-.3f, .5f, -1).nor());
                     var sheet = new BufferedImage(SIZE * MOMENTS.length, SIZE * STYLES.length, BufferedImage.TYPE_INT_RGB);
                     var graphics = sheet.createGraphics();
+                    File folder = new File(System.getProperty("megamek.gpu.screenshots"));
+                    assertTrue(folder.isDirectory() || folder.mkdirs());
                     var empty = frame(buffer, batch, ground, camera, volumes, () -> { });
                     try {
                         for (int row = 0; row < STYLES.length; row++) {
@@ -87,7 +89,7 @@ class GpuArtilleryBlastSmokeTest {
                                 if (column == 0) {
                                     firstWarmth = warmth(image) - warmth(empty);
                                     // Kept beside the sheet, so a shape that fails here can be looked at.
-                                    ImageIO.write(image, "png", new File(System.getProperty("megamek.gpu.screenshots"),
+                                    ImageIO.write(image, "png", new File(folder,
                                           "artillery-ignition-" + style + ".png"));
                                     long drawn = different(image, empty);
                                     // A minefield round only pops its mines out, far smaller than any fiery blast.

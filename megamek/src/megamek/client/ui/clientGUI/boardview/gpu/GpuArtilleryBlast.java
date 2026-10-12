@@ -2,14 +2,19 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuExplosionEffects.Look;
 import megamek.common.ResolvedAttack;
 import megamek.common.annotations.Nullable;
@@ -61,6 +66,8 @@ final class GpuArtilleryBlast {
           "M_SMOKE_WARHEAD", "M_FLARE", "M_LASER_INHIB");
     /** Mines a minefield round drops into its hex. */
     private static final int MINES_PER_ROUND = 9;
+    /** A mine's radius, in hexes. */
+    private static final float MINE_SIZE = .028f;
     /** Height of a minefield round's dispenser above its hex, in hexes: lower and quieter than a cluster air burst. */
     private static final float DISPENSER_HEXES = .9f;
     /** How far short of the hex centre the shell opens, in hexes, so its stream of mines passes over the middle. */
@@ -98,6 +105,8 @@ final class GpuArtilleryBlast {
     static final AreaEffect PREVIEW_CLUSTER = new AreaEffect(1, 20, 10, true);
 
     private final List<Blast> blasts = new ArrayList<>();
+    /** The mines lying in each known minefield hex, placed on the installed terrain once, by hex. */
+    private final Map<Coords, List<Vector3>> restingMines = new HashMap<>();
     private final Vector3 point = new Vector3();
     private final Vector3 axis = new Vector3();
     private final Vector3 burst = new Vector3();
@@ -144,6 +153,13 @@ final class GpuArtilleryBlast {
         final ResolvedAttack.Shot profile;
         /** The attack that landed the shell, {@code null} for a blast drawn without one. */
         final UnitAttack attack;
+        /** The hex the shell landed in, {@code null} for a blast drawn without an attack. */
+        final Coords targetHex;
+        /**
+         * The seed its shapes are drawn with: a minefield round's is its hex's, so its mines lie where the mines
+         * drawn for the minefield afterwards lie, in the same shapes; any other blast's is its key.
+         */
+        final int drawSeed;
         final List<Piece> pieces;
         /** Where each piece lands, on the terrain where it could be found, else level with the crater. */
         final List<Vector3> landings;
@@ -165,8 +181,10 @@ final class GpuArtilleryBlast {
             size = size(profile);
             area = areaEffect(attack == null ? null : attack.event.result().equipmentName(), profile);
             style = laysMines(profile) ? Style.MINES : area.cluster() ? Style.CLUSTER : style(profile, key);
+            targetHex = attack == null ? null : attack.event.destination().coords();
+            drawSeed = ((style == Style.MINES) && (targetHex != null)) ? mineSeed(targetHex) : key;
             pieces = switch (style) {
-                case MINES -> mines(key);
+                case MINES -> mines(drawSeed);
                 case CLUSTER -> bomblets(area, key);
                 default -> debrisPieces(area.hexRadius(), key);
             };
@@ -179,7 +197,8 @@ final class GpuArtilleryBlast {
                 Piece piece = pieces.get(index);
                 float x = hexCentre.x + piece.offsetX();
                 float y = hexCentre.y + piece.offsetY();
-                Vector3 terrain = attack == null || attack.landscape == null ? null : terrain(attack, x, y, ground.z);
+                Vector3 terrain = attack == null || attack.landscape == null ? null
+                      : terrain(attack.landscape, x, y, ground.z);
                 onTerrain[index] = terrain != null;
                 landings.add(terrain != null ? terrain : new Vector3(x, y, ground.z));
             }
@@ -433,7 +452,7 @@ final class GpuArtilleryBlast {
     void emit(GpuExplosionEffects explosions) {
         for (Blast blast : blasts) {
             var scatter = new Scatter(blast.pieces, blast.landings, blast.heading);
-            emit(explosions, blast.ground, blast.size, scatter, blast.style, blast.seconds, blast.key);
+            emit(explosions, blast.ground, blast.size, scatter, blast.style, blast.seconds, blast.drawSeed);
         }
     }
 
@@ -525,7 +544,7 @@ final class GpuArtilleryBlast {
         for (int index = 0; index < pieces.size(); index++) {
             Piece piece = pieces.get(index);
             Vector3 landing = scatter.landings().get(index);
-            float mineSize = hex * .028f;
+            float mineSize = hex * MINE_SIZE;
             float travel = (seconds - piece.launch()) / piece.flight();
             if (travel > 0 && travel < 1) {
                 // Each mine leaves where the shell has got to by its release, so together they form a stream along
@@ -764,12 +783,86 @@ final class GpuArtilleryBlast {
     }
 
     /** Where a vertical line through {@code x}, {@code y} meets the installed terrain, searching well above and below. */
-    private static @Nullable Vector3 terrain(UnitAttack attack, float x, float y, float near) {
+    private static @Nullable Vector3 terrain(Function<Ray, BoardGeometry.Hit> landscape, float x, float y,
+          float near) {
         float drop = BoardGeometry.height() * 8;
         var ray = new Ray(new Vector3(x, y, near + drop / 2), new Vector3(0, 0, -1));
-        BoardGeometry.Hit hit = attack.landscape.apply(ray);
+        BoardGeometry.Hit hit = landscape.apply(ray);
         // A hit's distance is squared, as every landscape query reports it.
         return hit == null ? null : ray.getEndPoint(new Vector3(), (float) Math.sqrt(hit.distance()));
+    }
+
+    /** The hexes the markers show a minefield in: the minefields the local player knows of. */
+    static List<Coords> minedHexes(List<BoardMarker> markers) {
+        List<Coords> mined = new ArrayList<>();
+        for (BoardMarker marker : markers) {
+            if (marker.kind() == BoardMarker.Kind.MINEFIELD) {
+                mined.add(marker.coords());
+            }
+        }
+        return mined;
+    }
+
+    /**
+     * Queues the mines lying in each hex with a minefield the local player knows of, for as long as it lasts: the
+     * client knows only the minefields its player may, and a hex leaves {@code mined} once its field is detonated or
+     * cleared. A hex whose mines are still being dropped is left to its drop, which lays them in the same places.
+     *
+     * @param mined     the hexes with a known minefield
+     * @param landscape finds the installed terrain under a mine
+     */
+    void restingMines(GpuExplosionEffects explosions, Collection<Coords> mined,
+          Function<Ray, BoardGeometry.Hit> landscape) {
+        restingMines.keySet().retainAll(mined);
+        float mineSize = BoardGeometry.height() * MINE_SIZE;
+        for (Coords hex : mined) {
+            if (beingDropped(hex)) {
+                continue;
+            }
+            List<Vector3> mines = restingMines.get(hex);
+            if (mines == null) {
+                mines = placeMines(hex, landscape);
+                if (mines.isEmpty()) {
+                    // The terrain under the hex is not installed yet; a later frame places them.
+                    continue;
+                }
+                restingMines.put(hex, mines);
+                LOGGER.debug("[ArtilleryBlast] {} mines lie in the minefield at {}", mines.size(), hex);
+            }
+            int seed = mineSeed(hex);
+            for (int index = 0; index < mines.size(); index++) {
+                point.set(mines.get(index)).add(0, 0, mineSize * .6f);
+                explosions.add(point, mineSize, .5f, 0, 1, seed + index * 41, MINE, Vector3.Zero);
+            }
+        }
+    }
+
+    /** Whether a minefield round's drop into the hex is still being drawn. */
+    private boolean beingDropped(Coords hex) {
+        for (Blast blast : blasts) {
+            if ((blast.style == Style.MINES) && hex.equals(blast.targetHex)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Where the mines of the hex lie: where its drop lays them, on the installed terrain. */
+    static List<Vector3> placeMines(Coords hex, Function<Ray, BoardGeometry.Hit> landscape) {
+        Vector3 centre = BoardGeometry.center(hex, 0);
+        List<Vector3> placed = new ArrayList<>();
+        for (Piece mine : mines(mineSeed(hex))) {
+            Vector3 ground = terrain(landscape, centre.x + mine.offsetX(), centre.y + mine.offsetY(), centre.z);
+            if (ground != null) {
+                placed.add(ground);
+            }
+        }
+        return placed;
+    }
+
+    /** The seed of a hex's mines, the same for its drop and for the mines lying there afterwards. */
+    static int mineSeed(Coords hex) {
+        return hex.getX() * 7919 + hex.getY() * 104729 + 17;
     }
 
     /** The first instant: a hot, low core that flashes and swells before the shape of the blast takes over. */

@@ -5,14 +5,17 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.ResolvedAttack;
+import megamek.common.board.Coords;
 
 /** Bounded procedural effects using the posed assembly's actual muzzle/launcher emitters. No rules or hit tests. */
 final class GpuAttackEffects implements Disposable {
@@ -49,6 +52,8 @@ final class GpuAttackEffects implements Disposable {
     private final GpuMissileEffects missiles = new GpuMissileEffects();
     private final GpuExplosionEffects explosions = new GpuExplosionEffects();
     private final GpuArtilleryBlast artilleryBlasts = new GpuArtilleryBlast();
+    private List<Coords> minedHexes = List.of();
+    private Function<Ray, BoardGeometry.Hit> minedLandscape = ray -> null;
     private final GpuEffectBatch flames = new GpuEffectBatch(2048);
     private final GpuEffectBatch beams = new GpuEffectBatch(MAX_MUZZLES * 4, "beams");
     private final GpuEffectBatch projectiles = new GpuEffectBatch(512, "projectiles");
@@ -293,6 +298,15 @@ final class GpuAttackEffects implements Disposable {
     /** Ages the artillery blasts, which outlive the attacks that landed them, by the frame's real time. */
     void advance(float seconds) { artilleryBlasts.advance(seconds); }
 
+    /**
+     * The hexes with a minefield the local player knows of, whose mines lie on the ground until it is gone, and the
+     * terrain they lie on. An empty list draws none.
+     */
+    void setMinefields(List<Coords> mined, Function<Ray, BoardGeometry.Hit> landscape) {
+        minedHexes = List.copyOf(mined);
+        minedLandscape = landscape;
+    }
+
     /** Scorch marks where artillery debris has just landed in the rings around its target hex. */
     void artilleryGroundMarks(Consumer<GpuGroundDamage.Impact> receiver) {
         artilleryBlasts.groundMarks(receiver);
@@ -334,7 +348,7 @@ final class GpuAttackEffects implements Disposable {
         flames.begin();
         beams.begin();
         projectiles.begin();
-        if (volley.isEmpty() && artilleryBlasts.size() == 0) { return; }
+        if (volley.isEmpty() && artilleryBlasts.size() == 0 && minedHexes.isEmpty()) { return; }
         this.camera = camera;
         for (var shot : volley) {
             if (shot.defensive() && shot.interception() != null) { continue; }
@@ -344,6 +358,7 @@ final class GpuAttackEffects implements Disposable {
         }
         renderInterceptions();
         artilleryBlasts.emit(explosions);
+        artilleryBlasts.restingMines(explosions, minedHexes, minedLandscape);
         missiles.render(camera);
         projectiles.render(camera, 0);
         if (depth == null) { explosions.render(camera); }

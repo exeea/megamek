@@ -13,7 +13,10 @@ import java.util.Map;
 import java.util.Set;
 
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
+import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.common.ResolvedAttack;
+import megamek.common.board.Coords;
 import megamek.common.equipment.EquipmentType;
 import org.junit.jupiter.api.Test;
 
@@ -288,6 +291,64 @@ class GpuArtilleryBlastTest {
             assertTrue(Math.hypot(mine.offsetX(), mine.offsetY()) < BoardGeometry.height() * .45f,
                   "Every mine lands inside the hex: " + mine);
         }
+    }
+
+    /** A known minefield's mines lie on the ground every frame until it is gone, and only then disappear. */
+    @Test
+    void minesStayOnTheGroundUntilTheMinefieldIsGone() {
+        Coords hex = new Coords(3, 6);
+        var blasts = new GpuArtilleryBlast();
+        var explosions = new GpuExplosionEffects();
+        explosions.begin();
+        blasts.restingMines(explosions, List.of(hex), GpuArtilleryBlastTest::flatGround);
+        int mines = explosions.size();
+        assertTrue(mines >= 6, "The minefield's mines lie there: " + mines);
+        for (Vector3 mine : GpuArtilleryBlast.placeMines(hex, GpuArtilleryBlastTest::flatGround)) {
+            assertEquals(0, mine.z, .01f, "On the ground");
+            assertTrue(mine.dst(BoardGeometry.center(hex, 0)) < BoardGeometry.height() * .45f, "Inside the hex");
+        }
+        explosions.begin();
+        blasts.restingMines(explosions, List.of(hex), GpuArtilleryBlastTest::flatGround);
+        assertEquals(mines, explosions.size(), "Still there a frame later, with no blast to keep them");
+        explosions.begin();
+        blasts.restingMines(explosions, List.of(), GpuArtilleryBlastTest::flatGround);
+        assertEquals(0, explosions.size(), "Gone once the minefield is detonated or cleared");
+    }
+
+    /** While its drop is still drawn the hex is left to it, which lays the mines in the same places; then they stay. */
+    @Test
+    void theDropHandsItsMinesOverToTheMinefield() {
+        EquipmentType.initializeTypes();
+        var round = shot(true, "M_FASCAM");
+        var attack = GroundDamagePlaybackTest.shot("ISLongTom", true, round);
+        Coords hex = attack.event.destination().coords();
+        var blasts = new GpuArtilleryBlast();
+        blasts.detonate(BoardGeometry.center(hex, 0), round, attack, 3);
+        var explosions = new GpuExplosionEffects();
+        explosions.begin();
+        blasts.restingMines(explosions, List.of(hex), GpuArtilleryBlastTest::flatGround);
+        assertEquals(0, explosions.size(), "The drop draws this hex's mines itself");
+        blasts.advance(GpuArtilleryBlast.SECONDS);
+        explosions.begin();
+        blasts.restingMines(explosions, List.of(hex), GpuArtilleryBlastTest::flatGround);
+        assertTrue(explosions.size() > 0, "After the drop, the minefield's mines stay");
+    }
+
+    @Test
+    void onlyMinefieldMarkersHaveMines() {
+        Coords mined = new Coords(2, 2);
+        List<BoardMarker> markers = List.of(new BoardMarker(BoardMarker.Kind.MINEFIELD, mined, 0),
+              new BoardMarker(BoardMarker.Kind.ARTILLERY_TARGET, new Coords(4, 4), 0));
+        assertEquals(List.of(mined), GpuArtilleryBlast.minedHexes(markers));
+    }
+
+    /** Level ground at height 0 that reports squared distances, as the board's landscape does. */
+    private static BoardGeometry.Hit flatGround(Ray ray) {
+        if (ray.direction.z >= 0) {
+            return null;
+        }
+        float distance = -ray.origin.z / ray.direction.z;
+        return distance < 0 ? null : new BoardGeometry.Hit(new Coords(0, 0), distance * distance);
     }
 
     private static int craters(String weapon, ResolvedAttack.Shot profile) {
