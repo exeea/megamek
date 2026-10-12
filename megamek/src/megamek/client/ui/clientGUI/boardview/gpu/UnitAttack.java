@@ -74,7 +74,8 @@ final class UnitAttack {
         for (var profile : profiles.values()) { firingSeconds = Math.max(firingSeconds, machineGunFireSeconds(profile)); }
         contactSeconds = removal() ? .85f : death() ? DEATH_SECONDS : shot() ? ANTICIPATION_SECONDS + flightSeconds + firingSeconds
               : approachSeconds + MELEE_SWING_SECONDS;
-        duration = removal() ? 1.4f : death() ? DEATH_SECONDS : contactSeconds + RECOVERY_SECONDS + (shot() ? 0 : MELEE_RUN_SECONDS);
+        duration = removal() ? 1.4f : death() ? DEATH_SECONDS : contactSeconds + RECOVERY_SECONDS + (shot() ? 0 : MELEE_RUN_SECONDS)
+              + fuelAirIgnitionHold();
         firingEndSeconds = event.result().mounts().stream()
               .anyMatch(mount -> "flame".equals(effect(mount.entityId(), mount.equipmentIndex())))
               ? Math.max(contactSeconds, ANTICIPATION_SECONDS + flightSeconds + RECOVERY_SECONDS) : contactSeconds;
@@ -359,6 +360,14 @@ final class UnitAttack {
      * How long after contact the terrain this attack changes shows its change: a fuel-air round's at its ignition, a
      * moment after landing, when the fire that clears and burns it lights; any other attack's at contact.
      */
+    /**
+     * How much longer a fuel-air round's attack lasts, so the terrain it changes shows at its ignition, before the next
+     * attack starts: none for any other attack.
+     */
+    private float fuelAirIgnitionHold() {
+        return shot() ? Math.max(0, terrainDelaySeconds() + .1f - RECOVERY_SECONDS) : 0;
+    }
+
     float terrainDelaySeconds() {
         return GpuArtilleryBlast.isFuelAir(event.result().shot()) ? GpuArtilleryBlast.FUEL_AIR_IGNITION_SECONDS : 0;
     }

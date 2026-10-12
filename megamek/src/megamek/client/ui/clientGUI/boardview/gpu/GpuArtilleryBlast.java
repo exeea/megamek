@@ -118,8 +118,11 @@ final class GpuArtilleryBlast {
     private static final Look FUEL_SOOT = new Look(1, .2f, 0, .5f);
     /** Burning chunks it throws out. */
     private static final Look FUEL_CHUNK = new Look(.2f, 1, 0, .6f);
-    /** Seconds after landing a fuel-air round's dispersed fuel lights; its terrain changes show then too. */
-    static final float FUEL_AIR_IGNITION_SECONDS = .25f;
+    /**
+     * Seconds after landing a fuel-air round's dispersed fuel lights; its terrain changes show then too. Half a second
+     * lets the spreading cloud read as fuel before it goes up.
+     */
+    static final float FUEL_AIR_IGNITION_SECONDS = .5f;
     /** How strongly a fuel-air blast draws in thin air, where it does half damage. */
     private static final float THIN_AIR_INTENSITY = .65f;
     private static final int FUEL_AIR_CHUNKS = 12;
