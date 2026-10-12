@@ -405,9 +405,9 @@ final class GpuMapSource implements BoardSource {
             Path near = editor == null ? null : editor.path();
             JFileChooser chooser = new JFileChooser(near == null ? new File(".") : near.toFile().getParentFile());
             chooser.setDialogTitle(Messages.getString("CommonMenuBar.PrintMenu"));
-            chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("PNG (*.png)", "png"));
-            chooser.setAccessory(new JLabel("<html><body style='width: 220px'>"
-                  + Messages.getString("GpuBoard.print.scale") + "</body></html>"));
+            chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                  Messages.getString("GpuBoard.print.filter"), "png"));
+            chooser.setAccessory(new JLabel(Messages.getString("GpuBoard.print.scale")));
             String name = near == null ? board.getBoardName() : BoardFile.withoutExtension(near.getFileName().toString());
             if (name == null || name.isBlank()) { name = "board"; }
             chooser.setSelectedFile(new File(name + "-3d.png"));
