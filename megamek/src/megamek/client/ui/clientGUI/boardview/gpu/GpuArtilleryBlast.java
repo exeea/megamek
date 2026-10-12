@@ -68,6 +68,9 @@ final class GpuArtilleryBlast {
     private static final float DENSITY_PER_MINE = 2.5f;
     private static final int FEWEST_MINES = 2;
     private static final int MOST_MINES = 12;
+    /** The density of an Arrow IV FASCAM minefield, which does not follow its rack size. */
+    private static final int ARROW_IV_DENSITY = 20;
+    private static final int CLAN_ARROW_IV_DENSITY = 30;
     /** The density of the minefield the shader preview and review sheets drop: a Long Tom's FASCAM round. */
     private static final int PREVIEW_MINE_DENSITY = 25;
     /** A mine's radius, in hexes. */
@@ -183,12 +186,12 @@ final class GpuArtilleryBlast {
             this.attack = attack;
             this.key = key;
             size = size(profile);
-            area = areaEffect(attack == null ? null : attack.event.result().equipmentName(), profile);
+            area = areaEffect(weaponName(attack), profile);
             style = laysMines(profile) ? Style.MINES : area.cluster() ? Style.CLUSTER : style(profile, key);
             targetHex = attack == null ? null : attack.event.destination().coords();
             drawSeed = ((style == Style.MINES) && (targetHex != null)) ? mineSeed(targetHex) : key;
             pieces = switch (style) {
-                case MINES -> mines(drawSeed, minesFor(profile == null ? 0 : profile.rackSize()));
+                case MINES -> mines(drawSeed, minesFor(minefieldDensity(weaponName(attack), profile)));
                 case CLUSTER -> bomblets(area, key);
                 default -> debrisPieces(area.hexRadius(), key);
             };
@@ -402,9 +405,29 @@ final class GpuArtilleryBlast {
     }
 
     /**
+     * The density of the minefield a minefield round lays, as the server works it out: the rack size of its shell,
+     * except an Arrow IV's, which lays 20 from an Inner Sphere launcher and 30 from a Clan one.
+     *
+     * @param weaponName the internal name of the weapon that fired, or {@code null} when unknown
+     * @param profile    the shot, or {@code null} when unknown
+     */
+    static int minefieldDensity(@Nullable String weaponName, @Nullable ResolvedAttack.Shot profile) {
+        if ((weaponName != null) && (EquipmentType.get(weaponName) instanceof WeaponType weapon)
+              && (weapon.getAmmoType() == AmmoType.AmmoTypeEnum.ARROW_IV)) {
+            return weapon.isClan() ? CLAN_ARROW_IV_DENSITY : ARROW_IV_DENSITY;
+        }
+        return profile == null ? 0 : profile.rackSize();
+    }
+
+    /** The internal name of the weapon that fired the attack, or {@code null} for a blast drawn without one. */
+    private static @Nullable String weaponName(@Nullable UnitAttack attack) {
+        return attack == null ? null : attack.event.result().equipmentName();
+    }
+
+    /**
      * The mines drawn for a minefield of {@code density}: one for every {@link #DENSITY_PER_MINE} points, at least
-     * {@link #FEWEST_MINES} and at most {@link #MOST_MINES}. A minefield round's density is its shell's rack size,
-     * as the server lays it, so its drop shows as many mines as then lie in the hex.
+     * {@link #FEWEST_MINES} and at most {@link #MOST_MINES}. A minefield round's drop takes the density of the field it
+     * lays ({@link #minefieldDensity}), so it shows as many mines as then lie in the hex.
      */
     static int minesFor(int density) {
         return MathUtils.clamp(Math.round(density / DENSITY_PER_MINE), FEWEST_MINES, MOST_MINES);

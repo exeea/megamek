@@ -369,6 +369,28 @@ class GpuArtilleryBlastTest {
         assertEquals(10, explosions.size());
     }
 
+    /**
+     * Each launcher's drop takes the density of the field the server lays: its shell's rack size, except Arrow IV, which
+     * lays 20 from an Inner Sphere launcher and 30 from a Clan one whatever its rack size.
+     */
+    @Test
+    void eachLauncherDropsAsManyMinesAsItsField() {
+        EquipmentType.initializeTypes();
+        assertEquals(6, mineDrop("ISThumper"), "Thumper: density 15");
+        assertEquals(2, mineDrop("ISThumperCannon"), "Thumper Cannon: density 5");
+        assertEquals(8, mineDrop("ISSniper"), "Sniper: density 20");
+        assertEquals(10, mineDrop("ISLongTom"), "Long Tom: density 25");
+        assertEquals(8, mineDrop("ISArrowIV"), "Inner Sphere Arrow IV: density 20");
+        assertEquals(12, mineDrop("CLArrowIV"), "Clan Arrow IV: density 30");
+    }
+
+    private static int mineDrop(String weaponName) {
+        var weapon = (WeaponType) EquipmentType.get(weaponName);
+        var round = new ResolvedAttack.Shot("", Set.of("M_FASCAM"), true, false, 1, 0, true, null, null, null, true,
+              weapon.getRackSize(), false, false, false, null, weapon.getRackSize());
+        return GpuArtilleryBlast.minesFor(GpuArtilleryBlast.minefieldDensity(weaponName, round));
+    }
+
     /** As detonations thin a field the mines drawn there fall, and the ones left stay where they lay. */
     @Test
     void aThinnedMinefieldLosesMinesWithoutMovingTheRest() {
