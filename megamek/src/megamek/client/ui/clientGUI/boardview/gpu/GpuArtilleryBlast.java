@@ -304,10 +304,7 @@ final class GpuArtilleryBlast {
               || isStarShell(profile);
     }
 
-    /**
-     * Whether the round came down without going off: an explosive artillery round the server sent as dealing no
-     * damage, which it does only for a homing round with no TAG to follow. It throws up dirt and leaves no crater.
-     */
+    /** Whether the round is a fuel-air round that goes off: it burns every hex in its radius rather than digging. */
     static boolean isFuelAir(@Nullable ResolvedAttack.Shot profile) {
         return explodes(profile) && profile.munitions().contains("M_FAE") && !isDud(profile);
     }
@@ -317,6 +314,10 @@ final class GpuArtilleryBlast {
         fuelAirStrength = strength;
     }
 
+    /**
+     * Whether the round came down without going off: an explosive artillery round the server sent as dealing no
+     * damage, which it does only for a homing round with no TAG to follow. It throws up dirt and leaves no crater.
+     */
     static boolean isDud(@Nullable ResolvedAttack.Shot profile) {
         return explodes(profile) && (profile.damagePerHit() == 0);
     }
