@@ -37,6 +37,16 @@ final class GpuMissileEffects implements Disposable {
     static final int SMOKE_PER_MISSILE = 20;
     static final float SMOKE_LIFE_SECONDS = .3f;
     private static final int MISSILES_PER_BATCH = 512;
+    /** An Arrow IV round's rocket plume, one entry per fire puff: its distance behind the tail in metres. */
+    private static final float[] ROCKET_PLUME_OFFSETS = { .5f, 1.7f, 3.1f };
+    /** Each plume puff's half size in metres. */
+    private static final float[] ROCKET_PLUME_SIZES = { .45f, .7f, .85f };
+    /** Each plume puff's age as fire, which sets its heat: young is white-hot, old is red. */
+    private static final float[] ROCKET_PLUME_AGES = { .3f, .65f, .95f };
+    /** Each plume puff's opacity. */
+    private static final float[] ROCKET_PLUME_ALPHAS = { .8f, .6f, .4f };
+    /** How often the plume's fire changes shape, in flickers per second. */
+    private static final float ROCKET_FLICKER_PER_SECOND = 24;
     private static final int STRIDE = 7;
     /** Arrow IV rounds a batch holds before it is drawn; a volley rarely has more than a few. */
     private static final int ARROW_IV_PER_BATCH = 32;
@@ -178,6 +188,7 @@ final class GpuMissileEffects implements Disposable {
     private Mesh mesh;
     private ShaderProgram shader;
     private int offset, smokeCount, missileCount;
+    private final Vector3 plume = new Vector3(), plumeAcross = new Vector3();
 
     void begin() { launches.clear(); smokeCount = 0; missileCount = 0; }
     void add(Launch launch) { launches.add(launch); }
@@ -263,14 +274,19 @@ final class GpuMissileEffects implements Disposable {
         int drawnSmoke = exhaust.size();
         int flames = 0;
         for (var launch : launches) {
+            boolean arrowIV = firesArrowIV(launch);
             for (int missile = 0; missile < launch.missiles && flames < MISSILES_PER_BATCH; missile++) {
                 float t = progress(launch, missile, launch.attack.seconds);
                 if (t < 0 || t >= launch.poweredProgress(missile)) { continue; }
                 position(launch, missile, t, point);
                 position(launch, missile, Math.max(0, t - .003f), direction).sub(point).nor();
-                width.set(right).scl(.5f);
-                length.set(direction).scl(2.5f);
-                exhaust.quad(point, width, length, 0, 1, .8f);
+                if (arrowIV) {
+                    rocketMotor(camera, point, direction, launch.attack.seconds, missile);
+                } else {
+                    width.set(right).scl(.5f);
+                    length.set(direction).scl(2.5f);
+                    exhaust.quad(point, width, length, 0, 1, .8f);
+                }
                 flames++;
             }
         }
@@ -283,6 +299,36 @@ final class GpuMissileEffects implements Disposable {
      */
     static boolean firesArrowIV(Launch launch) {
         return UnitAttack.firesArrowIV(launch.attack.event.result());
+    }
+
+    /**
+     * An Arrow IV round's rocket motor: a flickering plume of fire trailing from its tail, white-hot at the nozzle and
+     * reddening as it streams back, about as long as the round itself.
+     *
+     * @param camera  the view, which the plume faces across its length
+     * @param tail    where the round's tail is
+     * @param back    the direction behind the round
+     * @param seconds the attack's time, for the flicker
+     * @param missile which round, so rounds flying together do not flicker in step
+     */
+    private void rocketMotor(Camera camera, Vector3 tail, Vector3 back, float seconds, int missile) {
+        float metre = BoardRelief.metres(1);
+        int flicker = (int) (seconds * ROCKET_FLICKER_PER_SECOND) + missile * 13;
+        // Across the plume as the camera sees it; looking straight along the flight, any sideways direction will do.
+        plumeAcross.set(back).crs(camera.direction);
+        if (plumeAcross.isZero(.0001f)) {
+            plumeAcross.set(right);
+        }
+        plumeAcross.nor();
+        for (int puff = 0; puff < ROCKET_PLUME_OFFSETS.length; puff++) {
+            plume.set(tail).mulAdd(back, ROCKET_PLUME_OFFSETS[puff] * metre);
+            float size = ROCKET_PLUME_SIZES[puff] * metre;
+            width.set(plumeAcross).scl(size);
+            length.set(back).scl(size * 1.4f);
+            // Fire's age sets its heat: the puff at the nozzle is youngest and brightest, the last the reddest.
+            float kind = 2 + ((flicker + puff * 5) % 97) + ROCKET_PLUME_AGES[puff];
+            exhaust.quad(plume, width, length, -1, kind, ROCKET_PLUME_ALPHAS[puff]);
+        }
     }
 
     /**
