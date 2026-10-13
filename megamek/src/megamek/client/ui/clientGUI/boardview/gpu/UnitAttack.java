@@ -24,9 +24,9 @@ final class UnitAttack {
      * An Arrow IV round flies in slower than a shell, so its missile is seen coming: this much longer per hex of range,
      * between these bounds. A shell takes at most .7 seconds.
      */
-    static final float ARROW_IV_SECONDS_PER_HEX = .1f;
-    static final float ARROW_IV_MIN_FLIGHT_SECONDS = 1.4f;
-    static final float ARROW_IV_MAX_FLIGHT_SECONDS = 2.2f;
+    static final float ARROW_IV_SECONDS_PER_HEX = .08f;
+    static final float ARROW_IV_MIN_FLIGHT_SECONDS = 1.12f;
+    static final float ARROW_IV_MAX_FLIGHT_SECONDS = 1.76f;
     static final float RECOVERY_SECONDS = .35f;
     /** How much longer a TAG that hits holds its designator on the target, so the player can see what it marked. */
     static final float DESIGNATOR_HOLD_SECONDS = 1.2f;

@@ -37,6 +37,8 @@ final class GpuMissileEffects implements Disposable {
     static final int SMOKE_PER_MISSILE = 20;
     static final float SMOKE_LIFE_SECONDS = .3f;
     private static final int MISSILES_PER_BATCH = 512;
+    /** How much larger than its true size an Arrow IV round is drawn, so it reads at board zoom. */
+    private static final float ARROW_IV_SCALE = 1.1f;
     /** An Arrow IV round's rocket plume, one entry per fire puff: its distance behind the tail in metres. */
     private static final float[] ROCKET_PLUME_OFFSETS = { .5f, 1.7f, 3.1f };
     /** Each plume puff's half size in metres. */
@@ -312,7 +314,8 @@ final class GpuMissileEffects implements Disposable {
      * @param missile which round, so rounds flying together do not flicker in step
      */
     private void rocketMotor(Camera camera, Vector3 tail, Vector3 back, float seconds, int missile) {
-        float metre = BoardRelief.metres(1);
+        // The plume grows with the round, so the motor still fits its tail.
+        float metre = BoardRelief.metres(ARROW_IV_SCALE);
         int flicker = (int) (seconds * ROCKET_FLICKER_PER_SECOND) + missile * 13;
         // Across the plume as the camera sees it; looking straight along the flight, any sideways direction will do.
         plumeAcross.set(back).crs(camera.direction);
@@ -333,13 +336,14 @@ final class GpuMissileEffects implements Disposable {
 
     /**
      * Queues one missile body, its base at {@code center}, pointing along {@code forward}. An Arrow IV round's model
-     * is in metres, so it is scaled to the board's metres; the plain missile is already in board units.
+     * is in metres, so it is scaled to the board's metres, and drawn {@link #ARROW_IV_SCALE} larger; the plain
+     * missile is already in board units.
      */
     private void missile(Camera camera, Vector3 center, Vector3 forward, boolean arrowIV) {
         if (mesh == null) { create(); }
         boolean drawsArrowIV = arrowIV && (arrowIVBody.length > 0);
         float[] template = drawsArrowIV ? arrowIVBody : body;
-        float scale = drawsArrowIV ? BoardRelief.metres(1) : 1;
+        float scale = drawsArrowIV ? BoardRelief.metres(ARROW_IV_SCALE) : 1;
         if (offset + template.length > vertices.length) { flush(camera); }
         side.set(forward).crs(Vector3.Z);
         if (side.isZero(.001f)) { side.set(Vector3.X); }
