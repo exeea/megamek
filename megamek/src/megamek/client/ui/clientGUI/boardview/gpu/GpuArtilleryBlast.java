@@ -124,6 +124,10 @@ final class GpuArtilleryBlast {
      * lets the spreading cloud read as fuel before it goes up.
      */
     static final float FUEL_AIR_IGNITION_SECONDS = .5f;
+    /** How long a fuel-air round's haze takes to burn away under its sheet of fire. */
+    private static final float FUEL_HAZE_LINGER_SECONDS = .2f;
+    /** How dense a fuel-air round's haze is at its thickest. */
+    private static final float FUEL_HAZE_OPACITY = .55f;
     /** How strongly a fuel-air blast draws in thin air, where it does half damage. */
     private static final float THIN_AIR_INTENSITY = .65f;
     private static final int FUEL_AIR_CHUNKS = 12;
@@ -805,15 +809,17 @@ final class GpuArtilleryBlast {
         // One haze and one sheet of fire over the whole circular radius, not one of each per hex: an Arrow IV's 61
         // overlapping volumes cost a modest graphics chip far too much.
         float cloudRadius = hex * (radius + .6f);
-        // The fuel spreads out to the radius, easing as it reaches the edge.
+        // The fuel spreads out from the target hex to the radius over the half second before it lights.
         float spread = MathUtils.clamp(seconds / FUEL_AIR_IGNITION_SECONDS, 0, 1);
-        spread = 1 - (1 - spread) * (1 - spread);
-        // The fuel thins as it is about to light and is gone when the sheet of fire appears, so the two never overlap.
-        float hazeFade = MathUtils.clamp((FUEL_AIR_IGNITION_SECONDS - seconds) / .08f, 0, 1);
-        if (spread > 0 && hazeFade > 0) {
-            float hazeRadius = cloudRadius * (.35f + .65f * spread);
+        spread = spread * spread * (3 - 2 * spread);
+        // It lingers a moment under the sheet of fire as it burns away: with one volume of each, the overlap is cheap.
+        float hazeFade = MathUtils.clamp((FUEL_AIR_IGNITION_SECONDS + FUEL_HAZE_LINGER_SECONDS - seconds)
+              / FUEL_HAZE_LINGER_SECONDS, 0, 1);
+        if (seconds >= 0 && hazeFade > 0) {
+            float hazeRadius = cloudRadius * (.12f + .88f * spread);
             point.set(ground).add(0, 0, hex * .1f);
-            explosions.addFlat(point, hazeRadius, .1f, 0, .3f * hazeFade, seed + 13, FUEL_HAZE,
+            // Denser than one hex's haze was: the many overlapping hazes it replaces built up to this.
+            explosions.addFlat(point, hazeRadius, .1f, 0, FUEL_HAZE_OPACITY * hazeFade, seed + 13, FUEL_HAZE,
                   flatness(hex * .3f, hazeRadius));
         }
         float sheet = (seconds - FUEL_AIR_IGNITION_SECONDS) / .75f;
