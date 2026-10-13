@@ -30,6 +30,7 @@ import javax.swing.Timer;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
@@ -128,7 +129,10 @@ final class GpuBoardSource implements BoardSource {
     private volatile GpuBoardWindow.DialogRequest dialog;
     private long dialogSequence;
     private Frame frame;
+    /** EDT-owned menu request; the selection flag scopes this capture, not the game's acting unit. */
     private Coords contextCoords;
+    private int contextUnitId = Entity.NONE;
+    private boolean contextSelectionCleared;
     /** One pointer sample from the GL thread, captured together on the EDT. */
     private record HoverPoint(Coords coords, float pointedZ) { }
     private volatile HoverPoint hoverPoint = new HoverPoint(null, Float.NaN);
@@ -692,7 +696,6 @@ final class GpuBoardSource implements BoardSource {
                 view.setVisibleArea(() -> new double[] { 0, 0, 1, 1 });
                 view.releasePlanarCapture();
                 view = selectedView;
-                contextCoords = null;
                 unitImages.clear();
                 terrain.changed(null);
                 synchronized (this) {
@@ -704,6 +707,9 @@ final class GpuBoardSource implements BoardSource {
         if (changedState || current != board) {
             if (board != null) { board.removeBoardListener(boardListener); }
             board = current;
+            contextCoords = null;
+            contextUnitId = Entity.NONE;
+            contextSelectionCleared = false;
             boardGeneration++;
             BoardClientState owner = view;
             long generation = boardGeneration;
@@ -857,8 +863,6 @@ final class GpuBoardSource implements BoardSource {
         unitImages.keySet().retainAll(usedImages.keySet());
         camouflage.retain();
         List<BoardScene.Command> commands = actions.phaseCommands();
-        BoardScene.Context nextContext = contextCoords == null ? null : new BoardScene.Context(contextCoords,
-              actions.contextCommands(contextCoords));
         List<BoardScene.Command> nextGlobal = new ArrayList<>(actions.globalCommands());
         if (view.getClientgui() != null) {
             var gui = view.getClientgui();
@@ -904,6 +908,18 @@ final class GpuBoardSource implements BoardSource {
               chat.capture(), toasts.capture(), rulerSnapshot, players.capture());
         if (!nextPanels.equals(panels)) {
             panels = nextPanels;
+        }
+        BoardScene.Context nextContext = null;
+        if (contextCoords != null || contextUnitId != Entity.NONE) {
+            var orders = panels.fire();
+            var target = orders.active() && orders.editable() ? orders.targets().stream()
+                  .filter(candidate -> candidate.key().equals(TargetKey.unit(contextUnitId))).findFirst().orElse(null) : null;
+            var tools = contextSelectionCleared ? MapMenu.ContextTools.NO_SELECTION
+                  : new MapMenu.ContextTools(status.myTurn() && status.phase().isMovement() && move.planner(),
+                  move.mode() != GpuMovePlan.Mode.JUMP, status.myTurn() && actorId != Entity.NONE ? actorId : focus,
+                  target != null && !target.primary(), target != null);
+            nextContext = new BoardScene.Context(contextCoords, contextUnitId,
+                  actions.contextCommands(contextCoords, contextUnitId, tools), contextSelectionCleared);
         }
         status = battleStatus.arcs(arcTarget(status, hover, panels));
         Entity actor = view.game.getEntity(actorId);
@@ -1398,9 +1414,19 @@ final class GpuBoardSource implements BoardSource {
     }
 
     public void inspect(Coords coords) {
+        inspect(coords, Entity.NONE);
+    }
+
+    public void inspect(Coords coords, int unitId) {
+        inspect(coords, unitId, false);
+    }
+
+    public void inspect(Coords coords, int unitId, boolean selectionCleared) {
         SwingUtilities.invokeLater(() -> {
             if (acceptsInput()) {
                 contextCoords = coords;
+                contextUnitId = unitId;
+                contextSelectionCleared = selectionCleared;
                 refresh();
             }
         });

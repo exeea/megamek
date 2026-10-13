@@ -19,6 +19,7 @@ import java.util.stream.Stream;
 import javax.swing.ImageIcon;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardElectronicWarfare;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
@@ -26,6 +27,7 @@ import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.common.board.Coords;
+import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Terrains;
 
@@ -820,11 +822,17 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     /**
      * The action marshals back to Swing and rechecks the original button before invoking it. {@code shortcut} is the
      * menu item's accelerator text ("" without one); {@code selected} is a toggle item's state, null for other items.
+     * {@code unitAction} identifies a shared unit menu item without interpreting its localized label.
      */
     public record Command(String id, String label, String detail, boolean enabled, boolean commit, boolean boardTool,
-          List<Command> children, Runnable action, String shortcut, Boolean selected) {
+          List<Command> children, Runnable action, String shortcut, Boolean selected, MapMenu.UnitAction unitAction) {
         public Command {
             children = List.copyOf(children);
+        }
+
+        public Command(String id, String label, String detail, boolean enabled, boolean commit, boolean boardTool,
+              List<Command> children, Runnable action, String shortcut, Boolean selected) {
+            this(id, label, detail, enabled, commit, boardTool, children, action, shortcut, selected, null);
         }
 
         public Command(String id, String label, String detail, boolean enabled, boolean commit, boolean boardTool,
@@ -842,9 +850,18 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         }
     }
 
-    public record Context(Coords coords, List<Command> commands) {
+    /** The requested hex, unit and selection state, retained to match the asynchronous menu capture. */
+    public record Context(Coords coords, int unitId, List<Command> commands, boolean selectionCleared) {
         public Context {
             commands = List.copyOf(commands);
+        }
+
+        public Context(Coords coords, int unitId, List<Command> commands) {
+            this(coords, unitId, commands, false);
+        }
+
+        public Context(Coords coords, List<Command> commands) {
+            this(coords, Entity.NONE, commands);
         }
     }
 

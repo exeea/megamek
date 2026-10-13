@@ -42,6 +42,7 @@ import javax.swing.JSpinner;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
@@ -53,11 +54,13 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
 import megamek.client.ui.panels.phaseDisplay.DeployMinefieldDisplay;
+import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.common.Configuration;
 import megamek.common.RangeType;
 import megamek.common.ToHitData;
 import megamek.common.board.Coords;
 import megamek.common.equipment.Cargo;
+import megamek.common.game.GameTurn;
 import megamek.common.util.FiringSolution;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -235,37 +238,83 @@ class GpuSwingCutTest {
         }
     }
 
-    /**
-     * D13: over the battle window MegaMek's map menu, which the HUD's "More actions" captures, has no View group (its
-     * Unit Display and readout are the HUD's unit card and record sheet); the Legacy 2D board keeps it.
-     */
+    /** Both board presentations receive the same unit actions, labels and availability from the shared map menu. */
     @Test
-    void theCapturedMapMenuHasNoViewGroupWhileTheBattleWindowIsActive() throws Exception {
+    void bothBoardsUseTheSameMapMenuForUnitSelectionInspectionAndRecords() throws Exception {
         ClientGUI gui = mock(ClientGUI.class);
         Client client = mock(Client.class);
+        MovementDisplay movement = mock(MovementDisplay.class);
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             when(client.getGame()).thenReturn(fixture.game);
             when(client.getLocalPlayer()).thenReturn(fixture.player);
+            when(client.isMyTurn()).thenReturn(true);
+            when(client.getMyTurn()).thenReturn(new GameTurn(fixture.player.getId()));
             when(gui.getClient()).thenReturn(client);
             BoardClientState view = spy(fixture.view);
             doReturn(gui).when(view).getClientgui();
-            GpuBoardActions actions = new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { });
+            GpuBoardActions actions = new GpuBoardActions(view, () -> movement, () -> false, () -> { });
             Coords hex = fixture.entity.getPosition();
-            assertTrue(labels(onSwing(() -> actions.contextCommands(hex))).contains("View"),
-                  "The Legacy 2D board's map menu views the unit on the hex");
+            List<BoardScene.Command> legacy = onSwing(() -> actions.contextCommands(hex));
+            List<String> legacyLabels = labels(legacy);
+            assertTrue(legacyLabels.containsAll(List.of("Select", "View")),
+                  "The Legacy 2D board's map menu selects and views the unit on the hex");
+            BoardScene.Command select = legacy.stream().filter(command -> command.label().equals("Select"))
+                  .findFirst().orElseThrow();
+            assertEquals(List.of(Messages.getString("ClientGUI.selectMenuItem") + fixture.entity.getDisplayName()),
+                  labels(select.children()));
+            List<MapMenu.UnitAction> expected = List.of(
+                  new MapMenu.UnitAction(MapMenu.UnitActionType.SELECT, fixture.entity.getId()),
+                  new MapMenu.UnitAction(MapMenu.UnitActionType.VIEW, fixture.entity.getId()),
+                  new MapMenu.UnitAction(MapMenu.UnitActionType.READOUT, fixture.entity.getId()));
+            assertEquals(expected, unitActions(legacy),
+                  "The shared items identify their purpose without parsing translated labels");
+            select.children().getFirst().action().run();
+            onSwing(() -> null);
+            verify(movement).selectEntity(fixture.entity.getId());
             present(gui, view, fixture.source);
             try {
-                List<String> labels = labels(onSwing(() -> actions.contextCommands(hex)));
-                assertFalse(labels.contains("View"), "No View group over the battle window: " + labels);
-                assertFalse(labels.isEmpty(), "The map menu's other groups stay");
+                List<BoardScene.Command> nativeCommands = onSwing(() -> actions.contextCommands(hex));
+                assertEquals(legacyLabels, labels(nativeCommands), "The native board uses every shared menu group");
+                assertEquals(expected, unitActions(nativeCommands),
+                      "Opening the native board neither suppresses nor duplicates shared unit actions");
+                assertEquals(legacy.stream().flatMap(command -> command.children().stream())
+                            .map(BoardScene.Command::label).toList(),
+                      nativeCommands.stream().flatMap(command -> command.children().stream())
+                            .map(BoardScene.Command::label).toList(),
+                      "Both renderers receive the same unit labels");
+
+                assertEquals(expected, unitActions(onSwing(() -> actions.contextCommands(null, fixture.entity.getId()))),
+                      "A roster's explicit unit uses the same actions without a hovered hex");
+                assertEquals(expected, unitActions(onSwing(() -> actions.contextCommands(hex, fixture.entity.getId()))),
+                      "An explicit unit already on the hovered hex appears only once");
+
+                when(movement.currentEntity()).thenReturn(fixture.entity);
+                BoardScene.Command actorSelect = onSwing(() -> actions.contextCommands(hex)).stream()
+                      .flatMap(command -> command.children().stream())
+                      .filter(command -> expected.getFirst().equals(command.unitAction())).findFirst().orElseThrow();
+                assertFalse(actorSelect.enabled(), "Selecting the acting unit again must not clear its orders");
+                actorSelect.action().run();
+                onSwing(() -> null);
+                verify(movement).selectEntity(fixture.entity.getId());
+                when(movement.currentEntity()).thenReturn(null);
             } finally {
                 dismiss();
             }
+            assertEquals(legacyLabels, labels(onSwing(() -> actions.contextCommands(hex))),
+                  "Closing the native board leaves the common menu intact");
         }
     }
 
     private static List<String> labels(List<BoardScene.Command> commands) {
         return commands.stream().map(BoardScene.Command::label).toList();
+    }
+
+    private static List<MapMenu.UnitAction> unitActions(List<BoardScene.Command> commands) {
+        return commands.stream().flatMap(command -> command.unitAction() == null
+                    ? unitActions(command.children()).stream() : java.util.stream.Stream.of(command.unitAction()))
+              .filter(action -> List.of(MapMenu.UnitActionType.SELECT, MapMenu.UnitActionType.VIEW,
+                    MapMenu.UnitActionType.READOUT).contains(action.type()))
+              .toList();
     }
 
     /**

@@ -22,11 +22,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
 import com.badlogic.gdx.Input;
-import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -37,13 +35,14 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.BoardGraphics;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
+import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay.FiringCommand;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
@@ -89,6 +88,7 @@ class GpuContextMenuSmokeTest {
         final GpuContextMenu menu;
         final Table root;
         final UiPopover popover;
+        GpuBoardSource.Frame frame;
 
         Menu(GpuHudTestStage hud) {
             when(source.fire()).thenReturn(fire);
@@ -103,10 +103,25 @@ class GpuContextMenuSmokeTest {
 
         /** One frame: the status through the HUD state's focus rule, then the menu. */
         Menu update(GpuHudTestStage hud, GpuBoardSource.Frame frame) {
+            this.frame = frame;
             state.update(frame.status(), GpuUnitRecord.Snapshot.EMPTY, false);
-            menu.update(new GpuHud.Inputs(frame, GpuHud.HudView.EMPTY, null, preferences(),
+            menu.update(new GpuHud.Inputs(state.presented(frame), GpuHud.HudView.EMPTY, null, preferences(),
                   GpuHud.Metrics.of(hud.width(), hud.height()), List.of()));
             return this;
+        }
+
+        /** Publish the common menu that the source captured after the context request. */
+        void capture(GpuHudTestStage hud, Coords hex, int unitId, List<BoardScene.Command> commands) {
+            capture(hud, hex, unitId, commands, false);
+        }
+
+        void capture(GpuHudTestStage hud, Coords hex, int unitId, List<BoardScene.Command> commands,
+              boolean selectionCleared) {
+            update(hud, new GpuBoardSource.Frame(frame.scene(), frame.timeline(),
+                  new BoardScene.Context(hex, unitId, commands, selectionCleared),
+                  frame.globalCommands(), frame.tooltip(),
+                  frame.centerRequest(), frame.boardGeneration(), frame.actorName(), frame.scenarioAtmosphere(),
+                  frame.reports(), frame.status(), frame.panels()));
         }
 
         /** The open menu's item with this text. */
@@ -118,175 +133,227 @@ class GpuContextMenuSmokeTest {
     }
 
     @Test
-    void theEnemyMenuBesideShot13() {
+    void sharedUnitActionsOpenTheNativeInspectRecordAndTargetViews() {
         GpuHudTestStage.run(hud -> {
             Menu menu = new Menu(hud).update(hud, frame(firing(), fire(true)));
-            // Shot 13: the King Crab's menu at the pointer, with the popover's corner where the mock's is.
-            menu.menu.open(new Coords(12, 3), KING_CRAB, 784, hud.height() - 193);
-            assertEquals(List.of("KING CRAB KGC-000", "Visual contact · 11 hex", "Inspect King Crab KGC-000", "---",
-                  "Set as attack target", "---", "Unit record", "Center camera", "Line of sight from Atlas"),
-                  lines(menu.popover));
-            Rectangle area = UiTestStage.bounds(menu.popover);
-            assertEquals(784, area.x, .01f);
-            assertEquals(hud.height() - 193, area.y + area.height, .01f);
-            assertTrue(area.width >= 240);
+            Coords hex = new Coords(12, 3);
+            String name = "King Crab KGC-000";
+            List<BoardScene.Command> common = new ArrayList<>(unitCommands(KING_CRAB, name, null, true));
+            common.add(group("Camera", unitCommand(MapMenu.UnitActionType.CENTER_UNIT, KING_CRAB,
+                        "Center camera", true),
+                  unitCommand(MapMenu.UnitActionType.LINE_OF_SIGHT, ATLAS, "Line of sight from Atlas", true, hex)));
+            menu.menu.open(hex, KING_CRAB, 784, hud.height() - 193);
+            assertEquals(List.of("KING CRAB KGC-000", "Visual contact · 11 hex",
+                  Messages.getString("UnitLoadingDialog.pleaseWait") + OFF), lines(menu.popover));
+            menu.capture(hud, hex, BATTLEMASTER, common);
+            assertNull(find(menu.popover, "Target " + name), "A capture for another unit cannot populate this menu");
+            menu.capture(hud, hex, KING_CRAB, common);
+            assertEquals(List.of("KING CRAB KGC-000", "Visual contact · 11 hex", "View " + name,
+                  "View Readout " + name, "---", "Target " + name, "---", "Center camera",
+                  "Line of sight from Atlas"), lines(menu.popover));
             hud.draw();
-            Pixmap image = hud.capture("context-menu-13");
-            try {
-                hud.compare("context-menu-13", image, menu.popover, "13-context-menu.jpg", 784, 193);
-            } finally {
-                image.dispose();
-            }
-
-            click(hud, menu.item("Set as attack target"));
+            hud.capture("context-menu-common-enemy").dispose();
+            click(hud, menu.item("Target " + name));
             verify(menu.fire).focusTarget(TargetKey.unit(KING_CRAB));
-            assertFalse(menu.popover.isVisible(), "choosing an item closes the menu");
-            menu.menu.open(new Coords(12, 3), KING_CRAB, 784, hud.height() - 193);
-            click(hud, menu.item("Inspect King Crab KGC-000"));
+            verify(menu.fire, never()).assign(anyInt(), any(TargetKey.class));
+            assertFalse(menu.popover.isVisible());
+
+            menu.menu.open(hex, KING_CRAB, 784, hud.height() - 193);
+            click(hud, menu.item("View " + name));
             assertEquals(KING_CRAB, menu.state.inspected);
-            // Its record (unit panel design 2.2): the sheet opens on the inspected enemy, over the overview too
             menu.state.inspected = Entity.NONE;
             menu.state.overview = true;
-            menu.menu.open(new Coords(12, 3), KING_CRAB, 784, hud.height() - 193);
-            click(hud, menu.item("Unit record"));
+            menu.menu.open(hex, KING_CRAB, 784, hud.height() - 193);
+            click(hud, menu.item("View Readout " + name));
             assertEquals(List.of(KING_CRAB, true, false), List.of(menu.state.inspected, menu.state.recordOpen,
                   menu.state.overview));
-            menu.menu.open(new Coords(12, 3), KING_CRAB, 784, hud.height() - 193);
+            menu.menu.open(hex, KING_CRAB, 784, hud.height() - 193);
             click(hud, menu.item("Center camera"));
             verify(menu.source).locateUnit(KING_CRAB);
-            menu.menu.open(new Coords(12, 3), KING_CRAB, 784, hud.height() - 193);
+            menu.menu.open(hex, KING_CRAB, 784, hud.height() - 193);
             click(hud, menu.item("Line of sight from Atlas"));
-            verify(menu.los).lineOfSight(ATLAS, new Coords(12, 3), Float.NaN);
-            verify(menu.fire, never()).assign(anyInt(), any(TargetKey.class));
+            verify(menu.los).lineOfSight(ATLAS, hex, Float.NaN);
         });
     }
 
     @Test
-    void attackItemsFollowTheOrdersAndTheArmedWeapon() {
+    void theSharedTargetActionUsesTheArmedWeaponAndKeepsExistingOrderEditing() {
         GpuHudTestStage.run(hud -> {
             Menu menu = new Menu(hud).update(hud, frame(firing(), fire(true)));
-            // The BattleMaster is a secondary target and the AC/20 is armed.
+            Coords hex = new Coords(18, 2);
+            String name = "BattleMaster BLR-1G";
             menu.state.armedWeapon = AC20;
-            menu.menu.open(new Coords(18, 2), BATTLEMASTER, 900, 700);
-            assertEquals(List.of("BATTLEMASTER BLR-1G", "Visual contact · 13 hex", "Inspect BattleMaster BLR-1G", "---",
-                  "Assign armed AC/20 here", "Edit attacks on this target", "Make primary target",
-                  "Remove target and its attacks", "---", "Unit record", "Center camera", "Line of sight from Atlas"),
+            menu.menu.open(hex, BATTLEMASTER, 900, 700);
+            List<BoardScene.Command> common = new ArrayList<>(unitCommands(BATTLEMASTER, name, null, true));
+            common.add(group("Orders", unitCommand(MapMenu.UnitActionType.MAKE_PRIMARY, BATTLEMASTER,
+                        "Make primary target", true),
+                  unitCommand(MapMenu.UnitActionType.REMOVE_TARGET, BATTLEMASTER,
+                        "Remove target and its attacks", true)));
+            menu.capture(hud, hex, BATTLEMASTER, common);
+            assertEquals(List.of("BATTLEMASTER BLR-1G", "Visual contact · 13 hex", "View " + name,
+                  "View Readout " + name, "---", "Target " + name, "---", "Make primary target",
+                  "Remove target and its attacks"),
                   lines(menu.popover));
-            hud.draw();
-            hud.capture("context-menu-enemy-armed").dispose();
-            click(hud, menu.item("Assign armed AC/20 here"));
+            click(hud, menu.item("Target " + name));
             verify(menu.fire).focusTarget(TargetKey.unit(BATTLEMASTER));
             verify(menu.fire).assign(AC20, TargetKey.unit(BATTLEMASTER));
             assertEquals(-1, menu.state.armedWeapon, "the armed weapon is used once");
-            menu.menu.open(new Coords(18, 2), BATTLEMASTER, 900, 700);
-            assertNull(find(menu.popover, "Assign armed AC/20 here"));
+            menu.menu.open(hex, BATTLEMASTER, 900, 700);
             click(hud, menu.item("Make primary target"));
             verify(menu.fire).setPrimary(TargetKey.unit(BATTLEMASTER));
-            menu.menu.open(new Coords(18, 2), BATTLEMASTER, 900, 700);
+            menu.menu.open(hex, BATTLEMASTER, 900, 700);
             click(hud, menu.item("Remove target and its attacks"));
             verify(menu.fire).removeTarget(TargetKey.unit(BATTLEMASTER));
 
-            // The primary target has no "Make primary"; read-only orders (another player's turn) no attack items.
-            menu.menu.open(new Coords(14, 4), TIMBER_WOLF, 900, 700);
-            assertEquals(List.of("TIMBER WOLF PRIME", "Visual contact · 9 hex", "Inspect Timber Wolf Prime", "---",
-                  "Edit attacks on this target", "Remove target and its attacks", "---", "Unit record",
-                  "Center camera", "Line of sight from Atlas"), lines(menu.popover));
             menu.update(hud, frame(firing(), fire(false)));
-            menu.menu.open(new Coords(14, 4), TIMBER_WOLF, 900, 700);
-            assertEquals(List.of("TIMBER WOLF PRIME", "Visual contact · 9 hex", "Inspect Timber Wolf Prime", "---",
-                  "Unit record", "Center camera", "Line of sight from Atlas"), lines(menu.popover));
+            menu.menu.open(hex, BATTLEMASTER, 900, 700);
+            menu.capture(hud, hex, BATTLEMASTER, unitCommands(BATTLEMASTER, name, null, false));
+            assertNull(find(menu.popover, "Target " + name), "The source supplies no target outside declaration");
+            assertNull(find(menu.popover, "Make primary target"));
+            assertNull(find(menu.popover, "Remove target and its attacks"));
         });
     }
 
     @Test
-    void ownContactAndHexMenus() {
+    void commonSelectionListsEachStackedUnitOnceAndHexToolsKeepTheirOwnActions() {
         GpuHudTestStage.run(hud -> {
             Menu menu = new Menu(hud).update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.AUTO)));
-            // M2: the acting Atlas cannot be selected again; the key that centres it is the camera item's detail. The
-            // scene draws no unit, so each menu's first item is its own unit's (the user's decision of 2026-10-11).
-            String space = KeyCommandBind.getDesc(KeyCommandBind.CENTER_ON_SELECTED.keyDefault,
-                  KeyCommandBind.CENTER_ON_SELECTED.modifiersDefault);
-            menu.menu.open(new Coords(14, 13), ATLAS, 700, 600);
-            assertEquals(List.of("ATLAS AS7-D", "Your unit", "Select Atlas AS7-D" + OFF, "---",
-                  "Center camera [" + space + "]", "Unit record"), lines(menu.popover));
-            hud.draw();
-            hud.capture("context-menu-friendly").dispose();
-            // MegaMek's map menu of the unit's hex follows once its context arrives, below the unit's own items, and
-            // the header stays the unit's (the user's decision of 2026-10-11).
-            verify(menu.source).inspect(new Coords(14, 13));
-            menu.update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.AUTO), context(new Coords(14, 13))));
-            assertEquals(List.of("ATLAS AS7-D", "Your unit", "Select Atlas AS7-D" + OFF, "---",
-                  "Center camera [" + space + "]", "Unit record", "---", "Clear minefield", "---",
-                  "Mark as objective [Ctrl+O]", "✓ Show elevation"), lines(menu.popover));
-            click(hud, menu.item("Unit record"));
-            assertTrue(menu.state.recordOpen);
-            assertEquals(Entity.NONE, menu.state.inspected, "the acting unit's record needs no inspection");
-            // The Warhammer cannot act now: its item inspects it and selects nothing.
-            menu.menu.open(new Coords(18, 12), WARHAMMER, 700, 600);
-            click(hud, menu.item("Inspect Warhammer WHM-6R"));
-            assertEquals(List.of(WARHAMMER, List.of()), List.of(menu.state.inspected, menu.selected));
-            menu.state.inspected = Entity.NONE;
-            menu.menu.open(new Coords(18, 12), WARHAMMER, 700, 600);
-            click(hud, menu.item("Unit record"));
+            Coords ownHex = new Coords(14, 13);
+            List<BoardScene.Command> stack = List.of(group("Select",
+                  unitCommand(MapMenu.UnitActionType.SELECT, ATLAS, "Select Atlas AS7-D", false),
+                  unitCommand(MapMenu.UnitActionType.SELECT, WARHAMMER, "Select Warhammer WHM-6R", true)),
+                  group("View", unitCommand(MapMenu.UnitActionType.VIEW, ATLAS, "View Atlas AS7-D", true),
+                        unitCommand(MapMenu.UnitActionType.READOUT, ATLAS, "View Readout Atlas AS7-D", true),
+                        unitCommand(MapMenu.UnitActionType.VIEW, WARHAMMER, "View Warhammer WHM-6R", true)));
+            menu.menu.open(ownHex, ATLAS, 700, 600);
+            menu.capture(hud, ownHex, ATLAS, stack);
+            assertEquals(1, lines(menu.popover).stream().filter(line -> line.startsWith("Select Atlas")).count());
+            assertEquals(1, lines(menu.popover).stream().filter(line -> line.startsWith("Select Warhammer")).count());
+            assertTrue(menu.item("Select Atlas AS7-D").isDisabled(), "The shared current-actor item stays disabled");
+            click(hud, menu.item("Select Warhammer WHM-6R"));
+            assertEquals(List.of(WARHAMMER), menu.selected);
+            menu.menu.open(ownHex, ATLAS, 700, 600);
+            UiButton staleSelect = menu.item("Select Warhammer WHM-6R");
+            menu.capture(hud, ownHex, ATLAS, List.of());
+            click(hud, staleSelect);
+            assertEquals(List.of(WARHAMMER), menu.selected,
+                  "An open row cannot select a unit after the shared source withdraws its action");
+            menu.capture(hud, ownHex, ATLAS, stack);
+            menu.menu.open(ownHex, ATLAS, 700, 600);
+            click(hud, menu.item("View Warhammer WHM-6R"));
             assertEquals(WARHAMMER, menu.state.inspected);
-            menu.update(hud, frame(status(MOVEMENT, unit -> unit.id() == WARHAMMER ? done(unit) : unit),
-                  move(GpuMovePlan.Mode.AUTO)));
-            menu.menu.open(new Coords(18, 12), WARHAMMER, 700, 600);
-            assertEquals("Your unit · acted", lines(menu.popover).get(1));
+            menu.menu.open(ownHex, ATLAS, 700, 600);
+            click(hud, menu.item("View Readout Atlas AS7-D"));
+            assertTrue(menu.state.recordOpen);
+            assertEquals(Entity.NONE, menu.state.inspected);
+            verify(menu.source, org.mockito.Mockito.atLeastOnce()).inspect(ownHex, ATLAS, false);
 
-            // M4: a sensor contact's line of sight measures its bare hex.
-            menu.menu.open(new Coords(9, 3), CONTACT, 700, 600);
-            assertEquals(List.of("SENSOR CONTACT", "Unidentified · hex 1004", "Inspect sensor return", "---",
+            Coords sensorHex = new Coords(9, 3);
+            menu.menu.open(sensorHex, CONTACT, 700, 600);
+            menu.capture(hud, sensorHex, CONTACT, List.of(group("Sensor contact",
+                  unitCommand(MapMenu.UnitActionType.INSPECT_SENSOR, CONTACT, "Inspect sensor return", true),
+                  unitCommand(MapMenu.UnitActionType.CENTER_UNIT, CONTACT, "Center camera", true),
+                  unitCommand(MapMenu.UnitActionType.LINE_OF_SIGHT, ATLAS, "Line of sight from Atlas", true,
+                        sensorHex))));
+            assertEquals(List.of("SENSOR CONTACT", "Unidentified · hex 1004", "Inspect sensor return",
                   "Center camera", "Line of sight from Atlas"), lines(menu.popover));
-            hud.draw();
-            hud.capture("context-menu-contact").dispose();
             click(hud, menu.item("Line of sight from Atlas"));
-            verify(menu.los).lineOfSight(ATLAS, new Coords(9, 3), Float.NaN);
+            verify(menu.los).lineOfSight(ATLAS, sensorHex, Float.NaN);
 
-            // M5: in the local planning turn a hex plans or pins; MegaMek's map menu follows once the hex's context
-            // arrives, its commands in sections rather than behind a menu of menus (the user's decision of 2026-10-03).
             verifyNoInteractions(menu.moves);
-            clearInvocations(menu.source);
             menu.menu.open(HEX, Entity.NONE, 700, 600);
-            verify(menu.source).inspect(HEX);
-            String title = "HEX 1512";
-            String subtitle = "Light woods (TF: 50) · Road (TF: 150) · Woods/Jungle elevation: 2 · level 0";
-            assertEquals(List.of(title, subtitle, "Plan move here", "Plan and pin as waypoint [Ctrl + click]",
-                  "Center camera here", "Line of sight from Atlas"), lines(menu.popover));
-            menu.update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.AUTO), context()));
-            assertEquals(List.of(title, subtitle, "Plan move here", "Plan and pin as waypoint [Ctrl + click]",
-                  "Center camera here", "Line of sight from Atlas", "---", "Clear minefield", "---",
-                  "Mark as objective [Ctrl+O]", "✓ Show elevation"), lines(menu.popover),
-                  "the map menu's command, then its group's commands in a section of their own");
-            hud.draw();
-            hud.capture("context-menu-hex").dispose();
-            assertTrue(menu.menu.cancel());
-            verify(menu.source).inspect(null);
-            menu.menu.open(HEX, Entity.NONE, 700, 600);
+            List<BoardScene.Command> hexCommands = new ArrayList<>(context().commands());
+            hexCommands.add(group("Movement", unitCommand(MapMenu.UnitActionType.PLAN_MOVE, Entity.NONE,
+                        "Plan move here", true, HEX),
+                  unitCommand(MapMenu.UnitActionType.PIN_MOVE, Entity.NONE, "Plan and pin as waypoint", true, HEX),
+                  unitCommand(MapMenu.UnitActionType.CENTER_HEX, Entity.NONE, "Center camera here", true, HEX),
+                  unitCommand(MapMenu.UnitActionType.LINE_OF_SIGHT, ATLAS, "Line of sight from Atlas", true, HEX)));
+            menu.capture(hud, HEX, Entity.NONE, hexCommands);
+            assertEquals(List.of("HEX 1512",
+                  "Light woods (TF: 50) · Road (TF: 150) · Woods/Jungle elevation: 2 · level 0",
+                  "Clear minefield", "---", "Mark as objective [Ctrl+O]", "✓ Show elevation", "---",
+                  "Plan move here", "Plan and pin as waypoint", "Center camera here",
+                  "Line of sight from Atlas"), lines(menu.popover));
             click(hud, menu.item("Plan and pin as waypoint"));
             verify(menu.moves).planTo(HEX, 0, true);
             menu.menu.open(HEX, Entity.NONE, 700, 600);
-            click(hud, menu.item("Center camera here"));
-            verify(menu.source).command(any());
-            menu.menu.open(HEX, Entity.NONE, 700, 600);
             click(hud, menu.item("Plan move here"));
             verify(menu.moves).planTo(HEX, 0, false);
+            menu.menu.open(HEX, Entity.NONE, 700, 600);
+            click(hud, menu.item("Center camera here"));
+            verify(menu.source).command(any());
 
-            // A jump has one landing hex; outside the planning turn the hex only centres and measures.
             menu.update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.JUMP)));
             menu.menu.open(HEX, Entity.NONE, 700, 600);
-            assertEquals("Plan and pin as waypoint [Ctrl + click]" + OFF, lines(menu.popover).get(3));
-            menu.update(hud, frame(status(MOVEMENT, unit -> unit), GpuMovePlan.Snapshot.EMPTY));
-            menu.menu.open(HEX, Entity.NONE, 700, 600);
-            assertEquals(List.of(title, subtitle, "Center camera here", "Line of sight from Atlas"),
-                  lines(menu.popover));
-            // No line of sight into the acting unit's own hex.
-            menu.menu.open(new Coords(14, 13), Entity.NONE, 700, 600);
-            assertFalse(lines(menu.popover).contains("Line of sight from Atlas"));
-            // From the board, it measures to the height the pointer showed (the user's decision of 2026-10-03).
+            menu.capture(hud, HEX, Entity.NONE, List.of(unitCommand(MapMenu.UnitActionType.PIN_MOVE, Entity.NONE,
+                  "Plan and pin as waypoint", false, HEX)));
+            assertTrue(menu.item("Plan and pin as waypoint").isDisabled());
+            menu.update(hud, frame(MOVEMENT, GpuMovePlan.Snapshot.EMPTY));
             menu.menu.open(HEX, Entity.NONE, 700, 600, 2.5f);
+            menu.capture(hud, HEX, Entity.NONE, List.of(unitCommand(MapMenu.UnitActionType.LINE_OF_SIGHT, ATLAS,
+                  "Line of sight from Atlas", true, HEX)));
+            assertNull(find(menu.popover, "Plan move here"));
             click(hud, menu.item("Line of sight from Atlas"));
             verify(menu.los).lineOfSight(ATLAS, HEX, 2.5f);
+
+            menu.menu.open(HEX, Entity.NONE, 700, 600);
+            menu.update(hud, frame(firing(), fire(true)));
+            assertFalse(menu.popover.isVisible(), "Changing phase closes the old turn's context menu");
+        });
+    }
+
+    @Test
+    void aClearedSelectionKeepsSafeSharedMenusAndCanSelectTheSameActorAgain() {
+        GpuHudTestStage.run(hud -> {
+            for (GpuBoardSource.Frame phase : List.of(frame(MOVEMENT, move(GpuMovePlan.Mode.AUTO)),
+                  frame(firing(), fire(true)))) {
+                Menu menu = new Menu(hud).update(hud, phase);
+                Coords hex = new Coords(14, 13);
+                String name = "Atlas AS7-D";
+                String actorOrder = phase.status().phase().isMovement() ? "Walk" : "Fire";
+                List<String> actorCommandsRun = new ArrayList<>();
+                List<BoardScene.Command> actorCommands = new ArrayList<>(unitCommands(ATLAS, name, false, false));
+                actorCommands.add(command(actorOrder, "", true, actorCommandsRun));
+                menu.capture(hud, hex, ATLAS, actorCommands);
+
+                menu.state.clearSelection();
+                menu.update(hud, menu.frame);
+                menu.menu.open(hex, ATLAS, 700, 600);
+                verify(menu.source).inspect(hex, ATLAS, true);
+                assertNotNull(find(menu.popover, Messages.getString("UnitLoadingDialog.pleaseWait")),
+                      "The previous actor's unmasked capture cannot populate the cleared-selection menu");
+                assertNull(find(menu.popover, actorOrder));
+
+                List<BoardScene.Command> safe = new ArrayList<>(unitCommands(ATLAS, name, true, false));
+                safe.add(group("Camera", unitCommand(MapMenu.UnitActionType.CENTER_UNIT, ATLAS,
+                      "Center camera", true)));
+                menu.capture(hud, hex, ATLAS, safe, true);
+                assertEquals(List.of("ATLAS AS7-D", "Your unit", "Select " + name, "---", "View " + name,
+                      "View Readout " + name, "---", "Center camera"), lines(menu.popover));
+                assertEquals(ATLAS, menu.frame.status().actorId(), "The game still owns its original actor");
+                assertEquals(Entity.NONE, menu.state.presented(menu.frame).status().actorId(),
+                      "The HUD still has no selected actor");
+                assertFalse(menu.state.presented(menu.frame).panels().move().active());
+                assertFalse(menu.state.presented(menu.frame).panels().fire().active());
+
+                click(hud, menu.item("View " + name));
+                assertEquals(ATLAS, menu.state.inspected);
+                assertTrue(menu.state.turnLocked(menu.frame.status()), "Inspection does not resume old orders");
+                menu.menu.open(hex, ATLAS, 700, 600);
+                click(hud, menu.item("View Readout " + name));
+                assertEquals(ATLAS, menu.state.inspected, "The record must retain the inspected unit while locked");
+                assertTrue(GpuRecordSheet.open(menu.state), "The unit record is actually visible while locked");
+                assertTrue(menu.state.turnLocked(menu.frame.status()), "Opening a record does not resume old orders");
+                menu.menu.open(hex, ATLAS, 700, 600);
+                click(hud, menu.item("Center camera"));
+                verify(menu.source).locateUnit(ATLAS);
+                menu.menu.open(hex, ATLAS, 700, 600);
+                click(hud, menu.item("Select " + name));
+                assertEquals(List.of(ATLAS), menu.selected,
+                      "The shared menu can ask the selection controller to restore the same underlying actor");
+                assertTrue(actorCommandsRun.isEmpty());
+                verifyNoInteractions(menu.moves, menu.fire);
+            }
         });
     }
 
@@ -538,26 +605,36 @@ class GpuContextMenuSmokeTest {
 
     // ---------------------------------------------------------------- fixtures
 
+    /** Explicit menu fixtures stand for MapMenu's capture; the renderer must not invent any additional unit items. */
+    private static List<BoardScene.Command> unitCommands(int id, String name, Boolean selectable, boolean target) {
+        List<BoardScene.Command> commands = new ArrayList<>();
+        if (selectable != null) {
+            commands.add(group("Select", unitCommand(MapMenu.UnitActionType.SELECT, id, "Select " + name,
+                  selectable)));
+        }
+        commands.add(group("View", unitCommand(MapMenu.UnitActionType.VIEW, id, "View " + name, true),
+              unitCommand(MapMenu.UnitActionType.READOUT, id, "View Readout " + name, true)));
+        if (target) {
+            commands.add(group("Target", unitCommand(MapMenu.UnitActionType.TARGET, id, "Target " + name, true)));
+        }
+        return commands;
+    }
+
+    private static BoardScene.Command unitCommand(MapMenu.UnitActionType type, int id, String label, boolean enabled) {
+        return unitCommand(type, id, label, enabled, null);
+    }
+
+    private static BoardScene.Command unitCommand(MapMenu.UnitActionType type, int id, String label, boolean enabled,
+          Coords target) {
+        return new BoardScene.Command(type + ":" + id, label, "", enabled, false, false, List.of(),
+              () -> { throw new AssertionError("A native unit action must use its presentation controller"); },
+              "", null, new MapMenu.UnitAction(type, id, target == null ? null : BoardLocation.of(target, 0)));
+    }
+
     /** Shot 13's declaration: the Atlas acting in round 3, every roster unit identified but the contact. */
     private static GpuBattleStatus.Snapshot firing() {
         return new GpuBattleStatus.Snapshot(MOVEMENT.round(), GamePhase.FIRING, true, MOVEMENT.localPlayerId(), ATLAS,
               MOVEMENT.turns(), 0, MOVEMENT.units(), List.of(), false);
-    }
-
-    private static GpuBattleStatus.Snapshot status(GpuBattleStatus.Snapshot status, UnaryOperator<UnitStatus> change) {
-        return new GpuBattleStatus.Snapshot(status.round(), status.phase(), status.myTurn(), status.localPlayerId(),
-              status.actorId(), status.turns(), status.turnIndex(), status.units().stream().map(change).toList(),
-              status.initiative(), status.turnOrderHidden());
-    }
-
-    private static UnitStatus done(UnitStatus unit) {
-        return new UnitStatus(unit.id(), unit.side(), unit.sensorContact(), unit.name(), unit.chassis(), unit.model(),
-              unit.tons(), unit.weightClass(), unit.formation(), unit.pilot(), unit.gunnery(), unit.piloting(),
-              unit.armor(), unit.structure(), unit.heat(), unit.heatRgb(), unit.heatCapacity(), unit.walk(),
-              unit.run(), unit.jump(), unit.moved(), unit.mpUsed(), unit.hexesMoved(), unit.facing(), unit.tmm(),
-              false, false, true, unit.destroyed(), unit.damageLevel(), unit.destroyedLocations(), unit.heatEffects(),
-              unit.position(), unit.boardId(), unit.icon(), unit.statusWords(), unit.weightClassIndex(),
-              unit.declaredAttacks(), unit.ownerId(), unit.statusTiles());
     }
 
     /**

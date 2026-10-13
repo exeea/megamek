@@ -38,6 +38,7 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.InputEvent;
 import java.awt.event.MouseEvent;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -52,6 +53,7 @@ import megamek.client.bot.princess.ArtilleryCommandAndControl.ArtilleryOrder;
 import megamek.client.bot.princess.ArtilleryCommandAndControl.SpecialAmmo;
 import megamek.client.bot.princess.CardinalEdge;
 import megamek.client.bot.princess.ChatCommands;
+import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
@@ -69,6 +71,7 @@ import megamek.client.ui.panels.phaseDisplay.PreEndDeclarationsDisplay;
 import megamek.client.ui.panels.phaseDisplay.TargetingPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.VictoryHexPropertiesPane;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
+import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Hex;
 import megamek.common.HexTarget;
 import megamek.common.Player;
@@ -97,6 +100,32 @@ import megamek.logging.MMLogger;
 public class MapMenu extends JPopupMenu {
     private final static MMLogger logger = MMLogger.create(MapMenu.class);
 
+    /** Identifies common unit actions without requiring renderers to parse translated labels. */
+    public static final String UNIT_ACTION_PROPERTY = "megamek.mapMenu.unitAction";
+
+    public enum UnitActionType {
+        SELECT, VIEW, READOUT, TARGET, INSPECT_SENSOR, CENTER_UNIT, CENTER_HEX, LINE_OF_SIGHT,
+        PLAN_MOVE, PIN_MOVE, MAKE_PRIMARY, REMOVE_TARGET
+    }
+
+    public record UnitAction(UnitActionType type, int entityId, BoardLocation location) {
+        public UnitAction(UnitActionType type, int entityId) {
+            this(type, entityId, BoardLocation.NO_LOCATION);
+        }
+    }
+
+    /** Optional capabilities of the client's movement and fire-order editors. */
+    public record ContextTools(boolean planning, boolean canPin, int actorId,
+          boolean canMakePrimary, boolean canRemoveTarget, boolean selectionCleared) {
+        public static final ContextTools NONE = new ContextTools(false, false, Entity.NONE, false, false);
+        public static final ContextTools NO_SELECTION = new ContextTools(false, false, Entity.NONE, false, false, true);
+
+        public ContextTools(boolean planning, boolean canPin, int actorId,
+              boolean canMakePrimary, boolean canRemoveTarget) {
+            this(planning, canPin, actorId, canMakePrimary, canRemoveTarget, false);
+        }
+    }
+
     private final Coords coords;
     Game game;
     JComponent currentPanel;
@@ -108,9 +137,21 @@ public class MapMenu extends JPopupMenu {
     Targetable myTarget = null;
     private final boolean hasMenu;
     private final BoardLocation boardLocation;
+    private final int contextEntityId;
+    private final ContextTools contextTools;
 
     public MapMenu(Coords coords, int boardId, JComponent panel, ClientGUI gui) {
+        this(coords, boardId, panel, gui, Entity.NONE);
+    }
+
+    /** Creates the common menu for a hex, an explicitly picked unit, or both. */
+    public MapMenu(Coords coords, int boardId, JComponent panel, ClientGUI gui, int entityId) {
+        this(coords, boardId, panel, gui, entityId, null);
+    }
+
+    public MapMenu(Coords coords, int boardId, JComponent panel, ClientGUI gui, int entityId, ContextTools tools) {
         this.coords = coords;
+        contextEntityId = entityId;
         currentPanel = panel;
         this.gui = gui;
         client = gui.getClient();
@@ -118,6 +159,11 @@ public class MapMenu extends JPopupMenu {
         board = game.getBoard(boardId);
         selectedEntity = myEntity = panel instanceof ActionPhaseDisplay action
               ? action.currentEntity() : gui.getDisplayedUnit();
+        contextTools = tools == null
+              ? new ContextTools(false, false, myEntity == null ? Entity.NONE : myEntity.getId(), false, false) : tools;
+        if (contextTools.selectionCleared()) {
+            selectedEntity = myEntity = null;
+        }
         boardLocation = BoardLocation.of(coords, boardId);
 
         hasMenu = createMenu();
@@ -143,6 +189,12 @@ public class MapMenu extends JPopupMenu {
 
         addIfNotEmpty(createSelectMenu());
         addIfNotEmpty(createViewMenu());
+
+        if (!hasContextHex()) {
+            addIfNotEmpty(createBoardMenu());
+            addIfNotEmpty(createOrderEditorMenu());
+            return getComponentCount() > 0;
+        }
 
         if (client.isMyTurn() && (myEntity != null)) {
             findTarget();
@@ -194,6 +246,8 @@ public class MapMenu extends JPopupMenu {
         addIfNotEmptyWithSeparator(createSpecialHexDisplayMenu());
         addIfNotEmptyWithSeparator(createPleaToRoyaltyMenu());
         addIfNotEmptyWithSeparator(createGameMasterMenu());
+        addIfNotEmptyWithSeparator(createBoardMenu());
+        addIfNotEmptyWithSeparator(createOrderEditorMenu());
         return getComponentCount() > 0;
     }
 
@@ -227,6 +281,9 @@ public class MapMenu extends JPopupMenu {
 
     private JMenuItem targetMenuItem(Targetable t) {
         JMenuItem item = new JMenuItem(Messages.getString("ClientGUI.targetMenuItem") + t.getDisplayName());
+        if (t instanceof Entity) {
+            item.putClientProperty(UNIT_ACTION_PROPERTY, new UnitAction(UnitActionType.TARGET, t.getId()));
+        }
 
         String targetCode = getTargetCode(t);
 
@@ -278,6 +335,8 @@ public class MapMenu extends JPopupMenu {
 
     private JMenuItem selectJMenuItem(Entity en) {
         JMenuItem item = new JMenuItem(Messages.getString("ClientGUI.selectMenuItem") + en.getDisplayName());
+        item.putClientProperty(UNIT_ACTION_PROPERTY, new UnitAction(UnitActionType.SELECT, en.getId()));
+        item.setEnabled(myEntity == null || myEntity.getId() != en.getId());
 
         item.setActionCommand(Integer.toString(en.getId()));
         item.addActionListener(evt -> {
@@ -290,6 +349,9 @@ public class MapMenu extends JPopupMenu {
                         ((FiringDisplay) currentPanel).selectEntity(selectedEntity.getId());
                     } else if (currentPanel instanceof PhysicalDisplay) {
                         ((PhysicalDisplay) currentPanel).selectEntity(selectedEntity.getId());
+                    } else if (currentPanel instanceof TargetingPhaseDisplay targetingDisplay) {
+                        targetingDisplay.unitSelected(new BoardViewEvent(gui.getBoardState(),
+                              BoardViewEvent.SELECT_UNIT, selectedEntity.getId()));
                     } else if (currentPanel instanceof PreEndDeclarationsDisplay preEndDisplay) {
                         preEndDisplay.selectEntity(selectedEntity.getId());
                     }
@@ -304,6 +366,7 @@ public class MapMenu extends JPopupMenu {
 
     private JMenuItem viewJMenuItem(Entity en) {
         JMenuItem item = new JMenuItem(Messages.getString("ClientGUI.viewMenuItem") + en.getDisplayName());
+        item.putClientProperty(UNIT_ACTION_PROPERTY, new UnitAction(UnitActionType.VIEW, en.getId()));
 
         item.setActionCommand(Integer.toString(en.getId()));
         item.addActionListener(evt -> {
@@ -321,6 +384,7 @@ public class MapMenu extends JPopupMenu {
 
     private JMenuItem viewReadoutJMenuItem(Entity en) {
         JMenuItem item = new JMenuItem(Messages.getString("ClientGUI.viewReadoutMenuItem") + en.getDisplayName());
+        item.putClientProperty(UNIT_ACTION_PROPERTY, new UnitAction(UnitActionType.READOUT, en.getId()));
 
         item.setActionCommand(Integer.toString(en.getId()));
         item.addActionListener(evt -> {
@@ -839,10 +903,24 @@ public class MapMenu extends JPopupMenu {
         return item;
     }
 
+    private boolean hasContextHex() {
+        return coords != null && board != null && board.getHex(coords) != null;
+    }
+
+    private List<Entity> contextEntities(boolean ignoreTargetable) {
+        List<Entity> entities = hasContextHex()
+              ? new ArrayList<>(game.getEntitiesVector(boardLocation, ignoreTargetable)) : new ArrayList<>();
+        Entity explicitEntity = game.getEntity(contextEntityId);
+        if (explicitEntity != null && entities.stream().noneMatch(entity -> entity.getId() == contextEntityId)) {
+            entities.add(explicitEntity);
+        }
+        return entities;
+    }
+
     private JMenu createSelectMenu() {
         JMenu menu = new JMenu("Select");
         if (canSelectEntities()) {
-            for (Entity entity : client.getGame().getEntitiesVector(boardLocation, canTargetEntities())) {
+            for (Entity entity : contextEntities(canTargetEntities())) {
                 if (client.getMyTurn().isValidEntity(entity, client.getGame())) {
                     menu.add(selectJMenuItem(entity));
                 }
@@ -853,27 +931,108 @@ public class MapMenu extends JPopupMenu {
 
     private JMenu createViewMenu() {
         JMenu menu = new JMenu("View");
-        // Over the native battle window its unit card and record sheet show a unit, so the menu has no View (D13).
-        if (megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.isActiveFor(gui)) {
-            return menu;
-        }
-        Game game = client.getGame();
-        Player localPlayer = client.getLocalPlayer();
-        int playerId = localPlayer.getId();
 
-        for (Entity entity : game.getEntitiesVector(boardLocation, true)) {
-            // Skip hidden entities
-            if (entity.isHidden() && !(entity.getOwnerId() == playerId)) {
-                continue;
-            }
-            // Only add the unit if it's actually visible
-            // With double-blind on, the game may unsee units
-            if (!entity.isSensorReturn(localPlayer) && entity.hasSeenEntity(localPlayer)) {
+        for (Entity entity : contextEntities(true)) {
+            if (canViewEntity(entity)) {
                 menu.add(viewJMenuItem(entity));
                 menu.add(viewReadoutJMenuItem(entity));
             }
         }
         return menu;
+    }
+
+    private boolean canViewEntity(Entity entity) {
+        Player viewer = client.getLocalPlayer();
+        return entity != null && (entity.getOwnerId() == viewer.getId()
+              || EntityVisibilityUtils.detectedOrHasVisual(viewer, game, entity)
+              && !EntityVisibilityUtils.onlyDetectedBySensors(viewer, entity));
+    }
+
+    private boolean isSensorContact(Entity entity) {
+        Player viewer = client.getLocalPlayer();
+        return entity != null && EntityVisibilityUtils.detectedOrHasVisual(viewer, game, entity)
+              && EntityVisibilityUtils.onlyDetectedBySensors(viewer, entity);
+    }
+
+    /** Common camera, inspection, measuring and planning choices for both board renderers. */
+    private JMenu createBoardMenu() {
+        JMenu menu = new JMenu("Board");
+        Entity entity = game.getEntity(contextEntityId);
+        boolean unitContext = canViewEntity(entity) || isSensorContact(entity);
+
+        for (Entity candidate : contextEntities(true)) {
+            if (isSensorContact(candidate)) {
+                JMenuItem inspect = contextJMenuItem(UnitActionType.INSPECT_SENSOR, candidate.getId(),
+                      candidate.getBoardLocation(), Messages.getString("GpuBoard.hud.context.inspectSensorReturn"));
+                inspect.addActionListener(event -> gui.doAlertDialog(
+                      Messages.getString("GpuBoard.hud.common.sensorContact"),
+                      candidate.getPosition() == null ? Messages.getString("GpuBoard.hud.common.unidentified")
+                            : Messages.getString("GpuBoard.hud.context.unidentifiedHex",
+                                  candidate.getPosition().getBoardNum()), JOptionPane.INFORMATION_MESSAGE));
+                menu.add(inspect);
+            }
+        }
+
+        if (contextEntityId == Entity.NONE && hasContextHex() && contextTools.planning()) {
+            menu.add(contextJMenuItem(UnitActionType.PLAN_MOVE, Entity.NONE, boardLocation,
+                  Messages.getString("GpuBoard.hud.context.planMove")));
+            JMenuItem pin = contextJMenuItem(UnitActionType.PIN_MOVE, Entity.NONE, boardLocation,
+                  Messages.getString("GpuBoard.hud.context.planPin"));
+            pin.setEnabled(contextTools.canPin());
+            pin.setToolTipText(Messages.getString("GpuBoard.hud.mouse.ctrlClick"));
+            menu.add(pin);
+        }
+
+        if (unitContext) {
+            JMenuItem center = contextJMenuItem(UnitActionType.CENTER_UNIT, entity.getId(), entity.getBoardLocation(),
+                  Messages.getString("GpuBoard.hud.common.centerCamera"));
+            center.setEnabled(game.hasBoardLocation(entity.getBoardLocation()));
+            if (entity.getOwnerId() == client.getLocalPlayer().getId()) {
+                center.setAccelerator(KeyCommandBind.keyStroke(KeyCommandBind.CENTER_ON_SELECTED));
+            }
+            center.addActionListener(event -> gui.centerOnUnit(game.getEntity(contextEntityId)));
+            menu.add(center);
+        } else if (hasContextHex()) {
+            JMenuItem center = contextJMenuItem(UnitActionType.CENTER_HEX, Entity.NONE, boardLocation,
+                  Messages.getString("GpuBoard.hud.context.centerHere"));
+            center.addActionListener(event -> gui.centerOnHex(boardLocation));
+            menu.add(center);
+        }
+
+        Entity actor = game.getEntity(contextTools.actorId());
+        if (hasContextHex() && canViewEntity(actor) && actor.getPosition() != null
+              && actor.getBoardId() == boardLocation.boardId() && !actor.getOccupiedCoords().contains(coords)) {
+            JMenuItem measure = contextJMenuItem(UnitActionType.LINE_OF_SIGHT, actor.getId(), boardLocation,
+                  Messages.getString("GpuBoard.hud.context.lineOfSight", actor.getChassis()));
+            measure.addActionListener(event ->
+                  gui.measureLineOfSight(boardLocation.boardId(), actor.getPosition(), coords));
+            menu.add(measure);
+        }
+        return menu;
+    }
+
+    /** The fire-order editor supplies capabilities; the shared menu defines their presentation. */
+    private JMenu createOrderEditorMenu() {
+        JMenu menu = new JMenu("Orders");
+        Entity entity = game.getEntity(contextEntityId);
+        if (canViewEntity(entity) && entity.getOwner().isEnemyOf(client.getLocalPlayer()) && !entity.isDestroyed()) {
+            if (contextTools.canMakePrimary()) {
+                menu.add(contextJMenuItem(UnitActionType.MAKE_PRIMARY, entity.getId(), entity.getBoardLocation(),
+                      Messages.getString("GpuBoard.hud.context.makePrimary")));
+            }
+            if (contextTools.canRemoveTarget()) {
+                menu.add(contextJMenuItem(UnitActionType.REMOVE_TARGET, entity.getId(), entity.getBoardLocation(),
+                      Messages.getString("GpuBoard.hud.context.removeTarget")));
+            }
+        }
+        return menu;
+    }
+
+    private JMenuItem contextJMenuItem(UnitActionType type, int entityId, BoardLocation location, String label) {
+        JMenuItem item = new JMenuItem(label);
+        item.putClientProperty(UNIT_ACTION_PROPERTY, new UnitAction(type, entityId, location));
+        item.setActionCommand(type.name() + ":" + entityId + ":" + location);
+        return item;
     }
 
     private JMenu createMovementMenu(boolean entityInHex) {
@@ -1510,7 +1669,7 @@ public class MapMenu extends JPopupMenu {
         JMenu menu = new JMenu("Target");
 
         // If we can't target entities, nothing to do
-        if (!canTargetEntities() || (board.getHex(coords) == null)) {
+        if (!canTargetEntities() || myEntity == null || !hasContextHex()) {
             return menu;
         }
 
@@ -1529,9 +1688,10 @@ public class MapMenu extends JPopupMenu {
         Player localPlayer = client.getLocalPlayer();
 
         // Add menu item to target each entity in the coords
-        for (Entity entity : client.getGame().getEntitiesVector(coords, board.getBoardId(), false)) {
+        for (Entity entity : contextEntities(false)) {
             // Only add the unit if it's actually visible; with double-blind on, the game may have unseen units
-            if (!entity.isSensorReturn(localPlayer) && entity.hasSeenEntity(localPlayer) && !entity.isHidden()) {
+            if (entity.isTargetable() && !entity.isSensorReturn(localPlayer)
+                  && entity.hasSeenEntity(localPlayer) && !entity.isHidden()) {
                 menu.add(targetMenuItem(entity));
             }
         }
@@ -1857,10 +2017,10 @@ public class MapMenu extends JPopupMenu {
         Player localPlayer = client.getLocalPlayer();
         boolean friendlyFire = game.getOptions().booleanOption(OptionsConstants.BASE_FRIENDLY_FIRE);
 
-        for (Entity en : game.getEntitiesVector(boardLocation, false)) {
+        for (Entity en : contextEntities(false)) {
             // Only add the unit if it's actually visible
             // With double-blind on, the game may have unseen units
-            if ((en.isEnemyOf(myEntity) || friendlyFire) &&
+            if (en.isTargetable() && (en.isEnemyOf(myEntity) || friendlyFire) &&
                   !en.equals(myEntity) &&
                   !en.isSensorReturn(localPlayer) &&
                   en.hasSeenEntity(localPlayer) &&

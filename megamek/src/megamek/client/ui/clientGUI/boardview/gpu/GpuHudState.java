@@ -143,7 +143,7 @@ final class GpuHudState {
      * The frame as the HUD and the board overlay present it. Outside the local turn there is no fire preview: no
      * to-hit badges or guides from the last own unit while another player moves or fires (the user's decision of
      * 2026-10-03). While {@link #turnLocked} no unit acts either: no actor, no route or envelope, no fire orders or
-     * physical options, and no map menu (MegaMek builds it for its current unit).
+     * physical options. Only a map menu captured without an acting unit remains available.
      */
     GpuBoardSource.Frame presented(GpuBoardSource.Frame frame) {
         GpuBattleStatus.Snapshot status = frame.status();
@@ -162,7 +162,9 @@ final class GpuHudState {
               locked ? GpuFireOrders.Snapshot.EMPTY : panels.fire(),
               locked ? GpuPhysicalOptions.Snapshot.EMPTY : panels.physical(), panels.record(),
               GpuFirePreview.Snapshot.NONE, panels.chat(), panels.toasts(), panels.los(), panels.players());
-        return new GpuBoardSource.Frame(frame.scene(), frame.timeline(), locked ? null : frame.context(),
+        BoardScene.Context context = frame.context();
+        return new GpuBoardSource.Frame(frame.scene(), frame.timeline(),
+              locked && context != null && !context.selectionCleared() ? null : context,
               frame.globalCommands(), frame.tooltip(), frame.centerRequest(), frame.boardGeneration(),
               locked ? "" : frame.actorName(), frame.scenarioAtmosphere(), frame.reports(),
               locked ? presentedStatus : status, shown);

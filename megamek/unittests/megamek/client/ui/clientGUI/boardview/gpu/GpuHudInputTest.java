@@ -8,6 +8,7 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side.ENE
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side.OWN;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -44,6 +45,7 @@ import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -53,8 +55,10 @@ import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.UIUtils;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.client.ui.clientGUI.BoardGraphics;
+import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
+import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Player;
@@ -183,6 +187,59 @@ class GpuHudInputTest {
             assertTrue(escape(), "CANCEL would clear declared attacks, so " + phase + " never forwards it");
         }
         verify(moves, times(1)).clearRoute();
+    }
+
+    @Test
+    void theSharedSelectMenuRestoresTheSameActorAfterTheCardClearsSelection() {
+        GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1,
+              unit(FIRST, OWN, true, true));
+        GpuHudData panels = panels(move(true, List.of(STEP)), GpuFireOrders.Snapshot.EMPTY,
+              GpuPhysicalOptions.Snapshot.EMPTY, record(FIRST));
+        update(moving, panels, null);
+        hud.stage.getRoot().findActor("unit-card-close").fire(new ChangeListener.ChangeEvent());
+        assertTrue(hud.state.turnLocked(moving));
+        assertEquals(Entity.NONE, hud.state.cardUnit());
+        update(moving, panels, null);
+        clearInvocations(source);
+
+        hud.boardClick(HEX, FIRST, Input.Buttons.RIGHT, 0, 100, 100, Float.NaN);
+        verify(source).inspect(HEX, FIRST, true);
+        BoardScene.Command select = new BoardScene.Command("select-current", "Select current unit", "", true,
+              false, false, List.of(), () -> {
+                  throw new AssertionError("The shared Select must route through the HUD selection controller");
+              }, "", null, new MapMenu.UnitAction(MapMenu.UnitActionType.SELECT, FIRST));
+        BoardScene scene = mock(BoardScene.class);
+        BoardScene.Context stale = new BoardScene.Context(HEX, FIRST, List.of(select));
+        hud.update(new GpuBoardSource.Frame(scene, List.of(), stale, List.of(), "", null, 0, "", null,
+              GpuReportLog.Snapshot.EMPTY, moving, panels), GpuHud.HudView.EMPTY, null, preferences());
+        Actor menu = hud.stage.getRoot().findActor("context-menu-popover");
+        assertTrue(menu.isVisible());
+        assertNull(menuButton(menu, select.label()), "A capture made before selection cleared stays masked");
+
+        BoardScene.Context cleared = new BoardScene.Context(HEX, FIRST, List.of(select), true);
+        hud.update(new GpuBoardSource.Frame(scene, List.of(), cleared, List.of(), "", null, 0, "", null,
+              GpuReportLog.Snapshot.EMPTY, moving, panels), GpuHud.HudView.EMPTY, null, preferences());
+        UiButton item = menuButton(menu, select.label());
+        assertNotNull(item, "The menu captured without an actor can restore the cleared selection");
+        assertFalse(item.isDisabled());
+        item.fire(new ChangeListener.ChangeEvent());
+
+        assertFalse(hud.state.turnLocked(moving));
+        assertEquals(FIRST, hud.state.cardUnit());
+        verify(source).selectUnit(FIRST);
+    }
+
+    private static UiButton menuButton(Actor actor, String label) {
+        if (actor instanceof UiButton item) {
+            return item.getText().toString().equals(label) ? item : null;
+        }
+        if (actor instanceof Group group) {
+            for (Actor child : group.getChildren()) {
+                UiButton found = menuButton(child, label);
+                if (found != null) { return found; }
+            }
+        }
+        return null;
     }
 
     @Test

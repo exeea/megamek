@@ -335,9 +335,8 @@ class GpuMoveClickRoutingTest {
     }
 
     /**
-     * A stack's unit menu starts with one item per unit there, the menu's own unit among them once: Select for an own
-     * unit that may act now, which switches the acting unit, and Inspect for every other unit (an enemy, an own unit in
-     * another player's turn), which keeps the actor and the plan.
+     * A stack's shared menu lists each unit once per action: Select switches the acting unit, and View inspects the
+     * unit while keeping the actor and the plan.
      */
     @Test
     void aStacksMenuStartsWithAnItemPerUnit() throws Exception {
@@ -349,7 +348,7 @@ class GpuMoveClickRoutingTest {
 
         selectAndMode(SAGITTAIRE, GpuMovePlan.Mode.AUTO);
         List<String> rows = unitMenu(enemyStack, ARCHER, GamePhase.MOVEMENT);
-        assertEquals(Set.of(inspect(ARCHER), inspect(ENEMY_PLATOON)), Set.copyOf(rows.subList(0, 2)), rows.toString());
+        assertTrue(rows.containsAll(List.of(inspect(ARCHER), inspect(ENEMY_PLATOON))), rows.toString());
         assertEquals(1, Collections.frequency(rows, inspect(ARCHER)), rows.toString());
         menuItem(enemyStack, ENEMY_PLATOON, inspect(ENEMY_PLATOON));
         assertEquals(List.of(ENEMY_PLATOON, SAGITTAIRE), List.of(hud.state.inspected, actor()));
@@ -363,7 +362,7 @@ class GpuMoveClickRoutingTest {
 
         // In another player's turn no own unit may act: the menu inspects them.
         rows = unitMenu(ownStack, ATLAS, GamePhase.FIRING);
-        assertEquals(Set.of(inspect(ATLAS), inspect(BULLDOG)), Set.copyOf(rows.subList(0, 2)), rows.toString());
+        assertTrue(rows.containsAll(List.of(inspect(ATLAS), inspect(BULLDOG))), rows.toString());
     }
 
     /**
@@ -559,16 +558,16 @@ class GpuMoveClickRoutingTest {
             selectAndMode(SAGITTAIRE, GpuMovePlan.Mode.AUTO);
             dialogs.clear();
             hud.boardClick(archerHex, ARCHER, Input.Buttons.RIGHT, 0, 300, 300, Float.NaN);
-            verify(hudSource).inspect(archerHex);
-            hudUpdate(new BoardScene.Context(archerHex, mapMenu(archerHex)));
+            verify(hudSource).inspect(archerHex, archer.getId(), false);
+            hudUpdate(new BoardScene.Context(archerHex, ARCHER, mapMenu(archerHex, ARCHER)));
             String label = Messages.getString(attack == MoveCommand.MOVE_CHARGE ? "MovementDisplay.butCharge"
                   : "MovementDisplay.butDfa");
             UiButton item = find(hud.stage.getRoot().findActor("context-menu-popover"), label);
             assertNotNull(item, label + " in the enemy menu");
             List<String> rows = new ArrayList<>();
             rows(hud.stage.getRoot().findActor("context-menu-popover"), rows);
-            assertTrue(rows.indexOf(label) > rows.indexOf(UiKit.text("GpuBoard.hud.common.unitRecord")),
-                  label + " arrives below the rows shown at once: " + rows);
+            assertTrue(rows.indexOf(label) > rows.indexOf(readout(ARCHER)),
+                  label + " follows the shared unit actions: " + rows);
             assertEquals(1, Collections.frequency(rows, label), label + " once: " + rows);
             item.fire(new ChangeListener.ChangeEvent());
             settle();
@@ -606,8 +605,8 @@ class GpuMoveClickRoutingTest {
         });
         rows = unitMenu(archerHex, ARCHER, GamePhase.FIRING);
         assertTrue(rows.containsAll(List.of(editDamage, changeTerrain, scan)), "the enemy's menu: " + rows);
-        assertTrue(rows.indexOf(editDamage) > rows.indexOf(UiKit.text("GpuBoard.hud.common.unitRecord")),
-              "below the rows shown at once: " + rows);
+        assertTrue(rows.indexOf(editDamage) > rows.indexOf(readout(ARCHER)),
+              "after the shared unit actions: " + rows);
         rows = unitMenu(GpuMovementFixture.START, SAGITTAIRE, GamePhase.MOVEMENT);
         assertTrue(rows.containsAll(List.of(editDamage, changeTerrain, scan)), "the own unit's menu: " + rows);
 
@@ -656,11 +655,11 @@ class GpuMoveClickRoutingTest {
     }
 
     /** MegaMek's map menu at the hex, as the source captures it for an open menu (GpuBoardActions.contextCommands). */
-    private List<BoardScene.Command> mapMenu(Coords hex) throws Exception {
+    private List<BoardScene.Command> mapMenu(Coords hex, int unitId) throws Exception {
         return onSwing(() -> {
             BoardClientState view = spy(moving.board.view);
             doReturn(moving.gui).when(view).getClientgui();
-            return new GpuBoardActions(view, () -> moving.display, () -> false, () -> { }).contextCommands(hex);
+            return new GpuBoardActions(view, () -> moving.display, () -> false, () -> { }).contextCommands(hex, unitId);
         });
     }
 
@@ -683,8 +682,8 @@ class GpuMoveClickRoutingTest {
     private List<String> unitMenu(Coords hex, int unitId, GamePhase phase) throws Exception {
         hudUpdate(null, phase);
         hud.boardClick(hex, unitId, Input.Buttons.RIGHT, 0, 300, 300, Float.NaN);
-        verify(hudSource).inspect(hex);
-        hudUpdate(new BoardScene.Context(hex, mapMenu(hex)), phase);
+        verify(hudSource).inspect(hex, unitId, false);
+        hudUpdate(new BoardScene.Context(hex, unitId, mapMenu(hex, unitId)), phase);
         List<String> rows = new ArrayList<>();
         rows(hud.stage.getRoot().findActor("context-menu-popover"), rows);
         return rows;
@@ -699,14 +698,21 @@ class GpuMoveClickRoutingTest {
         settle();
     }
 
-    /** The unit menus' Inspect item of the unit, named as the test's status names it. */
-    private static String inspect(int unitId) {
-        return UiKit.text("GpuBoard.hud.context.inspectNamed", "Unit " + unitId);
+    /** The shared menu's View item uses the game entity's name. */
+    private String inspect(int unitId) throws Exception {
+        return Messages.getString("ClientGUI.viewMenuItem")
+              + onSwing(() -> moving.board.game.getEntity(unitId).getDisplayName());
     }
 
-    /** The unit menus' Select item of the own unit, named as the test's status names it. */
-    private static String select(int unitId) {
-        return UiKit.text("GpuBoard.hud.context.selectNamed", "Unit " + unitId);
+    private String readout(int unitId) throws Exception {
+        return Messages.getString("ClientGUI.viewReadoutMenuItem")
+              + onSwing(() -> moving.board.game.getEntity(unitId).getDisplayName());
+    }
+
+    /** The shared menu's Select item uses the game entity's name. */
+    private String select(int unitId) throws Exception {
+        return Messages.getString("ClientGUI.selectMenuItem")
+              + onSwing(() -> moving.board.game.getEntity(unitId).getDisplayName());
     }
 
     private GpuBoardSource.Frame frame(BoardScene.Context context) throws Exception {

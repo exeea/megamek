@@ -18,6 +18,7 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.client.ui.util.KeyCommandBind;
 import org.apache.commons.text.StringEscapeUtils;
@@ -109,7 +110,8 @@ final class GpuMenuCommands {
                     || Set.of("fireTwist", "fireStrafe").contains(button.getActionCommand()), children,
               dispatch(action),
               accelerator == null ? "" : KeyCommandBind.getDesc(accelerator.getKeyCode(), accelerator.getModifiers()),
-              selected);
+              selected, button.getClientProperty(MapMenu.UNIT_ACTION_PROPERTY) instanceof MapMenu.UnitAction unitAction
+                    ? unitAction : null);
     }
 
     Runnable dispatch(Runnable action) {
