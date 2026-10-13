@@ -95,7 +95,7 @@ import megamek.common.weapons.capitalWeapons.CapitalMissileWeapon;
 import megamek.common.weapons.mortars.VehicularGrenadeLauncherWeapon;
 import megamek.logging.MMLogger;
 
-public class FiringDisplay extends AttackPhaseDisplay {
+public class FiringDisplay extends AttackPhaseDisplay implements WeaponDeclarationDisplay {
     private final BiConsumer<WeaponMounted, WeaponMounted> weaponSelectionListener = this::weaponSelectionChanged;
 
     private final static MMLogger logger = MMLogger.create(FiringDisplay.class);
@@ -496,6 +496,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
     /**
      * Selects an entity, by number, for firing.
      */
+    @Override
     public void selectEntity(int en) {
         // clear any previously considered attacks
         if (en != currentEntity) {
@@ -709,6 +710,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
     /**
      * Fire Mode - Adds a Fire Mode Change to the current Attack Action
      */
+    @Override
     public void changeMode(boolean forward) {
         WeaponMounted weaponMounted = clientgui.getUnitDisplayState().getSelectedWeapon();
 
@@ -1416,6 +1418,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
     /**
      * Adds a weapon attack with the currently selected weapon to the attack queue.
      */
+    @Override
     public void fire() {
         // get the selected weaponnum
         final int weaponNum = clientgui.getUnitDisplayState().getSelectedWeaponNum();
@@ -1710,6 +1713,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
     /**
      * removes the last action when it is a weapon attack (Backspace)
      */
+    @Override
     public void removeLastFiring() {
         if (attacks.lastElement() instanceof WeaponAttackAction attack) {
             removeAttack(attack);
@@ -1737,6 +1741,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
     /**
      * @return the queued actions in fire order: a new list of the queue's own action objects
      */
+    @Override
     public List<EntityAction> getAttacks() {
         return List.copyOf(attacks.toVector());
     }
@@ -1786,6 +1791,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
      * @param actions actions of the selected unit in the new fire order, each at most once and with its target still in
      *                the game: the queue's own ({@link #getAttacks()}) reordered or fewer of them, or a saved draft
      */
+    @Override
     public void replaceAttacks(List<EntityAction> actions) {
         if (currentEntity() == null) {
             return;
@@ -1835,6 +1841,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
      *
      * @return the to-hit; its description is the reason when the shot cannot be declared
      */
+    @Override
     public ToHitData toHitFor(WeaponMounted weapon, Targetable target) {
         String refusal = ((currentEntity() != null) && currentEntity().isHidden())
               ? Messages.getString("FiringDisplay.HiddenUnitMaySpot") : refusal(weapon);
@@ -1918,6 +1925,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
     /**
      * Targets something
      */
+    @Override
     public void target(Targetable t) {
         if (currentEntity() == null) {
             return;
@@ -1988,6 +1996,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
     /**
      * Targets something
      */
+    @Override
     public void updateTarget() {
         setFireEnabled(false);
         Entity attacker = currentEntity();
@@ -2126,6 +2135,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
     /**
      * Torso twist in the proper direction.
      */
+    @Override
     public void torsoTwist(Coords twistTarget) {
         if ((currentEntity() == null) || currentEntity().getAlreadyTwisted()) {
             return;
@@ -2143,6 +2153,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
      *
      * @param twistDir 0 for twisting to the left, 1 to the right
      */
+    @Override
     public void torsoTwist(int twistDir) {
         if ((currentEntity() == null) || currentEntity().getAlreadyTwisted() || ((twistDir != 0) && (twistDir != 1))) {
             return;
@@ -2413,6 +2424,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
     /**
      * update for change of arms-flipping status
      */
+    @Override
     public void updateFlipArms(boolean armsFlipped) {
         if (currentEntity() == null) {
             return;
@@ -2695,6 +2707,7 @@ public class FiringDisplay extends AttackPhaseDisplay {
      *
      * @return {@code true} if firing the selected weapon is currently allowed
      */
+    @Override
     public boolean isFireAllowed() {
         if (buttons == null) {
             return false;
@@ -3008,11 +3021,13 @@ public class FiringDisplay extends AttackPhaseDisplay {
         return choice;
     }
 
+    @Override
     public Targetable getTarget() {
         return target;
     }
 
     /** @return the aimed shot handler: the aiming mode and the location aimed at on the current target */
+    @Override
     public AimedShotHandler getAimedShotHandler() {
         return ash;
     }

@@ -16,11 +16,12 @@ import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Coords;
 import megamek.common.compute.ArtilleryRange;
 import megamek.common.compute.Compute;
+import megamek.common.enums.GamePhase;
 import megamek.common.enums.WeaponSortOrder;
 import megamek.common.equipment.AmmoMounted;
+import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.AmmoType.AmmoTypeEnum;
 import megamek.common.equipment.AmmoType.Munitions;
-import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.HandheldWeapon;
 import megamek.common.equipment.Mounted;
 import megamek.common.equipment.TrainAmmoSharing;
@@ -31,6 +32,7 @@ import megamek.common.interfaces.ILocationExposureStatus;
 import megamek.common.options.OptionsConstants;
 import megamek.common.units.*;
 import megamek.common.weapons.bayWeapons.BayWeapon;
+import megamek.common.weapons.capitalWeapons.CapitalMissileWeapon;
 import megamek.common.weapons.gaussRifles.HAGWeapon;
 import megamek.common.weapons.handlers.AreaEffectHelper;
 import megamek.common.weapons.handlers.DamageFalloff;
@@ -944,6 +946,26 @@ public final class WeaponDisplayData {
         }
         weapons.sort(entity.getWeaponSortOrder().getWeaponSortComparator(entity));
         return weapons;
+    }
+
+    /**
+     * Whether the weapon could be declared in the phase at all, as the attack rules allow
+     * ({@code ComputeToHitIsImpossible}'s phase reasons): in the Targeting phase only artillery, capital and
+     * sub-capital weapons and capital missiles; in the Off-board phase only TAG; in any other phase every weapon. Whether
+     * a particular target allows the attack is still that attack's own to-hit check.
+     */
+    public static boolean isDeclarableIn(GamePhase phase, WeaponMounted weapon) {
+        WeaponType type = weapon.getType();
+        if (phase.isTargeting()) {
+            boolean isArtillery = type.hasFlag(WeaponType.F_ARTILLERY);
+            boolean isCapitalMissile = (type instanceof CapitalMissileWeapon) || weapon.isInBearingsOnlyMode();
+            boolean isCapitalScale = type.isCapital() || type.isSubCapital();
+            return isArtillery || isCapitalMissile || isCapitalScale;
+        }
+        if (phase.isOffboard()) {
+            return type.hasFlag(WeaponType.F_TAG);
+        }
+        return true;
     }
 
     /** Whether the list shows the weapon: a LAM in Mek mode lists no bomb weapons but rocket launchers and TAG. */

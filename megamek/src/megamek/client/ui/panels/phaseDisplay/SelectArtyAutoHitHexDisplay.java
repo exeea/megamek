@@ -61,8 +61,11 @@ import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.event.GameTurnChangeEvent;
 import megamek.common.game.Game;
 import megamek.common.options.OptionsConstants;
+import megamek.logging.MMLogger;
 
 public class SelectArtyAutoHitHexDisplay extends StatusBarPhaseDisplay {
+    private static final MMLogger LOGGER = MMLogger.create(SelectArtyAutoHitHexDisplay.class);
+
     @Serial
     private static final long serialVersionUID = -4948184589134809323L;
 
@@ -320,6 +323,9 @@ public class SelectArtyAutoHitHexDisplay extends StatusBarPhaseDisplay {
 
     @Override
     public void ready() {
+        if (!confirmNoHexesDesignated()) {
+            return;
+        }
         endMyTurn();
         PlayerIDAndList<BoardLocation> finalAutoHits = new PlayerIDAndList<>();
         finalAutoHits.setPlayerID(player.getId());
@@ -327,6 +333,28 @@ public class SelectArtyAutoHitHexDisplay extends StatusBarPhaseDisplay {
         plannedAutoHits.clear();
         clientgui.getClient().sendArtyAutoHitHexes(finalAutoHits);
         clientgui.getClient().sendPlayerInfo();
+    }
+
+    /**
+     * Done ends the phase for good, and a hex that was not designated now cannot be later. When the player designated
+     * none of the hexes they may, asks first. It has its own preference, apart from the routine "no action this turn"
+     * questions, as it comes once a game and cannot be undone. A turn timer that ran out ends the phase without
+     * asking.
+     *
+     * @return {@code true} to end the phase
+     */
+    private boolean confirmNoHexesDesignated() {
+        boolean designatedNone = plannedAutoHits.isEmpty() && (allowedNumberOfHexes > 0);
+        if (!designatedNone || !GUIP.getNagForNoArtilleryDesignation() || isTimerExpired()) {
+            return true;
+        }
+        boolean confirmed = NagDialogs.confirm(clientgui,
+              Messages.getString("SelectArtyAutoHitHexDisplay.NoHexesDesignated.title"),
+              Messages.getString("SelectArtyAutoHitHexDisplay.NoHexesDesignated.message", allowedNumberOfHexes),
+              () -> GUIP.setNagForNoArtilleryDesignation(false));
+        LOGGER.debug("[ArtyAutoHit] {} hexes allowed, none designated: player {} ending the phase",
+              allowedNumberOfHexes, confirmed ? "confirmed" : "cancelled");
+        return confirmed;
     }
 
     private void setArtyEnabled(int remainingHexes) {
