@@ -47,12 +47,18 @@ final class GpuStarShells implements Disposable {
     private static final float LIFT = .02f;
     /** Near-white and a touch warm, so the colours of what it lights stay true. */
     private static final Color LIGHT = new Color(1, .96f, .9f, 1);
-    private static final int CORE = 0, HALO = 1, RAY = 2, CANOPY = 3, SMOKE = 4;
+    private static final int CORE = 0, HALO = 1, RAY = 2, SMOKE = 4;
     private static final int RAYS = 4;
     private static final int SMOKE_PUFFS = 5;
+    /** Flares lit in one pass; flare-light.frag holds as many. */
+    private static final int MAX_LIGHTS = 16;
 
     private final GpuEffectBatch quads = new GpuEffectBatch(256, "starshell");
     private final List<Shown> shown = new ArrayList<>();
+    private final float[] flareHexes = new float[MAX_LIGHTS * 3];
+    private final float[] flareCenters = new float[MAX_LIGHTS * 2];
+    private final float[] flareStrengths = new float[MAX_LIGHTS];
+    private final GpuFlareCanopies canopies = new GpuFlareCanopies();
     private final Vector3 point = new Vector3(), width = new Vector3(), length = new Vector3();
     private ShaderProgram lightShader;
     private Mesh box;
@@ -208,27 +214,46 @@ final class GpuStarShells implements Disposable {
             lightShader.setUniformf("u_viewport", depth.x, depth.y, depth.width, depth.height);
             lightShader.setUniformi("u_depth", 0);
             lightShader.setUniformf("u_hexSize", BoardGeometry.width(), BoardGeometry.height());
+            int count = 0;
+            float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
             for (Shown flare : shown) {
                 float strength = brightness(flare) * gain;
-                if (strength <= 0) {
+                if (strength <= 0 || count == MAX_LIGHTS) {
                     continue;
                 }
                 Coords hex = flare.shell.coords();
                 int radius = flare.shell.radius();
                 Vector3 ground = BoardGeometry.center(hex, 0);
                 Vector3 at = position(flare);
-                lightShader.setUniformf("u_flareHex", hex.getX(), hex.getY(), radius);
-                lightShader.setUniformf("u_flareCenter", at.x, at.y);
-                lightShader.setUniformf("u_boxCenter", ground.x, ground.y, ground.z);
-                lightShader.setUniformf("u_boxHalf", BoardGeometry.width() * .75f * (radius + 2),
-                      BoardGeometry.height() * (radius + 2), BoardGeometry.level() * 60);
+                flareHexes[count * 3] = hex.getX();
+                flareHexes[count * 3 + 1] = hex.getY();
+                flareHexes[count * 3 + 2] = radius;
+                flareCenters[count * 2] = at.x;
+                flareCenters[count * 2 + 1] = at.y;
+                flareStrengths[count] = strength;
+                float reachX = BoardGeometry.width() * .75f * (radius + 2), reachY = BoardGeometry.height() * (radius + 2);
+                minX = Math.min(minX, ground.x - reachX);
+                maxX = Math.max(maxX, ground.x + reachX);
+                minY = Math.min(minY, ground.y - reachY);
+                maxY = Math.max(maxY, ground.y + reachY);
+                count++;
+            }
+            if (count > 0) {
+                // One box around every pool, lit once: where pools overlap the brightest flare wins, so two flares
+                // light a hex no more than one does, as the rules have it.
+                lightShader.setUniformi("u_flareCount", count);
+                lightShader.setUniform3fv("u_flareHex[0]", flareHexes, 0, count * 3);
+                lightShader.setUniform2fv("u_flareCenter[0]", flareCenters, 0, count * 2);
+                lightShader.setUniform1fv("u_flareStrength[0]", flareStrengths, 0, count);
+                lightShader.setUniformf("u_boxCenter", (minX + maxX) / 2, (minY + maxY) / 2, 0);
+                lightShader.setUniformf("u_boxHalf", (maxX - minX) / 2, (maxY - minY) / 2, BoardGeometry.level() * 60);
                 // dst * (1 + src): the scene's own colours brighten.
                 Gdx.gl.glBlendFunc(GL20.GL_DST_COLOR, GL20.GL_ONE);
-                lightShader.setUniformf("u_light", LIGHT.r, LIGHT.g, LIGHT.b, strength);
+                lightShader.setUniformf("u_light", LIGHT.r, LIGHT.g, LIGHT.b, 1);
                 box.render(lightShader, GL20.GL_TRIANGLES);
                 // dst + src: an even lift, so what was near black is seen.
                 Gdx.gl.glBlendFunc(GL20.GL_ONE, GL20.GL_ONE);
-                lightShader.setUniformf("u_light", LIGHT.r, LIGHT.g, LIGHT.b, strength * LIFT);
+                lightShader.setUniformf("u_light", LIGHT.r, LIGHT.g, LIGHT.b, LIFT);
                 box.render(lightShader, GL20.GL_TRIANGLES);
             }
         } finally {
@@ -241,18 +266,27 @@ final class GpuStarShells implements Disposable {
         }
     }
 
-    /** The flares themselves: parachute and smoke wisp first, then the glowing point, halo and starburst over them. */
-    void renderFlares(Camera camera) {
+    /**
+     * The flares themselves: the parachutes, then the smoke wisps, then the glowing point, halo and starburst over them.
+     *
+     * @param daylight 0 at night to 1 in full daylight, for the light on the parachutes' crowns
+     */
+    void renderFlares(Camera camera, float daylight) {
         if (shown.isEmpty()) {
             return;
         }
         float hex = BoardGeometry.height();
+        float ambient = .22f + .7f * MathUtils.clamp(daylight, 0, 1);
+        canopies.begin();
+        for (Shown flare : shown) {
+            float fade = flare.sputter < 0 ? 1 : Math.max(0, 1 - flare.sputter / SPUTTER_SECONDS);
+            canopies.add(camera, position(flare), flare.seed, clock, brightness(flare), ambient, fade);
+        }
+        canopies.render(camera);
         quads.begin();
         for (Shown flare : shown) {
             Vector3 at = position(flare);
             float fade = flare.sputter < 0 ? 1 : Math.max(0, 1 - flare.sputter / SPUTTER_SECONDS);
-            point.set(at).add(0, 0, hex * .16f);
-            quads.billboard(camera, point, hex * .12f, CANOPY, .95f * fade);
             for (int puff = 0; puff < SMOKE_PUFFS; puff++) {
                 float rise = (clock * .35f + puff / (float) SMOKE_PUFFS) % 1;
                 point.set(at).add(-hex * .05f * rise, hex * .03f * rise, hex * (.25f + .6f * rise));
@@ -321,6 +355,7 @@ final class GpuStarShells implements Disposable {
     @Override
     public void dispose() {
         quads.dispose();
+        canopies.dispose();
         if (lightShader != null) {
             GpuShaderManager.dispose(lightShader);
             lightShader = null;

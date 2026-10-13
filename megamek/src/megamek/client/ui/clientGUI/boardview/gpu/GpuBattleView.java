@@ -809,7 +809,7 @@ class GpuBattleView extends ApplicationAdapter {
               ray -> terrain.hit(scene, ray));
         jumpJets.render(boardCamera.camera);
         attackEffects.render(boardCamera.camera, effectDepth);
-        starShells.renderFlares(boardCamera.camera);
+        starShells.renderFlares(boardCamera.camera, atmosphere.lighting().daylight());
         if (!terrain.waterVisible()) { waterImpacts.clear(); }
         else if (!boardCamera.tactical()) {
             waterImpacts.render(boardCamera.camera, scene, motions, unitInstances, smokeLight, playback.attachment());

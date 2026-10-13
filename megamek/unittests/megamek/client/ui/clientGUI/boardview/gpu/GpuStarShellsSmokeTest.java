@@ -99,6 +99,32 @@ class GpuStarShellsSmokeTest {
                     ImageIO.write(night, "png", new File(folder, "star-shell-night.png"));
                     ImageIO.write(day, "png", new File(folder, "star-shell-day.png"));
                     assertLit(night, dark, camera, flare, hex);
+                    // A second flare two hexes east: where the pools overlap the ground is no brighter than under one.
+                    float single = brightening(night, dark, camera, new Coords(flare.getX() + 1, flare.getY()), hex);
+                    var pair = new GpuStarShells();
+                    try {
+                        pair.update(scene(new BoardScene.StarShell(flare, 3, 5, true),
+                              new BoardScene.StarShell(new Coords(flare.getX() + 2, flare.getY()), 3, 5, true)),
+                              Map.of(), 3);
+                        BufferedImage both = frame(buffer, batch, scene, camera, pair, depth, 0, true, .12f);
+                        ImageIO.write(both, "png", new File(folder, "star-shell-overlap.png"));
+                        float overlap = brightening(both, dark, camera, new Coords(flare.getX() + 1, flare.getY()), hex);
+                        System.out.println("[StarShell] under one flare " + single + ", under two " + overlap);
+                        assertEquals(single, overlap, single * .08f, "Two flares light a hex no more than one");
+                    } finally {
+                        pair.dispose();
+                    }
+                    // Close on the parachute, from the side and a little below, to review the canopy.
+                    var close = new PerspectiveCamera(35, SIZE, SIZE);
+                    Vector3 hang = centre.cpy().add(0, 0, hex * GpuStarShells.HANG_HEXES + hex * .12f);
+                    close.position.set(hang.x + hex * .5f, hang.y - hex * .9f, hang.z + hex * .25f);
+                    close.up.set(Vector3.Z);
+                    close.lookAt(hang);
+                    close.near = .1f;
+                    close.far = hex * 60;
+                    close.update();
+                    ImageIO.write(frame(buffer, batch, scene, close, starShells, depth, 0, true, .12f), "png",
+                          new File(folder, "star-shell-canopy.png"));
                     File frames = new File(folder, "star-shell-frames");
                     assertTrue(frames.isDirectory() || frames.mkdirs());
                     for (int index = 0; index < 45; index++) {
@@ -168,7 +194,7 @@ class GpuStarShellsSmokeTest {
             depth.begin();
             if (lit) {
                 starShells.renderLight(camera, depth, daylight);
-                starShells.renderFlares(camera);
+                starShells.renderFlares(camera, daylight);
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
             Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, SIZE, SIZE);

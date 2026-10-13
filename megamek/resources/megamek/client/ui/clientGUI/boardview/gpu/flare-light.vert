@@ -1,6 +1,6 @@
 #version 330 core
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-// A box around an illumination round's lit hexes; the fragment shader lights the scene surfaces inside it.
+// A box around all the illumination rounds' lit hexes; the fragment shader lights the scene surfaces inside it.
 in vec3 a_position;
 uniform mat4 u_projView;
 uniform vec3 u_boxCenter;

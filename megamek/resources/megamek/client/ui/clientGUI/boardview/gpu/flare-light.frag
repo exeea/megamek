@@ -1,7 +1,9 @@
 #version 330 core
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-// An illumination round's pool of light. It lights exactly the hexes the rules do (every hex within its radius, by
-// hex count), fully, and fades over a short strip just outside them so it reads as light rather than a stencil.
+// Illumination rounds' pools of light, all flares in one pass. Each lights exactly the hexes the rules do (every hex
+// within its radius, by hex count), fully, and fades over a short strip just outside them so it reads as light rather
+// than a stencil. Where pools overlap the brightest one wins: a hex is lit or it is not, so two flares light it no more
+// than one does.
 // Blended as dst * (1 + src): the scene's own colours are brightened, not washed out. GpuStarShells mirrors the hex
 // arithmetic below in Java, and its tests hold that to the game's own hex distance.
 layout(location = 0) out vec4 fragColor;
@@ -10,11 +12,15 @@ uniform mat4 u_inverseProjView;
 uniform vec4 u_viewport;
 // Hex width and height in world units.
 uniform vec2 u_hexSize;
-// The flare's hex (column, row) and its radius in hexes.
-uniform vec3 u_flareHex;
-// Where the flare hangs, over the ground, for the gentle brightening toward it.
-uniform vec2 u_flareCenter;
-// The light's colour and strength.
+const int MAX_FLARES = 16;
+uniform int u_flareCount;
+// Each flare's hex (column, row) and its radius in hexes.
+uniform vec3 u_flareHex[MAX_FLARES];
+// Where each flare hangs, over the ground, for the gentle brightening toward it.
+uniform vec2 u_flareCenter[MAX_FLARES];
+// How brightly each flare burns.
+uniform float u_flareStrength[MAX_FLARES];
+// The light's colour and overall strength.
 uniform vec4 u_light;
 
 vec2 hexCenter(ivec2 hex) {
@@ -52,15 +58,10 @@ int hexDistance(ivec2 a, ivec2 b) {
     return max(d.x, max(d.y, d.z));
 }
 
-void main() {
-    vec2 uv = (gl_FragCoord.xy - u_viewport.xy) / u_viewport.zw;
-    float depth = texture(u_depth, uv).r;
-    if (depth >= 1.0) discard;
-    vec4 surface = u_inverseProjView * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-    vec3 p = surface.xyz / surface.w;
-    ivec2 cell = hexAt(p.xy);
-    ivec2 flare = ivec2(u_flareHex.xy);
-    int radius = int(u_flareHex.z);
+// How much one flare lights the surface at p, 0 to 1.
+float flareLight(vec2 p, ivec2 cell, int index) {
+    ivec2 flare = ivec2(u_flareHex[index].xy);
+    int radius = int(u_flareHex[index].z);
     int distance = hexDistance(cell, flare);
     float light = 0.0;
     if (distance <= radius) {
@@ -75,13 +76,28 @@ void main() {
                 if (hexDistance(neighbour, cell) != 1 || hexDistance(neighbour, flare) > radius) continue;
                 vec2 other = hexCenter(neighbour);
                 vec2 toward = normalize(other - center);
-                fromEdge = min(fromEdge, dot((center + other) * 0.5 - p.xy, toward));
+                fromEdge = min(fromEdge, dot((center + other) * 0.5 - p, toward));
             }
         }
         light = 1.0 - smoothstep(0.0, u_hexSize.x * 0.2, max(fromEdge, 0.0));
     }
-    if (light <= 0.0) discard;
+    if (light <= 0.0) return 0.0;
     float reach = u_hexSize.y * (float(radius) + 0.5);
-    float toward = 1.0 - 0.2 * clamp(length(p.xy - u_flareCenter) / reach, 0.0, 1.0);
-    fragColor = vec4(u_light.rgb * u_light.a * light * toward, 1.0);
+    float toward = 1.0 - 0.2 * clamp(length(p - u_flareCenter[index]) / reach, 0.0, 1.0);
+    return light * toward * u_flareStrength[index];
+}
+
+void main() {
+    vec2 uv = (gl_FragCoord.xy - u_viewport.xy) / u_viewport.zw;
+    float depth = texture(u_depth, uv).r;
+    if (depth >= 1.0) discard;
+    vec4 surface = u_inverseProjView * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    vec3 p = surface.xyz / surface.w;
+    ivec2 cell = hexAt(p.xy);
+    float light = 0.0;
+    for (int index = 0; index < u_flareCount; index++) {
+        light = max(light, flareLight(p.xy, cell, index));
+    }
+    if (light <= 0.0) discard;
+    fragColor = vec4(u_light.rgb * u_light.a * light, 1.0);
 }
