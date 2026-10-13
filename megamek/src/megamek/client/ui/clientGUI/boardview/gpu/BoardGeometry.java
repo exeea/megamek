@@ -162,6 +162,12 @@ final class BoardGeometry {
     private static final int[] CORNER_DX = { 2, 1, -1, -2, -1, 1 };
     private static final int[] CORNER_DY = { 0, 1, 1, 0, -1, -1 };
 
+    /** A corner in model-local units, without a world-position or presentation-scale round trip. */
+    static Vector3 modelCorner(int corner) {
+        int k = Math.floorMod(corner, 6);
+        return new Vector3(CORNER_DX[k] * (TILE_WIDTH / 4), CORNER_DY[k] * (TILE_HEIGHT / 2), 0);
+    }
+
     /**
      * Corners lie on a lattice of quarter widths and half heights. Computing them from lattice indices gives every
      * hex that shares a corner bit-identical coordinates, independently of the hex scale.

@@ -9,7 +9,8 @@
 | `BoardBridge` | Traverse connected spans; draw each span's stored type (built or natural; an untyped span draws built) and a built deck's road material. |
 | `BoardNaturalBridge` | Construct the natural arch, top, underside and bank contact facets. |
 | `BoardBridgeFooting` | Extend manufactured slab/rails onto actual supporting banks; build the piers under deck joints. |
-| `BoardBridgeSlope` | Grade authored manufactured slabs and rails between connected deck elevations. |
+| `BoardBridgeMesh`, `BoardBridgeTruss` | Generate the built slab, kerbs and steel from the live road and on-deck rail footprint. |
+| `BoardBridgeSlope` | Grade generated manufactured facets between connected deck elevations. |
 | `BoardRelief` | Reserve entrances and move obstructing decorative rocks onto supported bank positions. |
 | `GpuRoads / GpuTerrain` | Apply deck/apron materials and own the installed bridge geometry used for drawing and picking. |
 
@@ -26,7 +27,7 @@ then dirt. Without one it is plain unmarked asphalt between its kerbs.
 
 Decks one level apart meet halfway between their elevations at the shared edge, in either direction.
 The centre retains its authored elevation. Manufactured spans keep a level central hub, with broad
-diagonal approaches across the whole carriageway and both rails. The existing GLB triangles are split
+diagonal approaches across the whole carriageway and both rails. The generated bridge triangles are split
 at the grade changes and displaced together, preserving the slab thickness, rail height and footprint.
 Road materials and markings use those same installed top facets; picking and bounds use the complete
 sloped shape. Natural spans grade their rock shell to matching top and underside contacts at every LOD.
@@ -66,27 +67,28 @@ is not a walkable bank approach and does not receive a manufactured bridge footi
 
 Manufactured bridges use `BoardBridgeFooting` to extend each terminal at least one metre into its bank
 hex. If the rim has receded, the extension grows until the full slab width has ground underneath, with an
-inset from the rim. The extension keeps the authored slab thickness and rail width. Its short grade
+inset from the rim. The extension keeps the shared slab thickness and rail width. Its short grade
 reaches the bank's ground height; asphalt, gravel, dirt, dashes and wheel wear use the same road helpers
 as the original deck. Lower-grade road approaches keep their existing fade. Bridge-to-bridge joints
 retain their original position in the hex plane, with stepped decks sharing the joint's height.
 No foundation is grown down through a lower crossing.
 
-**Truss (b10-f1).** A built span whose design is the truss (`BoardBridge.Deck.truss`, from `BridgeSpan.truss`) draws
-`bridges/truss-exits-NN.glb` instead of the standard deck: the same deck triangles, slab, kerb outline and footprint, so
-roads, rails, piers, landings and passages are unchanged, plus steel trusses on the kerb lines (`bridge-steel`, its Body
-colour slot). Each exit has two alternative nodes, `truss-joint-D` and `truss-end-D`; `BoardBridge.trussNodes` draws the
-body and exactly one per exit: the joint where the neighbour is a joined deck (`Deck.joints`), the end post at a bank, a
-road landing or an open end. The deck's colours select a recoloured copy through the one recolour path
-(`GpuAssets.model(name, colours)`, `RigidGlb.recolour`); the editor and the game draw a bridge the same way (it is chunk
-terrain). A sloped truss is graded like the standard slab (`BoardBridgeSlope`, `BoardShape.loadNodes` on the recoloured
-LOD0, cached per kit and colours; each scene commit drops the recoloured kits and keeps the uncoloured ones,
-`BoardBridgeSlope.retainUncoloured`) and draws its steel as `Part.STEEL` facets in their own colour. Picking uses the drawn
-nodes only (`Prop.pickingTriangles`, kept when a hex is reused), and a flat deck receives decals on its road surface
-alone (`receiverFaces`: the `bridge-deck` part), which also keeps decals off the standard kit's kerb tops. A straight truss
-hex draws 352 triangles against the standard deck's 32 (junctions up to 1,572). Measured (2026-10-10, 64x68
-CanalCity2 with all 136 bridge hexes as trusses, game view at 1600x1000): +113,280 opaque vertices (+1.3 %) and +6
-opaque draws in the overview; no frame-time difference beyond the run-to-run spread on an RTX 4070 or an Iris Xe.
+**Manufactured spans.** `BoardBridgeMesh` derives the slab and kerbs from the current road footprint and
+the actual on-deck `RailRoute` courses, including explicit junctions and unfinished stubs. Standard and truss
+designs share that supporting footprint. Road-only five/six-way spans retain a raised roundabout island;
+an on-deck rail opens its centre. Rail geometry still follows the common route model.
+
+**Truss.** A built span whose design is the truss (`BoardBridge.Deck.truss`, from `BridgeSpan.truss`) adds
+`BoardBridgeTruss` steel along the exposed carriageway boundary. Continuous chords follow the curve; fitted
+support panels leave the carriageway clear. `Deck.joints` selects the joining chord at a connected deck or an
+end post at a bank, road landing or open end. Members are clipped and capped at the local hex boundary.
+The steel fascia replaces the concrete side faces it covers, avoiding coplanar surfaces.
+
+The span's Body colour, oxide red by default, is carried by its `Part.STEEL` facets.
+`BoardBridgeSlope` grades the complete generated slab and steel together. The prepared terrain chunk owns
+the resulting shape in the game, editor and previews; flat and sloped decks use those same facets for drawing
+and picking. Decals project only onto `Part.TOP`, keeping them off kerbs and steel. No per-mask span model,
+recoloured bridge-model cache or per-frame bridge generation is involved.
 
 **Piers.** A bridge hex whose Pillars toggle is on (`HexAppearance.PILLARS`, the appearance owner `bridge`, variant
 `bridge/pillars`, a built type; legacy pillar art on a bridge hex turns it on) gets one concrete pier under each joint between two
@@ -144,9 +146,9 @@ promontory whose rims close in on the deck, the rock is left out: nothing stands
 
 The immutable bridge facets belong to the installed terrain chunk. Rendering and picking share those
 facets and their bounds; an extended section is picked in the hex its visible contact occupies. Chunk
-reuse carries this geometry with the material batches. Manufactured assets retain their original mesh and
-are supplemented at their bank ends; level sections keep the original model, while sloped sections
-reuse its authored geometry in the terrain batches.
+reuse carries this geometry with the material batches. Manufactured spans are generated during chunk
+preparation, graded and supplemented at their bank ends, then retained until their scene inputs change.
+Terminal and pier GLBs remain reusable details; the span itself has no external mesh asset.
 
 ## Limits
 

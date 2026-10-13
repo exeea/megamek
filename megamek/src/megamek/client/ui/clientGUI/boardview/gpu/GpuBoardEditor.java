@@ -1355,7 +1355,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                 // The truss's Body slot, chosen like a placed object's colour: one choice for the whole span.
                 if (truss) {
                     heading(UiKit.text("BoardEditor.bridgeColour"));
-                    colourRows(colourSlots(TRUSS_COLOURS), snapshot.appearance().get("bridge").colours(),
+                    colourRows(List.of(BoardBridgeTruss.BODY), snapshot.appearance().get("bridge").colours(),
                           (slot, value) -> send(Action.BRIDGE_COLOUR, value));
                 }
             }
@@ -1589,8 +1589,6 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
 
     /** Each model's colour slots, read from its file once. */
     private final Map<String, List<RigidGlb.ColourSlot>> colourSlots = new java.util.HashMap<>();
-    /** Every truss deck shares one Body slot; the straight deck's file names it. */
-    private static final String TRUSS_COLOURS = "bridges/truss-exits-09";
 
     /**
      * One row per colour slot of the object's model: its preset swatches, then its colour as #rrggbb to type any other.

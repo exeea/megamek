@@ -2485,6 +2485,7 @@ final class BoardSurface {
             }
         }
         untangle(moved);
+        unfold(moved);
         // Walls can add columns from the neighbouring top. Share this road's actual piecewise-linear outline
         // so those columns interpolate the emitted top rather than sample a different curve between its vertices.
         for (int edge = 0; edge < 6; edge++) {
@@ -2571,6 +2572,35 @@ final class BoardSurface {
                 middle.scl(1f / ring.get(p).size());
                 moved.put(p, new Vector3(middle.x, middle.y, p.z));
             }
+        }
+    }
+
+    /** Repair a concave fan that neighbour averaging cannot unfold, moving its free corners together. */
+    private void unfold(Map<Vector3, Vector3> moved) {
+        for (int pass = 0; pass < 4 * UNTANGLE; pass++) {
+            boolean changed = false;
+            for (Face face : faces) {
+                if (face.finish() != Finish.TOP) { continue; }
+                Vector3 a = moved.get(face.a()), b = moved.get(face.b()), c = moved.get(face.c());
+                float area = upward(a, b, c);
+                if (area >= 0) { continue; }
+                Vector3[] source = { face.a(), face.b(), face.c() }, points = { a, b, c };
+                float[] dx = { b.y - c.y, c.y - a.y, a.y - b.y };
+                float[] dy = { c.x - b.x, a.x - c.x, b.x - a.x };
+                float length2 = 0;
+                for (int i = 0; i < 3; i++) {
+                    if (onOutline(source[i]) || rampKeep(source[i]) <= 0) { dx[i] = dy[i] = 0; }
+                    length2 += dx[i] * dx[i] + dy[i] * dy[i];
+                }
+                if (length2 == 0) { continue; }
+                float margin = outlineTolerance(a) * (float) Math.sqrt(length2);
+                float step = (-area + margin) / length2;
+                for (int i = 0; i < 3; i++) {
+                    moved.put(source[i], new Vector3(points[i]).add(step * dx[i], step * dy[i], 0));
+                }
+                changed = true;
+            }
+            if (!changed) { return; }
         }
     }
 
@@ -2946,7 +2976,11 @@ final class BoardSurface {
         for (Face face : edgeTopography) {
             float sample = face.height(x, y, 0);
             if (sample > highest) {
-                float endpoint = face.height(point.x, point.y);
+                // Merging nearly coincident edge cuts can put the endpoint just beyond this triangle.
+                // Continue the selected roof's plane instead of falling back to the higher uncut slab.
+                Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                float endpoint = face.a().z - (normal.x * (point.x - face.a().x)
+                      + normal.y * (point.y - face.a().y)) / normal.z;
                 if (Float.isFinite(endpoint)) { highest = sample; result = endpoint; }
             }
         }

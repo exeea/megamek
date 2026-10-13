@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
@@ -44,7 +45,12 @@ class GpuRoadSourceTest {
             var pavement = GpuRoads.patches(tile, road).stream()
                   .filter(p -> p.texture().equals("roads/asphalt") && !p.blended()).findFirst().orElseThrow();
             for (var lod : TerrainLod.values()) {
-                var triangles = GpuRoads.drape(tile, new BoardSurface(scene, tile, lod), pavement);
+                var surfaces = new HashMap<Coords, BoardSurface>();
+                surfaces.put(tile.coords(), new BoardSurface(scene, tile, lod));
+                var footing = BoardBridgeFooting.build(scene, bridge, lod, surfaces);
+                var triangles = GpuRoads.drape(tile, surfaces.get(tile.coords()), pavement);
+                // The bridge's bank landing spans any recessed shore before it meets the road carrier.
+                triangles.addAll(GpuRoads.deck(pavement, footing.shape()));
                 for (float lateral : new float[] { -7, -6, 0, 6, 7 }) {
                     for (float distance : new float[] { .05f, 1, 3, 6, 10 }) {
                         var point = new Vector3(gate).mulAdd(step, lateral).mulAdd(inward, distance);
@@ -52,11 +58,14 @@ class GpuRoadSourceTest {
                               (point.y - center.y) / BoardGeometry.hexScale()));
                         var ray = new Ray(new Vector3(point.x, point.y, 200), new Vector3(0, 0, -1));
                         var hit = new Vector3();
-                        assertTrue(triangles.stream().anyMatch(t -> Intersector.intersectRayTriangle(ray,
-                              t.a(), t.b(), t.c(), hit)),
+                        double height = triangles.stream().mapToDouble(t -> Intersector.intersectRayTriangle(ray,
+                              t.a(), t.b(), t.c(), hit) ? hit.z : Double.NEGATIVE_INFINITY).max().orElseThrow();
+                        assertTrue(Double.isFinite(height),
                               tile.coords().getBoardNum() + " " + lod + " road missing at " + point);
                         if (distance == .05f) {
-                            assertEquals(GpuRoads.SURFACE_LIFT, hit.z, .001f,
+                            // Deck coats sit .01 hex units above their structural landing to avoid z-fighting.
+                            float deckCoat = (pavement.lift() + .01f) * BoardGeometry.hexScale();
+                            assertEquals(deckCoat, height, .001f,
                                   tile.coords().getBoardNum() + " " + lod + " road must meet the level deck");
                         }
                     }

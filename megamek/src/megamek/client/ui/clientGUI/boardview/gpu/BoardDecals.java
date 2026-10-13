@@ -345,33 +345,14 @@ final class BoardDecals {
         List<BoardSurface.Face> result = new ArrayList<>();
         for (var face : faces) {
             if (!upward(face)) { continue; }
-            List<Vector3> polygon = clip(clip(List.of(face.a(), face.b(), face.c()), rectangle), hex);
+            List<Vector3> polygon = BoardTacticalGeometry.clip(
+                  BoardTacticalGeometry.clip(List.of(face.a(), face.b(), face.c()), rectangle), hex);
             for (int i = 1; i + 1 < polygon.size(); i++) {
                 var triangle = new BoardSurface.Face(polygon.getFirst(), polygon.get(i), polygon.get(i + 1), BoardSurface.Finish.TOP);
                 if (upward(triangle)) { result.add(triangle); }
             }
         }
         return result;
-    }
-
-    /** Convex XY clipping retains the receiving triangle's interpolated Z and reuses wholly covered vertices. */
-    private static List<Vector3> clip(List<Vector3> polygon, List<Vector3> boundary) {
-        for (int edge = 0; edge < boundary.size() && !polygon.isEmpty(); edge++) {
-            Vector3 a = boundary.get(edge), b = boundary.get((edge + 1) % boundary.size());
-            float dx = b.x - a.x, dy = b.y - a.y;
-            if (polygon.stream().allMatch(p -> dx * (p.y - a.y) - dy * (p.x - a.x) >= 0)) { continue; }
-            List<Vector3> next = new ArrayList<>(polygon.size() + 1);
-            Vector3 previous = polygon.getLast();
-            float before = dx * (previous.y - a.y) - dy * (previous.x - a.x);
-            for (Vector3 point : polygon) {
-                float after = dx * (point.y - a.y) - dy * (point.x - a.x);
-                if ((before >= 0) != (after >= 0)) { next.add(new Vector3(previous).lerp(point, before / (before - after))); }
-                if (after >= 0) { next.add(point); }
-                previous = point; before = after;
-            }
-            polygon = next;
-        }
-        return polygon;
     }
 
     private static List<BoardSurface.Face> project(Vector3 anchor, Area hex, List<BoardSurface.Face> ground,

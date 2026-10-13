@@ -17,7 +17,7 @@ import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 
 /**
- * The authored deck shape and its presentation: its type (built or natural, {@link HexAppearance#bridgeBuilt}) and the
+ * The shared deck shape and its presentation: its type (built or natural, {@link HexAppearance#bridgeBuilt}) and the
  * materials of connected roads.
  */
 final class BoardBridge {
@@ -25,12 +25,12 @@ final class BoardBridge {
     /** Half the passage both deck styles reserve, in model px: a natural mouth or a paved lane and its shoulder. */
     static final float PASSAGE_HALF_WIDTH = Math.max(NATURAL_HALF_WIDTH * 1.04f * BoardGeometry.TILE_WIDTH / 30,
           BoardRoad.Kind.PAVED.halfWidth + BoardRoad.SHOULDER);
-    /** The bridge GLBs' slab beneath the deck surface, model px (deck top Z = 0, slab bottom Z = -1.5). */
+    /** Slab beneath the deck surface, model px (deck top Z = 0, slab bottom Z = -1.5). */
     static final float SLAB = 1.5f;
 
     private BoardBridge() { }
 
-    /** The drawn top of a built deck at {@code elevation} levels: every bridge GLB, graded slab, landing and pier. */
+    /** The drawn top of a built deck at {@code elevation} levels: its generated slab, landing and pier. */
     static float deckZ(float elevation) {
         return elevation * BoardGeometry.level() + GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale();
     }
@@ -53,7 +53,7 @@ final class BoardBridge {
 
     /**
      * The drawn deck at (x, y): its installed shape's top ({@link #top}, a sloped or fitted deck), else the plane of the
-     * tile's flat deck, which its GLB draws alone ({@link #deckZ}). What lies on a deck stands on it, a rail too.
+     * tile's deck when no installed surface is available ({@link #deckZ}). What lies on a deck stands on it, a rail too.
      */
     static float drawnTop(Shape shape, BoardScene.Tile tile, float x, float y) {
         float height = top(shape, x, y);
@@ -64,7 +64,7 @@ final class BoardBridge {
      * {@code piers}: the hex's Pillars toggle ({@link HexAppearance#PILLARS}), see {@link BoardBridgeFooting#pier}.
      * {@code colours}: the span's truss colours ({@link BridgeSpan#truss}), null for the standard design or a natural
      * span. {@code joints}: the exits whose neighbour is a joined deck ({@link #connected}); a truss continues there
-     * and ends with an end post at every other exit ({@link #trussNodes}). Any change rebuilds the hex.
+     * and ends with an end post at every other exit. Any change rebuilds the hex.
      */
     record Deck(BoardRoad.Kind kind, int exits, List<BoardRoad.Kind> neighbors, BoardScene.Surface surface,
           List<Float> rises, boolean piers, BoardDecoration.Colours colours, int joints) {
@@ -72,15 +72,13 @@ final class BoardBridge {
         boolean natural() { return kind == BoardRoad.Kind.NONE; }
         boolean sloped() { return rises.stream().anyMatch(rise -> rise != 0); }
         boolean truss() { return colours != null; }
-        /** The deck's GLB: the standard kit or the truss kit of its exits. */
-        String asset() { return BoardBridge.asset(exits, truss()); }
     }
 
     private record Material(BoardRoad.Kind kind, BoardScene.Surface surface, BoardDecoration.Colours truss) { }
 
     /**
      * PIER: the concrete piers under the deck's joints ({@link BoardBridgeFooting#pier}), never a walkable level. STEEL:
-     * a sloped truss's steel members, drawn in their facets' {@code colour} (the span's recoloured Body).
+     * a truss's steel members, drawn in their facets' {@code colour} (the span's recoloured Body).
      */
     enum Part { TOP, RIM, SIDE, SOFFIT, STRUCTURE, PIER, STEEL }
 
@@ -101,6 +99,18 @@ final class BoardBridge {
             for (var face : facets) {
                 if ((piers || face.part() != Part.PIER)
                       && Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)) {
+                    if (hit.equals(ray.origin)) { return 0; }
+                    // A thin facet's float determinant can place an accepted hit off its plane.
+                    var normal = face.normal();
+                    double denominator = (double) normal.x * ray.direction.x
+                          + (double) normal.y * ray.direction.y + (double) normal.z * ray.direction.z;
+                    if (denominator != 0) {
+                        double parameter = (normal.x * ((double) face.a().x - ray.origin.x)
+                              + normal.y * ((double) face.a().y - ray.origin.y)
+                              + normal.z * ((double) face.a().z - ray.origin.z)) / denominator;
+                        if (parameter < 0) { continue; }
+                        hit.set(ray.direction).scl((float) parameter).add(ray.origin);
+                    }
                     distance = Math.min(distance, ray.origin.dst2(hit));
                 }
             }
@@ -121,28 +131,6 @@ final class BoardBridge {
     static void triangle(List<Facet> faces, Vector3 a, Vector3 b, Vector3 c, Part part, Color colour) {
         var normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a));
         if (normal.len2() > 1e-8f) { faces.add(new Facet(a, b, c, normal.nor(), part, colour)); }
-    }
-
-    static String asset(int exits) { return asset(exits, false); }
-
-    /** One GLB per exit mask: the standard kit ({@code bridge} for a straight deck) or the truss kit. */
-    static String asset(int exits, boolean truss) {
-        String mask = String.format(java.util.Locale.ROOT, "%02d", exits);
-        return truss ? "bridges/truss-exits-" + mask : exits == 9 ? "bridge" : "bridges/bridge-exits-" + mask;
-    }
-
-    /**
-     * The nodes of a truss deck's GLB that draw: its body and, per exit, exactly one of its two alternatives, the half
-     * panel that continues the truss across a joint ({@code truss-joint-D}) or the inclined end post
-     * ({@code truss-end-D}) at a bank, a road landing or an open end. Drawing both or neither would be wrong.
-     */
-    static List<String> trussNodes(Deck deck) {
-        var nodes = new ArrayList<String>();
-        nodes.add("truss-exits-" + String.format(java.util.Locale.ROOT, "%02d", deck.exits()));
-        for (int d = 0; d < 6; d++) {
-            if ((deck.exits() & (1 << d)) != 0) { nodes.add(((deck.joints() & (1 << d)) != 0 ? "truss-joint-" : "truss-end-") + d); }
-        }
-        return List.copyOf(nodes);
     }
 
     static BoardScene.Feature feature(BoardScene.Tile tile) {

@@ -26,6 +26,20 @@ material change must not pinch the route. Two exits form a bend, three/four form
 junction, and five/six form a roundabout. Dead ends extend through the center but retain
 a ground margin before the opposite hex; an exit-free road uses a short isolated stretch.
 
+At a 120-degree connection with square border crossings, roads and bridges use
+`RailRoute.course` across the whole hex. The shared broad curve keeps the deck and
+its side structure centered around the track. Oblique crossings keep their shared
+neighbor-derived tangents, and tighter adjacent-exit turns keep their own layout.
+Three/four-way junctions retain their radial approaches and add the same broad curve
+at full carriageway width for every legal gentle pair of exits, including pairs used
+only by explicit rail layouts. Their approach markings and tyre wear stay unchanged.
+The rail course itself is unchanged.
+
+Roundabout approaches use a two-pixel fillet where they meet the circulating road.
+The closing operation erodes only exposed boundaries; internal seams between filled
+`Area` subpaths must not cut into the road and leave pointed kerbs. Generated bridge
+outlines follow this same footprint.
+
 Rails share the carriageway (batch 10, docs/3d-board-editor.md): every shape and
 clearance site reads `wayExits` and `BoardRoad.carriageway` (a drawn road or a ground
 rail on detailed, dry ground), so a rail-only hex is shaped exactly as the road hex
@@ -46,8 +60,8 @@ Roads run like real roads through plain two-way hexes at one level: `BoardRoad.b
 crosses each shared border along the line from the border before it to the border after
 it, so a zigzag of hexes becomes one straight road and a turn one smooth arc instead of
 a kink at every centre. Crossings stay within 40 degrees of square. Junctions, dead
-ends, bridges and climbs keep square crossings with a straight corridor into the hex,
-which holds a climb's ramp and a bridge deck's bank end. Next to such a crossing, the
+ends, bridges and climbs keep square crossings. Except for the shared broad 120-degree
+bend, their straight corridor holds a climb's ramp and a bridge deck's bank end. Next to such a crossing, the
 bent crossing is chosen so that the hex's whole course into the corridor is one circular
 arc; otherwise the turn would be left to the corridor's mouth, where a deck reaching
 into the bank hides its start. Both hexes of a border derive the same crossing from the
@@ -157,7 +171,7 @@ The block owns the ramp's carriageway and straight retaining sides, and the brid
 retains its authored rails above it. Those rails continue to the road inset, with the
 existing `bridge-terminal` GLB wedges on the flat road beyond the base. The level centre
 of the bridge remains open below. The block's faces serve both road paint and picking;
-`BoardBridgeSlope` omits the authored slab inside that block to avoid overlapping faces.
+`BoardBridgeSlope` omits the generated slab inside that block to avoid overlapping faces.
 Descending approaches still cut the road bank, with concrete on the cut faces and
 ground cover excluded from those faces.
 
@@ -190,6 +204,21 @@ a deck is not an explicit deck-surface override. The span's stored type (the leg
 every loaded bridge; an untyped span draws built) makes it built or natural; natural spans use
 [natural bridge geometry](gpu-natural-bridges.md).
 
+`BoardBridgeMesh` generates the built slab and kerbs from the road footprint and the
+actual on-deck rail courses, including explicit junction choices and unfinished tracks.
+`BoardBridgeTruss` follows that boundary with continuous chords and fitted support panels.
+Members stop at the exact local hex boundary, with caps closing any cuts. Steel fascia
+replaces the concrete side faces it covers so the two materials do not fight at one plane.
+Road-only five/six-way spans keep their raised roundabout island; a span carrying rail has
+an open center. The rail curves themselves remain the `RailRoute` courses.
+
+`BoardBridgeSlope` places these local facets on the shared grade profile. Flat and graded
+spans both retain one complete `BoardBridge.Shape` in the prepared terrain snapshot;
+drawing, picking, rail placement and road paint consume those same facets. Geometry is
+built during chunk preparation and retained between edits, without a separate per-frame
+bridge builder or a second camera-specific mesh. Shape-specific bridge GLBs are no longer
+used for spans; terminal and pier GLBs remain reusable details.
+
 `BoardBridgeFooting` extends terminal decks to actual bank support. Road-connected
 ends retain the ordinary material transition. At a bare bank, rails taper after they
 are supported and the material apron blends into the existing bank triangles, except on
@@ -197,7 +226,8 @@ a bank drawn as pavement.
 The physical span remains opaque.
 
 Changing a road's kind, exits or supporting geometry must invalidate the ground and
-road masks together. A changed approach can affect the inherited surface of a connected
+road masks together. Rail layout edits also rebuild the containing bridge's footprint and
+side structure. A changed approach can affect the inherited surface of a connected
 span across chunk boundaries. Reused road materials must bind the replacement chunk's
 atlas before the previous atlas is disposed.
 

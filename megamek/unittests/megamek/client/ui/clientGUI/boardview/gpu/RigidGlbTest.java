@@ -388,7 +388,7 @@ class RigidGlbTest {
     @Test
     void theJsonLevelCountIsTheDecodedLevels() {
         var root = megamek.common.Configuration.dataDir().toPath().resolve("models/board");
-        var expected = java.util.Map.of("scenery/vehicles/car", 1, "bridges/truss-exits-09", 1, "fungus/cup-chalice", 3,
+        var expected = java.util.Map.of("scenery/vehicles/car", 1, "scenery/maglev/cab", 2, "fungus/cup-chalice", 3,
               "tree-broad", 4, "mars/brain-lobes", 4);
         for (var entry : expected.entrySet()) {
             var file = root.resolve(entry.getKey() + ".glb").toFile();

@@ -360,7 +360,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
     /** The built deck's complete support, shared by its drawing and neighboring rail or object placement. */
     BoardBridge.Shape withDeck(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck,
           TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
-        var support = deck.sloped() ? BoardBridgeSlope.build(tile, deck, this) : shape;
+        var support = BoardBridgeSlope.build(tile, deck, this);
         return withPiers(scene, tile, deck, support, lod, surfaces);
     }
 

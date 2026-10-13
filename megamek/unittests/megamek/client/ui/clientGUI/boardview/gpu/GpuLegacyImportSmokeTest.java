@@ -514,7 +514,11 @@ class GpuLegacyImportSmokeTest {
             for (int frame = 0; frame < 5 || terrain.busy(); frame++) { view.render(); }
             settle(view, source);
             assertEquals(JOINTS.keySet(), piers(terrain).keySet(), "One Undo restores the span's piers");
-            // The flat middle deck, which its GLB alone draws, is what hovering, placing and the side view find there.
+            // Undo clears the selection; reopen the bridge inspector before continuing with its controls.
+            source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.COMPONENT, "bridge"),
+                  source.takeFrame().boardGeneration());
+            settle(view, source);
+            // The runtime middle deck is what hovering, placing and the side view find there.
             var deckScene = (BoardScene) field(view, "scene");
             var onDeck = new com.badlogic.gdx.math.collision.Ray(BoardGeometry.center(DECK, 0).add(0, 0, 200), new Vector3(0, 0, -1));
             var walk = terrain.walkableHit(deckScene, onDeck);
@@ -537,6 +541,9 @@ class GpuLegacyImportSmokeTest {
             for (int frame = 0; frame < 5 || terrain.busy(); frame++) { view.render(); }
             settle(view, source);
             assertEquals(JOINTS.keySet(), piers(terrain).keySet(), "One Undo restores the built span and its piers");
+            source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.COMPONENT, "bridge"),
+                  source.takeFrame().boardGeneration());
+            settle(view, source);
             assertNotNull(stageRoot.findActor("editor-bridge-pillars"));
             // Built: Truss for the whole span, then a colour from its swatches, as a placed object's (b10-f1): one undo
             // step each; the piers stay.

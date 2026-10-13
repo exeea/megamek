@@ -75,8 +75,10 @@ class BoardNaturalBridgeTest {
                     if (!BoardBridge.abutment(tile, next, d) || next.elevation() < shape.level() + 2) { continue; }
                     var walls = surfaces.get(next.coords()).walls(scene, BoardGeometry.floor(scene), surfaces);
                     var along = BoardGeometry.center(next.coords(), shape.level()).sub(center).nor();
+                    // The mouth is perpendicular to the span. Rounded side facets can face nearly the same
+                    // direction and reach farther out, but are not the end plane whose burial is checked here.
                     var ends = shape.facets().stream().filter(f -> f.part() == BoardBridge.Part.SIDE
-                          && f.normal().dot(along) > .99f).toList();
+                          && f.normal().epsilonEquals(along, .0001f)).toList();
                     float end = (float) ends.stream().mapToDouble(f -> f.a().dot(along)).max().orElseThrow();
                     var points = ends.stream().filter(f -> Math.abs(f.a().dot(along) - end) < .001f)
                           .flatMap(f -> List.of(f.a(), f.b(), f.c(),

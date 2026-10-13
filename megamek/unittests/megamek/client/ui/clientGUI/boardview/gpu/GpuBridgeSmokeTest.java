@@ -30,7 +30,7 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Authored bridge geometry meets the actual road triangles without using level height for its dimensions. */
+/** Generated bridge geometry meets the actual road triangles without using level height for its dimensions. */
 @Tag("on-demand")
 class GpuBridgeSmokeTest {
     private static final Coords CENTER = BoardSurfaceBlendTest.CENTER;
@@ -657,7 +657,7 @@ class GpuBridgeSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Trainjob truss", failure.get()); }
     }
 
-    /** The case's decks: one joint or end node per exit, picks on drawn nodes only, sloped steel in the span's colour. */
+    /** The case's decks: picks on generated geometry only, one joint or end per exit, steel in the span's colour. */
     private static void checkTruss(BoardScene scene, GpuTerrain terrain, Case shown) throws Exception {
         float s = BoardGeometry.hexScale();
         var hexes = new java.util.LinkedHashSet<>(shown.joints().keySet());
@@ -673,50 +673,42 @@ class GpuBridgeSmokeTest {
                 assertEquals(BoardBridge.connected(tile, scene.tile(at.translated(d)), d), (deck.joints() & (1 << d)) != 0,
                       name + ": a joint toward a joined deck only, " + d);
             }
-            var nodes = BoardShape.loadNodes(deck.asset(), megamek.common.board.BoardDecoration.Colours.NONE);
-            var drawn = BoardBridge.trussNodes(deck);
-            assertEquals(1 + Integer.bitCount(deck.exits()), drawn.size(), name + ": the body and one node per exit");
-            assertTrue(nodes.keySet().containsAll(drawn), name + ": " + drawn + " in " + nodes.keySet());
-            assertEquals(1 + 2 * Integer.bitCount(deck.exits()), nodes.size(), name + ": two alternatives per exit");
-            if (deck.sloped()) {
-                var steel = ((BoardBridge.Shape) field(tileMesh(terrain, at), "bridgeShape")).facets().stream()
-                      .filter(f -> f.part() == BoardBridge.Part.STEEL).toList();
-                assertFalse(steel.isEmpty(), name + ": a sloped truss draws its steel");
-                var expected = com.badlogic.gdx.graphics.Color.valueOf(at.getX() == 1 ? GREEN : "732417");
-                for (var facet : steel) {
-                    assertTrue(Math.abs(facet.colour().r - expected.r) < .01f && Math.abs(facet.colour().g - expected.g) < .01f
-                          && Math.abs(facet.colour().b - expected.b) < .01f, name + ": steel in the span's colour, " + facet.colour());
-                }
-                System.out.printf("TRUSS %s: sloped, %d steel facets%n", name, steel.size());
-                continue;
+            var shape = (BoardBridge.Shape) field(tileMesh(terrain, at), "bridgeShape");
+            assertNotNull(shape, name + ": a flat or sloped truss has one installed generated shape");
+            var steel = shape.facets().stream().filter(f -> f.part() == BoardBridge.Part.STEEL).toList();
+            assertFalse(steel.isEmpty(), name + ": a truss draws its steel");
+            var expected = com.badlogic.gdx.graphics.Color.valueOf(at.getX() == 1 ? GREEN : "732417");
+            for (var facet : steel) {
+                assertNotNull(facet.colour(), name + ": every steel facet carries its material colour");
+                assertTrue(Math.abs(facet.colour().r - expected.r) < .01f && Math.abs(facet.colour().g - expected.g) < .01f
+                      && Math.abs(facet.colour().b - expected.b) < .01f, name + ": steel in the span's colour, " + facet.colour());
             }
-            // A flat deck's GLB: a ray onto each undrawn alternative's faces, along their normal, never stops on them
-            // (where a drawn face lies at the same spot, the spot is skipped).
-            var origin = new Vector3(BoardGeometry.centerX(at), BoardGeometry.centerY(at), BoardBridge.deckZ(tile));
+            // Generate the opposite end/joint choices at the same grade. Rays must not pick their absent steel;
+            // a face occupying the same place in the installed shape is shared and cannot distinguish the choice.
+            var alternateDeck = new BoardBridge.Deck(deck.kind(), deck.exits(), deck.neighbors(), deck.surface(),
+                  deck.rises(), deck.piers(), deck.colours(), deck.joints() ^ deck.exits());
+            var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, new java.util.HashMap<>());
+            var alternate = BoardBridgeSlope.build(tile, alternateDeck, footing);
             float reach = 30 * s, tolerance = .05f * s;
             int passed = 0;
-            for (var node : nodes.entrySet()) {
-                if (drawn.contains(node.getKey())) { continue; }
-                for (var polygon : node.getValue().polygons()) {
-                    var c = new Vector3(polygon.points()[0]).add(polygon.points()[1]).add(polygon.points()[2]).scl(s / 3).add(origin);
-                    var ray = new Ray(new Vector3(polygon.normal()).scl(reach).add(c), new Vector3(polygon.normal()).scl(-1));
-                    var point = new Vector3();
-                    boolean shared = drawn.stream().flatMap(id -> nodes.get(id).polygons().stream()).anyMatch(p ->
-                          Intersector.intersectRayTriangle(ray, world(p.points()[0], s, origin), world(p.points()[1], s, origin),
-                                world(p.points()[2], s, origin), point) && Math.abs(point.dst(ray.origin) - reach) < tolerance);
-                    if (shared) { continue; }
-                    var pick = terrain.selectionHit(scene, ray);
-                    assertTrue(pick == null || Math.abs((float) Math.sqrt(pick.distance()) - reach) > tolerance,
-                          name + ": the undrawn " + node.getKey() + " is not picked at " + c);
-                    passed++;
-                }
+            for (var facet : alternate.facets()) {
+                if (facet.part() != BoardBridge.Part.STEEL) { continue; }
+                var c = new Vector3(facet.a()).add(facet.b()).add(facet.c()).scl(1f / 3);
+                var ray = new Ray(new Vector3(facet.normal()).scl(reach).add(c), new Vector3(facet.normal()).scl(-1));
+                var point = new Vector3();
+                boolean shared = shape.facets().stream().anyMatch(face ->
+                      Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), point)
+                            && Math.abs(point.dst(ray.origin) - reach) < tolerance);
+                if (shared) { continue; }
+                var pick = terrain.selectionHit(scene, ray);
+                assertTrue(pick == null || Math.abs((float) Math.sqrt(pick.distance()) - reach) > tolerance,
+                      name + ": the undrawn end/joint alternative is not picked at " + c);
+                passed++;
             }
-            System.out.printf("TRUSS %s: drawn %s, %d faces of undrawn alternatives looked through%n", name, drawn, passed);
+            System.out.printf("TRUSS %s: %d steel facets, %d faces of undrawn alternatives looked through%n", name, steel.size(), passed);
             assertTrue(deck.exits() == 0 || passed > 0, name + ": an undrawn alternative was probed");
         }
     }
-
-    private static Vector3 world(Vector3 model, float scale, Vector3 origin) { return new Vector3(model).scl(scale).add(origin); }
 
     private static Object tileMesh(GpuTerrain terrain, Coords at) throws Exception {
         for (Object chunk : (List<?>) field(terrain, "chunks")) {

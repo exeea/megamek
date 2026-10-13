@@ -2623,7 +2623,6 @@ final class GpuTerrain implements Disposable {
         }
         trees.retainParts(sharedSources);
         assets.retain(this, liveBuildings, liveIndustrial, liveRoutes);
-        BoardBridgeSlope.retainUncoloured();
         updateLight(scene.light());
     }
 
@@ -2853,7 +2852,7 @@ final class GpuTerrain implements Disposable {
                     check.run();
                     if (patch.shape().isEmpty()) { continue; }
                     patches.add(new RoadPatch(patch, masks.share(GpuRoads.mask(road, patch)),
-                          GpuRoads.deck(tile, feature, patch, footing, surfaces, deck.sloped() ? shape : null), true));
+                          GpuRoads.deck(tile, feature, patch, footing, surfaces, shape), true));
                 }
             }
             if (!patches.isEmpty()) { roads.put(tile.coords(), patches); }
@@ -3266,7 +3265,6 @@ final class GpuTerrain implements Disposable {
                   || f.authoredPlacement() || f.decoration() != null)).toList();
         }
         List<Prop> supports = new ArrayList<>();
-        Prop deckProp = null;
         for (BoardScene.Feature feature : features) {
             if (feature.decoration() != null && feature.decoration().kind().equals("decal")) { continue; }
             if (build.chunk.columns && !columnFeature(feature)) { continue; }
@@ -3297,8 +3295,10 @@ final class GpuTerrain implements Disposable {
                 chunk.tileMeshes.get(tile.coords()).bridgeShape = bridgeShape;
                 chunk.bounds.ext(bridgeShape.bounds());
             }
-            if (bridge && prepared.bridges().get(tile.coords()).natural()) {
-                naturalBridge(solid, bridgeShape);
+            if (bridge) {
+                var deck = prepared.bridges().get(tile.coords());
+                if (deck.natural()) { naturalBridge(solid, bridgeShape); }
+                else { builtBridge(solid, bridgeShape, deck, scene, tile); }
                 continue;
             }
             boolean generatedIndustrial = BoardIndustrial.supports(feature);
@@ -3317,28 +3317,14 @@ final class GpuTerrain implements Disposable {
                   : building != null ? building.model(0)
                   : feature.kind() == BoardScene.FeatureKind.TREE
                   ? assets.lodModel(feature.asset(), 0)
-                  : bridge ? bridgeModel(prepared.bridges().get(tile.coords())) : assets.model(feature.asset(), feature.colours());
+                  : assets.model(feature.asset(), feature.colours());
             assets.take(this, building, model);
-            // A truss deck draws its body and one joint or end node per exit, the span's colours on its steel.
-            var trussNodes = bridge && prepared.bridges().get(tile.coords()).truss()
-                  ? BoardBridge.trussNodes(prepared.bridges().get(tile.coords())) : null;
             java.util.function.UnaryOperator<Model> drawn = mesh ->
                   feature.kind() == BoardScene.FeatureKind.TREE || fungus || foliageModel(mesh) ? foliage(mesh) : mesh;
             ModelInstance instance = building != null ? building.instance(0)
-                  : trussNodes != null ? new ModelInstance(model, trussNodes.toArray(String[]::new))
                   : new ModelInstance(drawn.apply(model));
             // Its renderables carry the colours to the instance data and the shader (copy keeps them).
             if (placedObject) { instance.userData = RigidGlb.packed(feature.colours()); }
-            if (bridge) {
-                Material deck = instance.getMaterial("bridge-deck");
-                deck.set(roadMaterial(GpuRoads.texture(prepared.bridges().get(tile.coords()).kind()).substring("roads/".length()), false));
-                deck.set(GpuIceShader.road(deck, scene, tile));
-                deck.set(new BridgeDeck());
-                if (bridgeShape != null) {
-                    bridgeFooting(solid, bridgeShape, deck, instance.getMaterial("bridge-structure"), instance.getMaterial("bridge-steel"));
-                }
-                if (prepared.bridges().get(tile.coords()).sloped()) { continue; }
-            }
             for (Material material : instance.materials) {
                 if (building == null && material.id.equals("wall")) {
                     material.get(TextureAttribute.class, TextureAttribute.Diffuse).scaleV = feature.height();
@@ -3377,8 +3363,7 @@ final class GpuTerrain implements Disposable {
                 px = spot[0];
                 py = spot[1];
             }
-            // The deck meets the road surface, including its small clearance above the ground.
-            float base = bridge ? BoardBridge.deckZ(tile) : ground.height(px, py);
+            float base = ground.height(px, py);
             if (coral) {
                 // Sample the drawn terrain around the roots; a high point must not suspend the rest of the base.
                 for (int sample = 0; sample < 8; sample++) {
@@ -3441,11 +3426,6 @@ final class GpuTerrain implements Disposable {
                             base + feature.elevation() * BoardGeometry.MODEL_LEVEL_HEIGHT * BoardGeometry.hexScale())
                       .rotate(Vector3.Z, feature.rotation()).scale(scale * (float) feature.stretch().x(),
                             scale * (float) feature.stretch().y(), scale * (float) feature.stretch().z());
-            } else if (bridge) {
-                // Bridge elevation locates the deck; it never stretches its thickness or raised rails.
-                // Each GLB is a complete joined deck, already clipped to the actual hex exit edges.
-                float scale = BoardGeometry.hexScale();
-                instance.transform.setToTranslation(px, py, base).scale(scale, scale, scale);
             } else {
                 // Trees and structures retain inspectable proportions; their actual Z extent fits the rules' height.
                 // Fuel tanks and industrial structures also use the building catalog, without building cutaways.
@@ -3485,8 +3465,8 @@ final class GpuTerrain implements Disposable {
                         || feature.asset().startsWith("buildings/"),
                   Float.NaN, feature.kind() == BoardScene.FeatureKind.INDUSTRIAL);
             prop.scatter = feature.kind() == BoardScene.FeatureKind.SCATTER;
-            // The Tactical View keeps a bridge and terrain scenery with gameplay value: rubble and fortifications.
-            prop.tactical = !placedObject && (bridge || gameplayScenery(instance));
+            // The Tactical View keeps terrain scenery with gameplay value: rubble and fortifications.
+            prop.tactical = !placedObject && gameplayScenery(instance);
             // Placed objects, from either file format, under a quarter hex: zoomed-out views skip them (drawn).
             prop.small = object != null && !BoardRail.route(feature)
                   && !standTree && !foliageModel(model) && geyser == null
@@ -3494,8 +3474,6 @@ final class GpuTerrain implements Disposable {
             prop.decorationId = editable ? object.id() : null;
             if (placedObject) { prop.decorationFeature = feature; }
             prop.decorationAnchorZ = instance.transform.val[Matrix4.M23] - feature.elevation() * BoardGeometry.level();
-            // A truss is picked on the nodes it draws, never on the alternatives its model also holds.
-            if (trussNodes != null) { prop.pickingTriangles = triangles(instance.nodes, part -> true); }
             // A click on a maglev's pier selects its route (batch-10 answer 8): the beam's triangles and its piers'.
             if (!routePiers.isEmpty()) { prop.pickingTriangles = withPierTriangles(triangles(model), routePiers, instance.transform); }
             // A placed object's simpler levels, shared meshes as its near one (a stand tree has the stand's levels).
@@ -3503,13 +3481,11 @@ final class GpuTerrain implements Disposable {
                 List<Model> levels = assets.objectLevels(feature.asset());
                 if (levels.stream().distinct().count() > 1) { prop.levels = levels.stream().map(drawn).toList(); }
             }
-            // A flat built deck, drawn by its GLB alone, is the bridge support that placement and hovering find.
-            prop.receiver = bridge ? "bridge" : BoardFeatures.receiver(feature);
+            prop.receiver = BoardFeatures.receiver(feature);
             chunk.props.add(prop);
-            if (bridge) { deckProp = prop; }
             if (feature.decoration() == null && (feature.kind() == BoardScene.FeatureKind.BUILDING
                   || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL
-                  || feature.kind() == BoardScene.FeatureKind.PROP && !bridge && !feature.asset().equals("field"))) {
+                  || feature.kind() == BoardScene.FeatureKind.PROP && !feature.asset().equals("field"))) {
                 supports.add(prop);
             }
             if (feature.kind() == BoardScene.FeatureKind.BUILDING) {
@@ -3535,16 +3511,14 @@ final class GpuTerrain implements Disposable {
             chunk.bounds.ext(bounds);
         }
         placeDecals(build, tile, ground, supports);
-        List<Prop> receivers = supports;
-        if (deckProp != null) { receivers = new ArrayList<>(supports); receivers.add(deckProp); }
-        placeDecorationPaint(build, tile, ground.faces(), ground.deck(), receivers);
+        placeDecorationPaint(build, tile, ground.faces(), ground.deck(), supports);
     }
 
     /**
      * The placement's support rule ({@link megamek.common.board.BoardDecoration.Placement#level}) settled on the drawn
      * meshes: the chosen support beneath the anchor; where that support has no surface there, its height at the
-     * {@code owner} hex centre, as the legacy composition's shared plane did; a flat built deck, which its GLB draws
-     * without facets, at its deck plane ({@link BoardBridge#deckZ}); and only then the sampled ground. A rail rider
+     * {@code owner} hex centre, as the legacy composition's shared plane did; a missing bridge support at its deck
+     * plane ({@link BoardBridge#deckZ}); and only then the sampled ground. A rail rider
      * stands on the rail top the owner's track draws there ({@link BoardRail#railTop}).
      */
     private float decorationHeight(BoardScene scene, BoardScene.Feature feature, float groundHeight,
@@ -4355,8 +4329,19 @@ final class GpuTerrain implements Disposable {
         });
     }
 
+    /** Generate GPU batches from the same prepared bridge facets used for placement and picking. */
+    private void builtBridge(Layer solid, BoardBridge.Shape shape, BoardBridge.Deck bridge,
+          BoardScene scene, BoardScene.Tile tile) {
+        Material deck = roadMaterial(GpuRoads.texture(bridge.kind()).substring("roads/".length()), false);
+        deck.set(GpuIceShader.road(deck, scene, tile));
+        deck.set(new BridgeDeck());
+        Material concrete = material(assets.material("sculpt/concrete"), false);
+        Material steel = bridge.truss() ? new Material(ColorAttribute.createDiffuse(Color.WHITE)) : null;
+        bridgeFooting(solid, shape, deck, concrete, steel);
+    }
+
     /**
-     * A built deck's terrain facets: its top in the road material, a sloped truss's steel ({@code steel}, null for
+     * A built deck's terrain facets: its top in the road material, a truss's steel ({@code steel}, null for
      * the standard kit and piers) in its facets' recoloured colour, everything else in the structure's concrete.
      */
     private void bridgeFooting(Layer solid, BoardBridge.Shape shape, Material deck, Material structure, Material steel) {
@@ -4387,11 +4372,6 @@ final class GpuTerrain implements Disposable {
             points[i++] = vertex(p, normal, u / repeat, v / repeat, colour);
         }
         mesh.triangle(points[0], points[1], points[2]);
-    }
-
-    /** A flat built deck's GLB: the standard kit, or the truss kit in the span's colours (the one recolour path). */
-    private Model bridgeModel(BoardBridge.Deck deck) {
-        return deck.truss() ? assets.model(deck.asset(), deck.colours()) : assets.model(deck.asset());
     }
 
     /** {@code lava} is the chunk's lava field: cooled banks, the lava's own and those of land beside it, glow at it. */

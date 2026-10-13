@@ -47,7 +47,10 @@ independent copies of cached footprint areas.
   edges blend by inverse square distance. A receding rim then compresses the ground
   without shearing it. Only the graded ramp strips stay put. Where a rim bends faster
   than the lattice is fine, a few small triangles flip; their free corners then move to
-  the middle of their neighbours. Slivers can remain where two rims cross at a corner.
+  the middle of their neighbours. If that mean remains outside a concave fan, a bounded
+  correction moves the flipped triangles' free corners together to increase their
+  signed area, preserving the outline, ramp corridor and heights. Slivers can remain
+  where two rims cross at a corner.
   On Fire and Ice 2 all stay under 0.3 m, which its test checks; Mines 1 keeps one
   0.6 m sliver, and MesaCity 2721 (a gate beside a five-level cliff) a cluster up to
   0.9 m tall but under 0.3 m² each.
@@ -99,6 +102,6 @@ the approach's material, normal/surface maps and world-space texture phase.
 The visible road stays bright at the entrance, then fades deeper inside. A tiny
 recessed underlap at the hex edge prevents cracks on the slightly oblique lattice.
 
-The bridge asset exporter must omit zero-width shared boundaries when extruding
+The runtime bridge builder must omit zero-width shared boundaries when extruding
 rail outlines; otherwise coincident clipped loops create vertical faces across
 an open carriageway.

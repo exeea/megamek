@@ -58,6 +58,7 @@ class BoardBridgeSlopeTest {
             var shape = manufactured(scene, tile);
             var road = deck.road(at);
             var footprint = road.footprint(0);
+            var slab = road.footprint(BoardRoad.SHOULDER);
             var center = BoardGeometry.center(at, 2);
             float lift = GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale();
             for (int d = 0; d < 6; d++) {
@@ -79,15 +80,22 @@ class BoardBridgeSlopeTest {
                     assertEquals(joint - 1.5f * BoardGeometry.hexScale(), height(shape, inside, true), .005f);
                     assertEquals(height(shape, inside, true), height(other, outside, true), .01f);
                 }
-                // Check the actual incline between the nominal centre and the shared edge, including both rails.
+                // Check the incline wherever the curved slab crosses these stations, including its rails.
+                // The broad bend needs a small sampling inset from the kerb's 0.1-unit authoring approximation.
+                float reach = exits == 5 ? 8 : 8.25f;
                 for (float t : new float[] { .55f, .7f, .9f }) {
-                    for (float offset : new float[] { -8.25f, 0, 8.25f }) {
+                    for (float offset : new float[] { -reach, 0, reach }) {
                         var p = new Vector3(center).mulAdd(gate, t).mulAdd(across, offset * BoardGeometry.hexScale());
-                        boolean lane = footprint.contains((p.x - center.x) / BoardGeometry.hexScale(),
-                              (p.y - center.y) / BoardGeometry.hexScale());
+                        float px = (p.x - center.x) / BoardGeometry.hexScale(), py = (p.y - center.y) / BoardGeometry.hexScale();
+                        float actual = height(shape, p, false);
+                        if (!slab.contains(px, py)) {
+                            assertEquals(Float.NEGATIVE_INFINITY, actual, "No bridge outside the curved slab at " + p);
+                            continue;
+                        }
+                        boolean lane = footprint.contains(px, py);
                         float expected = center.z + lift + step(d) * BoardGeometry.level() * (t - .5f)
                               + (lane ? 0 : 2.5f * BoardGeometry.hexScale());
-                        assertEquals(expected, height(shape, p, false), .01f, "Continuous grade at exit " + d);
+                        assertEquals(expected, actual, .01f, "Continuous grade at exit " + d);
                     }
                 }
             }

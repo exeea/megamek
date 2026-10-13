@@ -45,7 +45,9 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `GpuRoads` | Turns footprints into material masks/atlases carried by existing terrain or bridge triangles. |
 | `BoardBridge` | Follows span connectivity; draws each span's stored type (built or natural; an untyped span draws built, the conversion types every loaded bridge) and a built deck's surface from its approach roads. |
 | `BoardBridgeFooting` | Extends manufactured slab/rails until their bank ends have actual terrain support; the one pier implementation (room rule, joint frame, footing sample, liquid sink, stretched shaft, LoD), parameterised by its kit and the underside it carries: deck piers under the joints of a built span whose Pillars toggle is on (`bridges/bridge-pier.glb`), slim piers under the joints of a maglev route whose Pillars are on (`bridges/maglev-pier.glb`, up to the beam's underside from `BoardRail.joint`). |
-| `BoardBridgeSlope` | Fits authored slabs and rails to connected decks one level apart; shares facets with paint and picking. |
+| `BoardBridgeMesh` | Generates manufactured slabs and kerbs from the live road and on-deck rail footprint during chunk preparation. |
+| `BoardBridgeTruss` | Generates continuous steel chords, support panels and joined or terminal ends along the manufactured carriageway boundary. |
+| `BoardBridgeSlope` | Grades generated slabs and rails to connected decks one level apart; shares complete flat and sloped shapes with drawing, paint and picking. |
 | `BoardNaturalBridge` | Builds hollow rock spans, bank contacts and underpass geometry. |
 | `BoardTunnel` | Detects cosmetic portals at eligible cliff-facing road/deck exits and supplies their placement. |
 | `BoardRocks`, `BoardShape` | Load reusable rock/scatter CPU mesh data; shape loading is separate from placement policy. |
