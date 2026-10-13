@@ -138,8 +138,17 @@ final class GpuMarkers implements Disposable {
         return builder.end();
     }
 
-    /** One cosmetic clock and transform for location markers and sensor contacts, independent of playback speed. */
-    void beginFrame(List<BoardMarker> markers, float seconds) {
+    /**
+     * One cosmetic clock and transform for location markers and sensor contacts, independent of playback speed. An
+     * artillery drift is a line drawn by the board overlay, so it gets no symbol here.
+     */
+    void beginFrame(List<BoardMarker> allMarkers, float seconds) {
+        List<BoardMarker> markers = new ArrayList<>(allMarkers.size());
+        for (BoardMarker marker : allMarkers) {
+            if (marker.kind() != BoardMarker.Kind.ARTILLERY_DRIFT) {
+                markers.add(marker);
+            }
+        }
         clock = (clock + seconds) % SPIN_PERIOD_SECONDS;
         if (!previousMarkers.equals(markers)) {
             locations.keySet().retainAll(Set.copyOf(markers));
@@ -316,6 +325,8 @@ final class GpuMarkers implements Disposable {
             case RUBBLE_CLEAR -> RUBBLE_CLEAR_OUTLINE;
             case DUG_IN -> DUG_IN_OUTLINE;
             case TAGGED -> TAGGED_OUTLINE;
+            // A drift is a line the board overlay draws, never a standing symbol.
+            case ARTILLERY_DRIFT -> false;
         };
     }
 
