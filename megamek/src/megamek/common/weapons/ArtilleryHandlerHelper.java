@@ -185,6 +185,25 @@ public final class ArtilleryHandlerHelper {
     }
 
     /**
+     * The first hex past the board's edge on the line from the hex a round was aimed at to where it scattered off the
+     * board: where its explosion is shown, at the edge it crossed, rather than wherever far off the map it landed.
+     *
+     * @param board           the board the round was fired at
+     * @param aimedHex        the hex it was aimed at
+     * @param offBoardScatter where it came down, off the board
+     *
+     * @return the first hex off the board on that line, or {@code null} if the line never leaves it
+     */
+    public static @Nullable Coords firstOffBoardHexToward(Board board, Coords aimedHex, Coords offBoardScatter) {
+        for (Coords coords : Coords.intervening(aimedHex, offBoardScatter)) {
+            if (!board.contains(coords)) {
+                return coords;
+            }
+        }
+        return board.contains(offBoardScatter) ? null : offBoardScatter;
+    }
+
+    /**
      * Returns the name of the player who fired the given artillery attack, for use in the "fired by ..." text of a hex
      * marker or report.
      * <p>

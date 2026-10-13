@@ -35,6 +35,7 @@ package megamek.common.weapons;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -42,10 +43,14 @@ import static org.mockito.Mockito.when;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Optional;
+import java.util.stream.Stream;
 
+import megamek.common.Hex;
 import megamek.common.Messages;
 import megamek.common.Player;
 import megamek.common.actions.ArtilleryAttackAction;
+import megamek.common.board.Board;
+import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import megamek.common.options.OptionsConstants;
 import megamek.common.units.Entity;
@@ -214,5 +219,17 @@ class ArtilleryHandlerHelperTest {
         when(game.getPlayer(2)).thenReturn(new Player(2, "Independent Base Defenses"));
 
         assertEquals("Independent Base Defenses", ArtilleryHandlerHelper.firingPlayerName(game, attack));
+    }
+
+    /** A round that scattered off the board shows its explosion at the first hex past the edge it crossed. */
+    @Test
+    void firstOffBoardHexToward_isJustPastTheEdgeItCrossed() {
+        Board board = new Board(10, 10, Stream.generate(Hex::new).limit(100).toArray(Hex[]::new));
+        Coords aimed = new Coords(5, 5);
+
+        assertEquals(new Coords(5, 10), ArtilleryHandlerHelper.firstOffBoardHexToward(board, aimed, new Coords(5, 16)),
+              "Straight south, six hexes past the edge: shown one hex past it");
+        assertNull(ArtilleryHandlerHelper.firstOffBoardHexToward(board, aimed, new Coords(5, 8)),
+              "A round still on the board has no edge to show");
     }
 }
