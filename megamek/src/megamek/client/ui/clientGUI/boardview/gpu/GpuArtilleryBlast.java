@@ -789,8 +789,8 @@ final class GpuArtilleryBlast {
     }
 
     /**
-     * A fuel-air round, in four beats. Its fuel spreads as a pale, low haze over every hex in its radius; a quarter
-     * second after landing the whole cloud lights at once, a sheet of fire over each hex, brightest at the centre. The
+     * A fuel-air round, in four beats. Its fuel spreads as one pale, low haze over its whole radius; a moment after
+     * landing the whole cloud lights at once, one sheet of fire over the radius, drawing in as it burns. The
      * fire rolls up into a tall, churning orange-and-black column flecked with burning metal, while a ring of dust
      * races out to the radius and burning chunks streak away. Heavy black soot is left to drift off on the wind.
      */
@@ -801,28 +801,27 @@ final class GpuArtilleryBlast {
         int radius = 0;
         for (Piece piece : hexes) { radius = Math.max(radius, piece.ring()); }
         float reach = .6f + .25f * radius;
-        for (int index = 0; index < hexes.size(); index++) {
-            Piece piece = hexes.get(index);
-            Vector3 landing = scatter.landings().get(index);
-            // The fuel reaches the outer rings a moment after the inner ones.
-            float spread = MathUtils.clamp((seconds - piece.ring() * .04f) / FUEL_AIR_IGNITION_SECONDS, 0, 1);
-            // The fuel thins as it is about to light and is gone when the sheet of fire appears, so the two never
-            // overlap: drawing both at once was the blast's costliest moment.
-            float hazeFade = MathUtils.clamp((FUEL_AIR_IGNITION_SECONDS - seconds) / .08f, 0, 1);
-            if (spread > 0 && hazeFade > 0) {
-                // Wide enough that neighbouring hexes' haze merges into one low, pale cloud.
-                point.set(landing).add(0, 0, hex * .1f);
-                explosions.addFlat(point, hex * .85f * spread, .1f, 0, .3f * hazeFade, seed + index * 13, FUEL_HAZE,
-                      .35f);
-            }
-            float sheet = (seconds - FUEL_AIR_IGNITION_SECONDS) / .75f;
-            if (sheet >= 0 && sheet < 1) {
-                // The sheet draws in and up as it burns, rolling into the column over the target hex.
-                float ringFade = 1 - .22f * piece.ring();
-                point.set(landing).lerp(ground, .35f * sheet).add(0, 0, hex * (.12f + .45f * sheet));
-                explosions.addFlat(point, hex * .6f * intensity * (1 - .3f * sheet), sheet, 1,
-                      fadeOut(sheet, .45f) * ringFade, seed + index * 17, FUEL_FIRE, .45f + .4f * sheet);
-            }
+        // One haze and one sheet of fire over the whole circular radius, not one of each per hex: an Arrow IV's 61
+        // overlapping volumes cost a modest graphics chip far too much.
+        float cloudRadius = hex * (radius + .6f);
+        // The fuel spreads out to the radius, easing as it reaches the edge.
+        float spread = MathUtils.clamp(seconds / FUEL_AIR_IGNITION_SECONDS, 0, 1);
+        spread = 1 - (1 - spread) * (1 - spread);
+        // The fuel thins as it is about to light and is gone when the sheet of fire appears, so the two never overlap.
+        float hazeFade = MathUtils.clamp((FUEL_AIR_IGNITION_SECONDS - seconds) / .08f, 0, 1);
+        if (spread > 0 && hazeFade > 0) {
+            float hazeRadius = cloudRadius * (.35f + .65f * spread);
+            point.set(ground).add(0, 0, hex * .1f);
+            explosions.addFlat(point, hazeRadius, .1f, 0, .3f * hazeFade, seed + 13, FUEL_HAZE,
+                  flatness(hex * .3f, hazeRadius));
+        }
+        float sheet = (seconds - FUEL_AIR_IGNITION_SECONDS) / .75f;
+        if (sheet >= 0 && sheet < 1) {
+            // The sheet draws in and up as it burns, rolling into the column over the target hex.
+            float sheetRadius = cloudRadius * intensity * (1 - .45f * sheet);
+            point.set(ground).add(0, 0, hex * (.12f + .45f * sheet));
+            explosions.addFlat(point, sheetRadius, sheet, 1, fadeOut(sheet, .45f), seed + 17, FUEL_FIRE,
+                  flatness(hex * (.35f + .5f * sheet), sheetRadius));
         }
         float columnSeconds = seconds - FUEL_AIR_IGNITION_SECONDS;
         float columnAge = columnSeconds / 2.4f;
@@ -873,6 +872,11 @@ final class GpuArtilleryBlast {
                       .95f * fadeOut(sootAge, .55f), seed + 600 + level * 31, FUEL_SOOT, Vector3.Zero);
             }
         }
+    }
+
+    /** How flat a volume of {@code radius} must be to stand {@code height} tall: its height as a share of its width. */
+    private static float flatness(float height, float radius) {
+        return MathUtils.clamp(height / radius, .1f, 1);
     }
 
     /**
