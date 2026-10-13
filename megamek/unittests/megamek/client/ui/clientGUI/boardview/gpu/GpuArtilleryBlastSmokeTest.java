@@ -41,9 +41,9 @@ class GpuArtilleryBlastSmokeTest {
     private static final float[] MOMENTS = { .08f, .35f, .9f, 1.8f, 3.2f, 4.8f };
     private static final GpuArtilleryBlast.Style[] STYLES = { GpuArtilleryBlast.Style.CROWN,
           GpuArtilleryBlast.Style.MUSHROOM, GpuArtilleryBlast.Style.FIREBALL, GpuArtilleryBlast.Style.CROWN,
-          GpuArtilleryBlast.Style.CROWN, GpuArtilleryBlast.Style.CLUSTER };
-    /** The R value of each row: a Sniper ring for the three shapes, a Copperhead, a Long Tom, a Long Tom cluster. */
-    private static final int[] HEX_RADII = { 1, 1, 1, 0, 2, 1 };
+          GpuArtilleryBlast.Style.CROWN, GpuArtilleryBlast.Style.CLUSTER, GpuArtilleryBlast.Style.MINES };
+    /** The R value of each row: a Sniper for the three shapes, Copperhead, Long Tom, its cluster round, FASCAM. */
+    private static final int[] HEX_RADII = { 1, 1, 1, 0, 2, 1, 0 };
 
     @Test
     void drawsEachBlastShapeFromIgnitionToClearing() {
@@ -74,6 +74,8 @@ class GpuArtilleryBlastSmokeTest {
                     volumes.setLightDirection(new Vector3(-.3f, .5f, -1).nor());
                     var sheet = new BufferedImage(SIZE * MOMENTS.length, SIZE * STYLES.length, BufferedImage.TYPE_INT_RGB);
                     var graphics = sheet.createGraphics();
+                    File folder = new File(System.getProperty("megamek.gpu.screenshots"));
+                    assertTrue(folder.isDirectory() || folder.mkdirs());
                     var empty = frame(buffer, batch, ground, camera, volumes, () -> { });
                     try {
                         for (int row = 0; row < STYLES.length; row++) {
@@ -86,7 +88,13 @@ class GpuArtilleryBlastSmokeTest {
                                       () -> blast.emit(volumes, Vector3.Zero, size, hexRadius, style, seconds, 41));
                                 if (column == 0) {
                                     firstWarmth = warmth(image) - warmth(empty);
-                                    assertTrue(different(image, empty) > 500, style + " must draw at ignition");
+                                    // Kept beside the sheet, so a shape that fails here can be looked at.
+                                    ImageIO.write(image, "png", new File(folder,
+                                          "artillery-ignition-" + style + ".png"));
+                                    long drawn = different(image, empty);
+                                    // A minefield round only pops its mines out, far smaller than any fiery blast.
+                                    long minimum = style == GpuArtilleryBlast.Style.MINES ? 40 : 500;
+                                    assertTrue(drawn > minimum, style + " must draw at ignition, changed pixels " + drawn);
                                     var repeated = frame(buffer, batch, ground, camera, volumes,
                                           () -> blast.emit(volumes, Vector3.Zero, size, hexRadius, style, seconds, 41));
                                     assertTrue(Arrays.equals(pixels(image), pixels(repeated)),
@@ -158,6 +166,8 @@ class GpuArtilleryBlastSmokeTest {
             }
         } finally { graphics.dispose(); }
         ImageIO.write(sheet, "png", new File(folder, "artillery-cluster-review.png"));
+        // The animations blow in a moderate eastward wind, so the drift of the smoke can be judged.
+        volumes.setWind(new BoardAtmosphere.Effects(0, 0, 0, 0, 0, .6f, 90));
         writeAnimation(buffer, batch, ground, volumes, blast, size, oblique, GpuArtilleryBlast.Style.CLUSTER, 1,
               new File(folder, "artillery-cluster-frames"));
         // Wide enough for a Long Tom's debris landing two rings out.
@@ -170,6 +180,19 @@ class GpuArtilleryBlastSmokeTest {
         wide.update();
         writeAnimation(buffer, batch, ground, volumes, blast, size, wide, GpuArtilleryBlast.Style.CROWN, 2,
               new File(folder, "artillery-longtom-frames"));
+        // Close on the single hex a minefield round seeds.
+        var close = new PerspectiveCamera(40, SIZE, SIZE);
+        close.position.set(0, -hex * 2.4f, hex * 1.5f);
+        close.up.set(Vector3.Z);
+        close.lookAt(0, 0, hex * .3f);
+        close.near = 1;
+        close.far = size * 40;
+        close.update();
+        writeAnimation(buffer, batch, ground, volumes, blast, size, close, GpuArtilleryBlast.Style.MINES, 0,
+              new File(folder, "artillery-mines-frames"));
+        // A homing round with no TAG to follow: a dud's dirt burst.
+        writeAnimation(buffer, batch, ground, volumes, blast, size, close, GpuArtilleryBlast.Style.DUD, 0,
+              new File(folder, "artillery-dud-frames"));
     }
 
     /** Numbered frames at 15 a second over the blast's life, for stitching into an animation to review. */

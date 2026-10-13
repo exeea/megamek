@@ -88,6 +88,7 @@ final class GpuMarkers implements Disposable {
     static final boolean FORTIFY_BUILD_OUTLINE = true;
     static final boolean RUBBLE_CLEAR_OUTLINE = true;
     static final boolean DUG_IN_OUTLINE = true;
+    static final boolean TAGGED_OUTLINE = true;
     static final int SENSOR_RGB = BoardMarker.Kind.SENSOR_CONTACT.rgb();
     private static final int ART_SIZE = 96;
     private static final Font LABEL_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 16);
@@ -314,6 +315,7 @@ final class GpuMarkers implements Disposable {
             case FORTIFY_BUILD -> FORTIFY_BUILD_OUTLINE;
             case RUBBLE_CLEAR -> RUBBLE_CLEAR_OUTLINE;
             case DUG_IN -> DUG_IN_OUTLINE;
+            case TAGGED -> TAGGED_OUTLINE;
         };
     }
 
@@ -557,6 +559,14 @@ final class GpuMarkers implements Disposable {
                 } else {
                     g.drawPolyline(new int[] { 20, 26, 26, 70, 70, 78 }, new int[] { 53, 53, 80, 80, 53, 53 }, 6);
                 }
+            }
+            case TAGGED -> {
+                // A laser designator's spot: a bright dot held inside four corner brackets.
+                g.fillOval(40, 40, 16, 16);
+                g.drawPolyline(new int[] { 24, 24, 34 }, new int[] { 34, 24, 24 }, 3);
+                g.drawPolyline(new int[] { 62, 72, 72 }, new int[] { 24, 24, 34 }, 3);
+                g.drawPolyline(new int[] { 72, 72, 62 }, new int[] { 62, 72, 72 }, 3);
+                g.drawPolyline(new int[] { 34, 24, 24 }, new int[] { 72, 72, 62 }, 3);
             }
             default -> throw new IllegalArgumentException("No coin symbol for " + kind);
         }

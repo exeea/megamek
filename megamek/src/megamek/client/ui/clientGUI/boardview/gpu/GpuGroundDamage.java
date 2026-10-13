@@ -4,11 +4,11 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.io.File;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,8 +26,8 @@ import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.TextureArrayData;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.BufferUtils;
+import com.badlogic.gdx.utils.Disposable;
 import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
@@ -42,6 +42,13 @@ final class GpuGroundDamage implements Disposable {
     static final int TILE_INTERIOR = TILE_SIZE - 2 * TILE_BORDER;
     static final float TILE_METRES = 8;
     static final int STAMPS_PER_FRAME = 8;
+    /**
+     * Texels the marks one frame paints may cover, at least one mark's worth: a few craters fit in a frame, while a
+     * fuel-air round's charring of every hex in its radius is spread over many frames instead of stalling one.
+     */
+    static final int STAMP_TEXELS_PER_FRAME = 120_000;
+    /** A frame whose mark painting takes longer than this is logged. */
+    private static final long SLOW_STAMPING_MILLIS = 20;
     private static final int MAX_PENDING_STAMPS = 256;
     private static final int MAX_EVENTS = UnitPlayback.MAX_PENDING_EVENTS * 2;
     private static final int MAX_MARKS_PER_EVENT = 64;
@@ -59,12 +66,24 @@ final class GpuGroundDamage implements Disposable {
         boolean thermal() { return this == LASER || this == PPC || this == LASER_BLAST || this == PPC_BLAST || this == PLASMA; }
     }
 
+    /**
+     * A fuel-air round's charring of each 30 m hex in its radius: its soft edge reaches most of the hex. Kept to 9 m,
+     * as one mark is painted in one frame and a 13 m mark took about 45 ms.
+     */
+    static final float FUEL_AIR_CHAR_METRES = 9;
+    /** The ring damage at which fuel-air charring is darkest: a Sniper's or an Arrow IV's target hex. */
+    static final float FUEL_AIR_DARKEST_DAMAGE = 20;
+
+    /** The damage at which an artillery crater keeps the size every blast crater has: a Sniper's. */
+    static final float ARTILLERY_CRATER_DAMAGE = 20;
+
     /** Miss endpoints and contact times are supplied by the existing attack effects, never rolled here. */
     record Impact(UnitAttack attack, String key, Vector3 origin, Vector3 point, String effect, ResolvedAttack.Shot shot) {
         Style style() {
             // Captured weapon flags take precedence over a mesh's generic energy/bullet emitter.
             if (shot != null) {
-                if (shot.artillery()) { return Style.BLAST; }
+                // Fuel-air ordnance burns rather than digs: it chars the ground of every hex in its radius.
+                if (shot.artillery()) { return fuelAir() ? Style.BURN : Style.BLAST; }
                 if (shot.plasma()) { return Style.PLASMA; }
                 if (shot.ppc()) { return Style.PPC; }
             }
@@ -117,9 +136,15 @@ final class GpuGroundDamage implements Disposable {
         float radius(Style style) {
             // Zero-damage weapons still leave a visible scar; the captured game value stays unchanged.
             float damage = shot == null ? cut() ? 5 : 1 : (float) Math.max(1, shot.damagePerHit());
+            if ((style == Style.BURN) && fuelAir()) {
+                return BoardRelief.metres(FUEL_AIR_CHAR_METRES);
+            }
+            if ((style == Style.BLAST) && (shot != null) && shot.artillery()) {
+                // An artillery crater, and the scorch marks in its rings, grow in step with damage as its blast does.
+                return BoardRelief.metres(blastCraterMetres(ARTILLERY_CRATER_DAMAGE) * damage / ARTILLERY_CRATER_DAMAGE);
+            }
             if (style == Style.BLAST || style == Style.PLASMA) {
-                // One power curve through 2.7 m diameter at 1 damage and 12 m at 25 damage.
-                return BoardRelief.metres(1.35f * (float) Math.pow(damage, .4634086426));
+                return BoardRelief.metres(blastCraterMetres(damage));
             }
             // Gouges are 5:1. Their perpendicular blast diameter is twice the gouge width.
             float scale = switch (style) {
@@ -129,9 +154,24 @@ final class GpuGroundDamage implements Disposable {
             return BoardRelief.metres(1.5f * (float) Math.sqrt(damage) * scale);
         }
 
+        /** A blast crater's radius in metres: one power curve through 2.7 m diameter at 1 damage and 12 m at 25. */
+        static float blastCraterMetres(float damage) {
+            return 1.35f * (float) Math.pow(damage, .4634086426);
+        }
+
         float strength() {
+            if (fuelAir()) {
+                // A fuel-air round chars its target hex black and its outer rings lighter, as its damage falls.
+                double damage = Math.max(0, shot.damagePerHit());
+                return MathUtils.clamp(.4f + .6f * (float) damage / FUEL_AIR_DARKEST_DAMAGE, .4f, 1);
+            }
             // A readable burn, lighter than an opaque crater; damage changes the footprint only.
             return burn() ? .65f : 1;
+        }
+
+        /** Whether the mark is a fuel-air round's charring of one hex in its radius. */
+        boolean fuelAir() {
+            return (shot != null) && shot.artillery() && shot.munitions().contains("M_FAE");
         }
     }
 
@@ -448,10 +488,26 @@ final class GpuGroundDamage implements Disposable {
     void upload() {
         // Large salvos/instant playback must not rasterize every scar in one render frame. Retain newest arrivals
         // on overload; only compact stamp data waits here, never the attack's unit/model snapshots.
+        long start = System.nanoTime();
+        int budget = STAMP_TEXELS_PER_FRAME;
+        int stamped = 0;
+        int painted = 0;
         for (int count = 0; count < STAMPS_PER_FRAME && !pending.isEmpty(); count++) {
+            int texels = texels(pending.peekFirst());
+            if ((stamped > 0) && (texels > budget)) {
+                break;
+            }
+            budget -= texels;
+            painted += texels;
             var mark = pending.removeFirst();
             stamp(mark);
             marks++;
+            stamped++;
+        }
+        long millis = (System.nanoTime() - start) / 1_000_000;
+        if (millis > SLOW_STAMPING_MILLIS) {
+            LOGGER.debug("[GroundDamage] painted {} marks ({} texels) in {} ms, {} waiting", stamped, painted, millis,
+                  pending.size());
         }
         if (directory.isEmpty() || !directoryDirty && dirty.isEmpty()) { return; }
         int required = directory.size() + tiles.size();
@@ -472,6 +528,12 @@ final class GpuGroundDamage implements Disposable {
         }
         directoryDirty = false;
         dirty.clear();
+    }
+
+    /** About how many texels a mark paints: the square it spans at the scars' resolution. */
+    private int texels(Stamp mark) {
+        float side = 2 * mark.radius() * TILE_INTERIOR / Math.max(tileWorldSize, 1e-6f);
+        return (int) Math.min(Integer.MAX_VALUE, side * side);
     }
 
     private static void uploadTile(int layer, int level, Pixmap pixels) {

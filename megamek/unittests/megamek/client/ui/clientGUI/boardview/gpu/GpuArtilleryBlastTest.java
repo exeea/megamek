@@ -13,8 +13,12 @@ import java.util.Map;
 import java.util.Set;
 
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
+import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.common.ResolvedAttack;
+import megamek.common.board.Coords;
 import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.WeaponType;
 import org.junit.jupiter.api.Test;
 
 /** Which landings draw an artillery blast, which shape they take, and how long the blasts live. */
@@ -47,7 +51,7 @@ class GpuArtilleryBlastTest {
     @Test
     void specialWarheadsChooseTheirShape() {
         assertEquals(GpuArtilleryBlast.Style.MUSHROOM, GpuArtilleryBlast.style(shot(true, "M_DAVY_CROCKETT_M"), 1));
-        assertEquals(GpuArtilleryBlast.Style.FIREBALL, GpuArtilleryBlast.style(shot(true, "M_FAE"), 1));
+        assertEquals(GpuArtilleryBlast.Style.FUEL_AIR, GpuArtilleryBlast.style(shot(true, "M_FAE"), 1));
         assertEquals(GpuArtilleryBlast.Style.FIREBALL, GpuArtilleryBlast.style(shot(true, "M_ADA"), 1));
     }
 
@@ -141,9 +145,28 @@ class GpuArtilleryBlastTest {
     /** The ring hexes are hit one after another, not all in the same instant. */
     @Test
     void debrisLandsAtDifferentMoments() {
-        var landings = GpuArtilleryBlast.debrisPieces(2, 41).stream().map(GpuArtilleryBlast.Piece::landing).sorted().toList();
-        assertTrue(landings.getLast() - landings.getFirst() > .5f, "Landings spread over more than half a second");
-        assertEquals(landings.size(), landings.stream().distinct().count(), "No two pieces land together");
+        var pieces = GpuArtilleryBlast.debrisPieces(2, 41);
+        var landings = pieces.stream().map(GpuArtilleryBlast.Piece::landing).sorted().toList();
+        assertTrue(landings.getLast() - landings.getFirst() > .1f, "The strikes ripple rather than land together");
+        assertTrue(landings.getLast() < .5f, "Fragments are fast: every hex is struck within half a second");
+        assertEquals(landings.size(), landings.stream().distinct().count(), "No two fragments land together");
+        double innerRing = pieces.stream().filter(piece -> piece.ring() == 1)
+              .mapToDouble(GpuArtilleryBlast.Piece::landing).average().orElseThrow();
+        double outerRing = pieces.stream().filter(piece -> piece.ring() == 2)
+              .mapToDouble(GpuArtilleryBlast.Piece::landing).average().orElseThrow();
+        assertTrue(innerRing < outerRing, "The ripple runs outward: the inner ring is struck first");
+    }
+
+    /** The casing smoke of a cluster round drifts with the board's wind, and stays put in calm air. */
+    @Test
+    void downwindFollowsTheWeather() {
+        var explosions = new GpuExplosionEffects();
+        explosions.setWind(new BoardAtmosphere.Effects(0, 0, 0, 0, 0, 1, 90));
+        var drifted = explosions.downwind(new Vector3(), 1);
+        assertTrue(drifted.x > BoardGeometry.height() * .5f, "A full eastward wind carries smoke most of a hex east");
+        assertEquals(0, drifted.y, .001f);
+        explosions.setWind(new BoardAtmosphere.Effects(0, 0, 0, 0, 0, 0, 90));
+        assertEquals(0, explosions.downwind(new Vector3(), 1).len(), .001f, "Calm air leaves it where it is");
     }
 
     @Test
@@ -233,6 +256,212 @@ class GpuArtilleryBlastTest {
         for (var mark : marks) {
             assertTrue(mark.shot().damagePerHit() <= 4, "Each mark is one bomblet's share: " + mark.shot().damagePerHit());
         }
+    }
+
+    /** FASCAM and Vibrabomb-IV lay mines: no blast, no crater, but a landing that is drawn. */
+    @Test
+    void minefieldRoundsLayMinesInsteadOfExploding() {
+        EquipmentType.initializeTypes();
+        for (String munition : new String[] { "M_FASCAM", "M_VIBRABOMB_IV" }) {
+            var round = shot(true, munition);
+            assertTrue(GpuArtilleryBlast.laysMines(round), munition);
+            assertFalse(GpuArtilleryBlast.explodes(round), munition + " must not draw a high-explosive blast");
+            assertTrue(GpuArtilleryBlast.drawsLanding(round), munition);
+        }
+        assertFalse(GpuArtilleryBlast.laysMines(shot(true, "M_STANDARD")));
+        assertFalse(GpuArtilleryBlast.laysMines(shot(false, "M_FASCAM")), "Only artillery lays a minefield this way");
+        assertEquals(0, craters("ISLongTom", shot(true, "M_FASCAM")), "Mines leave no crater");
+    }
+
+    /** A minefield round's mines land in the hex it hit and nowhere else, and leave no scorch marks. */
+    @Test
+    void minesStayInTheHexTheRoundLandedOn() {
+        EquipmentType.initializeTypes();
+        var round = shot(true, "M_FASCAM");
+        var attack = GroundDamagePlaybackTest.shot("ISLongTom", true, round);
+        var blasts = new GpuArtilleryBlast();
+        blasts.detonate(BoardGeometry.center(attack.event.destination().coords(), 0), round, attack, 3);
+        blasts.advance(GpuArtilleryBlast.SECONDS - .1f);
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        blasts.groundMarks(marks::add);
+        assertEquals(0, marks.size(), "Mines scorch nothing");
+        var mines = GpuArtilleryBlast.mines(3, GpuArtilleryBlast.minesFor(round.rackSize()));
+        assertTrue(mines.size() >= 6, "A handful of mines");
+        for (var mine : mines) {
+            assertEquals(0, mine.ring());
+            assertTrue(Math.hypot(mine.offsetX(), mine.offsetY()) < BoardGeometry.height() * .45f,
+                  "Every mine lands inside the hex: " + mine);
+        }
+    }
+
+    /** A known minefield's mines lie on the ground every frame until it is gone, and only then disappear. */
+    @Test
+    void minesStayOnTheGroundUntilTheMinefieldIsGone() {
+        Coords hex = new Coords(3, 6);
+        var blasts = new GpuArtilleryBlast();
+        var explosions = new GpuExplosionEffects();
+        explosions.begin();
+        blasts.restingMines(explosions, Map.of(hex, 20), GpuArtilleryBlastTest::flatGround);
+        int mines = explosions.size();
+        assertTrue(mines >= 6, "The minefield's mines lie there: " + mines);
+        for (Vector3 mine : GpuArtilleryBlast.placeMines(hex, 8, GpuArtilleryBlastTest::flatGround)) {
+            assertEquals(0, mine.z, .01f, "On the ground");
+            assertTrue(mine.dst(BoardGeometry.center(hex, 0)) < BoardGeometry.height() * .45f, "Inside the hex");
+        }
+        explosions.begin();
+        blasts.restingMines(explosions, Map.of(hex, 20), GpuArtilleryBlastTest::flatGround);
+        assertEquals(mines, explosions.size(), "Still there a frame later, with no blast to keep them");
+        explosions.begin();
+        blasts.restingMines(explosions, Map.of(), GpuArtilleryBlastTest::flatGround);
+        assertEquals(0, explosions.size(), "Gone once the minefield is detonated or cleared");
+    }
+
+    /** While its drop is still drawn the hex is left to it, which lays the mines in the same places; then they stay. */
+    @Test
+    void theDropHandsItsMinesOverToTheMinefield() {
+        EquipmentType.initializeTypes();
+        var round = shot(true, "M_FASCAM");
+        var attack = GroundDamagePlaybackTest.shot("ISLongTom", true, round);
+        Coords hex = attack.event.destination().coords();
+        var blasts = new GpuArtilleryBlast();
+        blasts.detonate(BoardGeometry.center(hex, 0), round, attack, 3);
+        var explosions = new GpuExplosionEffects();
+        explosions.begin();
+        blasts.restingMines(explosions, Map.of(hex, 20), GpuArtilleryBlastTest::flatGround);
+        assertEquals(0, explosions.size(), "The drop draws this hex's mines itself");
+        blasts.advance(GpuArtilleryBlast.SECONDS);
+        explosions.begin();
+        blasts.restingMines(explosions, Map.of(hex, 20), GpuArtilleryBlastTest::flatGround);
+        assertTrue(explosions.size() > 0, "After the drop, the minefield's mines stay");
+    }
+
+    @Test
+    void onlyMinefieldMarkersHaveMinesAndTheyCarryTheirDensity() {
+        Coords mined = new Coords(2, 2);
+        List<BoardMarker> markers = List.of(new BoardMarker(BoardMarker.Kind.MINEFIELD, mined, 0, 0, "", 15),
+              new BoardMarker(BoardMarker.Kind.ARTILLERY_TARGET, new Coords(4, 4), 0));
+        assertEquals(Map.of(mined, 15), GpuArtilleryBlast.minefields(markers));
+    }
+
+    /** One mine for every two and a half points of density, never fewer than two or more than twelve. */
+    @Test
+    void theNumberOfMinesFollowsTheDensity() {
+        assertEquals(2, GpuArtilleryBlast.minesFor(5));
+        assertEquals(4, GpuArtilleryBlast.minesFor(10));
+        assertEquals(8, GpuArtilleryBlast.minesFor(20));
+        assertEquals(10, GpuArtilleryBlast.minesFor(25));
+        assertEquals(12, GpuArtilleryBlast.minesFor(30));
+        assertEquals(2, GpuArtilleryBlast.minesFor(0), "A field the client knows no density for still shows");
+        assertEquals(12, GpuArtilleryBlast.minesFor(100));
+    }
+
+    /** A Long Tom's FASCAM round drops as many mines as then lie in the field it lays (density = its rack size). */
+    @Test
+    void theDropShowsAsManyMinesAsTheFieldItLays() {
+        EquipmentType.initializeTypes();
+        var longTom = (WeaponType) EquipmentType.get("ISLongTom");
+        assertEquals(10, GpuArtilleryBlast.minesFor(longTom.getRackSize()));
+        Coords hex = new Coords(3, 6);
+        var blasts = new GpuArtilleryBlast();
+        var explosions = new GpuExplosionEffects();
+        explosions.begin();
+        blasts.restingMines(explosions, Map.of(hex, longTom.getRackSize()), GpuArtilleryBlastTest::flatGround);
+        assertEquals(10, explosions.size());
+    }
+
+    /**
+     * Each launcher's drop takes the density of the field the server lays: its shell's rack size, except Arrow IV, which
+     * lays 20 from an Inner Sphere launcher and 30 from a Clan one whatever its rack size.
+     */
+    @Test
+    void eachLauncherDropsAsManyMinesAsItsField() {
+        EquipmentType.initializeTypes();
+        assertEquals(6, mineDrop("ISThumper"), "Thumper: density 15");
+        assertEquals(2, mineDrop("ISThumperCannon"), "Thumper Cannon: density 5");
+        assertEquals(8, mineDrop("ISSniper"), "Sniper: density 20");
+        assertEquals(10, mineDrop("ISLongTom"), "Long Tom: density 25");
+        assertEquals(8, mineDrop("ISArrowIV"), "Inner Sphere Arrow IV: density 20");
+        assertEquals(12, mineDrop("CLArrowIV"), "Clan Arrow IV: density 30");
+    }
+
+    private static int mineDrop(String weaponName) {
+        var weapon = (WeaponType) EquipmentType.get(weaponName);
+        var round = new ResolvedAttack.Shot("", Set.of("M_FASCAM"), true, false, 1, 0, true, null, null, null, true,
+              weapon.getRackSize(), false, false, false, null, weapon.getRackSize());
+        return GpuArtilleryBlast.minesFor(GpuArtilleryBlast.minefieldDensity(weaponName, round));
+    }
+
+    /** As detonations thin a field the mines drawn there fall, and the ones left stay where they lay. */
+    @Test
+    void aThinnedMinefieldLosesMinesWithoutMovingTheRest() {
+        Coords hex = new Coords(3, 6);
+        var blasts = new GpuArtilleryBlast();
+        var explosions = new GpuExplosionEffects();
+        explosions.begin();
+        blasts.restingMines(explosions, Map.of(hex, 20), GpuArtilleryBlastTest::flatGround);
+        assertEquals(8, explosions.size());
+        explosions.begin();
+        blasts.restingMines(explosions, Map.of(hex, 15), GpuArtilleryBlastTest::flatGround);
+        assertEquals(6, explosions.size(), "Density 20 less 5 for a detonation");
+        List<Vector3> before = GpuArtilleryBlast.placeMines(hex, 8, GpuArtilleryBlastTest::flatGround);
+        List<Vector3> after = GpuArtilleryBlast.placeMines(hex, 6, GpuArtilleryBlastTest::flatGround);
+        assertEquals(before.subList(0, 6), after, "The mines left lie where they did");
+    }
+
+    /**
+     * A blast, its crater and its ring scorches grow in step with the shell's damage: a Long Tom (25) draws clearly over
+     * a Sniper (20) and a Thumper (15), not all three about the same size.
+     */
+    @Test
+    void blastsAndCratersGrowInStepWithDamage() {
+        float sniper = GpuArtilleryBlast.size(damage(20));
+        assertEquals(25f / 20, GpuArtilleryBlast.size(damage(25)) / sniper, .001f, "Long Tom");
+        assertEquals(15f / 20, GpuArtilleryBlast.size(damage(15)) / sniper, .001f, "Thumper");
+        assertEquals(10f / 20, GpuArtilleryBlast.size(damage(10)) / sniper, .001f, "Sniper Cannon");
+        assertEquals(.35f, GpuArtilleryBlast.size(damage(5)) / sniper, .001f, "A Thumper Cannon stays visible");
+        float sniperCrater = crater(20);
+        assertEquals(BoardRelief.metres(GpuGroundDamage.Impact.blastCraterMetres(20)), sniperCrater, .001f,
+              "A Sniper's crater keeps its size");
+        assertEquals(25f / 15, crater(25) / crater(15), .001f, "A Long Tom's crater against a Thumper's");
+    }
+
+    /**
+     * A homing round with no TAG to follow is sent as dealing no damage, and draws as a dud: a burst of dirt, no crater
+     * and no scorch marks in any ring. Smoke and other rounds that never explode are not duds.
+     */
+    @Test
+    void aZeroDamageExplosiveRoundIsADudThatLeavesNoMarks() {
+        EquipmentType.initializeTypes();
+        assertTrue(GpuArtilleryBlast.isDud(damage(0)));
+        assertFalse(GpuArtilleryBlast.isDud(damage(20)), "A round that deals damage explodes");
+        assertFalse(GpuArtilleryBlast.isDud(shot(true, "M_SMOKE").withDamagePerHit(0)), "Smoke never explodes");
+        assertEquals(0, craters("ISArrowIV", damage(0)), "A dud leaves no crater");
+        var attack = GroundDamagePlaybackTest.shot("ISArrowIV", false, damage(0));
+        var blasts = new GpuArtilleryBlast();
+        blasts.detonate(BoardGeometry.center(attack.event.destination().coords(), 0), damage(0), attack, 5);
+        blasts.advance(GpuArtilleryBlast.SECONDS - .1f);
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        blasts.groundMarks(marks::add);
+        assertEquals(0, marks.size(), "and no scorch marks");
+    }
+
+    private static ResolvedAttack.Shot damage(double damage) {
+        return new ResolvedAttack.Shot("", Set.of("M_STANDARD"), true, false, 1, 0, true, null, null, null, true, 20,
+              false, false, false, null, damage);
+    }
+
+    private static float crater(double damage) {
+        return new GpuGroundDamage.Impact(null, "crater", new Vector3(), new Vector3(), "bullet", damage(damage))
+              .radius();
+    }
+
+    /** Level ground at height 0 that reports squared distances, as the board's landscape does. */
+    private static BoardGeometry.Hit flatGround(Ray ray) {
+        if (ray.direction.z >= 0) {
+            return null;
+        }
+        float distance = -ray.origin.z / ray.direction.z;
+        return distance < 0 ? null : new BoardGeometry.Hit(new Coords(0, 0), distance * distance);
     }
 
     private static int craters(String weapon, ResolvedAttack.Shot profile) {

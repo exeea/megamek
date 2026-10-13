@@ -22,6 +22,7 @@ final class GpuExplosionEffects implements Disposable {
     private static final Comparator<Volume> BACK_TO_FRONT = Comparator.comparingDouble((Volume v) -> v.depth).reversed();
     private final Volume[] volumes = new Volume[CAPACITY];
     private final Vector3 burstCenter = new Vector3();
+    private final Vector3 axisScratch = new Vector3();
     private final Color light = new Color(Color.WHITE);
     private final Vector3 wind = new Vector3(0, 1, 0);
     private final Vector3 sun = new Vector3(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS).direction()).scl(-1);
@@ -42,10 +43,16 @@ final class GpuExplosionEffects implements Disposable {
      *
      * @param soot  how dark the smoke is: 0 is the plain grey fireball smoke, 1 is the charcoal of a heavy shell
      * @param ember how long fire keeps glowing inside the smoke after the blast has cooled
-     * @param dust  how far the smoke is browned toward thrown earth
+     * @param dust     how far the smoke is browned toward thrown earth
+     * @param violence how violently it churns, as a fuel-air blast does: its billows start small and grow large as it
+     *                 ages, and blinding pockets of burning metal flicker through its fire. 0 for every other blast
      */
-    record Look(float soot, float ember, float dust) {
+    record Look(float soot, float ember, float dust, float violence) {
         static final Look PLAIN = new Look(0, 0, 0);
+
+        Look(float soot, float ember, float dust) {
+            this(soot, ember, dust, 0);
+        }
     }
 
     void begin() { count = 0; }
@@ -56,6 +63,15 @@ final class GpuExplosionEffects implements Disposable {
     /** The board's travel bearing and normalized visual strength, not a second weather simulation. */
     void setWind(BoardAtmosphere.Effects weather) {
         wind.set(MathUtils.sinDeg(weather.windDirection()), MathUtils.cosDeg(weather.windDirection()), weather.wind());
+    }
+
+    /**
+     * Carries {@code point} as far downwind as the board's wind takes free smoke in {@code seconds}: nothing in calm
+     * air, and most of a hex a second at full strength, along the same bearing the weather gives the shader.
+     */
+    Vector3 downwind(Vector3 point, float seconds) {
+        float distance = wind.z * BoardGeometry.height() * .8f * seconds;
+        return point.add(wind.x * distance, wind.y * distance, 0);
     }
 
     /** One expanding, buoyant fire-to-smoke volume, sampled entirely from the caller's normalized attack clock. */
@@ -76,6 +92,23 @@ final class GpuExplosionEffects implements Disposable {
      * the volume is stretched along it, so a zero vector keeps it round. The leading end tapers to a tip.
      */
     void add(Vector3 center, float radius, float age, float fire, float alpha, int seed, Look look, Vector3 elongation) {
+        float length = elongation.len();
+        add(center, radius, age, fire, alpha, seed, look, length > 0 ? axisScratch.set(elongation).scl(1 / length) : Vector3.Z,
+              length);
+    }
+
+    /**
+     * One round volume squashed flat to {@code height} of its width, as a low cloud or sheet of fire spread over the
+     * ground is; 1 keeps it round.
+     */
+    void addFlat(Vector3 center, float radius, float age, float fire, float alpha, int seed, Look look, float height) {
+        // A squash is a stretch below zero along the vertical.
+        add(center, radius, age, fire, alpha, seed, look, Vector3.Z, MathUtils.clamp(height, .1f, 1) - 1);
+    }
+
+    /** One volume drawn out along the unit {@code axis} by {@code elongation}: above 0 stretches, below 0 squashes. */
+    private void add(Vector3 center, float radius, float age, float fire, float alpha, int seed, Look look,
+          Vector3 axis, float elongation) {
         if (count == CAPACITY || radius <= 0 || alpha <= 0) { return; }
         Volume volume = volumes[count];
         if (volume == null) { volume = new Volume(); volumes[count] = volume; }
@@ -89,9 +122,8 @@ final class GpuExplosionEffects implements Disposable {
         volume.alpha = MathUtils.clamp(alpha, 0, 1) / (1 + volume.stretch);
         volume.seed = Math.floorMod(seed, 4096) * .17f;
         volume.look = look;
-        volume.elongation = elongation.len();
-        if (volume.elongation > 0) { volume.axis.set(elongation).scl(1 / volume.elongation); }
-        else { volume.axis.set(Vector3.Z); }
+        volume.elongation = elongation;
+        volume.axis.set(axis);
         count++;
     }
 
@@ -143,7 +175,8 @@ final class GpuExplosionEffects implements Disposable {
                 shader.setUniformf("u_stretch", volume.stretch);
                 shader.setUniformf("u_effect", volume.age, volume.fire, volume.alpha, volume.seed);
                 shader.setUniformf("u_axis", volume.axis.x, volume.axis.y, volume.axis.z, volume.elongation);
-                shader.setUniformf("u_look", volume.look.soot(), volume.look.ember(), volume.look.dust(), 0);
+                shader.setUniformf("u_look", volume.look.soot(), volume.look.ember(), volume.look.dust(),
+                      volume.look.violence());
                 proxy.render(shader, GL20.GL_TRIANGLES);
             }
         } finally {

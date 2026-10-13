@@ -31,9 +31,16 @@ import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.ShortArray;
 import megamek.common.board.Coords;
+import megamek.logging.MMLogger;
 
 /** Sparse surface tiles on the real receiving mesh. Images accumulate; geometry does not accumulate per shot. */
 final class GpuSurfaceScars implements Disposable {
+    private static final MMLogger LOGGER = MMLogger.create(GpuSurfaceScars.class);
+    /** Where a sculpted terrain shader takes the scar helpers (GpuTerrain adds them there). */
+    static final String SCULPT_HELPERS = "// sculpt-material-functions";
+    /** Where a model shader takes them. */
+    static final String MODEL_SURFACE = "vec3 modelSurface(vec3 albedo, vec3 emission) {";
+    private static boolean warnedUnsupported;
     static final class Marking extends Attribute {
         static final long TYPE = register("boardSurfaceScar");
         Marking() { super(TYPE); }
@@ -77,7 +84,21 @@ final class GpuSurfaceScars implements Disposable {
         return source.replace("void main() {", "in vec3 a_scarUV;\nout vec3 v_scarUV;\nvoid main() {\nv_scarUV = a_scarUV;\n");
     }
 
+    /**
+     * The scar variant of a surface's fragment shader. A sculpted terrain shader gets the scar helpers from GpuTerrain,
+     * a model shader here. A scar on a surface whose shader takes neither, such as a sculpted water surface drawn with
+     * a liquid shader, is not drawn: before, its shader failed to compile and the whole 3D board stopped.
+     */
     static String fragment(String source, boolean sculpt) {
+        boolean takesHelpers = sculpt ? source.contains(SCULPT_HELPERS) : source.contains(MODEL_SURFACE);
+        if (!takesHelpers) {
+            if (!warnedUnsupported) {
+                warnedUnsupported = true;
+                LOGGER.warn("[SurfaceScars] a scar reached a surface whose shader cannot draw one (sculpted {}); it is"
+                      + " not drawn", sculpt);
+            }
+            return source.replace("void main() {", "void main() {\ndiscard;\n");
+        }
         if (!sculpt) {
             String helpers = "#define GROUND_DAMAGE_FRAGMENT\n" + GpuGroundDamage.shaderSource()
                   + GpuShaderSource.read("scar-material.glsl");

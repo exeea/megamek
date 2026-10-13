@@ -53,6 +53,7 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
+import megamek.common.weapons.handlers.AreaEffectHelper;
 import megamek.logging.MMLogger;
 
 /** GPU board and Scene2D controls. The source remains the sole bridge to the existing client. */
@@ -106,6 +107,12 @@ class GpuBattleView extends ApplicationAdapter {
     private final BoardSurface.Cache groundSurfaces = new BoardSurface.Cache();
     private final Map<Integer, UnitMotion> motions = playback.motions;
     private final GpuAttackEffects attackEffects = new GpuAttackEffects();
+    private final GpuDesignators designators = new GpuDesignators();
+    /** A frame slower than this is logged with what it drew, so a playtest log shows what a stutter came from. */
+    private static final long SLOW_FRAME_MILLIS = 40;
+    private List<BoardScene.Tile> lastFrameTiles;
+    private boolean tilesChangedThisFrame;
+    private final GpuStarShells starShells = new GpuStarShells();
     private final GpuTerrainEffects terrainEffects = new GpuTerrainEffects();
     private final GpuEffectDepth effectDepth = new GpuEffectDepth();
     private final GpuWaterImpacts waterImpacts = new GpuWaterImpacts();
@@ -383,6 +390,8 @@ class GpuBattleView extends ApplicationAdapter {
         if (editorPreview != null) { editorPreview.dispose(); editorPreview = null; }
         if (lines != null) { lines.dispose(); lines = null; }
         attackEffects.dispose();
+        designators.dispose();
+        starShells.dispose();
         terrainEffects.dispose();
         jumpJets.dispose();
         waterImpacts.dispose();
@@ -438,10 +447,24 @@ class GpuBattleView extends ApplicationAdapter {
             return;
         }
         try (TerrainSettings.Scope settings = TerrainSettings.use(terrain == null ? null : terrain.settings())) {
+            long start = System.nanoTime();
             renderFrame(settings);
+            logSlowFrame((System.nanoTime() - start) / 1_000_000);
         } catch (RuntimeException failure) {
             if (!reloadingAssets) { throw failure; }
             assetReloadFailed(failure);
+        }
+    }
+
+    /**
+     * Logs a frame slower than {@link #SLOW_FRAME_MILLIS} with what it drew: the artillery blasts and their volumes, and
+     * whether the terrain changed, so a playtest's stutter can be traced to its cause from the log alone.
+     */
+    private void logSlowFrame(long millis) {
+        if (millis > SLOW_FRAME_MILLIS) {
+            LOGGER.debug("[GpuFrame] {} ms: {} artillery blasts, {} blast volumes, terrain {}", millis,
+                  attackEffects.artilleryBlastCount(), attackEffects.explosionCount(),
+                  tilesChangedThisFrame ? "changed" : "unchanged");
         }
     }
 
@@ -615,6 +638,8 @@ class GpuBattleView extends ApplicationAdapter {
         }
         if (boardPrint != null && boardPrint.update()) { boardPrint = null; }
         scene = terrain.presentation(scene);
+        tilesChangedThisFrame = scene.tiles() != lastFrameTiles;
+        lastFrameTiles = scene.tiles();
         boolean changedTiles = previousTiles != scene.tiles();
         if (changedTiles || cameraTerrainRevision != BoardGeometry.revision()) {
             boardCamera.terrainChanged(scene);
@@ -626,6 +651,8 @@ class GpuBattleView extends ApplicationAdapter {
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(tuning.fovStyle(), tuning.fovDarkness(), tuning.sensorStyle(), tuning.sensorDarkness());
         attackEffects.setWind(atmosphereSettings.effects());
+        // The board's pressure already reads as vacuum in space or at zero gravity.
+        attackEffects.setFuelAirStrength(AreaEffectHelper.fuelAirStrength(atmosphereSettings.pressure(), false));
         terrain.setNormalMaps(tuning.normalMaps());
         terrain.setTerrainWear(tuning.terrainWear());
         // The Tactical View hides what has no gameplay value. Grass and water effects are the terrain's live switches.
@@ -790,6 +817,9 @@ class GpuBattleView extends ApplicationAdapter {
         Color smokeLight = atmosphere.particleLight();
         terrainEffects.update(scene, groundSurfaces, atmosphereSettings.effects(), animationSeconds());
         effectDepth.begin();
+        // Illumination rounds light the opaque scene before smoke and fire are drawn over it.
+        starShells.update(scene, attackEffects.starShellOpenings(), Gdx.graphics.getDeltaTime());
+        starShells.renderLight(boardCamera.camera, effectDepth, atmosphere.lighting().daylight());
         // The Classic columns' tileset art already shows fire and smoke, the Tactical View marks them on their hexes.
         // TODO(b11 step 7): columns() for tacticalView().
         if (!terrain.tacticalView() && !boardCamera.tactical()) {
@@ -798,8 +828,14 @@ class GpuBattleView extends ApplicationAdapter {
         jumpJets.setSmokeLight(smokeLight);
         attackEffects.setSmokeLight(smokeLight);
         attackEffects.setLightDirection(atmosphere.lighting().direction());
+        // Mines lie on the terrain, so not in the Tactical View or on the Classic columns, which draw no craters.
+        boolean terrainMarks = !terrain.tacticalView() && !boardCamera.tactical();
+        attackEffects.setMinefields(terrainMarks ? GpuArtilleryBlast.minefields(scene.markers()) : Map.of(),
+              ray -> terrain.hit(scene, ray));
         jumpJets.render(boardCamera.camera);
         attackEffects.render(boardCamera.camera, effectDepth);
+        designators.render(boardCamera.camera, scene.designations(), Gdx.graphics.getDeltaTime());
+        starShells.renderFlares(boardCamera.camera, atmosphere.lighting().daylight());
         if (!terrain.waterVisible()) { waterImpacts.clear(); }
         else if (!boardCamera.tactical()) {
             waterImpacts.render(boardCamera.camera, scene, motions, unitInstances, smokeLight, playback.attachment());

@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -184,13 +184,13 @@ class GroundDamagePlaybackTest {
     }
 
     @ParameterizedTest
-    @CsvSource({ "ISLRM5, IS Ammo LRM-5, 1, 2.7", "ISLongTom, , 25, 12" })
+    @CsvSource({ "ISLRM5, IS Ammo LRM-5, 1, 2.7", "ISLongTom, , 25, 13.5264" })
     void explosiveBlastDiametersMatchTheLrmAndLongTomTargets(String weapon, String ammo, double damage, float diameter) {
         var mark = impact(weapon, ammo);
         assertEquals(GpuGroundDamage.Style.BLAST, mark.style());
         assertEquals(damage, mark.shot().damagePerHit());
         assertEquals(BoardRelief.metres(diameter / 2), mark.radius(), BoardRelief.metres(.001f),
-              "LRM diameter is 10% smaller; Long Tom diameter is 20% smaller");
+              "LRM diameter is 10% smaller; a Long Tom's is a Sniper's grown in step with damage (25 to 20)");
     }
 
     @Test
