@@ -1208,7 +1208,7 @@ final class GpuArtilleryBlast {
     }
 
     /** Where a vertical line through {@code x}, {@code y} meets the installed terrain, searching well above and below. */
-    private static @Nullable Vector3 terrain(Function<Ray, BoardGeometry.Hit> landscape, float x, float y,
+    static @Nullable Vector3 terrain(Function<Ray, BoardGeometry.Hit> landscape, float x, float y,
           float near) {
         float drop = BoardGeometry.height() * 8;
         var ray = new Ray(new Vector3(x, y, near + drop / 2), new Vector3(0, 0, -1));

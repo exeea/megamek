@@ -14,6 +14,7 @@ import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.ResolvedAttack;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponType;
+import megamek.common.units.UnitLocation;
 
 /** A resolved attack's presentation clock. Outcomes and damage are never calculated here. */
 final class UnitAttack {
@@ -48,6 +49,8 @@ final class UnitAttack {
     java.util.function.Function<Ray, BoardGeometry.Hit> landscape;
     java.util.function.BiFunction<Ray, Float, BoardGeometry.Hit> landscapeSegment;
     private final Map<Integer, Vector3> misses = new HashMap<>();
+    /** Where a round the server placed came down, on the installed terrain; {@code null} until first found. */
+    private Vector3 placedLanding;
     private final Map<Vector3, Boolean> hardImpacts = new HashMap<>();
     private final Map<Integer, Vector3> beamMisses = new HashMap<>();
     private final Map<Vector3, Contact> landscapeContacts = new HashMap<>();
@@ -175,10 +178,29 @@ final class UnitAttack {
         return result;
     }
 
+    /**
+     * Where a round the server placed came down. The server gives a hex and a whole level; the installed terrain is
+     * sculpted, so its ground sits above or below that level within the hex. The point is dropped onto the terrain, or
+     * a crater set at the flat level would float or sink and never be painted.
+     */
+    private Vector3 placedLanding(UnitLocation landing) {
+        if (placedLanding != null) {
+            return placedLanding;
+        }
+        Vector3 flat = BoardGeometry.center(landing.coords(), landing.elevation());
+        // Until the attack is placed on the terrain there is nothing to drop onto; ask again then.
+        if (landscape == null) {
+            return flat;
+        }
+        Vector3 ground = GpuArtilleryBlast.terrain(landscape, flat.x, flat.y, flat.z);
+        placedLanding = (ground == null) ? flat : ground;
+        return placedLanding;
+    }
+
     Vector3 endpoint(ModelInstance targetInstance, Vector3 origin, boolean missed, int missile, Vector3 result) {
         var profile = event.result().shot();
         if (profile != null && profile.impact() != null) {
-            return result.set(BoardGeometry.center(profile.impact().coords(), profile.impact().elevation()));
+            return result.set(placedLanding(profile.impact()));
         }
         if (defensive()) {
             if (incoming != null) {

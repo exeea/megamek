@@ -17,7 +17,9 @@ import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.Mounted;
+import megamek.common.units.Entity;
 import megamek.common.units.Tank;
+import megamek.common.units.UnitLocation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -285,6 +287,39 @@ class GroundDamagePlaybackTest {
 
     static UnitAttack shot(String weapon, boolean hit, ResolvedAttack.Shot profile) {
         return shot(UUID.randomUUID(), weapon, hit, profile);
+    }
+
+    /**
+     * The server places a round that drifted by hex and whole level; the terrain there is sculpted higher. Its ground
+     * mark sits on the terrain, where it can be painted, not at the flat level, where it would be dropped.
+     */
+    @Test
+    void aDriftedArtilleryRoundMarksTheTerrainItCameDownOn() {
+        Coords drifted = new Coords(3, 7);
+        var landing = new UnitLocation(Entity.NONE, drifted, 0, 0, 0);
+        var profile = new ResolvedAttack.Shot("", Set.of(), true, false, 1, 0, true, null, null, landing, true, 20,
+              false, false, false, null, 20);
+        UnitAttack round = shot("ISLongTom", false, profile);
+        float groundHeight = 7;
+        round.landscape = ray -> {
+            if (ray.direction.z >= 0) {
+                return null;
+            }
+            float distance = (groundHeight - ray.origin.z) / ray.direction.z;
+            return distance < 0 ? null : new BoardGeometry.Hit(drifted, distance * distance);
+        };
+        round.seconds = round.duration;
+        var effects = new GpuAttackEffects();
+        effects.update(List.of(round), null, Map.of());
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        effects.groundImpacts(List.of(), marks::add);
+
+        assertEquals(1, marks.size());
+        Vector3 point = marks.getFirst().point();
+        Vector3 hexCentre = BoardGeometry.center(drifted, 0);
+        assertEquals(hexCentre.x, point.x, .01f, "Over the hex it drifted to");
+        assertEquals(hexCentre.y, point.y, .01f);
+        assertEquals(groundHeight, point.z, .01f, "On the terrain, not the flat level");
     }
 
     @Test

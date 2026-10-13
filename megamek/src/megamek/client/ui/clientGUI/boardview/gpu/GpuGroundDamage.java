@@ -255,16 +255,29 @@ final class GpuGroundDamage implements Disposable {
         var contact = impact.attack().landscapeContact(point);
         // A deformed cliff can project into its neighbour (or beyond the board's flat outline).
         var tile = contact == null ? BoardGeometry.tile(scene, point.x, point.y) : scene.tile(contact.surface().coords());
-        if (tile == null || impact.attack().landscape == null) { return; }
+        if (tile == null || impact.attack().landscape == null) {
+            artilleryMarkDropped(impact, "it lies on no board tile, or the attack is not on the terrain yet");
+            return;
+        }
         // The attack already picked its collision. Compare its endpoint with the installed top triangles;
         // another board-wide ray would rebuild geometry unnecessarily and could stall at the first impact.
         float lift = BoardRelief.metres(.1f);
         var surface = surfaces.apply(tile.coords());
-        if (surface == null) { return; }
+        if (surface == null) {
+            artilleryMarkDropped(impact, "the tile has no installed surface");
+            return;
+        }
         var face = surface.top().stream().filter(candidate -> Math.abs(candidate.height(point.x, point.y) - point.z) < lift)
               .findFirst().orElse(null);
-        if (face == null) { vertical.accept(impact); return; }
-        if (tile.liquid().present() || tile.frozen()) { return; }
+        if (face == null) {
+            artilleryMarkDropped(impact, "its height matches no top face of " + tile.coords().getBoardNum());
+            vertical.accept(impact);
+            return;
+        }
+        if (tile.liquid().present() || tile.frozen()) {
+            artilleryMarkDropped(impact, "the hex is water or ice");
+            return;
+        }
         var style = impact.style(face);
         if (brushes.get(style).isEmpty()) { return; }
         int seed = impact.attack().event.result().id().hashCode() ^ impact.key().hashCode();
@@ -274,6 +287,17 @@ final class GpuGroundDamage implements Disposable {
         float angle = length < .001f ? UnitAttack.noise(seed) * MathUtils.PI2 : MathUtils.atan2(dy, dx);
         if (pending.size() >= MAX_PENDING_STAMPS) { pending.removeFirst(); }
         pending.addLast(new Stamp(tile.elevation(), point.cpy(), impact.radius(style), angle, style, seed, impact.strength()));
+    }
+
+    /**
+     * Logs why an artillery round's ground mark is not painted: these are silent otherwise, and a crater missing after
+     * a blast is the first thing a playtest asks about. One line per round, at most; other weapons' marks stay quiet.
+     */
+    private static void artilleryMarkDropped(Impact impact, String reason) {
+        boolean isArtillery = (impact.shot() != null) && impact.shot().artillery();
+        if (isArtillery) {
+            LOGGER.info("[GroundDamage] no crater for the artillery round at {}: {}", impact.point(), reason);
+        }
     }
 
     private void allocate() {
