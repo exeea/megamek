@@ -798,6 +798,10 @@ class GpuBattleView extends ApplicationAdapter {
         jumpJets.setSmokeLight(smokeLight);
         attackEffects.setSmokeLight(smokeLight);
         attackEffects.setLightDirection(atmosphere.lighting().direction());
+        // Mines lie on the terrain, so not in the Tactical View or on the Classic columns, which draw no craters.
+        boolean terrainMarks = !terrain.tacticalView() && !boardCamera.tactical();
+        attackEffects.setMinefields(terrainMarks ? GpuArtilleryBlast.minefields(scene.markers()) : Map.of(),
+              ray -> terrain.hit(scene, ray));
         jumpJets.render(boardCamera.camera);
         attackEffects.render(boardCamera.camera, effectDepth);
         if (!terrain.waterVisible()) { waterImpacts.clear(); }

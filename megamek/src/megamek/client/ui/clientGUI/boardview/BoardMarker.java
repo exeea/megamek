@@ -3,8 +3,12 @@ package megamek.client.ui.clientGUI.boardview;
 
 import megamek.common.board.Coords;
 
-/** Immutable presentation of an already-visible point marker. Elevation is its absolute support height. */
-public record BoardMarker(Kind kind, Coords coords, float elevation, int rgb, String label) {
+/**
+ * Immutable presentation of an already-visible point marker. Elevation is its absolute support height.
+ *
+ * @param density the density of the minefields in the hex, for a {@link Kind#MINEFIELD} marker; {@code 0} otherwise
+ */
+public record BoardMarker(Kind kind, Coords coords, float elevation, int rgb, String label, int density) {
     public enum Kind {
         SENSOR_CONTACT(0xE63D3D), COLLAPSE_WARNING(0xFFCC42), MINEFIELD(0xF0BB42),
         DEMOLITION_CHARGE(0xEF7750), ARTILLERY_INCOMING(0xF36B58), ARTILLERY_TARGET(0xEAA654),
@@ -27,6 +31,10 @@ public record BoardMarker(Kind kind, Coords coords, float elevation, int rgb, St
     public BoardMarker {
         label = label == null ? "" : label;
         rgb &= 0xFFFFFF;
+    }
+
+    public BoardMarker(Kind kind, Coords coords, float elevation, int rgb, String label) {
+        this(kind, coords, elevation, rgb, label, 0);
     }
 
     public BoardMarker(Kind kind, Coords coords, float elevation) {

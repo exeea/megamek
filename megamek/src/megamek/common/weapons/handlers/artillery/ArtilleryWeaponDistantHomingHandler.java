@@ -41,6 +41,7 @@ import java.util.Objects;
 import java.util.Vector;
 
 import megamek.common.Hex;
+import megamek.common.HexTarget;
 import megamek.common.Messages;
 import megamek.common.Report;
 import megamek.common.TagInfo;
@@ -67,6 +68,8 @@ import megamek.server.totalWarfare.TWGameManager;
 
 public class ArtilleryWeaponDistantHomingHandler extends ArtilleryWeaponDistantFireHandler {
     private static final MMLogger LOGGER = MMLogger.create(ArtilleryWeaponDistantHomingHandler.class);
+    /** Set when the round finds no TAG it can follow: none this turn, none that hit, or none near its aim. */
+    private boolean hasNoUsableTag;
 
     @Serial
     private static final long serialVersionUID = -7243477723032010917L;
@@ -175,6 +178,9 @@ public class ArtilleryWeaponDistantHomingHandler extends ArtilleryWeaponDistantF
             r.subject = subjectId;
             r.add(toHit.getDesc());
             vPhaseReport.addElement(r);
+            if (hasNoUsableTag) {
+                reportLostHomingRound(aaa);
+            }
             return false;
         } else if (toHit.getValue() == TargetRoll.AUTOMATIC_FAIL) {
             r = new Report(3140);
@@ -368,6 +374,30 @@ public class ArtilleryWeaponDistantHomingHandler extends ArtilleryWeaponDistantF
     }
 
     /**
+     * Shows a homing round with no TAG to follow coming down harmlessly in a hex beside the one it was aimed at. The
+     * rules are unchanged (it deals no damage); this only lets the board show the miss. The hex comes from the attack
+     * itself rather than the dice, so the miss changes no later roll.
+     */
+    private void reportLostHomingRound(ArtilleryAttackAction aaa) {
+        Coords aimed = aaa.getOldTargetCoords();
+        if (aimed == null) {
+            LOGGER.debug("[ArtilleryBlast] homing round lost its lock with no aim hex, nothing to show");
+            return;
+        }
+        int direction = Math.floorMod(attackingEntity.getId() * 31 + attackingEntity.getEquipmentNum(weapon) * 7
+              + game.getRoundCount(), 6);
+        Coords landing = aimed.translated(direction);
+        if (!game.getBoard().contains(landing)) {
+            landing = aimed;
+        }
+        LOGGER.debug("[ArtilleryBlast] homing round from {} found no usable TAG and comes down harmlessly at {}",
+              attackingEntity.getDisplayName(), landing);
+        // The lock search may have pointed the attack at a tagged unit elsewhere; the round comes down at the hex.
+        target = new HexTarget(landing, game.getBoard().getBoardId(), Targetable.TYPE_HEX_ARTILLERY);
+        reportDudArtilleryAnimation(landing, game.getBoard().getHex(landing).getLevel());
+    }
+
+    /**
      * Find the tagged entity for this attack Uses a CFR to let the player choose from eligible TAG
      */
     public void convertHomingShotToEntityTarget() throws InvalidPacketDataException {
@@ -410,6 +440,7 @@ public class ArtilleryWeaponDistantHomingHandler extends ArtilleryWeaponDistantF
         LOGGER.debug("convertHomingShotToEntityTarget: found {} allowed TAG targets", allowed.size());
         if (allowed.isEmpty()) {
             toHit = new ToHitData(TargetRoll.IMPOSSIBLE, "no targets tagged this turn");
+            hasNoUsableTag = true;
             return;
         }
 
@@ -431,6 +462,7 @@ public class ArtilleryWeaponDistantHomingHandler extends ArtilleryWeaponDistantF
             aaa.setTargetType(newTarget.getTargetType());
             target = newTarget;
             toHit = new ToHitData(TargetRoll.IMPOSSIBLE, "tag missed the target");
+            hasNoUsableTag = true;
             return;
         }
 
@@ -450,6 +482,7 @@ public class ArtilleryWeaponDistantHomingHandler extends ArtilleryWeaponDistantF
             target = newTarget;
             toHit = new ToHitData(TargetRoll.IMPOSSIBLE,
                   "no tag in 8 hex radius of target hex");
+            hasNoUsableTag = true;
         } else if (allowed.size() == 1) {
             // Just use target 0...
             LOGGER.debug("convertHomingShotToEntityTarget: single target, auto-selecting");

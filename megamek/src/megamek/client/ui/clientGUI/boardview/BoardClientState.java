@@ -937,9 +937,20 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                     default -> "";
                 };
             }
-            result.add(boardMarker(BoardMarker.Kind.MINEFIELD, coords, label));
+            BoardMarker marker = boardMarker(BoardMarker.Kind.MINEFIELD, coords, label);
+            result.add(new BoardMarker(marker.kind(), coords, marker.elevation(), marker.rgb(), label,
+                  minefieldDensity(coords)));
         }
         return result;
+    }
+
+    /** The combined density of the minefields in the hex, which sets how many mines the 3D board draws there. */
+    private int minefieldDensity(Coords coords) {
+        int density = 0;
+        for (Minefield minefield : game.getMinefields(coords)) {
+            density += minefield.getDensity();
+        }
+        return density;
     }
 
     public void drawDemolitionCharges(Graphics2D graphics2D) {
