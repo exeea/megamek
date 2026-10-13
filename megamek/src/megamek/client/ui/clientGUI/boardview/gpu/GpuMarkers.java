@@ -108,7 +108,9 @@ final class GpuMarkers implements Disposable {
         if (!models.isEmpty()) { return; }
         Map<BoardMarker.Kind, BoardScene.Pixels> artwork = new EnumMap<>(BoardMarker.Kind.class);
         for (var kind : BoardMarker.Kind.values()) {
-            artwork.put(kind, artwork(kind));
+            if (hasCoin(kind)) {
+                artwork.put(kind, artwork(kind));
+            }
         }
         textures.update(artwork);
         artwork.forEach((kind, pixels) -> {
@@ -118,6 +120,11 @@ final class GpuMarkers implements Disposable {
             model.instance.model.materials.forEach(material -> material.set(ColorAttribute.createDiffuse(color(kind.rgb()))));
             models.put(kind, model);
         });
+    }
+
+    /** Whether a marker kind stands as a coin. An artillery drift is a line the board overlay draws instead. */
+    static boolean hasCoin(BoardMarker.Kind kind) {
+        return kind != BoardMarker.Kind.ARTILLERY_DRIFT;
     }
 
     GpuUnitModel model(BoardMarker.Kind kind) {
@@ -145,7 +152,7 @@ final class GpuMarkers implements Disposable {
     void beginFrame(List<BoardMarker> allMarkers, float seconds) {
         List<BoardMarker> markers = new ArrayList<>(allMarkers.size());
         for (BoardMarker marker : allMarkers) {
-            if (marker.kind() != BoardMarker.Kind.ARTILLERY_DRIFT) {
+            if (hasCoin(marker.kind())) {
                 markers.add(marker);
             }
         }
