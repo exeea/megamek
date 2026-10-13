@@ -106,6 +106,7 @@ class GpuBattleView extends ApplicationAdapter {
     private final BoardSurface.Cache groundSurfaces = new BoardSurface.Cache();
     private final Map<Integer, UnitMotion> motions = playback.motions;
     private final GpuAttackEffects attackEffects = new GpuAttackEffects();
+    private final GpuDesignators designators = new GpuDesignators();
     private final GpuTerrainEffects terrainEffects = new GpuTerrainEffects();
     private final GpuEffectDepth effectDepth = new GpuEffectDepth();
     private final GpuWaterImpacts waterImpacts = new GpuWaterImpacts();
@@ -383,6 +384,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (editorPreview != null) { editorPreview.dispose(); editorPreview = null; }
         if (lines != null) { lines.dispose(); lines = null; }
         attackEffects.dispose();
+        designators.dispose();
         terrainEffects.dispose();
         jumpJets.dispose();
         waterImpacts.dispose();
@@ -804,6 +806,7 @@ class GpuBattleView extends ApplicationAdapter {
               ray -> terrain.hit(scene, ray));
         jumpJets.render(boardCamera.camera);
         attackEffects.render(boardCamera.camera, effectDepth);
+        designators.render(boardCamera.camera, scene.designations(), Gdx.graphics.getDeltaTime());
         if (!terrain.waterVisible()) { waterImpacts.clear(); }
         else if (!boardCamera.tactical()) {
             waterImpacts.render(boardCamera.camera, scene, motions, unitInstances, smokeLight, playback.attachment());

@@ -27,7 +27,6 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
-import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -35,6 +34,7 @@ import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
@@ -44,9 +44,11 @@ import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
+import megamek.common.TagInfo;
 import megamek.common.actions.ArtilleryAttackAction;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.WeaponAttackAction;
+import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -66,9 +68,13 @@ import megamek.common.units.EntityVisibilityUtils;
 import megamek.common.units.Mek;
 import megamek.common.units.Targetable;
 import megamek.common.units.UnitLocation;
+import megamek.logging.MMLogger;
 
 /** Thin Swing adapter. Reuses MegaMek's tileset, visibility checks, movement path, and actual phase buttons. */
 final class GpuBoardSource implements BoardSource {
+    private static final MMLogger LOGGER = MMLogger.create(GpuBoardSource.class);
+    /** The designator lines last shown, so they log only when their number changes. */
+    private int lastDesignations;
     private final java.util.LinkedHashSet<java.util.UUID> receivedAttacks = new java.util.LinkedHashSet<>();
     private final Map<Integer, BoardScene.Combat> removalAttempts = new HashMap<>();
     private final Set<Integer> voluntaryReleases = new java.util.HashSet<>();
@@ -882,7 +888,7 @@ final class GpuBoardSource implements BoardSource {
               view.getWeaponRangeTextSprites().stream().map(sprite -> new BoardScene.RangeLabel(sprite.getPosition(),
                     FieldOfFireSprite.getFieldOfFireColor(sprite.getRangeBracket()).getRGB(),
                     FieldOfFireSprite.getRangeText(sprite.getRangeBracket()))).toList(), fieldOfView,
-              view.electronicWarfare());
+              view.electronicWarfare(), designations());
         // The report log before the chat, whose round lines read it with the status (plan O6).
         GpuReportLog.Snapshot log = captureReports();
         chat.roundLines(status, log);
@@ -909,7 +915,7 @@ final class GpuBoardSource implements BoardSource {
     /**
      * EDT: the board state's tactical capture without MegaMek's sprites the HUD draws itself (G4, a consumer filter):
      * the firing solutions always (the board labels' to-hit badges), and the path's step arrows and costs while the
-     * plan draws the route. MegaMek's movement envelope stays. 
+     * plan draws the route. MegaMek's movement envelope stays.
      * The sprites are hidden only for this capture, on the thread that paints the Legacy 2D board.
      */
     private BoardTactical tacticalGeometry(boolean planner) {
@@ -1075,6 +1081,40 @@ final class GpuBoardSource implements BoardSource {
         }
         // Multiple weapons on one target share a trace, but direct and indirect fire remain distinct.
         return result.stream().distinct().toList();
+    }
+
+    /**
+     * The TAGs that hit this round, while semi-guided and homing rounds can still use them: from the Off-board phase,
+     * when TAG fires, to the end of the Firing phase and its report. Both units must be on this board and seen.
+     */
+    private List<BoardScene.Designation> designations() {
+        GamePhase phase = view.game.getPhase();
+        boolean isOffboard = phase.isOffboard() || phase.isOffboardReport();
+        boolean isFiring = phase.isFiring() || phase.isFiringReport();
+        if (!isOffboard && !isFiring) {
+            return List.of();
+        }
+        List<BoardScene.Designation> result = new ArrayList<>();
+        for (TagInfo tag : view.game.getTagInfo()) {
+            boolean isUnitHit = !tag.missed && (tag.targetType == Targetable.TYPE_ENTITY) && (tag.target != null);
+            Entity designator = isUnitHit ? view.game.getEntity(tag.attackerId) : null;
+            Entity target = isUnitHit ? view.game.getEntity(tag.target.getId()) : null;
+            if (isShownDesignating(designator) && isShownDesignating(target)) {
+                result.add(new BoardScene.Designation(designator.getId(), firingEndpoint(designator), target.getId(),
+                      firingEndpoint(target)));
+            }
+        }
+        if (result.size() != lastDesignations) {
+            lastDesignations = result.size();
+            LOGGER.debug("[TAG] {} designator lines shown in {}", result.size(), phase);
+        }
+        return result;
+    }
+
+    /** Whether a unit in a designation is on this board, placed, and identified by the local player. */
+    private boolean isShownDesignating(@Nullable Entity unit) {
+        return (unit != null) && (unit.getPosition() != null) && (unit.getBoardId() == view.getBoardId())
+              && board.contains(unit.getPosition()) && identified(unit);
     }
 
     private BoardScene.Waypoint firingEndpoint(Targetable target) {

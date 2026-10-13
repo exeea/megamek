@@ -12,11 +12,15 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.ResolvedAttack;
+import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.WeaponType;
 
 /** A resolved attack's presentation clock. Outcomes and damage are never calculated here. */
 final class UnitAttack {
     static final float ANTICIPATION_SECONDS = .2f;
     static final float RECOVERY_SECONDS = .35f;
+    /** How much longer a TAG that hits holds its designator on the target, so the player can see what it marked. */
+    static final float DESIGNATOR_HOLD_SECONDS = 1.2f;
     static final float RECOIL_KICK_SECONDS = .035f;
     static final float RECOIL_RECOVERY_SECONDS = .24f;
     static final float RECOIL_DISTANCE = .9f;
@@ -74,7 +78,8 @@ final class UnitAttack {
         for (var profile : profiles.values()) { firingSeconds = Math.max(firingSeconds, machineGunFireSeconds(profile)); }
         contactSeconds = removal() ? .85f : death() ? DEATH_SECONDS : shot() ? ANTICIPATION_SECONDS + flightSeconds + firingSeconds
               : approachSeconds + MELEE_SWING_SECONDS;
-        duration = removal() ? 1.4f : death() ? DEATH_SECONDS : contactSeconds + RECOVERY_SECONDS + (shot() ? 0 : MELEE_RUN_SECONDS);
+        duration = removal() ? 1.4f : death() ? DEATH_SECONDS : contactSeconds + RECOVERY_SECONDS + (shot() ? 0 : MELEE_RUN_SECONDS)
+              + (designatorHolds() ? DESIGNATOR_HOLD_SECONDS : 0);
         firingEndSeconds = event.result().mounts().stream()
               .anyMatch(mount -> "flame".equals(effect(mount.entityId(), mount.equipmentIndex())))
               ? Math.max(contactSeconds, ANTICIPATION_SECONDS + flightSeconds + RECOVERY_SECONDS) : contactSeconds;
@@ -350,9 +355,24 @@ final class UnitAttack {
             case "screen-launcher" -> "screen";
             case "missile" -> "missile";
             case "infantry-melee" -> "melee";
-            case "sensor" -> "none";
+            case "sensor" -> firesTag(owner, index) ? "designator" : "none";
             default -> profile != null && profile.ppc() ? "ppc" : "bullet";
         };
+    }
+
+    /**
+     * Whether the mount is the TAG this attack fired, which draws as a laser designator. TAG fires alone, so it is
+     * always the attack's own weapon.
+     */
+    boolean firesTag(int owner, int index) {
+        boolean isAttackWeapon = (owner == event.entityId()) && (index == event.result().equipmentIndex());
+        return isAttackWeapon && (EquipmentType.get(event.result().equipmentName()) instanceof WeaponType weapon)
+              && weapon.hasFlag(WeaponType.F_TAG);
+    }
+
+    /** Whether this is a TAG that hit, whose designator stays on the target a little longer. */
+    private boolean designatorHolds() {
+        return shot() && event.result().hit() && firesTag(event.entityId(), event.result().equipmentIndex());
     }
 
     float firingEndSeconds() { return firingEndSeconds; }
