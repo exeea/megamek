@@ -96,6 +96,22 @@ class GpuStarShellsTest {
         assertEquals(0, starShells.size(), "Gone");
     }
 
+    /** A flare starts high and sinks a step each of its five turns, lowest on its last. */
+    @Test
+    void theFlareSinksThroughItsFiveTurns() {
+        assertEquals(GpuStarShells.HANG_HEXES, GpuStarShells.hangHexes(GpuStarShells.BURN_TURNS), 1e-4f);
+        for (int turnsLeft = GpuStarShells.BURN_TURNS; turnsLeft > 1; turnsLeft--) {
+            assertTrue(GpuStarShells.hangHexes(turnsLeft - 1) < GpuStarShells.hangHexes(turnsLeft),
+                  "Lower with " + (turnsLeft - 1) + " turns left than with " + turnsLeft);
+        }
+        assertTrue(GpuStarShells.hangHexes(1) > GpuStarShells.HANG_HEXES * .25f, "Still well above the ground");
+        var starShells = new GpuStarShells();
+        Coords over = new Coords(4, 4);
+        starShells.update(scene(new BoardScene.StarShell(over, 3, 5, true)), Map.of(), .1f);
+        starShells.update(scene(new BoardScene.StarShell(over, 3, 4, true)), Map.of(), .1f);
+        assertEquals(1, starShells.size(), "The same flare, a turn lower, not a second one");
+    }
+
     /** An artillery illumination round bursts high as a star shell and digs no crater; its burst is where its flare starts. */
     @Test
     void anIlluminationRoundBurstsAsAStarShell() {

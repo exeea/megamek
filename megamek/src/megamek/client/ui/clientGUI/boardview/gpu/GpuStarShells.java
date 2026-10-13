@@ -23,7 +23,8 @@ import megamek.logging.MMLogger;
 /**
  * Illumination rounds' flares: star shells hanging over the board under small parachutes, each lighting exactly the
  * hexes the rules say it does. A flare appears where its round burst and glides to its place; when the wind moves it,
- * it glides to its new hex; on its last turn it hangs lower and flickers, and when it burns out it sputters away.
+ * it glides to its new hex. It sinks under its parachute through its five turns, a step each turn, flickers on its
+ * last, and when it burns out it sputters away.
  *
  * <p>The light pool is a pass over the finished opaque scene: the surface under each pixel is found from the scene's
  * depth, and its hex counted against the flare's, so terrain and units inside the radius are lit and nothing outside
@@ -31,10 +32,13 @@ import megamek.logging.MMLogger;
  */
 final class GpuStarShells implements Disposable {
     private static final MMLogger LOGGER = MMLogger.create(GpuStarShells.class);
-    /** How high a flare hangs over its hex, in hexes. */
+    /** How high a flare hangs over its hex when it arrives, in hexes. */
     static final float HANG_HEXES = 2.2f;
-    /** How much lower, as a share of its height, it hangs on its last turn. */
-    private static final float LAST_TURN_SINK = .2f;
+    /** How many turns an illumination round's flare burns, and how low, as a share of its first height, its last is. */
+    static final int BURN_TURNS = 5;
+    private static final float LAST_TURN_HEIGHT = .35f;
+    /** How much further it falls, as a share of its first height, while it sputters out. */
+    private static final float SPUTTER_FALL = .15f;
     private static final float GLIDE_SECONDS = 2.5f;
     private static final float SPUTTER_SECONDS = 1.5f;
     /** How much brighter it makes the lit scene at night (1 + gain times), and by full daylight. */
@@ -91,7 +95,7 @@ final class GpuStarShells implements Disposable {
         List<Shown> next = new ArrayList<>();
         for (BoardScene.StarShell shell : scene.starShells()) {
             Shown match = nearest(unmatched, shell);
-            Vector3 hang = hang(scene, shell.coords());
+            Vector3 hang = hang(scene, shell.coords(), shell.turnsLeft());
             if (match == null) {
                 match = new Shown();
                 match.seed = shell.coords().hashCode() * 31 + shown.size();
@@ -103,11 +107,14 @@ final class GpuStarShells implements Disposable {
                       shell.coords(), shell.turnsLeft(), shell.lit() ? "lit" : "not lit yet");
             } else {
                 unmatched.remove(match);
-                if (!match.shell.coords().equals(shell.coords())) {
+                boolean drifted = !match.shell.coords().equals(shell.coords());
+                boolean sank = match.shell.turnsLeft() != shell.turnsLeft();
+                if (drifted || sank) {
                     match.from.set(position(match));
                     match.to.set(hang);
                     match.glide = 0;
-                    LOGGER.debug("[Illumination] flare drifts from {} to {}", match.shell.coords(), shell.coords());
+                    LOGGER.debug("[Illumination] flare moves from {} to {}, {} turns left", match.shell.coords(),
+                          shell.coords(), shell.turnsLeft());
                 }
             }
             match.shell = shell;
@@ -144,22 +151,31 @@ final class GpuStarShells implements Disposable {
         return best;
     }
 
-    /** Where a flare hangs over its hex: {@link #HANG_HEXES} above the hex's ground. */
-    private static Vector3 hang(BoardScene scene, Coords coords) {
+    /** Where a flare hangs over its hex: high on its first turn, lower a step each turn, lowest on its last. */
+    private static Vector3 hang(BoardScene scene, Coords coords, int turnsLeft) {
         BoardScene.Tile tile = scene.tile(coords);
         return BoardGeometry.center(coords, tile == null ? 0 : tile.elevation())
-              .add(0, 0, BoardGeometry.height() * HANG_HEXES);
+              .add(0, 0, BoardGeometry.height() * hangHexes(turnsLeft));
     }
 
-    /** Where the flare is drawn: gliding, swaying a little under its canopy, and lower on its last turn. */
+    /**
+     * How high a flare hangs, in hexes, with this many turns left to burn: {@link #HANG_HEXES} with all of them left,
+     * falling evenly to its lowest on its last.
+     */
+    static float hangHexes(int turnsLeft) {
+        float burnt = MathUtils.clamp((BURN_TURNS - turnsLeft) / (float) (BURN_TURNS - 1), 0, 1);
+        return HANG_HEXES * MathUtils.lerp(1, LAST_TURN_HEIGHT, burnt);
+    }
+
+    /** Where the flare is drawn: gliding, swaying a little under its canopy, and falling as it sputters out. */
     private Vector3 position(Shown flare) {
         float eased = flare.glide * flare.glide * (3 - 2 * flare.glide);
         Vector3 at = new Vector3(flare.from).lerp(flare.to, eased);
         float hex = BoardGeometry.height();
         at.add(MathUtils.sin(clock * .7f + flare.seed) * hex * .06f, MathUtils.cos(clock * .55f + flare.seed) * hex * .05f,
               0);
-        if (flare.shell.turnsLeft() <= 1 || flare.sputter >= 0) {
-            at.z -= hex * HANG_HEXES * LAST_TURN_SINK;
+        if (flare.sputter >= 0) {
+            at.z -= hex * HANG_HEXES * SPUTTER_FALL * Math.min(1, flare.sputter / SPUTTER_SECONDS);
         }
         return at;
     }
