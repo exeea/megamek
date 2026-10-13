@@ -89,6 +89,13 @@ final class UnitAttack {
         return event.result().kind() == ResolvedAttack.Kind.SHOT;
     }
 
+    /** Whether this is an artillery round still on its way: fired, and not yet landed on the hex it is coming down on. */
+    boolean artilleryIncoming() {
+        ResolvedAttack.Shot profile = event.result().shot();
+        boolean isArtillery = shot() && (profile != null) && profile.artillery();
+        return isArtillery && (seconds < contactSeconds);
+    }
+
     boolean death() { return event.result().kind() == ResolvedAttack.Kind.DEATH; }
 
     boolean removal() {
