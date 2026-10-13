@@ -19,6 +19,8 @@ import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponType;
+import megamek.common.units.Entity;
+import megamek.common.units.UnitLocation;
 import org.junit.jupiter.api.Test;
 
 /** Which landings draw an artillery blast, which shape they take, and how long the blasts live. */
@@ -255,6 +257,35 @@ class GpuArtilleryBlastTest {
         assertEquals(35, marks.size(), "Every bomblet marks the ground, the target hex's eight included");
         for (var mark : marks) {
             assertTrue(mark.shot().damagePerHit() <= 4, "Each mark is one bomblet's share: " + mark.shot().damagePerHit());
+        }
+    }
+
+    /**
+     * A cluster round that missed and drifted three hexes: every bomblet marks the ground around the hex it came down
+     * on, and none around the hex it was aimed at.
+     */
+    @Test
+    void aDriftedClusterRoundFrecklesTheHexItCameDownOn() {
+        EquipmentType.initializeTypes();
+        Coords drifted = new Coords(3, 7);
+        var cluster = new ResolvedAttack.Shot("", Set.of("M_CLUSTER"), true, false, 1, 0, true, null, null,
+              new UnitLocation(Entity.NONE, drifted, 0, 0, 0), true, 20, false, false, false, null, 20);
+        var attack = GroundDamagePlaybackTest.shot("ISLongTom", false, cluster);
+        Coords aimed = attack.event.destination().coords();
+        assertEquals(drifted, GpuArtilleryBlast.landingHex(cluster, attack));
+
+        var blasts = new GpuArtilleryBlast();
+        Vector3 landing = BoardGeometry.center(drifted, 0);
+        blasts.detonate(landing, cluster, attack, 9);
+        blasts.advance(GpuArtilleryBlast.SECONDS - .1f);
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        blasts.groundMarks(marks::add);
+        assertEquals(35, marks.size());
+        float hex = BoardGeometry.height();
+        for (var mark : marks) {
+            assertTrue(mark.point().dst(landing) < hex * 1.6f, "Around the hex it came down on: " + mark.point());
+            assertTrue(mark.point().dst(BoardGeometry.center(aimed, 0)) > hex * 1.4f,
+                  "Nothing around the hex it was aimed at: " + mark.point());
         }
     }
 

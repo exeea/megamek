@@ -245,7 +245,7 @@ final class GpuArtilleryBlast {
                   : laysMines(profile) ? Style.MINES : area.cluster() ? Style.CLUSTER : fuelAir ? Style.FUEL_AIR
                   : style(profile, key);
             intensity = (fuelAirStrength == AreaEffectHelper.FuelAirStrength.HALF) && fuelAir ? THIN_AIR_INTENSITY : 1;
-            targetHex = attack == null ? null : attack.event.destination().coords();
+            targetHex = landingHex(profile, attack);
             drawSeed = ((style == Style.MINES) && (targetHex != null)) ? mineSeed(targetHex) : key;
             pieces = switch (style) {
                 case MINES -> mines(drawSeed, minesFor(minefieldDensity(weaponName(attack), profile)));
@@ -254,7 +254,7 @@ final class GpuArtilleryBlast {
                 case FUEL_AIR -> fuelAirHexes(targetHex, area.hexRadius());
                 default -> debrisPieces(area.hexRadius(), key);
             };
-            Vector3 hexCentre = attack == null ? ground : BoardGeometry.center(attack.event.destination().coords(), 0);
+            Vector3 hexCentre = targetHex == null ? ground : BoardGeometry.center(targetHex, 0);
             heading = attack == null ? DEFAULT_HEADING
                   : heading(BoardGeometry.center(attack.event.attacker().location().coords(), 0), hexCentre);
             landings = new ArrayList<>(pieces.size());
@@ -269,6 +269,21 @@ final class GpuArtilleryBlast {
                 landings.add(terrain != null ? terrain : new Vector3(x, y, ground.z));
             }
         }
+    }
+
+    /**
+     * The hex a round came down on: where the server placed it, which for a round that missed is the hex it drifted to,
+     * else the hex it was fired at. Its bomblets, debris, mines and burning hexes all lie around this hex; nothing is
+     * drawn at the hex a missed round was aimed at.
+     *
+     * @return the hex, or {@code null} for a blast drawn without an attack
+     */
+    static @Nullable Coords landingHex(@Nullable ResolvedAttack.Shot profile, @Nullable UnitAttack attack) {
+        if (attack == null) {
+            return null;
+        }
+        boolean isPlacedByServer = (profile != null) && (profile.impact() != null);
+        return isPlacedByServer ? profile.impact().coords() : attack.event.destination().coords();
     }
 
     /**
