@@ -271,11 +271,6 @@ class ArtilleryWeaponIndirectHomingHandlerTest {
     }
 
     /**
-     * This test actually exists to quickly iterate through artillery handling code, for debugging purposes. It iterates
-     * through one Homing Arrow IV bomb launch, the subsequent tagging turn, and the homing attack conversion /
-     * handling.
-     */
-    /**
      * A homing round with no TAG to follow deals no damage, as before, but the server now shows it coming down in a hex
      * beside the one it was aimed at, as a round dealing no damage, which the 3D board draws as a dud: a dirt burst.
      */
@@ -346,6 +341,11 @@ class ArtilleryWeaponIndirectHomingHandlerTest {
         return shown;
     }
 
+    /**
+     * This test actually exists to quickly iterate through artillery handling code, for debugging purposes. It iterates
+     * through one Homing Arrow IV bomb launch, the subsequent tagging turn, and the homing attack conversion /
+     * handling.
+     */
     @Test
     void handleArrowIVHomingBombTargetMekWithTAG() throws LocationFullException, EntityLoadingException {
         // Create and load entities

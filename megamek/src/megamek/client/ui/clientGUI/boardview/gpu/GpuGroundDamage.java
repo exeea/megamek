@@ -66,7 +66,6 @@ final class GpuGroundDamage implements Disposable {
         boolean thermal() { return this == LASER || this == PPC || this == LASER_BLAST || this == PPC_BLAST || this == PLASMA; }
     }
 
-    /** Miss endpoints and contact times are supplied by the existing attack effects, never rolled here. */
     /**
      * A fuel-air round's charring of each 30 m hex in its radius: its soft edge reaches most of the hex. Kept to 9 m,
      * as one mark is painted in one frame and a 13 m mark took about 45 ms.
@@ -78,6 +77,7 @@ final class GpuGroundDamage implements Disposable {
     /** The damage at which an artillery crater keeps the size every blast crater has: a Sniper's. */
     static final float ARTILLERY_CRATER_DAMAGE = 20;
 
+    /** Miss endpoints and contact times are supplied by the existing attack effects, never rolled here. */
     record Impact(UnitAttack attack, String key, Vector3 origin, Vector3 point, String effect, ResolvedAttack.Shot shot) {
         Style style() {
             // Captured weapon flags take precedence over a mesh's generic energy/bullet emitter.

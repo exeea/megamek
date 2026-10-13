@@ -46,12 +46,9 @@ final class GpuArtilleryBlast {
     /**
      * The blast shapes: the first three after the reference sheet the effect was drawn from, CLUSTER for a round that
      * bursts in the air and scatters bomblets over its target hex and the ring around it, and MINES for a round that
-     * opens above the hex it lands on and lets its mines drift down into that hex alone.
-     */
-    /** {@link #DUD}: a round that came down without going off, a homing round with no TAG to follow. */
-    /**
-     * {@link #STAR_SHELL}: an illumination round, bursting high over its target to hang its flare. {@link #FUEL_AIR}:
-     * a fuel-air round.
+     * opens above the hex it lands on and lets its mines drift down into that hex alone. DUD for a round that came down
+     * without going off, a homing round with no TAG to follow; FUEL_AIR for a fuel-air round; STAR_SHELL for an
+     * illumination round, bursting high over its target to hang its flare.
      */
     enum Style { CROWN, MUSHROOM, FIREBALL, CLUSTER, MINES, DUD, FUEL_AIR, STAR_SHELL }
 
@@ -1176,10 +1173,6 @@ final class GpuArtilleryBlast {
     }
 
     /**
-     * The damage one mark is sized for: a ring's damage for a high-explosive shell's debris, and a bomblet's share of
-     * its hex's damage for a cluster round, so a cluster round freckles the ground with small marks.
-     */
-    /**
      * The damage a fuel-air round does in a ring, which sets how dark its charring is there: the fuel-air table's,
      * not the usual falloff (an Arrow IV's 20, 10 and 5), halved in thin air.
      */
@@ -1188,6 +1181,10 @@ final class GpuArtilleryBlast {
         return intensity < 1 ? Math.ceil(damage / 2.0) : damage;
     }
 
+    /**
+     * The damage one mark is sized for: a ring's damage for a high-explosive shell's debris, and a bomblet's share of
+     * its hex's damage for a cluster round, so a cluster round freckles the ground with small marks.
+     */
     static double markDamage(AreaEffect area, int ring) {
         int damage = area.ringDamage(ring);
         return area.cluster() ? (double) damage / bombletsPerHex(damage) : damage;

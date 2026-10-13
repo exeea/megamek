@@ -349,10 +349,10 @@ final class GpuAttackEffects implements Disposable {
         minedLandscape = landscape;
     }
 
-    /** Scorch marks where artillery debris has just landed in the rings around its target hex. */
     /** Where each illumination round that just landed burst, by its target hex. */
     Map<Coords, Vector3> starShellOpenings() { return artilleryBlasts.starShellOpenings(); }
 
+    /** Scorch marks where artillery debris has just landed in the rings around its target hex. */
     void artilleryGroundMarks(Consumer<GpuGroundDamage.Impact> receiver) {
         artilleryBlasts.groundMarks(receiver);
     }
@@ -679,7 +679,6 @@ final class GpuAttackEffects implements Disposable {
         }
     }
 
-    /** Constant width even when a missed beam continues far off-board. */
     /**
      * A TAG's laser designator. One that hits holds a thin red line on its target, pulsing, with a red spot where it
      * lands, until the attack ends; one that misses only flickers faintly past its target for a moment.
@@ -701,6 +700,7 @@ final class GpuAttackEffects implements Disposable {
         GpuDesignators.draw(beams, camera, muzzle, target, fadeIn * fadeOut * pulse, pulse);
     }
 
+    /** Constant width even when a missed beam continues far off-board. */
     private void beam(Vector3 start, Vector3 finish, float width, float kind, float alpha) {
         beams.ribbon(camera, start, finish, width, kind, alpha);
     }
