@@ -16,6 +16,7 @@ import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
+import megamek.common.weapons.handlers.AreaEffectHelper;
 import megamek.logging.MMLogger;
 
 /** Bounded procedural effects using the posed assembly's actual muzzle/launcher emitters. No rules or hit tests. */
@@ -334,6 +335,7 @@ final class GpuAttackEffects implements Disposable {
               emitted[index] == null ? 1 : emitted[index].progress());
     }
     int explosionCount() { return explosions.size(); }
+    int artilleryBlastCount() { return artilleryBlasts.size(); }
 
     /** Ages the artillery blasts, which outlive the attacks that landed them, by the frame's real time. */
     void advance(float seconds) { artilleryBlasts.advance(seconds); }
@@ -360,6 +362,9 @@ final class GpuAttackEffects implements Disposable {
 
     void setLightDirection(Vector3 direction) { explosions.setLightDirection(direction); }
     void setWind(BoardAtmosphere.Effects weather) { explosions.setWind(weather); }
+
+    /** How fuel-air rounds burn in the board's atmosphere, which their blast follows as the rules do. */
+    void setFuelAirStrength(AreaEffectHelper.FuelAirStrength strength) { artilleryBlasts.setFuelAirStrength(strength); }
 
     float flameSize() {
         float size = 0;
