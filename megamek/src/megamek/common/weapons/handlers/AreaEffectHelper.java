@@ -146,6 +146,32 @@ public class AreaEffectHelper {
     }
 
     /**
+     * The damage fuel-air ordnance of {@code blastRadius} does {@code ring} hexes from its centre, before any thin-air
+     * halving: an Arrow IV's (radius 2) is 20, 10 and 5; nothing beyond its radius.
+     */
+    public static int fuelAirRingDamage(int blastRadius, int ring) {
+        int bracket = blastRadius - ring;
+        return ((bracket < 0) || (bracket >= fuelAirDamage.length)) ? 0 : fuelAirDamage[bracket];
+    }
+
+    /** How fuel-air ordnance burns: not at all, at half damage, or in full. */
+    public enum FuelAirStrength { NONE, HALF, FULL }
+
+    /**
+     * How fuel-air ordnance burns in an atmosphere: not at all in space, vacuum or anything thinner than thin air, at
+     * half damage (rounded up) in thin air, and in full otherwise. The rules and the 3D board's blast both use it.
+     *
+     * @param atmosphere the planetary atmosphere
+     * @param space      whether the board is a space board
+     */
+    public static FuelAirStrength fuelAirStrength(Atmosphere atmosphere, boolean space) {
+        if (space || atmosphere.isLighterThan(Atmosphere.THIN)) {
+            return FuelAirStrength.NONE;
+        }
+        return atmosphere.isThin() ? FuelAirStrength.HALF : FuelAirStrength.FULL;
+    }
+
+    /**
      * Helper function that adds elements to the fuel blast radius index
      */
     private static void addFuelAirBlastRadiusIndex(AmmoTypeEnum ammoType, int blastRadius) {
@@ -177,12 +203,12 @@ public class AreaEffectHelper {
           Vector<Report> vPhaseReport, TWGameManager gameManager) {
         Game game = attacker.getGame();
         PlanetaryConditions conditions = game.getPlanetaryConditions();
-        boolean thinAir = conditions.getAtmosphere().isThin();
+        FuelAirStrength strength = fuelAirStrength(conditions.getAtmosphere(), game.getBoard().isSpace());
+        boolean thinAir = strength == FuelAirStrength.HALF;
         // sanity check: if this attack is happening in vacuum through very thin atmosphere,
         // add that to the phase report and terminate early
 
-        if (game.getBoard().isSpace()
-              || conditions.getAtmosphere().isLighterThan(Atmosphere.THIN)) {
+        if (strength == FuelAirStrength.NONE) {
             Report r = new Report(9986);
             r.indent(1);
             r.subject = attacker.getId();
@@ -215,13 +241,12 @@ public class AreaEffectHelper {
         // if any attacked unit is infantry or BA, roll 2d6 + current distance. Inf dies
         // on 9-, BA dies on 7-
         int distFromCenter = center.distance(target.getPosition());
-        int damageBracket = blastRadius - distFromCenter;
-        if (damageBracket < 0) {
+        if (distFromCenter > blastRadius) {
             return;
         }
 
-        int damage = AreaEffectHelper.fuelAirDamage[damageBracket];
-        if (conditions.getAtmosphere().isThin()) {
+        int damage = fuelAirRingDamage(blastRadius, distFromCenter);
+        if (thinAir) {
             damage = (int) Math.ceil(damage / 2.0);
         }
 
@@ -250,12 +275,12 @@ public class AreaEffectHelper {
         Game game = attacker.getGame();
         Vector<Integer> entitiesToExclude = new Vector<>();
         PlanetaryConditions conditions = game.getPlanetaryConditions();
-        boolean thinAir = conditions.getAtmosphere().isThin();
+        FuelAirStrength strength = fuelAirStrength(conditions.getAtmosphere(), game.getBoard(boardId).isSpace());
+        boolean thinAir = strength == FuelAirStrength.HALF;
 
         // sanity check: if this attack is happening in vacuum through very thin atmosphere,
         // add that to the phase report and terminate early
-        if (game.getBoard(boardId).isSpace()
-              || conditions.getAtmosphere().isLighterThan(Atmosphere.THIN)) {
+        if (strength == FuelAirStrength.NONE) {
             Report r = new Report(9986);
             r.indent(1);
             r.subject = attacker.getId();

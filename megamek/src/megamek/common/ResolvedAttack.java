@@ -126,6 +126,12 @@ public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLoca
                   damagePerHit, plasma);
         }
 
+        /** The same shot dealing {@code damage} per hit, such as an artillery shell's damage in an outer ring. */
+        public Shot withDamagePerHit(double damage) {
+            return new Shot(mode, munitions, artillery, defensive, shots, missiles, indirect, missileHits, launch, impact,
+                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, damage, plasma);
+        }
+
         public Shot asDefensive() {
             return new Shot(mode, munitions, artillery, true, shots, missiles, indirect, missileHits, launch, impact,
                   ballistic, rackSize, ppc, machineGun, rapidFire, interception, damagePerHit, plasma);

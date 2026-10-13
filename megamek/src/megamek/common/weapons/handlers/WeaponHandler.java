@@ -155,6 +155,20 @@ public class WeaponHandler implements AttackHandler, Serializable {
 
     /** Called after the artillery handler resolves a landing, before applying any area damage. */
     protected final void reportArtilleryAnimation(Coords landing, int height, megamek.common.ResolvedAttack.Mount mount) {
+        reportArtilleryLanding(landing, height, mount, false);
+    }
+
+    /**
+     * Shows a round coming down harmlessly at {@code landing}: no warhead goes off and it deals no damage, such as a
+     * homing round with no TAG to follow. It is sent as dealing no damage, which the board draws as a dud: a burst of
+     * dirt and nothing more.
+     */
+    protected final void reportDudArtilleryAnimation(Coords landing, int height) {
+        for (var mount : firingMounts()) { reportArtilleryLanding(landing, height, mount, true); }
+    }
+
+    private void reportArtilleryLanding(Coords landing, int height, megamek.common.ResolvedAttack.Mount mount,
+          boolean dud) {
         if (animatedArtillery == null) { animatedArtillery = new java.util.HashSet<>(); }
         if (!animatedArtillery.add(mount.equipmentIndex())) { return; }
         animationReported = true;
@@ -163,8 +177,9 @@ public class WeaponHandler implements AttackHandler, Serializable {
         if (profile == null || animationOrigin == null) { return; }
         var shot = profile.withResolution(ammoType, null).withTrajectory(animationOrigin,
               new megamek.common.units.UnitLocation(Entity.NONE, landing, 0, height, target.getBoardId()));
+        if (dud) { shot = shot.withDamagePerHit(0); }
         gameManager.sendAttackAnimation(attackingEntity, target, megamek.common.ResolvedAttack.Kind.SHOT,
-              mount.equipmentIndex(), gun.getLocation(), !bMissed, shot,
+              mount.equipmentIndex(), gun.getLocation(), !bMissed && !dud, shot,
               java.util.List.of(new megamek.common.ResolvedAttack.Mount(mount.entityId(), mount.equipmentIndex(), shot)));
     }
 

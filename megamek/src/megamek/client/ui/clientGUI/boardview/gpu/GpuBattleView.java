@@ -53,6 +53,7 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
+import megamek.common.weapons.handlers.AreaEffectHelper;
 import megamek.logging.MMLogger;
 
 /** GPU board and Scene2D controls. The source remains the sole bridge to the existing client. */
@@ -106,6 +107,12 @@ class GpuBattleView extends ApplicationAdapter {
     private final BoardSurface.Cache groundSurfaces = new BoardSurface.Cache();
     private final Map<Integer, UnitMotion> motions = playback.motions;
     private final GpuAttackEffects attackEffects = new GpuAttackEffects();
+    private final GpuDesignators designators = new GpuDesignators();
+    /** A frame slower than this is logged with what it drew, so a playtest log shows what a stutter came from. */
+    private static final long SLOW_FRAME_MILLIS = 40;
+    private List<BoardScene.Tile> lastFrameTiles;
+    private boolean tilesChangedThisFrame;
+    private final GpuStarShells starShells = new GpuStarShells();
     private final GpuTerrainEffects terrainEffects = new GpuTerrainEffects();
     private final GpuEffectDepth effectDepth = new GpuEffectDepth();
     private final GpuWaterImpacts waterImpacts = new GpuWaterImpacts();
@@ -383,6 +390,8 @@ class GpuBattleView extends ApplicationAdapter {
         if (editorPreview != null) { editorPreview.dispose(); editorPreview = null; }
         if (lines != null) { lines.dispose(); lines = null; }
         attackEffects.dispose();
+        designators.dispose();
+        starShells.dispose();
         terrainEffects.dispose();
         jumpJets.dispose();
         waterImpacts.dispose();
@@ -438,10 +447,24 @@ class GpuBattleView extends ApplicationAdapter {
             return;
         }
         try (TerrainSettings.Scope settings = TerrainSettings.use(terrain == null ? null : terrain.settings())) {
+            long start = System.nanoTime();
             renderFrame(settings);
+            logSlowFrame((System.nanoTime() - start) / 1_000_000);
         } catch (RuntimeException failure) {
             if (!reloadingAssets) { throw failure; }
             assetReloadFailed(failure);
+        }
+    }
+
+    /**
+     * Logs a frame slower than {@link #SLOW_FRAME_MILLIS} with what it drew: the artillery blasts and their volumes, and
+     * whether the terrain changed, so a playtest's stutter can be traced to its cause from the log alone.
+     */
+    private void logSlowFrame(long millis) {
+        if (millis > SLOW_FRAME_MILLIS) {
+            LOGGER.debug("[GpuFrame] {} ms: {} artillery blasts, {} blast volumes, terrain {}", millis,
+                  attackEffects.artilleryBlastCount(), attackEffects.explosionCount(),
+                  tilesChangedThisFrame ? "changed" : "unchanged");
         }
     }
 
@@ -618,6 +641,8 @@ class GpuBattleView extends ApplicationAdapter {
         }
         if (boardPrint != null && boardPrint.update()) { boardPrint = null; }
         scene = terrain.presentation(scene);
+        tilesChangedThisFrame = scene.tiles() != lastFrameTiles;
+        lastFrameTiles = scene.tiles();
         boolean changedTiles = previousTiles != scene.tiles();
         if (changedTiles || cameraTerrainRevision != BoardGeometry.revision()) {
             boardCamera.terrainChanged(scene);
@@ -629,6 +654,8 @@ class GpuBattleView extends ApplicationAdapter {
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(tuning.fovStyle(), tuning.fovDarkness(), tuning.sensorStyle(), tuning.sensorDarkness());
         attackEffects.setWind(atmosphereSettings.effects());
+        // The board's pressure already reads as vacuum in space or at zero gravity.
+        attackEffects.setFuelAirStrength(AreaEffectHelper.fuelAirStrength(atmosphereSettings.pressure(), false));
         terrain.setNormalMaps(tuning.normalMaps());
         terrain.setTerrainWear(tuning.terrainWear());
         // The Tactical View hides what has no gameplay value, by one draw rule and without a rebuild.
@@ -728,9 +755,11 @@ class GpuBattleView extends ApplicationAdapter {
         markers.update(unitInstances.values(), boardCamera.camera);
         updateJumpJets();
         attackEffects.update(playback.attacks(), completedAttacks, unitModels, unitInstances);
+        attackEffects.advance(Gdx.graphics.getDeltaTime());
         // No craters in the Tactical View or on the Classic columns.
         if (!terrain.columns() && !boardCamera.tactical()) {
             attackEffects.groundImpacts(completedAttacks, impact -> terrain.impact(scene, impact));
+            attackEffects.artilleryGroundMarks(impact -> terrain.impact(scene, impact));
         }
         unitBounds.begin();
         List<ModelInstance> units = new ArrayList<>(unitInstances.values());
@@ -786,6 +815,9 @@ class GpuBattleView extends ApplicationAdapter {
         Color smokeLight = atmosphere.particleLight();
         terrainEffects.update(scene, groundSurfaces, atmosphereSettings.effects(), animationSeconds());
         effectDepth.begin();
+        // Illumination rounds light the opaque scene before smoke and fire are drawn over it.
+        starShells.update(scene, attackEffects.starShellOpenings(), Gdx.graphics.getDeltaTime());
+        starShells.renderLight(boardCamera.camera, effectDepth, atmosphere.lighting().daylight());
         // The Classic columns' tileset art already shows fire and smoke, the Tactical View marks them on their hexes.
         if (!terrain.columns() && !boardCamera.tactical()) {
             terrainEffects.render(boardCamera.camera, effectDepth, smokeLight, atmosphere.lighting().direction());
@@ -793,8 +825,14 @@ class GpuBattleView extends ApplicationAdapter {
         jumpJets.setSmokeLight(smokeLight);
         attackEffects.setSmokeLight(smokeLight);
         attackEffects.setLightDirection(atmosphere.lighting().direction());
+        // Mines lie on the terrain, so not in the Tactical View or on the Classic columns, which draw no craters.
+        boolean terrainMarks = !terrain.tacticalView() && !boardCamera.tactical();
+        attackEffects.setMinefields(terrainMarks ? GpuArtilleryBlast.minefields(scene.markers()) : Map.of(),
+              ray -> terrain.hit(scene, ray));
         jumpJets.render(boardCamera.camera);
         attackEffects.render(boardCamera.camera, effectDepth);
+        designators.render(boardCamera.camera, scene.designations(), Gdx.graphics.getDeltaTime());
+        starShells.renderFlares(boardCamera.camera, atmosphere.lighting().daylight());
         if (!terrain.waterVisible()) { waterImpacts.clear(); }
         else if (!boardCamera.tactical()) {
             waterImpacts.render(boardCamera.camera, scene, motions, unitInstances, smokeLight, playback.attachment());
@@ -1379,6 +1417,14 @@ class GpuBattleView extends ApplicationAdapter {
 
     private float cameraWidth() { return boardCamera.camera.viewportWidth; }
 
+    /**
+     * Whether the unit stands on the map. Off-board artillery is placed past the map's edge, as far out as its
+     * off-board distance, and framing it would fly the camera away from the board the player is aiming at.
+     */
+    private static boolean onMap(BoardScene scene, BoardScene.Unit unit) {
+        return scene.tile(unit.location().coords()) != null;
+    }
+
     /** Only replay framing consumes HUD clearance; all ordinary navigation uses the full viewport. */
     private float playbackCameraWidth() {
         if (boardCamera.firstPerson()) { return cameraWidth(); }
@@ -1440,7 +1486,7 @@ class GpuBattleView extends ApplicationAdapter {
             }
             var active = scene.units().stream().filter(unit -> unit.id() == playback.activeEntityId())
                   .findFirst().orElse(null);
-            if (active != null) {
+            if (active != null && onMap(scene, active)) {
                 playbackCameraWidth();
                 var motion = motions.get(active.id());
                 Vector3 position = motion != null && motion.isMoving() ? motion.surfacePosition(scene).cpy()
@@ -1464,13 +1510,17 @@ class GpuBattleView extends ApplicationAdapter {
         centerSequence = request.sequence();
         cameraSelection = scene.selectedId();
         cameraFollowingPlayback = false;
-        if (selection != null) {
+        if (selection != null && !onMap(scene, selection)) {
+            // Off-board artillery taking its turn: the player aims at the map, so the camera stays on it.
+            LOGGER.debug("[SelectionCamera] {} is off the map, the camera stays", selection.name());
+        } else if (selection != null) {
             boardCamera.viewableArea(0, cameraWidth());
             boardCamera.frameSelection(selection, cameraWidth());
         } else if (instantAction instanceof BoardScene.Combat combat && combat.result().kind() == ResolvedAttack.Kind.SHOT) {
             boardCamera.frameAttacks(List.of(new UnitAttack(combat)), playbackCameraWidth());
         } else if (instantAction != null) {
             scene.units().stream().filter(unit -> unit.id() == instantAction.entityId()).findFirst()
+                  .filter(unit -> onMap(scene, unit))
                   .ifPresent(unit -> boardCamera.frameSelection(unit, playbackCameraWidth()));
         } else if (center != null && scene.tile(center) != null) {
             boardCamera.viewableArea(0, cameraWidth());
@@ -2404,6 +2454,8 @@ class GpuBattleView extends ApplicationAdapter {
          * scrolls the board ({@link #autoPan}).
          */
         private boolean drawingRoute() {
+            // The window can pause or close while it still shows the loading screen, before any map is attached.
+            if (source == null) { return false; }
             var state = source.editorState();
             return boardGesture && gestureButton == Input.Buttons.LEFT && !measurementGesture && !marquee && rotationGrab == null
                   && source.isEditor() && state != null && state.drawsRoutes();

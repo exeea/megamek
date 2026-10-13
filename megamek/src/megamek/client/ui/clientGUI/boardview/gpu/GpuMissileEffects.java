@@ -24,17 +24,37 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
+import megamek.common.equipment.AmmoType;
+import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.WeaponType;
+import megamek.logging.MMLogger;
 
-/** Four triangles per missile; all bodies and smoke are batched. Trails sample the same immutable flight curve. */
+/**
+ * Missile bodies and their smoke, all batched. A plain missile is four triangles; an Arrow IV round is drawn as the
+ * real thing, 4 m long. Trails sample the same immutable flight curve.
+ */
 final class GpuMissileEffects implements Disposable {
+    private static final MMLogger LOGGER = MMLogger.create(GpuMissileEffects.class);
     static final float LAUNCH_JITTER_SECONDS = .06f;
     static final int SMOKE_BUDGET = 7680;
     static final int SMOKE_PER_MISSILE = 20;
     static final float SMOKE_LIFE_SECONDS = .3f;
     private static final int MISSILES_PER_BATCH = 512;
     private static final int STRIDE = 7;
+    /** Arrow IV rounds a batch holds before it is drawn; a volley rarely has more than a few. */
+    private static final int ARROW_IV_PER_BATCH = 32;
+    private static final String MISSILE_MODEL = "models/effects/missile-body.glb";
+    /** An Arrow IV round, authored in metres: 4 m long and twice its true thickness, so it reads at board zoom. */
+    private static final String ARROW_IV_MODEL = "models/effects/arrow-iv.glb";
+    /**
+     * One weapon's missiles in flight.
+     *
+     * @param openings for each missile, the share of its flight at which a cluster or minefield round opened in the
+     *                 air, or {@code -1} for one that did not; its spent body flies on to the ground after that
+     */
     record Launch(UnitAttack attack, Vector3[] origins, Vector3[] targets, int missiles, int hits, boolean indirect, int seed,
-          ResolvedAttack.Shot profile, int intercepted, Vector3[] aims, UnitAttack.Contact[] contacts) {
+          ResolvedAttack.Shot profile, int intercepted, Vector3[] aims, UnitAttack.Contact[] contacts,
+          float[] openings) {
         boolean hit(int missile) { return Math.floorMod(seed - missile, missiles) < hits; }
         boolean intercepted(int missile) {
             int rank = Math.floorMod(seed - missile, missiles);
@@ -47,8 +67,28 @@ final class GpuMissileEffects implements Disposable {
         }
 
         float endSeconds(int missile) {
+            return secondsAt(missile, endProgress(missile));
+        }
+
+        /** Whether the missile opened in the air, a cluster burst or a minefield dispenser. */
+        boolean opened(int missile) { return openings[missile] >= 0; }
+
+        /** The moment the missile opened in the air; only for one that {@link #opened} did. */
+        float openingSeconds(int missile) {
+            return secondsAt(missile, openings[missile]);
+        }
+
+        /**
+         * How far the missile flies under power, trailing flame and smoke: to its opening, after which its spent
+         * body falls on without either, or else to the end of its flight.
+         */
+        float poweredProgress(int missile) {
+            return opened(missile) ? openings[missile] : endProgress(missile);
+        }
+
+        private float secondsAt(int missile, float progress) {
             float start = UnitAttack.ANTICIPATION_SECONDS + launchDelay(this, missile);
-            return MathUtils.lerp(start, attack.roundContactSeconds(profile, 0), endProgress(missile));
+            return MathUtils.lerp(start, attack.roundContactSeconds(profile, 0), progress);
         }
     }
 
@@ -67,8 +107,11 @@ final class GpuMissileEffects implements Disposable {
           boolean indirect, int seed, ResolvedAttack.Shot profile, int intercepted) {
         hits = MathUtils.clamp(hits, 0, missiles);
         var launch = new Launch(attack, origins, new Vector3[missiles], missiles, hits, indirect, seed, profile,
-              MathUtils.clamp(intercepted, 0, missiles - hits), new Vector3[missiles], new UnitAttack.Contact[missiles]);
+              MathUtils.clamp(intercepted, 0, missiles - hits), new Vector3[missiles], new UnitAttack.Contact[missiles],
+              new float[missiles]);
+        Arrays.fill(launch.openings, -1);
         int hitOrdinal = 0;
+        float openingHeight = GpuArtilleryBlast.openingHeight(attack.event.result().equipmentName(), profile);
         for (int missile = 0; missile < missiles; missile++) {
             Vector3 origin = origins[missile % origins.length];
             // Observed artillery landings and counterfire retain their own targets rather than a body surface.
@@ -82,8 +125,44 @@ final class GpuMissileEffects implements Disposable {
                 launch.contacts[missile] = contact;
                 if (contact != null) { launch.targets[missile] = contact.point(); }
             }
+            if ((openingHeight > 0) && !launch.intercepted(missile)) {
+                openInTheAir(launch, missile, openingHeight);
+            }
         }
         return launch;
+    }
+
+    /**
+     * Opens a cluster or minefield round where it comes down to its opening height, so its burst or dispenser opens
+     * where the round is, not above a spot it has flown through. Its spent body falls on along its flight to the
+     * ground and vanishes there. A round that strikes the landscape before it can open does not.
+     */
+    private static void openInTheAir(Launch launch, int missile, float height) {
+        float progress = GpuArtilleryBlast.openingProgress(t -> position(launch, missile, (float) t, new Vector3()),
+              launch.aims[missile], height);
+        if (progress < 0) {
+            LOGGER.debug("[ArtilleryBlast] missile {} never comes down from its opening height, it opens over its"
+                  + " target", missile);
+            return;
+        }
+        UnitAttack.Contact landscape = launch.contacts[missile];
+        if ((landscape != null) && (landscape.progress() <= progress)) {
+            LOGGER.debug("[ArtilleryBlast] missile {} strikes the landscape before it can open", missile);
+            return;
+        }
+        launch.openings[missile] = progress;
+        LOGGER.debug("[ArtilleryBlast] missile {} opens in the air {} of the way along its flight, at {}", missile,
+              progress, openingPoint(launch, missile));
+    }
+
+    /** Whether the missile opened in the air, a cluster burst or minefield dispenser, before it landed. */
+    static boolean openedInTheAir(Launch launch, int missile) {
+        return launch.opened(missile);
+    }
+
+    /** Where the missile opened in the air; only for one that {@link Launch#opened} did. */
+    static Vector3 openingPoint(Launch launch, int missile) {
+        return position(launch, missile, launch.openings[missile], new Vector3());
     }
     private static final class Puff {
         final Vector3 center = new Vector3();
@@ -97,6 +176,8 @@ final class GpuMissileEffects implements Disposable {
     private final Vector3 right = new Vector3(), width = new Vector3(), length = new Vector3();
     private float[] vertices;
     private float[] body;
+    /** The Arrow IV round, or empty when its model is missing, which draws the plain missile instead. */
+    private float[] arrowIVBody;
     private Mesh mesh;
     private ShaderProgram shader;
     private int offset, smokeCount, missileCount;
@@ -145,12 +226,13 @@ final class GpuMissileEffects implements Disposable {
         int ordinal = 0;
         for (var launch : launches) {
             float time = launch.attack.seconds;
+            boolean arrowIV = firesArrowIV(launch);
             for (int missile = 0; missile < launch.missiles; missile++, ordinal++) {
                 float t = progress(launch, missile, time);
                 if (t >= 0 && t < launch.endProgress(missile)) {
                     position(launch, missile, t, point);
                     position(launch, missile, Math.min(1, t + .002f), direction).sub(point).nor();
-                    missile(camera, point, direction);
+                    missile(camera, point, direction, arrowIV);
                     missileCount++;
                 }
                 if (ordinal % smokeStride != 0) { continue; }
@@ -159,7 +241,8 @@ final class GpuMissileEffects implements Disposable {
                 for (int puff = 0; puff < perMissile && smokeCount < SMOKE_BUDGET; puff++) {
                     float birth = newest - puff * interval;
                     float at = progress(launch, missile, birth);
-                    if (at < 0 || at >= launch.endProgress(missile)) { continue; }
+                    // A spent body leaves no smoke after it has opened.
+                    if (at < 0 || at >= launch.poweredProgress(missile)) { continue; }
                     float age = time - birth, remaining = Math.max(0, 1 - age / SMOKE_LIFE_SECONDS);
                     Puff sample = smoke[smokeCount];
                     if (sample == null) { sample = new Puff(); smoke[smokeCount] = sample; }
@@ -185,7 +268,7 @@ final class GpuMissileEffects implements Disposable {
         for (var launch : launches) {
             for (int missile = 0; missile < launch.missiles && flames < MISSILES_PER_BATCH; missile++) {
                 float t = progress(launch, missile, launch.attack.seconds);
-                if (t < 0 || t >= launch.endProgress(missile)) { continue; }
+                if (t < 0 || t >= launch.poweredProgress(missile)) { continue; }
                 position(launch, missile, t, point);
                 position(launch, missile, Math.max(0, t - .003f), direction).sub(point).nor();
                 width.set(right).scl(.5f);
@@ -197,19 +280,39 @@ final class GpuMissileEffects implements Disposable {
         exhaust.render(camera, drawnSmoke);
     }
 
-    private void missile(Camera camera, Vector3 center, Vector3 forward) {
+    /**
+     * Whether the launch's missiles are Arrow IV rounds: any shot from an Arrow IV launcher, or an aircraft's Arrow IV
+     * homing missile, which is the same round.
+     */
+    static boolean firesArrowIV(Launch launch) {
+        String weaponName = launch.attack.event.result().equipmentName();
+        if ((weaponName == null) || !(EquipmentType.get(weaponName) instanceof WeaponType weapon)) {
+            return false;
+        }
+        AmmoType.AmmoTypeEnum ammoType = weapon.getAmmoType();
+        return (ammoType == AmmoType.AmmoTypeEnum.ARROW_IV) || (ammoType == AmmoType.AmmoTypeEnum.ARROW_IV_BOMB);
+    }
+
+    /**
+     * Queues one missile body, its base at {@code center}, pointing along {@code forward}. An Arrow IV round's model
+     * is in metres, so it is scaled to the board's metres; the plain missile is already in board units.
+     */
+    private void missile(Camera camera, Vector3 center, Vector3 forward, boolean arrowIV) {
         if (mesh == null) { create(); }
-        if (offset == vertices.length) { flush(camera); }
+        boolean drawsArrowIV = arrowIV && (arrowIVBody.length > 0);
+        float[] template = drawsArrowIV ? arrowIVBody : body;
+        float scale = drawsArrowIV ? BoardRelief.metres(1) : 1;
+        if (offset + template.length > vertices.length) { flush(camera); }
         side.set(forward).crs(Vector3.Z);
         if (side.isZero(.001f)) { side.set(Vector3.X); }
         side.nor();
         up.set(side).crs(forward).nor();
-        for (int i = 0; i < body.length; i += STRIDE) {
-            float x = body[i], y = body[i + 1], z = body[i + 2];
+        for (int i = 0; i < template.length; i += STRIDE) {
+            float x = template[i] * scale, y = template[i + 1] * scale, z = template[i + 2] * scale;
             vertices[offset++] = center.x + side.x * x + forward.x * y + up.x * z;
             vertices[offset++] = center.y + side.y * x + forward.y * y + up.y * z;
             vertices[offset++] = center.z + side.z * x + forward.z * y + up.z * z;
-            System.arraycopy(body, i + 3, vertices, offset, 4);
+            System.arraycopy(template, i + 3, vertices, offset, 4);
             offset += 4;
         }
     }
@@ -228,16 +331,39 @@ final class GpuMissileEffects implements Disposable {
     }
 
     private void create() {
-        var file = new FileHandle(new File(Configuration.dataDir(), "models/effects/missile-body.glb"));
+        body = template(MISSILE_MODEL);
+        if (body.length == 0) { throw new IllegalArgumentException("Empty missile body"); }
+        arrowIVBody = arrowIVTemplate();
+        shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU missile",
+              GpuShaderSource.read("missile.vert"), GpuShaderSource.read("missile.frag")), next -> shader = next);
+        vertices = new float[Math.max(MISSILES_PER_BATCH * body.length, ARROW_IV_PER_BATCH * arrowIVBody.length)];
+        mesh = new Mesh(false, vertices.length / STRIDE, 0, VertexAttribute.Position(), VertexAttribute.ColorUnpacked());
+    }
+
+    /** The vertices of a missile model, its authored transforms baked in. */
+    private static float[] template(String path) {
+        var file = new FileHandle(new File(Configuration.dataDir(), path));
         var data = RigidGlb.loadLods(file).getFirst();
         var points = new com.badlogic.gdx.utils.FloatArray();
         for (var node : data.nodes) { body(data, node, new Matrix4(), points); }
-        body = points.toArray();
-        if (body.length == 0) { throw new IllegalArgumentException("Empty missile body"); }
-        shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU missile",
-              GpuShaderSource.read("missile.vert"), GpuShaderSource.read("missile.frag")), next -> shader = next);
-        vertices = new float[MISSILES_PER_BATCH * body.length];
-        mesh = new Mesh(false, vertices.length / STRIDE, 0, VertexAttribute.Position(), VertexAttribute.ColorUnpacked());
+        return points.toArray();
+    }
+
+    /** The Arrow IV round, or an empty template when its model cannot be read, so it falls back to the plain missile. */
+    private static float[] arrowIVTemplate() {
+        if (!new File(Configuration.dataDir(), ARROW_IV_MODEL).isFile()) {
+            LOGGER.warn("[ArrowIV] {} is missing, Arrow IV rounds fly as plain missiles", ARROW_IV_MODEL);
+            return new float[0];
+        }
+        try {
+            float[] template = template(ARROW_IV_MODEL);
+            LOGGER.info("[ArrowIV] loaded the Arrow IV round, {} triangles", template.length / STRIDE / 3);
+            return template;
+        } catch (RuntimeException exception) {
+            LOGGER.warn(exception, "[ArrowIV] {} could not be read, Arrow IV rounds fly as plain missiles",
+                  ARROW_IV_MODEL);
+            return new float[0];
+        }
     }
 
     /** Bake the authored rigid transforms once; the dynamic batch only rotates/translates this template. */
@@ -276,6 +402,7 @@ final class GpuMissileEffects implements Disposable {
         if (shader != null) { GpuShaderManager.dispose(shader); shader = null; }
         vertices = null;
         body = null;
+        arrowIVBody = null;
         Arrays.fill(smoke, null);
     }
 }

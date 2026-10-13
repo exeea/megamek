@@ -4,17 +4,24 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.ResolvedAttack;
+import megamek.common.board.Coords;
+import megamek.common.weapons.handlers.AreaEffectHelper;
+import megamek.logging.MMLogger;
 
 /** Bounded procedural effects using the posed assembly's actual muzzle/launcher emitters. No rules or hit tests. */
 final class GpuAttackEffects implements Disposable {
+    private static final MMLogger LOGGER = MMLogger.create(GpuAttackEffects.class);
     private static final int MAX_MUZZLES = 512;
     private static final int FLAME_PUFFS = 32;
     private static final float MUZZLE_BLAST_SECONDS = .11f;
@@ -22,6 +29,8 @@ final class GpuAttackEffects implements Disposable {
     private static final float PPC_BEAM_WIDTH = 4.3f;
     // Beam shader kinds; particle kinds belong to the separate particle shader.
     private static final int LASER = 0, PPC = 1, PPC_GLOW = 2;
+    /** A TAG that misses only flickers, faintly and briefly, off past its target. */
+    private static final float DESIGNATOR_MISS_SECONDS = .3f;
     // projectiles.frag kinds. Fractional parts carry animation phase from the existing attack clock.
     static final int TRACER = 0, ENERGY_TRAIL = 1, ENERGY_GLOW = 2, FLARE_GLOW = 3, SPRAY = 4, SCREEN = 5, CONTACT_GLOW = 6;
     static final int IMPACT_SPARK = 7;
@@ -47,6 +56,9 @@ final class GpuAttackEffects implements Disposable {
     private Map<String, ModelInstance> instances = Map.of();
     private final GpuMissileEffects missiles = new GpuMissileEffects();
     private final GpuExplosionEffects explosions = new GpuExplosionEffects();
+    private final GpuArtilleryBlast artilleryBlasts = new GpuArtilleryBlast();
+    private Map<Coords, Integer> minefields = Map.of();
+    private Function<Ray, BoardGeometry.Hit> minedLandscape = ray -> null;
     private final GpuEffectBatch flames = new GpuEffectBatch(2048);
     private final GpuEffectBatch beams = new GpuEffectBatch(MAX_MUZZLES * 4, "beams");
     private final GpuEffectBatch projectiles = new GpuEffectBatch(512, "projectiles");
@@ -56,8 +68,18 @@ final class GpuAttackEffects implements Disposable {
     private final Vector3 flameSide = new Vector3(), flameUp = new Vector3();
     private final Vector3 sparkAxis = new Vector3(), sparkSide = new Vector3(), sparkUp = new Vector3(), sparkVelocity = new Vector3();
     private Camera camera;
-    record Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact, Vector3 aim, float progress) {
+    /**
+     * A round's flight.
+     *
+     * @param opening whether the round opened in the air at {@code target}, short of its {@code aim}: a cluster burst or
+     *                a minefield dispenser
+     */
+    record Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact, Vector3 aim, float progress,
+          boolean opening) {
         Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact) { this(origin, forward, target, impact, target, 1); }
+        Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact, Vector3 aim, float progress) {
+            this(origin, forward, target, impact, aim, progress, false);
+        }
         Vector3 position(float at, boolean arc, Vector3 result) {
             return at >= 1 ? result.set(target) : UnitAttack.projectile(origin, aim, at * progress, arc, result);
         }
@@ -142,7 +164,9 @@ final class GpuAttackEffects implements Disposable {
                     float size = MathUtils.clamp(UnitBounds.subtree(attachment).getDimensions(point).len()
                           * instance.transform.getScaleX() * .5f, 1.5f, 14);
                     String key = binding.node() + ":" + (barrel + 1) + (bullet && index > 0 ? ":round-" + index : "");
-                    emission(paths, key, emitter.effect(), profile, victim, size, bullet ? attack.roundDelay(index, profile) : 0);
+                    // A TAG is a designator whatever its model's emitter says.
+                    String effect = attack.firesTag(owner, binding.index()) ? "designator" : emitter.effect();
+                    emission(paths, key, effect, profile, victim, size, bullet ? attack.roundDelay(index, profile) : 0);
                 }
             }
         }
@@ -201,15 +225,17 @@ final class GpuAttackEffects implements Disposable {
             var start = muzzles[muzzleCount].cpy();
             var finish = new Vector3();
             boolean impact;
-            if ("laser".equals(effect) || "ppc".equals(effect)) { impact = attack.beamEndpoint(victim, start, key.hashCode(), finish); }
+            boolean isBeam = "laser".equals(effect) || "ppc".equals(effect) || "designator".equals(effect);
+            if (isBeam) { impact = attack.beamEndpoint(victim, start, key.hashCode(), finish); }
             else { attack.endpoint(victim, start, !attack.event.result().hit(), key.hashCode(), finish); impact = true; }
             boolean missed = !attack.event.result().hit() && !attack.defensive();
             boolean arc = profile != null && (profile.indirect() || profile.artillery());
             var aim = finish.cpy();
-            var contact = missed && !"laser".equals(effect) && !"ppc".equals(effect)
+            var contact = missed && !isBeam
                   ? attack.landscapeContact(t -> UnitAttack.projectile(start, aim, (float) t, arc, new Vector3()), arc ? 32 : 1) : null;
             trace = new Trace(start, forwards[muzzleCount].cpy(), contact == null ? finish : contact.point(), impact,
                   aim, contact == null ? 1 : contact.progress());
+            trace = openInTheAir(trace, profile, arc);
             paths.put(key, trace);
         }
         origin(muzzleCount).set(trace == null ? muzzles[muzzleCount] : trace.origin());
@@ -222,6 +248,28 @@ final class GpuAttackEffects implements Disposable {
         profiles[muzzleCount] = profile;
         emissionKeys[muzzleCount] = key;
         effects[muzzleCount++] = effect;
+    }
+
+    /**
+     * Ends a cluster or minefield shell's flight where it comes down to its opening height, so its burst or dispenser
+     * opens where the shell is. A shell that strikes the landscape before then, or never climbs that high, keeps its
+     * flight.
+     */
+    private Trace openInTheAir(Trace trace, ResolvedAttack.Shot profile, boolean arc) {
+        float height = GpuArtilleryBlast.openingHeight(attack.event.result().equipmentName(), profile);
+        if (height <= 0) {
+            return trace;
+        }
+        float progress = GpuArtilleryBlast.openingProgress(
+              t -> UnitAttack.projectile(trace.origin(), trace.aim(), (float) t, arc, new Vector3()), trace.aim(), height);
+        if ((progress < 0) || (progress >= trace.progress())) {
+            LOGGER.debug("[ArtilleryBlast] shell opens over its target: it never comes down from its opening height"
+                  + " or strikes the landscape first");
+            return trace;
+        }
+        Vector3 opening = UnitAttack.projectile(trace.origin(), trace.aim(), progress, arc, new Vector3());
+        LOGGER.debug("[ArtilleryBlast] shell opens in the air {} of the way along its flight, at {}", progress, opening);
+        return new Trace(trace.origin(), trace.forward(), opening, trace.impact(), trace.aim(), progress, true);
     }
 
     private static boolean firingEmitter(UnitModelDescriptor.Emitter emitter) {
@@ -254,10 +302,13 @@ final class GpuAttackEffects implements Disposable {
                     if (unitHit || !impacts[index] || shot.seconds < contactSeconds(index)) { continue; }
                     String effect = effects[index];
                     if (!List.of("bullet", "laser", "ppc", "energy", "missile", "cluster", "bomb", "flame").contains(effect)) { continue; }
+                    // A cluster round leaves no crater: its bomblets freckle the ground (GpuArtilleryBlast.groundMarks).
+                    if (GpuArtilleryBlast.leavesNoCrater(shot.event.result().equipmentName(), profile)) { continue; }
                     receiver.accept(new GpuGroundDamage.Impact(shot, emissionKeys[index], origins[index], endpoints[index], effect, profile));
                 }
                 for (var entry : launches.getOrDefault(shot, Map.of()).entrySet()) {
                     var launch = entry.getValue();
+                    if (GpuArtilleryBlast.leavesNoCrater(shot.event.result().equipmentName(), launch.profile())) { continue; }
                     // Sample actual ground arrivals, so a single miss in a mostly hitting rack cannot be skipped.
                     var arrivals = new java.util.ArrayList<Integer>();
                     for (int index = 0; index < launch.missiles(); index++) {
@@ -284,6 +335,27 @@ final class GpuAttackEffects implements Disposable {
               emitted[index] == null ? 1 : emitted[index].progress());
     }
     int explosionCount() { return explosions.size(); }
+    int artilleryBlastCount() { return artilleryBlasts.size(); }
+
+    /** Ages the artillery blasts, which outlive the attacks that landed them, by the frame's real time. */
+    void advance(float seconds) { artilleryBlasts.advance(seconds); }
+
+    /**
+     * The density of each minefield the local player knows of, by hex, whose mines lie on the ground until it is
+     * gone, and the terrain they lie on. An empty map draws none.
+     */
+    void setMinefields(Map<Coords, Integer> minefields, Function<Ray, BoardGeometry.Hit> landscape) {
+        this.minefields = Map.copyOf(minefields);
+        minedLandscape = landscape;
+    }
+
+    /** Where each illumination round that just landed burst, by its target hex. */
+    Map<Coords, Vector3> starShellOpenings() { return artilleryBlasts.starShellOpenings(); }
+
+    /** Scorch marks where artillery debris has just landed in the rings around its target hex. */
+    void artilleryGroundMarks(Consumer<GpuGroundDamage.Impact> receiver) {
+        artilleryBlasts.groundMarks(receiver);
+    }
 
     void setSmokeLight(Color light) {
         flames.setSmokeLight(light);
@@ -293,6 +365,9 @@ final class GpuAttackEffects implements Disposable {
 
     void setLightDirection(Vector3 direction) { explosions.setLightDirection(direction); }
     void setWind(BoardAtmosphere.Effects weather) { explosions.setWind(weather); }
+
+    /** How fuel-air rounds burn in the board's atmosphere, which their blast follows as the rules do. */
+    void setFuelAirStrength(AreaEffectHelper.FuelAirStrength strength) { artilleryBlasts.setFuelAirStrength(strength); }
 
     float flameSize() {
         float size = 0;
@@ -321,7 +396,7 @@ final class GpuAttackEffects implements Disposable {
         flames.begin();
         beams.begin();
         projectiles.begin();
-        if (volley.isEmpty()) { return; }
+        if (volley.isEmpty() && artilleryBlasts.size() == 0 && minefields.isEmpty()) { return; }
         this.camera = camera;
         for (var shot : volley) {
             if (shot.defensive() && shot.interception() != null) { continue; }
@@ -330,6 +405,8 @@ final class GpuAttackEffects implements Disposable {
             renderShot();
         }
         renderInterceptions();
+        artilleryBlasts.emit(explosions);
+        artilleryBlasts.restingMines(explosions, minefields, minedLandscape);
         missiles.render(camera);
         projectiles.render(camera, 0);
         if (depth == null) { explosions.render(camera); }
@@ -430,6 +507,10 @@ final class GpuAttackEffects implements Disposable {
                     if (impacts[index] && flash > 0) { electricGlow(target, 3 + (1 - flash) * 5, flash); }
                     continue;
                 }
+                if ("designator".equals(effect)) {
+                    designator(muzzles[index], target, attack.event.result().hit());
+                    continue;
+                }
                 if (attack.seconds < UnitAttack.ANTICIPATION_SECONDS) { continue; }
                 if ("flame".equals(effect)) {
                     flame(start, target, flameSizes[index]);
@@ -444,12 +525,18 @@ final class GpuAttackEffects implements Disposable {
                 float contact = contactSeconds(index);
                 float flash = attack.contactFlash(contact);
                 if (impacts[index] && flash > 0) {
-                    if ("bullet".equals(effect)) {
+                    // Tube artillery is ballistic like an autocannon, but its shell explodes rather than sparking.
+                    boolean isShell = GpuArtilleryBlast.drawsLanding(profiles[index]);
+                    if ("bullet".equals(effect) && !isShell) {
                         boolean targetHit = attack.event.result().hit() && attack.event.target() != null
                               && (profiles[index] == null || profiles[index].impact() == null);
                         ballisticImpact(start, target, flash, profiles[index], attack.event.result().id().hashCode() ^ index * 31, targetHit);
                     } else if ("energy".equals(effect)) { glow(target, 1.5f + (1 - flash) * 3, ENERGY_GLOW, 1 - flash, flash); }
-                    else { impact(target, flash, profiles[index]); }
+                    else {
+                        Trace flight = emitted[index];
+                        boolean opened = (flight != null) && flight.opening();
+                        impact(target, opened ? flight.aim() : target, flash, profiles[index]);
+                    }
                 }
                 if (attack.seconds >= contact) { continue; }
                 float t = MathUtils.clamp(age / Math.max(.0001f, contact - UnitAttack.ANTICIPATION_SECONDS - roundDelays[index]), 0, 1);
@@ -488,14 +575,23 @@ final class GpuAttackEffects implements Disposable {
                     int step = Math.max(1, launch.missiles() / 12);
                     for (int index = 0; index < launch.missiles(); index += step) {
                         if (launch.intercepted(index)) { continue; }
-                        float impact = attack.contactFlash(launch.endSeconds(index));
+                        boolean opened = GpuMissileEffects.openedInTheAir(launch, index);
+                        // A round that opens in the air bursts there; its spent body lands later with no blast.
+                        float impact = attack.contactFlash(
+                              opened ? launch.openingSeconds(index) : launch.endSeconds(index));
                         if (impact <= 0) { continue; }
                         var profile = launch.profile();
-                        if (profile != null && profile.ballistic()) {
+                        boolean isSolidRound = profile != null && profile.ballistic();
+                        boolean isShell = GpuArtilleryBlast.drawsLanding(profile);
+                        if (isSolidRound && !isShell) {
                             boolean targetHit = launch.hit(index) && attack.event.target() != null && profile.impact() == null;
                             ballisticImpact(launch.origins()[index % launch.origins().length], launch.targets()[index], impact,
                                   profile, launch.seed() ^ index * 31, targetHit);
-                        } else { impact(launch.targets()[index], impact, profile); }
+                        } else if (opened) {
+                            impact(GpuMissileEffects.openingPoint(launch, index), launch.aims()[index], impact, profile);
+                        } else {
+                            impact(launch.targets()[index], launch.targets()[index], impact, profile);
+                        }
                     }
                 }
             }
@@ -583,6 +679,27 @@ final class GpuAttackEffects implements Disposable {
         }
     }
 
+    /**
+     * A TAG's laser designator. One that hits holds a thin red line on its target, pulsing, with a red spot where it
+     * lands, until the attack ends; one that misses only flickers faintly past its target for a moment.
+     */
+    private void designator(Vector3 muzzle, Vector3 target, boolean hit) {
+        float on = attack.seconds - UnitAttack.ANTICIPATION_SECONDS;
+        if (on < 0) {
+            return;
+        }
+        if (!hit) {
+            if (on < DESIGNATOR_MISS_SECONDS) {
+                beam(muzzle, target, GpuDesignators.WIDTH, GpuDesignators.LINE, .35f * (1 - on / DESIGNATOR_MISS_SECONDS));
+            }
+            return;
+        }
+        float fadeIn = MathUtils.clamp(on / .08f, 0, 1);
+        float fadeOut = MathUtils.clamp((attack.duration - attack.seconds) / .3f, 0, 1);
+        float pulse = GpuDesignators.pulse(on);
+        GpuDesignators.draw(beams, camera, muzzle, target, fadeIn * fadeOut * pulse, pulse);
+    }
+
     /** Constant width even when a missed beam continues far off-board. */
     private void beam(Vector3 start, Vector3 finish, float width, float kind, float alpha) {
         beams.ribbon(camera, start, finish, width, kind, alpha);
@@ -635,14 +752,26 @@ final class GpuAttackEffects implements Disposable {
         }
     }
 
-    /** Transient presentation of the observed munition. Persistent fire, smoke and minefields belong to the board. */
-    private void impact(Vector3 center, float fade, ResolvedAttack.Shot profile) {
+    /**
+     * Transient presentation of the observed munition. Persistent fire, smoke and minefields belong to the board.
+     *
+     * @param center where the round's flight ended
+     * @param ground the ground it was aimed at: {@code center} itself, unless it opened in the air there
+     */
+    private void impact(Vector3 center, Vector3 ground, float fade, ResolvedAttack.Shot profile) {
         var ammo = profile == null ? java.util.Set.<String>of() : profile.munitions();
         boolean smoke = ammo.contains("M_SMOKE") || ammo.contains("M_SMOKE_WARHEAD");
         boolean fire = ammo.contains("M_INFERNO") || ammo.contains("M_INFERNO_IV") || ammo.contains("M_INCENDIARY")
               || ammo.contains("M_INCENDIARY_LRM") || ammo.contains("M_THUNDER_INFERNO");
         int seed = attack.event.result().id().hashCode() ^ Float.floatToIntBits(center.x);
-        if (ammo.contains("M_FLARE")) { glow(center, 1 + (1 - fade) * 2, FLARE_GLOW, 1 - fade, fade); }
+        // An artillery illumination round bursts as a star shell; a missile's or mortar's flare still glows.
+        if (ammo.contains("M_FLARE") && !GpuArtilleryBlast.isStarShell(profile)) {
+            glow(center, 1 + (1 - fade) * 2, FLARE_GLOW, 1 - fade, fade);
+        }
+        else if (GpuArtilleryBlast.drawsLanding(profile)) {
+            boolean opened = !ground.equals(center);
+            artilleryBlasts.detonate(ground, opened ? center : null, profile, attack, seed);
+        }
         else if (!smoke) { explosions.burst(center, 5.5f, 1 - fade, seed); }
         if (smoke || fire) {
             for (int puff = 0; puff < 4; puff++) {
@@ -701,6 +830,7 @@ final class GpuAttackEffects implements Disposable {
         groundComplete.clear();
         missiles.dispose();
         explosions.dispose();
+        artilleryBlasts.clear();
         flames.dispose();
         beams.dispose();
         projectiles.dispose();

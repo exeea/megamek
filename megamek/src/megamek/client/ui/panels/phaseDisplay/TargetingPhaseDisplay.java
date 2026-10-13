@@ -99,7 +99,7 @@ import megamek.logging.MMLogger;
  * Targeting Phase Display. Breaks naming convention because TargetingDisplay is too easy to confuse with something
  * else
  */
-public class TargetingPhaseDisplay extends AttackPhaseDisplay {
+public class TargetingPhaseDisplay extends AttackPhaseDisplay implements WeaponDeclarationDisplay {
     private final BiConsumer<WeaponMounted, WeaponMounted> weaponSelectionListener = this::weaponSelectionChanged;
 
     private static final MMLogger logger = MMLogger.create(TargetingPhaseDisplay.class);
@@ -387,7 +387,8 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay {
     /**
      * Selects an entity, by number, for targeting.
      */
-    private void selectEntity(int en) {
+    @Override
+    public void selectEntity(int en) {
         // clear any previously considered attacks
         if (en != currentEntity) {
             clearAttacks();
@@ -561,7 +562,8 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay {
     /**
      * Fire Mode - Adds a Fire Mode Change to the current Attack Action
      */
-    private void changeMode(boolean forward) {
+    @Override
+    public void changeMode(boolean forward) {
         WeaponMounted weaponMounted = clientgui.getUnitDisplayState().getSelectedWeapon();
 
         // Do nothing we have no unit selected or no weapon selected or if the weapon doesn't have modes
@@ -661,7 +663,8 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay {
     /**
      * Adds a weapon attack with the currently selected weapon to the attack queue.
      */
-    private void fire() {
+    @Override
+    public void fire() {
         // get the selected weapon num
         int weaponNum = clientgui.getUnitDisplayState().getSelectedWeaponNum();
         Mounted<?> mounted = currentEntity().getEquipment(weaponNum);
@@ -831,19 +834,134 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay {
     /**
      * removes the last action
      */
-    private void removeLastFiring() {
-        if (!attacks.isEmpty()) {
-            EntityAction lastAction = attacks.lastElement();
-            if (lastAction instanceof WeaponAttackAction weaponAttackAction) {
+    @Override
+    public void removeLastFiring() {
+        if (!attacks.isEmpty() && (attacks.lastElement() instanceof WeaponAttackAction weaponAttackAction)) {
+            removeAttack(weaponAttackAction);
+        }
+    }
+
+    /**
+     * Removes the queued action: a weapon attack makes its weapon usable again, and the action leaves the game's
+     * temporary actions and the board.
+     *
+     * @param action an action in the queue
+     */
+    @Override
+    public void removeAttack(EntityAction action) {
+        if (action instanceof WeaponAttackAction weaponAttackAction) {
+            markWeaponUnfired(weaponAttackAction);
+        }
+        super.removeAttack(action);
+        boolean mayFlee = attacks.isEmpty() && currentEntity().isOffBoard()
+              && currentEntity().canFlee(currentEntity().getPosition());
+        setDisengageEnabled(mayFlee);
+        clientgui.getUnitDisplayState().displayMek(currentEntity());
+        game.removeAction(action);
+        clientgui.boardStates().forEach(BoardClientState::refreshAttacks);
+    }
+
+    @Override
+    public List<EntityAction> getAttacks() {
+        return List.copyOf(attacks.toVector());
+    }
+
+    /**
+     * Replaces the queue with the given actions in the given order, keeping each action object with its ammunition and
+     * other settings: the queued weapons become usable again and their actions leave the game, then each given action
+     * is queued again as {@link #fire()} queues it. The unit's twist and arms stay as they are, no prompt opens and the
+     * turn does not end. Does nothing without a selected unit.
+     *
+     * @param actions actions of the selected unit in the new fire order, each at most once
+     */
+    @Override
+    public void replaceAttacks(List<EntityAction> actions) {
+        if (currentEntity() == null) {
+            return;
+        }
+        List<EntityAction> replacement = List.copyOf(actions);
+        WeaponMounted selectedWeapon = clientgui.getUnitDisplayState().getSelectedWeapon();
+        for (EntityAction action : attacks) {
+            if (action instanceof WeaponAttackAction weaponAttackAction) {
                 markWeaponUnfired(weaponAttackAction);
-                removeAttack(lastAction);
-                setDisengageEnabled(attacks.isEmpty() && currentEntity().isOffBoard() && currentEntity().canFlee(
-                      currentEntity().getPosition()));
-                clientgui.getUnitDisplayState().displayMek(currentEntity());
-                game.removeAction(lastAction);
-                clientgui.boardStates().forEach(bv -> bv.refreshAttacks());
+                removeCarriedWeaponAttack(weaponAttackAction);
             }
         }
+        removeAllAttacks();
+        removeTempAttacks();
+        for (EntityAction action : replacement) {
+            addAttack(action);
+            if (action instanceof WeaponAttackAction weaponAttackAction) {
+                game.addAction(weaponAttackAction);
+                Mounted<?> weapon = weaponAttackAction.getWeapon(game);
+                if (weapon != null) {
+                    weapon.setUsedThisRound(true);
+                }
+            }
+        }
+        clientgui.boardStates().forEach(BoardClientState::refreshAttacks);
+        if (selectedWeapon != null) {
+            clientgui.getUnitDisplayState().selectWeapon(selectedWeapon);
+        }
+        updateTarget();
+    }
+
+    @Override
+    public @Nullable Targetable getTarget() {
+        return target;
+    }
+
+    /**
+     * @param weapon a weapon of the selected unit
+     * @param target a target
+     *
+     * @return the to-hit as this display rolls it for the Fire button; its description is the reason when the shot
+     *       cannot be declared
+     */
+    @Override
+    public ToHitData toHitFor(WeaponMounted weapon, Targetable target) {
+        Entity attacker = currentEntity();
+        if (attacker == null) {
+            return new ToHitData(TargetRoll.IMPOSSIBLE, Messages.getString("TargetingPhaseDisplay.noUnitSelected"));
+        }
+        String refusal = refusal(weapon, Compute.effectiveDistance(game, attacker, target));
+        if (refusal != null) {
+            return new ToHitData(TargetRoll.IMPOSSIBLE, refusal);
+        }
+        return WeaponAttackAction.toHit(game, currentEntity, target, attacker.getEquipmentNum(weapon), Entity.LOC_NONE,
+              AimingMode.NONE, false);
+    }
+
+    /**
+     * @return why Fire refuses the weapon at this distance whatever the roll, or {@code null}: it already fired this
+     *       round, is in bearings-only mode below its minimum range, or fires automatically
+     */
+    private @Nullable String refusal(Mounted<?> weapon, int effectiveDistance) {
+        if (weapon.isUsedThisRound()) {
+            return Messages.getString("TargetingPhaseDisplay.alreadyFired");
+        } else if (weapon.isInBearingsOnlyMode() && (effectiveDistance < RangeType.RANGE_BEARINGS_ONLY_MINIMUM)) {
+            return Messages.getString("TargetingPhaseDisplay.bearingsOnlyMinRange");
+        } else if (weapon.getType().hasFlag(WeaponType.F_AUTO_TARGET)
+              && !weapon.curMode().equals(Weapon.MODE_AMS_MANUAL)) {
+            return Messages.getString("TargetingPhaseDisplay.autoFiringWeapon");
+        }
+        return null;
+    }
+
+    /** @return {@code true} if Fire may declare the selected weapon at the current target now */
+    @Override
+    public boolean isFireAllowed() {
+        if (buttons == null) {
+            return false;
+        }
+        MegaMekButton fireButton = buttons.get(TargetingCommand.FIRE_FIRE);
+        return (fireButton != null) && fireButton.isEnabled();
+    }
+
+    /** @return {@code null}: the Targeting and Off-board phases offer no aimed shots */
+    @Override
+    public @Nullable AimedShotHandler getAimedShotHandler() {
+        return null;
     }
 
     /**
@@ -866,7 +984,8 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay {
     /**
      * Targets something
      */
-    public void target(Targetable t) {
+    @Override
+    public void target(@Nullable Targetable t) {
         target = t;
         updateTarget();
     }
@@ -874,6 +993,7 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay {
     /**
      * Targets something
      */
+    @Override
     public void updateTarget() {
         setFireEnabled(false);
 
@@ -905,18 +1025,9 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay {
                 ToHitData toHit = WeaponAttackAction.toHit(game,
                       currentEntity, target, weaponId, Entity.LOC_NONE, AimingMode.NONE, false);
 
-                if (weapon.isUsedThisRound()) {
-                    clientgui.getUnitDisplayState().setToHit(
-                          Messages.getString("TargetingPhaseDisplay.alreadyFired"));
-                    setFireEnabled(false);
-                } else if (weapon.isInBearingsOnlyMode() && effectiveDistance < RangeType.RANGE_BEARINGS_ONLY_MINIMUM) {
-                    clientgui.getUnitDisplayState().setToHit(
-                          Messages.getString("TargetingPhaseDisplay.bearingsOnlyMinRange"));
-                    setFireEnabled(false);
-                } else if ((weapon.getType().hasFlag(WeaponType.F_AUTO_TARGET)
-                      && !weapon.curMode().equals(Weapon.MODE_AMS_MANUAL))) {
-                    clientgui.getUnitDisplayState().setToHit(
-                          Messages.getString("TargetingPhaseDisplay.autoFiringWeapon"));
+                String refusal = refusal(weapon, effectiveDistance);
+                if (refusal != null) {
+                    clientgui.getUnitDisplayState().setToHit(refusal);
                     setFireEnabled(false);
                 } else if (toHit.getValue() == TargetRoll.IMPOSSIBLE) {
                     clientgui.getUnitDisplayState().setToHit(toHit);
@@ -1062,7 +1173,8 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay {
     /**
      * Torso twist in the proper direction.
      */
-    void torsoTwist(Coords twistTarget) {
+    @Override
+    public void torsoTwist(Coords twistTarget) {
         int direction = currentEntity().getFacing();
 
         if (twistTarget != null) {
@@ -1081,7 +1193,8 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay {
      *                 left, 1 if to the right.
      */
 
-    void torsoTwist(int twistDir) {
+    @Override
+    public void torsoTwist(int twistDir) {
         int direction = currentEntity().getSecondaryFacing();
         if (twistDir == 0) {
             applyTorsoTwist(currentEntity().clipSecondaryFacing((direction + 5) % 6));
@@ -1375,7 +1488,8 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay {
         }
     }
 
-    private void updateFlipArms(boolean armsFlipped) {
+    @Override
+    public void updateFlipArms(boolean armsFlipped) {
         if (armsFlipped == currentEntity().getArmsFlipped()) {
             return;
         }
