@@ -27,7 +27,6 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
-import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -35,6 +34,7 @@ import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
@@ -50,6 +50,7 @@ import megamek.common.actions.WeaponAttackAction;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.equipment.Flare;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.board.BoardEvent;
 import megamek.common.event.board.BoardListenerAdapter;
@@ -882,7 +883,7 @@ final class GpuBoardSource implements BoardSource {
               view.getWeaponRangeTextSprites().stream().map(sprite -> new BoardScene.RangeLabel(sprite.getPosition(),
                     FieldOfFireSprite.getFieldOfFireColor(sprite.getRangeBracket()).getRGB(),
                     FieldOfFireSprite.getRangeText(sprite.getRangeBracket()))).toList(), fieldOfView,
-              view.electronicWarfare());
+              view.electronicWarfare(), starShells());
         // The report log before the chat, whose round lines read it with the status (plan O6).
         GpuReportLog.Snapshot log = captureReports();
         chat.roundLines(status, log);
@@ -909,7 +910,7 @@ final class GpuBoardSource implements BoardSource {
     /**
      * EDT: the board state's tactical capture without MegaMek's sprites the HUD draws itself (G4, a consumer filter):
      * the firing solutions always (the board labels' to-hit badges), and the path's step arrows and costs while the
-     * plan draws the route. MegaMek's movement envelope stays. 
+     * plan draws the route. MegaMek's movement envelope stays.
      * The sprites are hidden only for this capture, on the thread that paints the Legacy 2D board.
      */
     private BoardTactical tacticalGeometry(boolean planner) {
@@ -1075,6 +1076,18 @@ final class GpuBoardSource implements BoardSource {
         }
         // Multiple weapons on one target share a trace, but direct and indirect fire remain distinct.
         return result.stream().distinct().toList();
+    }
+
+    /** The illumination rounds' flares over this board, burning or about to. */
+    private List<BoardScene.StarShell> starShells() {
+        List<BoardScene.StarShell> result = new ArrayList<>();
+        for (Flare flare : view.game.getFlares()) {
+            boolean onThisBoard = (flare.getBoardId() == view.getBoardId()) && board.contains(flare.position);
+            if (onThisBoard) {
+                result.add(new BoardScene.StarShell(flare.position, flare.radius, flare.turnsToBurn, flare.isIgnited()));
+            }
+        }
+        return result;
     }
 
     private BoardScene.Waypoint firingEndpoint(Targetable target) {

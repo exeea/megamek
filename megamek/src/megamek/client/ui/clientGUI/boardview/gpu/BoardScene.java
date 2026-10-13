@@ -33,7 +33,27 @@ import megamek.common.units.Terrains;
 record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
       List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
       List<FiringLine> firingLines, List<RangeBorder> rangeBorders, List<BoardMarker> markers, BoardTactical tactical,
-      List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView, BoardElectronicWarfare electronicWarfare) {
+      List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView, BoardElectronicWarfare electronicWarfare,
+      List<StarShell> starShells) {
+
+    /** A scene with no illumination rounds burning. */
+    BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
+          List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
+          List<FiringLine> firingLines, List<RangeBorder> rangeBorders, List<BoardMarker> markers, BoardTactical tactical,
+          List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView, BoardElectronicWarfare electronicWarfare) {
+        this(boardId, width, height, tiles, units, plannedPath, selectedId, phase, commands, light, firingLines,
+              rangeBorders, markers, tactical, rangeLabels, fieldOfView, electronicWarfare, List.of());
+    }
+
+    /**
+     * An illumination round's flare (a star shell) hanging over the board.
+     *
+     * @param coords    the hex it hangs over
+     * @param radius    the hexes around it that it lights
+     * @param turnsLeft the turns it has left to burn, counting this one
+     * @param lit       whether it is burning yet: under the Core Rules it lights at the End phase of its arrival turn
+     */
+    record StarShell(Coords coords, int radius, int turnsLeft, boolean lit) { }
 
     /** A scene without E(C)CM: map previews, the editor and tests. */
     BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
@@ -752,12 +772,12 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     BoardScene withTiles(List<Tile> shown) {
         if (shown == tiles) { return this; }
         return new BoardScene(boardId, width, height, shown, units, plannedPath, selectedId, phase, commands, light,
-              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, electronicWarfare);
+              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, electronicWarfare, starShells);
     }
 
     BoardScene withUnits(List<Unit> shown) {
         return new BoardScene(boardId, width, height, tiles, shown, plannedPath, selectedId, phase, commands, light,
-              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, electronicWarfare);
+              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, electronicWarfare, starShells);
     }
 
     /** Board artwork, terrain and authorized contacts advance with the queue; interactive tools stay live. */
@@ -776,7 +796,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               hideMovement ? List.of() : world.firingLines, hideMovement ? List.of() : world.rangeBorders, shownMarkers,
               tactical.duringPlayback(settled == null ? BoardTactical.EMPTY : settled.tactical, hideMovement),
               hideMovement ? List.of() : world.rangeLabels, hideMovement ? BoardFieldOfView.EMPTY : world.fieldOfView,
-              world.electronicWarfare);
+              world.electronicWarfare, world.starShells);
     }
 
     /** Excludes HUD commands and other live controls, which do not need a playback checkpoint. */
@@ -786,7 +806,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               && tactical.equals(other.tactical) && plannedPath.equals(other.plannedPath)
               && firingLines.equals(other.firingLines) && rangeBorders.equals(other.rangeBorders)
               && rangeLabels.equals(other.rangeLabels) && fieldOfView.equals(other.fieldOfView)
-              && electronicWarfare.equals(other.electronicWarfare);
+              && electronicWarfare.equals(other.electronicWarfare) && starShells.equals(other.starShells);
     }
 
     /**

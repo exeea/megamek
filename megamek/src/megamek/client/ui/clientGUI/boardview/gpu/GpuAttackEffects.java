@@ -343,6 +343,9 @@ final class GpuAttackEffects implements Disposable {
     }
 
     /** Scorch marks where artillery debris has just landed in the rings around its target hex. */
+    /** Where each illumination round that just landed burst, by its target hex. */
+    Map<Coords, Vector3> starShellOpenings() { return artilleryBlasts.starShellOpenings(); }
+
     void artilleryGroundMarks(Consumer<GpuGroundDamage.Impact> receiver) {
         artilleryBlasts.groundMarks(receiver);
     }
@@ -726,7 +729,10 @@ final class GpuAttackEffects implements Disposable {
         boolean fire = ammo.contains("M_INFERNO") || ammo.contains("M_INFERNO_IV") || ammo.contains("M_INCENDIARY")
               || ammo.contains("M_INCENDIARY_LRM") || ammo.contains("M_THUNDER_INFERNO");
         int seed = attack.event.result().id().hashCode() ^ Float.floatToIntBits(center.x);
-        if (ammo.contains("M_FLARE")) { glow(center, 1 + (1 - fade) * 2, FLARE_GLOW, 1 - fade, fade); }
+        // An artillery illumination round bursts as a star shell; a missile's or mortar's flare still glows.
+        if (ammo.contains("M_FLARE") && !GpuArtilleryBlast.isStarShell(profile)) {
+            glow(center, 1 + (1 - fade) * 2, FLARE_GLOW, 1 - fade, fade);
+        }
         else if (GpuArtilleryBlast.drawsLanding(profile)) {
             boolean opened = !ground.equals(center);
             artilleryBlasts.detonate(ground, opened ? center : null, profile, attack, seed);
