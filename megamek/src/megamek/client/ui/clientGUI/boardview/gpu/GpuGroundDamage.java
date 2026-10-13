@@ -30,6 +30,7 @@ import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
+import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.logging.MMLogger;
 
@@ -269,6 +270,15 @@ final class GpuGroundDamage implements Disposable {
         }
         var face = surface.top().stream().filter(candidate -> Math.abs(candidate.height(point.x, point.y) - point.z) < lift)
               .findFirst().orElse(null);
+        Vector3 stampAt = point;
+        // An artillery round's landing was found by a ray that stops at whatever stands on the hex, such as the
+        // canopy of woods: its crater belongs on the ground beneath, not on the trees.
+        if ((face == null) && isArtillery(impact)) {
+            face = groundBeneath(surface.top(), point.x, point.y);
+            if (face != null) {
+                stampAt = new Vector3(point.x, point.y, face.height(point.x, point.y));
+            }
+        }
         if (face == null) {
             artilleryMarkDropped(impact, "its height matches no top face of " + tile.coords().getBoardNum());
             vertical.accept(impact);
@@ -286,7 +296,29 @@ final class GpuGroundDamage implements Disposable {
         float length = (float) Math.hypot(dx, dy);
         float angle = length < .001f ? UnitAttack.noise(seed) * MathUtils.PI2 : MathUtils.atan2(dy, dx);
         if (pending.size() >= MAX_PENDING_STAMPS) { pending.removeFirst(); }
-        pending.addLast(new Stamp(tile.elevation(), point.cpy(), impact.radius(style), angle, style, seed, impact.strength()));
+        pending.addLast(new Stamp(tile.elevation(), stampAt.cpy(), impact.radius(style), angle, style, seed,
+              impact.strength()));
+    }
+
+    /**
+     * The ground face directly beneath a point: the highest of the hex's top faces over it, or {@code null} when it lies
+     * over none of them.
+     */
+    static @Nullable BoardSurface.Face groundBeneath(List<BoardSurface.Face> top, float x, float y) {
+        BoardSurface.Face highest = null;
+        float highestHeight = Float.NEGATIVE_INFINITY;
+        for (BoardSurface.Face candidate : top) {
+            float height = candidate.height(x, y);
+            if (height > highestHeight) {
+                highestHeight = height;
+                highest = candidate;
+            }
+        }
+        return highest;
+    }
+
+    private static boolean isArtillery(Impact impact) {
+        return (impact.shot() != null) && impact.shot().artillery();
     }
 
     /**
@@ -294,8 +326,7 @@ final class GpuGroundDamage implements Disposable {
      * a blast is the first thing a playtest asks about. One line per round, at most; other weapons' marks stay quiet.
      */
     private static void artilleryMarkDropped(Impact impact, String reason) {
-        boolean isArtillery = (impact.shot() != null) && impact.shot().artillery();
-        if (isArtillery) {
+        if (isArtillery(impact)) {
             LOGGER.info("[GroundDamage] no crater for the artillery round at {}: {}", impact.point(), reason);
         }
     }
