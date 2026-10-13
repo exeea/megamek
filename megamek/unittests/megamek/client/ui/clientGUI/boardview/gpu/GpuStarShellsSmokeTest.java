@@ -219,6 +219,6 @@ class GpuStarShellsSmokeTest {
         return new BoardScene(base.boardId(), base.width(), base.height(), base.tiles(), base.units(),
               base.plannedPath(), base.selectedId(), base.phase(), base.commands(), base.light(), base.firingLines(),
               base.rangeBorders(), base.markers(), base.tactical(), base.rangeLabels(), base.fieldOfView(),
-              base.electronicWarfare(), List.of(shells));
+              base.electronicWarfare(), base.designations(), List.of(shells));
     }
 }
