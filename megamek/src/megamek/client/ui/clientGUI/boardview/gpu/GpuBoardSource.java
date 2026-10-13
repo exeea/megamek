@@ -52,6 +52,7 @@ import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.equipment.Flare;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.board.BoardEvent;
 import megamek.common.event.board.BoardListenerAdapter;
@@ -888,7 +889,7 @@ final class GpuBoardSource implements BoardSource {
               view.getWeaponRangeTextSprites().stream().map(sprite -> new BoardScene.RangeLabel(sprite.getPosition(),
                     FieldOfFireSprite.getFieldOfFireColor(sprite.getRangeBracket()).getRGB(),
                     FieldOfFireSprite.getRangeText(sprite.getRangeBracket()))).toList(), fieldOfView,
-              view.electronicWarfare(), designations());
+              view.electronicWarfare(), designations(), starShells());
         // The report log before the chat, whose round lines read it with the status (plan O6).
         GpuReportLog.Snapshot log = captureReports();
         chat.roundLines(status, log);
@@ -1115,6 +1116,18 @@ final class GpuBoardSource implements BoardSource {
     private boolean isShownDesignating(@Nullable Entity unit) {
         return (unit != null) && (unit.getPosition() != null) && (unit.getBoardId() == view.getBoardId())
               && board.contains(unit.getPosition()) && identified(unit);
+    }
+
+    /** The illumination rounds' flares over this board, burning or about to. */
+    private List<BoardScene.StarShell> starShells() {
+        List<BoardScene.StarShell> result = new ArrayList<>();
+        for (Flare flare : view.game.getFlares()) {
+            boolean onThisBoard = (flare.getBoardId() == view.getBoardId()) && board.contains(flare.position);
+            if (onThisBoard) {
+                result.add(new BoardScene.StarShell(flare.position, flare.radius, flare.turnsToBurn, flare.isIgnited()));
+            }
+        }
+        return result;
     }
 
     private BoardScene.Waypoint firingEndpoint(Targetable target) {

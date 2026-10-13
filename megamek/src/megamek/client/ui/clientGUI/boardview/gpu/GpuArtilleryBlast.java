@@ -49,7 +49,11 @@ final class GpuArtilleryBlast {
      * opens above the hex it lands on and lets its mines drift down into that hex alone.
      */
     /** {@link #DUD}: a round that came down without going off, a homing round with no TAG to follow. */
-    enum Style { CROWN, MUSHROOM, FIREBALL, CLUSTER, MINES, DUD, FUEL_AIR }
+    /**
+     * {@link #STAR_SHELL}: an illumination round, bursting high over its target to hang its flare. {@link #FUEL_AIR}:
+     * a fuel-air round.
+     */
+    enum Style { CROWN, MUSHROOM, FIREBALL, CLUSTER, MINES, DUD, FUEL_AIR, STAR_SHELL }
 
     /** How long the slowest layer of a blast (its smoke) lasts. */
     static final float SECONDS = 5.5f;
@@ -236,15 +240,16 @@ final class GpuArtilleryBlast {
             boolean fuelAir = isFuelAir(profile);
             // A fuel-air round in vacuum or thinner than thin air does nothing, as the rules say: a dud.
             boolean noFuelAirBurn = fuelAir && (fuelAirStrength == AreaEffectHelper.FuelAirStrength.NONE);
-            style = (isDud(profile) || noFuelAirBurn) ? Style.DUD : laysMines(profile) ? Style.MINES
-                  : area.cluster() ? Style.CLUSTER : fuelAir ? Style.FUEL_AIR : style(profile, key);
+            style = (isDud(profile) || noFuelAirBurn) ? Style.DUD : isStarShell(profile) ? Style.STAR_SHELL
+                  : laysMines(profile) ? Style.MINES : area.cluster() ? Style.CLUSTER : fuelAir ? Style.FUEL_AIR
+                  : style(profile, key);
             intensity = (fuelAirStrength == AreaEffectHelper.FuelAirStrength.HALF) && fuelAir ? THIN_AIR_INTENSITY : 1;
             targetHex = attack == null ? null : attack.event.destination().coords();
             drawSeed = ((style == Style.MINES) && (targetHex != null)) ? mineSeed(targetHex) : key;
             pieces = switch (style) {
                 case MINES -> mines(drawSeed, minesFor(minefieldDensity(weaponName(attack), profile)));
                 case CLUSTER -> bomblets(area, key);
-                case DUD -> List.of();
+                case DUD, STAR_SHELL -> List.of();
                 case FUEL_AIR -> fuelAirHexes(targetHex, area.hexRadius());
                 default -> debrisPieces(area.hexRadius(), key);
             };
@@ -288,12 +293,18 @@ final class GpuArtilleryBlast {
 
     /** Whether the shot's landing is drawn here at all: a blast, a cluster round or a minefield being laid. */
     static boolean drawsLanding(@Nullable ResolvedAttack.Shot profile) {
-        return explodes(profile) || laysMines(profile);
+        return explodes(profile) || laysMines(profile) || isStarShell(profile);
+    }
+
+    /** Whether the round is an illumination round (a star shell), which bursts high to hang a flare. */
+    static boolean isStarShell(@Nullable ResolvedAttack.Shot profile) {
+        return (profile != null) && profile.artillery() && profile.munitions().contains("M_FLARE");
     }
 
     /** Whether the landing leaves no single crater: a cluster round's bomblets, or mines, which make none. */
     static boolean leavesNoCrater(@Nullable String weaponName, @Nullable ResolvedAttack.Shot profile) {
-        return laysMines(profile) || scattersBomblets(weaponName, profile) || isDud(profile) || isFuelAir(profile);
+        return laysMines(profile) || scattersBomblets(weaponName, profile) || isDud(profile) || isFuelAir(profile)
+              || isStarShell(profile);
     }
 
     /**
@@ -582,6 +593,9 @@ final class GpuArtilleryBlast {
         if (scattersBomblets(weaponName, profile)) {
             return BoardGeometry.height() * AIR_BURST_HEXES;
         }
+        if (isStarShell(profile)) {
+            return BoardGeometry.height() * GpuStarShells.HANG_HEXES;
+        }
         return 0;
     }
 
@@ -669,7 +683,7 @@ final class GpuArtilleryBlast {
         List<Piece> pieces = switch (style) {
             case MINES -> mines(seed, minesFor(PREVIEW_MINE_DENSITY));
             case CLUSTER -> bomblets(PREVIEW_CLUSTER, seed);
-            case DUD -> List.of();
+            case DUD, STAR_SHELL -> List.of();
             case FUEL_AIR -> fuelAirHexes(null, hexRadius);
             default -> debrisPieces(hexRadius, seed);
         };
@@ -699,6 +713,10 @@ final class GpuArtilleryBlast {
             fuelAir(explosions, ground, scatter, seconds, seed);
             return;
         }
+        if (style == Style.STAR_SHELL) {
+            starShell(explosions, burstPoint(ground, scatter.opening()), seconds, seed);
+            return;
+        }
         debris(explosions, ground, size, scatter.pieces(), scatter.landings(), seconds, seed);
         switch (style) {
             case CROWN -> crown(explosions, ground, size, seconds, seed);
@@ -710,6 +728,47 @@ final class GpuArtilleryBlast {
         // The fireball's own smoke follows once it burns down; drawn earlier, the column cuts a dark streak through it.
         if (style == Style.CROWN) { smokeColumn(explosions, ground, size, seconds, seed, .4f); }
         if (style == Style.FIREBALL) { smokeColumn(explosions, ground, size, seconds, seed, 1.9f); }
+    }
+
+    /** Where an illumination round bursts: where its flight ended in the air, else straight over its target. */
+    private static Vector3 burstPoint(Vector3 ground, @Nullable Vector3 opening) {
+        return opening != null ? opening : new Vector3(ground).add(0, 0, BoardGeometry.height() * GpuStarShells.HANG_HEXES);
+    }
+
+    /**
+     * Where each illumination round still bursting opened, by its target hex: the flare it hangs starts there and
+     * glides to its place over its hex.
+     */
+    Map<Coords, Vector3> starShellOpenings() {
+        Map<Coords, Vector3> openings = new HashMap<>();
+        for (Blast blast : blasts) {
+            if ((blast.style == Style.STAR_SHELL) && (blast.targetHex != null)) {
+                openings.put(blast.targetHex, burstPoint(blast.ground, blast.opening));
+            }
+        }
+        return openings;
+    }
+
+    /**
+     * An illumination round bursting: a small sharp pop high over its target as the charge throws its flare out, and a
+     * pale puff that drifts off. The flare itself hangs from GpuStarShells, for as long as the rules have it burn.
+     */
+    private void starShell(GpuExplosionEffects explosions, Vector3 burst, float seconds, int seed) {
+        float hex = BoardGeometry.height();
+        float flashAge = seconds / .25f;
+        if (flashAge < 1) {
+            explosions.add(burst, hex * (.06f + .08f * flashAge), flashAge, 1, fadeOut(flashAge, .3f), seed + 1,
+                  BRIGHT_FIRE, Vector3.Zero);
+        }
+        float puffSeconds = seconds - .05f;
+        float puffAge = puffSeconds / 1.6f;
+        if (puffAge >= 0 && puffAge < 1) {
+            float swell = 1 - (float) Math.exp(-puffSeconds * 2.5f);
+            point.set(burst).add(0, 0, hex * .1f * swell);
+            explosions.downwind(point, puffSeconds);
+            explosions.add(point, hex * (.06f + .14f * swell), puffAge, 0, .4f * fadeOut(puffAge, .2f), seed + 2,
+                  PALE_SMOKE, Vector3.Zero);
+        }
     }
 
     /**
