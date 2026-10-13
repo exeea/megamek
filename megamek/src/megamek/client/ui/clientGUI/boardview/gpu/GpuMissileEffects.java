@@ -24,9 +24,6 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
-import megamek.common.equipment.AmmoType;
-import megamek.common.equipment.EquipmentType;
-import megamek.common.equipment.WeaponType;
 import megamek.logging.MMLogger;
 
 /**
@@ -285,12 +282,7 @@ final class GpuMissileEffects implements Disposable {
      * homing missile, which is the same round.
      */
     static boolean firesArrowIV(Launch launch) {
-        String weaponName = launch.attack.event.result().equipmentName();
-        if ((weaponName == null) || !(EquipmentType.get(weaponName) instanceof WeaponType weapon)) {
-            return false;
-        }
-        AmmoType.AmmoTypeEnum ammoType = weapon.getAmmoType();
-        return (ammoType == AmmoType.AmmoTypeEnum.ARROW_IV) || (ammoType == AmmoType.AmmoTypeEnum.ARROW_IV_BOMB);
+        return UnitAttack.firesArrowIV(launch.attack.event.result());
     }
 
     /**

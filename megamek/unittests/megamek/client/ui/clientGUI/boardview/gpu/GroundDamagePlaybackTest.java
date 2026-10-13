@@ -341,6 +341,22 @@ class GroundDamagePlaybackTest {
         assertNull(GpuGroundDamage.groundBeneath(ground, 20, 20), "No ground beneath a point beside every face");
     }
 
+    /** An Arrow IV round flies in slower than a shell from the same range, so its missile is seen coming. */
+    @Test
+    void anArrowIVRoundArrivesSlowerThanAShell() {
+        EquipmentType.initializeTypes();
+        var profile = new ResolvedAttack.Shot("", Set.of(), true, false, 1, 0, true, null, null, null, true, 20,
+              false, false, false, null, 20);
+        UnitAttack arrowIV = shot("ISArrowIV", true, profile);
+        UnitAttack shell = shot("ISLongTom", true, profile);
+
+        assertTrue(UnitAttack.firesArrowIV(arrowIV.event.result()));
+        assertFalse(UnitAttack.firesArrowIV(shell.event.result()));
+        assertTrue(shell.flightSeconds <= .7f, "A shell: " + shell.flightSeconds);
+        assertTrue(arrowIV.flightSeconds >= UnitAttack.ARROW_IV_MIN_FLIGHT_SECONDS, "An Arrow IV: " + arrowIV.flightSeconds);
+        assertTrue(arrowIV.contactSeconds > shell.contactSeconds, "It lands later");
+    }
+
     @Test
     void aSingleMissInALargeRackIsNeverLostToImpactGrouping() {
         var shot = shot(new UUID(0, 1), "ISLRM20", true, new ResolvedAttack.Shot("", Set.of(), false, false, 1, 20, false, 19));
