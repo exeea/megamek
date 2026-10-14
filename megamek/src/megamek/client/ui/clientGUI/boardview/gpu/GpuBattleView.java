@@ -826,7 +826,7 @@ class GpuBattleView extends ApplicationAdapter {
         attackEffects.setSmokeLight(smokeLight);
         attackEffects.setLightDirection(atmosphere.lighting().direction());
         // Mines lie on the terrain, so not in the Tactical View or on the Classic columns, which draw no craters.
-        boolean terrainMarks = !terrain.tacticalView() && !boardCamera.tactical();
+        boolean terrainMarks = !terrain.columns() && !boardCamera.tactical();
         attackEffects.setMinefields(terrainMarks ? GpuArtilleryBlast.minefields(scene.markers()) : Map.of(),
               ray -> terrain.hit(scene, ray));
         jumpJets.render(boardCamera.camera);
@@ -850,6 +850,8 @@ class GpuBattleView extends ApplicationAdapter {
         if (source.isEditor()) { traceOverlay.render(boardCamera, source.trace(), Gdx.graphics.getDeltaTime()); }
         renderStage("tactical overlays");
         terrain.render(boardCamera.camera, true);
+        // Each artillery round in the air marks the hex it is coming down on, until it lands.
+        overlay.setIncomingTargets(playback.attacks(), Gdx.graphics.getDeltaTime());
         // Movement annotations show through scenery; draw the destination ghost after the route and the units.
         overlay.renderMarks(boardCamera.camera, unitFootprints::get);
         overlay.render(boardCamera.camera);

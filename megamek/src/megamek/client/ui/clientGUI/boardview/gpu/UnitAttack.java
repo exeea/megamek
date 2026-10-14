@@ -12,12 +12,21 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.ResolvedAttack;
+import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponType;
+import megamek.common.units.UnitLocation;
 
 /** A resolved attack's presentation clock. Outcomes and damage are never calculated here. */
 final class UnitAttack {
     static final float ANTICIPATION_SECONDS = .2f;
+    /**
+     * An Arrow IV round flies in slower than a shell, so its missile is seen coming: this much longer per hex of range,
+     * between these bounds. A shell takes at most .7 seconds.
+     */
+    static final float ARROW_IV_SECONDS_PER_HEX = .08f;
+    static final float ARROW_IV_MIN_FLIGHT_SECONDS = 1.12f;
+    static final float ARROW_IV_MAX_FLIGHT_SECONDS = 1.76f;
     static final float RECOVERY_SECONDS = .35f;
     /** How much longer a TAG that hits holds its designator on the target, so the player can see what it marked. */
     static final float DESIGNATOR_HOLD_SECONDS = 1.2f;
@@ -48,6 +57,8 @@ final class UnitAttack {
     java.util.function.Function<Ray, BoardGeometry.Hit> landscape;
     java.util.function.BiFunction<Ray, Float, BoardGeometry.Hit> landscapeSegment;
     private final Map<Integer, Vector3> misses = new HashMap<>();
+    /** Where a round the server placed came down, on the installed terrain; {@code null} until first found. */
+    private Vector3 placedLanding;
     private final Map<Vector3, Boolean> hardImpacts = new HashMap<>();
     private final Map<Integer, Vector3> beamMisses = new HashMap<>();
     private final Map<Vector3, Contact> landscapeContacts = new HashMap<>();
@@ -73,7 +84,10 @@ final class UnitAttack {
         float distance = BoardGeometry.center(event.attacker().location().coords(), event.attacker().location().elevation())
               .dst(BoardGeometry.center(event.destination().coords(), event.destination().elevation())) / BoardGeometry.height();
         approachSeconds = event.result().kind() == ResolvedAttack.Kind.PUSH ? MELEE_RUN_SECONDS : MELEE_WALK_SECONDS;
-        flightSeconds = MathUtils.clamp(distance * .05f, interception() == null ? .18f : .45f, .7f);
+        flightSeconds = firesArrowIV(event.result())
+              ? MathUtils.clamp(distance * ARROW_IV_SECONDS_PER_HEX, ARROW_IV_MIN_FLIGHT_SECONDS,
+                    ARROW_IV_MAX_FLIGHT_SECONDS)
+              : MathUtils.clamp(distance * .05f, interception() == null ? .18f : .45f, .7f);
         float firingSeconds = machineGunFireSeconds(event.result().shot());
         for (var profile : profiles.values()) { firingSeconds = Math.max(firingSeconds, machineGunFireSeconds(profile)); }
         contactSeconds = removal() ? .85f : death() ? DEATH_SECONDS : shot() ? ANTICIPATION_SECONDS + flightSeconds + firingSeconds
@@ -87,6 +101,26 @@ final class UnitAttack {
 
     boolean shot() {
         return event.result().kind() == ResolvedAttack.Kind.SHOT;
+    }
+
+    /**
+     * Whether the attack is an Arrow IV round: any shot from an Arrow IV launcher, or an aircraft's Arrow IV homing
+     * missile, which is the same round.
+     */
+    static boolean firesArrowIV(ResolvedAttack result) {
+        String weaponName = result.equipmentName();
+        if ((weaponName == null) || !(EquipmentType.get(weaponName) instanceof WeaponType weapon)) {
+            return false;
+        }
+        AmmoType.AmmoTypeEnum ammoType = weapon.getAmmoType();
+        return (ammoType == AmmoType.AmmoTypeEnum.ARROW_IV) || (ammoType == AmmoType.AmmoTypeEnum.ARROW_IV_BOMB);
+    }
+
+    /** Whether this is an artillery round still on its way: fired, and not yet landed on the hex it is coming down on. */
+    boolean artilleryIncoming() {
+        ResolvedAttack.Shot profile = event.result().shot();
+        boolean isArtillery = shot() && (profile != null) && profile.artillery();
+        return isArtillery && (seconds < contactSeconds);
     }
 
     boolean death() { return event.result().kind() == ResolvedAttack.Kind.DEATH; }
@@ -168,10 +202,29 @@ final class UnitAttack {
         return result;
     }
 
+    /**
+     * Where a round the server placed came down. The server gives a hex and a whole level; the installed terrain is
+     * sculpted, so its ground sits above or below that level within the hex. The point is dropped onto the terrain, or
+     * a crater set at the flat level would float or sink and never be painted.
+     */
+    private Vector3 placedLanding(UnitLocation landing) {
+        if (placedLanding != null) {
+            return placedLanding;
+        }
+        Vector3 flat = BoardGeometry.center(landing.coords(), landing.elevation());
+        // Until the attack is placed on the terrain there is nothing to drop onto; ask again then.
+        if (landscape == null) {
+            return flat;
+        }
+        Vector3 ground = GpuArtilleryBlast.terrain(landscape, flat.x, flat.y, flat.z);
+        placedLanding = (ground == null) ? flat : ground;
+        return placedLanding;
+    }
+
     Vector3 endpoint(ModelInstance targetInstance, Vector3 origin, boolean missed, int missile, Vector3 result) {
         var profile = event.result().shot();
         if (profile != null && profile.impact() != null) {
-            return result.set(BoardGeometry.center(profile.impact().coords(), profile.impact().elevation()));
+            return result.set(placedLanding(profile.impact()));
         }
         if (defensive()) {
             if (incoming != null) {

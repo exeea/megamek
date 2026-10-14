@@ -124,6 +124,10 @@ final class GpuArtilleryBlast {
      * lets the spreading cloud read as fuel before it goes up.
      */
     static final float FUEL_AIR_IGNITION_SECONDS = .5f;
+    /** How long a fuel-air round's haze takes to burn away under its sheet of fire. */
+    private static final float FUEL_HAZE_LINGER_SECONDS = .2f;
+    /** How dense a fuel-air round's haze is at its thickest. */
+    private static final float FUEL_HAZE_OPACITY = .55f;
     /** How strongly a fuel-air blast draws in thin air, where it does half damage. */
     private static final float THIN_AIR_INTENSITY = .65f;
     private static final int FUEL_AIR_CHUNKS = 12;
@@ -241,7 +245,7 @@ final class GpuArtilleryBlast {
                   : laysMines(profile) ? Style.MINES : area.cluster() ? Style.CLUSTER : fuelAir ? Style.FUEL_AIR
                   : style(profile, key);
             intensity = (fuelAirStrength == AreaEffectHelper.FuelAirStrength.HALF) && fuelAir ? THIN_AIR_INTENSITY : 1;
-            targetHex = attack == null ? null : attack.event.destination().coords();
+            targetHex = landingHex(profile, attack);
             drawSeed = ((style == Style.MINES) && (targetHex != null)) ? mineSeed(targetHex) : key;
             pieces = switch (style) {
                 case MINES -> mines(drawSeed, minesFor(minefieldDensity(weaponName(attack), profile)));
@@ -250,7 +254,7 @@ final class GpuArtilleryBlast {
                 case FUEL_AIR -> fuelAirHexes(targetHex, area.hexRadius());
                 default -> debrisPieces(area.hexRadius(), key);
             };
-            Vector3 hexCentre = attack == null ? ground : BoardGeometry.center(attack.event.destination().coords(), 0);
+            Vector3 hexCentre = targetHex == null ? ground : BoardGeometry.center(targetHex, 0);
             heading = attack == null ? DEFAULT_HEADING
                   : heading(BoardGeometry.center(attack.event.attacker().location().coords(), 0), hexCentre);
             landings = new ArrayList<>(pieces.size());
@@ -265,6 +269,21 @@ final class GpuArtilleryBlast {
                 landings.add(terrain != null ? terrain : new Vector3(x, y, ground.z));
             }
         }
+    }
+
+    /**
+     * The hex a round came down on: where the server placed it, which for a round that missed is the hex it drifted to,
+     * else the hex it was fired at. Its bomblets, debris, mines and burning hexes all lie around this hex; nothing is
+     * drawn at the hex a missed round was aimed at.
+     *
+     * @return the hex, or {@code null} for a blast drawn without an attack
+     */
+    static @Nullable Coords landingHex(@Nullable ResolvedAttack.Shot profile, @Nullable UnitAttack attack) {
+        if (attack == null) {
+            return null;
+        }
+        boolean isPlacedByServer = (profile != null) && (profile.impact() != null);
+        return isPlacedByServer ? profile.impact().coords() : attack.event.destination().coords();
     }
 
     /**
@@ -304,10 +323,7 @@ final class GpuArtilleryBlast {
               || isStarShell(profile);
     }
 
-    /**
-     * Whether the round came down without going off: an explosive artillery round the server sent as dealing no
-     * damage, which it does only for a homing round with no TAG to follow. It throws up dirt and leaves no crater.
-     */
+    /** Whether the round is a fuel-air round that goes off: it burns every hex in its radius rather than digging. */
     static boolean isFuelAir(@Nullable ResolvedAttack.Shot profile) {
         return explodes(profile) && profile.munitions().contains("M_FAE") && !isDud(profile);
     }
@@ -317,6 +333,10 @@ final class GpuArtilleryBlast {
         fuelAirStrength = strength;
     }
 
+    /**
+     * Whether the round came down without going off: an explosive artillery round the server sent as dealing no
+     * damage, which it does only for a homing round with no TAG to follow. It throws up dirt and leaves no crater.
+     */
     static boolean isDud(@Nullable ResolvedAttack.Shot profile) {
         return explodes(profile) && (profile.damagePerHit() == 0);
     }
@@ -368,8 +388,11 @@ final class GpuArtilleryBlast {
             return AreaEffect.TARGET_HEX_ONLY;
         }
         DamageFalloff falloff = AreaEffectHelper.calculateDamageFallOff(round, 0, false);
-        return new AreaEffect(Math.max(0, falloff.radius), falloff.damage, falloff.falloff,
-              falloff.clusterMunitionsFlag);
+        // A homing round strikes the unit it homes on and splashes only that unit's hex
+        // (ArtilleryWeaponDistantHomingHandler), not the ring around it.
+        boolean isHoming = profile.munitions().contains("M_HOMING");
+        int radius = isHoming ? 0 : Math.max(0, falloff.radius);
+        return new AreaEffect(radius, falloff.damage, falloff.falloff, falloff.clusterMunitionsFlag);
     }
 
     /** The round of the weapon's ammunition family whose munitions are exactly those the shot carried. */
@@ -789,8 +812,8 @@ final class GpuArtilleryBlast {
     }
 
     /**
-     * A fuel-air round, in four beats. Its fuel spreads as a pale, low haze over every hex in its radius; a quarter
-     * second after landing the whole cloud lights at once, a sheet of fire over each hex, brightest at the centre. The
+     * A fuel-air round, in four beats. Its fuel spreads as one pale, low haze over its whole radius; a moment after
+     * landing the whole cloud lights at once, one sheet of fire over the radius, drawing in as it burns. The
      * fire rolls up into a tall, churning orange-and-black column flecked with burning metal, while a ring of dust
      * races out to the radius and burning chunks streak away. Heavy black soot is left to drift off on the wind.
      */
@@ -801,28 +824,29 @@ final class GpuArtilleryBlast {
         int radius = 0;
         for (Piece piece : hexes) { radius = Math.max(radius, piece.ring()); }
         float reach = .6f + .25f * radius;
-        for (int index = 0; index < hexes.size(); index++) {
-            Piece piece = hexes.get(index);
-            Vector3 landing = scatter.landings().get(index);
-            // The fuel reaches the outer rings a moment after the inner ones.
-            float spread = MathUtils.clamp((seconds - piece.ring() * .04f) / FUEL_AIR_IGNITION_SECONDS, 0, 1);
-            // The fuel thins as it is about to light and is gone when the sheet of fire appears, so the two never
-            // overlap: drawing both at once was the blast's costliest moment.
-            float hazeFade = MathUtils.clamp((FUEL_AIR_IGNITION_SECONDS - seconds) / .08f, 0, 1);
-            if (spread > 0 && hazeFade > 0) {
-                // Wide enough that neighbouring hexes' haze merges into one low, pale cloud.
-                point.set(landing).add(0, 0, hex * .1f);
-                explosions.addFlat(point, hex * .85f * spread, .1f, 0, .3f * hazeFade, seed + index * 13, FUEL_HAZE,
-                      .35f);
-            }
-            float sheet = (seconds - FUEL_AIR_IGNITION_SECONDS) / .75f;
-            if (sheet >= 0 && sheet < 1) {
-                // The sheet draws in and up as it burns, rolling into the column over the target hex.
-                float ringFade = 1 - .22f * piece.ring();
-                point.set(landing).lerp(ground, .35f * sheet).add(0, 0, hex * (.12f + .45f * sheet));
-                explosions.addFlat(point, hex * .6f * intensity * (1 - .3f * sheet), sheet, 1,
-                      fadeOut(sheet, .45f) * ringFade, seed + index * 17, FUEL_FIRE, .45f + .4f * sheet);
-            }
+        // One haze and one sheet of fire over the whole circular radius, not one of each per hex: an Arrow IV's 61
+        // overlapping volumes cost a modest graphics chip far too much.
+        float cloudRadius = hex * (radius + .6f);
+        // The fuel spreads out from the target hex to the radius over the half second before it lights.
+        float spread = MathUtils.clamp(seconds / FUEL_AIR_IGNITION_SECONDS, 0, 1);
+        spread = spread * spread * (3 - 2 * spread);
+        // It lingers a moment under the sheet of fire as it burns away: with one volume of each, the overlap is cheap.
+        float hazeFade = MathUtils.clamp((FUEL_AIR_IGNITION_SECONDS + FUEL_HAZE_LINGER_SECONDS - seconds)
+              / FUEL_HAZE_LINGER_SECONDS, 0, 1);
+        if (seconds >= 0 && hazeFade > 0) {
+            float hazeRadius = cloudRadius * (.12f + .88f * spread);
+            point.set(ground).add(0, 0, hex * .1f);
+            // Denser than one hex's haze was: the many overlapping hazes it replaces built up to this.
+            explosions.addFlat(point, hazeRadius, .1f, 0, FUEL_HAZE_OPACITY * hazeFade, seed + 13, FUEL_HAZE,
+                  flatness(hex * .3f, hazeRadius));
+        }
+        float sheet = (seconds - FUEL_AIR_IGNITION_SECONDS) / .75f;
+        if (sheet >= 0 && sheet < 1) {
+            // The sheet draws in and up as it burns, rolling into the column over the target hex.
+            float sheetRadius = cloudRadius * intensity * (1 - .45f * sheet);
+            point.set(ground).add(0, 0, hex * (.12f + .45f * sheet));
+            explosions.addFlat(point, sheetRadius, sheet, 1, fadeOut(sheet, .45f), seed + 17, FUEL_FIRE,
+                  flatness(hex * (.35f + .5f * sheet), sheetRadius));
         }
         float columnSeconds = seconds - FUEL_AIR_IGNITION_SECONDS;
         float columnAge = columnSeconds / 2.4f;
@@ -873,6 +897,11 @@ final class GpuArtilleryBlast {
                       .95f * fadeOut(sootAge, .55f), seed + 600 + level * 31, FUEL_SOOT, Vector3.Zero);
             }
         }
+    }
+
+    /** How flat a volume of {@code radius} must be to stand {@code height} tall: its height as a share of its width. */
+    private static float flatness(float height, float radius) {
+        return MathUtils.clamp(height / radius, .1f, 1);
     }
 
     /**
@@ -1197,7 +1226,7 @@ final class GpuArtilleryBlast {
     }
 
     /** Where a vertical line through {@code x}, {@code y} meets the installed terrain, searching well above and below. */
-    private static @Nullable Vector3 terrain(Function<Ray, BoardGeometry.Hit> landscape, float x, float y,
+    static @Nullable Vector3 terrain(Function<Ray, BoardGeometry.Hit> landscape, float x, float y,
           float near) {
         float drop = BoardGeometry.height() * 8;
         var ray = new Ray(new Vector3(x, y, near + drop / 2), new Vector3(0, 0, -1));

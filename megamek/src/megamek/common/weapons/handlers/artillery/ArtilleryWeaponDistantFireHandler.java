@@ -51,6 +51,7 @@ import megamek.common.ToHitData;
 import megamek.common.actions.ArtilleryAttackAction;
 import megamek.common.actions.NukeDetonatedAction;
 import megamek.common.actions.WeaponAttackAction;
+import megamek.common.annotations.Nullable;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
@@ -678,10 +679,32 @@ public class ArtilleryWeaponDistantFireHandler extends AmmoWeaponHandler {
                     missMarker.setDriftHex(edgeHex);
                 }
                 game.getBoard().addSpecialHexDisplay(originalPosition, missMarker);
+                showOffBoardLanding(originalPosition, targetPos, edgeHex);
                 return null;
             }
         }
         return targetPos;
+    }
+
+    /**
+     * Shows a round that scattered off the board exploding just past the edge it crossed, so the players see where it
+     * went. Nothing is damaged there: the round came down off the map.
+     *
+     * @param aimedHex        the hex the round was aimed at
+     * @param offBoardScatter where it came down, off the board
+     * @param edgeHex         the last hex on the board on its way out, or {@code null} if there is none
+     */
+    private void showOffBoardLanding(Coords aimedHex, Coords offBoardScatter, @Nullable Coords edgeHex) {
+        Coords shownAt = ArtilleryHandlerHelper.firstOffBoardHexToward(game.getBoard(), aimedHex, offBoardScatter);
+        if (shownAt == null) {
+            logger.debug("[ArtilleryDrift] round aimed at {} scattered to {}, but no hex past the edge lies between",
+                  aimedHex, offBoardScatter);
+            return;
+        }
+        Hex edge = (edgeHex == null) ? null : game.getBoard().getHex(edgeHex);
+        reportArtilleryAnimation(shownAt, (edge == null) ? 0 : edge.getLevel());
+        logger.debug("[ArtilleryDrift] round aimed at {} scattered off the board to {}; its explosion shows at {}",
+              aimedHex, offBoardScatter, shownAt);
     }
 
     /**

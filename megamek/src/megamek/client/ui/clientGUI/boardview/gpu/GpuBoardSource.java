@@ -53,6 +53,7 @@ import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.Flare;
+import megamek.common.event.GameAttackResolvedEvent;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.board.BoardEvent;
 import megamek.common.event.board.BoardListenerAdapter;
@@ -425,12 +426,34 @@ final class GpuBoardSource implements BoardSource {
               unit.height(), form == null ? unit.airborne() : form.airborne(), model, unit.outlineRgb(), unit.footprint(), unit.attachment(), unit.heat());
     }
 
+    /**
+     * Logs what the board receives for an artillery attack, so a log card that offers no Replay can be traced: the
+     * card's report line links to the attack only on the same phase, attacking unit, target and weapon name.
+     */
+    private void logArtilleryAttack(GameAttackResolvedEvent event) {
+        var result = event.result();
+        boolean isArtillery = (result.shot() != null) && result.shot().artillery();
+        if (!isArtillery) {
+            return;
+        }
+        Entity attacker = event.attacker();
+        var weapon = (attacker == null) ? null : attacker.getEquipment(result.equipmentIndex());
+        LOGGER.debug("[ArtilleryReplay] attack {} by {} (id {}) with {} at {} in phase {} round {}, board {} of {}"
+                    + ", attacker visible {}",
+              result.id(), attacker == null ? "nobody" : attacker.getShortName(),
+              attacker == null ? Entity.NONE : attacker.getId(), weapon == null ? "no weapon" : weapon.getType().getName(),
+              event.target() == null ? "nothing" : event.target().getDisplayName(), view.game.getPhase(),
+              view.game.getRoundCount(), result.attacker().boardId(), view.getBoardId(),
+              (attacker != null) && visible(attacker));
+    }
+
     /** Copy authorized, then-visible appearance once; no Entity reaches the GL thread. */
     private void captureCombat(megamek.common.event.GameAttackResolvedEvent event) {
         requireSwingThread();
         var result = event.result();
         Entity attacker = event.attacker();
         Entity target = event.target() instanceof Entity entity ? entity : null;
+        logArtilleryAttack(event);
         if (closed || result.attacker().boardId() != view.getBoardId() || attacker == null
               || !visible(attacker) || sensorContact(attacker)
               || (result.targetType() == Targetable.TYPE_ENTITY && target == null)
