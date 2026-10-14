@@ -201,9 +201,9 @@ class GpuArrowIVSmokeTest {
     /** Pixels much redder than they are green or blue: fire. */
     private static long redPixels(BufferedImage image) {
         long count = 0;
-        for (int y = 0; y < image.getHeight(); y++) {
-            for (int x = 0; x < image.getWidth(); x++) {
-                int rgb = image.getRGB(x, y);
+        for (int row = 0; row < image.getHeight(); row++) {
+            for (int column = 0; column < image.getWidth(); column++) {
+                int rgb = image.getRGB(column, row);
                 int red = rgb >> 16 & 255, green = rgb >> 8 & 255, blue = rgb & 255;
                 if (red > 120 && red > green + 50 && red > blue + 50) {
                     count++;

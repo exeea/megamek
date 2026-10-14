@@ -53,6 +53,7 @@ import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.Flare;
+import megamek.common.event.GameAttackResolvedEvent;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.board.BoardEvent;
 import megamek.common.event.board.BoardListenerAdapter;
@@ -429,7 +430,7 @@ final class GpuBoardSource implements BoardSource {
      * Logs what the board receives for an artillery attack, so a log card that offers no Replay can be traced: the
      * card's report line links to the attack only on the same phase, attacking unit, target and weapon name.
      */
-    private void logArtilleryAttack(megamek.common.event.GameAttackResolvedEvent event) {
+    private void logArtilleryAttack(GameAttackResolvedEvent event) {
         var result = event.result();
         boolean isArtillery = (result.shot() != null) && result.shot().artillery();
         if (!isArtillery) {
@@ -437,7 +438,7 @@ final class GpuBoardSource implements BoardSource {
         }
         Entity attacker = event.attacker();
         var weapon = (attacker == null) ? null : attacker.getEquipment(result.equipmentIndex());
-        LOGGER.info("[ArtilleryReplay] attack {} by {} (id {}) with {} at {} in phase {} round {}, board {} of {}"
+        LOGGER.debug("[ArtilleryReplay] attack {} by {} (id {}) with {} at {} in phase {} round {}, board {} of {}"
                     + ", attacker visible {}",
               result.id(), attacker == null ? "nobody" : attacker.getShortName(),
               attacker == null ? Entity.NONE : attacker.getId(), weapon == null ? "no weapon" : weapon.getType().getName(),

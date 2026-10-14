@@ -304,11 +304,11 @@ final class GpuGroundDamage implements Disposable {
      * The ground face directly beneath a point: the highest of the hex's top faces over it, or {@code null} when it lies
      * over none of them.
      */
-    static @Nullable BoardSurface.Face groundBeneath(List<BoardSurface.Face> top, float x, float y) {
+    static @Nullable BoardSurface.Face groundBeneath(List<BoardSurface.Face> top, float pointX, float pointY) {
         BoardSurface.Face highest = null;
         float highestHeight = Float.NEGATIVE_INFINITY;
         for (BoardSurface.Face candidate : top) {
-            float height = candidate.height(x, y);
+            float height = candidate.height(pointX, pointY);
             if (height > highestHeight) {
                 highestHeight = height;
                 highest = candidate;

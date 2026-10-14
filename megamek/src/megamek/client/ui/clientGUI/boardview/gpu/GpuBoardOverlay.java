@@ -314,10 +314,10 @@ final class GpuBoardOverlay implements Disposable {
         List<Band> incoming = incomingBands();
         for (Coords hex : incomingTargets) {
             Vector3 center = BoardGeometry.center(hex, 0);
-            float z = BoardTacticalGeometry.floatingZ(scene, hex);
+            float planeHeight = BoardTacticalGeometry.floatingZ(scene, hex);
             for (Band band : incoming) {
                 band((corner, inset) -> BoardGeometry.inset(BoardGeometry.corner(hex, 0, corner), center, inset)
-                      .add(0, 0, z), band, opacity);
+                      .add(0, 0, planeHeight), band, opacity);
             }
         }
         // The Tactical View draws its own drift arrows, with the rest of the flat board's art.
