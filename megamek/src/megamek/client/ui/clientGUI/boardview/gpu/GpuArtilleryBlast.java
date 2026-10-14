@@ -388,8 +388,11 @@ final class GpuArtilleryBlast {
             return AreaEffect.TARGET_HEX_ONLY;
         }
         DamageFalloff falloff = AreaEffectHelper.calculateDamageFallOff(round, 0, false);
-        return new AreaEffect(Math.max(0, falloff.radius), falloff.damage, falloff.falloff,
-              falloff.clusterMunitionsFlag);
+        // A homing round strikes the unit it homes on and splashes only that unit's hex
+        // (ArtilleryWeaponDistantHomingHandler), not the ring around it.
+        boolean isHoming = profile.munitions().contains("M_HOMING");
+        int radius = isHoming ? 0 : Math.max(0, falloff.radius);
+        return new AreaEffect(radius, falloff.damage, falloff.falloff, falloff.clusterMunitionsFlag);
     }
 
     /** The round of the weapon's ammunition family whose munitions are exactly those the shot carried. */

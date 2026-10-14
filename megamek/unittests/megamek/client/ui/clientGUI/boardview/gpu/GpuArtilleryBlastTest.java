@@ -101,6 +101,8 @@ class GpuArtilleryBlastTest {
         assertEquals(1, radius("ISThumper", shot(true, "M_STANDARD")), "Thumper 15/5 (R1)");
         assertEquals(1, radius("ISArrowIV", shot(true, "M_STANDARD")), "Arrow IV 20/10 (R1)");
         assertEquals(1, radius("ISLongTom", shot(true, "M_CLUSTER")), "Long Tom cluster 20/10 (R1)");
+        assertEquals(1, radius("ISArrowIV", shot(true, "M_STANDARD")), "Arrow IV 20/10 (R1)");
+        assertEquals(0, radius("ISArrowIV", shot(true, "M_HOMING")), "A homing Arrow IV strikes its target's hex only");
         assertEquals(2, radius("ISLongTom", shot(true)), "No munitions captured is standard");
     }
 
