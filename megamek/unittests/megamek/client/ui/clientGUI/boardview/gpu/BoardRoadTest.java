@@ -434,7 +434,9 @@ class BoardRoadTest {
         when(page.getHeight()).thenReturn(512);
         var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
         var road = BoardRoad.of(scene, scene.tile(CENTER));
-        var coats = new GpuRoads.Coats(mock(TextureArray.class), mock(TextureArray.class));
+        var maps = new GpuAssets.MaterialArrays(mock(TextureArray.class), mock(TextureArray.class));
+        var coats = new GpuRoads.Coats(maps,
+              new GpuAssets.MaterialArrays(mock(TextureArray.class), mock(TextureArray.class)));
         var patches = GpuRoads.patches(scene.tile(CENTER), road);
         List<Material> batches = new ArrayList<>();
         for (int i = 0; i < patches.size(); i++) {

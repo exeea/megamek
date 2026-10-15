@@ -479,8 +479,8 @@ colour, surface properties and normals; its normal gradients follow the rotation
 scale and wind stretch. Solid crust bends its domain within a few repeats to reduce
 the visible plate grid while retaining one material sample and its matching Jacobian.
 The solid magma source uses varied broken crust, quiet cold faces and sparse narrow
-fissures instead of a few repeated large slabs. Its four aligned maps are baked by
-`mm-data/tools/build_magma_materials.py`.
+fissures instead of a few repeated large slabs. Its four aligned maps are exported by
+the Material Maker project `mm-data/tools/materials/terrain/lava/crust`.
 
 `GpuSurfaceScaleSmokeTest` captures 14 materials at identical overhead, oblique and
 close scales, including one-level slopes and three-level cliffs. These are visual

@@ -86,9 +86,10 @@ final class GpuEditorPreview implements Disposable {
           .collect(Collectors.toUnmodifiableSet());
 
     /** Submission order: the stand-ins' hidden pass, then their visible pass, then the ghosts. */
-    private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Editor ghosts", GpuUnitShader::displayProvider),
+    private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Editor ghosts", GpuUnitShader::linearDisplayProvider),
           (camera, renderables) -> { });
     private final Environment light = new Environment();
+    private final GpuLinearOverlay blend = new GpuLinearOverlay();
     /** What the built geometry shows, for which renderer, and whether that renderer was busy then. */
     private Data built = Data.NONE;
     private GpuTerrain builtFor;
@@ -209,22 +210,26 @@ final class GpuEditorPreview implements Disposable {
         if (data != built || terrain != builtFor || builtBusy && !busy) { build(scene, terrain, data); }
         builtBusy = busy;
         if (data == Data.NONE) { return; }
-        if (standIns != null) {
-            for (boolean hidden : new boolean[] { true, false }) {
-                for (Material material : standIns.materials) {
-                    material.set(new DepthTestAttribute(hidden ? GL20.GL_GREATER : GL20.GL_LEQUAL, false));
-                    ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity = opacity(material) * (hidden ? HIDDEN : 1);
+        if (standIns == null && ghosts.isEmpty()) { return; }
+        blend.begin();
+        try {
+            if (standIns != null) {
+                for (boolean hidden : new boolean[] { true, false }) {
+                    for (Material material : standIns.materials) {
+                        material.set(new DepthTestAttribute(hidden ? GL20.GL_GREATER : GL20.GL_LEQUAL, false));
+                        ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity = opacity(material) * (hidden ? HIDDEN : 1);
+                    }
+                    batch.begin(camera);
+                    batch.render(standIns, light);
+                    batch.end();
                 }
+            }
+            if (!ghosts.isEmpty()) {
                 batch.begin(camera);
-                batch.render(standIns, light);
+                ghosts.forEach(ghost -> batch.render(ghost, light));
                 batch.end();
             }
-        }
-        if (!ghosts.isEmpty()) {
-            batch.begin(camera);
-            ghosts.forEach(ghost -> batch.render(ghost, light));
-            batch.end();
-        }
+        } finally { blend.end(); }
     }
 
     /** The erased objects' boxes, which the hover rings outline in red. */
@@ -384,5 +389,6 @@ final class GpuEditorPreview implements Disposable {
     public void dispose() {
         clear();
         batch.dispose();
+        blend.dispose();
     }
 }

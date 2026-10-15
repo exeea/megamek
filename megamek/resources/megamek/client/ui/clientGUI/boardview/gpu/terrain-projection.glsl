@@ -21,13 +21,14 @@ float farDetail;
 float mapVariance = 0.0;
 float normalMapVariance(float shortened);
 
-// A map is a sampler2D of its own, or a layer of u_terrainLayers, the array that holds every sculpt map (one texture
-// unit for all of them; macOS gives a shader stage only 16). The helpers below take either; only the fetch differs.
+// Stable semantic IDs retain even colour / odd normal numbering. Each storage array is compact by role.
+// Separate colour and normal helpers keep sampler selection out of varying fragment branches.
 vec4 mapTexel(sampler2D map, vec2 uv) { return texture(map, uv); }
-vec4 mapTexel(float layer, vec2 uv) { return texture(u_terrainLayers, vec3(uv, layer)); }
+vec4 mapTexel(float layer, vec2 uv) { return texture(u_terrainLayers, vec3(uv, layer * .5)); }
+vec4 normalTexel(float layer, vec2 uv) { return texture(u_terrainData, vec3(uv, (layer - 1.0) * .5)); }
 // The map's average colour: its last mip level.
 vec4 mapAverage(sampler2D map, vec2 uv) { return texture(map, uv, 12.0); }
-vec4 mapAverage(float layer, vec2 uv) { return texture(u_terrainLayers, vec3(uv, layer), 12.0); }
+vec4 mapAverage(float layer, vec2 uv) { return texture(u_terrainLayers, vec3(uv, layer * .5), 12.0); }
 
 // A map on the ground plane at two repeats, mixed by a broad field, so no period shows. p is in metres with +V
 // pointing to world -Y, as the maps are authored. From afar it settles to the map's average (its last mip level).
@@ -58,7 +59,7 @@ vec4 planarNormal(sampler2D map, vec2 p, float tile, float mixer) {
 }
 
 vec4 planarNormal(float map, vec2 p, float tile, float mixer) {
-    return planarNormal(mapTexel(map, p / tile), mapTexel(map, TURN * p / (tile * 2.37) + .31), mixer);
+    return planarNormal(normalTexel(map, p / tile), normalTexel(map, TURN * p / (tile * 2.37) + .31), mixer);
 }
 
 // Tangent-space detail on a surface facing up: U is world +X, V is world -Y.
@@ -81,7 +82,7 @@ vec3 wallNormal(sampler2D map, vec2 uvx, vec2 uvy, vec3 face, float side) {
 }
 
 vec3 wallNormal(float map, vec2 uvx, vec2 uvy, vec3 face, float side) {
-    return wallNormal(mapTexel(map, uvx), mapTexel(map, uvy), face, side);
+    return wallNormal(normalTexel(map, uvx), normalTexel(map, uvy), face, side);
 }
 
 // Cliffs and rocks share the same world-space projections.

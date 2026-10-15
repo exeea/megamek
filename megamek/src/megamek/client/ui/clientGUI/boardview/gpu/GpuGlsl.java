@@ -165,6 +165,13 @@ final class GpuGlsl {
             }
         }
 
+        /** Whether a link it started is still running: running its action again would only find it unfinished. */
+        boolean linking() {
+            for (Job job : working.values()) { if (!job.done().isDone()) { return true; } }
+            for (Linked linked : pending.values()) { if (!linked.complete()) { return true; } }
+            return false;
+        }
+
         private Linked take(GpuShaderManager.Sources source) {
             if (worker != null) {
                 Job job = working.computeIfAbsent(source, key -> {

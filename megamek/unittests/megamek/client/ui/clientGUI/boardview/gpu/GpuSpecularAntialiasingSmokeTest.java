@@ -195,23 +195,36 @@ class GpuSpecularAntialiasingSmokeTest {
         return camera;
     }
 
-    /** The fitted view from the angle, its detail settled and drawn once. */
+    /** The fitted view from the angle, its detail settled and drawn until its programs are. */
     private static BoardCamera view(GpuTerrain terrain, GpuReviewFrame frame, BoardScene scene, int angle)
           throws InterruptedException {
         BoardCamera camera = camera(scene, angle);
         frame.prepare(terrain, camera, scene);
         settle(terrain, camera);
-        frame.render(terrain, camera, scene);
+        draw(terrain, frame, camera, scene);
         return camera;
     }
 
-    /** The same view zoomed onto the cliff foot, its detail settled and drawn once. */
+    /** The same view zoomed onto the cliff foot, its detail settled and drawn until its programs are. */
     private static void focus(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene, float zoom)
           throws InterruptedException {
         camera.camera.zoom = zoom;
         camera.center(BoardGeometry.center(FOOT, scene.tile(FOOT).elevation()));
         settle(terrain, camera);
-        frame.render(terrain, camera, scene);
+        draw(terrain, frame, camera, scene);
+    }
+
+    /**
+     * Draws until no family program is waiting (GpuFamilyPrograms): timings and captures see the settled programs.
+     * Like the view, it refines before each frame; family programs build there while the terrain loads.
+     */
+    private static void draw(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene) {
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(20);
+        do {
+            terrain.refine(camera.camera);
+            frame.render(terrain, camera, scene);
+            assertTrue(System.nanoTime() < deadline, "Family programs must finish");
+        } while (terrain.familyPrograms().pending() > 0);
     }
 
     /** Waits until the terrain has installed its detail for the camera and compiled its material programs. */

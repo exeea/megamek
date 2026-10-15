@@ -52,7 +52,8 @@ class GpuConcreteProjectionSmokeTest {
         pixels.dispose();
         // Optional historical source proves that the regression check detects the old axis projection.
         String source = System.getProperty("megamek.gpu.concreteProjectionSource", "");
-        String concrete = source.isBlank() ? GpuShaderSource.read("terrain-concrete.glsl") : Files.readString(Path.of(source));
+        String concrete = source.isBlank() ? GpuShaderSource.read("terrain-concrete.glsl") : Files.readString(Path.of(source))
+              .replace("mapTexel(u_sculptLayers.w + 1.0,", "normalTexel(u_sculptLayers.w + 1.0,");
         String roughness = source.isBlank() ? "#define SCULPT_MATERIAL_COUNT 1\n"
               + GpuShaderSource.read("terrain-roughness.glsl") : "";
         String call = source.isBlank()
@@ -65,7 +66,7 @@ class GpuConcreteProjectionSmokeTest {
               void main() { gl_Position = vec4(a_position, 0.0, 1.0); }
               """, """
               out vec4 fragColor;
-              uniform sampler2DArray u_terrainLayers;
+              uniform sampler2DArray u_terrainLayers, u_terrainData;
               uniform sampler2D u_rainNoise;
               uniform vec2 u_direction;
               uniform float u_slope;
@@ -93,11 +94,14 @@ class GpuConcreteProjectionSmokeTest {
             Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
             Gdx.gl.glDisable(GL20.GL_BLEND);
-            assets.sculptArray(List.of("cast")).bind(0);
+            var maps = assets.sculptArray(List.of("cast"));
+            maps.color().bind(0);
+            maps.data().bind(3);
             noise.bind(1);
             if (source.isBlank()) { assets.sculptRoughness(List.of("cast")).maps().bind(2); }
             shader.bind();
             shader.setUniformi("u_terrainLayers", 0);
+            if (shader.hasUniform("u_terrainData")) { shader.setUniformi("u_terrainData", 3); }
             shader.setUniformi("u_rainNoise", 1);
             if (source.isBlank()) {
                 shader.setUniformi("u_roughnessLayers", 2);

@@ -83,13 +83,14 @@ final class GpuBoardOverlay implements Disposable {
     private static final List<Band> HOVERED = List.of(new Band(.05f, .06f, alpha(Color.WHITE, .85f)));
 
     private final ModelBatch batch = new ModelBatch((camera, renderables) -> { });
-    private final ModelBatch ghostBatch = new ModelBatch(GpuShaderManager.provider("Movement ghosts", GpuUnitShader::displayProvider),
+    private final ModelBatch ghostBatch = new ModelBatch(GpuShaderManager.provider("Movement ghosts", GpuUnitShader::linearDisplayProvider),
           (camera, renderables) -> { });
     /** Draws the marks every frame, GpuBattleView draws its selection bands. */
     private final ShapeRenderer shapes = new ShapeRenderer();
     private final BoardSurface.Cache surfaces = new BoardSurface.Cache();
     /** Light for the 3D ghost: enough ambient to keep it bright, one light from above to show its shape. */
     private final Environment ghostLight = new Environment();
+    private final GpuLinearOverlay ghostBlend = new GpuLinearOverlay();
     private ModelInstance overlay;
     private ModelInstance movementMarkers;
     private long builds;
@@ -389,9 +390,12 @@ final class GpuBoardOverlay implements Disposable {
         Vector3 to = BoardGeometry.center(arrival.coords(), arrival.elevation());
         ghost.transform.setToTranslation(to).rotate(Vector3.Z, (mover.location().facing() - arrival.facing()) * 60)
               .translate(-from.x, -from.y, -from.z).mul(source.transform);
-        ghostBatch.begin(camera);
-        ghostBatch.render(ghost, ghostLight);
-        ghostBatch.end();
+        ghostBlend.begin();
+        try {
+            ghostBatch.begin(camera);
+            ghostBatch.render(ghost, ghostLight);
+            ghostBatch.end();
+        } finally { ghostBlend.end(); }
     }
 
     /**
@@ -968,6 +972,7 @@ final class GpuBoardOverlay implements Disposable {
         surfaces.clear();
         batch.dispose();
         ghostBatch.dispose();
+        ghostBlend.dispose();
         shapes.dispose();
     }
 

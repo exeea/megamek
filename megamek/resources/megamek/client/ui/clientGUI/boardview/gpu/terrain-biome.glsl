@@ -9,7 +9,7 @@ vec4 biomeTexel(sampler2DArray maps, float layer, vec2 uv, mat2 gradient) {
     return textureGrad(maps, vec3(uv, layer), gradient[0], gradient[1]);
 }
 vec4 biomeTexel(float layer, vec2 uv, mat2 gradient) {
-    return biomeTexel(u_terrainLayers, layer, uv, gradient);
+    return biomeTexel(u_terrainLayers, layer * .5, uv, gradient);
 }
 vec4 biomePlanar(sampler2DArray maps, float map, MaterialProjection p, float mixer, bool normalMap) {
     float tile = u_biomeSoilTile;
@@ -21,7 +21,8 @@ vec4 biomePlanar(sampler2DArray maps, float map, MaterialProjection p, float mix
           biomeTexel(maps, map, p.top / tile, p.topGradient * (4096.0 / tile)), farDetail) : pigment;
 }
 vec4 biomePlanar(float map, MaterialProjection p, float mixer, bool normalMap) {
-    return biomePlanar(u_terrainLayers, map, p, mixer, normalMap);
+    if (normalMap) return biomePlanar(u_terrainData, (map - 1.0) * .5, p, mixer, true);
+    return biomePlanar(u_terrainLayers, map * .5, p, mixer, false);
 }
 float biomeRoughness(MaterialProjection p, float mixer, bool planar, float fallback) {
     vec2 authored = u_sculptRoughness[int(u_biomeSoilLayer * .5)];
@@ -43,8 +44,8 @@ vec4 biomeSoil(MaterialProjection p, float mixer) {
 vec3 biomeSoilNormal(MaterialProjection p, vec3 face, float mixer) {
     if (p.lying >= 1.0) return upNormal(biomePlanar(u_biomeSoilLayer + 1.0, p, mixer, true).rgb, face);
     float tile = u_biomeSoilTile;
-    vec3 steep = wallNormal(biomeTexel(u_biomeSoilLayer + 1.0, p.x / tile, p.xGradient / tile),
-          biomeTexel(u_biomeSoilLayer + 1.0, p.y / tile, p.yGradient / tile), face, p.side);
+    vec3 steep = wallNormal(biomeTexel(u_terrainData, u_biomeSoilLayer * .5, p.x / tile, p.xGradient / tile),
+          biomeTexel(u_terrainData, u_biomeSoilLayer * .5, p.y / tile, p.yGradient / tile), face, p.side);
     if (p.lying <= 0.0) return normalize(steep);
     return normalize(mix(steep, upNormal(biomePlanar(u_biomeSoilLayer + 1.0, p, mixer, true).rgb, face), p.lying));
 }

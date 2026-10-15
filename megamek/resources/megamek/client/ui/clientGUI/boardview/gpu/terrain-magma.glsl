@@ -1,8 +1,7 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Shared volcanic material evaluation for liquid sheets and terrain-boundary palettes.
-// One set's aligned maps in one texture unit (GpuAssets.magma); macOS gives a shader stage only 16.
-uniform sampler2DArray u_magmaMaps;
-const float MAGMA_COLOR = 0.0;
+// One set's sRGB colour array and raw normal/surface/heat array (GpuAssets.magma).
+uniform sampler2DArray u_magmaColor, u_magmaMaps;
 const float MAGMA_NORMAL = 1.0;
 const float MAGMA_SURFACE = 2.0; // height, roughness, AO, relief UV / .1
 const float MAGMA_HEAT = 3.0;    // heat, signed flow XY, crack-wall glow
@@ -11,7 +10,7 @@ uniform vec4 u_magmaFieldMap;   // world XY to field UV; zero without a field
 // Hex widths either side of a lava bank over which the melt chills into a skin and the cooled bank still glows.
 const float MAGMA_MARGIN = .08;
 struct Volcanic {
-    vec3 albedo; // linear reflectance; only the color layer is decoded at upload
+    vec3 albedo; // linear reflectance; the colour sampler decodes before filtering
     vec3 normal;
     vec4 surface;
     vec2 heat;
@@ -23,7 +22,7 @@ vec3 magmaEmission(vec2 heat, float strength);
 float magmaRepeatMetres();
 float magmaDistantRoughness();
 
-vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy) { return textureGrad(u_magmaMaps, vec3(uv, map), dx, dy); }
+vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy) { return textureGrad(u_magmaMaps, vec3(uv, map - 1.0), dx, dy); }
 
 vec4 magmaField(vec2 world) {
     return texture(u_magmaField, world * u_magmaFieldMap.xy + u_magmaFieldMap.zw);
@@ -59,7 +58,7 @@ Volcanic magmaSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, bool relief) {
     }
     surface = mix(distantSurface, surface, terrainSurfaceDetail);
     vec4 heat = magmaTexel(MAGMA_HEAT, uv, dx, dy);
-    return Volcanic(magmaTexel(MAGMA_COLOR, uv, dx, dy).rgb, normal, surface, heat.ra, vec3(0.0));
+    return Volcanic(textureGrad(u_magmaColor, vec3(uv, 0.0), dx, dy).rgb, normal, surface, heat.ra, vec3(0.0));
 }
 
 Volcanic magmaMix(Volcanic a, Volcanic b, float weight) {

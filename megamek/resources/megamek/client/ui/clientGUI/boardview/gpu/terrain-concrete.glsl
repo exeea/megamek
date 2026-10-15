@@ -48,7 +48,7 @@ void concreteSlab(vec3 world, vec3 worldDx, vec3 worldDy, vec3 face, vec3 projec
     mat2 gradient = mat2(vec2(dot(worldDx, tangent), -worldDx.z), vec2(dot(worldDy, tangent), -worldDy.z)) / u_sculptTiles.w;
     roughness = authoredRoughness(u_sculptLayers.w, uv, gradient, roughness);
     if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
-        vec4 texel = mapTexel(u_sculptLayers.w + 1.0, uv);
+        vec4 texel = normalTexel(u_sculptLayers.w + 1.0, uv);
         vec3 detail = texel.rgb * 2.0 - 1.0;
         vec3 down = normalize(cross(tangent, face));
         vec3 across = cross(face, down);

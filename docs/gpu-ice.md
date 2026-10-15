@@ -15,14 +15,9 @@ is present. Rules for discovery, movement and breaking ice stay in the game code
 | `BoardEditorTerrain` | Authoring markers for hidden flags, independently of gameplay appearance. |
 | `data/models/board/textures/terrain/ice` | Chromatic scattering-tint input, normal and packed optical controls. |
 
-The [ice map generator](../../mm-data/tools/board-models/GenerateIceMaps.java)
-reads the preserved source at
-`mm-data/tools/board-models/ice-source/sheet-source.png`. From the `mm-data` root,
-rebuild with Java 21 or newer:
-
-```powershell
-java tools/board-models/GenerateIceMaps.java tools/board-models/ice-source/sheet-source.png data/models/board/textures/terrain/ice
-```
+The Material Maker project `mm-data/tools/materials/terrain/ice/sheet` exports these maps
+(`sheet.png`, `sheet-normal.png`, `sheet-surface.png`); run `python tools/materials/export.py`
+from the `mm-data` root.
 
 `sheet.png` is a chromatic input to the optical coat, not a final diffuse albedo
 or measured transmission coefficient. The shader blends two filtered RGB samples,

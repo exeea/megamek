@@ -13,6 +13,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
@@ -23,7 +25,10 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.ObjectMap;
+import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.Coords;
+import megamek.common.game.Game;
 import megamek.common.planetaryConditions.Fog;
 import megamek.common.planetaryConditions.Light;
 import megamek.common.planetaryConditions.Weather;
@@ -59,7 +64,7 @@ class GpuSamplerBudgetSmokeTest {
     void everyBattleViewProgramFitsMacTextureUnits() throws Exception {
         var over = new TreeMap<String, Integer>();
         var used = new TreeMap<String, Integer>();
-        BoardScene ice = GpuIceSmokeTest.scene(2);
+        BoardScene ice = GpuIceSmokeTest.scene(2), volcanicIce = volcanicIceScene();
         var failure = new AtomicReference<Throwable>();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
@@ -75,7 +80,8 @@ class GpuSamplerBudgetSmokeTest {
                         System.out.println("Texture limit 0x" + Integer.toHexString(name) + "=" + limit.get(0));
                     }
                     for (Scene scene : SCENES) { review(scene, used, over); }
-                    reviewIce(ice, used, over);
+                    reviewTerrain(ice, "GpuIceSmokeTest.scene(2)", used, over);
+                    reviewTerrain(volcanicIce, "cooled crust / rock / frozen land", used, over);
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
@@ -89,9 +95,19 @@ class GpuSamplerBudgetSmokeTest {
               .forEach(program -> System.out.println(program.getValue() + " " + program.getKey()));
         assertTrue(used.keySet().stream().anyMatch(program -> program.contains("volcanicFlag")),
               "Reach the volcanic terrain programs: " + used.keySet());
-        for (String feature : List.of("iceFlag", "roadCoatFlag", "u_roughnessLayers", "u_magmaMaps")) {
+        for (String feature : List.of("iceFlag", "roadCoatFlag", "u_roughnessLayers", "u_magmaMaps", "u_terrainData", "u_roadData", "u_environmentLut")) {
             assertTrue(used.keySet().stream().anyMatch(program -> program.contains(feature)),
                   "Reach the material-array consumer: " + feature);
+        }
+        // Individual ice and volcanic shaders are insufficient: this actual material must link both together.
+        var combined = used.entrySet().stream().filter(program -> program.getKey().contains("iceFlag")
+              && program.getKey().contains("volcanicFlag") && program.getKey().contains("u_terrainData")).toList();
+        assertTrue(!combined.isEmpty(), "Reach the combined sculpt ice/volcanic material: " + used.keySet());
+        for (var program : combined) {
+            for (String sampler : List.of("u_terrainLayers", "u_terrainData", "u_magmaColor", "u_magmaMaps",
+                  "u_iceColor", "u_iceNormal", "u_iceSurface", "u_environmentLut")) {
+                assertTrue(program.getKey().contains(sampler), "Combined program must sample " + sampler + ": " + program);
+            }
         }
         assertTrue(over.isEmpty(), "Programs over macOS's " + MAC_TEXTURE_UNITS + " texture units: " + over);
     }
@@ -123,8 +139,26 @@ class GpuSamplerBudgetSmokeTest {
         }
     }
 
-    /** Reuse the actual land/black/lake ice specimen: the historical seven-board scan reached no iceFlag program. */
-    private static void reviewIce(BoardScene scene, Map<String, Integer> used, Map<String, Integer> over) throws Exception {
+    /** A natural rock strip blends toward crust on one edge and carries its frozen neighbour's ice fringe. */
+    private static BoardScene volcanicIceScene() throws Exception {
+        var task = new FutureTask<BoardScene>(() -> {
+            var board = Board.createEmptyBoard(5, 3);
+            for (int x = 0; x < 5; x++) {
+                for (int y = 0; y < 3; y++) {
+                    board.setHex(new Coords(x, y), new Hex(0, x == 0 ? "magma:1" : x > 1 ? "ice:1" : "", "rock"));
+                }
+            }
+            var game = new Game();
+            game.setBoard(board);
+            try (var source = new GpuMapSource(game, null, null)) { return source.takeFrame().scene(); }
+        });
+        SwingUtilities.invokeAndWait(task);
+        return task.get();
+    }
+
+    /** Render the actual captured material combinations, rather than manufacturing shader defines. */
+    private static void reviewTerrain(BoardScene scene, String name, Map<String, Integer> used,
+          Map<String, Integer> over) throws Exception {
         var terrain = new GpuTerrain();
         var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, .5f, 0,
               BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
@@ -134,8 +168,13 @@ class GpuSamplerBudgetSmokeTest {
             camera.fit(scene);
             frame.prepare(terrain, camera, scene);
             terrain.update(scene);
+            long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(10);
+            while (terrain.refine(camera.camera) | terrain.busy()) {
+                assertTrue(System.nanoTime() < deadline, () -> "Sampler specimen must settle: " + terrain.buildDetails());
+                Thread.sleep(5);
+            }
             frame.render(terrain, camera, scene);
-            scan(new Scene("GpuIceSmokeTest.scene(2)", Weather.CLEAR, Light.DAY, Fog.FOG_NONE), used, over);
+            scan(new Scene(name, Weather.CLEAR, Light.DAY, Fog.FOG_NONE), used, over);
         } finally {
             frame.dispose();
             terrain.dispose();
@@ -171,14 +210,6 @@ class GpuSamplerBudgetSmokeTest {
             }
             String label = (program instanceof GpuShaderUniforms named ? named.name : "libGDX") + " " + flags(program)
                   + " " + names;
-            // A conservative source-design estimate, not a linked candidate measurement. Each mixed array adds
-            // one sampler; sculpt's environment layer moves to the already-existing standalone atlas owner.
-            int extra = 0;
-            for (String mixed : List.of("u_terrainLayers", "u_sculptMaps", "u_roadMaps", "u_magmaMaps")) {
-                if (names.contains(mixed)) { extra++; }
-            }
-            if (flags(program).contains("environmentArrayFlag")) { extra++; }
-            if (extra > 0) { System.out.println("Proposed split upper bound: " + units + " -> " + (units + extra) + " " + label); }
             used.merge(label, units, Math::max);
             if (units > MAC_TEXTURE_UNITS) { over.merge(label + " in " + scene, units, Math::max); }
         }

@@ -189,12 +189,10 @@ limitations are recorded in the shader audit.
 
 ## Assets
 
-`mm-data/tools/build_magma_materials.py` reuses the existing periodic terrain and
-normal-map baker. It separates neutral basalt reflectance from heat and estimates
-recessed fissure height. This is artistic relief, not measured photogrammetry.
-The generated molten-interior source, its generation prompt and provenance live in
-`mm-data/tools/magma-reference/lava-source.png`, `lava-source-prompt.txt` and
-`lava-source.json`. The source contains broad irregular thin cooling plates
+The Material Maker projects `mm-data/tools/materials/terrain/lava/crust` and `lava`
+export each material's aligned maps (`<name>.png`, `-normal`, `-surface` and `-heat`),
+with heat kept apart from the basalt reflectance. This is artistic relief, not
+measured photogrammetry. The `lava` project's molten-interior source contains broad irregular thin cooling plates
 separated by connected molten rifts; riverbanks come from the board geometry and
 shore field. The 2026-10-12 replacement removes the dense fiery thread patterns.
 Its heat map has 36.5% coverage above .2; the molten exposure ramp uses .25–.65

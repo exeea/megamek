@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.concurrent.atomic.AtomicReference;
@@ -11,7 +10,6 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
@@ -19,7 +17,7 @@ import com.badlogic.gdx.utils.BufferUtils;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Independent numerical integrals of the production BRDF and both GPU environment-LUT storage paths. */
+/** Independent numerical integrals of the production BRDF and the production standalone GPU environment LUT. */
 @Tag("on-demand")
 class GpuPbrSmokeTest {
     private static final int WIDTH = 8, HEIGHT = 6;
@@ -35,15 +33,6 @@ class GpuPbrSmokeTest {
               if (u_mode == 1) {
                   vec3 direction = normalize(vec3(sqrt(max(0.0, 1.0-u_probe.x*u_probe.x)),0,u_probe.x));
                   fragColor = vec4(environmentRadiance(direction,u_probe.y,vec3(.1),vec3(.8)),1);
-                  return;
-              }
-              if (u_mode == 2) {
-                  fragColor = vec4(integratedBrdf(nv,rough),averageSpecularAlbedo(rough,vec3(.04)).r,
-                        environmentRadiance(v,rough,vec3(.1),vec3(.8)).r);
-                  return;
-              }
-              if (u_mode == 8) {
-                  fragColor = vec4(directionalNormalization(nv,rough,vec3(.02037,.04,1)),1);
                   return;
               }
               if (u_mode == 9) {
@@ -150,6 +139,7 @@ class GpuPbrSmokeTest {
           }
           """;
 
+    // Keep the historical method selector used by native runners; the obsolete array route is gone.
     @Test
     void coupledBrdfConservesEnergyAndEnvironmentArrayMatchesStandaloneLookup() {
         var failure = new AtomicReference<Throwable>();
@@ -167,18 +157,9 @@ class GpuPbrSmokeTest {
         var environment = new GpuEnvironmentLighting();
         var target = GpuHeatGlow.buffer(WIDTH, HEIGHT, false);
         var quad = GpuAtmosphere.screenQuad();
-        ShaderProgram ordinary = probe(false), array = probe(true);
-        int textureArray = Gdx.gl.glGenTexture();
+        ShaderProgram ordinary = probe();
         try {
-            Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
-            Gdx.gl.glBindTexture(GL30.GL_TEXTURE_2D_ARRAY, textureArray);
-            Gdx.gl30.glTexImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, GL30.GL_RGBA16F, 256, 256, 1, 0,
-                  GL20.GL_RGBA, GL20.GL_FLOAT, GpuEnvironmentLighting.arrayPixels(256, 256));
-            Gdx.gl.glTexParameteri(GL30.GL_TEXTURE_2D_ARRAY, GL20.GL_TEXTURE_MIN_FILTER, GL20.GL_LINEAR);
-            Gdx.gl.glTexParameteri(GL30.GL_TEXTURE_2D_ARRAY, GL20.GL_TEXTURE_MAG_FILTER, GL20.GL_LINEAR);
-            assertFalse(array.hasUniform("u_environmentLut"), "The array route must not consume a second sampler");
             ordinary.bind(); ordinary.setUniformi("u_environmentLut", 0);
-            array.bind(); array.setUniformi("u_terrainLayers", 0); array.setUniformf("u_environmentLayer", 0f);
             environment.texture().bind(0);
             float[] integrated = draw(target, quad, ordinary, 0, 0, 0, 1, 1);
             float[] reciprocity = draw(target, quad, ordinary, 3, 0, 0, 1, 1);
@@ -235,26 +216,14 @@ class GpuPbrSmokeTest {
             assertEquals(.68, diffuse[0], .002, "Cosine sky integral is .2*horizon+.8*zenith");
             float[] broad = draw(target, quad, ordinary, 1, 0, 1, .8f, .2f);
             assertTrue(broad[0] > .1 && broad[0] < .68, "Rough grazing reflection must integrate sky and ground");
-            float[] separate = draw(target, quad, ordinary, 2, 0, 0, .8f, .2f);
-            float[] separateFiltered = draw(target, quad, ordinary, 8, 0, 0, .8f, .2f);
-            Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
-            Gdx.gl.glBindTexture(GL30.GL_TEXTURE_2D_ARRAY, textureArray);
-            float[] packed = draw(target, quad, array, 2, 0, 0, .8f, .2f);
-            float[] packedFiltered = draw(target, quad, array, 8, 0, 0, .8f, .2f);
-            for (int i = 0; i < separate.length; i++) {
-                assertEquals(separate[i], packed[i], .0005, "Packed LUT must preserve every numerical channel " + i);
-                assertEquals(separateFiltered[i], packedFiltered[i], .0005,
-                      "Packed LUT must preserve finite-source energy coefficients " + i);
-            }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
-            Gdx.gl.glDeleteTexture(textureArray);
-            ordinary.dispose(); array.dispose(); quad.dispose(); target.dispose(); environment.dispose();
+            ordinary.dispose(); quad.dispose(); target.dispose(); environment.dispose();
         }
     }
 
-    private static ShaderProgram probe(boolean array) {
-        String prefix = "#define environmentLightingFlag\n" + (array ? "#define environmentArrayFlag\n" : "");
+    private static ShaderProgram probe() {
+        String prefix = "#define environmentLightingFlag\n";
         return GpuGlsl.compile("PBR integration probe", prefix, GpuShaderSource.read("atmosphere.vert"),
               "#version 330 core\n" + GpuShaderSource.read("light-model.glsl")
                     + GpuShaderSource.read("environment-lighting.glsl") + PROBE);

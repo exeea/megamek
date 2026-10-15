@@ -79,6 +79,8 @@ final class GpuSurfaceScars implements Disposable {
         var material = new Material(source);
         if (!GpuTerrain.sculpted(material) && !material.has(GpuModelMaterial.TYPE)) { material.set(new GpuModelMaterial(.8f, 0, null)); }
         material.set(new Marking());
+        // A family program never draws a scar: the scar keeps the generic program its warm-up prepared.
+        material.remove(GpuFamilyPrograms.Constants.TYPE);
         return material;
     }
 

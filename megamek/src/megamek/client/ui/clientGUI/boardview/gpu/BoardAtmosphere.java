@@ -19,8 +19,11 @@ final class BoardAtmosphere {
     static final float MAX_FOG_OPACITY = 0.25f;
     /** Blowing sand keeps at least this much ground fog, so its dust reads even with fog none. */
     static final float MIN_SAND_FOG = 0.05f;
-    /** Fraction of the night sky's fill moved into moonlight where the moon casts shadows; 0 keeps the plain moon. */
-    static final float MOONLIGHT_SHADOW_CONTRAST = 0.25f;
+    /**
+     * Fraction of sky fill moved into visible moonlight. The default gives comparable standard-air noon/midnight
+     * key-to-fill ratios; it is a presentation calibration, not a universal day/night contrast rule.
+     */
+    static final float MOONLIGHT_SHADOW_CONTRAST = 0.3f;
     /** Artistic palette blends, not gas opacity or a change to gameplay visibility. */
     static final float TAINTED_COLOR_STRENGTH = 0.45f;
     static final float TOXIC_COLOR_STRENGTH = 1.0f;
@@ -61,6 +64,10 @@ final class BoardAtmosphere {
     private static final float ENVIRONMENT_CHROMA = 0.25f;
     /** Readable moonless fill, in units of the night-sky budget; presentation light, not astronomical irradiance. */
     private static final float MOONLESS_SKY_SHARE = 2.1f;
+    /** Retain the dim no-moon backdrop independently of the moon's adjustable shadow contrast. */
+    private static final float MOONLESS_BACKDROP_SHARE = 0.75f;
+    /** Neutral gameplay fill relative to incident light, separate from visible sky and atmospheric scattering. */
+    private static final float AIRLESS_READABILITY_SHARE = 0.075f;
     /** Around sunset the deep blue sky overhead fills the shade, cool against the golden sun. */
     private static final Color TWILIGHT_SKY = rgb(0.68f, 0.96f, 1.32f);
     /** Dawn and dusk warm the diffuse fill toward the glowing horizon, at constant luminance. */
@@ -69,7 +76,9 @@ final class BoardAtmosphere {
     /** Moonlight and the night sky are cool, but only a little blue. */
     private static final Color NIGHT_TINT = rgb(0.70f, 0.90f, 1.30f);
     /** Full-moon light on level ground against clear noon, in stops, after the view's adaptation. */
-    private static final float FULL_MOON_STOPS = -1.75f;
+    private static final float FULL_MOON_STOPS = -0.75f;
+    /** Reference night budget for readable moonless fill, independent of the full-moon brightness target. */
+    private static final float MOONLESS_REFERENCE_STOPS = -1.75f;
     /** The full moon on level ground against the night sky, before MOONLIGHT_SHADOW_CONTRAST moves fill into it. */
     private static final float MOON_KEY = 2.5f;
     /** The view adapts to this share of a change in light, in stops: dusk and night stay darker, but readable. */
@@ -82,10 +91,13 @@ final class BoardAtmosphere {
     static final Color SAND_DUST = rgb(0.57f, 0.38f, 0.17f);
     /** Derived levels: clear noon sun and sky give level ground luminance 1, in the ratio KEY_FILL to 1. */
     private static final float NOON_INCIDENCE = -direction(12, true).z;
-    private static final float SUN_LEVEL = KEY_FILL / (1 + KEY_FILL) / NOON_INCIDENCE / luminance(transmittance(1));
+    private static final Color STANDARD_TRANSMITTANCE = transmittance(1, 1);
+    private static final float SUN_LEVEL = KEY_FILL / (1 + KEY_FILL) / NOON_INCIDENCE
+          / luminance(STANDARD_TRANSMITTANCE);
     private static final float SKY_LEVEL = 1 / (1 + KEY_FILL);
     /** Full-moon light overhead, before adaptation, so that the adapted moon lands FULL_MOON_STOPS below noon. */
     private static final float NIGHT_LEVEL = (float) Math.pow(2, FULL_MOON_STOPS / (1 - ADAPTATION));
+    private static final float MOONLESS_LEVEL = (float) Math.pow(2, MOONLESS_REFERENCE_STOPS / (1 - ADAPTATION));
     /**
      * The Tactical View's fixed light (b11 design item 23), so shadows read the same on every map: from the
      * north-west, 50 degrees above the horizon (board +y is north), in clear 13:00 colours and a neutral grade; the
@@ -223,9 +235,11 @@ final class BoardAtmosphere {
             return BoardAtmosphere.groundLight(direction, direct, ambient);
         }
 
-        /** One gain for the completed scene, derived after the final sky and daylight white point. */
+        /** Meter the source before camera-relative presentation; grazing sunlight also illuminates slopes. */
         float adaptation() {
-            return BoardAtmosphere.adaptation(groundLight());
+            float incidence = meteringIncidence(direction);
+            return BoardAtmosphere.adaptation(rgb(ambient.r + incidence * direct.r,
+                  ambient.g + incidence * direct.g, ambient.b + incidence * direct.b));
         }
 
         /** Keep the light at the same screen bearing through the board camera's yaw, tilt, pan and zoom. */
@@ -425,14 +439,11 @@ final class BoardAtmosphere {
         // Coverage affects the sky palette. Spatial transmission alone attenuates surface sunlight.
         float clouds = cloudiness(settings);
         float angle = (settings.hour() - 6) * MathUtils.PI / 12;
-        float altitude = MathUtils.sin(angle);
+        // The sine table introduces discrete steps at sub-minute source handovers.
+        float altitude = (float) Math.sin(angle);
         float daylight = smooth(-0.30f, 0.25f, altitude);
-        float scattering = switch (settings.pressure()) {
-            case VACUUM -> 0;
-            case TRACE -> 0.15f;
-            case THIN -> 0.45f;
-            default -> 1;
-        };
+        float density = airDensity(settings.pressure());
+        float scattering = Math.min(1, density);
         // Warm light peaks at the horizon, independently of how much daylight remains.
         float warmth = smooth(-0.20f, 0.015f, altitude) * (1 - smooth(0.16f, 0.50f, altitude)) * scattering;
         float twilight = (1 - smooth(0.05f, 0.45f, Math.abs(altitude))) * scattering;
@@ -447,23 +458,30 @@ final class BoardAtmosphere {
         Vector3 direction = direction(settings.hour(), sunlight);
         float incidence = -direction.z;
         float moonIncidence = -direction(settings.hour(), false).z;
-        // The existing sun model keeps the same directional irradiance across pressures. Airless worlds lose
-        // atmospheric fill below, where the shared visible/environment sky becomes black.
-        Color transmittance = transmittance(altitude);
+        // Both sources use the same category optical depth. Lost beam energy drives a relative sky-fill
+        // response, normalized to the established standard-air calibration at the same source altitude.
+        Color transmittance = transmittance(altitude, density);
+        Color moonTransmission = transmittance(-altitude, density);
+        float sunScatter = scatteredShare(transmittance, altitude);
+        float moonScatter = scatteredShare(moonTransmission, -altitude);
+        // The moon's cool spectrum remains a presentation choice; extinction changes its luminance only.
+        float moonTransmissionGain = luminance(moonTransmission) / luminance(STANDARD_TRANSMITTANCE);
         float sun = SUN_LEVEL * sunShadows;
         float fill = SKY_LEVEL * (SKY_HORIZON + (1 - SKY_HORIZON) * Math.max(altitude, 0)) * daylight
-              / luminance(SKY_TINT);
-        // The night sky and the moon, whose irradiance is constant: a lower moon lights level ground less.
-        float night = NIGHT_LEVEL / (1 + MOON_KEY) * (1 - daylight) / luminance(NIGHT_TINT);
+              * sunScatter / luminance(SKY_TINT);
+        // Brighten the visible moon without raising dawn's sky fill. Squaring the existing visibility gives
+        // the extra source a flat onset at handover; a missing moon retains its independent night budget.
+        float nightLevel = MathUtils.lerp(MOONLESS_LEVEL, NIGHT_LEVEL, moonShadows * moonShadows);
+        float night = nightLevel / (1 + MOON_KEY) * (1 - daylight) / luminance(NIGHT_TINT);
         float moon = settings.moonlight() ? night * MOON_KEY / NOON_INCIDENCE : 0;
         // Moonlight whose shadows the twilight sky washes out still lights the ground, as fill. The moon contrast
         // moves night-sky fill into the shadow-casting moonlight; lit level ground keeps its luminance.
         float transfer = moonShadowContrast * moonShadows;
-        float moonlight = moon * moonShadows + night * transfer / incidence;
-        // Removing the moon keeps the default residual sky floor; it must not return the missing moon's
-        // transferred energy as ambient light. The live moon-contrast control still affects only moonlight.
-        float skyShare = 1 - (settings.moonlight() ? transfer : MOONLIGHT_SHADOW_CONTRAST);
-        float nightFill = night * skyShare + moon * (1 - moonShadows) * moonIncidence;
+        float moonlight = moon * moonShadows * moonTransmissionGain + night * moonScatter * transfer / incidence;
+        // The no-moon source and backdrop keep their own readability budget; adjusting full-moon brightness
+        // or contrast must not change them. The live moon-contrast control still affects only moonlight.
+        float skyShare = settings.moonlight() ? 1 - transfer : MOONLESS_BACKDROP_SHARE;
+        float nightFill = (night * skyShare + moon * (1 - moonShadows) * moonIncidence) * moonScatter;
         Color direct = rgb(sun * transmittance.r + moonlight * NIGHT_TINT.r,
               sun * transmittance.g + moonlight * NIGHT_TINT.g, sun * transmittance.b + moonlight * NIGHT_TINT.b);
         Color ambient = rgb(fill * SKY_TINT.r, fill * SKY_TINT.g, fill * SKY_TINT.b);
@@ -533,12 +551,24 @@ final class BoardAtmosphere {
             // Increase diffuse night illumination rather than scene exposure: emissive lava must not brighten
             // just to make unlit terrain readable. The added fill vanishes continuously through dawn.
             if (!settings.moonlight()) {
-                float gain = 1 + night * (MOONLESS_SKY_SHARE - skyShare) * luminance(NIGHT_TINT)
+                float readableFill = night * MOONLESS_SKY_SHARE * scattering;
+                float gain = 1 + (readableFill - nightFill) * luminance(NIGHT_TINT)
                       / Math.max(1e-8f, luminance(integratedSky));
                 scale(environmentSky, gain);
                 scale(environmentHorizon, gain);
             }
         }
+        // Support shade relative to its incident beam; the existing noon-sky unit also leaves a small
+        // no-source allowance. This neutral gameplay light never brightens the visible sky or invents a moon.
+        // It fades into ordinary sky fill as density rises; standard-air lighting remains unchanged.
+        float readability = AIRLESS_READABILITY_SHARE * (SKY_LEVEL + luminance(direct) * incidence)
+              * (1 - scattering);
+        environmentSky.r += readability;
+        environmentSky.g += readability;
+        environmentSky.b += readability;
+        environmentHorizon.r += readability;
+        environmentHorizon.g += readability;
+        environmentHorizon.b += readability;
         if (!settings.moonlight()) {
             // The readability fill is not a visible moon. Keep even the faint airless backdrop dark under adaptation.
             float backdrop = MathUtils.lerp(.35f, 1, daylight);
@@ -607,11 +637,29 @@ final class BoardAtmosphere {
               -Math.max(lowest, Math.abs(MathUtils.sin(angle))) * 0.9f).nor();
     }
 
-    /** The air's transmittance along the sun's path at this altitude. */
-    private static Color transmittance(float altitude) {
+    /** Representative category optical densities, not measured pressures or gas compositions. */
+    private static float airDensity(Atmosphere pressure) {
+        return switch (pressure) {
+            case VACUUM -> 0;
+            case TRACE -> 0.15f;
+            case THIN -> 0.45f;
+            case STANDARD -> 1;
+            case HIGH -> 1.2f;
+            case VERY_HIGH -> 1.4f;
+        };
+    }
+
+    /** The air's transmittance along either source's path at this altitude. */
+    private static Color transmittance(float altitude, float density) {
         float airMass = (1 + AIR_MASS_OFFSET) / (Math.max(altitude, 0) + AIR_MASS_OFFSET);
-        return rgb((float) Math.exp(-EXTINCTION[0] * airMass), (float) Math.exp(-EXTINCTION[1] * airMass),
-              (float) Math.exp(-EXTINCTION[2] * airMass));
+        return rgb((float) Math.exp(-EXTINCTION[0] * airMass * density),
+              (float) Math.exp(-EXTINCTION[1] * airMass * density),
+              (float) Math.exp(-EXTINCTION[2] * airMass * density));
+    }
+
+    /** Relative lost-light response; preserves the standard-air sky calibration, not a scattering simulation. */
+    private static float scatteredShare(Color transmission, float altitude) {
+        return (1 - luminance(transmission)) / (1 - luminance(transmittance(altitude, 1)));
     }
 
     /** {@code noon}'s colours from the fixed north-west direction, with its direct light on level ground kept. */
@@ -646,12 +694,17 @@ final class BoardAtmosphere {
         color.b *= factor;
     }
 
+    /** Include sloped receivers in the exposure meter without changing physical ground light or fog. */
+    static float meteringIncidence(Vector3 direction) {
+        return Math.max(.5f, -direction.z);
+    }
+
     /**
-     * View adaptation from the actual level-ground source. The established night metering range bounds gain in
-     * vacuum or a black environment; this readability floor changes exposure, never the source light itself.
+     * View adaptation from the metered source. The established night metering range bounds gain in vacuum
+     * or a black environment; this readability floor changes exposure, never the source light itself.
      */
-    static float adaptation(Color ground) {
-        return (float) Math.pow(Math.max(MIN_METERED_LIGHT, luminance(ground)), -ADAPTATION);
+    static float adaptation(Color metered) {
+        return (float) Math.pow(Math.max(MIN_METERED_LIGHT, luminance(metered)), -ADAPTATION);
     }
 
     private static float luminance(Color color) {

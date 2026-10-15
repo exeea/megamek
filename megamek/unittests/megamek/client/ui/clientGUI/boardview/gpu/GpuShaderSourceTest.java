@@ -49,7 +49,7 @@ class GpuShaderSourceTest {
                     // A depth-only stage with an empty main (water-depth.frag) writes no colour and declares no output.
                     if (file.toString().endsWith(".frag") && !source.matches("(?s).*void main\\(\\)\\s*\\{\\s*\\}.*")) {
                         assertTrue(source.matches("(?s).*\\blayout\\s*\\(\\s*location\\s*=\\s*0\\s*\\)"
-                              + "\\s*out\\s+vec4\\s+fragColor\\s*;.*"), "Explicit output: " + file);
+                              + "\\s*out\\s+vec[234]\\s+fragColor\\s*;.*"), "Explicit output: " + file);
                     }
                 }
                 String[] lines = source.split("\n", -1);
@@ -65,5 +65,29 @@ class GpuShaderSourceTest {
         }
         assertTrue(shaders > 10, "The shader resources were found: " + folder);
         assertTrue(found.isEmpty(), "Reserved or legacy GLSL identifiers in shader code: " + found);
+    }
+
+    /**
+     * A family program (GpuFamilyPrograms) makes the surface families constant through the sculptFamily and
+     * coverFamilies macros. A direct uniform read would still draw correctly, but keep every family's code.
+     */
+    @Test
+    void surfaceFamiliesAreReadThroughTheirMacros() throws Exception {
+        Path folder = Path.of(GpuShaderSourceTest.class
+              .getResource("/megamek/client/ui/clientGUI/boardview/gpu/terrain-sculpt.frag").toURI()).getParent();
+        Pattern uniform = Pattern.compile("\\bu_(sculptFamily|coverFamilies)\\b");
+        List<String> reads = new ArrayList<>();
+        try (var files = Files.list(folder)) {
+            for (Path file : files.filter(f -> f.getFileName().toString().matches(".*\\.(frag|glsl)")).toList()) {
+                String[] lines = COMMENT.matcher(Files.readString(file)).replaceAll("").split("\n", -1);
+                for (String line : lines) {
+                    String code = line.strip();
+                    if (uniform.matcher(code).find() && !code.startsWith("uniform ") && !code.startsWith("#define ")) {
+                        reads.add(file.getFileName() + ": " + code);
+                    }
+                }
+            }
+        }
+        assertTrue(reads.isEmpty(), "Read the families through sculptFamily and coverFamilies: " + reads);
     }
 }

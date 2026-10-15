@@ -33,7 +33,6 @@ import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.GLTexture;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
@@ -127,8 +126,10 @@ final class GpuTerrain implements Disposable {
     private final BoardRim rims = new BoardRim();
     private final GpuTextures<DecalSlot> decals = new GpuTextures<>(false, true);
     private final GpuTextures<Coords> tactical = new GpuTextures<>();
+    /** Family programs and the generic program each sorts with (see createShader); others sort alone. */
+    private final Map<Shader, Shader> shaderGroups = new IdentityHashMap<>();
     private final GpuTerrainBatch terrainBatch = new GpuTerrainBatch(material -> material.has(Ground.TYPE)
-          && !material.has(GpuLiquidShader.Frame.TYPE) && !material.has(GpuWaterShader.TYPE));
+          && !material.has(GpuLiquidShader.Frame.TYPE) && !material.has(GpuWaterShader.TYPE), this::shaderGroup);
     private final GpuTerrainPages terrainPages = new GpuTerrainPages(terrainBatch::eligible);
     /** Authored paint of nearby chunks in shared draws: each chunk numbers its paint draws in painter order. */
     private final GpuTerrainPages paintPages = new GpuTerrainPages(part -> true);
@@ -182,8 +183,6 @@ final class GpuTerrain implements Disposable {
         protected Shader createShader(Renderable renderable) {
             boolean linearTexture = linearDiffuse(renderable.material);
             int ordinaryFamily = GpuSurfaceBlend.ordinaryFamily(renderable.material);
-            boolean environmentArray = renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.TYPE)
-                  && (renderable.material.has(Sculpt.TYPE) || renderable.material.has(GpuBankTurf.Turf.TYPE));
             var water = renderable.material.get(GpuWaterShader.class, GpuWaterShader.TYPE);
             var waterMode = water == null ? null : water.mode;
             var magma = renderable.material.get(GpuMagmaShader.class, GpuMagmaShader.TYPE);
@@ -219,7 +218,6 @@ final class GpuTerrain implements Disposable {
             }
             String prefix = GpuCloudShadow.prefix(renderable, chosen)
                   + (renderable.environment != null ? "#define sceneUnlitFlag\n" : "")
-                  + (environmentArray ? "#define environmentArrayFlag\n" : "")
                   + (renderable.material.has(Sculpt.TYPE) || waterMode != null
                         || renderable.material.has(GpuGroundCover.Wind.TYPE)
                         || renderable.material.has(GpuBiomeVegetation.Kind.TYPE)
@@ -270,9 +268,12 @@ final class GpuTerrain implements Disposable {
                   + (GpuIceShader.mode(renderable.material) != 0 ? " ice-" + GpuIceShader.mode(renderable.material) : "")
                   + (renderable.environment != null && renderable.environment.has(GpuCloudShadow.TYPE) ? " cloud" : "")
                   + (renderable.environment != null && renderable.environment.shadowMap != null ? " shadow" : "")
-                  + (GpuTreeInstances.instanced(renderable) ? " instanced" : "");
+                  + (GpuTreeInstances.instanced(renderable) ? " instanced" : "")
+                  + GpuFamilyPrograms.name(renderable.material, Sculpt.TYPE);
             DefaultShader result = new DefaultShader(renderable, chosen,
-                  GpuGlsl.compile(shaderName, prefix, chosen.vertexShader, fragment)) {
+                  GpuGlsl.compile(shaderName, prefix + GpuFamilyPrograms.defines(renderable.material, Sculpt.TYPE),
+                        chosen.vertexShader, fragment)) {
+                private final float[] families = GpuFamilyPrograms.constants(renderable.material, Sculpt.TYPE);
                 private final int normalMapsUniform = register("u_normalMaps");
                 private final int iceNormalsUniform = register("u_iceNormals");
                 private final int magmaTimeUniform = register("u_magmaTime");
@@ -356,7 +357,9 @@ final class GpuTerrain implements Disposable {
                     // The modes share an attribute mask but use different programs, including on shader reload.
                     // libGDX binds only the instance attributes of the renderable a shader was created for: crop rows
                     // must not reuse a reed shader, which never binds a_coverRow and would draw rows as clumps.
-                    return waterMode == (otherWater == null ? null : otherWater.mode)
+                    // Family programs (GpuFamilyPrograms) first: the provider's scan rejects them cheaply.
+                    return GpuFamilyPrograms.draws(families, other.material, Sculpt.TYPE)
+                          && waterMode == (otherWater == null ? null : otherWater.mode)
                           && sameMaterialVariant(other.material, iceMode, linearTexture, ordinaryFamily)
                           && flowingMagma == (otherMagma != null && otherMagma.flowing())
                           // A shadow map changes the compiled samplers without changing the environment's mask.
@@ -522,8 +525,8 @@ final class GpuTerrain implements Disposable {
                 GpuUnitShader.registerMaterialColors(result, renderable.environment != null || linearTexture);
             }
             GpuCloudShadow.register(result);
-            GpuEnvironmentLighting.register(result, environmentArray ? SCULPT_LAYERS.size() * 2 : -1);
-            if (!environmentArray && renderable.environment != null) {
+            GpuEnvironmentLighting.register(result);
+            if (renderable.environment != null) {
                 var lighting = renderable.environment.get(GpuEnvironmentLighting.class, GpuEnvironmentLighting.TYPE);
                 // Texture uploads must finish before local setters begin assigning the draw's sampler bindings.
                 if (lighting != null) { lighting.texture(); }
@@ -566,13 +569,19 @@ final class GpuTerrain implements Disposable {
                 }
             });
             for (boolean roads : new boolean[] { true, false }) {
-                result.register(roads ? "u_roadMaps" : "u_sculptMaps", new BaseShader.LocalSetter() {
-                    @Override
-                    public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                        GpuRoads.Coats coats = attributes.get(GpuRoads.Coats.class, GpuRoads.Coats.TYPE);
-                        if (coats != null) { target.set(id, roads ? coats.roads : coats.sculpt); }
-                    }
-                });
+                for (boolean color : new boolean[] { true, false }) {
+                    String uniform = (roads ? "u_road" : "u_sculpt") + (color ? "Colors" : "Data");
+                    result.register(uniform, new BaseShader.LocalSetter() {
+                        @Override
+                        public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                            GpuRoads.Coats coats = attributes.get(GpuRoads.Coats.class, GpuRoads.Coats.TYPE);
+                            if (coats != null) {
+                                var maps = roads ? coats.roads : coats.sculpt;
+                                target.set(id, color ? maps.color() : maps.data());
+                            }
+                        }
+                    });
+                }
             }
             result.register("u_roadMask", new BaseShader.LocalSetter() {
                 @Override
@@ -646,14 +655,17 @@ final class GpuTerrain implements Disposable {
                     if (blend != null) { target.set(id, blend.responses[0], blend.responses[1], blend.responses[2], blend.responses[3]); }
                 }
             });
-            result.register("u_terrainLayers", new BaseShader.LocalSetter() {
-                @Override
-                public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                    SculptLayers maps = attributes.get(SculptLayers.class, SculptLayers.TYPE);
-                    if (maps != null) { target.set(id, maps.texture); }
-                    else if (attributes.has(GpuBankTurf.Turf.TYPE)) { target.set(id, terrainLayers()); }
-                }
-            });
+            for (boolean color : new boolean[] { true, false }) {
+                result.register(color ? "u_terrainLayers" : "u_terrainData", new BaseShader.LocalSetter() {
+                    @Override
+                    public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                        SculptLayers layers = attributes.get(SculptLayers.class, SculptLayers.TYPE);
+                        var maps = layers != null ? layers.texture
+                              : attributes.has(GpuBankTurf.Turf.TYPE) ? terrainLayers() : null;
+                        if (maps != null) { target.set(id, color ? maps.color() : maps.data()); }
+                    }
+                });
+            }
             for (var family : BoardScene.Surface.values()) {
                 String name = SCULPT_MATERIALS[family.ordinal()][0];
                 result.register("u_turfMaterials[" + family.ordinal() + "]", new BaseShader.LocalSetter() {
@@ -680,6 +692,19 @@ final class GpuTerrain implements Disposable {
                     });
                 }
             }
+            if (renderable.material.has(GpuFamilyPrograms.Constants.TYPE)) {
+                // Draw order decides depth-tie winners. A family program sorts as the generic program that draws
+                // the same material unmarked, so swapping it in changes no pixel (GpuOpaqueSorter).
+                Renderable generic = new Renderable().set(renderable);
+                generic.material = new Material(renderable.material);
+                generic.material.remove(GpuFamilyPrograms.Constants.TYPE);
+                for (Shader shader : shaders) {
+                    if (shader.canRender(generic)) {
+                        shaderGroups.put(result, shaderGroup(shader));
+                        break;
+                    }
+                }
+            }
             return result;
         }
     }), terrainBatch);
@@ -688,6 +713,21 @@ final class GpuTerrain implements Disposable {
           new GpuOpaqueSorter());
 
     void shadersChanged() { refreshShadows(); }
+
+    /** What selects a sculpt material's generic program besides its families; the family marker is left out. */
+    private static Object familyVariant(Material material) {
+        return List.of(material.getMask() & ~GpuFamilyPrograms.Constants.TYPE, GpuIceShader.mode(material),
+              linearDiffuse(material), GpuSurfaceBlend.ordinaryFamily(material));
+    }
+
+    /** The shader whose draws a shader's draws sort among: its generic program for a family program. */
+    private Shader shaderGroup(Shader shader) {
+        Shader program = GpuShaderProvider.unwrap(shader);
+        return shaderGroups.getOrDefault(program, program);
+    }
+
+    /** Native checks follow the family programs a view requested. */
+    GpuFamilyPrograms familyPrograms() { return familyPrograms; }
 
     /**
      * Redraw the shadow map at the next pass, as terrain, light and shader changes do. Tree, scatter and building
@@ -849,6 +889,11 @@ final class GpuTerrain implements Disposable {
     private boolean fluffHidden;
     private boolean terrainMaterialsReady;
     private GpuGlsl.Preparation terrainMaterialPreparation;
+    /** Sculpt and blend ground switches to programs with constant families once those have compiled. */
+    private final GpuFamilyPrograms familyPrograms;
+    /** A load, graphics switch or lighting change whose family programs the loading stage still waits for. */
+    private boolean familySession = true;
+    private long familySessionStart = System.nanoTime();
     private final List<Renderable> terrainMaterialSamples = new ArrayList<>();
     private final TerrainLoadProgress terrainMaterialProgress = new TerrainLoadProgress();
     private long terrainMaterialEnvironment = -1;
@@ -948,6 +993,7 @@ final class GpuTerrain implements Disposable {
         environmentLighting.set(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS));
         environment.set(environmentLighting);
         borrowedAssets = borrowed != null;
+        familyPrograms = new GpuFamilyPrograms(!borrowedAssets, Sculpt.TYPE, GpuTerrain::familyVariant);
         assets = borrowedAssets ? borrowed : new GpuAssets();
         trees = new GpuTreeInstances((name, level) -> foliage(assets.lodModel(name, level)));
     }
@@ -1248,16 +1294,15 @@ final class GpuTerrain implements Disposable {
           .distinct().toList();
 
     /**
-     * Every family's maps in one array (GpuAssets.sculptArray, bound as u_terrainLayers), so all of them take a
-     * single texture unit: macOS gives a shader stage only 16. layers are the colour/height layers of this family's
-     * ground, debris, wall and mantle maps; each normal/AO map is the next layer.
+     * Every family's colour/height and normal/AO arrays. Stable semantic layer IDs retain the existing
+     * even-colour/odd-normal numbering; sampling helpers map them into the two compact arrays.
      */
     private static final class SculptLayers extends Attribute {
         static final long TYPE = register("boardSculptLayers");
-        final TextureArray texture;
+        final GpuAssets.MaterialArrays texture;
         final float[] layers;
 
-        SculptLayers(TextureArray texture, float... layers) {
+        SculptLayers(GpuAssets.MaterialArrays texture, float... layers) {
             super(TYPE);
             this.texture = texture;
             this.layers = layers.clone();
@@ -1779,9 +1824,10 @@ final class GpuTerrain implements Disposable {
     /** Blocking convenience for offline fixtures; uses the same preparation and installation path as the view. */
     void update(BoardScene scene) {
         update(scene, null);
-        while (busy()) {
+        // Like the loading stage, wait for the load's family programs too: fixtures draw what a game shows.
+        while (busy() || familiesPending()) {
             refine(null, true);
-            if (busy()) { java.util.concurrent.locks.LockSupport.parkNanos(1_000_000); }
+            if (busy() || familiesPending()) { java.util.concurrent.locks.LockSupport.parkNanos(1_000_000); }
         }
     }
 
@@ -1809,6 +1855,9 @@ final class GpuTerrain implements Disposable {
             // Board/geometry-setting and graphics changes still cancel work whose result no longer applies.
             if (requested == null || !sameBoard(target, scene) || !sameSettings(targetSettings, settings)
                   || targetColumns != columns) { meshGeneration++; }
+            // These show the loading stage: their family programs build behind it. Edits keep the built ones.
+            if (target == null || !sameBoard(target, scene) || !sameSettings(targetSettings, settings)
+                  || targetColumns != columns) { startFamilySession(); }
             requested = new Request(meshGeneration, scene, settings, columns);
             retiredChunks.addAll(detailCache.values());
             detailCache.clear();
@@ -1836,14 +1885,22 @@ final class GpuTerrain implements Disposable {
 
     boolean busy() { return requested != null || rebuild != null || detailJob != null || coverScene != null && !materialsReady(); }
 
+    /** The loading stage (ready, buildProgress) waits for a session's family programs; busy does not, nor tests. */
+    private void startFamilySession() {
+        familySession = true;
+        familySessionStart = System.nanoTime();
+    }
+
+    private boolean familiesPending() { return familySession && familyPrograms.pending() > 0; }
+
     /** The installed terrain shows {@code scene}'s board in the wanted graphics: a switch either way shows the loading stage. */
     boolean ready(BoardScene scene) {
         return materialsReady() && coverScene != null && sameBoard(coverScene, scene) && installedColumns == columns
-              && atlasColumns == columns;
+              && atlasColumns == columns && !familiesPending();
     }
 
     int buildProgress() {
-        if (requested == null) { return materialsReady() ? -1 : 100; }
+        if (requested == null) { return materialsReady() && !familiesPending() ? -1 : 100; }
         if (rebuild == null || rebuild.request != requested || rebuild.plan == null) { return 0; }
         return 100 * rebuild.replacements.size() / Math.max(1, rebuild.remaining.size() + rebuild.replacements.size());
     }
@@ -1854,6 +1911,10 @@ final class GpuTerrain implements Disposable {
         List<TerrainLoadProgress.Status> result = new ArrayList<>();
         if (terrainMaterialPreparation != null && !materialsReady()) {
             result.add(new TerrainLoadProgress.Status(0, 0, terrainMaterialProgress.snapshot()));
+        } else if (familiesPending()) {
+            int ready = familyPrograms.ready().size();
+            result.add(new TerrainLoadProgress.Status(0, 0, new TerrainLoadProgress.Step("materials", ready,
+                  ready + familyPrograms.pending(), familySessionStart)));
         }
         if (requested == null || rebuild == null || rebuild.request.generation() != requested.generation()) {
             return result;
@@ -2268,6 +2329,18 @@ final class GpuTerrain implements Disposable {
         if (!materialsReady()) {
             if (terrainMaterialPreparation == null && requested != null) { updateLight(requested.scene().light()); }
             prepareTerrainMaterials();
+        }
+        // Family programs build only behind the loading stage, after the generic ones: on Iris Xe a link built beside
+        // interactive frames once held one frame for 9 s (GpuFamilyPrograms).
+        if (familyPrograms.configure(environment)) {
+            terrainBatch.clear();
+            startFamilySession();
+        }
+        if (familySession && requested == null && rebuild == null && materialsReady()) {
+            if (familyPrograms.prepare(terrainMaterialPreparation, batch.getShaderProvider(), environment)) {
+                terrainBatch.clear();
+            }
+            familySession = familyPrograms.pending() > 0;
         }
         // While opening/replacing a board or switching the graphics (both behind the loading stage), use more of the
         // loading frame for uploads instead of stretching each chunk's handoffs over several frames. An editor change
@@ -4055,6 +4128,10 @@ final class GpuTerrain implements Disposable {
                     }
                 }
             }
+            // The ground switches to family programs as they become ready; scatter and water keep generic ones.
+            for (Renderable part : chunk.terrainRenderables) {
+                familyPrograms.request(part.material, part.meshPart.size, part.meshPart.mesh.getVertexAttributes());
+            }
             chunk.depthTerrain = new GpuTerrainDepth(chunk.opaque);
             if (chunk.waterField != null) { chunk.waterField.finish(); }
             if (chunk.waterField != null) {
@@ -4493,7 +4570,7 @@ final class GpuTerrain implements Disposable {
 
     private void roads(Layer overlay, List<RoadPatch> prepared, BoardSurface surface,
           GpuTextures<BoardScene.Pixels> masks, BoardScene scene, BoardScene.Tile tile) {
-        TextureArray roadMaps = assets.roadArray();
+        var roadMaps = assets.roadArray();
         for (var preparedPatch : prepared) {
             var patch = preparedPatch.patch();
             var mask = new GpuRoads.Mask(masks.region(preparedPatch.mask().pixels()), preparedPatch.mask());
@@ -5467,7 +5544,7 @@ final class GpuTerrain implements Disposable {
         var directions = environment.get(DirectionalLightsAttribute.class, DirectionalLightsAttribute.Type);
         if (directions != null) {
             for (var source : directions.lights) {
-                float incidence = Math.max(0, -source.direction.z);
+                float incidence = BoardAtmosphere.meteringIncidence(source.direction);
                 ground.r += source.color.r * incidence;
                 ground.g += source.color.g * incidence;
                 ground.b += source.color.b * incidence;
@@ -6148,6 +6225,11 @@ final class GpuTerrain implements Disposable {
 
     /** Opaque world first. Tactical overlays are a separate final pass. */
     void render(Camera camera, boolean drawTactical) {
+        // A changed lighting configuration returns every surface to its generic program before anything draws.
+        if (!drawTactical && familyPrograms.configure(environment)) {
+            terrainBatch.clear();
+            startFamilySession();
+        }
         shadingPass++;
         // The 3D relief's own layers (biomes, scars, ground cover, roads); the Classic columns have none.
         boolean terrain = !drawTactical && !installedColumns;
@@ -6497,11 +6579,7 @@ final class GpuTerrain implements Disposable {
     /** Isolate authored frame interpolation from surface deformation in native reference comparisons. */
     void setWaterEffects(boolean enabled) { waterEffects = enabled; }
 
-    private TextureArray terrainLayers() {
-        TextureArray array = assets.sculptArray(SCULPT_LAYERS);
-        environmentLighting.terrainArray(array, SCULPT_LAYERS.size() * 2);
-        return array;
-    }
+    private GpuAssets.MaterialArrays terrainLayers() { return assets.sculptArray(SCULPT_LAYERS); }
 
     private void applyLight() {
         BoardAtmosphere.Lighting lighting = atmosphere != null ? atmosphere
@@ -6891,6 +6969,7 @@ final class GpuTerrain implements Disposable {
         // Workers borrow chunk/asset data. Join them before freeing it; a slow cancellation or an interrupted
         // closing thread must not abandon GL cleanup. ExecutorService.close also restores the caller's interrupt.
         detailWorker.close();
+        familyPrograms.dispose();
         if (terrainMaterialPreparation != null) { terrainMaterialPreparation.dispose(); }
         terrainMaterialSamples.forEach(sample -> sample.meshPart.mesh.dispose());
         terrainMaterialSamples.clear();

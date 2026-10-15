@@ -370,7 +370,8 @@ class GpuTuningPanelSmokeTest {
                     hud.click(utility);
                     assertSame(GpuHudState.Dialog.TUNING, hud.hud.state.dialog);
                     assertTrue(utility.isChecked(), "the utility is pressed while the panel is open");
-                    assertTrue(hud.find("tuning-display").isVisible(), "the Display page is the first " + at);
+                    // The panel keeps its last page when it closes, so it opens on Display only the first time.
+                    if (size == SIZES[0]) { assertTrue(hud.find("tuning-display").isVisible(), "the Display page is the first"); }
                     hud.click("tuning-board-tab");
                     Rectangle panel = GpuHudTestStage.bounds(hud.find("tuning-frame"));
                     assertEquals(size[0] - metrics.gap(), panel.x + panel.width, .5f, "at the right gap " + at);
@@ -394,8 +395,11 @@ class GpuTuningPanelSmokeTest {
                     assertSame(GpuHudState.Dialog.HELP, hud.hud.state.dialog, "Help replaces the panel " + at);
                     assertFalse(hud.find("tuning-panel").isVisible());
                     assertFalse(utility.isChecked());
+                    // Help is modal: a press outside it, on the utility too, only dismisses it (UiModal).
                     hud.click(utility);
-                    assertSame(GpuHudState.Dialog.TUNING, hud.hud.state.dialog, "and the utility replaces Help");
+                    assertSame(GpuHudState.Dialog.NONE, hud.hud.state.dialog, "a press beside Help closes it " + at);
+                    hud.click(utility);
+                    assertSame(GpuHudState.Dialog.TUNING, hud.hud.state.dialog, "then the utility opens it " + at);
                     hud.key(KeyCommandBind.CANCEL);
                     assertSame(GpuHudState.Dialog.NONE, hud.hud.state.dialog, "Esc closes the panel " + at);
                     assertFalse(hud.find("tuning-panel").isVisible());

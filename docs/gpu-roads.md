@@ -236,7 +236,7 @@ Road maps live in `mm-data/data/models/board/textures/roads`.
 Each material has albedo, tangent normals and a packed surface map:
 R height, G roughness, B cavity occlusion, A relief range. Texture height affects fine
 coverage/wetting; the ground mesh continues to own actual height and support.
-`tools/prepare_road_materials.py` in mm-data bakes aligned maps.
+The Material Maker projects under mm-data's `tools/materials/roads/` export the aligned maps.
 
 Unsupported road levels, custom artwork combinations and submerged roads keep the
 existing artwork fallback. Ice on dry ground supports native roads. Supported road

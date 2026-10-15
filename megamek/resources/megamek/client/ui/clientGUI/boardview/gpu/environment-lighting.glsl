@@ -5,22 +5,10 @@
 #ifdef environmentLightingFlag
 uniform vec3 u_environmentSky, u_environmentHorizon;
 uniform vec2 u_environmentImage; // image present, radiance gain; visible sky remains separate
-#ifdef environmentArrayFlag
-#ifndef TERRAIN_LAYERS_DECLARED
-#define TERRAIN_LAYERS_DECLARED
-uniform sampler2DArray u_terrainLayers;
-#endif
-uniform float u_environmentLayer;
-#else
 uniform sampler2D u_environmentLut;
-#endif
 
 vec4 environmentTable(vec2 pixel) {
-#ifdef environmentArrayFlag
-    return textureLod(u_terrainLayers, vec3((pixel + .5) / vec2(textureSize(u_terrainLayers, 0).xy), u_environmentLayer), 0.0);
-#else
     return textureLod(u_environmentLut, (pixel + .5) / vec2(textureSize(u_environmentLut, 0)), 0.0);
-#endif
 }
 
 vec3 imageEnvironment(vec3 direction, float roughness) {

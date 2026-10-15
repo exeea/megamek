@@ -116,9 +116,6 @@ their paint stays nonmetallic and `detail` stays matte because it combines
 metal, rubber, glass and other surfaces. The shared selection also scopes complete
 kit rebuilds: other bodies, equipment, troops and vehicles retain their existing
 defaults. All LODs of a reviewed body share its surface settings.
-`calibrate_model_materials.py --apply`
-reproduces the small reference update without changing geometry or embedded
-images and updates the two manifest hashes; omit `--apply` to preview it.
 
 `RigidGlb.loadLods` requires top-level identity groups named after the component:
 `atlas.glb` contains `atlas-lod0`, optionally `atlas-lod1` and `atlas-lod2`.

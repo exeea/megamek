@@ -15,15 +15,23 @@ in vec4 v_color;       // r: occlusion. g: game level (+64)/255, or for cliffs h
                             // nearest step height (.3 + .1 per level, dry ground), or below .25 on a water hex's banks
                             // and bed its water's palette and that height packed (GpuTerrain.shoreTint).
                             // Panels use alpha for a fixed texture azimuth, independent of the lighting normal.
-// Every family's maps, interleaved: colour/height at a map's layer and normal/AO at the next (GpuAssets.sculptArray).
+// Aligned colour/height and normal/AO arrays; semantic IDs are mapped by the sampling helpers.
 #define TERRAIN_LAYERS_DECLARED
 uniform sampler2DArray u_terrainLayers;
+uniform sampler2DArray u_terrainData;
 uniform vec4 u_sculptLayers; // this family's colour/height layers: ground, debris, wall, mantle; normal/AO one up
 uniform vec4 u_sculptTiles; // metres per repeat: ground, debris, wall, mantle
 uniform float u_metre;      // world units per metre
 uniform float u_normalMaps;
 uniform float u_groundResponse;
 uniform float u_sculptFamily; // BoardScene.Surface: GRASS 0, DIRT 1, SAND 2, ROCK 3, CONCRETE 4, SNOW 5, LUNAR 6
+// A draw's families are compile-time constants in its family program (GpuFamilyPrograms), so the compiler
+// keeps only their paths; the generic program of the same flags reads the same values from the uniforms.
+#ifdef SCULPT_FAMILY
+#define sculptFamily SCULPT_FAMILY
+#else
+#define sculptFamily u_sculptFamily
+#endif
 uniform float u_levelHeight;
 uniform float u_clay;
 uniform vec3 u_wind;        // direction in xy, strength in z
@@ -34,6 +42,12 @@ uniform float u_gravity;    // scenario acceleration; without it there is no wat
 in vec4 v_coverWeights;
 in float v_coverInterpolation;
 uniform vec4 u_coverFamilies;
+#ifdef COVER_FAMILIES
+const vec4 coverFamilyConstants = COVER_FAMILIES;
+#define coverFamilies coverFamilyConstants
+#else
+#define coverFamilies u_coverFamilies
+#endif
 uniform vec4 u_coverResponses;
 uniform vec4 u_coverTiles0, u_coverTiles1, u_coverTiles2, u_coverTiles3;
 uniform vec4 u_coverLayers0, u_coverLayers1, u_coverLayers2, u_coverLayers3;
@@ -45,16 +59,16 @@ uniform vec4 u_coverLayers0, u_coverLayers1, u_coverLayers2, u_coverLayers3;
 
 // ---- Surface families --------------------------------------------------------------------------------------------
 
-bool family(float f) { return abs(u_sculptFamily - f) < .5; }
+bool family(float f) { return abs(sculptFamily - f) < .5; }
 
 // Grey lunar/volcanic sand reuses the shared loose-sand relief. Derive the colour from the supporting covers,
 // so a theme boundary interpolates in world space instead of changing abruptly at a hex edge.
 float greySand() {
 #ifdef terrainBlendFlag
     vec4 weights = max(v_coverWeights, vec4(0.0));
-    vec4 grey = (1.0 - step(vec4(.5), abs(u_coverFamilies - LUNAR_FAMILY)))
-          + (1.0 - step(vec4(.5), abs(u_coverFamilies - VOLCANO_FAMILY)));
-    vec4 substrate = step(vec4(.5), abs(u_coverFamilies - 2.0));
+    vec4 grey = (1.0 - step(vec4(.5), abs(coverFamilies - LUNAR_FAMILY)))
+          + (1.0 - step(vec4(.5), abs(coverFamilies - VOLCANO_FAMILY)));
+    vec4 substrate = step(vec4(.5), abs(coverFamilies - 2.0));
     return dot(weights, grey) / max(dot(weights, substrate), .0001);
 #else
     return family(LUNAR_FAMILY) || family(VOLCANO_FAMILY) ? 1.0 : 0.0;
@@ -102,10 +116,10 @@ vec3 groundBounceFor(float f) {
     return vec3(.75, .78, .82);
 }
 
-vec3 groundBounce() { return groundBounceFor(u_sculptFamily); }
+vec3 groundBounce() { return groundBounceFor(sculptFamily); }
 
 vec3 groundTone(vec3 albedo, vec3 world, float broad, float fine, float region, float rim, float foot) {
-    return groundToneFor(u_sculptFamily, albedo, world, broad, fine, region, rim, foot);
+    return groundToneFor(sculptFamily, albedo, world, broad, fine, region, rim, foot);
 }
 
 // sculpt-material-functions
@@ -265,7 +279,7 @@ void main() {
             }
             if (u_normalMaps > .5 && terrainNormalDetail > 0.0 && !steep) {
                 vec4 topNormal = family(4.0)
-                      ? translatedTexel(u_sculptLayers.x + 1.0, q / u_sculptTiles.x, concreteGradient, concreteVariation)
+                      ? translatedTexel(u_terrainData, u_sculptLayers.x * .5, q / u_sculptTiles.x, concreteGradient, concreteVariation)
                       : planarNormal(u_sculptLayers.x + 1.0, p, u_sculptTiles.x, broad);
                 if (family(4.0)) topNormal.rgb = mix(topNormal.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail);
                 detail = mix(topNormal,
@@ -308,14 +322,14 @@ void main() {
             albedo = wall.rgb;
             if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
                 normal = wallNormal(u_sculptLayers.z + 1.0, uvx, uvy, face, side);
-                cavity = mix(mapTexel(u_sculptLayers.z + 1.0, uvy).a, mapTexel(u_sculptLayers.z + 1.0, uvx).a, side) * .5 + .5;
+                cavity = mix(normalTexel(u_sculptLayers.z + 1.0, uvy).a, normalTexel(u_sculptLayers.z + 1.0, uvx).a, side) * .5 + .5;
                 if (crown > 0.0) {
                     vec4 top = planarNormal(u_sculptLayers.z + 1.0, p, u_sculptTiles.z, fine);
                     normal = normalize(mix(normal, upNormal(top.rgb, face), crown));
                     cavity = mix(cavity, top.a * .5 + .5, crown);
                 }
             }
-            roughness = mappedRoughness(stoneRoughness(u_sculptFamily, .5), wall.a);
+            roughness = mappedRoughness(stoneRoughness(sculptFamily, .5), wall.a);
             if (hasAuthoredRoughness(u_sculptLayers.z)) {
                 float stone = wallRoughness(u_sculptLayers.z, uvx, uvy,
                       wallXGradient / u_sculptTiles.z, wallYGradient / u_sculptTiles.z, side, roughness);
@@ -372,7 +386,7 @@ void main() {
                 float w = heightBlend(wall.a, top.a, ledge);
                 albedo = mix(albedo, groundTone(top.rgb, world, broad, fine, region, 0.0, 0.0), w);
                 roughness = mix(roughness, planarRoughness(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad,
-                      mappedRoughness(coverRoughness(u_sculptFamily), top.a)), w);
+                      mappedRoughness(coverRoughness(sculptFamily), top.a)), w);
                 if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
                     normal = normalize(mix(normal, upNormal(planarNormal(u_sculptLayers.x + 1.0, p, u_sculptTiles.x, broad).rgb, face), w));
                 }
@@ -415,7 +429,7 @@ void main() {
                 }
                 if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
                     normal = normalize(mix(normal, wallNormal(u_sculptLayers.z + 1.0, uvx, uvy, face, side), rock));
-                    float relief = mix(mapTexel(u_sculptLayers.z + 1.0, uvy).a, mapTexel(u_sculptLayers.z + 1.0, uvx).a, side);
+                    float relief = mix(normalTexel(u_sculptLayers.z + 1.0, uvy).a, normalTexel(u_sculptLayers.z + 1.0, uvx).a, side);
                     cavity = mix(cavity, relief * .5 + .5, rock);
                 }
             }
@@ -479,18 +493,18 @@ void main() {
         if (u_terrainWear > 0.0 && terrainNormalDetail > 0.0) {
             vec4 wear = terrainWear(fields, materialHeight, cavity, face, normal);
 #ifdef terrainBlendFlag
-            vec3 pigment = materialWeathering(u_coverFamilies.x, wear, fields, cavity) * materialCoverage.x
-                  + materialWeathering(u_coverFamilies.y, wear, fields, cavity) * materialCoverage.y
-                  + materialWeathering(u_coverFamilies.z, wear, fields, cavity) * materialCoverage.z
-                  + materialWeathering(u_coverFamilies.w, wear, fields, cavity) * materialCoverage.w;
+            vec3 pigment = materialWeathering(coverFamilies.x, wear, fields, cavity) * materialCoverage.x
+                  + materialWeathering(coverFamilies.y, wear, fields, cavity) * materialCoverage.y
+                  + materialWeathering(coverFamilies.z, wear, fields, cavity) * materialCoverage.z
+                  + materialWeathering(coverFamilies.w, wear, fields, cavity) * materialCoverage.w;
 #else
-            vec3 pigment = materialWeathering(u_sculptFamily, wear, fields, cavity);
+            vec3 pigment = materialWeathering(sculptFamily, wear, fields, cavity);
 #endif
             // Snow's authored RGB already contains its cool granular crust. Do not add a second microscopic
             // color treatment that disappears with normal LOD. Keep the original wear response for roughness.
             vec3 colorPigment = pigment;
 #ifdef terrainBlendFlag
-            float snowCoverage = dot(materialCoverage, 1.0 - step(vec4(.5), abs(u_coverFamilies - 5.0)));
+            float snowCoverage = dot(materialCoverage, 1.0 - step(vec4(.5), abs(coverFamilies - 5.0)));
             if (snowCoverage > 0.0) colorPigment -= materialWeathering(5.0, wear, fields, cavity) * snowCoverage;
 #else
             if (family(5.0)) colorPigment = vec3(0.0);
@@ -530,7 +544,7 @@ void main() {
         float fungusGrade = family(FUNGUS_FAMILY) ? 1.0 : 0.0;
 #ifdef terrainBlendFlag
         // The final material coverage includes height competition and sediment transfer at mixed contacts.
-        fungusGrade = dot(materialCoverage, 1.0 - step(vec4(.5), abs(u_coverFamilies - FUNGUS_FAMILY)));
+        fungusGrade = dot(materialCoverage, 1.0 - step(vec4(.5), abs(coverFamilies - FUNGUS_FAMILY)));
 #endif
         albedo = mix(levelGrade(albedo, level, fungusGrade), albedo, volcanic);
     }

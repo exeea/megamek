@@ -16,7 +16,7 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
     MaterialProjection projection = materialProjection(world, face);
     amount *= smoothstep(.08, .65, face.z);
     if (amount < .0001) return;
-    vec3 kinds = tundraFamily(u_sculptFamily);
+    vec3 kinds = tundraFamily(sculptFamily);
     float meadow = family(0.0) || family(TROPICAL_FAMILY) ? 1.0 : 0.0;
     float snow = family(5.0) ? 1.0 : 0.0;
     float concrete = family(4.0) ? 1.0 : 0.0;
@@ -25,7 +25,7 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
     weights /= max(dot(weights, vec4(1.0)), .0001);
     kinds = vec3(0.0); meadow = 0.0; snow = 0.0; concrete = 0.0;
     for (int i = 0; i < 4; i++) {
-        float f = u_coverFamilies[i];
+        float f = coverFamilies[i];
         kinds += tundraFamily(f) * weights[i];
         meadow += (abs(f) < .5 || abs(f - TROPICAL_FAMILY) < .5 ? 1.0 : 0.0) * weights[i];
         snow += (abs(f - 5.0) < .5 ? 1.0 : 0.0) * weights[i];

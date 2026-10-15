@@ -11,7 +11,6 @@ contract. Board units are defined by `BoardGeometry`.
 | `BoardArtwork` | Resolve tileset artwork and its associated model reference. |
 | `GpuAssets` | Load/cache authored board models and fit legacy structures to their runtime dimensions. |
 | `BoardGeometry` | Convert game levels and model units to displayed board dimensions. |
-| `mm-data/tools/build_board_assets.py` | Build crops offline. |
 | `BoardBridgeMesh`, `BoardBridgeTruss` | Generate manufactured spans from the live road and on-deck rail footprint. |
 | `BoardBridgeSlope`, `BoardBridgeFooting` | Grade the span and fit its bank landings and optional piers. |
 
@@ -69,7 +68,5 @@ building_hard_00.glb   # one-level mesh; processed roof texture embedded
 building_hard_00.png   # original building image, including alpha and shadow
 ```
 
-The footprint tool prepares roof inputs under `tools/board-models/roofs` and
-copies the original image beside the GLB. The exporter embeds the processed roof;
-shared facade textures remain external. The adjacent PNG is the original image,
+Each GLB embeds its processed roof; shared facade textures remain external. The adjacent PNG is the original image,
 not a separate processed roof texture.

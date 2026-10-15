@@ -582,10 +582,8 @@ class GpuShadingNormalSmokeTest {
         var destination = java.nio.file.Path.of(System.getProperty("megamek.gpu.screenshots"), "grazing-proxies");
         assertTrue(java.nio.file.Files.notExists(destination), "Preserve previous proxy evidence");
         java.nio.file.Files.createDirectories(destination);
-        boolean virtualFrames = Boolean.getBoolean("megamek.gpu.proxyFrames");
         String foliageDisk = GpuShaderSource.readDisk("terrain-foliage.frag");
-        assertEquals(virtualFrames, foliageDisk.contains("uniform float u_foliageProxy;"),
-              "Explicit proxy-frame run must match the installed source contract");
+        boolean virtualFrames = proxyFrames(foliageDisk);
         String foliage = proxySource(foliageDisk, false, virtualFrames);
         String vegetation = proxySource(GpuShaderSource.readDisk("terrain-vegetation.frag"), true, virtualFrames);
         applySources(manager, Map.of("terrain-foliage.frag", foliage, "terrain-vegetation.frag", vegetation),
@@ -822,7 +820,8 @@ class GpuShadingNormalSmokeTest {
 
     /** Six real submitted clump views; no flags fabricated on grass or alternate plant templates. */
     private static void clumpFrames(GpuShaderManager manager) throws Exception {
-        assertTrue(Boolean.getBoolean("megamek.gpu.proxyFrames"), "Clump follow-up requires the represented-frame candidate");
+        assertTrue(proxyFrames(GpuShaderSource.readDisk("terrain-foliage.frag")),
+              "Clump follow-up requires installed represented frames");
         var path = java.nio.file.Path.of(System.getProperty("megamek.gpu.screenshots"), "grazing-clumps");
         assertTrue(java.nio.file.Files.notExists(path), "Preserve previous clump evidence");
         java.nio.file.Files.createDirectories(path);
@@ -1099,6 +1098,14 @@ class GpuShadingNormalSmokeTest {
             org.junit.jupiter.api.Assertions.assertArrayEquals(full.rgba(),
                   specimenFrame(output, preview, camera, draw).rgba(), "Restore full output after failure diagnostics");
         }
+    }
+
+    /**
+     * Whether the installed foliage shader has represented proxy frames: it declares the role uniform GpuTerrain sets.
+     * Baseline shaders lack it, so a run follows whichever sources are installed.
+     */
+    private static boolean proxyFrames(String foliage) {
+        return foliage.contains("uniform float u_foliageProxy;");
     }
 
     private static String proxySource(String source, boolean tuft, boolean virtualFrames) {

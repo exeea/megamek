@@ -11,7 +11,7 @@
 | `BoardRampMesh` | Simplify interior ramp samples while preserving shared boundaries and height error constraints. |
 | `BoardTunnel` | Detect eligible blocked exits and define portal placement/clipping. |
 | `GpuAssets / GpuRoads` | Load the portal kit and continue the road material through its lining. |
-| `mm-data/tools/build_tunnel_asset.py` | Author portal geometry and textures offline. |
+| `mm-data/tools/board-models/road-tunnel.md` | Portal GLB dimensions and contract. |
 
 Roads beside elevation changes retain the native terrain slope and cliff
 profiles outside their carriageway. Actual graded approaches still use the
@@ -80,8 +80,7 @@ The maintained asset is in the adjacent mm-data repository:
 
 - `data/models/board/road-tunnel.glb`: winged ground portal.
 - `data/models/board/road-tunnel-bridge.glb`: wingless bridge portal.
-- `tools/board-models/road-tunnel.blend`: editable Blender source.
-- `tools/build_tunnel_asset.py`: reproducible geometry, materials and GLB export.
+- `tools/board-models/road-tunnel.md`: the portal's dimensions and contract.
 - `data/models/board/textures/scenery/tunnel-concrete.png`: dedicated fine-grain albedo.
 
 External walls and roof extend the full 18-unit depth. The lining and pier have

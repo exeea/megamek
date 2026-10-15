@@ -35,6 +35,7 @@ import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.planetaryConditions.Atmosphere;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -74,6 +75,7 @@ class GpuTerrainRealismSmokeTest {
         var selectedViews = Arrays.asList(System.getProperty("megamek.gpu.realismViews", "top,iso").split(","));
         var selectedConditions = Arrays.asList(System.getProperty("megamek.gpu.realismConditions", "morning,midday,overcast,night").split(","));
         boolean overlays = Boolean.getBoolean("megamek.gpu.realismOverlays");
+        boolean freezeAnimation = overlays || Boolean.getBoolean("megamek.gpu.realismFreezeAnimation");
         var views = new ArrayList<View>();
         for (Landscape landscape : LANDSCAPES) {
             if (!selected.contains(landscape.name)) { continue; }
@@ -118,6 +120,17 @@ class GpuTerrainRealismSmokeTest {
                     views.add(new View(scene, top, new Conditions("night", 0, 0, 0)));
                 }
             }
+        }
+        // Optional local pressure override retains each preset's source time, EV and moon policy.
+        String pressureName = System.getProperty("megamek.gpu.realismPressure");
+        if (pressureName != null) {
+            Atmosphere pressure = Atmosphere.valueOf(pressureName.trim().toUpperCase(Locale.ROOT));
+            views.replaceAll(view -> {
+                var s = view.conditions.settings();
+                var settings = new BoardAtmosphere.Settings(s.hour(), s.clouds(), s.fog(), s.groundLayerHeight(),
+                      s.haze(), s.exposure(), s.effects(), pressure, s.temperature(), s.moonlight(), s.taint(), s.gravity());
+                return new View(view.scene, view.top, new Conditions(view.conditions.name, settings));
+            });
         }
         assertTrue(!views.isEmpty(), "Select at least one known landscape");
         var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "landscapes");
@@ -167,7 +180,7 @@ class GpuTerrainRealismSmokeTest {
                     assertTrue(renderer.toLowerCase(Locale.ROOT).contains(expectedRenderer.toLowerCase(Locale.ROOT)),
                           () -> "Requested benchmark renderer containing '" + expectedRenderer + "', got " + renderer);
                     variants = variants(report);
-                    stableOrder = overlays || variants.size() > 1 || Boolean.getBoolean("megamek.gpu.realismStableOrder");
+                    stableOrder = freezeAnimation || variants.size() > 1 || Boolean.getBoolean("megamek.gpu.realismStableOrder");
                     String initialSources = System.getProperty("megamek.gpu.realismInitialSources");
                     if (initialSources != null) {
                         assertEquals(1, variants.size(), "Initial sources require a single-version process");
@@ -210,6 +223,10 @@ class GpuTerrainRealismSmokeTest {
                               .append("the timed view is a central close-up, not all bays. The complete board remains installed. ")
                               .append("This is a separate workload from Dome.\n");
                     }
+                    if (freezeAnimation && !overlays) {
+                        report.append("Lighting review: animation advances .5s once per board, then freezes across cases.\n");
+                    }
+                    if (pressureName != null) { report.append("Pressure override: ").append(pressureName).append('\n'); }
                     if (stableOrder) { report.append("Stable draw sorting enabled for this process.\n"); }
                     if (variants.size() > 1) {
                         report.append("Source comparisons use stable draw sorting; frozen same-source repeats must be byte-exact.\n")
@@ -250,6 +267,14 @@ class GpuTerrainRealismSmokeTest {
                     stages.poll();
                     if (++frame == warmup + samples) {
                         if (overlays) { captureOverlays(view, label); }
+                        if (freezeAnimation && !overlays) {
+                            byte[] paused = ScreenUtils.getFrameBufferPixels(0, 0,
+                                  Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight(), false);
+                            compositor.render(terrain, camera, installed.board);
+                            assertArrayEquals(paused, ScreenUtils.getFrameBufferPixels(0, 0,
+                                  Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight(), false),
+                                  "Frozen lighting review must repeat exactly: " + label);
+                        }
                         GpuReviewFrame.save(new File(output, label + ".png"));
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), view.name());
                         var hit = terrain.hit(installed.board, pick);
@@ -562,7 +587,7 @@ class GpuTerrainRealismSmokeTest {
                 long overviewStart = preparationStart(view.name() + "-overview-settle");
                 GpuTerrainLodSmokeTest.settle(terrain, null, installed.board, camera);
                 preparationEnd(view.name() + "-overview-settle", overviewStart, report);
-                terrain.animate(overlays && !newBoard ? 0 : .5f, List.of());
+                terrain.animate(freezeAnimation && !newBoard ? 0 : .5f, List.of());
                 long overviewDraw = preparationStart(view.name() + "-overview-first-draw-submit");
                 compositor.render(terrain, camera, installed.board);
                 preparationEnd(view.name() + "-overview-first-draw-submit", overviewDraw, report);
@@ -587,6 +612,16 @@ class GpuTerrainRealismSmokeTest {
                 long closeDraw = preparationStart(view.name() + "-close-first-draw-submit");
                 compositor.render(terrain, camera, installed.board);
                 preparationEnd(view.name() + "-close-first-draw-submit", closeDraw, report);
+                if (freezeAnimation && !overlays) {
+                    report.append(view.name()).append(" settings=").append(view.conditions.settings())
+                          .append(" exposure=").append(compositor.atmosphere().exposure())
+                          .append(" directRGB=").append(compositor.lighting().direct().r).append(',')
+                          .append(compositor.lighting().direct().g).append(',').append(compositor.lighting().direct().b)
+                          .append(" ambientRGB=").append(compositor.lighting().ambient().r).append(',')
+                          .append(compositor.lighting().ambient().g).append(',').append(compositor.lighting().ambient().b)
+                          .append(" camera=").append(camera.camera.position).append(" zoom=").append(camera.camera.zoom)
+                          .append('\n');
+                }
                 if (overlays) {
                     assertTrue(installed.board.tiles().stream().anyMatch(tile -> !tile.text().isEmpty()),
                           "The captured map must contain real board labels");

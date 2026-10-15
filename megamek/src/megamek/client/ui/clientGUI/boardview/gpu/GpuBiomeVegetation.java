@@ -845,7 +845,7 @@ final class GpuBiomeVegetation implements Disposable {
         catch (RuntimeException error) { near.dispose(); throw error; }
     }
 
-    /** Pixel-space registration belongs to the artwork; world spacing belongs to the shared row template. */
+    /** Normalized artwork anchors are resolved once to pixels; world spacing belongs to the shared row template. */
     private record CropSprite(int left, int top, int right, int bottom, int x, int y) { }
 
     private record Artwork(GpuLinearImage pixels, List<CropSprite> plants) {
@@ -868,7 +868,11 @@ final class GpuBiomeVegetation implements Disposable {
                             top = Math.min(top, y); bottom = Math.max(bottom, y);
                         }
                     }
-                    int x = anchors.get(i).getInt(0), y = anchors.get(i).getInt(1);
+                    float u = anchors.get(i).getFloat(0), v = anchors.get(i).getFloat(1);
+                    if (!(u >= 0 && u < 1 && v >= 0 && v < 1)) {
+                        throw new IllegalArgumentException(name + " requires normalized registration for variant " + i);
+                    }
+                    int x = (int) (u * source.getWidth()), y = (int) (v * source.getHeight());
                     if (left > right || top > bottom || x < start || x >= end || y < top || y > bottom) {
                         throw new IllegalArgumentException(name + " has invalid registration for variant " + i);
                     }

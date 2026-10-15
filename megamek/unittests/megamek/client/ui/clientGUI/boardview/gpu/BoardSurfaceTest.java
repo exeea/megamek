@@ -662,8 +662,7 @@ class BoardSurfaceTest {
             Vector3 outward = new Vector3(fall.b()).sub(fall.a()).crs(Vector3.Z).nor();
             assertEquals(high, BoardGeometry.pick(scene, new Ray(new Vector3(point).mulAdd(outward, 6), outward.scl(-1))));
         }
-        BoardScene frozen = riverScene(Map.of(high, 3, high.translated(3), 0), true);
-        assertTrue(new BoardSurface(frozen, frozen.tile(high)).waterfalls.isEmpty());
+        // Frozen falls keep their curtain and picking: BoardFrozenWaterfallTest.
     }
 
     @Test

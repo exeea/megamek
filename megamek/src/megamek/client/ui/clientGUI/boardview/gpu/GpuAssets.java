@@ -55,13 +55,13 @@ final class GpuAssets implements Disposable {
     private final Map<BoardRail.Layout, Model> routes = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
     private final Map<String, Cliff> cliffs = new HashMap<>();
-    private final Map<Boolean, TextureArray> magmas = new HashMap<>();
+    private final Map<Boolean, MaterialArrays> magmas = new HashMap<>();
     private final Map<String, Sculpt> sculpts = new HashMap<>();
     private final Map<String, JsonValue> sculptEntries = new HashMap<>();
-    private TextureArray sculptArray;
+    private MaterialArrays sculptArray;
     private float[] sculptNormalSpread;
     private SculptRoughness sculptRoughness;
-    private TextureArray roadArray;
+    private MaterialArrays roadArray;
     private final Map<BoardLiquid.Textures, Animation<Texture>> liquids = new HashMap<>();
     private BoardScene.Pixels incline;
     private BoardScene.Pixels highIncline;
@@ -72,17 +72,17 @@ final class GpuAssets implements Disposable {
     record Cliff(Texture color, Texture normal, Texture surface) { }
 
     /**
-     * Molten lava's or solid crust's aligned maps as the four layers of one array, so they take one texture unit:
+     * Molten lava's or solid crust's aligned maps in separate colour and numerical arrays:
      * colour; normal; surface (height, roughness, occlusion, relief range); heat (R heat, GB signed flow, A heat
      * bleeding onto crack walls). Enhanced materials require the complete set.
      */
-    TextureArray magma(boolean molten) {
+    MaterialArrays magma(boolean molten) {
         if (magmas.containsKey(molten)) { return magmas.get(molten); }
         var files = new ArrayList<FileHandle>();
         for (String map : List.of("", "-normal", "-surface", "-heat")) {
             files.add(materialFile("terrain/lava/" + (molten ? "lava" : "crust") + map));
         }
-        TextureArray maps = repeatingArray(files, 4);
+        MaterialArrays maps = repeatingArray(files, 4);
         magmas.put(molten, maps);
         return maps;
     }
@@ -93,8 +93,8 @@ final class GpuAssets implements Disposable {
      */
     record Sculpt(Texture color, Texture normal, float tile) { }
 
-    /** Existing colour/height and normal/AO maps, interleaved in one sampler for complete boundary materials. */
-    TextureArray sculptArray(List<String> names) {
+    /** Aligned colour/height and normal/AO arrays in the supplied stable material order. */
+    MaterialArrays sculptArray(List<String> names) {
         if (sculptArray == null) {
             var files = new ArrayList<FileHandle>();
             for (String name : names) {
@@ -102,8 +102,8 @@ final class GpuAssets implements Disposable {
                 files.add(materialFile("terrain/surfaces/" + name));
                 files.add(materialFile("terrain/surfaces/" + name + "-normal"));
             }
-            sculptArray = repeatingArray(files, 2, true);
-            sculptNormalSpread = normalSpread(sculptArray, names.size());
+            sculptArray = repeatingArray(files, 2);
+            sculptNormalSpread = normalSpread(sculptArray.data(), names.size());
         }
         return sculptArray;
     }
@@ -126,7 +126,7 @@ final class GpuAssets implements Disposable {
         GL11.glGetTexImage(GL30.GL_TEXTURE_2D_ARRAY, level, GL20.GL_RGBA, GL20.GL_FLOAT, texels);
         float[] spread = new float[(materials + 3) / 4 * 4];
         for (int material = 0; material < materials; material++) {
-            int normal = (2 * material + 1) * 4;
+            int normal = material * 4;
             float x = texels[normal] * 2 - 1, y = texels[normal + 1] * 2 - 1, z = texels[normal + 2] * 2 - 1;
             float length = (float) Math.sqrt(x * x + y * y + z * z);
             spread[material] = Math.max(0, (1 - Math.min(length, 1)) / Math.max(length, 1e-4f) - .005f);
@@ -265,7 +265,7 @@ final class GpuAssets implements Disposable {
      * Colour, normal and surface maps of every road material, three layers each in {@link GpuRoads#MATERIALS} order,
      * so that one draw holds all of a chunk's road coats. All maps are required.
      */
-    TextureArray roadArray() {
+    MaterialArrays roadArray() {
         if (roadArray == null) {
             var files = new ArrayList<FileHandle>();
             for (String name : GpuRoads.MATERIALS) {
@@ -276,91 +276,106 @@ final class GpuAssets implements Disposable {
         return roadArray;
     }
 
-    /** Sets of {@code maps} aligned repeating maps, filtered like the separate material textures. */
-    private static TextureArray repeatingArray(List<FileHandle> files, int maps) {
-        return repeatingArray(files, maps, false);
+    /** One owned pair: sRGB colour/height and raw numerical maps, each compacted in material order. */
+    record MaterialArrays(TextureArray color, TextureArray data) implements Disposable {
+        @Override public void dispose() { color.dispose(); data.dispose(); }
     }
 
-    private static TextureArray repeatingArray(List<FileHandle> files, int maps, boolean environment) {
-        var array = new TextureArray(new SculptArrayData(files, maps, environment));
-        array.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-        array.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
-        // GLTexture.setAnisotropicFilter always sets GL_TEXTURE_2D, so it would leave an array isotropic (blurred
-        // at grazing angles) and change whichever 2D texture the unit holds; set the array's own parameter.
-        float anisotropy = Math.min(8, GLTexture.getMaxAnisotropicFilterLevel());
-        if (anisotropy > 1) {
-            array.bind();
-            Gdx.gl.glTexParameterf(GL30.GL_TEXTURE_2D_ARRAY, GL20.GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
+    /** Sets of aligned maps; their first map is colour and all remaining maps carry numerical data. */
+    private static MaterialArrays repeatingArray(List<FileHandle> files, int maps) {
+        requireFiles(files);
+        if (files.isEmpty() || maps < 2 || files.size() % maps != 0) {
+            throw new IllegalArgumentException("Incomplete repeating material arrays");
         }
-        return array;
+        var colors = new ArrayList<FileHandle>();
+        var data = new ArrayList<FileHandle>();
+        for (int index = 0; index < files.size(); index++) {
+            (index % maps == 0 ? colors : data).add(files.get(index));
+        }
+        // Both arrays retain the previous set's grid, even when a numerical source has a different size.
+        var first = GpuColorTexture.decode(files.getFirst());
+        int width = first.getWidth(), height = first.getHeight();
+        first.dispose();
+        TextureArray color = null, numeric = null;
+        try {
+            color = repeatingArray(new MaterialArrayData(colors, width, height, true));
+            numeric = repeatingArray(new MaterialArrayData(data, width, height, false));
+            return new MaterialArrays(color, numeric);
+        } catch (RuntimeException failure) {
+            if (numeric != null) { numeric.dispose(); }
+            if (color != null) { color.dispose(); }
+            throw failure;
+        }
     }
 
-    /** Uploaded once per renderer; validate the complete set before allocating GL storage. */
-    private static final class SculptArrayData implements TextureArrayData {
-        private final List<FileHandle> files;
-        private final int maps;
-        private final boolean environment;
-        private boolean prepared;
-        private int width = 2, height = 2;
+    private static TextureArray repeatingArray(MaterialArrayData data) {
+        var array = new TextureArray(data);
+        try {
+            // Own the allocated handle before decoding/uploading: any source failure releases this array.
+            array.bind();
+            data.upload();
+            array.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+            array.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
+            // GLTexture.setAnisotropicFilter targets 2D, so set the array's own target explicitly.
+            float anisotropy = Math.min(8, GLTexture.getMaxAnisotropicFilterLevel());
+            if (anisotropy > 1) {
+                array.bind();
+                Gdx.gl.glTexParameterf(GL30.GL_TEXTURE_2D_ARRAY, GL20.GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
+            }
+            return array;
+        } catch (RuntimeException failure) { array.dispose(); throw failure; }
+    }
 
-        SculptArrayData(List<FileHandle> files, int maps, boolean environment) {
+    /** A single storage domain; source bytes are unchanged unless the existing grid requires resizing. */
+    private static final class MaterialArrayData implements TextureArrayData {
+        private final List<FileHandle> files;
+        private final int width, height;
+        private final boolean color;
+        private boolean prepared;
+
+        MaterialArrayData(List<FileHandle> files, int width, int height, boolean color) {
             requireFiles(files);
             this.files = List.copyOf(files);
-            this.maps = maps;
-            this.environment = environment;
-            // TextureArray allocates storage before calling prepare(), so its dimensions must already be known.
-            for (var file : files) {
-                var pixels = GpuColorTexture.decode(file);
-                try { width = pixels.getWidth(); height = pixels.getHeight(); }
-                finally { pixels.dispose(); }
-                break;
-            }
-            if (environment) {
-                width = Math.max(width, GpuLightingEnvironment.ATLAS_SIZE);
-                height = Math.max(height, GpuLightingEnvironment.ATLAS_SIZE);
-            }
+            this.width = width;
+            this.height = height;
+            this.color = color;
         }
 
         @Override public boolean isPrepared() { return prepared; }
         @Override public void prepare() { prepared = true; }
         @Override public int getWidth() { return width; }
         @Override public int getHeight() { return height; }
-        @Override public int getDepth() { return files.size() + (environment ? 1 : 0); }
+        @Override public int getDepth() { return files.size(); }
         @Override public boolean isManaged() { return false; }
         @Override public int getInternalFormat() { return GL20.GL_RGBA; }
-        @Override public int getGLType() { return GL20.GL_FLOAT; }
+        @Override public int getGLType() { return GL20.GL_UNSIGNED_BYTE; }
 
         @Override
         public void consumeTextureArrayData() {
-            // libGDX's array allocator uses one enum for both internal and input format. Allocate the sized
-            // floating format here, where storage format and uploaded channel layout can be specified separately.
-            Gdx.gl30.glTexImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, GL30.GL_RGBA16F, width, height, getDepth(), 0,
-                  GL20.GL_RGBA, GL20.GL_FLOAT, (java.nio.Buffer) null);
-            for (int layer = 0; layer < files.size(); layer++) {
-                FileHandle file = files.get(layer);
-                var pixels = GpuColorTexture.decode(file);
-                try {
-                    var upload = GpuColorTexture.arrayPixels(pixels, width, height, layer % maps == 0);
-                    try {
-                        Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, width, height, 1,
-                              GL20.GL_RGBA, GL20.GL_FLOAT, upload);
-                    } finally {
-                        // LWJGL passes only the native address; keep the GC-owned backing memory alive until return.
-                        Reference.reachabilityFence(upload);
-                    }
-                } finally { pixels.dispose(); }
-            }
-            if (environment) {
-                // The sculpt shader already uses all 16 portable samplers. Keep its BRDF/environment lookup in
-                // a separate data layer of this array; explicit mip-zero lookup leaves material filtering intact.
-                var upload = GpuEnvironmentLighting.arrayPixels(width, height);
-                try {
-                    Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, files.size(), width, height, 1,
-                          GL20.GL_RGBA, GL20.GL_FLOAT, upload);
-                } finally { Reference.reachabilityFence(upload); }
-            }
-            Gdx.gl.glGenerateMipmap(GL30.GL_TEXTURE_2D_ARRAY);
+            // libGDX's allocator shares internal/input enums; specify the sized storage here.
+            Gdx.gl30.glTexImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, color ? GL30.GL_SRGB8_ALPHA8 : GL30.GL_RGBA8,
+                  width, height, getDepth(), 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, (java.nio.Buffer) null);
             prepared = false;
+        }
+
+        /** The caller has an owned TextureArray handle and releases it if source decoding fails. */
+        void upload() {
+            var oldAlignment = com.badlogic.gdx.utils.BufferUtils.newIntBuffer(1);
+            Gdx.gl.glGetIntegerv(GL20.GL_UNPACK_ALIGNMENT, oldAlignment);
+            Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 1);
+            try {
+                for (int layer = 0; layer < files.size(); layer++) {
+                    var pixels = GpuColorTexture.decode(files.get(layer));
+                    try {
+                        var upload = GpuColorTexture.arrayPixels(pixels, width, height, color);
+                        try {
+                            Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, width, height, 1,
+                                  GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, upload);
+                        } finally { Reference.reachabilityFence(upload); }
+                    } finally { pixels.dispose(); }
+                }
+            } finally { Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, oldAlignment.get(0)); }
+            Gdx.gl.glGenerateMipmap(GL30.GL_TEXTURE_2D_ARRAY);
         }
     }
 
@@ -945,7 +960,7 @@ final class GpuAssets implements Disposable {
         modelLods.clear();
         materials.clear();
         cliffs.clear();
-        magmas.values().forEach(TextureArray::dispose);
+        magmas.values().forEach(MaterialArrays::dispose);
         magmas.clear();
         sculpts.clear();
         sculptEntries.clear();

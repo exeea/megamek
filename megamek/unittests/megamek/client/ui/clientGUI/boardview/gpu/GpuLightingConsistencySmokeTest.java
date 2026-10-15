@@ -416,6 +416,27 @@ class GpuLightingConsistencySmokeTest {
                       "The scene clear compensates the fixed UI backdrop before the final gain");
                 target.end();
             }
+            // Sections meter their actual published light, including a manually positioned grazing source.
+            var dawn = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(6.5f, 0, 0, 2.5f, 0, 0));
+            terrain.setAtmosphere(dawn);
+            drawChangedSection(terrain, stage, section, snapshot);
+            assertPreviewGain((GpuSceneDisplay) previewField(section, "display"), dawn.adaptation());
+            var grazingManual = new BoardScene(0, 1, 1, scene.tiles(), List.of(), List.of(), -1, "", List.of(),
+                  new BoardScene.Light(1000, 0));
+            terrain.setAtmosphere(null);
+            terrain.update(grazingManual);
+            var grazingSource = terrain.environment().get(DirectionalLightsAttribute.class,
+                  DirectionalLightsAttribute.Type).lights.first();
+            assertTrue(-grazingSource.direction.z < .5f, "This manual light must exercise the sloped receiver floor");
+            Color grazingMeter = defaults.ambient().cpy();
+            grazingMeter.r += .5f * defaults.direct().r;
+            grazingMeter.g += .5f * defaults.direct().g;
+            grazingMeter.b += .5f * defaults.direct().b;
+            drawChangedSection(terrain, stage, section, snapshot);
+            assertPreviewGain((GpuSceneDisplay) previewField(section, "display"), BoardAtmosphere.adaptation(grazingMeter));
+            terrain.setAtmosphere(BoardAtmosphere.lighting(settings.getFirst()));
+            terrain.update(scene);
+            drawChangedSection(terrain, stage, section, snapshot);
             // Republishing equal colors as different objects does not invalidate the cached image.
             terrain.setAtmosphere(BoardAtmosphere.lighting(settings.getFirst()));
             assertSectionIdle(stage, section);

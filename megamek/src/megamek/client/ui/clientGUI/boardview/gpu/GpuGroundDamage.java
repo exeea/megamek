@@ -176,7 +176,9 @@ final class GpuGroundDamage implements Disposable {
     }
 
     private final Map<UUID, Set<String>> seen = new LinkedHashMap<>();
-    private final Map<Style, List<Pixmap>> brushes = new EnumMap<>(Style.class);
+    /** Texture storage may be square; the trimmed artwork keeps its physical canvas proportions. */
+    private record BrushArt(List<Pixmap> levels, float aspect) { }
+    private final Map<Style, BrushArt> brushes = new EnumMap<>(Style.class);
     private record Stamp(int level, Vector3 point, float radius, float angle, Style style, int seed, float strength) { }
     private final ArrayDeque<Stamp> pending = new ArrayDeque<>();
     private BoardScene groundScene;
@@ -266,7 +268,7 @@ final class GpuGroundDamage implements Disposable {
         if (face == null) { vertical.accept(impact); return; }
         if (tile.liquid().present() || tile.frozen()) { return; }
         var style = impact.style(face);
-        if (brushes.get(style).isEmpty()) { return; }
+        if (brushes.get(style).levels().isEmpty()) { return; }
         int seed = impact.attack().event.result().id().hashCode() ^ impact.key().hashCode();
         var incoming = impact.incoming();
         float dx = incoming.x, dy = incoming.y;
@@ -324,12 +326,13 @@ final class GpuGroundDamage implements Disposable {
     }
 
     Brush brush(Style style, float radius, float strength, int seed) {
-        var levels = brushes.get(style);
-        if (levels == null || levels.isEmpty()) { return null; }
+        var art = brushes.get(style);
+        if (art == null || art.levels().isEmpty()) { return null; }
+        var levels = art.levels();
         int lod = 0;
         float diameter = 2 * radius * TILE_INTERIOR / tileWorldSize;
         while (lod + 1 < levels.size() && levels.get(lod).getWidth() > diameter * 2) { lod++; }
-        return new Brush(levels.get(lod), texels(levels.get(lod)), (float) levels.getFirst().getHeight() / levels.getFirst().getWidth(),
+        return new Brush(levels.get(lod), texels(levels.get(lod)), art.aspect(),
               (seed & 1) == 0 ? 1 : -1, strength);
     }
 
@@ -403,7 +406,7 @@ final class GpuGroundDamage implements Disposable {
     }
 
     /** Editable RGBA artwork: alpha is coverage; dark values are char/melt, light values disturbed debris. */
-    private static List<Pixmap> loadBrush(Style style) {
+    private static BrushArt loadBrush(Style style) {
         var file = new FileHandle(new File(Configuration.dataDir(), "models/board/textures/terrain/damage/" + style.file + ".png"));
         var levels = new ArrayList<Pixmap>();
         Pixmap source = null;
@@ -422,6 +425,10 @@ final class GpuGroundDamage implements Disposable {
             var mask = new Pixmap(right - left + 1, bottom - top + 1, Pixmap.Format.RGBA8888);
             mask.setBlending(Pixmap.Blending.None);
             levels.add(mask);
+            // Gouges retain their authored 4:1 canvas even when exported to a square texture.
+            // Empty margins are measured as fractions of that canvas, before selecting mip levels.
+            float aspect = (float) mask.getHeight() / mask.getWidth();
+            if (style.cut()) { aspect *= .25f * source.getWidth() / source.getHeight(); }
             float depth = switch (style) {
                 case BURN -> 0;
                 case PLASMA -> .18f;
@@ -458,11 +465,12 @@ final class GpuGroundDamage implements Disposable {
             while (levels.getFirst().getWidth() > MAX_BRUSH_SIZE || levels.getFirst().getHeight() > MAX_BRUSH_SIZE) {
                 levels.removeFirst().dispose();
             }
-            return List.copyOf(levels);
+            if (!style.cut()) { aspect = (float) levels.getFirst().getHeight() / levels.getFirst().getWidth(); }
+            return new BrushArt(List.copyOf(levels), aspect);
         } catch (RuntimeException error) {
             levels.forEach(Pixmap::dispose);
             LOGGER.warn("Could not load ground scar {}: {}", file, error.getMessage());
-            return List.of();
+            return new BrushArt(List.of(), 1);
         } finally {
             if (source != null) { source.dispose(); }
         }
@@ -606,7 +614,7 @@ final class GpuGroundDamage implements Disposable {
         mipScratch.forEach(Pixmap::dispose);
         mipScratch.clear();
         dirty.clear();
-        brushes.values().forEach(levels -> levels.forEach(Pixmap::dispose));
+        brushes.values().forEach(art -> art.levels().forEach(Pixmap::dispose));
         brushes.clear();
         texture = null; capacity = 0; seen.clear(); marks = 0;
         nextSurfaceKey = -1;

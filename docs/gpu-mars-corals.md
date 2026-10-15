@@ -32,19 +32,11 @@ The sibling `mm-data` repository contains:
 
 | File | Purpose |
 | --- | --- |
-| `tools/board-models/mars/coral-concept.png` | Imagegen concept, using the supplied Mars board as a reference. |
-| `tools/build_mars_corals.py` | Reproducible Blender authoring and rigid GLB export. |
-| `tools/board-mars-corals.blend` | Editable independent scene with all mesh levels and a review camera. |
-| `tools/board-models/mars/coral-library.png` | Blender kit preview. |
-| `tools/board-models/mars/mesh-report.json` | Measured bounds and triangle counts. |
 | `data/models/board/mars/*.glb` | Six runtime models. |
 | `data/models/board/textures/vegetation/mars/coral-mineral-atlas.png` | Shared opaque Imagegen atlas: porous ivory, veined mauve, weathered tubes and dusty basal crust. |
 
-Build through Blender MCP by executing
-`runpy.run_path('.../mm-data/tools/build_mars_corals.py')['build']()` in Object mode.
-The builder adds an independent scene and saves only that scene and its dependencies;
-it does not replace existing Blender scenes. The normal Gradle `stageData` task
-copies the GLBs and texture into the game's data directory.
+The normal Gradle `stageData` task copies the GLBs and texture into the game's data
+directory.
 
 Each asset targets 16,000 / 4,200 / 1,000 / 240 triangles across four named mesh levels.
 Every level is grounded at local Z=0 and is 30 board units tall. Fans have fewer

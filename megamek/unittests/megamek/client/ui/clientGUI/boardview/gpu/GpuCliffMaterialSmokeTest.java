@@ -78,7 +78,7 @@ class GpuCliffMaterialSmokeTest {
             Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
             Gdx.gl.glDisable(GL20.GL_BLEND);
-            array.bind(0);
+            array.color().bind(0);
             shader.bind();
             shader.setUniformi("u_terrainLayers", 0);
             for (int layer = 0; layer < MATERIALS.size(); layer++) {

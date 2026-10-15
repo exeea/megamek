@@ -330,9 +330,10 @@ final class GpuAtmosphere implements Disposable {
     }
 
     private void updateLight(Camera camera, boolean tactical, boolean freeFlight) {
-        exposureLighting = tactical ? BoardAtmosphere.TACTICAL
-              : options.fixedSun() && !freeFlight ? worldLighting.relativeTo(camera) : worldLighting;
-        lighting = tune(exposureLighting);
+        // Exposure belongs to the canonical source; moving the displayed sun must not pump its meter.
+        exposureLighting = tactical ? BoardAtmosphere.TACTICAL : worldLighting;
+        lighting = tune(options.fixedSun() && !freeFlight && !tactical
+              ? exposureLighting.relativeTo(camera) : exposureLighting);
     }
 
     private BoardAtmosphere.Lighting tune(BoardAtmosphere.Lighting base) {

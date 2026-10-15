@@ -12,7 +12,7 @@ import megamek.common.board.Coords;
 record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind kind, boolean bridge) {
     static final String ASSET = "road-tunnel";
     static final String BRIDGE_ASSET = "road-tunnel-bridge";
-    // Asset contract: tools/build_tunnel_asset.py. +Y points into the cliff, Z is up.
+    // Asset contract: mm-data tools/board-models/road-tunnel.md. +Y points into the cliff, Z is up.
     static final float HALF_WIDTH = 9.5f;
     static final float SPRING = 6;
     static final float DEPTH = 18;

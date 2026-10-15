@@ -437,20 +437,33 @@ class GpuMaterialLodSmokeTest {
 
     private static Map<String, String> changedMaps(boolean surfaces) {
         var result = new HashMap<String, String>();
-        String material = GpuShaderSource.readDisk("terrain-materials.glsl");
-        result.put("terrain-materials.glsl", material.replace(
-              "vec4 materialTexel(float layer, vec2 uv, mat2 gradient) {",
-              "vec4 materialTexel(float layer, vec2 uv, mat2 gradient) {"
-                    + " if (mod(layer, 2.0) > .5) return vec4(.95, .05, .65, .1);"));
+        // C1 separates color and numerical arrays. Perturb only actual normal/AO reads, retaining their
+        // projection, coverage and LOD branches; odd semantic IDs no longer pass through color helpers.
+        for (String file : List.of("terrain-materials.glsl", "terrain-sculpt.frag")) {
+            String source = GpuShaderSource.readDisk(file);
+            String changed = source.replaceAll(
+                  "\\b(?:materialTexel|fungusTexel|translatedTexel|cliffTexel)\\(u_terrainData,",
+                  "changedNormalTexel(u_terrainData,");
+            assertTrue(!source.equals(changed), file + " must alter actual numerical-array sample sites");
+            result.put(file, changed);
+        }
         String projection = GpuShaderSource.readDisk("terrain-projection.glsl");
-        result.put("terrain-projection.glsl", projection.replace("vec4 mapTexel(float layer, vec2 uv) {",
-              "vec4 mapTexel(float layer, vec2 uv) {"
-                    + " if (mod(layer, 2.0) > .5) return vec4(.95, .05, .65, .1);"));
+        String normal = "vec4 normalTexel(float layer, vec2 uv) {";
+        assertTrue(projection.contains(normal), "Projected normal-map diagnostic must be installed");
+        result.put("terrain-projection.glsl", """
+              vec4 changedNormalTexel(sampler2DArray maps, float layer, vec2 uv, mat2 gradient) {
+                  return vec4(.95, .05, .65, .1);
+              }
+              vec4 changedNormalTexel(sampler2DArray maps, float layer, vec2 uv, mat2 gradient, float variation) {
+                  return changedNormalTexel(maps, layer, uv, gradient);
+              }
+              """ + projection.replace(normal, normal + " return vec4(.95, .05, .65, .1);"));
         String magma = GpuShaderSource.readDisk("terrain-magma.glsl");
-        result.put("terrain-magma.glsl", magma.replace("vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy) {",
-              "vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy) {"
-                    + " if (map == MAGMA_NORMAL) return vec4(.95, .05, .65, .1);"
-                    + (surfaces ? " if (map == MAGMA_SURFACE) return vec4(.1, .1, .1, .1);" : "")));
+        String magmaSample = "vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy) {";
+        assertTrue(magma.contains(magmaSample), "Volcanic numerical-map diagnostic must be installed");
+        result.put("terrain-magma.glsl", magma.replace(magmaSample, magmaSample
+              + " if (map == MAGMA_NORMAL) return vec4(.95, .05, .65, .1);"
+              + (surfaces ? " if (map == MAGMA_SURFACE) return vec4(.1, .1, .1, .1);" : "")));
         return result;
     }
 

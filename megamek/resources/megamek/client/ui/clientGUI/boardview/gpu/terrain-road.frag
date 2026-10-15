@@ -33,8 +33,8 @@ uniform vec4 u_roadProfile;
 #ifdef roadCoatFlag
 // Every coat of a chunk in one draw. Road maps: colour, normal and surface per material; sculpt maps: colour and
 // normal per material. Each coat's own choice, finish and wet response come from its vertices (GpuRoads#coat).
-uniform sampler2DArray u_roadMaps;
-uniform sampler2DArray u_sculptMaps;
+uniform sampler2DArray u_roadColors, u_roadData;
+uniform sampler2DArray u_sculptColors, u_sculptData;
 flat in vec4 v_roadCoat;
 #endif
 
@@ -74,8 +74,8 @@ RoadMaps roadMaps() {
 
 vec4 roadAlbedo(RoadMaps m, vec2 uv) {
 #ifdef roadCoatFlag
-    return m.mapped ? texture(u_roadMaps, vec3(uv, float(m.maps * 3)))
-          : texture(u_sculptMaps, vec3(uv, float((m.maps - 3) * 2)));
+    return m.mapped ? texture(u_roadColors, vec3(uv, float(m.maps)))
+          : texture(u_sculptColors, vec3(uv, float(m.maps - 3)));
 #else
     return texture(u_diffuseTexture, uv);
 #endif
@@ -84,7 +84,7 @@ vec4 roadAlbedo(RoadMaps m, vec2 uv) {
 // Only a surface with maps has one; see RoadMaps.mapped.
 vec4 roadSurface(RoadMaps m, vec2 uv) {
 #ifdef roadCoatFlag
-    return texture(u_roadMaps, vec3(uv, float(m.maps * 3 + 2)));
+    return texture(u_roadData, vec3(uv, float(m.maps * 2 + 1)));
 #elif defined(roadMapsFlag)
     return texture(u_roadSurface, uv);
 #else
@@ -94,8 +94,8 @@ vec4 roadSurface(RoadMaps m, vec2 uv) {
 
 vec3 roadNormal(RoadMaps m, vec2 uv, float strength) {
 #ifdef roadCoatFlag
-    return mappedNormal(m.mapped ? texture(u_roadMaps, vec3(uv, float(m.maps * 3 + 1)))
-          : texture(u_sculptMaps, vec3(uv, float((m.maps - 3) * 2 + 1))), strength);
+    return mappedNormal(m.mapped ? texture(u_roadData, vec3(uv, float(m.maps * 2)))
+          : texture(u_sculptData, vec3(uv, float(m.maps - 3))), strength);
 #else
     return groundNormal(uv, strength);
 #endif

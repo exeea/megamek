@@ -137,8 +137,7 @@ surface across all four families; native captures inspect the caps from four azi
 The two photographic IMAGEN materials are `models/board/textures/structures/industrial/paint.png` and `steel.png`, with
 different texture scales and specular settings, circumferential tank/pipe UVs, full-resolution mip levels and
 anisotropic filtering. These are diffuse/specular materials; the shader does not implement a full metalness
-workflow. Concept, saved prompts and Blender review files live in mm-data's
-`tools/buildings/heavy-industrial/`. Its original whole-hex modular GLBs are authoring prototypes; the runtime
+workflow. The original whole-hex modular GLBs are authoring prototypes; the runtime
 generator supersedes them for these four terrain identifiers. Ordinary buildings keep the base/floor/roof contract.
 
 ## Cache and ownership

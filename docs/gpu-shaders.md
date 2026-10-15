@@ -90,6 +90,21 @@ timings. On Iris Xe the calibration board's 30 terrain programs compile in 168 s
 load from the cache in 0.3 s; a warm load of the board takes 6–10 s, and its 44
 programs take 5.5 MB (`GpuProgramCacheSmokeTest`).
 
+Once the board shows, sculpted ground draws with family programs (`GpuFamilyPrograms`): the
+same source with the draw's surface families as constants (`SCULPT_FAMILY`,
+`COVER_FAMILIES`), so the compiler keeps only those families' material paths. The
+generic program of the same flags stays every draw's fallback and draws the same pixels; a
+family program sorts with it, so draw order and depth-tie winners do not change. Family
+programs build behind the loading stage, after the generic ones: when a board opens, the
+graphics switch or the lighting changes, the most-drawn variants compile one at a time on
+the same worker. Variants that appear later, such as a newly painted combination, keep the
+generic program until the next load. Crust and bank draws and volcanic palettes with at most
+one ordinary family keep the generic program, which already compiles one family's path; so
+do scarred surfaces, scatter, water, editor previews and board prints. A terrain keeps at
+most 32 family programs over all lighting configurations. A shader-editor change recompiles
+the family programs with the other variants, on the render thread.
+`-Dmegamek.gpu.familyPrograms=false` draws with the generic programs only.
+
 ## Uniforms, inputs and previews
 
 `GpuShaderUniforms`, `GpuShaderInputs` and `GpuShaderValue` record typed inputs

@@ -4,15 +4,12 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.lang.ref.Reference;
 import java.nio.FloatBuffer;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
@@ -40,8 +37,6 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     private Texture texture;
     private GpuLightingEnvironment image;
     private float shadowStrength = 1, imageGain = 1;
-    private TextureArray terrainArray;
-    private int terrainLayer;
 
     GpuEnvironmentLighting() { super(TYPE); }
 
@@ -51,24 +46,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
         if (image != lighting.environmentImage()) {
             image = lighting.environmentImage();
             if (texture != null) { texture.dispose(); texture = null; texture(); }
-            if (terrainArray != null) { uploadArray(); }
         }
-    }
-
-    /** Called before drawing, so atlas uploads never disturb material sampler assignments. */
-    void terrainArray(TextureArray array, int layer) {
-        if (terrainArray == array) { return; }
-        terrainArray = array; terrainLayer = layer;
-        if (image != null) { uploadArray(); }
-    }
-
-    private void uploadArray() {
-        var pixels = pixels(terrainArray.getWidth(), terrainArray.getHeight());
-        terrainArray.bind();
-        try {
-            Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, terrainLayer,
-                  terrainArray.getWidth(), terrainArray.getHeight(), 1, GL20.GL_RGBA, GL20.GL_FLOAT, pixels);
-        } finally { Reference.reachabilityFence(pixels); }
     }
 
     private FloatBuffer pixels(int width, int height) {
@@ -109,10 +87,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
         shader.setUniformf("u_environmentImage", image != null ? 1 : 0, imageGain);
     }
 
-    static void register(DefaultShader shader) { register(shader, -1); }
-
-    /** The array route shares terrain's existing sampler; it never binds this attribute's standalone texture. */
-    static void register(DefaultShader shader, int arrayLayer) {
+    static void register(DefaultShader shader) {
         shader.register("u_shadowStrength", new BaseShader.LocalSetter() {
             @Override public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
                 var light = attributes.get(GpuEnvironmentLighting.class, TYPE);
@@ -135,11 +110,6 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
                 target.set(id, SOURCE_RADIUS_SINE);
             }
         });
-        shader.register("u_environmentLayer", new BaseShader.GlobalSetter() {
-            @Override public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
-                target.set(id, (float) arrayLayer);
-            }
-        });
         shader.register("u_environmentLut", new BaseShader.LocalSetter() {
             @Override public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
                 var light = attributes.get(GpuEnvironmentLighting.class, TYPE);
@@ -160,7 +130,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
         });
     }
 
-    /** Native-size table in the array's corner, padded at its edges; shader lookups explicitly use mip zero. */
+    /** Native-size table in the atlas's corner, padded at its edges; shader lookups explicitly use mip zero. */
     static FloatBuffer arrayPixels(int width, int height) {
         if (width < WIDTH || height < HEIGHT) { throw new IllegalArgumentException("Environment LUT layer is too small"); }
         var pixels = BufferUtils.newFloatBuffer(width * height * 4);

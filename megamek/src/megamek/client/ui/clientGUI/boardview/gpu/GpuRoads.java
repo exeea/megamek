@@ -15,7 +15,6 @@ import java.util.function.Supplier;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
@@ -24,7 +23,6 @@ import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
-import com.badlogic.gdx.graphics.g3d.utils.TextureDescriptor;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 
@@ -101,22 +99,22 @@ final class GpuRoads {
      */
     static final class Coats extends Attribute {
         static final long TYPE = register("roadCoats");
-        final TextureDescriptor<TextureArray> roads, sculpt;
+        final GpuAssets.MaterialArrays roads, sculpt;
 
-        Coats(TextureArray roads, TextureArray sculpt) {
+        Coats(GpuAssets.MaterialArrays roads, GpuAssets.MaterialArrays sculpt) {
             super(TYPE);
-            this.roads = new TextureDescriptor<>(roads);
-            this.sculpt = new TextureDescriptor<>(sculpt);
+            this.roads = roads;
+            this.sculpt = sculpt;
         }
 
         @Override
-        public Coats copy() { return new Coats(roads.texture, sculpt.texture); }
+        public Coats copy() { return new Coats(roads, sculpt); }
 
         @Override
         public int compareTo(Attribute other) {
             if (type != other.type) { return Long.compare(type, other.type); }
-            int result = roads.compareTo(((Coats) other).roads);
-            return result != 0 ? result : sculpt.compareTo(((Coats) other).sculpt);
+            int result = Integer.compare(System.identityHashCode(roads), System.identityHashCode(((Coats) other).roads));
+            return result != 0 ? result : Integer.compare(System.identityHashCode(sculpt), System.identityHashCode(((Coats) other).sculpt));
         }
 
         @Override

@@ -32,9 +32,9 @@ final class GpuUnitShader extends DefaultShader {
     private final int damageTransform = register("u_damageTransform");
     private final boolean displayOutput;
 
-    private GpuUnitShader(Renderable renderable, Config config, boolean displayOutput) {
+    private GpuUnitShader(Renderable renderable, Config config, boolean displayOutput, boolean encodeOutput) {
         super(renderable, config, GpuGlsl.compile("GPU unit material", GpuCloudShadow.prefix(renderable, config)
-                    + "#define sceneUnlitFlag\n" + (displayOutput ? "#define displayOutputFlag\n" : ""),
+                    + "#define sceneUnlitFlag\n" + (encodeOutput ? "#define displayOutputFlag\n" : ""),
               config.vertexShader, displayOutput ? config.fragmentShader : GpuSceneRadiance.fragment(config.fragmentShader)));
         this.displayOutput = displayOutput;
         registerMaterialColors(this, true);
@@ -54,20 +54,25 @@ final class GpuUnitShader extends DefaultShader {
     }
 
     static DefaultShaderProvider provider() {
-        return provider(false);
+        return provider(false, false);
     }
 
     /** Model ghosts drawn over the finished scene share linear material evaluation, then encode for that target. */
     static DefaultShaderProvider displayProvider() {
-        return provider(true);
+        return provider(true, true);
     }
 
-    private static DefaultShaderProvider provider(boolean displayOutput) {
+    /** Linear display light for a scoped sRGB target; neither scene storage scale nor a second encode. */
+    static DefaultShaderProvider linearDisplayProvider() {
+        return provider(true, false);
+    }
+
+    private static DefaultShaderProvider provider(boolean displayOutput, boolean encodeOutput) {
         return new DefaultShaderProvider(GpuCloudShadow.vertex(vertexSource(linearVertex(getDefaultVertexShader()))),
               GpuCloudShadow.fragment(fragmentSource(linearFragment(getDefaultFragmentShader())), false)) {
             @Override
             protected Shader createShader(Renderable renderable) {
-                return new GpuUnitShader(renderable, config, displayOutput);
+                return new GpuUnitShader(renderable, config, displayOutput, encodeOutput);
             }
         };
     }

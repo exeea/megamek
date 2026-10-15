@@ -27,8 +27,8 @@ vec3 turfColor(vec3 artwork, mat2 gradient, out float roughness) {
         vec2 nearUv = p / material.y, farUv = TURN * p / (material.y * 2.37) + .31;
         mat2 nearGradient = gradient * (2.0 / material.y);
         mat2 farGradient = TURN * gradient * (2.0 / (material.y * 2.37));
-        vec3 base = mix(textureGrad(u_terrainLayers, vec3(nearUv, material.x), nearGradient[0], nearGradient[1]).rgb,
-              textureGrad(u_terrainLayers, vec3(farUv, material.x), farGradient[0], farGradient[1]).rgb, fields.x);
+        vec3 base = mix(textureGrad(u_terrainLayers, vec3(nearUv, material.x * .5), nearGradient[0], nearGradient[1]).rgb,
+              textureGrad(u_terrainLayers, vec3(farUv, material.x * .5), farGradient[0], farGradient[1]).rgb, fields.x);
         roughness += mix(authoredRoughness(material.x, nearUv, nearGradient, .86),
               authoredRoughness(material.x, farUv, farGradient, .86), fields.x) * weight;
         base = groundToneFor(float(family), base, world, fields.x, fields.y, fields.z, 0.0, 0.0);

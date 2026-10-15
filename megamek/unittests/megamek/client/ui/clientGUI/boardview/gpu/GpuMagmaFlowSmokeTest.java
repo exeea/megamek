@@ -75,9 +75,10 @@ class GpuMagmaFlowSmokeTest {
         try {
             var maps = assets.magma(true);
             assertNotNull(maps, "Use the shipped lava maps");
-            maps.bind(0);
+            maps.data().bind(0); maps.color().bind(2);
             shader.bind();
             shader.setUniformi("u_magmaMaps", 0);
+            shader.setUniformi("u_magmaColor", 2);
             shader.setUniformi("u_magmaOcean", 1);
             shader.setUniformf("u_magmaOceanScale", 0);
             Gdx.gl.glViewport(0, 0, SIZE, SIZE);
@@ -137,7 +138,7 @@ class GpuMagmaFlowSmokeTest {
                     float time = .17f + step;
                     ocean.update(time, Vector3.Zero, BoardAtmosphere.STANDARD_GRAVITY);
                     assertNotNull(ocean.texture(), "Use the real FFT in zero-current pools");
-                    maps.bind(0);
+                    maps.data().bind(0); maps.color().bind(2);
                     ocean.texture().bind(1);
                     shader.bind();
                     shader.setUniformf("u_magmaOceanScale", 1f / GpuOcean.LAVA_PATCH);

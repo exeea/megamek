@@ -122,31 +122,32 @@ class BoardAtmosphereTest {
     }
 
     @Test
-    void fullMoonIsSlightlyBrighterAndBlueWhileMoonlessRemainsReadableBelowIt() {
+    void fullMoonHasDistinctCoolDirectionalLightWhileMoonlessKeepsItsReadableLevel() {
         var noon = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(12, 0, 0, 2, 0, 0));
         var moon = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(0, 0, 0, 2, 0, 0));
-        assertEquals(.04819409f, luminance(moon.groundLight()), .000001f,
-              "The source is distinct from its adapted display level");
-        assertEquals(6.168843f, moon.adaptation(), .00001f);
-        float stops = log2(adaptedGround(moon) / adaptedGround(noon));
-        assertEquals(-1.75f, stops, .00001f, "Full moon is one quarter-stop brighter than the former two-stop target");
+        float lit = adaptedGround(moon), shadow = luminance(moon.ambient()) * moon.adaptation();
+        assertTrue(lit > .55f && lit < .65f, "Clear full moon is visibly brighter than the former .297 level");
+        assertTrue(lit < adaptedGround(noon), "The same horizontal receiver remains darker than clear noon");
+        assertTrue(shadow > .10f && shadow < .14f, "Moon shadows retain readable sky fill");
+        float keyFill = (lit - shadow) / shadow;
+        float dayKeyFill = (1 - shadowShare(noon)) / shadowShare(noon);
+        assertTrue(keyFill > dayKeyFill * .85f && keyFill < dayKeyFill * 1.15f,
+              "The same standard air gives comparable noon/midnight key-to-fill, not a universal night rule");
         float blue = blueToRed(moon.direct());
-        assertTrue(blue > 1.8f && blue < 1.9f, "Full moon has a deliberate blue directional source: B/R " + blue);
+        assertTrue(blue > 1.8f && blue < 1.9f, "Full moon retains its cool directional source: B/R " + blue);
         assertTrue(blueToRed(moon.groundLight()) > 1.62f && blueToRed(moon.groundLight()) < 1.9f,
-              "Combined moon and sky are bluer than the former full-moon B/R of 1.62");
-        // The composite applies the scenario's exposure compensation on top of the light.
+              "Combined moon and sky remain cool");
+        assertTrue(moon.adaptation() < 6.168843f,
+              "Brighter incident moonlight lowers exposure instead of boosting emissive surfaces");
         var conditions = new PlanetaryConditions();
         conditions.setLight(Light.FULL_MOON);
         float fullMoon = displayedGround(BoardAtmosphere.fromScenario(conditions, false, 0.5));
         conditions.setLight(Light.MOONLESS);
         float moonless = displayedGround(BoardAtmosphere.fromScenario(conditions, false, 0.5));
-        assertTrue(fullMoon > .25f && fullMoon < .32f, "Full moon is slightly brighter than its former .25 output");
-        assertTrue(moonless > .23f && moonless < .25f,
-              "Moonless is readable just below the former full moon, rather than the former .049 moonless level");
-        assertTrue(moonless < fullMoon);
+        assertTrue(fullMoon > moonless * 2, "Lit full moon is clearly distinct from readable moonless terrain");
         conditions.setLight(Light.PITCH_BLACK);
         float pitch = displayedGround(BoardAtmosphere.fromScenario(conditions, false, 0.5));
-        assertTrue(pitch > .04944679f && pitch < moonless, "Pitch black is above former moonless and below new moonless");
+        assertEquals(moonless * .5f, pitch, .000001f, "Pitch black retains its one-stop difference");
     }
 
     @Test
@@ -172,15 +173,26 @@ class BoardAtmosphereTest {
                 float moonlessGain = moonless.adaptation() * (float) Math.pow(2, moonlessSettings.exposure());
                 float blackGain = black.adaptation() * (float) Math.pow(2, blackSettings.exposure());
                 assertTrue(displayedGround(fullSettings) > displayedGround(moonlessSettings));
-                assertTrue(luminance(full.sky()) * fullGain > luminance(moonless.sky()) * moonlessGain,
-                      "Removing the moon must not brighten the default visible sky at " + fullSettings.hour());
-                assertTrue(luminance(full.horizon()) * fullGain > luminance(moonless.horizon()) * moonlessGain);
+                if (pressure.isVacuum()) {
+                    // The stellar backdrop is independent of the moon. Brighter moonlight lowers its exposure.
+                    assertTrue(luminance(moonless.ambient()) > .01f && luminance(moonless.ambient()) < .02f,
+                          "A small explicit no-source allowance supports dark airless terrain");
+                    assertTrue(luminance(full.ambient()) > luminance(moonless.ambient()),
+                          "A stronger incident beam also supports readable shade");
+                    assertTrue(shadowShare(full) < .2f, "Airless moonlight retains strong shadow contrast");
+                    assertTrue(luminance(full.sky()) * fullGain < .004f);
+                    assertTrue(luminance(moonless.sky()) * moonlessGain < .004f);
+                } else {
+                    assertTrue(luminance(full.sky()) * fullGain > luminance(moonless.sky()) * moonlessGain,
+                          "Removing the moon must not brighten the atmospheric sky at " + fullSettings.hour());
+                    assertTrue(luminance(full.horizon()) * fullGain > luminance(moonless.horizon()) * moonlessGain);
+                }
                 assertEquals(moonlessGain * .5f, blackGain, .000001f,
                       "Pitch black retains a distinct one-stop presentation below moonless");
                 if (pressure == Atmosphere.STANDARD && time == .5) {
-                    assertEquals(.29730178, displayedGround(fullSettings), .00001);
-                    assertEquals(.06370752, luminance(full.ambient()) * fullGain, .00001,
-                          "Readable full-moon shadow fill retains directional contrast");
+                    // Retained r2 observations guard the independent no-moon budget, not the changed moon target.
+                    assertEquals(.02891645f, luminance(moonless.groundLight()), .000001f,
+                          "The canonical moonless source stays unchanged, independently of exposure");
                     assertEquals(.24235836, displayedGround(moonlessSettings), .00001);
                     assertEquals(.12117918, displayedGround(blackSettings), .00001);
                 }
@@ -207,13 +219,23 @@ class BoardAtmosphereTest {
     }
 
     @Test
-    void aLowMoonLightsWallsTurnedToItLessThanTheNoonSunDoes() {
-        // The view adapts to the dim level ground under a low moon; walls facing it must still read as night.
-        float noon = wallTurnedToTheLight(BoardAtmosphere.lighting(at(13)));
+    void moonlitGroundAndWallsStayDimmerThanSunlightAtTheSameIncidence() {
+        // A low moon can light a wall more directly than the high midday sun. Compare the actual source angles.
         for (int minute = 0; minute < 24 * 60; minute += 5) {
-            var light = BoardAtmosphere.lighting(at(minute / 60f));
-            if (!light.sunlight()) {
-                assertTrue(wallTurnedToTheLight(light) < noon, "Moonlit walls outshine sunlit ones at " + minute / 60f);
+            var moon = BoardAtmosphere.lighting(at(minute / 60f));
+            if (!moon.sunlight()) {
+                float low = 6, high = 12;
+                for (int step = 0; step < 20; step++) {
+                    float hour = (low + high) * .5f;
+                    var sun = BoardAtmosphere.lighting(at(hour));
+                    if (-sun.direction().z < -moon.direction().z) { low = hour; } else { high = hour; }
+                }
+                var sun = BoardAtmosphere.lighting(at((low + high) * .5f));
+                // MathUtils samples its trigonometric table; the closest daytime direction need not be exact.
+                assertEquals(-moon.direction().z, -sun.direction().z, .001f, "Matched actual source incidence");
+                assertTrue(adaptedGround(moon) < adaptedGround(sun), "Moonlit ground stays below comparable daylight");
+                assertTrue(wallTurnedToTheLight(moon) < wallTurnedToTheLight(sun),
+                      "Moonlit walls stay below comparable daylight at " + minute / 60f);
             }
         }
     }
@@ -225,16 +247,53 @@ class BoardAtmosphereTest {
     }
 
     @Test
-    void airlessWorldsKeepSunlightButHaveNoAtmosphericSkyFill() {
-        var standard = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0, 2, 0, 0));
-        for (Atmosphere pressure : Atmosphere.values()) {
-            var light = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0, 2, 0, 0,
-                  BoardAtmosphere.Effects.NONE, pressure));
-            assertSameColor(standard.direct(), light.direct(), "Sunlight at 13:00, " + pressure.name());
-            if (pressure.isVacuum()) {
-                assertTrue(luminance(light.ambient()) < .001f, "A black airless sky cannot provide atmospheric fill");
-            } else {
-                assertSameColor(standard.ambient(), light.ambient(), "Sky fill at 13:00, " + pressure.name());
+    void pressureChangesBothBeamAndFillWithoutCreatingAnAirlessSky() {
+        for (float hour : new float[] { 0, 4, 12, 16 }) {
+            float beam = Float.POSITIVE_INFINITY, fill = -1, shade = -1;
+            for (Atmosphere pressure : Atmosphere.values()) {
+                var light = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour, 0, 0, 2, 0, 0,
+                      BoardAtmosphere.Effects.NONE, pressure));
+                assertTrue(luminance(light.direct()) < beam, "Denser air attenuates the beam at " + hour);
+                assertTrue(luminance(light.ambient()) > fill, "Denser air supplies more fill at " + hour);
+                assertTrue(shadowShare(light) > shade, "Pressure softens direct/fill contrast at " + hour);
+                beam = luminance(light.direct());
+                fill = luminance(light.ambient());
+                shade = shadowShare(light);
+                if (pressure.isVacuum()) {
+                    assertTrue(fill > .01f && shadowShare(light) < .2f,
+                          "Airless readability supplies fill without washing out the incident beam");
+                    assertTrue(luminance(light.sky()) < .001f, "Readability never creates a visible atmosphere");
+                    if (hour < 6) {
+                        // Daylight retains its existing common white-point calibration.
+                        assertTrue(blueToRed(light.ambient()) < 1.12f, "Airless night allowance is neutral, not blue air");
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void noMoonReadabilityOrdersAtmospheresAndPreservesContinuousDaylight() {
+        var conditions = new PlanetaryConditions();
+        conditions.setLight(Light.MOONLESS);
+        float previous = 0;
+        for (Atmosphere pressure : new Atmosphere[] {
+              Atmosphere.VACUUM, Atmosphere.TRACE, Atmosphere.THIN, Atmosphere.STANDARD }) {
+            conditions.setAtmosphere(pressure);
+            var settings = BoardAtmosphere.fromScenario(conditions, false, .5);
+            var light = BoardAtmosphere.lighting(settings);
+            assertFalse(light.hasDirectLight());
+            assertTrue(luminance(light.ambient()) > previous, "Vacuum < trace < thin < standard readable fill");
+            previous = luminance(light.ambient());
+            assertTrue(displayedGround(settings) > .04f, "Darkness still permits terrain navigation");
+            var prior = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(0, 0, 0, 2, 0, 0,
+                  BoardAtmosphere.Effects.NONE, pressure, 25, false));
+            for (int minute = 1; minute <= 24 * 60; minute++) {
+                var current = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(minute / 60f, 0, 0, 2, 0, 0,
+                      BoardAtmosphere.Effects.NONE, pressure, 25, false));
+                assertTrue(Math.abs(log2(luminance(current.ambient()) / luminance(prior.ambient()))) < .12f,
+                      "Readable fill stays continuous through dawn and dusk in " + pressure);
+                prior = current;
             }
         }
     }
@@ -331,7 +390,6 @@ class BoardAtmosphereTest {
                               "A steeper incidence raises direct light, unclipped");
                     }
                     assertSameColor(world.ambient(), fixed.ambient(), "The fixed light moves no fill");
-                    assertEquals(world.adaptation(), fixed.adaptation(), .00001f, "Camera pose does not change exposure");
                     camera.pan(120, -90);
                     camera.zoom(0.8f);
                     assertSameLighting(fixed, world.relativeTo(camera.camera), "Pan and zoom must not move the light");
@@ -359,7 +417,6 @@ class BoardAtmosphereTest {
                 assertTrue(Float.isFinite(light.direct().g) && light.direct().g >= 0);
                 assertTrue(Float.isFinite(light.direct().b) && light.direct().b >= 0);
                 assertSameColor(world.groundLight(), light.groundLight(), "Free flight preserves ground illumination");
-                assertEquals(world.adaptation(), light.adaptation(), .00001f);
             }
         }
     }
@@ -551,7 +608,8 @@ class BoardAtmosphereTest {
                   "Dawn and dusk must cast shadows in opposite directions");
         }
         float moonShade = shadowShare(BoardAtmosphere.lighting(at(0)));
-        assertEquals(3f / 14, moonShade, .00001f, "Full Moon keeps readable fill and a stronger directional beam");
+        assertTrue(moonShade > .18f && moonShade < .22f,
+              "Standard-air full moon retains readable fill and a distinct directional beam");
     }
 
     @Test
@@ -944,13 +1002,14 @@ class BoardAtmosphereTest {
         var day = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(12, 0, 0, 2, 0, 0));
         var vacuumDay = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(12, 0, 0, 2, 0, 0,
               BoardAtmosphere.Effects.NONE, Atmosphere.VACUUM));
-        assertSameColor(day.direct(), vacuumDay.direct(), "Pressure does not change canonical noon sunlight");
+        assertTrue(luminance(vacuumDay.direct()) > luminance(day.direct()), "Airless sunlight loses no beam to air");
         assertEquals(1, day.adaptation(), .000001f);
-        assertTrue(luminance(vacuumDay.ambient()) < .001f, "Metering adds no atmospheric light in vacuum");
-        assertTrue(vacuumDay.adaptation() > day.adaptation(), "The final airless mixture has less sky light");
+        assertTrue(luminance(vacuumDay.ambient()) > .01f
+                    && luminance(vacuumDay.ambient()) < luminance(day.ambient()),
+              "The neutral gameplay allowance stays below standard-air fill");
         assertEquals(Math.pow(luminance(vacuumDay.groundLight()), -.6), vacuumDay.adaptation(), .000001,
               "Exposure is based on the final vacuum source, including its actual sky and white point");
-        assertTrue(adaptedGround(vacuumDay) < adaptedGround(day), "Partial adaptation retains the darker mixture");
+        assertTrue(shadowShare(vacuumDay) < shadowShare(day), "Airless daylight keeps deeper shadow contrast");
 
         var conditions = new PlanetaryConditions();
         conditions.setAtmosphere(Atmosphere.VACUUM);
@@ -961,10 +1020,36 @@ class BoardAtmosphereTest {
             assertEquals(category == Light.FULL_MOON, lighting.hasDirectLight());
             assertTrue(lighting.adaptation() > 1 && lighting.adaptation() <= Math.pow(112, .6) + .0001);
             if (category != Light.FULL_MOON) {
-                assertEquals(Math.pow(112, .6), lighting.adaptation(), .0001,
-                      "Almost-black vacuum is bounded by the established moonless exposure range");
-                assertTrue(displayedGround(settings) < .004, "The meter floor does not invent sky fill");
+                assertTrue(lighting.adaptation() < Math.pow(112, .6),
+                      "The added source lowers exposure instead of amplifying emissive terrain");
+                var standard = new BoardAtmosphere.Settings(settings.hour(), 0, 0, 2, 0, settings.exposure(),
+                      BoardAtmosphere.Effects.NONE, Atmosphere.STANDARD, 25, false);
+                assertTrue(displayedGround(settings) > .04
+                            && displayedGround(settings) < displayedGround(standard),
+                      "Airless darkness stays below the same standard-air night preset");
             }
+        }
+    }
+
+    @Test
+    void grazingExposureIncludesSlopesWithoutInventingGroundLight() {
+        for (float hour : new float[] { 6.5f, 17.5f }) {
+            var light = BoardAtmosphere.lighting(at(hour));
+            Color direct = light.direct().cpy(), ambient = light.ambient().cpy();
+            Color ground = light.groundLight(), fog = light.fog().cpy();
+            assertTrue(light.adaptation() < BoardAtmosphere.adaptation(ground),
+                  "Low-angle light on slopes must prevent the flat-ground meter from overexposing cliffs");
+            assertEquals(ambient.r - light.direction().z * direct.r, ground.r, .000001f);
+            assertEquals(ambient.g - light.direction().z * direct.g, ground.g, .000001f);
+            assertEquals(ambient.b - light.direction().z * direct.b, ground.b, .000001f);
+            assertSameColor(direct, light.direct(), "Exposure never changes the direct source");
+            assertSameColor(ambient, light.ambient(), "Exposure never adds ambient fill");
+            assertSameColor(fog, light.fog(), "Fog retains actual ground illumination");
+        }
+        for (float hour : new float[] { 0, 12 }) {
+            var light = BoardAtmosphere.lighting(at(hour));
+            assertEquals(BoardAtmosphere.adaptation(light.groundLight()), light.adaptation(), .000001f,
+                  "The established noon and full-moon meter is unchanged");
         }
     }
 

@@ -183,7 +183,9 @@ class GpuAtmosphereSmokeTest {
                   "Moon contrast must preserve lit-ground luminance: " + originalMoonGround + " -> " + night);
             assertTrue(luminance(sample(camera, moonShadow)) < luminance(originalMoonShade) * 0.95f,
                   "The Full Moon contrast control must visibly deepen native cast shadows without a settings change");
-            assertTrue(luminance(clearGround) > luminance(night) * 1.25f, "Neutral daylight must be visibly brighter than night");
+            float nightToDay = linearLuminance(night) / linearLuminance(clearGround);
+            assertTrue(nightToDay > .5f && nightToDay < .7f,
+                  "Calibrated full moon stays below daylight on the matched gray receiver: " + nightToDay);
             // Retain a readable display-space floor after the night exposure and cool tint.
             float nightBrightnessFloor = 0.29f;
             assertTrue(luminance(night) > nightBrightnessFloor,
@@ -202,12 +204,14 @@ class GpuAtmosphereSmokeTest {
                 float twilight = luminance(sample(camera, ground));
                 floor.append(String.format(Locale.ROOT, "%s: %.3f%n", hour, twilight));
                 darkestTwilight = Math.min(darkestTwilight, twilight);
+                GpuBoardTestUi.capture(new File(output, "atmosphere-twilight-" + hour + ".png"));
             }
             Files.writeString(new File(output, "twilight-floor.txt").toPath(), floor);
             // Overcast twilight, whose cloud shadows take most of the low sun's light, stays as readable as a clear
             // full-moon night.
             assertTrue(darkestTwilight > nightBrightnessFloor,
                   "The rendered board must not go dark during twilight:\n" + floor);
+            checkPressureLighting(atmosphere, terrain, batch, tower, camera, scene, ground, center);
             checkTwilightShadows(atmosphere, terrain, batch, tower, camera, scene);
             checkTwilightAndCloudPalette(atmosphere, terrain, batch, tower, camera, scene);
             checkCloudOpacity(scene);
@@ -338,8 +342,11 @@ class GpuAtmosphereSmokeTest {
             camera.fit(scene);
             draw(atmosphere, terrain, batch, List.of(tower), camera, scene, cloudy, null, 0);
             var lighting = atmosphere.lighting();
+            assertEquals(BoardAtmosphere.lighting(cloudy).adaptation(), atmosphere.exposure(), .00001f,
+                  "Orbiting Fixed Sun cannot change canonical exposure");
             var light = terrain.environment().get(DirectionalLightsAttribute.class, DirectionalLightsAttribute.Type);
-            assertEquals(lighting.direction(), light.lights.first().direction);
+            assertEquals(lighting.direction().cpy().nor(), light.lights.first().direction,
+                  "The native directional light normalizes its copied source vector");
             Vector3 screen = lighting.direction().cpy().rot(camera.camera.view);
             if (screenDirection == null) { screenDirection = screen; }
             assertTrue(screenDirection.epsilonEquals(screen, 0.00001f));
@@ -356,6 +363,25 @@ class GpuAtmosphereSmokeTest {
             assertEquals(shadowA.y, shadowB.y, 0.00001f, "Geometry shadows must follow that same light");
             GpuBoardTestUi.capture(new File(output, "atmosphere-fixed-sun-" + turn + ".png"));
         }
+        // Exercise the actual compositor owner at grazing sun, where a relative light's incidence meter differs.
+        var grazing = new BoardAtmosphere.Settings(6.5f, 0, 0, 2.5f, 0, 0);
+        var grazingCamera = new BoardCamera();
+        grazingCamera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        boolean differentViewMeter = false;
+        atmosphere.configure(grazing);
+        for (float tilt : new float[] { 0, 55, BoardCamera.MAX_TILT }) {
+            grazingCamera.orbit(47, tilt);
+            for (boolean fixed : List.of(false, true)) {
+                atmosphere.setOptions(new GpuAtmosphere.Options(.5f, fixed));
+                atmosphere.updateLight(grazingCamera);
+                assertEquals(BoardAtmosphere.lighting(grazing).adaptation(), atmosphere.exposure(), .00001f,
+                      "The real compositor meters world light independently of orbit and Fixed Sun");
+                differentViewMeter |= Math.abs(atmosphere.lighting().adaptation() - atmosphere.exposure()) > .01f;
+            }
+        }
+        assertTrue(differentViewMeter, "The fixed-light negative control must exercise a different view incidence");
+        atmosphere.setOptions(new GpuAtmosphere.Options(.5f, true));
+        draw(atmosphere, terrain, batch, List.of(tower), camera, scene, cloudy, null, 0);
         // The same saved toggle is ignored while flying, including views above the horizon. Compare complete
         // rendered frames with it off/on, not merely the boolean policy or a hand-written lighting formula.
         var orbitLight = atmosphere.lighting();
@@ -375,7 +401,8 @@ class GpuAtmosphereSmokeTest {
                 assertEquals(worldLight.direct().b, light.direct().b, .00001f, "No camera-dependent blue light gain");
                 assertEquals(worldLight.adaptation(), atmosphere.exposure(), .00001f, "Free Flight preserves world exposure");
                 var uploaded = terrain.environment().get(DirectionalLightsAttribute.class, DirectionalLightsAttribute.Type);
-                assertEquals(worldLight.direction(), uploaded.lights.first().direction, "Terrain receives that world sun");
+                assertEquals(worldLight.direction().cpy().nor(), uploaded.lights.first().direction,
+                      "Terrain receives the normalized world sun");
                 assertSame(originalShadow, terrain.environment().shadowMap, "Camera transitions reuse shadow resources");
                 byte[] frame = ScreenUtils.getFrameBufferPixels(0, 0,
                       Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight(), false);
@@ -460,6 +487,53 @@ class GpuAtmosphereSmokeTest {
         camera.setIsometric(false);
         camera.fit(scene);
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+    }
+
+    /** Compare pressure and no-moon illumination on the same gray terrain and full tower. */
+    private void checkPressureLighting(GpuAtmosphere atmosphere, GpuTerrain terrain, ModelBatch batch,
+          ModelInstance tower, BoardCamera camera, BoardScene scene, Vector3 ground, Vector3 center) throws Exception {
+        StringBuilder report = new StringBuilder("hour,pressure,litDisplay,shadeDisplay,decodedShadeToLit\n");
+        for (int hour : new int[] { 12, 0 }) {
+            float previousRatio = -1;
+            for (Atmosphere pressure : Atmosphere.values()) {
+                var settings = new BoardAtmosphere.Settings(hour, 0, 0, 1.5f, 0, 0,
+                      BoardAtmosphere.Effects.NONE, pressure);
+                draw(atmosphere, terrain, batch, tower, camera, scene, settings);
+                Color lit = sample(camera, ground);
+                Color shade = sample(camera, new Vector3(center).add(0, hour == 12 ? -32 : 32, 0));
+                float ratio = linearLuminance(shade) / linearLuminance(lit);
+                report.append(String.format(Locale.ROOT, "%d,%s,%.6f,%.6f,%.6f%n",
+                      hour, pressure, luminance(lit), luminance(shade), ratio));
+                Files.writeString(new File(output, "pressure-lighting.csv").toPath(), report);
+                GpuBoardTestUi.capture(new File(output, "atmosphere-" + hour + "-" + pressure + ".png"));
+                assertTrue(ratio > previousRatio, "Actual cast-shadow contrast softens with pressure: " + pressure);
+                assertTrue(luminance(shade) > .02f, "Even airless shaded gray terrain remains visible");
+                previousRatio = ratio;
+            }
+        }
+        report = new StringBuilder("preset,pressure,canonicalR,canonicalG,canonicalB,exposure,displayY\n");
+        var conditions = new PlanetaryConditions();
+        for (Light preset : new Light[] { Light.MOONLESS, Light.PITCH_BLACK }) {
+            conditions.setLight(preset);
+            float previous = -1;
+            for (Atmosphere pressure : new Atmosphere[] {
+                  Atmosphere.VACUUM, Atmosphere.TRACE, Atmosphere.THIN, Atmosphere.STANDARD }) {
+                conditions.setAtmosphere(pressure);
+                draw(atmosphere, terrain, batch, tower, camera, scene,
+                      BoardAtmosphere.fromScenario(conditions, false, .5));
+                float brightness = luminance(sample(camera, ground));
+                float[] source = sampleScene(atmosphere, camera, ground);
+                report.append(String.format(Locale.ROOT, "%s,%s,%.9g,%.9g,%.9g,%.9g,%.6f%n",
+                      preset, pressure, source[0], source[1], source[2], atmosphere.exposure(), brightness));
+                Files.writeString(new File(output, "pressure-darkness.csv").toPath(), report);
+                GpuBoardTestUi.capture(new File(output, "atmosphere-" + preset + "-" + pressure + ".png"));
+                assertFalse(atmosphere.lighting().hasDirectLight());
+                assertNull(terrain.environment().shadowMap, "Readable darkness must not invent a casting light");
+                assertTrue(brightness > .04f, "Actual airless gray terrain remains navigable");
+                assertTrue(brightness > previous, "Vacuum < trace < thin < standard readable terrain");
+                previous = brightness;
+            }
+        }
     }
 
     /** Compare the same receivers with/without a small caster so the entire long shadow fits on the fixture. */

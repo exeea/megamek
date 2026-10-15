@@ -25,10 +25,6 @@ The meshes and their textures are in the sibling `mm-data` repository:
   [gpu-board-performance.md](gpu-board-performance.md)).
 - `data/models/board/textures/vegetation/shrubs/{family}.png`: original, opaque
   1254 × 1254 botanical atlases.
-- `tools/build_foliage_assets.py`: Blender authoring and export through the existing
-  `glb_geometry.write_glb` helper.
-- `tools/board-foliage.blend`: one editable scene containing all 24 meshes, with
-  relative texture paths. The scene layout does not affect exported root coordinates.
 
 ## Families and triangle counts
 

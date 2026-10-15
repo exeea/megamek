@@ -46,10 +46,8 @@ edge or a slope steeper than 80% of its own height is omitted rather than left
 floating. Both camera modes and terrain detail levels use these same low-poly
 meshes. Water geometry snapshots retain their obstacle placements.
 
-The four assets live in `mm-data/data/models/board/rough`. Rebuild them with
-`python tools/build_rough_assets.py` from the mm-data checkout. The script uses
-the existing rigid mesh writer and concrete/bark textures, and updates the board
-asset manifest. The tooth has 28 triangles, trunk 91, and each stump pose 112. Their maximum
+The four assets live in `mm-data/data/models/board/rough` and use the shared
+concrete and bark textures. The tooth has 28 triangles, trunk 91, and each stump pose 112. Their maximum
 footprint radii are three board units for standing stumps and six for the other pieces
 before placement scaling, matching capture's route clearance. No GL resources
 are retained in scene snapshots; GPU models and

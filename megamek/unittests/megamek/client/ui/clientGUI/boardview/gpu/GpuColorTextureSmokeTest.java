@@ -25,8 +25,6 @@ import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.TextureArray;
-import com.badlogic.gdx.graphics.TextureArrayData;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
@@ -42,6 +40,345 @@ import org.lwjgl.opengl.GL11;
 class GpuColorTextureSmokeTest {
     @TempDir
     Path directory;
+
+    @Test
+    void squareArtworkKeepsCropRegistrationAndTrimmedGougeProportions() {
+        nativeCheck(() -> {
+            var previous = megamek.common.Configuration.dataDir();
+            var crops = directory.resolve("models/board/textures/vegetation");
+            var scars = directory.resolve("models/board/textures/terrain/damage");
+            Files.createDirectories(crops);
+            Files.createDirectories(scars);
+            // Other brush styles remain the real independent round-impact controls.
+            try (var files = Files.list(previous.toPath().resolve("models/board/textures/terrain/damage"))) {
+                for (var file : files.filter(path -> path.toString().endsWith(".png")).toList()) {
+                    Files.copy(file, scars.resolve(file.getFileName()));
+                }
+            }
+            var registration = new StringBuilder("{");
+            for (String view : List.of("side", "front", "top")) {
+                if (registration.length() > 1) { registration.append(','); }
+                registration.append('"').append(view).append("\":[");
+                for (int i = 0; i < 7; i++) {
+                    if (i > 0) { registration.append(','); }
+                    registration.append('[').append((i + .5) / 7).append(',')
+                          .append(view.equals("top") ? .5 : .875).append(']');
+                }
+                registration.append(']');
+            }
+            Files.writeString(crops.resolve("crop-row.json"), registration.append('}'));
+            var compose = GpuBiomeVegetation.class.getDeclaredMethod("cropTextures");
+            compose.setAccessible(true);
+            int[][] original = null;
+            try {
+                megamek.common.Configuration.setDataDir(directory.toFile());
+                for (boolean square : new boolean[] { false, true }) {
+                    for (String view : List.of("side", "front", "top")) {
+                        boolean top = view.equals("top");
+                        int width = square ? 1024 : top ? 2172 : 1536;
+                        int height = square ? 1024 : top ? 724 : 1024;
+                        var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+                        for (int i = 0; i < 7; i++) {
+                            // Keep the synthetic silhouette symmetric about its registered stem at either resolution.
+                            int stem = (int) ((i + .5) * width / 7), halfWidth = width / 35;
+                            for (int y = height / 4; y <= (top ? height * 3 / 4 : height * 7 / 8); y++) {
+                                for (int x = stem - halfWidth; x <= stem + halfWidth; x++) {
+                                    image.setRGB(x, y, 0xff60b030);
+                                }
+                            }
+                        }
+                        javax.imageio.ImageIO.write(image, "png", crops.resolve("crop-row-" + view + ".png").toFile());
+                    }
+                    var textures = (Texture[]) compose.invoke(null);
+                    try {
+                        GpuBiomeSmokeTest.registeredCrops(textures[0], directory.toFile());
+                        int[][] bounds = cropBounds(textures[0]);
+                        if (original == null) { original = bounds; }
+                        else {
+                            for (int plant = 0; plant < bounds.length; plant++) for (int edge = 0; edge < 4; edge++) {
+                                assertEquals(original[plant][edge], bounds[plant][edge], 2,
+                                      "Full-atlas aspect changes must preserve composed plant placement/size: " + plant);
+                            }
+                        }
+                    } finally { for (var texture : textures) { texture.dispose(); } }
+
+                    int height = square ? 256 : 64;
+                    var image = new BufferedImage(256, height, BufferedImage.TYPE_INT_ARGB);
+                    for (int y = height / 4; y < height * 3 / 4; y++) {
+                        for (int x = 32; x < 224; x++) { image.setRGB(x, y, 0xff606060); }
+                    }
+                    for (String name : List.of("laser-gouge", "ppc-gouge", "ballistic-gouge")) {
+                        javax.imageio.ImageIO.write(image, "png", scars.resolve(name + ".png").toFile());
+                    }
+                    var damage = new GpuGroundDamage();
+                    try {
+                        damage.update(BoardSurfaceBlendTest.scene(c ->
+                              BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, -1, 0)));
+                        for (var style : List.of(GpuGroundDamage.Style.LASER, GpuGroundDamage.Style.PPC, GpuGroundDamage.Style.BALLISTIC)) {
+                            for (float radius : new float[] { .3f, 10 }) {
+                                var brush = damage.brush(style, radius, 1, 0);
+                                // A 4:1 canvas, half its height and three quarters its width: a 6:1 visible mark.
+                                assertEquals(1f / 6, brush.aspect(), .00001f,
+                                      "Trimming and mip selection must preserve the physical gouge footprint");
+                                assertEquals(255, brush.sample(0, 0) >>> 24, "The real loaded mask must remain present");
+                            }
+                        }
+                    } finally { damage.dispose(); }
+                }
+            } finally { megamek.common.Configuration.setDataDir(previous); }
+        });
+    }
+
+    private static int[][] cropBounds(Texture texture) {
+        var pixels = new Pixmap(texture.getWidth(), texture.getHeight(), Pixmap.Format.RGBA8888);
+        try {
+            texture.bind(0);
+            GL11.glGetTexImage(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, pixels.getPixels());
+            int[][] bounds = new int[21][4];
+            int rowWidth = texture.getWidth() / 2;
+            for (int band = 0; band < 3; band++) for (int i = 0; i < 7; i++) {
+                int[] box = bounds[band * 7 + i];
+                box[0] = box[1] = Integer.MAX_VALUE; box[2] = box[3] = -1;
+                int origin = band == 1 ? rowWidth : 0;
+                for (int y = band == 2 ? 512 : 0; y < (band == 2 ? 640 : 512); y++) {
+                    for (int x = origin + i * rowWidth / 7; x < origin + (i + 1) * rowWidth / 7; x++) {
+                        if ((pixels.getPixel(x, y) & 255) < 82) { continue; }
+                        box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y);
+                        box[2] = Math.max(box[2], x); box[3] = Math.max(box[3], y);
+                    }
+                }
+                assertTrue(box[2] - box[0] > 20 && box[3] - box[1] > 20,
+                      "Every registered plant view must have a meaningful silhouette");
+            }
+            return bounds;
+        } finally { pixels.dispose(); }
+    }
+
+    @Test
+    void modelGhostsBlendLinearDisplayLightAndRestoreHudFramebufferAndDepth() {
+        nativeCheck(() -> {
+            var query = BufferUtils.newIntBuffer(4);
+            Gdx.gl.glGetFramebufferAttachmentParameteriv(GL30.GL_DRAW_FRAMEBUFFER, 0x0402,
+                  GL30.GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING, query);
+            System.out.println("Linear overlay renderer: " + Gdx.gl.glGetString(GL20.GL_RENDERER)
+                  + "; default encoding=" + query.get(0));
+            var builder = new com.badlogic.gdx.graphics.glutils.GLFrameBuffer.FrameBufferBuilder(32, 32);
+            builder.addColorTextureAttachment(GL30.GL_SRGB8_ALPHA8, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE);
+            builder.addDepthRenderBuffer(GL30.GL_DEPTH_COMPONENT24);
+            FrameBuffer srgb = builder.build(), ordinary = GpuAtmosphere.buffer(32, 32, true);
+            var linear = new com.badlogic.gdx.graphics.g3d.ModelBatch(GpuUnitShader.linearDisplayProvider());
+            var encoded = new com.badlogic.gdx.graphics.g3d.ModelBatch(GpuUnitShader.displayProvider());
+            var material = new com.badlogic.gdx.graphics.g3d.Material(
+                  com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute.createDiffuse(1, 1, 1, 1),
+                  new com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute(.5f),
+                  new com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute(GL20.GL_ALWAYS, false));
+            var model = new com.badlogic.gdx.graphics.g3d.utils.ModelBuilder().createRect(
+                  -1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0, 0, 0, 1, material,
+                  com.badlogic.gdx.graphics.VertexAttributes.Usage.Position
+                        | com.badlogic.gdx.graphics.VertexAttributes.Usage.Normal);
+            var instance = new com.badlogic.gdx.graphics.g3d.ModelInstance(model);
+            var camera = new com.badlogic.gdx.graphics.OrthographicCamera(2, 2);
+            camera.position.set(0, 0, 3); camera.near = .1f; camera.far = 10;
+            camera.lookAt(0, 0, 0); camera.update();
+            var fallbackField = GpuLinearOverlay.class.getDeclaredField("fallback");
+            fallbackField.setAccessible(true);
+            try {
+                // Prove the real window's encoding and depth-copy contract, not only explicit FBOs.
+                FrameBuffer.unbind();
+                Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+                Gdx.gl.glDisable(GpuLinearOverlay.FRAMEBUFFER_SRGB);
+                Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+                Gdx.gl.glDepthMask(true); Gdx.gl.glClearDepthf(.37f);
+                Gdx.gl.glClearColor(0, 0, 0, 1);
+                Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+                float windowDepth = overlayDepth();
+                var windowBlend = new GpuLinearOverlay();
+                try {
+                    windowBlend.begin();
+                    try { linear.begin(camera); linear.render(instance); linear.end(); }
+                    finally { windowBlend.end(); }
+                    int[] windowPixel = overlayPixel();
+                    for (int channel = 0; channel < 3; channel++) {
+                        assertEquals(188, windowPixel[channel], 1, "Real window blends half-white in linear light");
+                    }
+                    assertEquals(windowDepth, overlayDepth(), 0, "Real window scene depth remains unchanged");
+                    assertEquals(0, GL11.glGetInteger(GL30.GL_DRAW_FRAMEBUFFER_BINDING));
+                    assertEquals(0, GL11.glGetInteger(GL30.GL_READ_FRAMEBUFFER_BINDING));
+                    assertFalse(Gdx.gl.glIsEnabled(GpuLinearOverlay.FRAMEBUFFER_SRGB));
+                    assertFalse(Gdx.gl.glIsEnabled(GL20.GL_SCISSOR_TEST));
+                    query.clear(); Gdx.gl.glGetIntegerv(GL20.GL_VIEWPORT, query);
+                    assertEquals(0, query.get(0)); assertEquals(0, query.get(1));
+                    assertEquals(Gdx.graphics.getBackBufferWidth(), query.get(2));
+                    assertEquals(Gdx.graphics.getBackBufferHeight(), query.get(3));
+                } finally { windowBlend.dispose(); }
+                for (FrameBuffer target : List.of(srgb, ordinary)) {
+                    var overlay = new GpuLinearOverlay();
+                    try {
+                        target.begin();
+                        Gdx.gl.glDisable(GpuLinearOverlay.FRAMEBUFFER_SRGB);
+                        Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+                        Gdx.gl.glDepthMask(true);
+                        Gdx.gl.glClearDepthf(.37f);
+                        Gdx.gl.glClearColor(0, 0, 0, .4f);
+                        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+                        float depth = overlayDepth();
+                        overlay.begin();
+                        try {
+                            query.clear();
+                            Gdx.gl.glGetFramebufferAttachmentParameteriv(GL30.GL_DRAW_FRAMEBUFFER,
+                                  GL20.GL_COLOR_ATTACHMENT0, GL30.GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING, query);
+                            assertEquals(GL30.GL_SRGB, query.get(0), "The actual blend attachment must encode sRGB");
+                            assertTrue(Gdx.gl.glIsEnabled(GpuLinearOverlay.FRAMEBUFFER_SRGB));
+                            linear.begin(camera); linear.render(instance); linear.end();
+                        } finally { overlay.end(); }
+                        assertFalse(Gdx.gl.glIsEnabled(GpuLinearOverlay.FRAMEBUFFER_SRGB), "HUD conversion state restored");
+                        assertEquals(target.getFramebufferHandle(), GL11.glGetInteger(GL30.GL_DRAW_FRAMEBUFFER_BINDING));
+                        assertEquals(depth, overlayDepth(), 0, "A ghost never rewrites scene/picking depth");
+                        int[] first = overlayPixel();
+                        for (int channel = 0; channel < 3; channel++) {
+                            assertEquals(188, first[channel], 1, "Half white over black must blend linear, not encoded 128");
+                        }
+                        assertEquals(115, first[3], 1, "Display alpha retains the existing blend factors");
+                        assertEquals(target == ordinary, fallbackField.get(overlay) != null,
+                              "An actual sRGB target must not allocate a copy target");
+                        Object cached = fallbackField.get(overlay);
+                        // A second source blends against decoded destination RGB, not against its encoded bytes.
+                        overlay.begin();
+                        try { linear.begin(camera); linear.render(instance); linear.end(); }
+                        finally { overlay.end(); }
+                        assertSame(cached, fallbackField.get(overlay), "Fallback allocation is reused");
+                        int[] second = overlayPixel();
+                        for (int channel = 0; channel < 3; channel++) { assertEquals(225, second[channel], 1); }
+                        assertEquals(121, second[3], 1);
+                        // Scene2D and legacy tactical colors retain their encoded-space presentation afterward.
+                        encoded.begin(camera); encoded.render(instance); encoded.end();
+                        int[] hud = overlayPixel();
+                        for (int channel = 0; channel < 3; channel++) { assertEquals(240, hud[channel], 1); }
+
+                        // A colored source over a nonblack background catches wrong-domain RGB factor uploads.
+                        instance.materials.first().set(com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute
+                              .createDiffuse(.25f, .5f, .75f, 1));
+                        Gdx.gl.glClearColor(.2f, .35f, .6f, 1); Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+                        overlay.begin();
+                        try { linear.begin(camera); linear.render(instance); linear.end(); }
+                        finally { overlay.end(); }
+                        int[] colored = overlayPixel();
+                        // Independently evaluated standard sRGB inverse/forward around a half-alpha linear mix.
+                        int[] expected = { 58, 110, 173 };
+                        for (int channel = 0; channel < 3; channel++) { assertEquals(expected[channel], colored[channel], 1); }
+                        instance.materials.first().set(com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute
+                              .createDiffuse(1, 1, 1, 1));
+
+                        // Editor previews select hidden/visible passes against the copied opaque scene depth.
+                        Gdx.gl.glDepthMask(true); Gdx.gl.glClearDepthf(.1f); Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+                        instance.materials.first().set(new com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute
+                              (GL20.GL_LEQUAL, false));
+                        overlay.begin();
+                        try { linear.begin(camera); linear.render(instance); linear.end(); }
+                        finally { overlay.end(); }
+                        int[] occluded = overlayPixel();
+                        for (int channel = 0; channel < 4; channel++) { assertEquals(colored[channel], occluded[channel]); }
+                        instance.materials.first().set(new com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute
+                              (GL20.GL_GREATER, false));
+                        overlay.begin();
+                        try { linear.begin(camera); linear.render(instance); linear.end(); }
+                        finally { overlay.end(); }
+                        assertTrue(overlayPixel()[0] > occluded[0] + 50, "Hidden stand-in pass uses the same opaque depth");
+                        instance.materials.first().set(new com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute
+                              (GL20.GL_ALWAYS, false));
+
+                        // Viewport/scissor/read-target restoration is required even when an overlay draw fails.
+                        Gdx.gl.glViewport(3, 4, 20, 16);
+                        Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST); Gdx.gl.glScissor(5, 6, 9, 8);
+                        Gdx.gl.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
+                        try {
+                            overlay.begin();
+                            try { throw new IllegalStateException("deliberate overlay failure"); }
+                            finally { overlay.end(); }
+                        } catch (IllegalStateException expectedFailure) {
+                            assertEquals("deliberate overlay failure", expectedFailure.getMessage());
+                        }
+                        assertEquals(0, GL11.glGetInteger(GL30.GL_READ_FRAMEBUFFER_BINDING));
+                        assertEquals(target.getFramebufferHandle(), GL11.glGetInteger(GL30.GL_DRAW_FRAMEBUFFER_BINDING));
+                        query.clear(); Gdx.gl.glGetIntegerv(GL20.GL_VIEWPORT, query);
+                        assertEquals(3, query.get(0)); assertEquals(4, query.get(1));
+                        assertEquals(20, query.get(2)); assertEquals(16, query.get(3));
+                        query.clear(); Gdx.gl.glGetIntegerv(GL20.GL_SCISSOR_BOX, query);
+                        assertEquals(5, query.get(0)); assertEquals(6, query.get(1));
+                        assertEquals(9, query.get(2)); assertEquals(8, query.get(3));
+                        assertTrue(Gdx.gl.glIsEnabled(GL20.GL_SCISSOR_TEST));
+                        assertFalse(Gdx.gl.glIsEnabled(GpuLinearOverlay.FRAMEBUFFER_SRGB));
+                    } finally { overlay.dispose(); }
+                }
+            } finally {
+                Gdx.gl.glDisable(GpuLinearOverlay.FRAMEBUFFER_SRGB);
+                Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST); Gdx.gl.glClearDepthf(1);
+                FrameBuffer.unbind();
+                model.dispose(); linear.dispose(); encoded.dispose(); ordinary.dispose(); srgb.dispose();
+            }
+        });
+    }
+
+    private static int[] overlayPixel() {
+        var pixel = BufferUtils.newByteBuffer(4);
+        Gdx.gl.glReadPixels(16, 16, 1, 1, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, pixel);
+        return new int[] { pixel.get(0) & 255, pixel.get(1) & 255, pixel.get(2) & 255, pixel.get(3) & 255 };
+    }
+
+    private static float overlayDepth() {
+        var depth = BufferUtils.newFloatBuffer(1);
+        Gdx.gl.glReadPixels(16, 16, 1, 1, GL20.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, depth);
+        return depth.get(0);
+    }
+
+
+    /** Known unit-normal distributions exercise actual compact upload/mips and the production distant-AA input. */
+    @Test
+    void compactNormalMipsPreservePhysicalSpreadAndMaterialOrder() {
+        nativeCheck(() -> {
+            var files = new java.util.ArrayList<FileHandle>();
+            // X endpoints, common Z: symmetric (+/-.8, 0, .6), flat, then (+/-.6, 0, .8).
+            // Deliberately non-monotonic material order catches old interleaved-array addressing.
+            int[][] normals = { { 26, 230, 204 }, { 128, 128, 255 }, { 51, 204, 230 } };
+            int[] colors = { 0xFF0000FF, 0x008000FF, 0x0000FFFF };
+            for (int material = 0; material < normals.length; material++) {
+                var color = new FileHandle(directory.resolve("spread-" + material + ".png").toFile());
+                var normal = new FileHandle(directory.resolve("spread-" + material + "-normal.png").toFile());
+                var pixels = new Pixmap(2, 2, Pixmap.Format.RGBA8888);
+                try {
+                    pixels.setBlending(Pixmap.Blending.None);
+                    pixels.setColor(colors[material]); pixels.fill(); PixmapIO.writePNG(color, pixels);
+                    for (int y = 0; y < 2; y++) {
+                        for (int x = 0; x < 2; x++) {
+                            int rgba = normals[material][x] << 24 | 128 << 16 | normals[material][2] << 8
+                                  | (17 + material * 102);
+                            pixels.drawPixel(x, y, rgba);
+                        }
+                    }
+                    PixmapIO.writePNG(normal, pixels);
+                } finally { pixels.dispose(); }
+                files.add(color); files.add(normal);
+            }
+            var factory = GpuAssets.class.getDeclaredMethod("repeatingArray", List.class, int.class);
+            factory.setAccessible(true);
+            var arrays = (GpuAssets.MaterialArrays) factory.invoke(null, files, 2);
+            try {
+                var probe = GpuAssets.class.getDeclaredMethod("normalSpread",
+                      com.badlogic.gdx.graphics.TextureArray.class, int.class);
+                probe.setAccessible(true);
+                float[] spread = (float[]) probe.invoke(null, arrays.data(), normals.length);
+                for (float value : spread) {
+                    assertTrue(Float.isFinite(value) && value >= 0, "Finite nonnegative distant normal spread");
+                }
+                // Independent analytic mean-normal lengths .6, 1 and .8 give these Toksvig references.
+                // Bounds include source and generated-mip UNORM8 rounding; they cannot hide wrong layers/decoding.
+                assertEquals(.6616667, spread[0], .025, "Strong symmetric slopes retain their unresolved spread");
+                assertEquals(0, spread[1], .000001, "A flat normal does not acquire artificial roughness");
+                assertEquals(.245, spread[2], .02, "Moderate symmetric slopes retain their smaller spread");
+                assertTrue(spread[0] > spread[2] && spread[2] > spread[1], "Material order survives compact storage");
+            } finally { arrays.dispose(); }
+        });
+    }
 
     @Test
     void filteringAndGeneratedMipsAverageLinearRgbWithoutTransformingAlphaOrData() {
@@ -305,26 +642,63 @@ class GpuColorTextureSmokeTest {
             try { PixmapIO.writePNG(constant, pixels); } finally { pixels.dispose(); }
             pixels = pattern();
             try { PixmapIO.writePNG(varying, pixels); } finally { pixels.dispose(); }
-            // Exercise the real array loader with differing source sizes without replacing installed assets.
-            var constructor = Class.forName(GpuAssets.class.getName() + "$SculptArrayData")
-                  .getDeclaredConstructor(List.class, int.class, boolean.class);
-            constructor.setAccessible(true);
-            var upload = (TextureArrayData) constructor.newInstance(List.of(constant, constant, varying, varying, gray, gray), 2, false);
-            TextureArray array = new TextureArray(upload);
+            // Exercise the actual owned pair, including its sized storage and compact material indices.
+            var factory = GpuAssets.class.getDeclaredMethod("repeatingArray", List.class, int.class);
+            factory.setAccessible(true);
+            var arrays = (GpuAssets.MaterialArrays) factory.invoke(null,
+                  List.of(constant, constant, varying, varying, gray, gray), 2);
             try (var sample = new Sampler(true)) {
-                assertPixel(sample.read(array, .5f, .5f, 0, 0), .21586050, .21586050, .21586050,
-                      128.0 / 255, .001, "Only RGB in each color layer is decoded");
-                assertPixel(sample.read(array, .5f, .5f, 1, 0), 128.0 / 255, 128.0 / 255, 128.0 / 255,
+                arrays.color().bind();
+                assertEquals(GL30.GL_SRGB8_ALPHA8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
+                      GL11.GL_TEXTURE_INTERNAL_FORMAT), "Colour decodes in hardware before filtering");
+                arrays.data().bind();
+                assertEquals(GL30.GL_RGBA8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
+                      GL11.GL_TEXTURE_INTERNAL_FORMAT), "Numerical storage has no colour transfer");
+                assertEquals(3, arrays.color().getDepth());
+                assertEquals(3, arrays.data().getDepth());
+                assertPixel(sample.read(arrays.color(), .5f, .5f, 0, 0), .21586050, .21586050, .21586050,
+                      128.0 / 255, .001, "Only colour RGB is decoded; height remains raw");
+                assertPixel(sample.read(arrays.data(), .5f, .5f, 0, 0), 128.0 / 255, 128.0 / 255, 128.0 / 255,
                       128.0 / 255, .001, "Normal/data layers retain their numerical values");
-                assertPixel(sample.read(array, .5f, .5f, 2, 0), .5, .5, .5, 128.0 / 255, .001,
-                      "Resizing a black/white color layer averages linear RGB and untouched alpha");
-                assertPixel(sample.read(array, .5f, .5f, 3, 0), .5, .5, .5, 128.0 / 255, .001,
-                      "Resizing a data layer never applies a color transfer");
-                assertPixel(sample.read(array, .5f, .5f, 4, 0), .21586050, .21586050, .21586050, 1, .001,
-                      "File-decoded one-channel artwork is opaque grayscale in color array layers");
-                assertPixel(sample.read(array, .5f, .5f, 5, 0), 128.0 / 255, 128.0 / 255, 128.0 / 255, 1, .001,
-                      "File-decoded one-channel data remains grayscale in numerical array layers");
-            } finally { array.dispose(); }
+                arrays.color().bind();
+                var stored = BufferUtils.newByteBuffer(3 * 4);
+                GL11.glGetTexImage(GL30.GL_TEXTURE_2D_ARRAY, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, stored);
+                for (int channel = 0; channel < 4; channel++) {
+                    assertEquals(channel == 3 ? 128 : 188, Byte.toUnsignedInt(stored.get(4 + channel)),
+                          "Linear resize stores sRGB byte 188 and independent coverage byte 128");
+                }
+                // Use the same hardware decoder, whose permitted precision need not match CPU sRGB exactly.
+                Pixmap referencePixels = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
+                Texture reference;
+                try {
+                    referencePixels.setBlending(Pixmap.Blending.None);
+                    referencePixels.drawPixel(0, 0, 0xBCBCBC80);
+                    reference = GpuColorTexture.create(referencePixels, false);
+                } finally { referencePixels.dispose(); }
+                try (var referenceSample = new Sampler(false)) {
+                    float[] expected = referenceSample.read(reference, .5f, .5f, 0, 0);
+                    float[] actual = sample.read(arrays.color(), .5f, .5f, 1, 0);
+                    assertPixel(actual, expected[0], expected[1], expected[2], expected[3], 0,
+                          "Resized array and fixed-byte colour texture sample identically");
+                } finally { reference.dispose(); }
+                assertPixel(sample.read(arrays.data(), .5f, .5f, 1, 0), 128.0 / 255, 128.0 / 255, 128.0 / 255,
+                      128.0 / 255, .001, "Numerical resize rounds the independent mean to byte 128");
+                assertPixel(sample.read(arrays.color(), .5f, .5f, 2, 0), .21586050, .21586050, .21586050, 1, .001,
+                      "File-decoded one-channel artwork is opaque grayscale");
+                assertPixel(sample.read(arrays.data(), .5f, .5f, 2, 0), 128.0 / 255, 128.0 / 255, 128.0 / 255, 1, .001,
+                      "File-decoded one-channel data remains numerical grayscale");
+            } finally { arrays.dispose(); }
+            assertEquals(0, arrays.color().getTextureObjectHandle(), "Pair disposal releases colour");
+            assertEquals(0, arrays.data().getTextureObjectHandle(), "Pair disposal releases data");
+            arrays = (GpuAssets.MaterialArrays) factory.invoke(null, List.of(varying, varying), 2);
+            try (var sample = new Sampler(true)) {
+                assertPixel(sample.read(arrays.color(), .5f, .5f, 0, 0), .5, .5, .5, 128.0 / 255, .001,
+                      "Array bilinear filtering decodes before averaging");
+                assertPixel(sample.read(arrays.color(), .5f, .5f, 0, 1), .5, .5, .5, 128.0 / 255, .004,
+                      "Array mip generation averages linear light within sRGB8 storage precision");
+                assertPixel(sample.read(arrays.data(), .5f, .5f, 0, 1), .5, .5, .5, 128.0 / 255, .003,
+                      "Numerical mips average raw channels within UNORM8 storage precision");
+            } finally { arrays.dispose(); }
         });
     }
 
@@ -552,9 +926,9 @@ class GpuColorTextureSmokeTest {
                         float[] color = texture.read(separate.color(), .5f, .5f, 0, 0);
                         float[] normal = texture.read(separate.normal(), .5f, .5f, 0, 0);
                         org.junit.jupiter.api.Assertions.assertArrayEquals(color,
-                              array.read(combined, .5f, .5f, 0, 0), .001f, "Complete color pair");
+                              array.read(combined.color(), .5f, .5f, 0, 0), .001f, "Complete color pair");
                         org.junit.jupiter.api.Assertions.assertArrayEquals(normal,
-                              array.read(combined, .5f, .5f, 1, 0), .001f, "Complete normal pair");
+                              array.read(combined.data(), .5f, .5f, 0, 0), .001f, "Complete normal pair");
                         assertEquals(3, assets.sculptTile("earth"));
                     } finally { assets.dispose(); }
                 }

@@ -79,7 +79,7 @@ class GpuAssetReloadSmokeTest {
                 int step;
                 GpuTerrain originalTerrain;
                 Texture originalTexture;
-                TextureArray originalSculpt;
+                GpuAssets.MaterialArrays originalSculpt;
                 TextureArray originalRoughness;
                 List<String> sculptLayers;
                 float sculptTile;
@@ -188,18 +188,19 @@ class GpuAssetReloadSmokeTest {
                             assertCompositePixels();
                             assertNotSame(originalTerrain, terrain());
                             assertEquals(0, originalTexture.getTextureObjectHandle(), "Old textures must be released");
-                            assertEquals(0, originalSculpt.getTextureObjectHandle(), "Old authored map arrays must be released");
-                            TextureArray sculpt = assets().sculptArray(sculptLayers);
+                            assertEquals(0, originalSculpt.color().getTextureObjectHandle(), "Old colour array must be released");
+                            assertEquals(0, originalSculpt.data().getTextureObjectHandle(), "Old numerical array must be released");
+                            var sculpt = assets().sculptArray(sculptLayers);
                             assertNotSame(originalSculpt, sculpt);
                             assertEquals(sculptTile * 1.25f, assets().sculptTile("grass"), .0001f,
                                   "Reload must refresh the material definition as well as its maps");
                             int grassLayer = sculptLayers.indexOf("grass") * 2;
                             assertTrue(grassLayer >= 0);
-                            // Independent sRGB reference values; height, tangent normal and AO stay numerical.
-                            assertArrayEquals(new float[] { .005181517f, .2158605f, .7454042f, 64f / 255f },
-                                  arrayPixel(sculpt, grassLayer), .0006f);
+                            // FBO readback returns stored bytes: RGB is now encoded sRGB; height, normal and AO stay raw.
+                            assertArrayEquals(new float[] { 16f / 255f, 128f / 255f, 224f / 255f, 64f / 255f },
+                                  arrayPixel(sculpt.color(), grassLayer / 2), .0006f);
                             assertArrayEquals(new float[] { 64f / 255f, 192f / 255f, 240f / 255f, 96f / 255f },
-                                  arrayPixel(sculpt, grassLayer + 1), .0006f);
+                                  arrayPixel(sculpt.data(), grassLayer / 2), .0006f);
                             assertEquals(0, originalRoughness.getTextureObjectHandle(), "Old roughness arrays must be released");
                             var authored = assets().sculptRoughness(sculptLayers);
                             assertNotSame(originalRoughness, authored.maps());

@@ -9,13 +9,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
-import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
-import com.badlogic.gdx.graphics.g3d.utils.TextureDescriptor;
 import com.badlogic.gdx.math.Vector3;
 
 /** Extra data only on material boundaries. Palettes are shared by a chunk, never unique to individual hexes. */
@@ -25,13 +23,13 @@ final class GpuSurfaceBlend extends Attribute {
           VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0),
           new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverWeights"),
           new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_coverInterpolation", 1));
-    final TextureDescriptor<TextureArray> texture;
+    final GpuAssets.MaterialArrays texture;
     final float[] families, responses;
     final float[][] tiles, layers;
 
-    GpuSurfaceBlend(TextureArray texture, float[] families, float[] responses, float[][] tiles, float[][] layers) {
+    GpuSurfaceBlend(GpuAssets.MaterialArrays texture, float[] families, float[] responses, float[][] tiles, float[][] layers) {
         super(TYPE);
-        this.texture = new TextureDescriptor<>(texture);
+        this.texture = texture;
         this.families = families.clone();
         this.responses = responses.clone();
         this.tiles = Arrays.stream(tiles).map(float[]::clone).toArray(float[][]::new);
@@ -40,14 +38,14 @@ final class GpuSurfaceBlend extends Attribute {
 
     @Override
     public GpuSurfaceBlend copy() {
-        return new GpuSurfaceBlend(texture.texture, families, responses, tiles, layers);
+        return new GpuSurfaceBlend(texture, families, responses, tiles, layers);
     }
 
     @Override
     public int compareTo(Attribute other) {
         if (type != other.type) { return Long.compare(type, other.type); }
         var blend = (GpuSurfaceBlend) other;
-        int result = texture.compareTo(blend.texture);
+        int result = Integer.compare(System.identityHashCode(texture), System.identityHashCode(blend.texture));
         if (result == 0) { result = Arrays.compare(families, blend.families); }
         if (result == 0) { result = Arrays.compare(responses, blend.responses); }
         for (int i = 0; i < tiles.length && result == 0; i++) {

@@ -178,7 +178,7 @@ final class RigidGlb {
     /**
      * Replace the colours of {@code data}'s slot vertices with {@code colours} (a layout row's, a truss deck's or an
      * editor preview's). Each channel keeps its ratio to the slot's default colour in linear light, so the shaded parts
-     * of a slot stay shaded; tools/glb_geometry.py recolour() applies the same rule offline.
+     * of a slot stay shaded.
      * <p>
      * KEEP IN SYNC with model-colour-slots.glsl#slotColour, its GPU twin, which recolours a placed object's one shared
      * mesh ({@link #colourSlotMesh}) in every view. Both read each slot's replacement from the same {@link #packed}
@@ -400,7 +400,7 @@ final class RigidGlb {
      * {@code variant}, when not null, reads each material's {@code mmVariants.<variant>} extras instead of its own
      * values where they name them: {@code name}, {@code textures} by role ({@code baseColor}, {@code normal},
      * {@code occlusion}), {@code colourScale} (linear factors on its triangles' vertex colours) and {@code colours}
-     * (its one primitive's linear vertex colours). tools/merge_snow_trees.py writes them.
+     * (its one primitive's linear vertex colours). The bare species' GLB carries them.
      */
     private static ModelData convert(FileHandle file, String id, Asset asset, List<NodeModel> roots, String variant) {
         try {

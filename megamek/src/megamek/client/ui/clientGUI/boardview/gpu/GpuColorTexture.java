@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.lang.ref.Reference;
+import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.util.function.Supplier;
 
@@ -159,16 +160,29 @@ final class GpuColorTexture {
         @Override public boolean isManaged() { return managed; }
     }
 
-    /**
-     * Mixed color/data arrays have one storage format. Decode color layers once into RGBA16F; numerical layers keep
-     * their values. Resize in that same linear space before upload, so differing source sizes cannot reintroduce
-     * encoded interpolation. This preserves the array's existing sampler budget and layer indices.
-     */
-    static FloatBuffer arrayPixels(Pixmap source, int width, int height, boolean color) {
-        var decoded = new GpuLinearImage(source, color);
-        if (decoded.width == width && decoded.height == height) { return decoded.buffer(); }
-        var resized = new GpuLinearImage(width, height);
-        resized.draw(decoded, 0, 0, decoded.width, decoded.height, 0, 0, width, height);
-        return resized.buffer();
+    /** Raw RGBA8 storage; only a required resize decodes, filters and re-encodes colour RGB. */
+    static ByteBuffer arrayPixels(Pixmap source, int width, int height, boolean color) {
+        var upload = com.badlogic.gdx.utils.BufferUtils.newByteBuffer(width * height * 4);
+        if (source.getWidth() == width && source.getHeight() == height) {
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int rgba = source.getPixel(x, y);
+                    upload.put((byte) (rgba >>> 24)).put((byte) (rgba >>> 16))
+                          .put((byte) (rgba >>> 8)).put((byte) rgba);
+                }
+            }
+        } else {
+            var decoded = new GpuLinearImage(source, color);
+            var resized = new GpuLinearImage(width, height);
+            resized.draw(decoded, 0, 0, decoded.width, decoded.height, 0, 0, width, height);
+            var values = resized.buffer();
+            for (int index = 0; index < width * height * 4; index++) {
+                float value = values.get(index);
+                if (color && (index & 3) != 3) { value = GpuColor.display(value); }
+                upload.put((byte) Math.round(Math.clamp(value, 0f, 1f) * 255));
+            }
+        }
+        upload.flip();
+        return upload;
     }
 }
