@@ -82,7 +82,7 @@ The maintained asset is in the adjacent mm-data repository:
 - `data/models/board/road-tunnel-bridge.glb`: wingless bridge portal.
 - `tools/board-models/road-tunnel.blend`: editable Blender source.
 - `tools/build_tunnel_asset.py`: reproducible geometry, materials and GLB export.
-- `data/models/board/textures/tunnel-concrete.png`: dedicated fine-grain albedo.
+- `data/models/board/textures/scenery/tunnel-concrete.png`: dedicated fine-grain albedo.
 
 External walls and roof extend the full 18-unit depth. The lining and pier have
 no overlapping inner faces. Vertex colour fades continuously toward the dark

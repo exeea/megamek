@@ -16,6 +16,7 @@ inserted into a larger program, so editing a helper can affect several materials
 | `terrain-foliage.frag`, `terrain-vegetation.frag` | Tree/plant surface shading; programs configured by `GpuTerrain`. |
 | `terrain-grass.glsl`, `terrain-biome-vegetation.glsl`, `terrain-vegetation-wind.glsl` | Instanced blade/crop shapes and shared wind; `GpuGroundCover` and `GpuBiomeVegetation` inject the vertex helpers. |
 | `light-model.glsl`, `surface-lighting.glsl`, `rain-surface.glsl` | Shared light response, shadow/specular terms and wet surfaces. |
+| `color-space.glsl`, `environment-lighting.glsl` | Exact sRGB boundaries and shared integrated BRDF/environment reflection; `GpuEnvironmentLighting` owns the lookup table. |
 | `water-surface.frag`, `water-fall.frag`, `water-spray.frag`, `water-cut.frag` | Separate water draw modes; assembled by `GpuTerrain`, with attributes/uniforms from `GpuWaterShader`. |
 | `water-optics.glsl`, `water-lighting.glsl`, `water-interactions.glsl`, `water-pool.glsl` | Water color/transmission, illumination and local motion/contacts. |
 | `terrain-ice.glsl` | Lake ice and discovered ground/road glaze; injected and bound by `GpuIceShader`. |
@@ -31,8 +32,8 @@ inserted into a larger program, so editing a helper can affect several materials
 Unit materials are configured by `GpuUnitShader`, including the linear-light
 adaptation of libGDX's base shader, normal maps and per-unit material inputs.
 Imported model materials use `model-surface.glsl`, with factors/maps carried by
-`GpuModelMaterial`; terrain and foliage share its direct GGX helper in
-`light-model.glsl`. Roughness/metalness and normal/AO channels are linear data.
+`GpuModelMaterial`; terrain and foliage share its GGX and diffuse energy coupling
+in `light-model.glsl` / `environment-lighting.glsl`. Roughness/metalness and normal/AO channels are linear data.
 Normal/AO/surface maps use mesh UVs rather than the projected unit camouflage
 coordinates. The same model path is used for ordinary imported buildings and
 props. Custom terrain, foliage and water programs retain their own surface
@@ -74,7 +75,20 @@ compiler when available; otherwise a worker compiles in a private hidden shared
 context. The render thread adopts each completed program into libGDX without a
 second compilation and retains resource ownership. Lighting and shadow changes
 recheck the required variants. Closing a renderer during a native compiler call may
-wait for that call before releasing the shared context.
+wait for that call before releasing the shared context. One worker is enough: Intel's
+driver links one program at a time across contexts, so on Iris Xe 30 terrain programs
+took 168 s with one context, 192 s with two and 295 s with four.
+
+`GpuProgramCache` keeps every linked program in `mmconf/gpu-program-cache`, named by
+the SHA-256 of the driver's vendor, renderer and version and both complete stages, so
+a later launch loads it instead of compiling; Intel's own cache stores nothing once it
+is full. A damaged entry, or one the driver rejects, is deleted and compiles again; a
+driver without binary formats compiles at every launch. Opening a board window, and
+every 64 MB written, deletes entries unused for 30 days, then the least recently used
+beyond 256 MB. `-Dmegamek.gpu.programCache=false` compiles from source, for compiler
+timings. On Iris Xe the calibration board's 30 terrain programs compile in 168 s and
+load from the cache in 0.3 s; a warm load of the board takes 6–10 s, and its 44
+programs take 5.5 MB (`GpuProgramCacheSmokeTest`).
 
 ## Uniforms, inputs and previews
 
@@ -111,10 +125,12 @@ standalone compilable shader.
 Material programs share lighting, world projection and contact fields. A surface
 blend needs matching color, normal, height/roughness and occlusion weights.
 Wetness must affect the intended receiving materials. Decode authored albedo and
-emission, add emission to reflected light in linear space, then encode their sum
-for the scene target. Retain values above one until the atmosphere's shared
-exposure and highlight shoulder. Changes to alpha/cutouts may also require the
-shadow/depth path; scene alpha blending is still display-encoded.
+emission, add emission to reflected light in linear space, and keep the scene
+output linear through alpha/additive blending. Retain values above one until the
+atmosphere's shared exposure, highlight shoulder and final display conversion.
+Changes to alpha/cutouts may also require the shadow/depth path. Weather and
+tactical/UI draws after the composite still supply display colors. Isolated
+shader and section previews use `GpuSceneDisplay` for the same final conversion.
 
 macOS's OpenGL gives each shader stage only 16 texture units, and a program that
 samples more fails to link there, so the board does not draw on a Mac although

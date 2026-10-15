@@ -58,14 +58,14 @@ cut continues vertically from that position down to the board base. Straight-sid
 panels split at adjoining terrain heights and use flat facets across their diagonals,
 preserving shared boundary samples without narrow triangle fans at the slope ends.
 Concrete and outer cut walls retain one texture orientation across their facets.
-Their actual normals still light the geometry, but no longer rotate or switch the
-texture projection at a triangle boundary.
+Their actual normals light the geometry without rotating or switching the texture
+projection at a triangle boundary.
 Concrete samples its cast map in a frame running along that rim and down in
 world height. Slab joints and grain therefore follow diagonal faces instead of
 shearing between world XZ/YZ projections. The normal and cavity maps use the same
 coordinates, with normal relief expressed in the actual face's tangent frame.
-Courses retain their absolute level heights. This replaces the two projected
-samples with one per map; it adds no geometry, textures or draw passes.
+Courses keep their absolute level heights. Each map takes one sample, with no added
+geometry, textures or draw passes.
 The outer cut also keeps its face normals separate from the road or ground above;
 sharing the upward rim normals produces diagonal shading bands on the cut wall.
 
@@ -80,8 +80,6 @@ lip and patches on the shoulder, including overhead views with grass blades hidd
 At grass detail scales, fitted cutout crowns add the hanging fringe; see
 [grass rendering](gpu-grass-rendering.md). Their pigment follows the terrain's material
 weights and shared elevation grade, rather than the generated atlas's original color.
-The ImageGen reference and prompt are saved as `grass-bank-concept.png` and
-`grass-bank-concept-prompt.json` in `mm-data/tools/terrain-contact-sources`.
 
 Poured tops use six triangles and a rectangular cast wall panel uses two. A road cut,
 water contact or junction can require additional boundary vertices. Concrete keeps
@@ -95,7 +93,7 @@ water contacts, height changes and road ramps keep the foundation constraints th
 need; merely being near a building does not pin the surrounding paving.
 The water hex owns the submerged panel; the land column stops at its rim so those
 faces cannot overlap and flicker.
-Both GPU views omit the old `quay_fluff` sprites (`fluff:100`, used by
+Both GPU views omit the legacy `quay_fluff` sprites (`fluff:100`, used by
 `Templates/SeaPort.board`). Projecting those painted walls onto the seabed leaves pale
 wedges outside the actual quay. Tactical columns and water use the same fitted corners.
 
@@ -119,12 +117,9 @@ combines that broad gradient with texture-height contacts, softening transitions
 between themes while keeping pure tile centres and visible material detail.
 Material detail belongs in the fragment shader: world-space wear exposes soil and
 rock on low-poly slopes without relying on small changes in mesh normals.
-Desert hardpan's offline bake removes row/column tone bias before deriving relief,
-and balances the final estimated height before normal/AO generation. A seamless
-edge alone did not prevent the old tile's columns from lining up into visible
-six-metre bands. This correction retains the mean colour, 512-square aligned maps,
-six-metre scale and 0.025 m relief range. It changes no shader sampling or frame
-work. Other sources keep intentional bedding, ripples and directional features.
+The desert hardpan sources have their row/column tone bias removed, so the six-metre
+repeat does not line up into bands. Other sources keep intentional bedding, ripples
+and directional features.
 Additional ambient wear follows those materials' existing height, cavity and normal
 maps, with continuous ground fields controlling its strength. Each ground family
 has its own recess/crest colour response and balance between grain-height wear
@@ -133,16 +128,15 @@ This is ordinary terrain material construction in `terrain-materials.glsl`:
 cover erosion participates in layer blending, then pigment wear applies before
 lighting. **GPU Tuning → Terrain → Surface weathering → Ambient wear** controls
 both with a live 0–1 slider: 0 disables ambient wear, 1 is full strength (the
-default), and Defaults restores 1. This replaces `GpuTerrain.AMBIENT_WEAR`.
+default), and Defaults restores 1.
 It includes the broad pale exposed-rock patches on desert hardpan, the related
 mineral exposure in other families, rim abrasion and worn organic cover. Slope
 geology, the source textures and loose sand's tile-cover behaviour remain intact.
 The window's tuning model supplies the float to `GpuTerrain` each frame; updating
 the shader uniform does not rebuild the terrain. It does not depend on combat history.
-Desert retains its accepted maximum 20% recess darkening before field/detail
-modulation. Snow now uses shallow irregular crust and fine grains instead of
-the old wave motif in its base maps; its cool compaction response reaches 16%
-in the red channel before modulation. Pigment changes multiply the source
+Desert's maximum recess darkening is 20% before field/detail modulation. Snow's
+base maps have shallow irregular crust and fine grains; its cool compaction response
+reaches 16% in the red channel before modulation. Pigment changes multiply the source
 colour to retain its grain. Grass and tropical wear also reveal existing soil
 through the cover, while worn fungal colonies reveal existing mauve tissue.
 These are art-directed surface responses, not erosion simulation or measured scans.
@@ -195,9 +189,10 @@ the attack effects' captured endpoints and contact times, then sparse,
 mipmapped image tiles sampled in the existing sculpted-ground pass. They change
 colour, roughness and lighting normals, not geometry or game rules. Their stronger
 scorch/chip response is applied after natural weathering; ambient style does not
-alter scar strength or the amount of attack history. See the
-[ground-damage review](gpu-terrain-realism.md#ground-wear-and-combat-scars-2026-10-08)
-for supported surfaces, lifetime, validation and measured cost.
+alter scar strength or the amount of attack history. Scar history is cosmetic
+render-thread state, not game state: a new board or a change of its dimensions or
+geometry scale clears it, while camera changes, chunk rebuilds and detail changes
+keep it.
 
 Scar sizes use `ResolvedAttack.Shot.damagePerHit`, captured from the weapon and
 its ammunition before playback: nominal beam/round damage, damage per individual
@@ -212,8 +207,7 @@ Gouges use a consistent 5:1 footprint; their perpendicular variants have a
 diameter of twice gouge width. Doubling damage doubles footprint area
 for these shapes. Missile/artillery blast and plasma splash diameter instead follows
 `2.7 * damage^0.4634086426` metres: one smooth power curve through 2.7 metres
-at 1 damage (10% smaller than the original LRM mark) and 12 metres at 25 damage
-(20% smaller than the original Long Tom mark). SRMs leave 3.7-metre marks;
+at 1 damage and 12 metres at 25 damage. SRMs leave 3.7-metre marks;
 Thunderbolt 5/10/15/20 leave 5.7/7.8/9.5/10.8-metre marks.
 Artillery uses the blast shape even with a bullet
 emitter. Flame ground impacts leave singed patches at a fixed 65% opacity;
@@ -256,7 +250,7 @@ A packed RGBA mask holds coverage, premultiplied authored luminance,
 vitrification and shallow relief. Relief changes cavity shading only; impacts never
 excavate terrain geometry.
 The editable RGBA source PNGs live in
-`mm-data/data/models/board/textures/scars/`: laser, PPC and ballistic gouges and
+`mm-data/data/models/board/textures/terrain/damage/`: laser, PPC and ballistic gouges and
 round variants, missile/artillery blasts, burns and plasma splashes. Their alpha controls coverage and grayscale
 detail preserves dark char/melt and light debris. Sources are decoded during board
 setup, converted into the mask's material channels, and retained as CPU mip chains
@@ -272,7 +266,7 @@ draw pass. Authored light/dark detail supplies the relief appearance; the shader
 does not differentiate low-resolution mask cells into artificial ridges.
 Missing artwork logs a warning and skips that style. All decoded images
 are owned and disposed by the ground-damage renderer. The art directory's README
-documents editing and reload; its provenance file records the generation prompts.
+documents editing and reload.
 Vertical scars use cached patches clipped from the installed receiving triangles,
 including deformed cliffs and opaque model walls. Each patch retains the original
 material, UVs and vertex attributes, and adds its image-layer coordinates. A small
@@ -313,21 +307,10 @@ remain, but new areas cannot receive image tiles. Storage and update cost theref
 depend on damaged area, not only board dimensions. These masks are combat-only;
 terrain weathering and authored board decorations use their existing resources.
 
-The 2026-10-09 native tile check compares the same AC/20 scar near the beginning
-of a 50-by-50 board and 16 km farther along a 50-by-700 board. It verifies unchanged
-local scale, a continuous four-tile join, correct distant directory lookup, and
-preservation of existing GPU pixels after array growth. Both terrain/grass native
-cases and 21 playback cases pass. The gallery's active sculpt/grass programs use
-eight/three samplers respectively; no additional draw pass was introduced.
-
-A focused Intel Iris Xe check, before the subsequent artwork/size rebalance,
-painted 192 separated AC/20 marks (768 image tiles,
-1280 array layers), then measured 15 accepted updates to an existing footprint.
-Median synchronous raster/upload/filter time was 5.0 ms with selective mip updates,
-versus 48.5 ms with whole-array mip generation. At 128 and 384 image tiles the
-selective-update medians were 6.1 and 5.2 ms. These are local update measurements,
-not full-frame FPS or cross-GPU claims; one run had a 79 ms outlier. They exclude
-array growth, which allocates and re-uploads history and can still cause a spike.
+`GpuGroundDamageTilesSmokeTest` paints the same AC/20 scar on a 50-by-50 board and
+16 km along a 50-by-700 board. It checks unchanged local scale, a continuous
+four-tile join, the distant directory lookup and retention of existing layers after
+array growth.
 
 Scar coverage removes grass blades by their roots in the grass vertex shader and
 replaces turf colour with exposed soil. This shares the mask lookup above,
@@ -345,7 +328,7 @@ Ground vertices shared with a sculpted cliff foot use zero foot distance, so deb
 coverage continues across that contact despite the displaced outline.
 Plateau vertices at the sculpted rim likewise use zero rim distance. Measuring those
 vertices against the approximate lattice segment instead could move the cover contact
-several metres away. Sand and snow now expose irregular rock shoulders across that
+several metres away. Sand and snow expose irregular rock shoulders across that
 shared crest through the existing material roles; open flats retain their cover.
 Corner relief fades over the tangent space left by both transition bands and rounded
 corners. Using the original edge length let adjacent columns reverse into a hanging
@@ -390,7 +373,7 @@ Trees, rocks, vegetation and units must sample the installed finished surface.
 Dressing such as a tree pit can be drawn/picked with the ground without raising the
 support height. Field stones, shrubs and tree-pit kerbs seat against TOP faces, so other
 dressing cannot raise them. Small field stones use eight triangles and
-[small shrubs](gpu-scatter-bushes.md) use open branches and folded leaves;
+[small shrubs](../../mm-data/data/models/board/README.md#rock-and-scatter-meshes) use open branches and folded leaves;
 both appear only at full detail. Keep support roles distinct when adding a
 decorative layer.
 
@@ -406,66 +389,46 @@ the board's explicit Rough terrain remains separate from this cosmetic rule.
 
 Each natural family combines ground cover, soil/mantle, exposed rock and deposits.
 `GpuTerrain.SCULPT_MATERIALS` selects each family's maps; `GpuAssets` loads and
-owns the shared textures. Active sculpt maps are under
-`mm-data/data/models/board/textures/sculpt`. Every sculpt map is a layer of one
+owns the shared textures. Sculpt maps are under
+`mm-data/data/models/board/textures/terrain/surfaces`. Every sculpt map is a layer of one
 texture array (`GpuAssets.sculptArray`, bound as `u_terrainLayers`): colour/height at
 a map's layer and normal/AO at the next. A sculpt material's `SculptLayers` gives
 its family's ground, debris, wall and mantle layers (`u_sculptLayers`), and boundary
 palettes give theirs per family, so all of them take one texture unit (see
 [shaders](gpu-shaders.md#boundaries-to-preserve) for the 16-unit budget). The arrays set
-their own anisotropic filtering: libGDX's `setAnisotropicFilter` only addresses
-`GL_TEXTURE_2D`, which left them blurred at grazing angles.
+their own anisotropic filtering, because libGDX's `setAnisotropicFilter` only addresses
+`GL_TEXTURE_2D`.
 
 Sculpt albedo textures store height in alpha; their tangent-normal partners store
-ambient occlusion in alpha. Repeat scales come from the asset metadata.
-LUNAR has independent `lunar`, `lunar-scree` and `lunar-cliff` map pairs and a
-`terrain/lunar.png` fallback. These began as copies of the original ROCK maps and
-geology. Terrestrial rock now has broader masses and a new granite contact source;
-lunar now has authored neutral regolith, angular scree and fractured bedrock in
-its existing slots, with its separate profile. Editing either family must
-leave the other alone.
-Their existing 512-square map pairs span 8, 4 and 12 metres respectively; the
-contact baker estimates 2.5, 8 and 12 centimetres of shading relief. Sources and
-exact ImageGen prompts are retained in `mm-data/tools/terrain-contact-sources`.
+ambient occlusion in alpha. Each material's `<name>.json` gives its repeat in metres.
+The Material Maker project `mm-data/tools/materials/terrain/surfaces/<name>/<name>.ptex`
+generates a material's maps from its `sources/` images. `python tools/materials/export.py`,
+run from the mm-data root, exports every project; Gradle `stageData` mirrors the maps
+into `megamek/data`. Their height, normal and AO are artistic estimates, not measured
+scans.
+LUNAR has its own `lunar`, `lunar-scree` and `lunar-cliff` map pairs (neutral
+regolith, angular scree and fractured bedrock) and its own geology profile,
+independent of terrestrial rock. Editing either family must leave the other alone.
+The lunar pairs are 512 pixels square, span 8, 4 and 12 metres, and carry 2.5, 8 and
+12 centimetres of estimated shading relief.
 World-space projections keep coordinates continuous across hexes. Two differently
 oriented ground samples reduce repetition; walls use compatible vertical projections.
-Bare dirt, the soil mantle beneath grass/dirt and natural stone now share one
+Bare dirt, the soil mantle beneath grass/dirt and natural stone share one
 vertical sampler. They blend translated source windows selected by a continuous world field,
 preserving wind/bedding direction and feature size without a regular per-hex motif.
-The former earth-only two-scale bypass was removed. The fungal materials retain
-their four overlapping translated windows, varying in both horizontal and vertical
-directions. Enlarging a ground sample by 2.37 also divides its normal gradient by
-2.37, rather than exaggerating the same relief over a longer distance.
+The fungal materials use four overlapping translated windows, varying in both
+horizontal and vertical directions. Enlarging a ground sample by 2.37 also divides
+its normal gradient by 2.37, rather than exaggerating the same relief over a longer
+distance.
 Slope and height-aware blending determine how cover gives way to mantle, rock and scree.
 
-The dirt and `soil-contact` pairs are baked from ImageGen sources in
-`mm-data/tools/terrain-contact-sources`; `dirt-prompts.json` records the original
-prompts and `bank-soil-prompt.json` records the replacement eroded bank material.
-Run `python tools/prepare_terrain_contact.py --only dirt soil` in mm-data after any
-procedural material rebuild; `--check` verifies pixels and source metadata. The shared
-baker makes opposite edges periodic, flattens broad baked lighting, and derives aligned
-normal/AO and height channels. This relief is an artistic luminance estimate, not a
-measured scan. Dirt repeats at 5 m, soil at 4 m; no additional runtime maps are needed.
-The bank source represents cohesive eroded subsoil instead of a carpet of loose gravel;
-its estimated relief spans 9.5 cm, with aligned normal and cavity channels.
-Updating dirt alone does not update exposed grass banks, which use `soil-contact`.
-
-The same baker supplies the sandstone and `granite-contact` pairs from
-`sandstone.png` and `granite-bedrock.png` in that source directory, with exact prompts
-beside them. Sandstone repeats at 12 m with estimated relief of 16 cm; granite at 8 m
-with 8 cm. Their broader rock planes and discontinuous fractures replace the former
-brick-like sandstone and densely mottled granite. Run
-`python tools/prepare_terrain_contact.py --only sandstone granite-bedrock`, then the
-same command with `--check`. The older `granite.png` source remains available for
-comparison; `granite-bedrock` now bakes the existing `granite-contact` runtime slot.
-See the [realism plan](gpu-terrain-realism.md) for references and visual acceptance.
-
-The authored `sand-ground`, `meadow-ground` and `granite-scree` sources also bake
-through that tool, into the existing `sand`, `grass` and `scree` slots. Their
-repeats remain 6, 4 and 4 metres; estimated relief is 2.5, 2.5 and 10 cm. They
-replace the former procedural surface patterns without extra maps, layers or
-mesh detail. Lunar retains its own `lunar-scree` map. Run the baker without
-`--only` to restore all authored materials after a procedural rebuild.
+Dirt repeats at 5 m. Exposed grass banks use `soil-contact` rather than dirt: cohesive
+eroded subsoil, not loose gravel, repeating at 4 m with 9.5 cm of estimated relief.
+Sandstone repeats at 12 m with 16 cm of estimated relief and `granite-contact` at 8 m
+with 8 cm; both have broad rock planes and discontinuous fractures. `sand`, `grass`
+and `scree` repeat at 6, 4 and 4 metres with 2.5, 2.5 and 10 cm of relief; lunar has
+its own `lunar-scree`. See [terrain realism](gpu-terrain-realism.md) for the visual
+references and acceptance rules.
 
 `terrain-materials.glsl` owns that common evaluation.
 `terrain-projection.glsl` owns projection helpers, and `terrain-concrete.glsl` handles
@@ -590,7 +553,7 @@ cover without discarding their own authored SAND; water keeps its bed treatment.
 Authored `ground_fluff` gradients mix themes (including Desert and Mars), not SAND.
 
 The shared loose-sand source has broad branching waves and finer cross-ripples.
-Its 512-square color/height and normal/AO pair repeats over 12 metres. The baker's
+Its 512-square color/height and normal/AO pair repeats over 12 metres. Its
 22-centimetre relief is an artistic estimate for normals, not mesh displacement.
 The shader translates source windows instead of rotating or resizing them, retaining
 the dominant wind direction and wave size. Existing material LOD filters detail at
@@ -601,8 +564,7 @@ draw pass is introduced. Only existing mixed-material boundaries need refinement
 grass/marsh, rough and buildings, the shared grass-root field, plus the flat mesh
 budget at all four LODs in grass, dirt, rock, lunar, desert and Mars themes.
 `GpuAridSurfaceSmokeTest` provides matching overhead, oblique and close native
-views of these themes. Sources, exact ImageGen prompts and reproducible map bakes
-live in `mm-data/tools/terrain-contact-sources` and `prepare_terrain_contact.py`.
+views of these themes.
 
 ## Tundra terrain
 
@@ -619,23 +581,19 @@ The existing biome snapshot, per-hex texture and nine-hex coverage stencil carry
 tundra mask for both cameras. Three source materials (lichen/tussocks, fungal colonies,
 and barren mineral crust) occupy six layers of the shared terrain texture array,
 with no new sampler or flat-ground geometry. The shader preserves their image
-pigments and internal detail; thresholding one gray source into flat colored spots
-was rejected during visual review. Theme contacts use the existing material weights.
+pigments and internal detail rather than thresholding one gray source into flat
+colored spots. Theme contacts use the existing material weights.
 Concrete keeps its slabs visible between softly keyed sage lichen branches from
 the earth source, without the source's soil or tussocks. Water, ice and magma
 suppress it; fields, marsh, quicksand and mud keep their biome precedence. Explicit
 SAND or SNOW also covers it. A Snow *theme* can show exposed tundra between snow
 remnants. None of these appearance choices changes the board's terrain or rules.
 
-ImageGen concepts and exact prompts are in
-`mm-data/tools/terrain-contact-sources/tundra-concepts`; the production source is
-`tundra-earth.png`, `tundra-fungus.png` and `tundra-crust.png` beside that directory.
-Run `python tools/prepare_terrain_contact.py --only tundra-earth tundra-fungus tundra-crust`
-from mm-data to bake the 512-pixel color/height and normal/AO maps. The repeats are
-24 metres for living mats and 28 metres for mineral crust, deliberately enlarged
-to keep coherent colonies readable at tactical zoom. Add `--check` to verify exact
-reproduction. The 4–10 centimetre relief is an artistic estimate from image
-luminance, not measured geometry.
+The `tundra-earth`, `tundra-fungus` and `tundra-crust` color/height and normal/AO
+maps are 512 pixels square. Living mats repeat over 24 metres and mineral crust over
+28 metres, enlarged to keep coherent colonies readable at tactical zoom. Their
+4–10 centimetre relief is an artistic estimate from image luminance, not measured
+geometry.
 
 `BoardTundraTest` checks native capture, theme preservation, precedence, cliff
 reach, connected coverage and grass roots. `GpuTundraSmokeTest` renders paired
@@ -657,19 +615,12 @@ color/height and normal/AO maps repeat over 6 and 12 metres. Estimated relief is
 Scatter reuses the basalt map in its shared atlas. No per-hex texture or draw pass
 is added.
 
-ImageGen source images and exact prompts are maintained in
-`mm-data/tools/terrain-contact-sources/volcano-*.png` and `volcano-prompts.json`.
-`prepare_terrain_contact.py --only volcano-ground volcano-basalt` reproduces the
-runtime maps. Height and normal maps are artistic estimates, not measured
-photogrammetry. Basalt now uses a separately generated, registered height source;
-the ash ground retains its luminance estimate.
+Height and normal maps are artistic estimates, not measured photogrammetry. Basalt
+uses a separately authored, registered height source; the ash ground's height is
+estimated from luminance.
 
-The theme audit's recommendation to separate Volcano from generic rock was valid;
-its claim that Mars still used generic dirt was stale. Theme variations belong in
-the shared material/cover system, while SAND, ICE, pavement and magma retain their
-gameplay precedence. The audit's remaining lunar-water and enclosed-road artwork
-suggestions require their own material/model work and are not provided by this
-Volcano change.
+Theme variations belong in the shared material/cover system, while SAND, ICE,
+pavement and magma keep their gameplay precedence.
 
 `BoardAridSurfaceTest` covers volcanic/lunar SAND capture and the six-triangle flat
 mesh at every LOD. Native board captures cover Thunder Rift and Crystalline Canyon;
@@ -713,8 +664,8 @@ cavity. Cleaner stone faces reflect more than loose grains; fine variation
 comes from the already sampled height/cavity channels and fades with material
 LOD. These are art-directed estimates, not measured roughness scans.
 
-The shared ground-color function receives the actual rim and foot distances,
-restoring its existing wear and shelter tint at those contacts. Sand and snow
+The shared ground-color function receives the actual rim and foot distances for
+its wear and shelter tint at those contacts. Sand and snow
 covering a boulder also blend its roughness. No new geometry, texture lookup,
 sampler, material batch or shadow pass is introduced. This adds fragment shading
 work, so it is not a performance optimization.
@@ -723,9 +674,9 @@ Grass blades and bank turf use that same dry/wet dielectric response at a dry
 roughness of 0.86. Bark and snow-covered plants also reflect light, using rough
 0.90/0.95 estimates; leaf maps retain their authored roughness, and separately
 marked snow surfaces do not gain a rain film. Distant cards retain their combined
-leaf/body approximation. These plant changes add no sampler, geometry or pass.
-See the [terrain/vegetation validation](gpu-terrain-realism.md#terrain-and-vegetation-completion-review-2026-10-08)
-for native wet/dry checks and measured landscape costs.
+leaf/body approximation. These plant responses add no sampler, geometry or pass.
+`GpuVegetationLightingSmokeTest` checks dry and wet plant reflection in both camera
+views.
 
 ## Plateau weathering
 
@@ -743,49 +694,40 @@ height competes with hardpan and deposits, then the rock weight is distributed
 smoothly between the two maps. This prevents the height competition from
 turning the cap/face transition into a sharp cutoff. All material channels use
 that distribution. Deep steep faces retain their wall texture, and submerged
-sediment still removes the dry cap. Mars retains its existing mantle behavior.
+sediment still removes the dry cap. Mars uses its own mantle behavior.
 
-The three mineral caps use their families' existing mantle slots: pale sandstone,
+The three mineral caps use their families' mantle slots: pale sandstone,
 salmon Martian plates and cool basalt. Their aligned 512-square color/height and
 normal/cavity pairs repeat at 8 metres, with estimated shading relief of 10, 10
-and 12 cm. They add about 8 MiB to the existing texture array with mipmaps;
-there is no new sampler, draw batch or geometry subdivision.
+and 12 cm. Their six RGBA16F layers of the texture array take about 16 MiB with
+mipmaps; they need no extra sampler, draw batch or geometry subdivision.
 
 Dirt and rocky ground expose pale bedrock; lunar regolith exposes darker stone.
 Snow retains its cover with exposed scoured shoulders. Fungal lowlands keep
 their mauve skin, weathered into violet bedrock; raised cyan crust has separate
-colony gaps. Grass and tropical ground retain continuous cover and their native
-banks. The bare-soil experiment was removed, including its grass-density mask.
-SAND remains a separate gameplay cover.
+colony gaps. Grass and tropical ground keep continuous cover and their native
+banks. SAND remains a separate gameplay cover.
 
 `GpuMaterialLodSmokeTest` checks mineral patches at close and normal map zoom,
-and fungal weathering and palette identity at levels -3, 0 and +3. Actual
-captures and limitations are in the
-[family weathering review](../../mm-data/tools/terrain-realism/review/family-weathering/README.md).
+and fungal weathering and palette identity at levels -3, 0 and +3.
 
 ## Authoring and related features
 
-Sandstone and basalt caps and cliff faces accept registered `NAME-height.png`
-sources through `prepare_terrain_contact.py`. Linear grayscale describes shallow
-plate faces, chipped rims and recesses independently of pigment. The existing
-baker derives normals and cavity from that field, preserving the existing
-512-square pairs, repeat sizes, relief bounds and material LOD. Roughness still
-uses the existing height/cavity response. These are generated artistic height
-studies, not measured geometry.
+Sandstone and basalt caps and cliff faces use a registered height source,
+`sources/authored-structure.png` in their Material Maker projects. Its linear
+grayscale describes shallow plate faces, chipped rims and recesses independently of
+pigment; the project derives normals and cavity from that field. These are
+generated artistic height studies, not measured geometry.
 
-The two caps reuse translated sampling at their 8-metre scale, for both color
+The two caps use translated sampling at their 8-metre scale, for both color
 and normal/cavity. This avoids overlaying an enlarged second set of fractures.
 Single-scale sand and cap colour/height samples use their explicit texture
 gradients and mipmaps without the extra fade toward the texture's overall mean.
 Resolved ripples and fractures therefore survive normal gameplay zoom; normal
-detail still fades with projected size. The existing two-scale materials retain
-their colour averaging. See the
-[terrain detail and crest review](gpu-terrain-realism.md#terrain-detail-and-crest-blending-2026-10-08)
-for captures, camera-stability checks and rendering cost.
-The height-source authoring pass replaced eight existing images without adding array layers, samplers,
-geometry or draw batches. Native captures, lighting checks and scoped RTX 4070
-measurements are in the
-[material-depth review](../../mm-data/tools/terrain-realism/review/material-depth/README.md).
+detail still fades with projected size. Two-scale materials keep their colour
+averaging. `GpuTerrainMaterialReviewSmokeTest` compares this shading with a saved
+baseline during a deterministic pan and zoom; see
+[native reviews](gpu-terrain-realism.md#native-reviews).
 
 The [board asset format](../../mm-data/data/models/board/README.md) owns dimensions,
 mesh roles and editable source locations. Runtime loads the generated models/maps;

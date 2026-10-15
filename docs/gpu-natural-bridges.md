@@ -84,7 +84,7 @@ support panels leave the carriageway clear. `Deck.joints` selects the joining ch
 end post at a bank, road landing or open end. Members are clipped and capped at the local hex boundary.
 The steel fascia replaces the concrete side faces it covers, avoiding coplanar surfaces.
 
-The span's Body colour, oxide red by default, is carried by its `Part.STEEL` facets.
+The span's Body colour, oxide red by default, is converted to linear colour on its `Part.STEEL` facets.
 `BoardBridgeSlope` grades the complete generated slab and steel together. The prepared terrain chunk owns
 the resulting shape in the game, editor and previews; flat and sloped decks use those same facets for drawing
 and picking. Decals project only onto `Part.TOP`, keeping them off kerbs and steel. No per-mask span model,

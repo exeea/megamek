@@ -38,7 +38,7 @@ The sibling `mm-data` repository contains:
 | `tools/board-models/mars/coral-library.png` | Blender kit preview. |
 | `tools/board-models/mars/mesh-report.json` | Measured bounds and triangle counts. |
 | `data/models/board/mars/*.glb` | Six runtime models. |
-| `data/models/board/textures/foliage/mars/coral-mineral-atlas.png` | Shared opaque Imagegen atlas: porous ivory, veined mauve, weathered tubes and dusty basal crust. |
+| `data/models/board/textures/vegetation/mars/coral-mineral-atlas.png` | Shared opaque Imagegen atlas: porous ivory, veined mauve, weathered tubes and dusty basal crust. |
 
 Build through Blender MCP by executing
 `runpy.run_path('.../mm-data/tools/build_mars_corals.py')['build']()` in Object mode.

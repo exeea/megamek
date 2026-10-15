@@ -44,7 +44,7 @@ shared across parts and LODs through the existing texture cache.
 Assets live in the sibling `mm-data` repository:
 
 - `data/models/board/orchard-*.glb`: twelve models, three LOD nodes per file.
-- `data/models/board/textures/foliage/orchard/orchard-*.png`: six opaque
+- `data/models/board/textures/vegetation/orchard/orchard-*.png`: six opaque
   1254×1254 atlases with canopy, leaf, bark and fruit panels.
 - `tools/build_orchard_assets.py`: reproducible geometry builder, reusing the
   existing foliage primitives and GLB exporter.

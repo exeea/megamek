@@ -7,36 +7,34 @@ cover, visibility or picking.
 
 ## Living surfaces
 
-The surface follows concept A's material roles, with C's stronger cyan/violet:
+The surface has four material roles:
 
 - Open plain: mauve mineral skin and irregular blue mycelial marbling, 22 m span.
 - Ridge crowns and lips: lobed cyan crust, 8 m span.
 - Slopes: a separate purple fibrous mantle, 10 m span.
 - Exposed cliffs: dark violet rock with sparse cyan fissures, 12 m span.
 
-`terrain-materials.glsl` evaluates these through the existing four material roles
-and shared physical projection. Color, normal, height and cavity maps use the same
-role weights and translated sampling windows; neither scale nor UV origin resets
-at a hex edge. The baker retains broad fungal pigment boundaries, since translating
-the samples already breaks up repeating landmarks. Normal-map relief is an artistic
-estimate from source luminance, not measured displacement or new terrain geometry.
+`terrain-materials.glsl` evaluates these roles with the shared physical projection.
+Color, normal, height and cavity maps use the same role weights and translated
+sampling windows; neither scale nor UV origin resets at a hex edge. The maps retain
+broad fungal pigment boundaries, since translating the samples already breaks up
+repeating landmarks. Normal-map relief is an artistic estimate from source
+luminance, not measured displacement or new terrain geometry.
 
-Rebuild and verify with:
-
-```
-python tools/prepare_terrain_contact.py --only fungus-ground fungus-mat fungus-cliff fungus-fibres
-python tools/prepare_terrain_contact.py --check --only fungus-ground fungus-mat fungus-cliff fungus-fibres
-```
-
-The existing sculpt texture array owns the four color/height and normal/AO pairs.
+The four color/height and normal/AO pairs are layers of the sculpt texture array.
+Their Material Maker projects are `fungus-ground`, `fungus-mat`, `fungus-cliff` and
+`fungus-fibres` under `mm-data/tools/materials/terrain/surfaces/`;
+`python tools/materials/export.py`, run from the mm-data root, exports all projects.
 
 The shared `levelGrade` helper starts fungus with a darker, richer pigment, then
-progressively lightens and desaturates it uphill; sublevels darken toward plum.
+progressively lightens it uphill with a scalar linear-light gain and a small,
+bounded reduction in chroma; sublevels darken toward plum. It does not mix in white,
+so the elevation cue retains the underlying pigment and texture contrast.
 Grading happens after the four roles combine, so the cyan crust receives the same
 elevation treatment as the underlying skin, slopes and cliffs. The curve follows
 continuous world height and eases at extreme elevations rather than bleaching to
 white. Captured contact weights blend the treatment at theme boundaries. Negative
-levels retain separate tones down to -6; other materials retain their existing grade.
+levels keep separate tones down to -6; other materials use the ordinary grade.
 
 ## Bioluminescence and mist
 
@@ -79,9 +77,8 @@ is retried when it spans a gap or would swallow more than 45% of the model's out
 reach. This supports all shelves of a tiered cluster rather than only its origin;
 it does not add new cliff geometry or change the existing placement probabilities.
 
-The hanging mycelium GLB has been rebuilt in Blender with its strand roots embedded
-in the shelf's curved underside. Its three mesh levels share matching root
-positions; the exporter checked 17/9/5 roots against the actual shell triangles.
+The hanging mycelium GLB embeds its strand roots in the shelf's curved underside.
+Its three mesh levels share matching root positions.
 
 ## Verification
 
@@ -89,11 +86,19 @@ positions; the exporter checked 17/9/5 roots against the actual shell triangles.
 actual GLB's rear vertices on the finished cliffs.
 `GpuFungusSmokeTest` compiles and renders the actual GL shaders on Fungal Crevasse
 by day and night, verifies visible night emission, checks the mist changes over
-time, checks one cloud per occupied hex, and compares the same night frame with
-and without spill lighting. Replacement cliff-only and scatter-only boards must
-have no mist or leftover clouds. A controlled overhead comparison raises the same
-fungal plateau through levels 1–5, tracking the same cyan pixels through the complete
-rendering pipeline and requiring each step to lighten and lose saturation. Captures
+time through the shared HDR/display boundary, checks one cloud per occupied hex,
+and compares the same night frame with and without spill lighting. Replacement
+cliff-only and scatter-only boards must have no mist or leftover clouds. A controlled
+overhead comparison keeps the physical plateau, material and camera fixed at level 2
+while changing only the actual shader's height-grade argument through levels 1–5.
+Raising the physical board would also change cyan colony coverage and world-space
+material noise, conflating the grade with a different pigment mixture. The comparison
+tracks the same cyan pixels through the complete rendering pipeline and requires
+each grade step to lighten and gently lose saturation.
+The full progression must span more than four display luminance levels and a
+normalized saturation change of 1/255, while retaining at least 85% of the first
+shelf's saturation. `GpuTerrainGradeSmokeTest` separately
+checks the actual shader's chromaticity, texture contrast and bounded height curve. Captures
 and `fungus-elevation.csv` are saved under the configured GPU review directory's
 `fungus` folder. `GpuLavaLightingSmokeTest` guards existing lava lighting,
 fungal illumination of ordinary objects, field-of-view gating and source removal.

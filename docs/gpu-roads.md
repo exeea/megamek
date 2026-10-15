@@ -115,10 +115,9 @@ is not in the array, keep separate materials. Bridge decks and tunnel floors kee
 own road textures.
 
 The 2026-09-29 MesaCity comparison used the real 96x51 scene, a 1280x960 framebuffer,
-terrain LoD enabled, RTX 4070 Laptop GPU, 60 warm-up and 240 measured frames per view.
-Two sequential before/after pairs used a frozen source snapshot to exclude concurrent
-terrain and water work. [All seven views and both pairs](benchmarks/mesa-road-batching.csv)
-retain the raw timings and counts.
+terrain LoD enabled, RTX 4070 Laptop GPU, 60 warm-up and 240 measured frames in each
+of seven views. Two sequential before/after pairs used a frozen source snapshot to
+exclude concurrent terrain and water work.
 
 | Overview metric | Before | Batched |
 | --- | ---: | ---: |
@@ -244,4 +243,4 @@ existing artwork fallback. Ice on dry ground supports native roads. Supported ro
 fluff uses the native material and geometry, including bent and horizontal routes.
 Roadside-tree and parking-car models contain only their objects. Parking sprites can
 provide cosmetic exits when the hex has no gameplay ROAD; existing ROAD takes
-precedence. See [Tile scenery and decals](gpu-scenery.md) for source selection and coverage.
+precedence. See [legacy scenery conversion](3d-board-editor.md#native-files-and-compatibility) for source selection and coverage.

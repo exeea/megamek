@@ -33,15 +33,16 @@ in `magma-flow.glsl`. Both use `terrain-magma.glsl` for sampling/projection and
 use the same solid evaluation. World-space coordinates continue across adjoining
 hexes. Each active triplanar axis evaluates one coherent material projection.
 Flowing lava uses two modest, successive world-space shears to vary the source's
-alignment without additional texture fetches or folded UVs; cooled crust retains
+alignment without additional texture fetches or folded UVs. Their restrained
+amplitudes keep downstream rafts readable; cooled crust retains
 its gentle warp. Colour, heat, height and normals use the same coordinates. Normal gradients,
 view directions and flow directions include the warp's Jacobian; mip derivatives are
 taken after the warp. Smooth triplanar weights cover tops, slopes, curved fall lips
 and vertical cuts without switching projection abruptly.
 
-A flat flowing surface uses ten material-map reads at close range: five in each
+A flat flowing surface uses up to eight material-map reads at close range: four in each
 of the two advection phases. Material LOD reduces this to six after fine normals
-and relief disappear, then four when the surface map is no longer sampled; colour
+disappear, then four when the surface map is no longer sampled; colour
 and heat remain. These counts exclude bank/current fields, the wave field, lighting
 and shadows; surfaces using multiple projection axes cost more. Solid crust retains
 its relief trace only at close range. See [material LOD](gpu-terrain-materials.md#material-detail-at-distance).
@@ -59,9 +60,11 @@ currents cannot cross between them. Rebuilt chunks rebind reused materials to th
 new field and dispose the old texture. Water and lava use `liquid-flow.glsl` for
 their two staggered material advections, hiding each reset at zero weight; solid
 crust remains stationary. Lava advances its source window at these hidden resets
-so it does not repeat the same short loop. Source offsets stay bounded and do not
-accumulate distortion around bends. Broad spatial staggering avoids synchronized
-crossfades across the river, without another texture read.
+so it does not repeat the same short loop. Each refresh moves up to about 2.3 metres
+through the 24-metre source repeat. This refresh is separate from physical current
+velocity. Source offsets stay bounded and do not accumulate distortion around
+bends. Broad spatial staggering separates the phase handoffs across the river,
+without another texture read.
 Both phases use the local world-space current, transformed through the same warp
 and projection as every material map. There is no fixed texture-axis scroll or
 independent heat-map flow that could override a bend or run uphill after rotation.
@@ -75,10 +78,38 @@ on falls and where an established current takes over. It shares the same materia
 advection and adds no simulation pass or texture fetch. The small FFT displacement
 continues to deform the skin alongside this transport; it is no longer the only
 visible motion in zero-current hexes.
-Each molten phase converts heat to emitted RGB before the two phases blend. This
-avoids the brightness pulse produced by applying a nonlinear heat ramp to their
-averaged temperature. Both phases carry colour, normals, surface and heat together;
-restrained FFT displacement and slopes keep the liquid from becoming knotted.
+Each molten phase derives a cooling-skin mask from its existing heat sample.
+That mask controls basalt reflectance, roughness and emitted RGB together: broad
+cooled plates remain dark and rough, while exposed rifts retain the original HDR
+peak. A small, height-modulated basalt reflectance floor gives cooled skin a
+visible surface without adding an emission floor. The exposed-melt mask rises
+between heat-map values .25 and .65; before the shore treatment, cool skin has
+roughness at least .96 and fully exposed churned skin at least .92, retaining any
+higher authored value. The same roughness reaches direct and environment reflection,
+so the molten rifts do not use a separate smooth, water-like specular lobe. These
+are artistic material estimates, not measured temperatures or roughness samples.
+An Iris Xe component capture aligned with the clear 07:00 sun found that the
+earlier .82/.68 floors left direct specular light responsible for about 83% of
+cold horizontal lava's red radiance. Sky reflection contributed about 4%, and the
+finite-source normalization stayed near one. The .96/.92 preview reduced that
+polished appearance while retaining the same Fresnel model, mapped normals and
+emitted radiance; it adds no texture reads or shader branches.
+The appearance follows the broad plates and incandescent margins documented in
+[USGS lava-lake observations](https://www.usgs.gov/media/images/radial-fracture-patterns-halemaumaus-lava-lake-surface-kilauea-volcano-summit).
+
+This complete material, including emitted RGB, is calculated before the two phases
+meet. A height-priority overlap selects the upper plate, with a narrow continuous
+contact instead of a broad dissolve between two crack patterns. All material
+channels use the same contact weight. Phase bias exceeds the full sampled height
+range at either endpoint, keeping every source reset completely hidden. When
+material LOD omits height samples, the already-filtered heat supplies a cold-is-higher
+proxy, with no extra texture read. This is an opaque surface approximation, not
+separate rigid plates. It still has a short blend at contacts, and transport gradients
+retain the existing pre-advection approximation.
+
+Blending each phase's emitted RGB avoids applying a nonlinear heat ramp to averaged
+temperature, and the blended temperature does not make cooled skin glossy again.
+Restrained FFT displacement and slopes deform the same material channels together.
 The existing shore-distance field supplies a wider red thermal margin around the
 hot interior, without adding geometry or texture reads.
 This is a viscous surface approximation, not a volume-conserving or thermal fluid
@@ -86,12 +117,13 @@ solver. It introduces no separate board scene, animation thread or game state.
 
 Basalt uses the board's linear lighting, shadows, normal-map toggle and GGX
 roughness response. Heat and the local glow on fissure walls are added after
-ambient, sunlight and shadowing. The molten heat ramp rises from red cooling skin
-through orange melt to bright yellow cores; exposed hot melt is smoother than its
+ambient, sunlight and shadowing. The molten heat ramp rises from red exposed margins
+through orange melt to bright yellow cores, restoring the original .68-.94 transition
+to the hottest colour. Exposed hot skin remains rough but can be smoother than its
 cooling rafts. Solid basalt retains its dimmer red fissures.
 
 All main 3D boards capture the scene in RGBA16F, preserving radiance above diffuse
-white through the existing display-encoded material outputs. Only boards containing
+white through linear material outputs and scene blending. Only boards containing
 molten tiles run heat passes. The atmosphere composite separates
 strong warm HDR highlights from ordinary surface lighting, so their energy
 does not inherit the night surface tint/desaturation. Fog, sand and exposure still
@@ -109,7 +141,7 @@ The halo models camera glare. Its warm-radiance selector is an approximation rat
 mask: sufficiently bright warm fire may also glow on a molten board, while ordinary
 white reflections are excluded. Ordinary reflected highlights also retain values
 above one until shared exposure and tone mapping, whether or not lava is present.
-Scene alpha blending remains display-encoded; see the
+Scene alpha blending and heat extraction operate on linear radiance; see the
 [scene color contract](gpu-atmosphere.md#scene-depth-fog-and-composition).
 
 Local illumination is a separate diffuse contribution in the existing lit shaders.
@@ -125,10 +157,35 @@ lava field exceeds the local emitter budget. The camera halo and local lighting
 both respect captured visibility, through their own existing render paths.
 
 Relief uses normals and bounded parallax, not geometric displacement, so silhouettes
-and picking remain the existing board geometry. Crust traces up to twelve depth
-layers with a refined intersection to preserve its occluding slab edges; lava keeps
-its thin-skin offset. The crust bake concentrates relief in the thick plates and
+and picking remain the existing board geometry. Crust traces two to twelve depth
+layers according to the projected relief ray's screen footprint, with a refined
+intersection to preserve its occluding slab edges. The full texture-coordinate
+Jacobian accounts for anisotropic views; a conservative bound skips its inversion
+when the twelve-layer budget is already required. Below half a pixel, crust uses
+a single height offset; exactly zero parallax skips relief work. All aligned
+colour, heat and normal samples remain. Flowing lava uses aligned, advected
+maps without a height offset: its thin skin retains mapped normals and FFT folds,
+while eliminating the shifted surface-map reread in each flow phase.
+The crust bake concentrates relief in the thick plates and
 gives fine rock grain only shallow relief. Fissure-wall glow stays close to the gaps.
+The shader audit records measured costs and validation separately from
+these implementation details: [magma material and timing](gpu-shader-audit.md#magma-material-and-timing).
+
+The final native review verifies finite scene/material output, quiet rough
+cooling skin alongside HDR rifts, gravity pause/recovery, motion continuity,
+day/night rendering and live material edits. It also exposed a zero normal at
+collapsed waterfall-lip endpoints: `GpuWaterfall` now uses the limiting outward
+path tangent there, preserving mouth slope and mesh positions. The shared repair
+applies to both water and molten falls. All 23 waterfall geometry tests pass.
+The boundary palette shares its warped projection and finite derivatives before
+coverage branches. It skips zero-weight volcanic overlays only after shore
+coverage is resolved, and retains any volcanic substrate that can acquire sand
+exposure. One surface sample supplies both crust and cooled-bank palette entries;
+each retains its own emission strength. Ordinary palette evaluation no longer
+contains a redundant volcanic relief path. Duplicate family slots also reuse their
+contact noise. Shared bank lighting reuses its dielectric response and local
+irradiance instead of evaluating them twice. Measured costs and remaining
+limitations are recorded in the shader audit.
 
 ## Assets
 
@@ -137,14 +194,24 @@ normal-map baker. It separates neutral basalt reflectance from heat and estimate
 recessed fissure height. This is artistic relief, not measured photogrammetry.
 The generated molten-interior source, its generation prompt and provenance live in
 `mm-data/tools/magma-reference/lava-source.png`, `lava-source-prompt.txt` and
-`lava-source.json`. The source contains connected melt with disconnected cooling
-fragments; riverbanks come from the board geometry and shore field. Painting long
-rock-separated channels into a repeating material made obvious diagonal bands.
+`lava-source.json`. The source contains broad irregular thin cooling plates
+separated by connected molten rifts; riverbanks come from the board geometry and
+shore field. The 2026-10-12 replacement removes the dense fiery thread patterns.
+Its heat map has 36.5% coverage above .2; the molten exposure ramp uses .25–.65
+to retain those rifts while leaving most plate faces cold and rough. Map count,
+resolution, advection and texture-sample budget are unchanged.
+
+Molten spill lighting is calibrated to the replacement artwork's average emitted
+radiance, including its cold plates: approximately `(.75, .11, .0023)` in linear
+RGB. The former `(1.8, .24, .025)` made a conspicuous pale pink bank wash in
+daylight. The bounded disk/falloff model remains an approximation, not exact area
+lighting or dynamic integration of each animated crack. Solid-crust and fungal
+light retain their separate calibrations.
 
 Each material (`crust` and `lava`) has four aligned, repeating 1024px maps in
-`mm-data/data/models/board/textures/magma/`. The bake's reference scale is 12 metres.
+`mm-data/data/models/board/textures/terrain/lava/`. The bake's reference scale is 12 metres.
 Solid crust retains that repeat; flowing lava uses 24 metres for larger readable
-rafts, with parallax, normal gradients and motion adjusted to retain their physical scale;
+rafts, with normal gradients and motion adjusted to retain their physical scale;
 the shared world warp softens the regular grid, but recognisable motifs can still
 repeat. The maps are artistic materials, not a physical thermal simulation.
 

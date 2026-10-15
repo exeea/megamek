@@ -134,7 +134,7 @@ cap, exchanger posts end below their top beams, and shared pipe supports emit on
 These avoid coplanar top faces that would flicker while orbiting. The geometry regression scans the uppermost
 surface across all four families; native captures inspect the caps from four azimuths.
 
-The two photographic IMAGEN materials are `models/board/textures/industrial/paint.png` and `steel.png`, with
+The two photographic IMAGEN materials are `models/board/textures/structures/industrial/paint.png` and `steel.png`, with
 different texture scales and specular settings, circumferential tank/pipe UVs, full-resolution mip levels and
 anisotropic filtering. These are diffuse/specular materials; the shader does not implement a full metalness
 workflow. Concept, saved prompts and Blender review files live in mm-data's

@@ -865,16 +865,17 @@ A developer and tester tool, to be removed before release.
   preview and editor share Top view, Isometric view and Fit board controls and compact, 34-unit-high buttons.
   Fit board accounts for the current panel clearances. The gameplay right column starts one gap below the utility
   row and fills the available height; the phase header moves below that row when both cannot fit across the window. Tuning opens
-  at the same top, 360 wide and ending at least 70 above the bottom, with the pages Board, Atmosphere, Terrain and
-  Camera, and in its footer Defaults, Reload assets with its outcome, and Edit shaders (the GLSL editor).
+  at the same top, 360 wide and ending at least 70 above the bottom, with the pages Display, Board, Atmosphere, Terrain
+  and Camera, and in its footer Defaults, Reload assets with its outcome, and Edit shaders (the GLSL editor).
 - **Model:** `GpuBoardTuning` keeps every value as a Scene2D control that is never drawn; `GpuBattleView` reads the
   values from it. `GpuTuningPanel` mirrors the model's rows in the hud-v3 look, and an edit goes to the model's own
   control. Its tooltips are the model's texts; the row texts are English literals.
 
 | Page | Sections |
 | --- | --- |
-| Board | Geometry (with Normal maps and VSync), Unit family sizes, Zoom-out unit scaling, Route pulse (on/off, speed, intensity), Unit visibility, Outside field of view, Outside sensor range, Unit damage |
-| Atmosphere | Atmosphere presets with "Planetary conditions…" (the Swing editor), Lighting (time of day, exposure, moonlight, fixed sun), Planet properties, Clouds and ground air, Weather effects, Light and fog effects |
+| Display | Display mode Windowed/Fullscreen, VSync, Render resolution 50-100% with its scene size, Anti-aliasing Off/SMAA and Specular anti-aliasing (both saved across sessions), the detected graphics and the Graphics card choice with its in-use and pending notes |
+| Board | Geometry (with Normal maps and Unit display), Unit family sizes, Zoom-out unit scaling, Route pulse (on/off, speed, intensity), Unit visibility, Outside field of view, Outside sensor range, Unit damage |
+| Atmosphere | Atmosphere presets with "Planetary conditions…" (the Swing editor), Lighting (time of day, exposure, moonlight, fixed sun, the lighting environment and Show lighting sky, not saved, which shows the sky that lights the scene, or its image, as the backdrop), Planet properties, Clouds and ground air, Weather effects, Light and fog effects |
 | Terrain | Terrain build progress, concrete shapes, river shape and land, banks and river openings, waterfalls, terrain detail (grass blades, water effects, terrain LoD, object LoD), material geology |
 | Camera | Fixed sun/moon, framing on selection, framing on movement (combat framing is the dock's Follow toggle); the model's camera rows: Free Flight, the thermal wireframe view, the Free Flight field of view |
 

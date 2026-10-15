@@ -71,15 +71,16 @@ descriptor formats and G3DJ unit meshes are rejected.
   accepted material roles are `paint`, `detail` and `bark`.
 
 `RigidGlb` decodes binary glTF 2.0 on the CPU through JglTF, before allocating
-GPU resources. It converts glTF's Y-up coordinates and linear colors to the
-board's Z-up/display-color convention. Preserve node and part names: descriptors,
+GPU resources. It converts glTF's Y-up coordinates to the board's Z-up convention
+and preserves linear material factors and vertex colors. Preserve node and part names: descriptors,
 damage and animation use them to find rigid geometry.
 
 The importer rejects skins, animation clips, morph targets, external geometry
 buffers, required extensions and blended materials. Opaque and alpha-tested
 materials are supported; double-sided faces get reversed geometry and normals.
 Textures may be embedded PNG/JPEG data or local relative images inside the
-permitted model directory. `ModelTextures` shares them by image and sampler;
+permitted model directory. `ModelTextures` shares them by image, sampler and color/data role;
+color images decode from sRGB during sampling, while numerical maps remain linear data.
 `paint` receives runtime camouflage while `detail` retains authored artwork.
 
 Imported models in the main 3D board use authored glTF roughness and metallic
@@ -93,13 +94,15 @@ Normals use a derivative tangent frame; degenerate UVs retain the geometric
 normal. Occlusion shades indirect light, not direct sunlight or emission.
 
 `GpuModelMaterial` carries these values through instance copies and static prop
-batching. `model-surface.glsl` shares direct GGX reflection with terrain and foliage,
-using the board's sun and sky/ground hemisphere. Metal reflections take their
+batching. `model-surface.glsl` shares correlated Smith GGX reflection and reciprocal
+diffuse energy coupling with terrain and foliage. Metal reflections take their
 colour from albedo; dielectric highlights remain neutral. Orthographic top and
-isometric cameras use parallel view rays. Roughness is bounded to 0.15–0.98 for
-board-scale highlights. Ambient metal reflection is a broad hemisphere
-approximation, without a cubemap or reflections of nearby objects; this is not
-a complete glTF PBR renderer.
+isometric cameras use parallel view rays. Perceptual roughness is bounded to
+0.045–1.0. Environment reflection uses a prefiltered analytic sky/ground gradient
+and the matching integrated BRDF, shared with the visible sky and diffuse light.
+It has no nearby-object reflections or global illumination and uses single-scattering
+GGX. See the [light and color contract](gpu-atmosphere.md#light-and-color-contract)
+for its approximations; this remains a deliberately limited glTF material implementation.
 
 The sibling `mm-data/tools/glb_geometry.py` writer/reader preserves `roughness`,
 `metallic` and a `METALLIC_ROUGHNESS` texture role in its authoring dictionaries.
