@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -31,6 +30,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -69,7 +69,7 @@ final class GpuDamageReview {
             UnitDamageDisplay.show(old, locations);
             for (var part : parts(old.nodes)) {
                 if (part.material.id.endsWith(UnitDamageDisplay.WRECKED_SUFFIX)) {
-                    part.material.set(ColorAttribute.createDiffuse(.13f, .12f, .11f, 1));
+                    part.material.set(ColorAttribute.createDiffuse(GpuColor.linear(.13f, .12f, .11f)));
                 }
             }
             UnitDamageDisplay.show(wrecked, locations);
@@ -97,7 +97,9 @@ final class GpuDamageReview {
             }
             for (var part : UnitDamageDisplay.locationParts(wrecked, "LA")) {
                 assertSame(texture, texture(part), "Attached weapons and anatomy share the damage texture");
-                assertEquals(UnitDamageDisplay.WRECKED, part.material.get(ColorAttribute.class, ColorAttribute.Diffuse).color);
+                assertTrue(part.material.has(GpuLinearColors.TYPE));
+                assertEquals(GpuColor.linear(UnitDamageDisplay.WRECKED),
+                      part.material.get(ColorAttribute.class, ColorAttribute.Diffuse).color);
                 assertFalse(part.material.has(ColorAttribute.Emissive));
             }
             assertTrue(parts(intact.nodes).stream().allMatch(part -> part.enabled && texture(part) == null));
@@ -149,9 +151,13 @@ final class GpuDamageReview {
             var view = new GpuBattleView(fixture.source);
             try {
                 view.create();
+                GpuBoardTestUi.<SelectBox<UnitDisplayMode>>tuning(view, "tuning-unit-display")
+                      .setSelected(UnitDisplayMode.MODELS);
                 renderReady(view);
                 var terrain = (GpuTerrain) field(view, "terrain");
                 var unit = (ModelInstance) ((Map<?, ?>) field(view, "unitInstances")).get("1:-1");
+                assertFalse(UnitDamageDisplay.locationParts(unit, "LA").isEmpty());
+                assertFalse(UnitDamageDisplay.locationParts(unit, "RL").isEmpty());
                 assertTrue(UnitDamageDisplay.locationParts(unit, "LA").stream().noneMatch(part -> part.enabled));
                 assertTrue(UnitDamageDisplay.locationParts(unit, "RL").stream()
                       .allMatch(part -> texture(part) != null && texture(part).getWidth() == 128));
@@ -160,11 +166,11 @@ final class GpuDamageReview {
                 assertNotNull(tile.decals(), "The 2D limb marker remains available as fallback");
                 assertNotNull(tile.decalsWithoutLimbs(), "An empty replacement decal is retained, not mistaken for unavailable");
                 assertNotEquals(tile.decals(), tile.decalsWithoutLimbs());
-                var model = (Model) field(terrain, "limbModel");
-                assertNotNull(model);
-                assertSame(((GpuUnitModels) field(view, "unitModels")).equipment("Limb Club").model(), model);
-                var props = limbInstances(terrain, model);
+                var models = salvageModels(terrain);
+                var props = limbInstances(terrain, models);
                 assertEquals(3, props.size());
+                assertEquals(2, props.stream().filter(prop -> prop.model == models.get(0)).count());
+                assertEquals(1, props.stream().filter(prop -> prop.model == models.get(1)).count());
                 for (var prop : props) {
                     // A limb rests just above the plateau's sculpted top, which undulates within its natural relief.
                     assertEquals(2 * BoardGeometry.LEVEL + .12f * BoardGeometry.HEX_SCALE,
@@ -174,18 +180,19 @@ final class GpuDamageReview {
                 view.boardCamera.center(BoardGeometry.center(coords, 2));
                 view.boardCamera.zoom(.16f);
                 capture(view, "runtime-limb-remains");
-                var disabled = new GpuTerrain();
+                // Salvage belongs to the board asset library, including when no unit library is available.
+                var standalone = new GpuTerrain();
                 var missingLibrary = new GpuUnitModels(Configuration.dataDir().toPath().resolve("missing-models"));
                 var missing = new GpuTerrain(missingLibrary);
                 try {
-                    disabled.update(scene);
+                    standalone.update(scene);
                     missing.update(scene);
-                    assertNull(field(disabled, "limbModel"));
-                    assertNull(field(missing, "limbModel"));
-                    assertSame(tile.decals(), selectedDecals(disabled, coords));
-                    assertSame(tile.decals(), selectedDecals(missing, coords));
+                    assertEquals(3, limbInstances(standalone, salvageModels(standalone)).size());
+                    assertEquals(3, limbInstances(missing, salvageModels(missing)).size());
+                    assertSame(tile.decalsWithoutLimbs(), selectedDecals(standalone, coords));
+                    assertSame(tile.decalsWithoutLimbs(), selectedDecals(missing, coords));
                 } finally {
-                    disabled.dispose();
+                    standalone.dispose();
                     missing.dispose();
                     missingLibrary.dispose();
                 }
@@ -196,7 +203,7 @@ final class GpuDamageReview {
                     fixture.source.refresh();
                 });
                 renderReady(view);
-                var remaining = limbInstances(terrain, model);
+                var remaining = limbInstances(terrain, models);
                 assertEquals(2, remaining.size());
                 assertTrue(remaining.stream().allMatch(after -> props.stream()
                       .anyMatch(before -> samePlacement(before, after))),
@@ -208,7 +215,11 @@ final class GpuDamageReview {
                     fixture.source.refresh();
                 });
                 renderReady(view);
-                assertTrue(limbInstances(terrain, model).isEmpty());
+                assertTrue(limbInstances(terrain, models).isEmpty());
+                for (Model model : models) {
+                    assertTrue(parts(new ModelInstance(model).nodes).stream().allMatch(part -> part.enabled),
+                          "Collecting salvage must not mutate its shared board model");
+                }
                 assertTrue(parts(new ModelInstance(library.equipment("Limb Club").model()).nodes)
                       .stream().allMatch(part -> part.enabled), "Terrain must not alter shared equipment");
             } finally {
@@ -227,17 +238,25 @@ final class GpuDamageReview {
     }
 
     private static BoardScene.Pixels selectedDecals(GpuTerrain terrain, Coords coords) throws Exception {
-        var decals = field(terrain, "decals");
-        var entry = ((Map<?, ?>) field(decals, "entries")).get(coords);
-        return (BoardScene.Pixels) field(field(entry, "images"), "color");
+        for (var entry : ((Map<?, ?>) field(terrain, "decalPixels")).entrySet()) {
+            if (coords.equals(field(entry.getKey(), "coords")) && (int) field(entry.getKey(), "kind") == 0) {
+                return (BoardScene.Pixels) entry.getValue();
+            }
+        }
+        return null;
     }
 
-    private static List<ModelInstance> limbInstances(GpuTerrain terrain, Model model) throws Exception {
+    private static List<Model> salvageModels(GpuTerrain terrain) throws Exception {
+        var assets = (GpuAssets) field(terrain, "assets");
+        return List.of(assets.model("salvage/arm"), assets.model("salvage/leg"));
+    }
+
+    private static List<ModelInstance> limbInstances(GpuTerrain terrain, List<Model> models) throws Exception {
         var result = new ArrayList<ModelInstance>();
         for (Object chunk : (List<?>) field(terrain, "chunks")) {
             for (Object prop : (List<?>) field(chunk, "props")) {
                 var instance = (ModelInstance) field(prop, "instance");
-                if (instance.model == model) {
+                if (models.contains(instance.model)) {
                     result.add(instance);
                 }
             }

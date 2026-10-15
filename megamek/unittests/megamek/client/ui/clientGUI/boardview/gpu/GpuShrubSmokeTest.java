@@ -28,7 +28,6 @@ import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Configuration;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -50,7 +49,7 @@ class GpuShrubSmokeTest {
                 GpuTerrain terrain = new GpuTerrain();
                 ModelBatch depth = new ModelBatch(GpuTreeInstances.depthProvider(new DepthShader.Config()));
                 GLProfiler profiler = new GLProfiler(Gdx.graphics);
-                try {
+                try (var outputFrame = new GpuSceneTestOutput()) {
                     profiler.enable();
                     BoardScene.Pixels ground = new BoardScene.Pixels(ImageIO.read(new File(Configuration.dataDir(),
                           "models/board/tileset/saxarba/base/base_default_0.png")));
@@ -120,8 +119,9 @@ class GpuShrubSmokeTest {
                         camera.setIsometric(view != 1);
                         camera.setPerspective(view == 2);
                         terrain.renderShadows(camera.camera, List.of());
-                        ScreenUtils.clear(.035f, .055f, .075f, 1, true);
+                        outputFrame.begin(.035f, .055f, .075f, 1);
                         terrain.render(camera.camera, false);
+                        outputFrame.display();
                         GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"),
                               "shrubs-" + view + ".png"));
                     }

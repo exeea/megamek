@@ -17,18 +17,29 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
+import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
+import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.RenderableSorter;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -46,8 +57,8 @@ class GpuTerrainSubmissionSmokeTest {
             @Override
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
-                ModelBatch units = new ModelBatch();
-                FrameBuffer target = new FrameBuffer(Pixmap.Format.RGBA8888, 1280, 900, true);
+                ModelBatch units = new ModelBatch(GpuUnitShader.provider());
+                GpuSceneTestOutput target = new GpuSceneTestOutput(1280, 900);
                 Model model = new ModelBuilder().createBox(14, 14, 10,
                       new Material(ColorAttribute.createDiffuse(Color.RED)),
                       VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal);
@@ -122,7 +133,7 @@ class GpuTerrainSubmissionSmokeTest {
                             }
                         }
                     } finally {
-                        target.end();
+                        FrameBuffer.unbind();
                         sorter.set(batch, original);
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -130,7 +141,7 @@ class GpuTerrainSubmissionSmokeTest {
                     failure.set(error);
                 } finally {
                     terrain.dispose();
-                    target.dispose();
+                    target.close();
                     units.dispose();
                     model.dispose();
                     Gdx.app.exit();
@@ -138,6 +149,130 @@ class GpuTerrainSubmissionSmokeTest {
             }
         }, configuration);
         if (failure.get() != null) { throw new AssertionError("Terrain submission parity", failure.get()); }
+    }
+
+    @Test
+    void terrainProviderRoutesMaterialFactorsForPropsTacticalPagesAndAnimatedLiquids() {
+        var failure = new AtomicReference<Throwable>();
+        var configuration = GpuBoardWindow.configuration(false);
+        configuration.setWindowSizeLimits(64, 64, -1, -1);
+        configuration.setWindowedMode(64, 64);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                try { checkTerrainFactorDomains(); }
+                catch (Throwable error) { failure.set(error); }
+                finally { Gdx.app.exit(); }
+            }
+        }, configuration);
+        if (failure.get() != null) { throw new AssertionError("Terrain material factor domains", failure.get()); }
+    }
+
+    private static void checkTerrainFactorDomains() throws ReflectiveOperationException {
+        var terrain = new GpuTerrain();
+        var target = GpuHeatGlow.buffer(64, 64, true);
+        var mesh = new Mesh(true, 4, 6, VertexAttribute.Position(), VertexAttribute.TexCoords(0));
+        mesh.setVertices(new float[] { -1, -1, 0, 0, 0, 1, -1, 0, 1, 0, 1, 1, 0, 1, 1, -1, 1, 0, 0, 1 });
+        mesh.setIndices(new short[] { 0, 1, 2, 2, 3, 0 });
+        var pixels = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
+        pixels.drawPixel(0, 0, 0x808080FF);
+        var raw = new Texture(pixels);
+        var color = GpuColorTexture.create(pixels, false);
+        pixels.drawPixel(0, 0, 0xFFFFFFFF);
+        var next = GpuColorTexture.create(pixels, false);
+        pixels.dispose();
+        var instances = new GpuTreeInstances((name, level) -> {
+            throw new AssertionError("This probe instances its supplied prop mesh");
+        });
+        try {
+            Field field = GpuTerrain.class.getDeclaredField("batch");
+            field.setAccessible(true);
+            ModelBatch batch = (ModelBatch) field.get(terrain);
+            var camera = new OrthographicCamera(2, 2);
+            camera.near = .1f;
+            camera.far = 4;
+            camera.position.set(0, 0, 2);
+            camera.lookAt(0, 0, 0);
+            camera.update();
+            var environment = new Environment();
+            float sample = 128f / 255, linearSample = GpuColor.linear(sample);
+            // No normals: isolate the terrain provider's factor/texture contract from BRDF integration.
+            for (boolean linear : new boolean[] { false, true }) {
+                var part = new Renderable();
+                part.meshPart.set("factor-domain", mesh, 0, 6, GL20.GL_TRIANGLES);
+                part.material = new Material(ColorAttribute.createDiffuse(.5f, .5f, .5f, 1),
+                      TextureAttribute.createDiffuse(color));
+                if (linear) { part.material.set(new GpuLinearColors()); }
+                part.environment = environment;
+                float factor = linear ? .5f : GpuColor.linear(.5f);
+                float expected = factor * linearSample * GpuSceneRadiance.SCALE;
+                checkTerrainFactorDraw(batch, camera, target, part, factor, expected, "plain prop; linear=" + linear);
+
+                instances.begin(GpuTreeInstances.Pass.COLOUR);
+                instances.add(part);
+                var gathered = new Array<Renderable>();
+                instances.getRenderables(gathered, null);
+                assertEquals(1, gathered.size);
+                Renderable instanced = gathered.first();
+                instanced.environment = environment;
+                var shader = checkTerrainFactorDraw(batch, camera, target, instanced, factor, expected,
+                      "instanced prop; linear=" + linear);
+                assertTrue(shader.program.hasAttribute("a_instance0"), "Exercise the actual instanced prop program");
+
+                part.material = part.material.copy();
+                part.material.set(new GpuLiquidShader.Frame(next), new FloatAttribute(GpuLiquidShader.Frame.BLEND, .25f));
+                shader = checkTerrainFactorDraw(batch, camera, target, part, factor,
+                      factor * (linearSample * .75f + .25f) * GpuSceneRadiance.SCALE,
+                      "generic animated liquid; linear=" + linear);
+                assertTrue(shader.program.hasUniform("u_liquidBlend"), "Exercise the actual generic liquid program");
+            }
+            var part = new Renderable();
+            part.meshPart.set("tactical-factor-domain", mesh, 0, 6, GL20.GL_TRIANGLES);
+            part.material = new Material(ColorAttribute.createDiffuse(.5f, .5f, .5f, 1));
+            part.environment = null;
+            // The texture has the same attribute mask in both domains. Revisit raw after sRGB to exercise reuse.
+            for (Texture texture : new Texture[] { raw, color, raw }) {
+                part.material.set(TextureAttribute.createDiffuse(texture));
+                boolean linear = texture == color;
+                float factor = linear ? GpuColor.linear(.5f) : .5f;
+                float expected = linear ? GpuColor.display(factor * linearSample) : factor * sample;
+                checkTerrainFactorDraw(batch, camera, target, part, factor, expected, "tactical page; sRGB=" + linear);
+            }
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        } finally {
+            instances.dispose();
+            raw.dispose();
+            color.dispose();
+            next.dispose();
+            mesh.dispose();
+            target.dispose();
+            terrain.dispose();
+        }
+    }
+
+    private static DefaultShader checkTerrainFactorDraw(ModelBatch batch, OrthographicCamera camera,
+          FrameBuffer target, Renderable part, float factor, float expected, String name) {
+        part.shader = null;
+        var shader = (DefaultShader) batch.getShaderProvider().getShader(part);
+        target.begin();
+        try {
+            Gdx.gl.glClearColor(0, 0, 0, 0);
+            Gdx.gl.glDepthMask(true);
+            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+            batch.begin(camera);
+            batch.render(part);
+            batch.end();
+            var uniform = BufferUtils.newFloatBuffer(4);
+            Gdx.gl.glGetUniformfv(shader.program.getHandle(), shader.program.getUniformLocation("u_diffuseColor"), uniform);
+            var output = BufferUtils.newFloatBuffer(4);
+            Gdx.gl.glReadPixels(32, 32, 1, 1, GL20.GL_RGBA, GL20.GL_FLOAT, output);
+            for (int channel = 0; channel < 3; channel++) {
+                assertEquals(factor, uniform.get(channel), .000001f, "Actual terrain factor upload: " + name);
+                assertEquals(expected, output.get(channel), .002f * Math.max(expected, .01f),
+                      "Actual terrain fragment output: " + name);
+            }
+        } finally { target.end(); }
+        return shader;
     }
 
     private static BoardScene scene() {
@@ -166,22 +301,20 @@ class GpuTerrainSubmissionSmokeTest {
     }
 
     private static void draw(GpuTerrain terrain, BoardCamera camera, ModelBatch units, List<ModelInstance> occupants,
-          FrameBuffer target) {
+          GpuSceneTestOutput target) {
         terrain.renderShadows(camera.camera, occupants);
-        target.begin();
-        // Transparent passes leave depth writes off. Clear every reference frame, including its depth buffer.
-        Gdx.gl.glDepthMask(true);
-        ScreenUtils.clear(.2f, .26f, .31f, 1, true);
+        target.begin(.2f, .26f, .31f, 1);
         terrain.render(camera.camera, false);
         units.begin(camera.camera);
         units.render(occupants, terrain.environment());
         units.end();
         terrain.renderTransparent(camera.camera);
+        target.display();
         terrain.render(camera.camera, true);
     }
 
     private static byte[] pixels(GpuTerrain terrain, BoardCamera camera, ModelBatch units, List<ModelInstance> occupants,
-          FrameBuffer target) {
+          GpuSceneTestOutput target) {
         draw(terrain, camera, units, occupants, target);
         byte[] pixels = ScreenUtils.getFrameBufferPixels(0, 0, Gdx.graphics.getBackBufferWidth(),
               Gdx.graphics.getBackBufferHeight(), false);

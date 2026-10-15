@@ -16,6 +16,11 @@ float heightBlend(float lower, float upper, float want) {
 // would start to beat against each other, to 60 cm; a fifth of the detail remains. Set once per fragment in main().
 float farDetail;
 
+// The largest normal variance among this fragment's mapped texels and faded detail (light-model.glsl): the normal
+// helpers raise it, and main() adds it to surfaceVariance once.
+float mapVariance = 0.0;
+float normalMapVariance(float shortened);
+
 // A map is a sampler2D of its own, or a layer of u_terrainLayers, the array that holds every sculpt map (one texture
 // unit for all of them; macOS gives a shader stage only 16). The helpers below take either; only the fetch differs.
 vec4 mapTexel(sampler2D map, vec2 uv) { return texture(map, uv); }
@@ -40,6 +45,9 @@ vec4 planar(float map, vec2 p, float tile, float mixer) {
 // the same relief over a longer distance: rotate its gradient back and divide its slope by the enlargement.
 vec4 planarNormal(vec4 near, vec4 far, float mixer) {
     vec3 a = near.rgb * 2.0 - 1.0, b = far.rgb * 2.0 - 1.0;
+    // The enlarged sample's slopes, and so its variance, shrink with the enlargement.
+    mapVariance = max(mapVariance, mix(normalMapVariance(length(a)), normalMapVariance(length(b)) / (2.37 * 2.37),
+          mixer));
     b = normalize(vec3(b.xy * TURN / 2.37, b.z));
     vec4 result = vec4(mix(a, b, mixer), mix(near.a, far.a, mixer));
     return mix(result, vec4(0.0, 0.0, 1.0, result.a), farDetail);
@@ -62,6 +70,7 @@ vec3 upNormal(vec3 detail, vec3 face) {
 // expressed in world space. side weights the projection onto the YZ plane.
 vec3 wallNormal(vec4 x, vec4 y, vec3 face, float side) {
     vec3 nx = x.rgb * 2.0 - 1.0, ny = y.rgb * 2.0 - 1.0;
+    mapVariance = max(mapVariance, mix(normalMapVariance(length(ny)), normalMapVariance(length(nx)), side));
     vec3 wx = vec3(nx.z * face.x, nx.x * sign(face.x) + face.y, face.z - nx.y);
     vec3 wy = vec3(-ny.x * sign(face.y) + face.x, ny.z * face.y, face.z - ny.y);
     return normalize(mix(wy, wx, side));

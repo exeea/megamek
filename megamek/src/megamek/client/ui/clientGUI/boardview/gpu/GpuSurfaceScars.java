@@ -39,7 +39,9 @@ final class GpuSurfaceScars implements Disposable {
     /** Where a sculpted terrain shader takes the scar helpers (GpuTerrain adds them there). */
     static final String SCULPT_HELPERS = "// sculpt-material-functions";
     /** Where a model shader takes them. */
-    static final String MODEL_SURFACE = "vec3 modelSurface(vec3 albedo, vec3 emission) {";
+    static final String MODEL_SURFACE = "vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 view) {";
+    /** The mapped frame's derivative work must precede the scar coverage discard. */
+    static final String FRAME_READY = "// surface-frame-ready";
     private static boolean warnedUnsupported;
     static final class Marking extends Attribute {
         static final long TYPE = register("boardSurfaceScar");
@@ -102,11 +104,13 @@ final class GpuSurfaceScars implements Disposable {
         if (!sculpt) {
             String helpers = "#define GROUND_DAMAGE_FRAGMENT\n" + GpuGroundDamage.shaderSource()
                   + GpuShaderSource.read("scar-material.glsl");
-            source = source.replace("vec3 modelSurface(vec3 albedo, vec3 emission) {", helpers + "\nvec3 modelSurface(vec3 albedo, vec3 emission) {")
-                  .replace("vec3 normal = modelNormal();", "vec3 normal = modelNormal();\nfloat scarCavity = 1.0;\n"
-                        + "scarMaterial(surfaceScarMask, normalize(v_normal), albedo, 1.0, albedo, normal, scarCavity, roughness);\n");
+            source = source.replace(MODEL_SURFACE, helpers + "\n" + MODEL_SURFACE)
+                  .replace("normal = shadingNormal(normal, geometric, view);", "float scarCavity = 1.0;\n"
+                        + "scarMaterial(surfaceScarMask, normalize(v_normal), albedo, 1.0, albedo, normal, scarCavity, roughness);\n"
+                        + "normal = shadingNormal(normal, geometric, view);");
         }
-        return source.replace("void main() {", "void main() {\nsurfaceScarMask = surfaceScar();\nif (surfaceScarMask.r <= 0.0) discard;\n");
+        return source.replace(FRAME_READY, FRAME_READY
+              + "\nsurfaceScarMask = surfaceScar();\nif (surfaceScarMask.r <= 0.0) discard;\n");
     }
     int tileCount() { return tiles.size(); }
     int triangleCount() { return tiles.values().stream().mapToInt(page -> page.triangles).sum(); }

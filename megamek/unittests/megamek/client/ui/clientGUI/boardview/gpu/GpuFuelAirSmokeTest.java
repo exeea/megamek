@@ -12,7 +12,6 @@ import javax.imageio.ImageIO;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -23,9 +22,7 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -46,11 +43,11 @@ class GpuFuelAirSmokeTest {
             public void create() {
                 var volumes = new GpuExplosionEffects();
                 var blast = new GpuArtilleryBlast();
-                var batch = new ModelBatch();
+                var batch = new ModelBatch(GpuUnitShader.provider());
                 Model groundModel = null;
-                FrameBuffer buffer = null;
+                GpuSceneTestOutput buffer = null;
                 try {
-                    buffer = GpuAtmosphere.buffer(SIZE, SIZE, true);
+                    buffer = new GpuSceneTestOutput(SIZE, SIZE);
                     groundModel = new ModelBuilder().createBox(4000, 4000, 1,
                           new Material(ColorAttribute.createDiffuse(.36f, .38f, .33f, 1)),
                           VertexAttributes.Usage.Position);
@@ -107,7 +104,7 @@ class GpuFuelAirSmokeTest {
                         groundModel.dispose();
                     }
                     if (buffer != null) {
-                        buffer.dispose();
+                        buffer.close();
                     }
                     Gdx.app.exit();
                 }
@@ -119,7 +116,7 @@ class GpuFuelAirSmokeTest {
     }
 
     /** Three Arrow IV fuel-air rounds landing a hex apart: their volumes at every moment, and the drawing time. */
-    private static void budget(FrameBuffer buffer, ModelBatch batch, ModelInstance ground, PerspectiveCamera camera,
+    private static void budget(GpuSceneTestOutput buffer, ModelBatch batch, ModelInstance ground, PerspectiveCamera camera,
           GpuExplosionEffects volumes, GpuArtilleryBlast blast, float size, float hex) {
         Vector3[] centres = { new Vector3(-hex, 0, 0), new Vector3(0, hex * .8f, 0), new Vector3(hex, 0, 0) };
         int most = 0;
@@ -148,7 +145,7 @@ class GpuFuelAirSmokeTest {
     private static void fullScreen(ModelBatch batch, ModelInstance ground, GpuExplosionEffects volumes,
           GpuArtilleryBlast blast, float size, float hex) {
         int width = 1920, height = 1080;
-        FrameBuffer large = GpuAtmosphere.buffer(width, height, true);
+        GpuSceneTestOutput large = new GpuSceneTestOutput(width, height);
         try {
             var camera = new PerspectiveCamera(40, width, height);
             camera.position.set(0, -hex * 7, hex * 3.2f);
@@ -163,8 +160,7 @@ class GpuFuelAirSmokeTest {
                 long best = Long.MAX_VALUE;
                 int drawn = 0;
                 for (int repeat = 0; repeat < 3; repeat++) {
-                    large.begin();
-                    ScreenUtils.clear(new Color(.62f, .66f, .72f, 1), true);
+                    large.begin(.62f, .66f, .72f, 1);
                     batch.begin(camera);
                     batch.render(ground);
                     batch.end();
@@ -176,21 +172,20 @@ class GpuFuelAirSmokeTest {
                     volumes.render(camera);
                     Gdx.gl.glFinish();
                     best = Math.min(best, System.nanoTime() - start);
-                    large.end();
+                    large.scene().end();
                 }
                 timings.append(String.format(" %.2fs:%dv/%.1fms", moment, drawn, best / 1e6));
             }
             System.out.println("[FuelAir] R3 at 1920x1080:" + timings);
         } finally {
-            large.dispose();
+            large.close();
         }
     }
 
-    private static BufferedImage frame(FrameBuffer buffer, ModelBatch batch, ModelInstance ground,
+    private static BufferedImage frame(GpuSceneTestOutput buffer, ModelBatch batch, ModelInstance ground,
           PerspectiveCamera camera, GpuExplosionEffects volumes, Runnable enqueue) {
-        buffer.begin();
+        buffer.begin(.62f, .66f, .72f, 1);
         try {
-            ScreenUtils.clear(new Color(.62f, .66f, .72f, 1), true);
             batch.begin(camera);
             batch.render(ground);
             batch.end();
@@ -198,6 +193,7 @@ class GpuFuelAirSmokeTest {
             enqueue.run();
             volumes.render(camera);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            buffer.display();
             Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, SIZE, SIZE);
             try {
                 BufferedImage image = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_RGB);
@@ -211,7 +207,7 @@ class GpuFuelAirSmokeTest {
                 pixels.dispose();
             }
         } finally {
-            buffer.end();
+            buffer.pixels().end();
         }
     }
 }

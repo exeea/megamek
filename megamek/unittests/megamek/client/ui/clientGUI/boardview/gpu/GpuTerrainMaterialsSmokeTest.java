@@ -8,6 +8,7 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -16,6 +17,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -40,7 +42,7 @@ class GpuTerrainMaterialsSmokeTest {
             @Override
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
-                try {
+                try (var outputFrame = new GpuSceneTestOutput()) {
                     File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                     assertTrue(output.isDirectory() || output.mkdirs());
                     BoardCamera camera = new BoardCamera();
@@ -52,45 +54,31 @@ class GpuTerrainMaterialsSmokeTest {
                     terrain.setAtmosphere(BoardAtmosphere.lighting(settings));
 
                     // Grassland: the same south face as a two-level bank and as a three-level cliff.
-                    float[] bank = wallColor(terrain, camera, step(BoardScene.Surface.GRASS, 2, true), 2, output, "bank");
-                    float[] cliff = wallColor(terrain, camera, step(BoardScene.Surface.GRASS, 3, true), 3, output, "cliff");
+                    float[] bank = wallColor(outputFrame, terrain, camera, step(BoardScene.Surface.GRASS, 2, true), 2, output, "bank");
+                    float[] cliff = wallColor(outputFrame, terrain, camera, step(BoardScene.Surface.GRASS, 3, true), 3, output, "cliff");
                     assertTrue(bank[0] / bank[2] > cliff[0] / cliff[2] + .15f,
                           "A two-level grassland step is an earth bank, a three-level one rock: bank "
                                 + ratio(bank) + ", cliff " + ratio(cliff));
 
                     // The same point on a cast face keeps its material when the wall grows taller.
                     BoardSculptTest.withTransitions(false, () -> {
-                        float[] low = sample(terrain, camera, step(BoardScene.Surface.CONCRETE, 2, true),
+                        float[] low = sample(outputFrame, terrain, camera, step(BoardScene.Surface.CONCRETE, 2, true),
                               facePoint(1.1f), output, "concrete-wall");
                         for (int height : new int[] { 3, 6 }) {
-                            float[] tall = sample(terrain, camera, step(BoardScene.Surface.CONCRETE, height, true),
+                            float[] tall = sample(outputFrame, terrain, camera, step(BoardScene.Surface.CONCRETE, height, true),
                                   facePoint(1.1f), output, "concrete-wall-" + height);
                             assertEquals(luminance(low), luminance(tall), .08f,
                                   "The foot stays cast concrete: low " + ratio(low) + ", tall " + ratio(tall));
                         }
                     });
-                    sample(terrain, camera, step(BoardScene.Surface.CONCRETE, 2, true),
+                    sample(outputFrame, terrain, camera, step(BoardScene.Surface.CONCRETE, 2, true),
                           facePoint(1), output, "concrete-slope");
 
-                    // Rain darkens every exposed family except snow.
-                    for (BoardScene.Surface family : BoardScene.Surface.values()) {
-                        BoardScene scene = step(family, 3, true);
-                        terrain.setWetness(0);
-                        float[] dry = wallColor(terrain, camera, scene, 3, output, null);
-                        terrain.setWetness(1);
-                        float[] wet = wallColor(terrain, camera, scene, 3, output, null);
-                        terrain.setWetness(0);
-                        float darker = luminance(dry) - luminance(wet);
-                        if (family == BoardScene.Surface.SNOW) {
-                            assertEquals(0, darker, .002f, "Snow never takes the liquid rain film");
-                        } else {
-                            assertTrue(darker > .01f, family + " cliffs darken in rain: " + darker);
-                        }
-                    }
+                    checkRainAbsorption(outputFrame, camera, settings);
 
                     // Special ground art keeps its own texture on its sculpted top.
-                    float[] green = topColor(terrain, camera, step(BoardScene.Surface.GRASS, 3, false, 0xff30b030));
-                    float[] red = topColor(terrain, camera, step(BoardScene.Surface.GRASS, 3, false, 0xffb03030));
+                    float[] green = topColor(outputFrame, terrain, camera, step(BoardScene.Surface.GRASS, 3, false, 0xff30b030));
+                    float[] red = topColor(outputFrame, terrain, camera, step(BoardScene.Surface.GRASS, 3, false, 0xffb03030));
                     assertTrue(red[0] - green[0] > .1f && green[1] - red[1] > .1f,
                           "Retinted special art must retint its top: green " + ratio(green) + ", red " + ratio(red));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -103,6 +91,45 @@ class GpuTerrainMaterialsSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Sculpted materials", failure.get()); }
+    }
+
+    /** Wet pigment darkens even when a view-dependent reflection makes the final pixel brighter. */
+    private static void checkRainAbsorption(GpuSceneTestOutput outputFrame, BoardCamera camera,
+          BoardAtmosphere.Settings settings) {
+        var manager = new GpuShaderManager();
+        try {
+            manager.run(() -> {
+                String sculpt = GpuShaderSource.readDisk("terrain-sculpt.frag");
+                String result = "vec3 result = albedo + emission;";
+                assertTrue(sculpt.contains(result), "The absorption probe must read completed material albedo");
+                var changed = manager.apply(Map.of("terrain-sculpt.frag", sculpt.replace(result,
+                      result + "\n#ifdef lightingFlag\nresult = pigment;\n#endif\n")));
+                assertTrue(changed.success(), changed.message());
+                GpuTerrain probe = new GpuTerrain();
+                try {
+                    probe.setAtmosphere(BoardAtmosphere.lighting(settings));
+                    for (BoardScene.Surface family : BoardScene.Surface.values()) {
+                        BoardScene scene = step(family, 3, true);
+                        probe.setWetness(0);
+                        float[] dry = sample(outputFrame, probe, camera, scene, facePoint(1.5f), null, null, true);
+                        probe.setWetness(1);
+                        float[] wet = sample(outputFrame, probe, camera, scene, facePoint(1.5f), null, null, true);
+                        float baseline = luminance(dry);
+                        assertTrue(baseline > .01f, family + " must expose actual pigment in the sampled face");
+                        float retained = luminance(wet) / baseline;
+                        if (family == BoardScene.Surface.SNOW) {
+                            assertEquals(1, retained, .002f, "Snow never takes the liquid rain film");
+                        } else {
+                            // The authored porous-material range absorbs 11-18% at full rain. A relative linear
+                            // bound is independent of albedo calibration, exposure, sky color and specular sheen.
+                            assertTrue(retained >= .815f && retained <= .895f,
+                                  family + " rain absorption must retain 82-89% of linear pigment: " + retained);
+                        }
+                        System.out.println(family + " rain pigment retained=" + retained);
+                    }
+                } finally { probe.dispose(); }
+            });
+        } finally { manager.close(); }
     }
 
     /** Rows 0-2 stand {@code levels} above rows 3-5, so the step's face looks south, toward the default camera. */
@@ -127,9 +154,9 @@ class GpuTerrainMaterialsSmokeTest {
     }
 
     /** Mid-height of the face between hexes (2, 2) and (2, 3), averaged over a small window. */
-    private static float[] wallColor(GpuTerrain terrain, BoardCamera camera, BoardScene scene, int levels, File output,
-          String name) {
-        return sample(terrain, camera, scene, facePoint(levels * .5f), output, name);
+    private static float[] wallColor(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera,
+          BoardScene scene, int levels, File output, String name) {
+        return sample(outputFrame, terrain, camera, scene, facePoint(levels * .5f), output, name);
     }
 
     /** The middle of the logical edge between hexes (2, 2) and (2, 3), {@code levels} above the foot. */
@@ -139,20 +166,41 @@ class GpuTerrainMaterialsSmokeTest {
         return edge;
     }
 
-    private static float[] topColor(GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
-        return sample(terrain, camera, scene, BoardGeometry.center(new Coords(2, 1), 3), null, null);
+    private static float[] topColor(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
+        return sample(outputFrame, terrain, camera, scene, BoardGeometry.center(new Coords(2, 1), 3), null, null);
     }
 
-    private static float[] sample(GpuTerrain terrain, BoardCamera camera, BoardScene scene, Vector3 point, File output,
-          String name) {
+    private static float[] sample(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera,
+          BoardScene scene, Vector3 point, File output, String name) {
+        return sample(outputFrame, terrain, camera, scene, point, output, name, false);
+    }
+
+    private static float[] sample(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera,
+          BoardScene scene, Vector3 point, File output, String name, boolean radiance) {
         terrain.update(scene);
         camera.center(point);
         terrain.renderShadows(camera.camera, List.of());
-        ScreenUtils.clear(.4f, .5f, .6f, 1, true);
+        outputFrame.begin(.4f, .5f, .6f, 1);
         terrain.render(camera.camera, false);
         terrain.renderTransparent(camera.camera);
+        outputFrame.display();
         if (name != null) { GpuBoardTestUi.capture(new File(output, "terrain-materials-" + name + ".png")); }
         Vector3 screen = camera.camera.project(new Vector3(point));
+        if (radiance) {
+            int count = (2 * WINDOW + 1) * (2 * WINDOW + 1);
+            var pixels = BufferUtils.newFloatBuffer(count * 4);
+            outputFrame.scene().bind();
+            Gdx.gl.glReadPixels((int) screen.x - WINDOW, (int) screen.y - WINDOW, 2 * WINDOW + 1, 2 * WINDOW + 1,
+                  GL20.GL_RGBA, GL20.GL_FLOAT, pixels);
+            outputFrame.pixels().bind();
+            float[] sum = new float[3];
+            for (int i = 0; i < count; i++) {
+                for (int channel = 0; channel < 3; channel++) {
+                    sum[channel] += pixels.get(i * 4 + channel) / (count * GpuSceneRadiance.SCALE);
+                }
+            }
+            return sum;
+        }
         Pixmap pixels = ScreenUtils.getFrameBufferPixmap((int) screen.x - WINDOW, (int) screen.y - WINDOW,
               2 * WINDOW + 1, 2 * WINDOW + 1);
         try {

@@ -136,7 +136,7 @@ final class GpuExplosionEffects implements Disposable {
         if (count == 0) { return; }
         if (shader == null) {
             shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU explosion",
-                  GpuShaderSource.read("explosion.vert"), GpuShaderSource.read("explosion.frag")), next -> shader = next);
+                  GpuShaderSource.read("explosion.vert"), GpuEffectBatch.fragment("explosion.frag")), next -> shader = next);
             // The same unit cube bounds every analytic volume. Allocate/upload once, then move it with uniforms.
             proxy = new Mesh(true, 8, 36, VertexAttribute.Position());
             proxy.setVertices(new float[] {
@@ -169,7 +169,7 @@ final class GpuExplosionEffects implements Disposable {
             shader.setUniformi("u_depth", 0);
             for (int i = 0; i < count; i++) {
                 Volume volume = volumes[i];
-                float reach = volume.radius * (1 + volume.stretch) * (1 + volume.elongation);
+                float reach = volume.radius * (1 + volume.stretch) * (1 + Math.max(0, volume.elongation));
                 if (!camera.frustum.sphereInFrustum(volume.center, reach)) { continue; }
                 shader.setUniformf("u_centerRadius", volume.center.x, volume.center.y, volume.center.z, volume.radius);
                 shader.setUniformf("u_stretch", volume.stretch);

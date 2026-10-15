@@ -56,8 +56,8 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     position = root + curve + side * samplePoint.x * width * (1.0 - t) * growth;
     normal = normalize(cross(side, tangent));
     float tone = grassRandom(seed + 71u);
-    color = vec4(mix(vec3(.24, .30, .10), vec3(.44, .48, .21), tone), 1.0);
-    color.rgb = mix(color.rgb, vec3(.18, .14, .08), scar * .75);
+    color = vec4(mix(toLinear(vec3(.24, .30, .10)), toLinear(vec3(.44, .48, .21)), tone), 1.0);
+    color.rgb = mix(color.rgb, toLinear(vec3(.18, .14, .08)), scar * .75);
     v_coverData = vec2(height, t);
     v_coverRoot = root.xy / u_worldMetre;
     return true;

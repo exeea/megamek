@@ -21,6 +21,8 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Cursor.SystemCursor;
 import com.badlogic.gdx.graphics.GL20;
@@ -29,6 +31,8 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.glutils.ImmediateModeRenderer20;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
@@ -55,6 +59,7 @@ import megamek.common.board.Coords;
 import megamek.common.units.Entity;
 import megamek.common.weapons.handlers.AreaEffectHelper;
 import megamek.logging.MMLogger;
+import org.lwjgl.glfw.GLFW;
 
 /** GPU board and Scene2D controls. The source remains the sole bridge to the existing client. */
 class GpuBattleView extends ApplicationAdapter {
@@ -140,6 +145,9 @@ class GpuBattleView extends ApplicationAdapter {
     private final Map<String, BoardScene.LocationDamage> unitDamage = new HashMap<>();
     private final Map<Integer, KeyCommandBind> cameraKeys = new HashMap<>();
     private final BoardInput boardInput = new BoardInput();
+    final FullscreenKey fullscreenKey = new FullscreenKey();
+    /** The window's bounds before Alt+Enter made it fullscreen; the next Alt+Enter restores them. */
+    private GpuWindowBounds windowed;
     /** Render-thread snapshot of modifiers delivered to the separate Swing tools window. */
     private final List<Hover> hover = new ArrayList<>();
     private GpuTerrain terrain;
@@ -156,6 +164,8 @@ class GpuBattleView extends ApplicationAdapter {
     private ModelBatch unitBatch;
     private SpriteBatch annotationBatch;
     private ShapeRenderer lines;
+    private ShapeRenderer tethers;
+    private ShaderProgram tetherShader;
     /** The HUD; its skin also holds the hex labels' font. */
     private GpuBoardHud ui;
     private GpuBoardSkin theme;
@@ -250,7 +260,7 @@ class GpuBattleView extends ApplicationAdapter {
     private void createView() {
         if (source == null) {
             createLoadingStage();
-            Gdx.input.setInputProcessor(new InputMultiplexer(loadingStage));
+            Gdx.input.setInputProcessor(new InputMultiplexer(fullscreenKey, loadingStage));
             return;
         }
         createBoard();
@@ -305,7 +315,7 @@ class GpuBattleView extends ApplicationAdapter {
         boardCamera.terrainHit = ray -> scene == null || terrain == null ? null : terrain.selectionHit(scene, ray);
         markers = new GpuMarkers();
         if (source.isGameplay()) { markers.prepareModels(); }
-        unitTextures = new GpuTextures<>();
+        unitTextures = new GpuTextures<>(false, true);
         overlay = new GpuBoardOverlay();
         // One skin for the window: the loading screen's, when it showed, becomes the HUD's (M1 row 1). The loading
         // screen borrows it again while the terrain builds.
@@ -313,6 +323,8 @@ class GpuBattleView extends ApplicationAdapter {
         loadingTheme = null;
         unitBases = new GpuUnitBases(theme.skin);
         tuning = new GpuBoardTuning(theme.skin, source, boardCamera);
+        // The switch resizes and redraws the window: after the HUD's event, not inside it.
+        tuning.onDisplayMode(fullscreen -> Gdx.app.postRunnable(() -> setFullscreen(fullscreen)));
         // The HUD draws with the view's batch, which it does not own: the battle HUD over a game, the map tools over
         // the board editor and the map preview. The batch outlives an asset reload, which recreates the renderers.
         annotationBatch = new SpriteBatch();
@@ -341,17 +353,17 @@ class GpuBattleView extends ApplicationAdapter {
             @Override
             public boolean keyDown(int key) {
                 boardInput.finishElevationScroll();
-                return boardInput.keyDown(key);
+                return fullscreenKey.keyDown(key) || boardInput.keyDown(key);
             }
 
             @Override
             public boolean keyUp(int key) {
-                return boardInput.keyUp(key);
+                return fullscreenKey.keyUp(key) || boardInput.keyUp(key);
             }
 
             @Override
             public boolean keyTyped(char character) {
-                return boardInput.keyTyped(character);
+                return fullscreenKey.keyTyped(character) || boardInput.keyTyped(character);
             }
         });
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -371,6 +383,12 @@ class GpuBattleView extends ApplicationAdapter {
         traceOverlay = new GpuTraceOverlay();
         editorPreview = new GpuEditorPreview();
         lines = new ShapeRenderer();
+        tetherShader = GpuShaderManager.program(() -> GpuGlsl.compile("Scene tethers", "",
+              GpuShaderSource.read("scene-lines.vert"), GpuShaderSource.read("scene-lines.frag")), shader -> {
+                  tetherShader = shader;
+                  ((ImmediateModeRenderer20) tethers.getRenderer()).setShader(shader);
+              });
+        tethers = new ShapeRenderer(2000, tetherShader);
     }
 
     /** Render-thread only. Null released owners so a failed shader compile can be retried safely. */
@@ -389,6 +407,8 @@ class GpuBattleView extends ApplicationAdapter {
         if (traceOverlay != null) { traceOverlay.dispose(); traceOverlay = null; }
         if (editorPreview != null) { editorPreview.dispose(); editorPreview = null; }
         if (lines != null) { lines.dispose(); lines = null; }
+        if (tethers != null) { tethers.dispose(); tethers = null; }
+        if (tetherShader != null) { GpuShaderManager.dispose(tetherShader); tetherShader = null; }
         attackEffects.dispose();
         designators.dispose();
         starShells.dispose();
@@ -420,6 +440,7 @@ class GpuBattleView extends ApplicationAdapter {
         layoutPixelHeight = pixelHeight;
         layoutScale = scale;
         layoutPreference = preference;
+        tuning.windowPixels(pixelWidth, pixelHeight);
         ui.resize(width, height, scale);
         // The board fills the window; the HUD's panels float over it (rebuild plan A.1 A1).
         boardCamera.resize(width, height, scene, scale);
@@ -555,6 +576,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (scene != null && (boardGeneration != frame.boardGeneration() || scene.boardId() != frame.scene().boardId() || scene.width() != frame.scene().width()
               || scene.height() != frame.scene().height())) {
             terrain.boardChanged();
+            atmosphere.resetContrast();
             playback.clear();
             history.clear();
             animators.clear();
@@ -593,8 +615,9 @@ class GpuBattleView extends ApplicationAdapter {
         // The Tactical View has clear air and its one fixed light: no clouds, fog, haze or weather.
         atmosphere.configure(boardCamera.tactical() ? BoardAtmosphere.DEFAULTS : atmosphereSettings);
         atmosphere.setOptions(tuning.atmosphereOptions());
+        atmosphere.setAntiAliasing(tuning.antiAliasing());
         // Material readiness includes live lighting/cloud flags, before any visible terrain is submitted.
-        atmosphere.updateLight(boardCamera.camera, boardCamera.tactical());
+        atmosphere.updateLight(boardCamera);
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
         terrain.setGravity(atmosphereSettings.gravity());
@@ -657,6 +680,7 @@ class GpuBattleView extends ApplicationAdapter {
         attackEffects.setFuelAirStrength(AreaEffectHelper.fuelAirStrength(atmosphereSettings.pressure(), false));
         terrain.setNormalMaps(tuning.normalMaps());
         terrain.setTerrainWear(tuning.terrainWear());
+        terrain.setElevationGrading(tuning.elevationGrading());
         // The Tactical View hides what has no gameplay value, by one draw rule and without a rebuild.
         terrain.setFluffHidden(boardCamera.tactical());
         terrain.setGrass(tuning.grass());
@@ -774,6 +798,7 @@ class GpuBattleView extends ApplicationAdapter {
         // which can leave Free Flight by itself (its keys, the Tactical View).
         renderStage("board-space HUD");
         tuning.syncCamera();
+        tuning.showFullscreen(Gdx.graphics.isFullscreen());
         updateHud(frame);
         if (boardCamera.tactical()) {
             // After the HUD update, which settles the board overlay's acting unit and focused enemy.
@@ -782,7 +807,7 @@ class GpuBattleView extends ApplicationAdapter {
                   source.uiPreferences().overlays().statusBadges());
         }
         renderStage("cutaways and light");
-        atmosphere.updateLight(boardCamera.camera, boardCamera.tactical());
+        atmosphere.updateLight(boardCamera);
         terrain.setAtmosphere(atmosphere.lighting());
         terrain.animate(Gdx.graphics.getDeltaTime(), units, tuning.buildingOpacity(),
               ui.hit(Gdx.input.getX(), Gdx.input.getY()) ? null : hovered, hoverFloorZ());
@@ -793,7 +818,7 @@ class GpuBattleView extends ApplicationAdapter {
         renderStage("opaque terrain");
         ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
         atmosphere.begin((int) boardCamera.camera.viewportWidth, (int) boardCamera.camera.viewportHeight,
-              Gdx.graphics.getDeltaTime());
+              BoardCamera.renderScale, Gdx.graphics.getDeltaTime());
         if (wireframeView) {
             wireframe.fill(boardCamera.camera, terrain);
         } else {
@@ -811,7 +836,7 @@ class GpuBattleView extends ApplicationAdapter {
         renderStage("transparent effects");
         renderTethers();
         if (!wireframeView) { terrain.renderTransparent(boardCamera.camera); }
-        Color smokeLight = atmosphere.particleLight();
+        Color smokeLight = atmosphere.sceneParticleLight();
         terrainEffects.update(scene, groundSurfaces, atmosphereSettings.effects(), animationSeconds());
         effectDepth.begin();
         // Illumination rounds light the opaque scene before smoke and fire are drawn over it.
@@ -837,11 +862,12 @@ class GpuBattleView extends ApplicationAdapter {
             waterImpacts.render(boardCamera.camera, scene, motions, unitInstances, smokeLight, playback.attachment());
         }
         if (boardCamera.tactical()) { unitBases.renderBadges(boardCamera.camera); }
-        renderStage("atmosphere composite");
-        atmosphere.end(boardCamera.camera, terrain, scene, 0, fieldOfView, !wireframeView);
-        if (wireframeView) { wireframe.lines(boardCamera.camera, terrain); }
         renderStage("weather particles");
         atmosphere.renderWeather(boardCamera.camera, scene);
+        renderStage("atmosphere composite");
+        atmosphere.end(boardCamera.camera, terrain, scene, 0, fieldOfView, !wireframeView);
+        if (!boardCamera.tactical()) { atmosphere.prepareContrast(boardCamera.camera, scene, 0); }
+        if (wireframeView) { wireframe.lines(boardCamera.camera, terrain); }
         renderStage("unit outlines");
         unitVisibility.render(boardCamera.camera, outlined, atmosphere.depthTexture(), 0, seeThrough, layoutScale,
               unitBounds, terrain.columns() || boardCamera.tactical() ? null : terrainEffects.opacityTexture(),
@@ -861,7 +887,7 @@ class GpuBattleView extends ApplicationAdapter {
               source.uiPreferences().overlays());
         // Outside the Tactical View the grid over the finished scene; inside it, the ground layer drew it.
         if (!boardCamera.tactical()) {
-            hexGrid.render(boardCamera, scene, terrain.columns(), false, GpuBattleStatus.Arc.NONE);
+            hexGrid.render(boardCamera, scene, terrain.columns(), false, GpuBattleStatus.Arc.NONE, false, atmosphere);
         }
         renderHexText();
         overlay.renderGhost(boardCamera.camera, shownUnit);
@@ -1344,6 +1370,7 @@ class GpuBattleView extends ApplicationAdapter {
             BoardScene.Tile standing = BoardGeometry.tile(scene, position.x, position.y);
             ((Color) instance.userData).a = standing == null ? 0 : GpuUnitVisibility.ownHex(standing);
             if (authored && appearance == null && !unit.image().equals(unitTints.get(key))) {
+                // The sprite average and imported paint factor share linear RGB; normalize that pigment once.
                 Color tint = GpuCutout.averageColor(unit.image());
                 float brightest = Math.max(tint.r, Math.max(tint.g, tint.b));
                 if (brightest > 0.01f) {
@@ -1635,9 +1662,9 @@ class GpuBattleView extends ApplicationAdapter {
         Vector3 center = new Vector3();
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
         Gdx.gl.glDepthMask(false);
-        lines.setProjectionMatrix(boardCamera.camera.combined);
-        lines.begin(ShapeRenderer.ShapeType.Line);
-        lines.setColor(TETHER_COLOR);
+        tethers.setProjectionMatrix(boardCamera.camera.combined);
+        tethers.begin(ShapeRenderer.ShapeType.Line);
+        tethers.setColor(TETHER_COLOR);
         for (BoardScene.Unit unit : scene.units()) {
             BoardScene.Tile tile = scene.tile(unit.location().coords());
             ModelInstance instance = unitInstances.get(unit.id() + ":" + unit.part());
@@ -1654,7 +1681,7 @@ class GpuBattleView extends ApplicationAdapter {
             if (ruler.end() != null) { renderRulerTether(ruler.end(), ruler.endHeight()); }
         }
         if (source.isEditor() && source.editorState() != null && terrain != null) { renderObjectTethers(source.editorState()); }
-        lines.end();
+        tethers.end();
         Gdx.gl.glDepthMask(true);
     }
 
@@ -1786,7 +1813,7 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     private void renderTether(Vector3 center, float ground) {
-        if (center.z > ground) { lines.line(center.x, center.y, center.z, center.x, center.y, ground); }
+        if (center.z > ground) { tethers.line(center.x, center.y, center.z, center.x, center.y, ground); }
     }
 
     /** One render-only selection shared by color, depth, outlines and shadows. */
@@ -1972,7 +1999,7 @@ class GpuBattleView extends ApplicationAdapter {
         var overlays = source.uiPreferences().overlays();
         hexText.update(scene, theme.skin.getFont("default-font"), theme.skin.getFont(GpuBoardSkin.OUTLINE_FONT),
               terrain::roofBounds, boardCamera.tactical(), overlays.hexTypes(), overlays.hexLabelOutline());
-        hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0);
+        hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0, atmosphere);
     }
 
     /** The camera zoom of {@code notches} of the mouse wheel, on the board and on the minimap. */
@@ -2844,6 +2871,66 @@ class GpuBattleView extends ApplicationAdapter {
             case Input.Keys.MENU -> KeyEvent.VK_CONTEXT_MENU;
             default -> KeyEvent.VK_UNDEFINED;
         };
+    }
+
+    /**
+     * Alt+Enter (either Alt, Enter or numpad Enter), ahead of the HUD and the game's key bindings: its press, the
+     * character the window types for it and for each repeat, and its release reach neither.
+     */
+    final class FullscreenKey extends InputAdapter {
+        private int held = -1;
+
+        @Override
+        public boolean keyDown(int key) {
+            if (key != Input.Keys.ENTER && key != Input.Keys.NUMPAD_ENTER) { return false; }
+            held = (modifiers() & InputEvent.ALT_DOWN_MASK) != 0 ? key : -1;
+            if (held < 0) { return false; }
+            toggleFullscreen();
+            return true;
+        }
+
+        @Override
+        public boolean keyUp(int key) {
+            if (key != held) { return false; }
+            held = -1;
+            return true;
+        }
+
+        @Override
+        public boolean keyTyped(char character) {
+            return held >= 0 && character == '\n';
+        }
+    }
+
+    /** The tuning's Display mode: the same switch as the key's, when the window is not already in that mode. */
+    private void setFullscreen(boolean fullscreen) {
+        if (Gdx.graphics.isFullscreen() != fullscreen) { toggleFullscreen(); }
+    }
+
+    /**
+     * Fullscreen on the window's monitor in that monitor's display mode, or back to the windowed bounds before. The
+     * resize reaches {@link #resize} and every size-dependent target follows the new back buffer.
+     */
+    private void toggleFullscreen() {
+        if (!(Gdx.graphics instanceof Lwjgl3Graphics graphics)) { return; }
+        Lwjgl3Window window = graphics.getWindow();
+        if (graphics.isFullscreen()) {
+            if (windowed != null) {
+                graphics.setWindowedMode(windowed.width(), windowed.height());
+                window.setPosition(windowed.x(), windowed.y());
+                if (windowed.maximized()) { window.maximizeWindow(); }
+            }
+            return;
+        }
+        // The monitor holds the window now; a maximized window then returns to the normal bounds it restores to.
+        var monitor = graphics.getMonitor();
+        long handle = window.getWindowHandle();
+        boolean maximized = GLFW.glfwGetWindowAttrib(handle, GLFW.GLFW_MAXIMIZED) == GLFW.GLFW_TRUE;
+        if (maximized) { window.restoreWindow(); }
+        int[] width = new int[1], height = new int[1];
+        GLFW.glfwGetWindowSize(handle, width, height);
+        windowed = new GpuWindowBounds(window.getPositionX(), window.getPositionY(), width[0], height[0], maximized);
+        graphics.setFullscreenMode(graphics.getDisplayMode(monitor));
     }
 
     @Override

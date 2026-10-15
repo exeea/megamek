@@ -126,13 +126,16 @@ class GpuEditorTextKeysTest {
               /* "Neither" */ label("Shown text"); key("Prefix." + id + "Field.suffix");
               throw new IllegalStateException("Developer text");
               char quote = '"'; text("Escaped \\" quote"); join(" \\u00B7 ");
+              GpuShaderManager.provider("Shader diagnostic", factory);
               """);
-        assertEquals(List.of("Shown text", "Prefix.", "Field.suffix", "Developer text", "Escaped \\\" quote", " · "),
+        assertEquals(List.of("Shown text", "Prefix.", "Field.suffix", "Developer text", "Escaped \\\" quote", " · ",
+              "Shader diagnostic"),
               found.stream().map(Literal::text).toList());
         assertTrue(readsAsText("Shown text") && readsAsText("Undo") && !readsAsText("editor-tool-select") && !readsAsText(" · "));
         assertEquals('+', found.get(1).after());
         assertEquals('+', found.get(2).before());
         assertTrue(developerText(found.get(3)));
+        assertTrue(developerText(found.get(6)));
         assertFalse(developerText(found.getFirst()));
         assertEquals(2, found.getFirst().line());
     }
@@ -156,9 +159,10 @@ class GpuEditorTextKeysTest {
               && (literal.chars().anyMatch(Character::isWhitespace) || literal.matches("\\p{Lu}\\p{Ll}.*"));
     }
 
-    /** An exception's or a log message's text, which the user never reads as UI. */
+    /** Developer diagnostics, including the shader provider's first argument naming its program. */
     private static boolean developerText(Literal literal) {
-        return literal.statement().contains("Exception(") || literal.statement().matches("(?s).*\\b(LOGGER|logger)\\..*");
+        return literal.statement().contains("Exception(") || literal.statement().matches("(?s).*\\b(LOGGER|logger)\\..*")
+              || literal.statement().matches("(?s).*\\bGpuShaderManager\\s*\\.\\s*provider\\s*\\(\\s*");
     }
 
     /** The string literals of {@code source} outside comments, in order. Text blocks are not expected here. */

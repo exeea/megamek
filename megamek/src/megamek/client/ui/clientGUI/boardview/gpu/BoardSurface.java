@@ -84,7 +84,7 @@ final class BoardSurface {
           BoardSurfaceBlend.Cover groundCover, boolean ultraSublevel) { }
 
     /** What of a hex further out can reach a hex's shape: through the water's shore, its level, liquid and ground. */
-    record Shape(int elevation, int waterDepth, BoardLiquid liquid, boolean detailedGround, BoardScene.Surface surface,
+    record Shape(int elevation, int waterDepth, boolean frozen, BoardLiquid liquid, boolean detailedGround, BoardScene.Surface surface,
           int roadExits, BoardRoad.Kind road, int cliffTopExits, boolean ultraSublevel) { }
 
     /** A hex's own geometry and its six neighbours', and the shapes of the hexes out to {@link #SHORE_RINGS}. */
@@ -125,7 +125,7 @@ final class BoardSurface {
 
     /** The hex's shape as a hex further out reads it, with the given water depth. */
     static Shape shape(BoardScene.Tile tile, int waterDepth) {
-        return new Shape(tile.elevation(), waterDepth, tile.liquid(), tile.detailedGround(), tile.surface(),
+        return new Shape(tile.elevation(), waterDepth, tile.frozen(), tile.liquid(), tile.detailedGround(), tile.surface(),
               tile.wayExits(), tile.road(), tile.cliffTopExits(), tile.ultraSublevel());
     }
 
@@ -363,6 +363,16 @@ final class BoardSurface {
     /** Edges a fall pours over off the board's edge, as a bit mask; see {@link #bottomless}. */
     private int offBoard;
     final List<Side> waterfalls = new ArrayList<>();
+    /** Finished on the terrain worker, then borrowed by rendering and picking without retaining this builder. */
+    private List<GpuFrozenWaterfall.Geometry> frozenFalls;
+
+    List<GpuFrozenWaterfall.Geometry> frozenFalls() {
+        if (frozenFalls == null) {
+            frozenFalls = tile.frozen()
+                  ? waterfalls.stream().map(drop -> GpuFrozenWaterfall.geometry(this, drop, lod)).toList() : List.of();
+        }
+        return frozenFalls;
+    }
     final int ramps;
     /** Curved road cuts/fills, shared by the terrain triangles and their shading. Support samples the triangles. */
     private final List<RoadRamp> roadRamps = new ArrayList<>();
@@ -419,7 +429,8 @@ final class BoardSurface {
     /** Finished water geometry only: no scene, procedural relief cache or neighbouring surface is retained. */
     record WaterGeometry(Coords coords, TerrainLod lod, int ramps, List<Face> faces, List<Vector3> water,
           List<Face> cliffWater, List<Vector3> outline, List<Face> waterFaces, Map<Integer, List<Vector3>> contacts,
-          List<Face> cutFaces, List<Side> waterfalls, List<Face> edgeTopography, int offBoard, int openMouths,
+          List<Face> cutFaces, List<Side> waterfalls, List<GpuFrozenWaterfall.Geometry> frozenFalls, List<Face> edgeTopography,
+          int offBoard, int openMouths,
           List<Face> rough, List<BoardRough.Placement> roughModels, List<Face> iceSlab, List<Face> iceBroken,
           List<Face> iceLeads,
           boolean graded, Vector3[] joinsA, Vector3[] joinsB, Crest[] crests, Vector3[] bedOutline,
@@ -430,7 +441,7 @@ final class BoardSurface {
     WaterGeometry waterGeometry() {
         return new WaterGeometry(tile.coords(), lod, ramps, List.copyOf(faces), List.copyOf(water),
               List.copyOf(cliffWater), List.copyOf(outline), List.copyOf(waterFaces), Map.copyOf(waterContacts),
-              List.copyOf(cutFaces), List.copyOf(waterfalls), List.copyOf(edgeTopography), offBoard, openMouths,
+              List.copyOf(cutFaces), List.copyOf(waterfalls), frozenFalls(), List.copyOf(edgeTopography), offBoard, openMouths,
               List.copyOf(rough), roughModels, List.copyOf(iceSlab), List.copyOf(iceBroken), List.copyOf(iceLeads),
               gradedWater, joinA.clone(), joinB.clone(), crests.clone(), bedOutline, waterline, crestLine, shoreCorners);
     }
@@ -457,6 +468,7 @@ final class BoardSurface {
         waterContacts.putAll(geometry.contacts());
         cutFaces.addAll(geometry.cutFaces());
         waterfalls.addAll(geometry.waterfalls());
+        frozenFalls = geometry.frozenFalls();
         edgeTopography.addAll(geometry.edgeTopography());
         offBoard = geometry.offBoard();
         openMouths = geometry.openMouths();
@@ -530,7 +542,7 @@ final class BoardSurface {
      * vertically above the bed's edge. Move only the outer ring: the bed and the stream's rounded interior stay put.
      */
     private void meetWetCliffs() {
-        if (waterFaces.isEmpty()) { return; }
+        if (waterFaces.isEmpty() || tile.frozen()) { return; }
         float base = tile.elevation() * BoardGeometry.level();
         boolean adjusted = false;
         for (int edge = 0; edge < 6; edge++) {
@@ -778,12 +790,11 @@ final class BoardSurface {
                         lip[edge] = fallLip(BoardGeometry.waterZ(tile),
                               BoardGeometry.waterZ(tile) - tuning().bottomlessLevels() * BoardGeometry.level());
                     }
-                } else if (!tile.frozen() && !neighbor.frozen() && tile.elevation() > neighbor.elevation()
-                      && !waterSlope(tile, neighbor)) {
-                    lip[edge] = fallLip(BoardGeometry.waterZ(tile), BoardGeometry.waterZ(neighbor));
+                } else if (tile.elevation() > neighbor.elevation() && !waterSlope(tile, neighbor)) {
+                    lip[edge] = fallLip(BoardGeometry.surfaceZ(tile), BoardGeometry.surfaceZ(neighbor));
                 }
-                plunge[edge] = neighbor != null && !tile.frozen() && !neighbor.frozen()
-                      && neighbor.elevation() > tile.elevation() && !waterSlope(tile, neighbor);
+                plunge[edge] = neighbor != null && neighbor.elevation() > tile.elevation()
+                      && !waterSlope(tile, neighbor);
             }
         }
         waterline = shoreline(scene, shore, rise, plunge, BoardGeometry.waterZ(tile));
@@ -826,7 +837,7 @@ final class BoardSurface {
         }
         if (tile.frozen()) {
             outline.addAll(List.of(waterline));
-            freeze(scene, shore);
+            freeze(scene, shore, surface, plunge);
         } else {
             // The water recedes from each crest; the sheet's lip curves back down over it.
             outline.addAll(List.of(waterline));
@@ -835,17 +846,18 @@ final class BoardSurface {
                 if (gradedWater) { slopingSurface(surface); }
                 else { polygon(surface, Finish.TOP, waterFaces); }
             }
-            for (int edge = 0; edge < 6; edge++) {
-                BoardScene.Tile other = neighbor(scene, edge);
-                if (crests[edge] != null) {
-                    // Off the board's edge a fall drops into nothing and fades out on its way down.
-                    float bottom = other == null ? BoardGeometry.waterZ(tile) - tuning().bottomlessLevels() * BoardGeometry.level()
-                          : BoardGeometry.waterZ(other);
-                    waterfalls.add(new Side(new Vector3(crests[edge].a()), new Vector3(crests[edge].b()), bottom,
-                          bottom, edge));
-                } else if (other == null) {
-                    cut(edge);
-                }
+        }
+        // Frozen falls retain the same crest, cliff and ownership as liquid falls; their renderer supplies solid ice.
+        for (int edge = 0; edge < 6; edge++) {
+            BoardScene.Tile other = neighbor(scene, edge);
+            if (crests[edge] != null) {
+                // Off the board's edge a fall drops into nothing and fades out on its way down.
+                float bottom = other == null ? BoardGeometry.waterZ(tile) - tuning().bottomlessLevels() * BoardGeometry.level()
+                      : BoardGeometry.surfaceZ(other);
+                waterfalls.add(new Side(new Vector3(crests[edge].a()), new Vector3(crests[edge].b()), bottom,
+                      bottom, edge));
+            } else if (other == null && !tile.frozen()) {
+                cut(edge);
             }
         }
     }
@@ -864,7 +876,7 @@ final class BoardSurface {
      * a lead with rubble. It shows its thickness wherever it ends. All of that is drawn only: support and picking
      * keep the waterline.
      */
-    private void freeze(BoardScene scene, float[] shore) {
+    private void freeze(BoardScene scene, float[] shore, Vector3[] surface, boolean[] plunge) {
         float scale = BoardGeometry.hexScale(), top = BoardGeometry.surfaceZ(tile), water = BoardGeometry.waterZ(tile);
         float bottom = water - ICE_DRAFT * scale;
         int n = waterline.length;
@@ -878,6 +890,8 @@ final class BoardSurface {
         // Outward is to the right of the contour's direction when it runs counter-clockwise.
         float outward = Math.signum(area);
         boolean[] ragged = new boolean[6], continuous = new boolean[6], iced = new boolean[6], broken = new boolean[6];
+        List<Vector3[]> impact = new ArrayList<>();
+        boolean[] impacted = new boolean[6];
         for (int edge = 0; edge < 6; edge++) {
             BoardScene.Tile other = neighbor(scene, edge);
             boolean level = shore[edge] == 0 && other != null && other.elevation() == tile.elevation();
@@ -886,7 +900,21 @@ final class BoardSurface {
             // Frozen land's ice runs down the bank to the slab; a cut edge there would split the sheet.
             iced[edge] = shore[edge] > 0 && other != null && other.frozen() && !other.liquid().present();
             // The board's edge cuts the slab straight, as it cuts all water.
-            broken[edge] = other != null && !continuous[edge] && !ragged[edge] && !iced[edge];
+            broken[edge] = other != null && crests[edge] == null && !plunge[edge]
+                  && !continuous[edge] && !ragged[edge] && !iced[edge];
+            if (plunge[edge] && !other.frozen() && !other.liquid().molten()) {
+                // Reuse the actual crest and completed sheet, including joined corners and stream bulges.
+                // The open source needs only its existing river layout, not detailed cliff/ground meshes.
+                BoardSurface upper = new BoardSurface(scene, other, false, lod);
+                for (Side fall : upper.waterfalls) {
+                    if (!other.coords().translated(BoardGeometry.edgeDirection(fall.edge())).equals(tile.coords())) { continue; }
+                    Vector3[][] grid = GpuWaterfall.grid(upper, fall);
+                    Vector3[] landing = new Vector3[grid.length];
+                    for (int column = 0; column < grid.length; column++) { landing[column] = grid[column][grid[column].length - 1]; }
+                    impact.add(landing);
+                    impacted[edge] = true;
+                }
+            }
         }
         // Support: the waterline, straight edges by their corners alone.
         List<Vector3> support = new ArrayList<>();
@@ -894,55 +922,81 @@ final class BoardSurface {
             if (turns(slab[(i + n - 1) % n], slab[i], slab[(i + 1) % n])) { support.add(slab[i]); }
         }
         polygon(support.toArray(Vector3[]::new), Finish.ICE, faces);
+        // The drawn slab ends where the frozen curtain starts. Its logical support remains the original waterline.
+        for (int i = 0; i < n; i++) { slab[i] = new Vector3(surface[i].x, surface[i].y, top); }
         // Drawn: the waterline's samples, which the ragged margins share, and twice as many along broken shores.
         List<Vector3> base = new ArrayList<>();
         List<Integer> edges = new ArrayList<>();
         List<Boolean> onShore = new ArrayList<>();
+        int[] samples = new int[n];
         for (int i = 0; i < n; i++) {
             int edge = i / SHORE_SEGMENTS;
+            samples[i] = base.size();
             base.add(slab[i]);
             edges.add(edge);
             onShore.add(broken[edge] && (i % SHORE_SEGMENTS != 0 || broken[(edge + 5) % 6]));
-            if (broken[edge]) {
+            if (broken[edge] || impacted[edge]) {
                 base.add(new Vector3(slab[i]).lerp(slab[(i + 1) % n], .5f));
                 edges.add(edge);
-                onShore.add(true);
+                onShore.add(broken[edge]);
             }
         }
         int m = base.size();
         float[] recess = shoreBreak(onShore, scale);
         Vector3[] drawn = new Vector3[m];
+        boolean[] opened = new boolean[m];
         for (int k = 0; k < m; k++) {
             Vector3 before = base.get((k + m - 1) % m), after = base.get((k + 1) % m);
             Vector3 inward = new Vector3(before.y - after.y, after.x - before.x, 0).nor().scl(outward);
             drawn[k] = recess[k] == 0 ? base.get(k) : new Vector3(base.get(k)).mulAdd(inward, recess[k]);
+            Vector3 cleared = clearIceImpact(drawn[k], impact);
+            opened[k] = cleared != drawn[k];
+            drawn[k] = cleared;
         }
         List<Vector3> outline = new ArrayList<>();
         for (int k = 0; k < m; k++) {
-            if (ragged[edges.get(k)] || recess[k] > 0 || turns(drawn[(k + m - 1) % m], drawn[k], drawn[(k + 1) % m])) {
+            if (ragged[edges.get(k)] || recess[k] > 0 || opened[k]
+                  || turns(drawn[(k + m - 1) % m], drawn[k], drawn[(k + 1) % m])) {
                 outline.add(drawn[k]);
             }
         }
-        polygon(outline.toArray(Vector3[]::new), Finish.ICE, iceSlab);
+        if (impact.isEmpty()) { polygon(outline.toArray(Vector3[]::new), Finish.ICE, iceSlab); }
+        else {
+            // A narrow impact can cross a pre-existing ragged shore corner. Normalize that contour with the
+            // shared area tessellator; simple ear clipping can otherwise bridge across the whole opening.
+            Path2D.Float boundary = new Path2D.Float();
+            for (int i = 0; i < outline.size(); i++) {
+                Vector3 p = outline.get(i);
+                if (i == 0) { boundary.moveTo(p.x, p.y); } else { boundary.lineTo(p.x, p.y); }
+            }
+            boundary.closePath();
+            for (var triangle : BoardTacticalGeometry.flat(boundary, -1)) {
+                triangle.a().z = triangle.b().z = triangle.c().z = top;
+                iceFace(iceSlab, triangle.a(), triangle.b(), triangle.c(), Vector3.Z);
+            }
+        }
         Random random = new Random(tile.coords().getX() * 0x9E3779B97F4A7C15L ^ tile.coords().getY() * 0xC2B2AE3D27D4EB4FL);
         for (int k = 0; k < m; k++) {
             int edge = edges.get(k), next = (k + 1) % m;
-            if (continuous[edge] || iced[edge] || ragged[edge]) { continue; }
+            boolean pocket = opened[k] || opened[next];
+            if (!pocket && (continuous[edge] || iced[edge] || ragged[edge] || crests[edge] != null || plunge[edge])) { continue; }
             iceSkirt(iceBroken, drawn[k], drawn[next], bottom, outward);
-            if (recess[k] > 0 || recess[next] > 0) {
+            if (pocket || recess[k] > 0 || recess[next] > 0) {
                 Vector3 a = new Vector3(drawn[k].x, drawn[k].y, water), b = new Vector3(drawn[next].x, drawn[next].y, water);
                 Vector3 c = new Vector3(base.get(next).x, base.get(next).y, water);
                 Vector3 d = new Vector3(base.get(k).x, base.get(k).y, water);
-                iceFace(iceLeads, a, b, c, Vector3.Z);
-                iceFace(iceLeads, a, c, d, Vector3.Z);
+                List<Face> opening = pocket ? waterFaces : iceLeads;
+                iceFace(opening, a, b, c, Vector3.Z);
+                iceFace(opening, a, c, d, Vector3.Z);
             }
             // Rubble of the broken edge floats in the wider stretches of the lead.
-            if (recess[k] > 2.2f * scale && random.nextFloat() < .4f) {
+            if (!pocket && recess[k] > 2.2f * scale && random.nextFloat() < .4f) {
                 Vector3 centre = new Vector3(drawn[k]).lerp(base.get(k), .5f);
                 piece(centre, Math.min(.3f * recess[k], 1.4f * scale) * (.6f + .4f * random.nextFloat()),
                       water + .35f * scale, water - .8f * scale, random);
             }
         }
+        for (int i = 0; i < n; i++) { slab[i] = drawn[samples[i]]; }
         for (int edge = 0; edge < 6; edge++) {
             if (!ragged[edge]) { continue; }
             int first = edge * SHORE_SEGMENTS;
@@ -971,6 +1025,7 @@ final class BoardSurface {
                 float from = 1 - smooth(t / .3f), to = 1 - smooth((1 - t) / .3f);
                 margin[j] = new Vector3(point).mulAdd(out, BoardRelief.lerp(reach[k], reach[k + 1], along) * (1 - from - to))
                       .mulAdd(opening, from).mulAdd(closing, to);
+                margin[j] = clearIceImpact(margin[j], impact);
             }
             for (int i = 0; i < SHORE_SEGMENTS; i++) {
                 Vector3 a = slab[(first + i) % n], b = slab[(first + i + 1) % n];
@@ -979,8 +1034,35 @@ final class BoardSurface {
                 iceFace(iceBroken, b, margin[2 * i + 1], margin[2 * i + 2], Vector3.Z);
             }
             for (int j = 0; j + 1 < margin.length; j++) { iceSkirt(iceBroken, margin[j], margin[j + 1], bottom, outward); }
-            floes(margin, out, front);
+            // Leave the broken-open mouth clear rather than putting decorative floes back under its fall.
+            if (!opened[samples[first]] && !opened[samples[(first + SHORE_SEGMENTS) % n]]) { floes(margin, out, front); }
         }
+    }
+
+    /** Keep the ordered ice boundary just beyond the actual landing, with less than one tile pixel of clearance. */
+    private Vector3 clearIceImpact(Vector3 point, List<Vector3[]> impact) {
+        float dx = center.x - point.x, dy = center.y - point.y;
+        float length = (float) Math.hypot(dx, dy), fraction = 0, scale = BoardGeometry.hexScale();
+        if (length <= .0001f) { return point; }
+        float buffer = scale * (.5f + .3f * BoardRelief.noise(point.x / (5 * scale), point.y / (5 * scale)));
+        for (Vector3[] landing : impact) {
+            for (int index = 0; index + 1 < landing.length; index++) {
+                Vector3 a = landing[index], b = landing[index + 1];
+                float sx = b.x - a.x, sy = b.y - a.y, cross = dx * sy - dy * sx;
+                if (Math.abs(cross) <= .000001f) { continue; }
+                float ax = a.x - point.x, ay = a.y - point.y;
+                float along = (ax * dy - ay * dx) / cross;
+                float inward = (ax * sy - ay * sx) / cross;
+                // Close the narrow opening around the finite sheet ends too; otherwise the next untouched
+                // contour sample cuts a diagonal wedge back across the endpoint.
+                float cap = scale / (float) Math.hypot(sx, sy);
+                if (along >= (index == 0 ? -cap : 0) && along <= (index + 2 == landing.length ? 1 + cap : 1)
+                      && inward > 0 && inward < 1) {
+                    fraction = Math.max(fraction, Math.min(1, inward + buffer / length));
+                }
+            }
+        }
+        return fraction == 0 ? point : new Vector3(point).lerp(new Vector3(center.x, center.y, point.z), fraction);
     }
 
     private static boolean turns(Vector3 a, Vector3 b, Vector3 c) {
@@ -1788,7 +1870,7 @@ final class BoardSurface {
             return beside.elevation() == below.elevation() && beside.liquid().connects(below.liquid())
                   ? edgeOutward(edge).add(edgeOutward(side)).nor() : null;
         }
-        if (shore[side] != 0 || beside.elevation() != tile.elevation() || beside.frozen()
+        if (shore[side] != 0 || beside.elevation() != tile.elevation() || beside.frozen() != tile.frozen()
               || !beside.liquid().connects(below.liquid())) { return null; }
         boolean before = side == (edge + 5) % 6;
         Vector3 corner = before ? corners[edge] : corners[side];
@@ -1809,6 +1891,9 @@ final class BoardSurface {
     float receivingHeight(Side fall, float x, float y) {
         BoardScene.Tile other = neighbor(scene, fall.edge());
         if (other == null) { return fall.lowA(); }
+        if (other.frozen()) {
+            return tile.frozen() || tile.liquid().molten() ? BoardGeometry.surfaceZ(other) : BoardGeometry.waterZ(other);
+        }
         if (receivingWater[fall.edge()] == null) {
             receivingWater[fall.edge()] = new BoardSurface(scene, other, false, lod);
         }

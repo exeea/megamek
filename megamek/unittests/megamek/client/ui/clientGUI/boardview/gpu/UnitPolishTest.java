@@ -20,13 +20,12 @@ import megamek.common.units.EntityMovementType;
 import megamek.common.units.FallSide;
 import megamek.common.units.Mek;
 import megamek.common.units.ProneCause;
-import megamek.common.units.Tank;
 import megamek.common.util.SerializationHelper;
 import org.junit.jupiter.api.Test;
 
 class UnitPolishTest {
     @Test
-    void damageThresholdsFollowRemainingArmorAndStructureAndNeverPersonnel() {
+    void locationDamageFollowsMekArmorAndStructureAndExcludesInfantry() {
         var mek = new BipedMek();
         mek.initializeArmor(100, Mek.LOC_LEFT_ARM);
         mek.initializeInternal(10, Mek.LOC_LEFT_ARM);
@@ -40,18 +39,7 @@ class UnitPolishTest {
         assertEquals(UnitDamageDisplay.Stage.STRUCTURE_BATTERED, UnitModelSelection.damage(mek).stages().get("LA"));
         mek.setInternal(megamek.common.equipment.IArmorState.ARMOR_DESTROYED, Mek.LOC_LEFT_ARM);
         assertTrue(UnitModelSelection.damage(mek).removed().contains("LA"));
-        var tank = new Tank();
-        for (int location = 0; location < tank.locations(); location++) {
-            tank.initializeArmor(30, location);
-            tank.initializeInternal(10, location);
-        }
-        for (int stage = 1; stage <= 4; stage++) {
-            for (int location = 0; location < tank.locations(); location++) {
-                tank.setArmor(Math.max(0, 30 - stage * 10), location);
-                tank.setInternal(stage == 4 ? 0 : 10, location);
-            }
-            assertEquals(UnitDamageDisplay.Stage.values()[stage + 2], UnitModelSelection.damage(tank).stages().get("*"));
-        }
+        // Whole-body models follow the game's damage level, covered by UnitModelSelectionTest.
         assertTrue(UnitModelSelection.damage(new megamek.common.battleArmor.BattleArmor()).isNone());
         assertTrue(UnitModelSelection.damage(new ConvInfantry()).isNone());
     }

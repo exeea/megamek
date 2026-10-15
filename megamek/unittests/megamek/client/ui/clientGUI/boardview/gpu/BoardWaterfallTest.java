@@ -3,6 +3,9 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -10,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
@@ -19,6 +23,49 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class BoardWaterfallTest {
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void collapsedFreeBankLipKeepsFiniteSheetNormals(TerrainLod lod) {
+        int collapsed = 0, visible = 0;
+        for (int direction = 0; direction < 6; direction++) {
+            BoardScene scene = mesa(direction);
+            var surface = new BoardSurface(scene, scene.tile(new Coords(3, 3)), lod);
+            var drop = surface.waterfalls.getFirst();
+            Vector3[][] grid = GpuWaterfall.grid(surface, drop);
+            int columns = grid.length - 1, rows = grid[0].length;
+            List<Vector3> normals = new ArrayList<>();
+            MeshPartBuilder mesh = mock(MeshPartBuilder.class);
+            when(mesh.vertex(any(MeshPartBuilder.VertexInfo.class))).thenAnswer(call -> {
+                MeshPartBuilder.VertexInfo vertex = call.getArgument(0);
+                assertTrue(Float.isFinite(vertex.normal.x) && Float.isFinite(vertex.normal.y)
+                      && Float.isFinite(vertex.normal.z), "Every sheet normal must be finite");
+                assertEquals(1, vertex.normal.len2(), .00001,
+                      "Zero CPU normals become undefined when normalized by the vertex shader");
+                normals.add(new Vector3(vertex.normal));
+                return (short) (normals.size() - 1);
+            });
+            GpuWaterfall.sheet(mesh, surface, drop, null);
+            assertEquals(grid.length * rows, normals.size());
+            for (int column : new int[] { 0, columns }) {
+                assertEquals(grid[column][0], grid[column][1], "Exercise the collapsed free-bank lip");
+                collapsed++;
+                // Although one triangle collapses, the adjacent column's lip still leaves a visible triangle
+                // touching this vertex. Its winding must agree with the limiting crest normal.
+                int neighbor = column == 0 ? 1 : columns - 1;
+                Vector3 a = grid[neighbor][column == 0 ? 1 : 0];
+                Vector3 b = grid[neighbor][column == 0 ? 0 : 1];
+                Vector3 face = new Vector3(b).sub(a).crs(new Vector3(grid[column][0]).sub(a));
+                if (!face.isZero()) {
+                    assertTrue(face.dot(normals.get(column * rows)) > 0,
+                          "The repaired anchor must face the same way as its nondegenerate sheet triangle");
+                    visible++;
+                }
+            }
+        }
+        assertEquals(12, collapsed, "Both free banks in every board direction must be covered");
+        assertTrue(visible > 0, "Collapsed lip anchors must participate in visible geometry");
+    }
+
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void domeVentWaterfallWallsAreClosedForLavaAndWater(TerrainLod lod) {

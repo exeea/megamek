@@ -71,7 +71,7 @@ final class GpuEffectBatch implements Disposable {
 
     int size() { return offset / (4 * STRIDE); }
 
-    /** Display-encoded light on smoke; flames and jets stay emissive. White draws smoke as authored. */
+    /** Linear light on smoke; flames and jets stay emissive. White draws smoke as authored. */
     void setSmokeLight(Color light) { smokeLight.set(light); }
 
     void render(Camera camera, int smokeCount) {
@@ -89,9 +89,12 @@ final class GpuEffectBatch implements Disposable {
                 shader.setUniformf("u_light", smokeLight.r, smokeLight.g, smokeLight.b);
             }
             int smoke = Math.min(smokeCount, size());
-            Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+            // The atmosphere uses alpha as coverage when replacing the uncovered clear sky.
+            Gdx.gl.glBlendFuncSeparate(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA,
+                  GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA);
             if (smoke > 0) { mesh.render(shader, GL20.GL_TRIANGLES, 0, smoke * 6); }
-            Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE);
+            // Emission adds radiance without removing any of the background or changing its coverage.
+            Gdx.gl.glBlendFuncSeparate(GL20.GL_SRC_ALPHA, GL20.GL_ONE, GL20.GL_ZERO, GL20.GL_ONE);
             if (size() > smoke) { mesh.render(shader, GL20.GL_TRIANGLES, smoke * 6, (size() - smoke) * 6); }
         } finally {
             Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
@@ -114,12 +117,7 @@ final class GpuEffectBatch implements Disposable {
     }
 
     static String fragment(String file) {
-        String source = GpuShaderSource.read(file);
-        if (source.contains("// PARTICLE_APPEARANCE")) {
-            source = source.replace("// PARTICLE_APPEARANCE", GpuShaderSource.read("particles-smoke.glsl") + "\n"
-                  + GpuShaderSource.read("particles-fire.glsl") + "\n" + GpuShaderSource.read("particles-jet.glsl"));
-        }
-        return source;
+        return GpuSceneRadiance.fragment(GpuShaderSource.read(file));
     }
 
     @Override

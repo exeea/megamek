@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
@@ -13,8 +14,8 @@ import javax.imageio.ImageIO;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.VertexAttributes;
@@ -24,9 +25,8 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -53,11 +53,11 @@ class GpuArtilleryBlastSmokeTest {
             public void create() {
                 var volumes = new GpuExplosionEffects();
                 var blast = new GpuArtilleryBlast();
-                var batch = new ModelBatch();
+                var batch = new ModelBatch(GpuUnitShader.provider());
                 Model groundModel = null;
-                FrameBuffer buffer = null;
+                GpuSceneTestOutput buffer = null;
                 try {
-                    buffer = GpuAtmosphere.buffer(SIZE, SIZE, true);
+                    buffer = new GpuSceneTestOutput(SIZE, SIZE);
                     groundModel = new ModelBuilder().createBox(2000, 2000, 1,
                           new Material(ColorAttribute.createDiffuse(.3f, .3f, .31f, 1)), VertexAttributes.Usage.Position);
                     var ground = new ModelInstance(groundModel);
@@ -115,6 +115,7 @@ class GpuArtilleryBlastSmokeTest {
                     File output = new File(System.getProperty("megamek.gpu.screenshots"), "artillery-blast-review.png");
                     assertTrue(output.getParentFile().isDirectory() || output.getParentFile().mkdirs());
                     ImageIO.write(sheet, "png", output);
+                    verifyFlatVolumeAtFrustumEdge(buffer, volumes);
                     reviewCluster(buffer, batch, ground, volumes, blast, size, output.getParentFile());
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
@@ -122,7 +123,7 @@ class GpuArtilleryBlastSmokeTest {
                     volumes.dispose();
                     batch.dispose();
                     if (groundModel != null) { groundModel.dispose(); }
-                    if (buffer != null) { buffer.dispose(); }
+                    if (buffer != null) { buffer.close(); }
                     Gdx.app.exit();
                 }
             }
@@ -134,7 +135,7 @@ class GpuArtilleryBlastSmokeTest {
      * A close-up of a Long Tom cluster round from its air burst to its haze, at an angle and from straight above, so
      * the spread of the pops over the target hex and its ring can be judged.
      */
-    private static void reviewCluster(FrameBuffer buffer, ModelBatch batch, ModelInstance ground,
+    private static void reviewCluster(GpuSceneTestOutput buffer, ModelBatch batch, ModelInstance ground,
           GpuExplosionEffects volumes, GpuArtilleryBlast blast, float size, File folder) throws java.io.IOException {
         float[] moments = { .05f, .2f, .4f, .6f, .8f, 1.1f, 1.6f, 2.6f };
         float hex = BoardGeometry.height();
@@ -196,7 +197,7 @@ class GpuArtilleryBlastSmokeTest {
     }
 
     /** Numbered frames at 15 a second over the blast's life, for stitching into an animation to review. */
-    private static void writeAnimation(FrameBuffer buffer, ModelBatch batch, ModelInstance ground,
+    private static void writeAnimation(GpuSceneTestOutput buffer, ModelBatch batch, ModelInstance ground,
           GpuExplosionEffects volumes, GpuArtilleryBlast blast, float size, PerspectiveCamera camera,
           GpuArtilleryBlast.Style style, int hexRadius, File folder) throws java.io.IOException {
         assertTrue(folder.isDirectory() || folder.mkdirs());
@@ -209,11 +210,10 @@ class GpuArtilleryBlastSmokeTest {
         }
     }
 
-    private static BufferedImage frame(FrameBuffer buffer, ModelBatch batch, ModelInstance ground,
+    private static BufferedImage frame(GpuSceneTestOutput buffer, ModelBatch batch, ModelInstance ground,
           PerspectiveCamera camera, GpuExplosionEffects volumes, Runnable enqueue) {
-        buffer.begin();
+        buffer.begin(.62f, .63f, .65f, 1);
         try {
-            ScreenUtils.clear(new Color(.62f, .63f, .65f, 1), true);
             batch.begin(camera);
             batch.render(ground);
             batch.end();
@@ -221,8 +221,40 @@ class GpuArtilleryBlastSmokeTest {
             enqueue.run();
             volumes.render(camera);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            buffer.display();
             return snapshot();
-        } finally { buffer.end(); }
+        } finally { buffer.pixels().end(); }
+    }
+
+    /** A shallow blast still has its full horizontal extent when its centre has left the view. */
+    private static void verifyFlatVolumeAtFrustumEdge(GpuSceneTestOutput output, GpuExplosionEffects volumes) {
+        var camera = new OrthographicCamera(200, 200);
+        camera.position.set(0, 0, 400);
+        camera.up.set(Vector3.Y);
+        camera.lookAt(Vector3.Zero);
+        camera.near = 1;
+        camera.far = 1000;
+        camera.update();
+        var centre = new Vector3(115, 0, 20);
+        assertFalse(camera.frustum.pointInFrustum(centre), "The blast centre is deliberately outside the view");
+        assertTrue(camera.frustum.pointInFrustum(90, 0, 20), "Part of its horizontal lobe remains visible");
+        output.begin(0, 0, 0, 1);
+        output.display();
+        BufferedImage empty = snapshot();
+        output.begin(0, 0, 0, 1);
+        volumes.begin();
+        volumes.addFlat(centre, 40, .25f, 1, 1, 73, GpuExplosionEffects.Look.PLAIN, .1f);
+        var profiler = new GLProfiler(Gdx.graphics);
+        profiler.enable();
+        try {
+            volumes.render(camera);
+            assertEquals(1, profiler.getDrawCalls(), "The XY-visible flat volume must reach the draw call");
+        } finally {
+            profiler.disable();
+        }
+        output.display();
+        assertTrue(different(snapshot(), empty) > 0, "The submitted horizontal lobe must also produce visible pixels");
+        output.pixels().end();
     }
 
     private static BufferedImage snapshot() {

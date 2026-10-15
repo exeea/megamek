@@ -6,6 +6,7 @@ in vec3 v_thermalPosition;
 uniform vec3 u_thermal; // captured heat intensity, bottom, inverse height
 uniform vec4 u_thermalShape; // horizontal center and inverse half-extents; zero scale for formations
 uniform vec4 u_cameraPosition;
+// LIGHT_MODEL
 #ifdef normalFlag
 in vec3 v_normal;
 #endif
@@ -27,9 +28,10 @@ in float v_alphaTest;
 #endif
 
 vec3 thermalPalette(float heat) {
-    const vec3 colors[7] = vec3[7](vec3(.025, .055, .85), vec3(.32, .015, 1.0),
-          vec3(.85, .015, .58), vec3(1.0, .035, .06), vec3(1.0, .40, .015),
-          vec3(1.0, .90, .12), vec3(1.0, 1.0, .94));
+    // Constant authored endpoints decode before interpolation; the compiler folds these conversions.
+    vec3 colors[7] = vec3[7](toLinear(vec3(.025, .055, .85)), toLinear(vec3(.32, .015, 1.0)),
+          toLinear(vec3(.85, .015, .58)), toLinear(vec3(1.0, .035, .06)), toLinear(vec3(1.0, .40, .015)),
+          toLinear(vec3(1.0, .90, .12)), toLinear(vec3(1.0, 1.0, .94)));
     float index = clamp(heat, 0.0, 1.0) * 6.0;
     int low = min(int(index), 5);
     return mix(colors[low], colors[low + 1], smoothstep(0.0, 1.0, index - float(low)));
@@ -69,5 +71,6 @@ void main() {
     #endif
     float facing = abs(dot(normal, normalize(u_cameraPosition.xyz - v_thermalPosition)));
     float heat = u_thermal.x * mix(.28, 1.0, core) + .035 * facing;
+    // Palette interpolation, facet gain, scene blending and grading all consume linear radiance.
     fragColor = vec4(thermalPalette(heat) * mix(.78, 1.0, facing), alpha);
 }

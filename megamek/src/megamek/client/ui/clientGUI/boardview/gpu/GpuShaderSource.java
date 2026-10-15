@@ -10,8 +10,12 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
@@ -23,9 +27,173 @@ final class GpuShaderSource {
 
     private GpuShaderSource() { }
 
-    static String read(String name) {
+    private static final Pattern INCLUDE = Pattern.compile("(?m)^([ \\t]*)// ([A-Za-z][A-Za-z0-9_-]*)(?=[ \\t]*\\r?$)");
+
+    static String read(String name) { return read(name, Map.of()); }
+
+    /** File choices belong to the shader variant; recursive dependencies retain the same manager/draft owner. */
+    static String read(String name, Map<String, String> choices) {
+        String source = currentSource(name);
+        requireChoices(source, choices);
+        return expand(source, choices, new LinkedHashSet<>(Set.of(name)));
+    }
+
+    private static String currentSource(String name) {
         var session = GpuShaderManager.current();
-        return session == null ? readDisk(name) : session.read(name);
+        String source = session == null ? readDisk(name) : session.read(name);
+        return name.equals("scene-radiance.glsl")
+              ? source.replace("RADIANCE_SCALE_VALUE", Float.toString(GpuSceneRadiance.SCALE)) : source;
+    }
+
+    private static String read(String name, Map<String, String> choices, Set<String> path) {
+        if (!path.add(name)) {
+            throw new IllegalStateException("Shader include cycle: " + String.join(" -> ", path) + " -> " + name);
+        }
+        try {
+            return expand(currentSource(name), choices, path);
+        } finally { path.remove(name); }
+    }
+
+    /** Delayed includes, such as atmosphere's capability-dependent sun visibility, use the same resolver. */
+    static String expand(String source, Map<String, String> choices) {
+        requireChoices(source, choices);
+        return expand(source, choices, new LinkedHashSet<>());
+    }
+
+    private static void requireChoices(String source, Map<String, String> choices) {
+        for (String choice : choices.keySet()) {
+            Matcher markers = INCLUDE.matcher(source);
+            boolean found = false;
+            while (markers.find()) { if (markers.group(2).equals(choice)) { found = true; break; } }
+            if (!found) { throw new IllegalStateException("Missing required shader include: // " + choice); }
+        }
+    }
+
+    private static String expand(String source, Map<String, String> choices, Set<String> path) {
+        Matcher markers = INCLUDE.matcher(source);
+        StringBuilder result = new StringBuilder();
+        while (markers.find()) {
+            String marker = markers.group(2);
+            String included = choices.containsKey(marker) ? read(choices.get(marker), choices, path)
+                  : include(marker, choices, path);
+            markers.appendReplacement(result, Matcher.quoteReplacement(included == null ? markers.group()
+                  : markers.group(1) + included));
+        }
+        return markers.appendTail(result).toString();
+    }
+
+    private static String include(String marker, Map<String, String> choices, Set<String> path) {
+        String file = switch (marker) {
+            case "COLOR_SPACE" -> "color-space.glsl";
+            case "SCENE_RADIANCE" -> "scene-radiance.glsl";
+            case "OVERLAY_CONTRAST" -> "overlay-contrast.glsl";
+            case "LIGHT_MODEL" -> "light-model.glsl";
+            case "ENVIRONMENT_LIGHTING" -> "environment-lighting.glsl";
+            case "TERRAIN_PATTERNS" -> "terrain-patterns.glsl";
+            case "CLOUD_SHADOW" -> "cloud-shadow.glsl";
+            case "SCATTERING_PHASE" -> "scattering-phase.glsl";
+            case "GROUND_LAYER" -> "ground-layer.glsl";
+            case "CAMERA_DEPTH" -> "camera-depth.glsl";
+            case "WEATHER_SAND" -> "weather-sand.glsl";
+            case "ATMOSPHERE_FOV" -> "atmosphere-fov.glsl";
+            case "ATMOSPHERE_GRADE" -> "atmosphere-grade.glsl";
+            case "ATMOSPHERE_GLARE" -> "atmosphere-glare.glsl";
+            case "HEAT_RADIANCE" -> "heat-radiance.glsl";
+            case "OCEAN_FINISH" -> "ocean-finish.glsl";
+            case "terrain-ground-color-functions" -> "terrain-ground-color.glsl";
+            case "water-uniforms" -> "water-uniforms.glsl";
+            case "water-wave-functions" -> "water-wave.glsl";
+            default -> null;
+        };
+        if (file != null) { return read(file, choices, path); }
+        return switch (marker) {
+            case "PARTICLE_APPEARANCE" -> read("particles-smoke.glsl", choices, path) + "\n"
+                  + read("particles-fire.glsl", choices, path) + "\n" + read("particles-jet.glsl", choices, path);
+            case "terrain-projection-functions" -> read("terrain-detail.glsl", choices, path)
+                  + read("terrain-projection.glsl", choices, path);
+            // Selection comments and structural insertion points are not file includes.
+            default -> null;
+        };
+    }
+
+    static String magma(boolean flowing) {
+        return (flowing ? read("liquid-flow.glsl") : "") + read("terrain-magma.glsl",
+              Map.of("MAGMA_CONDITION", flowing ? "magma-flow.glsl" : "magma-solid.glsl"));
+    }
+
+    static String modelLighting() {
+        return read("light-model.glsl") + read("environment-lighting.glsl")
+              + read("lava-lighting.glsl") + read("model-surface.glsl");
+    }
+
+    /** Grass and biome templates share these already-computed vertex outputs. */
+    static String coverVertex(String source) {
+        return source.replace("vec4 pos = u_worldTrans * vec4(a_position, 1.0);", "vec4 pos = vec4(coverPosition, 1.0);")
+              .replace("vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = coverNormal;")
+              .replace("v_color = a_color;", "v_color = coverColor;");
+    }
+
+    /** Structural edits retain their caller's ordering, with one shared exact-anchor check. */
+    static String replaceOnce(String source, String anchor, String replacement, String stage) {
+        int index = source.indexOf(anchor);
+        if (index < 0 || source.indexOf(anchor, index + anchor.length()) >= 0) {
+            throw new IllegalStateException("Incompatible " + stage
+                  + " shader: expected exactly one insertion point: " + anchor);
+        }
+        return source.substring(0, index) + replacement + source.substring(index + anchor.length());
+    }
+
+    /** Every custom surface shares the light model, rain field, lighting, geometry shadows and water optics. */
+    static String terrainLighting(String source) {
+        String functions = read("light-model.glsl");
+        functions += read("environment-lighting.glsl");
+        functions += read("rain-surface.glsl");
+        functions += read("lava-lighting.glsl");
+        functions += read("surface-lighting.glsl");
+        functions += read("terrain-meadow.glsl");
+        functions += read("terrain-patterns.glsl");
+        functions += read("water-optics.glsl");
+        functions += read("terrain-hexes.glsl");
+        if (source.contains("// sculpt-material-functions")) {
+            functions += read("terrain-roughness.glsl");
+        } else if (source.contains("roadCoatFlag")) {
+            functions += "\n#ifdef roadCoatFlag\n" + read("terrain-roughness.glsl") + "\n#endif\n";
+        }
+        if (source.contains("bankTurfFlag")) {
+            functions += "\n#ifdef bankTurfFlag\n" + read("terrain-roughness.glsl")
+                  + read("terrain-ground-color.glsl")
+                  + read("terrain-bank-color.glsl") + "\n#endif\n";
+        }
+        if (source.contains("// sculpt-material-functions") || source.contains("// biome-water-functions")) {
+            functions += read("terrain-biome-mask.glsl");
+        }
+        if (source.contains("// sculpt-material-functions")) {
+            functions += read("terrain-concrete.glsl");
+            functions += "\n#ifdef volcanicFlag\n" + magma(false) + "\n#endif\n";
+            functions += read("terrain-materials.glsl");
+            functions += "#define GROUND_DAMAGE_FRAGMENT\n" + GpuGroundDamage.shaderSource();
+            functions += read("scar-material.glsl");
+            functions += read("terrain-damage.glsl");
+            functions += read("terrain-tundra.glsl");
+            functions += read("terrain-biome.glsl");
+        }
+        if (source.contains("// magma-solid-functions") || source.contains("// magma-flow-functions")) {
+            functions += read("terrain-detail.glsl");
+            functions += magma(source.contains("// magma-flow-functions"));
+            functions += read("magma-lighting.glsl");
+        }
+        if (source.contains("// ground-surface-functions")) {
+            functions += read("ground-surface.glsl");
+        }
+        if (source.contains("// water-lighting-functions")) {
+            functions += read("water-lighting.glsl");
+        }
+        if (source.contains("// water-pool-functions")) {
+            functions += read("liquid-flow.glsl");
+            functions += read("water-interactions.glsl");
+            functions += read("water-wave.glsl") + read("water-pool.glsl");
+        }
+        return source.replace("void main() {", "// terrain-lighting-functions\n" + functions + "\nvoid main() {");
     }
 
     static String readDisk(String name) { return resolve(name).readString("UTF-8"); }

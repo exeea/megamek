@@ -7,14 +7,16 @@ uniform sampler2D u_depth;
 uniform sampler2D u_fog;
 uniform float u_fogEnabled;
 uniform vec2 u_sourcePixel;
+// SCENE_RADIANCE
 // HEAT_RADIANCE
 // GROUND_LAYER
 // ATMOSPHERE_FOV
 
 vec3 hotColor(vec3 color, vec2 uv, float visibility) {
-    vec3 radiance = pow(max(color, vec3(0.0)), vec3(2.2));
+    vec3 radiance = max(color, vec3(0.0));
     float transmission = u_fogEnabled > 0.5 ? texture(u_fog, uv).a : 1.0;
-    return radiance * heatWeight(radiance) * transmission * visibility;
+    // Selection uses canonical light units; extraction and blur retain the scene's storage scale.
+    return radiance * heatWeight(loadScene(radiance)) * transmission * visibility;
 }
 
 vec3 hotAt(vec2 uv) {

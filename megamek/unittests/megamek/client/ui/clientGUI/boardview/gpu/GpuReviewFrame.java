@@ -43,6 +43,9 @@ final class GpuReviewFrame implements Disposable {
         return atmosphere.depthTexture();
     }
 
+    /** Borrowed owner for post-composite overlay review; this frame retains its lifetime. */
+    GpuAtmosphere atmosphere() { return atmosphere; }
+
     /** Loading must see the same shader flags as the eventual visible frame. */
     void prepare(GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
         atmosphere.updateLight(camera.camera);
@@ -57,20 +60,25 @@ final class GpuReviewFrame implements Disposable {
 
     /** Hiding the water exposes the bed and bank joins for geometry reviews. */
     void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, boolean water) {
-        render(terrain, camera, scene, water, List.of(), null);
+        render(terrain, camera, scene, water, List.of(), null, 1);
     }
 
     /** Review standard unit/prop materials in the same lit scene target as the terrain. */
     void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, List<ModelInstance> objects, ModelBatch batch) {
-        render(terrain, camera, scene, true, objects, batch);
+        render(terrain, camera, scene, true, objects, batch, 1);
+    }
+
+    /** Exercise the window's existing render-resolution path without changing camera framing or display size. */
+    void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, float scale) {
+        render(terrain, camera, scene, true, List.of(), null, scale);
     }
 
     private void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, boolean water,
-          List<ModelInstance> objects, ModelBatch batch) {
+          List<ModelInstance> objects, ModelBatch batch, float scale) {
         prepare(terrain, camera, scene);
         terrain.renderShadows(camera.camera, objects);
         atmosphere.prepareClouds(terrain, scene, 0);
-        atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
+        atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, scale, 0);
         terrain.render(camera.camera, false);
         if (!objects.isEmpty()) {
             batch.begin(camera.camera);
@@ -78,8 +86,8 @@ final class GpuReviewFrame implements Disposable {
             batch.end();
         }
         if (water) { terrain.renderTransparent(camera.camera); }
-        atmosphere.end(camera.camera, terrain, scene, 0);
         atmosphere.renderWeather(camera.camera, scene);
+        atmosphere.end(camera.camera, terrain, scene, 0);
     }
 
     /** The same frame with its stages marked on a native benchmark's timings. */
@@ -95,10 +103,10 @@ final class GpuReviewFrame implements Disposable {
         terrain.render(camera.camera, false);
         timings.stage("transparent");
         terrain.renderTransparent(camera.camera);
-        timings.stage("atmosphere composite");
-        atmosphere.end(camera.camera, terrain, scene, 0);
         timings.stage("weather");
         atmosphere.renderWeather(camera.camera, scene);
+        timings.stage("atmosphere composite");
+        atmosphere.end(camera.camera, terrain, scene, 0);
         timings.stage(null);
     }
 

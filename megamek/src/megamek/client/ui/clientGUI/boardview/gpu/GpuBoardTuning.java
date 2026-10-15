@@ -1,18 +1,20 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.Component;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
+import javax.swing.JDialog;
+import javax.swing.JFileChooser;
 import javax.swing.SwingUtilities;
+import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.Input;
-import com.badlogic.gdx.scenes.scene2d.Action;
 import com.badlogic.gdx.scenes.scene2d.Actor;
-import com.badlogic.gdx.scenes.scene2d.InputEvent;
-import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.actions.DelayAction;
 import com.badlogic.gdx.scenes.scene2d.actions.RunnableAction;
 import com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup;
@@ -25,11 +27,11 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
-import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Scaling;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.gdx.UiSliderInput;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.AtmosphericTaint;
 
@@ -42,8 +44,6 @@ final class GpuBoardTuning {
     private static final float SLIDER_WIDTH = 120;
     private static final float LABEL_WIDTH = 120;
     private static final float SLIDER_DEBOUNCE_SECONDS = 0.25f;
-    private static final float SLIDER_REPEAT_DELAY = 0.3f;
-    private static final float SLIDER_REPEAT_INTERVAL = 0.05f;
 
     private record Knob(String name, float min, float max, float step, String format, String help) {
         Knob(String name, float min, float max, float step, String format) {
@@ -96,6 +96,7 @@ final class GpuBoardTuning {
     /** Construction cursor only; each page owns its own rows. */
     private Table rows = new Table();
     private final Table cameraRows;
+    private final Table display;
     private final Table general;
     private final Table atmospheric;
     private final Table terrain;
@@ -107,6 +108,15 @@ final class GpuBoardTuning {
     private final CheckBox normalMaps;
     private final SelectBox<UnitDisplayMode> unitDisplayMode;
     private final CheckBox vsync;
+    /** Windowed or Fullscreen; the view switches the window and shows its state here every frame. */
+    private final SelectBox<String> displayMode;
+    private Consumer<Boolean> displayModeChange = fullscreen -> { };
+    private final List<Control> renderResolution;
+    private final Label renderSize;
+    /** The window's physical pixels, which the render resolution's scene size is shown for. */
+    private int windowWidth, windowHeight;
+    private final SelectBox<String> antiAliasing;
+    private final CheckBox specularAntialiasing;
     /** The graphics card rows; null on computers without two cards to choose from. */
     private SelectBox<GpuGraphicsCard> graphicsCard;
     private Label cardInUse;
@@ -121,6 +131,7 @@ final class GpuBoardTuning {
     private final List<Control> terrainDetail;
     private final CheckBox objectLod;
     private final List<Control> terrainWear;
+    private final CheckBox elevationGrading;
     private final Label terrainProgress;
     private int terrainPercent = -1;
     private final SelectBox<String> concreteShapes;
@@ -141,6 +152,14 @@ final class GpuBoardTuning {
     private final ButtonGroup<TextButton> sensorModes;
     private final List<Control> sensors;
     private final List<Control> daylight;
+    private final List<Control> colorGrading;
+    private final List<Control> lightBalance;
+    private GpuLightingEnvironment environmentImage;
+    private int environmentRequest;
+    private TextButton chooseEnvironment;
+    /** Show the sky that lights the scene as the backdrop; not saved. */
+    private final CheckBox lightingSky;
+    private Label environmentStatus;
     private final CheckBox moonlight;
     private final SelectBox<Atmosphere> pressure;
     private final SelectBox<AtmosphericTaint> atmosphericTaint;
@@ -222,6 +241,11 @@ final class GpuBoardTuning {
         unitDisplayMode.addListener(new TextTooltip("All Meeples: every unit uses an extruded artwork token. "
               + "Mek Meeples: only Meks use tokens; other units use 3D models. "
               + "3D Models: use the existing models for all units.", skin, "menu"));
+        // The Display page: the window's output, from its mode to the graphics card.
+        display = rows = new Table();
+        rows.top().defaults().pad(0, 3, 0, 3);
+        displayMode = choice(skin, "Display mode", "tuning-display-mode", new String[] { "Windowed", "Fullscreen" },
+              this::applyDisplayMode);
         vsync = checkbox(skin, "VSync", "tuning-vsync");
         // The window's own preference, shown once here and then left to the user; Defaults never touches it.
         vsync.setChecked(GpuBoardWindow.DEFAULT_VSYNC);
@@ -233,6 +257,38 @@ final class GpuBoardTuning {
                 Gdx.graphics.setVSync(vsync.isChecked());
                 Gdx.graphics.setForegroundFPS(0);
                 // Gdx.graphics.setForegroundFPS(vsync.isChecked() ? 0 : 60);
+            }
+        });
+        renderResolution = controls(skin, List.of(new Knob("Render resolution", 50, 100, 10, "%.0f%%")),
+              this::applyRenderResolution, 0);
+        Slider resolution = renderResolution.getFirst().slider();
+        resolution.setName("tuning-render-resolution");
+        resolution.addListener(new TextTooltip("The 3D scene renders at this share of the window's pixels and is then "
+              + "scaled up to the window: lower is faster and softer. Overlays, labels and the HUD keep the window's "
+              + "resolution.", skin, "menu"));
+        renderSize = new Label("", skin, "small");
+        renderSize.setName("tuning-render-size");
+        rows.add(renderSize).colspan(3).left().height(18).row();
+        antiAliasing = choice(skin, "Anti-aliasing", "tuning-anti-aliasing", new String[] { "Off", "SMAA" },
+              this::applyAntiAliasing);
+        // The saved choice (Off until one is saved). Like the graphics card it persists, and Defaults leaves it alone.
+        String savedAntiAliasing = GUIPreferences.getInstance().getBoardAntiAliasing();
+        syncing = true;
+        antiAliasing.setSelectedIndex("SMAA".equalsIgnoreCase(savedAntiAliasing) ? 1 : 0);
+        syncing = false;
+        antiAliasing.addListener(new TextTooltip("SMAA smooths the jagged edges of the 3D scene after its lighting and "
+              + "atmosphere, before overlays, labels and the HUD. Off shows the scene as rendered. The choice is "
+              + "saved for the next session.", skin, "menu"));
+        specularAntialiasing = checkbox(skin, "Specular anti-aliasing", "tuning-specular-anti-aliasing");
+        // The saved choice (on until one is saved); like anti-aliasing, Defaults leaves it alone.
+        specularAntialiasing.setChecked(GUIPreferences.getInstance().getBoardSpecularAntiAliasing());
+        GpuEnvironmentLighting.specularAntialiasing = specularAntialiasing.isChecked();
+        specularAntialiasing.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                boolean enabled = specularAntialiasing.isChecked();
+                GpuEnvironmentLighting.specularAntialiasing = enabled;
+                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardSpecularAntiAliasing(enabled));
             }
         });
         Label graphics = new Label("Graphics: " + GpuGlsl.description(), skin, "small");
@@ -257,6 +313,7 @@ final class GpuBoardTuning {
             rows.add(cardPending).colspan(3).left().height(18).row();
             updateGraphicsCard();
         }
+        rows = general;
         section(skin, "Unit family sizes");
         familySizes = controls(skin, Arrays.stream(UnitFamilyScale.values())
               .map(family -> new Knob(family.label, 0.25f, 3, 0.05f, "%.2f")).toList(), this::applyFamilySizes, 0);
@@ -369,6 +426,52 @@ final class GpuBoardTuning {
         rows.add(presets).colspan(3).left().padBottom(2).row();
         section(skin, "Lighting");
         daylight = controls(skin, LIGHTING_KNOBS, this::applyAtmosphere, 0);
+        lightBalance = controls(skin, List.of(
+              new Knob("Shadows", 0, 100, 1, "%.0f%%",
+                    "Cast-shadow strength: 0 removes geometry shadows; 100 keeps full occlusion. Independent of moon contrast."),
+              new Knob("Ambient light", 0, 100, 1, "%.0f%%",
+                    "Ambient/direct balance: 20 is the default daylight balance, 0 is direct only, 100 is ambient only."),
+              new Knob("Sky contribution", 0, 200, 1, "%.0f%%",
+                    "Scales sky illumination and reflections. 100 is the default; 0 removes them. The visible sky is unchanged.")),
+              this::applyRendering, 0);
+        chooseEnvironment = new TextButton("Choose lighting environment...", skin, "menu-control");
+        chooseEnvironment.setName("tuning-environment-image");
+        chooseEnvironment.setProgrammaticChangeEvents(false);
+        chooseEnvironment.addListener(new ChangeListener() {
+            @Override public void changed(ChangeEvent event, Actor actor) {
+                chooseEnvironment.setChecked(false);
+                chooseEnvironment(source);
+            }
+        });
+        rows.add(chooseEnvironment).colspan(3).left().row();
+        lightingSky = checkbox(skin, "Show lighting sky", "tuning-lighting-sky");
+        TextButton clearEnvironment = new TextButton("Use generated sky lighting", skin, "menu-control");
+        clearEnvironment.setName("tuning-environment-clear");
+        clearEnvironment.setProgrammaticChangeEvents(false);
+        clearEnvironment.addListener(new ChangeListener() {
+            @Override public void changed(ChangeEvent event, Actor actor) {
+                clearEnvironment.setChecked(false);
+                setEnvironmentImage(null);
+            }
+        });
+        rows.add(clearEnvironment).colspan(3).left().row();
+        environmentStatus = new Label("Generated sky lighting", skin, "small");
+        rows.add(environmentStatus).colspan(3).left().row();
+        colorGrading = controls(skin, List.of(new Knob("White balance", -1, 1, 0.01f, "%+.2f"),
+              new Knob("Tint", -1, 1, 0.01f, "%+.2f"),
+              new Knob("Saturation", 0, 2, 0.01f, "%.2f"),
+              new Knob("Contrast", .5f, 1.5f, 0.01f, "%.2f")), this::applyRendering, 0);
+        colorGrading.get(0).slider().addListener(new TextTooltip(
+              "Cooler blue to the left, warmer amber to the right. 0 is neutral. "
+                    + "Adjusts the whole scene, including sky and effects; HUD colors stay unchanged.", skin, "menu"));
+        colorGrading.get(1).slider().addListener(new TextTooltip(
+              "Green to the left, magenta to the right. 0 is neutral; complements white balance.", skin, "menu"));
+        colorGrading.get(2).slider().addListener(new TextTooltip(
+              "Color intensity: 0 is grayscale, 1 is unchanged, 2 boosts color. Applies after the time-of-day palette.",
+              skin, "menu"));
+        colorGrading.get(3).slider().addListener(new TextTooltip(
+              "Contrast around display mid-gray: 1 is unchanged. Higher values deepen shadows and brighten highlights.",
+              skin, "menu"));
         moonlight = checkbox(skin, "Moonlight at night", "tuning-moonlight");
         moonlight.addListener(new TextTooltip("Enable the directional moon at night. Moonless and Pitch Black disable it; "
               + "Exposure (EV) controls their darkness. This never disables daytime sunlight.", skin, "menu"));
@@ -385,7 +488,7 @@ final class GpuBoardTuning {
               "Starts at a random minute within the scenario's daylight, dawn/dusk or night window. "
                     + "It stays fixed during combat; adjust here to override. Defaults restores the scenario's choice.", skin, "menu"));
         daylight.get(1).slider().addListener(new TextTooltip(
-              "Visual brightness offset. The Moonless preset uses -0.6 EV; Pitch Black uses -1 EV, both without moonlight. "
+              "Visual brightness offset. The Moonless preset uses -1.2 EV; Pitch Black uses -2 EV, both without moonlight. "
                     + "Glare/Solar Flare use +0.6/+1.2 EV. Time of day also sets the base exposure.", skin, "menu"));
         section(skin, "Planet properties");
         gravity = controls(skin, List.of(new Knob("Gravity (g)", 0, 10, 0.01f, "%.2f")), this::applyAtmosphere, 0);
@@ -484,6 +587,10 @@ final class GpuBoardTuning {
         terrainProgress = new Label("", skin, "small");
         terrainProgress.setName("terrain-build-progress");
         rows.add(terrainProgress).colspan(3).left().row();
+        section(skin, "Surface appearance");
+        elevationGrading = checkbox(skin, "Elevation grading", "tuning-elevation-grading");
+        elevationGrading.addListener(new TextTooltip(
+              "Adds gentle color variation above and below level zero. Updates immediately.", skin, "menu"));
         section(skin, "Surface weathering");
         terrainWear = controls(skin, List.of(new Knob("Ambient wear", 0, 1, .01f, "%.2f",
               "Natural surface weathering, including exposed mineral patches and worn cover. "
@@ -665,8 +772,8 @@ final class GpuBoardTuning {
         });
         reset = new TextButton("Defaults", skin, "menu-control");
         reset.setName("tuning-defaults");
-        reset.addListener(new TextTooltip("Restore all tabs: camera projection, geometry, terrain, water, geology, "
-              + "family sizes, visibility, light/fog effects, "
+        reset.addListener(new TextTooltip("Restore all tabs: camera projection, geometry, render resolution, "
+              + "terrain, water, geology, family sizes, visibility, light/fog effects, "
               + "the game's current planetary conditions, and disable damage preview.",
               skin, "menu"));
         reset.setProgrammaticChangeEvents(false);
@@ -763,9 +870,6 @@ final class GpuBoardTuning {
 
     private List<Control> controls(Skin skin, List<Knob> knobs, Runnable apply, int toggleCount, boolean debounce) {
         List<Control> result = new ArrayList<>();
-        Slider.SliderStyle normal = skin.get("menu", Slider.SliderStyle.class);
-        Slider.SliderStyle focused = new Slider.SliderStyle(normal);
-        focused.knob = normal.knobOver;
         for (Knob knob : knobs) {
             Slider slider = new Slider(knob.min(), knob.max(), knob.step(), false, skin, "menu");
             slider.setName(knob.name());
@@ -776,62 +880,12 @@ final class GpuBoardTuning {
             RunnableAction applyAction = new RunnableAction();
             applyAction.setRunnable(apply);
             applyDelay.setAction(applyAction);
-            var keyboard = new InputListener() {
-                private int heldKey = -1;
-                private float repeatIn;
-                private final Action repeat = new Action() {
-                    @Override
-                    public boolean act(float delta) {
-                        if (!slider.hasKeyboardFocus() || slider.isDisabled() || !Gdx.input.isKeyPressed(heldKey)) {
-                            stopRepeating();
-                            return true;
-                        }
-                        repeatIn -= delta;
-                        if (repeatIn <= 0) {
-                            repeatIn = SLIDER_REPEAT_INTERVAL;
-                            step();
-                        }
-                        return false;
-                    }
-                };
-
-                private void step() {
-                    int direction = heldKey == Input.Keys.LEFT ? -1 : 1;
-                    slider.setValue(slider.getValue() + direction * slider.getStepSize());
+            UiSliderInput keyboard = new UiSliderInput(slider, () -> {
+                if (!slider.isDragging() && slider.getActions().contains(applyDelay, true)) {
+                    slider.removeAction(applyDelay);
+                    apply.run();
                 }
-
-                boolean isRepeating() { return repeat.getActor() != null; }
-
-                void stopRepeating() {
-                    heldKey = -1;
-                    slider.removeAction(repeat);
-                    if (!slider.isDragging() && slider.getActions().contains(applyDelay, true)) {
-                        slider.removeAction(applyDelay);
-                        apply.run();
-                    }
-                }
-
-                @Override
-                public boolean keyDown(InputEvent event, int key) {
-                    if (slider.isDisabled() || key != Input.Keys.LEFT && key != Input.Keys.RIGHT) { return false; }
-                    if (heldKey != key) {
-                        stopRepeating();
-                        heldKey = key;
-                        repeatIn = SLIDER_REPEAT_DELAY;
-                        step();
-                        slider.addAction(repeat);
-                    }
-                    return true;
-                }
-
-                @Override
-                public boolean keyUp(InputEvent event, int key) {
-                    if (key != heldKey) { return false; }
-                    stopRepeating();
-                    return true;
-                }
-            };
-            slider.addListener(keyboard);
+            });
             slider.addListener(new ChangeListener() {
                 @Override
                 public void changed(ChangeEvent event, Actor actor) {
@@ -844,13 +898,6 @@ final class GpuBoardTuning {
                     } else {
                         apply.run();
                     }
-                }
-            });
-            slider.addListener(new FocusListener() {
-                @Override
-                public void keyboardFocusChanged(FocusEvent event, Actor actor, boolean hasFocus) {
-                    slider.setStyle(hasFocus ? focused : normal);
-                    if (!hasFocus) { keyboard.stopRepeating(); }
                 }
             });
             TextButton toggle = null;
@@ -879,6 +926,11 @@ final class GpuBoardTuning {
             }
         }
         return result;
+    }
+
+    /** The Display page's rows (display mode, VSync, render resolution, anti-aliasing, graphics card). */
+    Table displayRows() {
+        return display;
     }
 
     /**
@@ -934,9 +986,9 @@ final class GpuBoardTuning {
     }
 
     /**
-     * Writes the current board values into the sliders, as the initial state and after a reset. VSync and the
-     * fixed sun/moon frame are the user's window preferences, and the graphics card the computer's, not board values,
-     * so a reset leaves them alone.
+     * Writes the current board values into the sliders, as the initial state and after a reset. VSync, the display
+     * mode and the fixed sun/moon frame are the user's window preferences, and the graphics card and both
+     * anti-aliasing choices saved preferences, not board values, so a reset leaves them alone.
      */
     private void restoreDefaults() {
         syncing = true;
@@ -945,9 +997,12 @@ final class GpuBoardTuning {
         setValues(cameraFieldOfView, new float[] { BoardCamera.DEFAULT_FIELD_OF_VIEW });
         applyCamera();
         normalMaps.setChecked(true);
+        elevationGrading.setChecked(GpuTerrain.DEFAULT_ELEVATION_GRADING);
         setValues(terrainWear, new float[] { GpuTerrain.DEFAULT_TERRAIN_WEAR });
         applyTerrainWear();
         unitDisplayMode.setSelected(UnitDisplayMode.DEFAULT);
+        setValues(renderResolution, new float[] { 100 });
+        applyRenderResolution();
         grass.setChecked(true);
         waterEffects.setChecked(true);
         objectLod.setChecked(true);
@@ -995,6 +1050,7 @@ final class GpuBoardTuning {
         sensorModes.getButtons().get(GpuFieldOfView.SENSOR_STYLE.ordinal()).setChecked(true);
         setValues(sensors, new float[] { GpuFieldOfView.SENSOR_DARKNESS * 100 });
         applyFieldOfView();
+        setEnvironmentImage(null);
         setRenderingOptions(GpuAtmosphere.Options.DEFAULTS);
         // Restored board values must not move the light back out of the frame the user chose for it.
         fixedSun.setChecked(fixedSunKept);
@@ -1031,7 +1087,10 @@ final class GpuBoardTuning {
 
     GpuAtmosphere.Options atmosphereOptions() {
         return new GpuAtmosphere.Options(value(rendering, 0), fixedSun.isChecked(), value(rendering, 1), value(rendering, 2),
-              value(rendering, 3), value(rendering, 4), value(rendering, 5), value(rendering, 6), value(rendering, 7), value(rendering, 8));
+              value(rendering, 3), value(rendering, 4), value(rendering, 5), value(rendering, 6), value(rendering, 7), value(rendering, 8),
+              value(colorGrading, 0), value(colorGrading, 1), value(colorGrading, 2), value(colorGrading, 3),
+              value(lightBalance, 0) / 100, value(lightBalance, 1) / 100, value(lightBalance, 2) / 100, environmentImage,
+              lightingSky.isChecked());
     }
 
     private void applyRendering() {
@@ -1044,10 +1103,113 @@ final class GpuBoardTuning {
               options.fogHeightVariation(), options.fogDensityVariation(), options.moonShadowContrast(), options.taintStrength(),
               options.fogCalmDrift() });
         updateReadings(rendering);
+        setValues(colorGrading, new float[] { options.whiteBalance(), options.tint(), options.saturation(), options.contrast() });
+        updateReadings(colorGrading);
+        setValues(lightBalance, new float[] { options.shadowStrength() * 100, options.ambientShare() * 100,
+              options.skyContribution() * 100 });
+        updateReadings(lightBalance);
+        lightingSky.setChecked(options.lightingSky());
+        if (environmentImage != options.environmentImage()) { setEnvironmentImage(options.environmentImage()); }
+    }
+
+    /** CPU-only file decode/filtering publishes one immutable result to this window's render thread. */
+    private void chooseEnvironment(BoardSource source) {
+        if (chooseEnvironment.isDisabled()) { return; }
+        chooseEnvironment.setDisabled(true);
+        int request = ++environmentRequest;
+        var application = Gdx.app;
+        SwingUtilities.invokeLater(() -> {
+            var chooser = new JFileChooser() {
+                @Override protected JDialog createDialog(Component parent) {
+                    JDialog dialog = super.createDialog(parent);
+                    // The native board is not an AWT owner, so its dialog-raising listener cannot find this picker.
+                    dialog.setAlwaysOnTop(true);
+                    return dialog;
+                }
+            };
+            chooser.setDialogTitle("Lighting environment (2:1 panorama; visible sky stays unchanged)");
+            chooser.setFileFilter(new FileNameExtensionFilter("Panorama: HDR, PNG, JPEG", "hdr", "png", "jpg", "jpeg"));
+            if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) {
+                application.postRunnable(() -> { if (request == environmentRequest) { chooseEnvironment.setDisabled(false); } });
+                return;
+            }
+            var file = chooser.getSelectedFile().toPath();
+            application.postRunnable(() -> { if (request == environmentRequest) { environmentStatus.setText("Preparing " + file.getFileName()); } });
+            CompletableFuture.supplyAsync(() -> {
+                try { return GpuLightingEnvironment.load(file); }
+                catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+            }).whenComplete((image, failure) -> application.postRunnable(() -> {
+                if (request != environmentRequest || source != null && source.isClosed()) { return; }
+                chooseEnvironment.setDisabled(false);
+                if (failure == null) { setEnvironmentImage(image); }
+                else {
+                    Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+                    environmentStatus.setText("Previous lighting kept: " + cause.getMessage());
+                }
+            }));
+        });
+    }
+
+    void setEnvironmentImage(GpuLightingEnvironment image) {
+        environmentRequest++;
+        environmentImage = image;
+        chooseEnvironment.setDisabled(false);
+        environmentStatus.setText(image == null ? "Generated sky lighting" : image.name);
     }
 
     boolean normalMaps() {
         return normalMaps.isChecked();
+    }
+
+    /** The view switches the window when the user picks a display mode: true for Fullscreen. */
+    void onDisplayMode(Consumer<Boolean> change) {
+        displayModeChange = change;
+    }
+
+    /** Shows the window's display mode, however it was switched; this asks for nothing. */
+    void showFullscreen(boolean fullscreen) {
+        syncing = true;
+        displayMode.setSelectedIndex(fullscreen ? 1 : 0);
+        syncing = false;
+    }
+
+    private void applyDisplayMode() {
+        displayModeChange.accept(displayMode.getSelectedIndex() == 1);
+    }
+
+    /** SMAA on the window's 3D scene. */
+    boolean antiAliasing() {
+        return antiAliasing.getSelectedIndex() == 1;
+    }
+
+    /** The window's physical size, after a resize: the render resolution shows the scene size it gives. */
+    void windowPixels(int width, int height) {
+        windowWidth = width;
+        windowHeight = height;
+        showRenderSize();
+    }
+
+    /** The view reads the choice each frame; it is also saved for later sessions, on the Swing thread as the card is. */
+    private void applyAntiAliasing() {
+        String choice = antiAliasing.getSelected().toUpperCase(Locale.ROOT);
+        SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardAntiAliasing(choice));
+    }
+
+    private void applyRenderResolution() {
+        BoardCamera.renderScale = value(renderResolution, 0) / 100;
+        updateReadings(renderResolution);
+        showRenderSize();
+    }
+
+    private void showRenderSize() {
+        float scale = BoardCamera.renderScale;
+        renderSize.setText(windowWidth <= 0 ? "" : String.format(Locale.ROOT, "Scene %d x %d px (window %d x %d)",
+              GpuAtmosphere.scaled(windowWidth, scale), GpuAtmosphere.scaled(windowHeight, scale), windowWidth,
+              windowHeight));
+    }
+
+    boolean elevationGrading() {
+        return elevationGrading.isChecked();
     }
 
     float terrainWear() {
@@ -1129,6 +1291,7 @@ final class GpuBoardTuning {
     /** An explicit Apply is an action, including when the selected conditions have not changed. */
     private void applyConditions(BoardAtmosphere.Settings settings) {
         conditionsPreview = true;
+        setEnvironmentImage(null);
         setRenderingOptions(GpuAtmosphere.Options.DEFAULTS);
         setAtmosphere(settings);
     }

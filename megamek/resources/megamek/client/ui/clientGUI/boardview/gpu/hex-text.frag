@@ -12,6 +12,7 @@ precision highp float;
 in vec4 v_color;
 in vec2 v_uv;
 in vec2 v_board;
+flat in float v_ink;
 uniform sampler2D u_texture;
 uniform sampler2D u_depth;
 uniform sampler2D u_units;
@@ -22,6 +23,7 @@ uniform int u_overlay; // 0: ground relief only; 1: HEIGHT through its own hex; 
 // GROUND_LAYER
 void main() {
     fragColor = v_color * texture(u_texture, v_uv);
+    if (v_ink >= 0.0) { fragColor.rgb = vec3(v_ink); }
     if (u_overlay == 2) {
         DEPTH = 0.0;
         return;

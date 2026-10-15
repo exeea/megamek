@@ -229,7 +229,7 @@ class BoardGroundCaptureTest {
             game.setBoard(board);
             try (var source = new GpuMapSource(game, null, null)) {
                 BoardScene scene = source.takeFrame().scene();
-                int transitions = 0, roads = 0, water = 0;
+                int transitions = 0, roads = 0, water = 0, unmixedCentres = 0;
                 for (var tile : scene.tiles()) {
                     var hex = board.getHex(tile.coords());
                     assertEquals(BoardScene.Surface.GRASS, tile.surface(), tile.coords().toString());
@@ -245,8 +245,15 @@ class BoardGroundCaptureTest {
                             float amount = hex.getTerrain(Terrains.GROUND_FLUFF).getExits() / 6f;
                             var p = BoardGeometry.center(tile.coords(), tile.elevation());
                             assertEquals(amount, tile.groundCover().desert(), .00001f);
-                            assertEquals(amount, BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z).desert(), .00001f,
-                                  "The authored desert percentage reaches native material vertices at " + tile.coords());
+                            // Higher neighbouring terrain blends its talus into the receiving hex, even at its
+                            // centre. A centre without that contact retains the captured proportions exactly.
+                            boolean belowCliff = tile.coords().allAdjacent().stream().map(scene::tile)
+                                  .anyMatch(next -> next != null && next.elevation() > tile.elevation());
+                            if (!belowCliff) {
+                                unmixedCentres++;
+                                assertEquals(amount, BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z).desert(), .00001f,
+                                      "The authored desert percentage reaches native material vertices at " + tile.coords());
+                            }
                             assertTrue(BoardSurfaceBlend.boundary(scene, tile));
                         }
                     }
@@ -257,6 +264,7 @@ class BoardGroundCaptureTest {
                     }
                 }
                 assertTrue(transitions > 100, "Exercise the actual map's widespread decorative transitions");
+                assertTrue(unmixedCentres > 0, "Exercise native material sampling away from higher neighbouring terrain");
                 if (number == 2) { assertTrue(roads > 0 && water > 0, "The real road and river remain in the captured scene"); }
                 assertEquals(transitions, board.getHexes(scene.tiles().stream().map(BoardScene.Tile::coords).toList()).stream()
                       .filter(hex -> hex.containsTerrain(Terrains.GROUND_FLUFF)).count(), "Capture never edits the board");

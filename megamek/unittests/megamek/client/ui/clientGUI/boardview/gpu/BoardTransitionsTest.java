@@ -93,7 +93,8 @@ class BoardTransitionsTest {
                       name + ": without transitions the rim follows the edge"));
                 BoardSculptTest.withTransitions(true, () -> {
                     float rim = reach(scene, HIGH, true), foot = reach(scene, LOW, false);
-                    float room = BoardRelief.TRANSITION;
+                    // Dry cliffs retain wider plateau tops than gentle one/two-level slopes.
+                    float room = BoardRelief.TRANSITION * (step >= 3 ? .6f : 1);
                     assertTrue(rim < -room + 1.5f && rim > -room - 1.5f, name + ": the rim stands back by the room, " + rim);
                     assertTrue(foot > room - 1 && foot < room + 1.5f, name + ": the foot spreads out by the room, " + foot);
                 });
@@ -102,10 +103,11 @@ class BoardTransitionsTest {
     }
 
     @Test
-    void pavingAndSpecialArtworkKeepTheirOutline() {
+    void pavedCliffsAndSpecialArtworkKeepTheirOutline() {
         BoardSculptTest.withTransitions(true, () -> {
-            BoardScene paving = scene(1, BoardScene.Surface.CONCRETE, true);
-            assertTrue(reach(paving, HIGH, true) > -1.5f, "A paved rim stays on its edge");
+            // One/two-level concrete drops form fitted slopes; taller poured cliffs keep a vertical rim.
+            BoardScene paving = scene(3, BoardScene.Surface.CONCRETE, true);
+            assertTrue(reach(paving, HIGH, true) > -1.5f, "A paved cliff rim stays on its edge");
             BoardScene artwork = scene(1, BoardScene.Surface.GRASS, false);
             assertTrue(reach(artwork, HIGH, true) > -1.5f, "Special artwork keeps its edge");
             assertTrue(reach(artwork, LOW, false) < 3, "No slope runs out below special artwork");

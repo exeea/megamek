@@ -56,7 +56,7 @@ class GpuMagmaFlowSmokeTest {
               uniform vec3 u_face, u_right, u_up;
               uniform vec2 u_current;
               const float u_normalMaps = 0.0;
-              """ + GpuShaderSource.read("terrain-detail.glsl") + GpuMagmaShader.functions(true) + """
+              """ + GpuShaderSource.read("terrain-detail.glsl") + GpuShaderSource.magma(true) + """
               void main() {
                   vec3 world = vec3(7.0, -5.0, 3.0) + (u_right * v_position.x + u_up * v_position.y) * 6.0;
                   vec4 waves = vec4(0.0);

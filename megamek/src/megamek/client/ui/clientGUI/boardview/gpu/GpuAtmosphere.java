@@ -13,6 +13,7 @@ import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.GLFrameBuffer;
 import com.badlogic.gdx.graphics.glutils.GLOnlyTextureData;
@@ -39,11 +40,26 @@ final class GpuAtmosphere implements Disposable {
     static final float MAX_SAND_OPACITY = 0.25f;
     /** Particle colors are authored bright, so they take this share of the light on level ground. */
     private static final float PARTICLE_ALBEDO = 0.4f;
+    /** Below this display brightness each hex uses white neutral ink; otherwise black. Zero disables adaptation. */
+    static final float OVERLAY_BRIGHTNESS_THRESHOLD = 0.2f;
+    /** A learned hex changes ink only beyond this small display-brightness band around the threshold. */
+    private static final float OVERLAY_BRIGHTNESS_HYSTERESIS = .02f;
 
     /** Local visual controls; weather and pressure still come from the scenario snapshot. */
     record Options(float rays, boolean fixedSun, float minCloudShadow, float maxCloudShadow, float sunGlare,
-          float fogHeightVariation, float fogDensityVariation, float moonShadowContrast, float taintStrength, float fogCalmDrift) {
+          float fogHeightVariation, float fogDensityVariation, float moonShadowContrast, float taintStrength, float fogCalmDrift,
+          float whiteBalance, float tint, float saturation, float contrast,
+          float shadowStrength, float ambientShare, float skyContribution, GpuLightingEnvironment environmentImage,
+          boolean lightingSky) {
         static final Options DEFAULTS = new Options(0.5f, false);
+
+        Options(float rays, boolean fixedSun, float minCloudShadow, float maxCloudShadow, float sunGlare,
+              float fogHeightVariation, float fogDensityVariation, float moonShadowContrast, float taintStrength,
+              float fogCalmDrift, float whiteBalance, float tint, float saturation, float contrast) {
+            this(rays, fixedSun, minCloudShadow, maxCloudShadow, sunGlare, fogHeightVariation, fogDensityVariation,
+                  moonShadowContrast, taintStrength, fogCalmDrift, whiteBalance, tint, saturation, contrast,
+                  1, BoardAtmosphere.DEFAULT_AMBIENT_SHARE, 1, null, false);
+        }
 
         Options(float rays, boolean fixedSun) {
             this(rays, fixedSun, GpuClouds.MIN_SHADOW_STRENGTH, GpuClouds.MAX_SHADOW_STRENGTH);
@@ -75,10 +91,18 @@ final class GpuAtmosphere implements Disposable {
                   moonShadowContrast, taintStrength, FOG_CALM_DRIFT);
         }
 
+        Options(float rays, boolean fixedSun, float minCloudShadow, float maxCloudShadow, float sunGlare,
+              float fogHeightVariation, float fogDensityVariation, float moonShadowContrast, float taintStrength, float fogCalmDrift) {
+            this(rays, fixedSun, minCloudShadow, maxCloudShadow, sunGlare, fogHeightVariation, fogDensityVariation,
+                  moonShadowContrast, taintStrength, fogCalmDrift, 0, 0, 1, 1);
+        }
+
         Options {
             if (!Float.isFinite(rays) || !Float.isFinite(minCloudShadow) || !Float.isFinite(maxCloudShadow)
                   || !Float.isFinite(sunGlare) || !Float.isFinite(fogHeightVariation) || !Float.isFinite(fogDensityVariation)
-                  || !Float.isFinite(moonShadowContrast) || !Float.isFinite(taintStrength) || !Float.isFinite(fogCalmDrift)) {
+                  || !Float.isFinite(moonShadowContrast) || !Float.isFinite(taintStrength) || !Float.isFinite(fogCalmDrift)
+                  || !Float.isFinite(whiteBalance) || !Float.isFinite(tint) || !Float.isFinite(saturation) || !Float.isFinite(contrast)
+                  || !Float.isFinite(shadowStrength) || !Float.isFinite(ambientShare) || !Float.isFinite(skyContribution)) {
                 throw new IllegalArgumentException("Atmosphere controls must be finite");
             }
             rays = MathUtils.clamp(rays, 0, 2);
@@ -90,6 +114,13 @@ final class GpuAtmosphere implements Disposable {
             moonShadowContrast = MathUtils.clamp(moonShadowContrast, 0, 1);
             taintStrength = MathUtils.clamp(taintStrength, 0, 10);
             fogCalmDrift = MathUtils.clamp(fogCalmDrift, 0, 2);
+            whiteBalance = MathUtils.clamp(whiteBalance, -1, 1);
+            tint = MathUtils.clamp(tint, -1, 1);
+            saturation = MathUtils.clamp(saturation, 0, 2);
+            contrast = MathUtils.clamp(contrast, .5f, 1.5f);
+            shadowStrength = MathUtils.clamp(shadowStrength, 0, 1);
+            ambientShare = MathUtils.clamp(ambientShare, 0, 1);
+            skyContribution = MathUtils.clamp(skyContribution, 0, 2);
         }
 
         float cloudShadowStrength(float cover) {
@@ -101,8 +132,29 @@ final class GpuAtmosphere implements Disposable {
     private ShaderProgram fogShader;
     private ShaderProgram compositeShader;
     private FrameBuffer sceneColor;
+    /** Disposable presentation history: R is binary ink, G says an in-viewport sample initialized it. */
+    private FrameBuffer contrastRead;
+    private FrameBuffer contrastWrite;
+    private Mesh contrastPoints;
+    private ShaderProgram contrastShader;
+    private List<BoardScene.Tile> contrastTiles;
+    private int contrastBoardId;
+    private boolean contrastPrepared;
+    private boolean contrastInvalidated;
+    private final float contrastThreshold;
+    private final float contrastDark;
+    private final float contrastLight;
     private Texture sceneDepth;
+    /** The composite's physical output size; the scene is smaller only at a window's render resolution below 1. */
+    private int displayWidth = 1;
+    private int displayHeight = 1;
+    private boolean resampled;
+    /** The window's SMAA after the composite, made while enabled; offscreen targets never use it. */
+    private boolean antiAliasing;
+    private GpuSmaa smaa;
     private FrameBuffer fog;
+    private FrameBuffer weatherLayer;
+    private boolean weatherDrawn;
     private GpuHeatGlow heatGlow;
     private List<BoardScene.Tile> heatTiles;
     private boolean molten;
@@ -113,10 +165,13 @@ final class GpuAtmosphere implements Disposable {
     /** Cached world lighting and its render-owned camera-relative result; neither is game state. */
     private BoardAtmosphere.Lighting worldLighting;
     private BoardAtmosphere.Lighting lighting;
+    private BoardAtmosphere.Lighting exposureLighting;
     private final Vector3 glareRight = new Vector3();
     private float clock;
     private float stormClock;
     private Options options = Options.DEFAULTS;
+    /** Derived on control changes; zero offsets leave the existing display conversion unchanged. */
+    private final Vector3 whiteBalanceShift = new Vector3();
     private boolean transparentBackground;
     private List<BoardScene.Tile> groundTiles;
     private float groundLevel;
@@ -163,7 +218,13 @@ final class GpuAtmosphere implements Disposable {
         }
     }
 
-    GpuAtmosphere() {
+    GpuAtmosphere() { this(OVERLAY_BRIGHTNESS_THRESHOLD); }
+
+    /** The same constructor path also permits a native check of the zero-threshold bypass. */
+    GpuAtmosphere(float brightnessThreshold) {
+        contrastThreshold = GpuColor.linear(brightnessThreshold);
+        contrastDark = GpuColor.linear(Math.max(0, brightnessThreshold - OVERLAY_BRIGHTNESS_HYSTERESIS));
+        contrastLight = GpuColor.linear(brightnessThreshold + OVERLAY_BRIGHTNESS_HYSTERESIS);
         fogShader = GpuShaderManager.program(() -> shader("atmosphere-fog.frag"), next -> fogShader = next);
         try {
             compositeShader = GpuShaderManager.program(() -> shader("atmosphere-composite.frag"), next -> compositeShader = next);
@@ -180,9 +241,9 @@ final class GpuAtmosphere implements Disposable {
         String vertex = GpuShaderSource.read("atmosphere.vert");
         String prefix = "";
         if (source.contains("// SUN_VISIBILITY")) {
-            String visibility = GpuShaderSource.read("sun-visibility.glsl");
-            vertex = vertex.replace("// SUN_VISIBILITY", visibility);
-            source = source.replace("// SUN_VISIBILITY", visibility);
+            var visibility = java.util.Map.of("SUN_VISIBILITY", "sun-visibility.glsl");
+            vertex = GpuShaderSource.expand(vertex, visibility);
+            source = GpuShaderSource.expand(source, visibility);
             var units = BufferUtils.newIntBuffer(1);
             Gdx.gl.glGetIntegerv(GL20.GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, units);
             if (units.get(0) > 0) { prefix = "#define VERTEX_SUN_VISIBILITY\n"; }
@@ -192,34 +253,7 @@ final class GpuAtmosphere implements Disposable {
 
     static String fragment(String file) {
         String source = GpuShaderSource.read(file);
-        if (source.contains("// CLOUD_SHADOW")) {
-            source = source.replace("// CLOUD_SHADOW", GpuShaderSource.read("cloud-shadow.glsl"));
-        }
-        if (source.contains("// SCATTERING_PHASE")) {
-            source = source.replace("// SCATTERING_PHASE", GpuShaderSource.read("scattering-phase.glsl"));
-        }
-        if (source.contains("// GROUND_LAYER")) {
-            source = source.replace("// GROUND_LAYER", GpuShaderSource.read("ground-layer.glsl"));
-        }
-        if (source.contains("// CAMERA_DEPTH")) {
-            source = source.replace("// CAMERA_DEPTH", GpuShaderSource.read("camera-depth.glsl"));
-        }
-        if (source.contains("// WEATHER_SAND")) {
-            source = source.replace("// WEATHER_SAND", GpuShaderSource.read("weather-sand.glsl"));
-        }
-        if (source.contains("// ATMOSPHERE_FOV")) {
-            source = source.replace("// ATMOSPHERE_FOV", GpuShaderSource.read("atmosphere-fov.glsl"));
-        }
-        if (source.contains("// ATMOSPHERE_GRADE")) {
-            source = source.replace("// ATMOSPHERE_GRADE", GpuShaderSource.read("atmosphere-grade.glsl"));
-        }
-        if (source.contains("// ATMOSPHERE_GLARE")) {
-            source = source.replace("// ATMOSPHERE_GLARE", GpuShaderSource.read("atmosphere-glare.glsl"));
-        }
-        if (source.contains("// HEAT_RADIANCE")) {
-            source = source.replace("// HEAT_RADIANCE", GpuShaderSource.read("heat-radiance.glsl"));
-        }
-        return source;
+        return file.equals("atmosphere-fog.frag") ? GpuSceneRadiance.fragment(source) : source;
     }
 
     /** Periodic two-channel noise, used by clouds and ground weather. The caller owns the texture. */
@@ -255,12 +289,14 @@ final class GpuAtmosphere implements Disposable {
 
     void configure(BoardAtmosphere.Settings next) {
         if (!next.equals(settings)) {
+            invalidateContrast();
             if (settings == null || settings.effects().lightning() == 0) {
                 stormClock = 0;
             }
             settings = next;
             worldLighting = BoardAtmosphere.lighting(next, options.moonShadowContrast(), options.taintStrength());
-            lighting = worldLighting;
+            exposureLighting = worldLighting;
+            lighting = tune(worldLighting);
         }
     }
 
@@ -268,43 +304,78 @@ final class GpuAtmosphere implements Disposable {
         return lighting;
     }
 
-    /** The composite's exposure: the scenario or tuning compensation alone, since the light arrives pre-exposed. */
+    /** The complete scene's adaptation and the scenario or tuning exposure compensation. */
     float exposure() {
-        return (float) Math.pow(2, settings.exposure());
+        // Manual light controls must not immediately be cancelled by automatic exposure.
+        return exposureLighting.adaptation() * (float) Math.pow(2, settings.exposure());
     }
 
-    /** Display-encoded light for unlit particles: rain, snow and hail over the composite, smoke in the scene. */
-    Color particleLight() {
+    /** Linear light for smoke, spray and precipitation blended into the HDR scene. */
+    Color sceneParticleLight() {
         Color ground = lighting.groundLight();
-        return new Color(particle(ground.r), particle(ground.g), particle(ground.b), 1);
-    }
-
-    private static float particle(float ground) {
-        return (float) Math.pow(Math.min(1, PARTICLE_ALBEDO * ground), 1 / 2.2);
+        ground.r *= PARTICLE_ALBEDO;
+        ground.g *= PARTICLE_ALBEDO;
+        ground.b *= PARTICLE_ALBEDO;
+        return ground;
     }
 
     /** Apply after the camera's final pose, before either geometry shadows or cloud transmission. */
     void updateLight(Camera camera) {
-        updateLight(camera, false);
+        updateLight(camera, false, false);
     }
 
-    /** As {@link #updateLight(Camera)}; the Tactical View ({@code tactical}) has its one fixed light instead. */
-    void updateLight(Camera camera, boolean tactical) {
-        lighting = tactical ? BoardAtmosphere.TACTICAL
-              : options.fixedSun() ? worldLighting.relativeTo(camera) : worldLighting;
+    /** Free Flight always uses the world sun; Tactical View keeps its own light. The saved option stays untouched. */
+    void updateLight(BoardCamera camera) {
+        updateLight(camera.camera, camera.tactical(), camera.firstPerson());
+    }
+
+    private void updateLight(Camera camera, boolean tactical, boolean freeFlight) {
+        exposureLighting = tactical ? BoardAtmosphere.TACTICAL
+              : options.fixedSun() && !freeFlight ? worldLighting.relativeTo(camera) : worldLighting;
+        lighting = tune(exposureLighting);
+    }
+
+    private BoardAtmosphere.Lighting tune(BoardAtmosphere.Lighting base) {
+        return base.tuned(options.shadowStrength(), options.ambientShare(), options.skyContribution(), options.environmentImage());
     }
 
     void setOptions(Options options) {
+        if (!this.options.equals(options)) { invalidateContrast(); }
         if (settings != null && (this.options.moonShadowContrast() != options.moonShadowContrast()
               || this.options.taintStrength() != options.taintStrength())) {
             worldLighting = BoardAtmosphere.lighting(settings, options.moonShadowContrast(), options.taintStrength());
-            lighting = worldLighting;
+        }
+        if (this.options.whiteBalance() != options.whiteBalance() || this.options.tint() != options.tint()) {
+            // Relative cool/warm and green/magenta gains, normalized to preserve a neutral gray's luminance.
+            float red = (float) Math.pow(2, .5f * options.whiteBalance() + .25f * options.tint());
+            float green = (float) Math.pow(2, -.25f * options.tint());
+            float blue = (float) Math.pow(2, -.5f * options.whiteBalance() + .25f * options.tint());
+            float luminance = .2126f * red + .7152f * green + .0722f * blue;
+            whiteBalanceShift.set(red / luminance - 1, green / luminance - 1, blue / luminance - 1);
         }
         this.options = options;
+        if (worldLighting != null) {
+            exposureLighting = worldLighting;
+            lighting = tune(worldLighting);
+        }
     }
 
     /** Printable board exports preserve coverage instead of adding a viewport-relative sky gradient. */
     void setTransparentBackground(boolean enabled) { transparentBackground = enabled; }
+
+    /** The backdrop: the visible sky palette, or with "Show lighting sky" the sky that lights the scene. */
+    private Color backdropSky() { return options.lightingSky() ? lighting.environmentSky() : lighting.sky(); }
+
+    private Color backdropHorizon() { return options.lightingSky() ? lighting.environmentHorizon() : lighting.horizon(); }
+
+    /** SMAA on the window's composite (not on offscreen targets); turning it off releases its targets. */
+    void setAntiAliasing(boolean enabled) {
+        antiAliasing = enabled;
+        if (!enabled && smaa != null) {
+            smaa.dispose();
+            smaa = null;
+        }
+    }
 
     /** Publish material flags before warmup, without advancing wind or rendering with an unfinished camera. */
     void configureClouds(GpuTerrain terrain, BoardScene board) {
@@ -315,12 +386,10 @@ final class GpuAtmosphere implements Disposable {
         terrain.setWetness(BoardAtmosphere.wetness(settings));
         terrain.setWind(settings.effects());
         cloudsActive = settings.clouds() > 0 && lighting.hasDirectLight();
-        if (cloudsActive) {
-            if (clouds == null) { clouds = new GpuClouds(quad); }
-            terrain.environment().set(clouds.shadow());
-        } else {
-            terrain.environment().remove(GpuCloudShadow.TYPE);
-        }
+        // Cloud cover changes uniforms, not the surface program or its preparation requirements.
+        if (clouds == null) { clouds = new GpuClouds(quad); }
+        clouds.shadow().enabled = cloudsActive;
+        terrain.environment().set(clouds.shadow());
     }
 
     /**
@@ -349,15 +418,37 @@ final class GpuAtmosphere implements Disposable {
     }
 
     void begin(int width, int height, float delta) {
-        beginPixels(Math.max(1, HdpiUtils.toBackBufferX(width)), Math.max(1, HdpiUtils.toBackBufferY(height)), delta);
+        begin(width, height, 1, delta);
+    }
+
+    /**
+     * A render resolution {@code scale} below 1 renders the scene and its scene-sized targets at that share of the
+     * window's pixels; the composite scales it up bilinearly. At 1 the composite reads the scene 1:1, as ever.
+     */
+    void begin(int width, int height, float scale, float delta) {
+        int pixelsWide = Math.max(1, HdpiUtils.toBackBufferX(width)), pixelsHigh = Math.max(1, HdpiUtils.toBackBufferY(height));
+        beginPixels(scaled(pixelsWide, scale), scaled(pixelsHigh, scale), delta);
+        displayWidth = pixelsWide;
+        displayHeight = pixelsHigh;
+        resampled = scale != 1;
+    }
+
+    /** The scene's pixels along one axis at a render resolution {@code scale}, never fewer than one. */
+    static int scaled(int pixels, float scale) {
+        return Math.max(1, Math.round(pixels * scale));
     }
 
     /** Offscreen exports specify physical pixels, independently of the window's display scaling. */
     void beginPixels(int pixelsWide, int pixelsHigh, float delta) {
+        contrastPrepared = false;
+        displayWidth = pixelsWide;
+        displayHeight = pixelsHigh;
+        resampled = false;
+        weatherDrawn = false;
         if (sceneColor == null || sceneColor.getWidth() != pixelsWide || sceneColor.getHeight() != pixelsHigh) {
             disposeBuffers();
             // Preserve reflected highlights as well as emission until the shared exposure and display shoulder.
-            // Surfaces still supply display-encoded radiance; the composite decodes it before grading.
+            // All scene surfaces and transparent effects supply linear radiance for hardware blending.
             sceneColor = GpuHeatGlow.buffer(pixelsWide, pixelsHigh);
             sceneColor.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
             try {
@@ -368,7 +459,9 @@ final class GpuAtmosphere implements Disposable {
             }
         }
         if (hasScattering() && fog == null) {
-            fog = buffer(Math.max(1, pixelsWide / 4), Math.max(1, pixelsHigh / 4), false);
+            // Scattered shafts can exceed display white; faint fog also needs precision before exposure.
+            fog = GpuHeatGlow.buffer(Math.max(1, pixelsWide / 4), Math.max(1, pixelsHigh / 4));
+            fog.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
         }
         clock = (clock + Math.min(delta, 0.1f)) % 3600;
         stormClock = settings.effects().lightning() > 0 ? (stormClock + Math.min(delta, 0.1f)) % 7 : 0;
@@ -376,7 +469,9 @@ final class GpuAtmosphere implements Disposable {
         sceneColor.begin();
         Gdx.gl.glDepthMask(true);
         // Background alpha distinguishes the sky from transparent scene color.
-        ScreenUtils.clear(lighting.sky().r, lighting.sky().g, lighting.sky().b, 0, true);
+        Color sky = backdropSky();
+        ScreenUtils.clear(sky.r * GpuSceneRadiance.SCALE, sky.g * GpuSceneRadiance.SCALE,
+              sky.b * GpuSceneRadiance.SCALE, 0, true);
     }
 
     static FrameBuffer buffer(int width, int height, boolean depth) {
@@ -398,18 +493,23 @@ final class GpuAtmosphere implements Disposable {
         try {
             depth.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
             depth.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
-            target.bind();
-            Gdx.gl.glFramebufferTexture2D(GL20.GL_FRAMEBUFFER, GL20.GL_DEPTH_ATTACHMENT,
-                  GL20.GL_TEXTURE_2D, depth.getTextureObjectHandle(), 0);
-            if (Gdx.gl.glCheckFramebufferStatus(GL20.GL_FRAMEBUFFER) != GL20.GL_FRAMEBUFFER_COMPLETE) {
-                throw new IllegalStateException("GPU scene depth attachment is incomplete");
-            }
+            attachDepthTexture(target, depth);
             return depth;
         } catch (RuntimeException failure) {
             depth.dispose();
             throw failure;
         } finally {
             FrameBuffer.unbind();
+        }
+    }
+
+    /** Borrow an existing depth attachment; the target owns only its color texture. */
+    private static void attachDepthTexture(FrameBuffer target, Texture depth) {
+        target.bind();
+        Gdx.gl.glFramebufferTexture2D(GL20.GL_FRAMEBUFFER, GL20.GL_DEPTH_ATTACHMENT,
+              GL20.GL_TEXTURE_2D, depth.getTextureObjectHandle(), 0);
+        if (Gdx.gl.glCheckFramebufferStatus(GL20.GL_FRAMEBUFFER) != GL20.GL_FRAMEBUFFER_COMPLETE) {
+            throw new IllegalStateException("GPU scene depth attachment is incomplete");
         }
     }
 
@@ -433,6 +533,9 @@ final class GpuAtmosphere implements Disposable {
     void end(Camera camera, GpuTerrain terrain, BoardScene board, int bottom,
           GpuFieldOfView fieldOfView, boolean glareEnabled, FrameBuffer target) {
         boolean fovActive = fieldOfView != null && fieldOfView.active();
+        boolean antiAliased = target == null && antiAliasing;
+        // Before any texture binding below: its lookup tables bind the active unit while they upload.
+        if (antiAliased && smaa == null) { smaa = new GpuSmaa(quad); }
         sceneColor.end();
         if (hasScattering()) {
             renderFog(camera, terrain, board);
@@ -443,8 +546,9 @@ final class GpuAtmosphere implements Disposable {
             heatGlow.render(sceneColor.getColorBufferTexture(), sceneDepth,
                   hasScattering() ? fog.getColorBufferTexture() : null, camera, fieldOfView);
         }
-        if (target == null) { HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight); }
-        else { target.begin(); }
+        if (target != null) { target.begin(); }
+        else if (antiAliased) { smaa.begin(displayWidth, displayHeight); }
+        else { HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight); }
         screenState();
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
         Gdx.gl.glDepthFunc(GL20.GL_ALWAYS);
@@ -461,12 +565,16 @@ final class GpuAtmosphere implements Disposable {
         }
         compositeShader.setUniformi("u_scene", 0);
         compositeShader.setUniformi("u_depth", 1);
+        compositeShader.setUniformf("u_sceneScaled", resampled ? 1 : 0);
         Texture water = hasScattering() || settings.effects().sand() > 0 ? terrain.waterDepth() : null;
         if (water != null) { water.bind(6); }
         compositeShader.setUniformi("u_waterDepth", water == null ? 1 : 6);
         compositeShader.setUniformi("u_fog", hasScattering() ? 2 : 0);
         if (glowActive) { heatGlow.texture().bind(5); }
         compositeShader.setUniformi("u_heatGlow", glowActive ? 5 : 0);
+        if (weatherDrawn) { weatherLayer.getColorBufferTexture().bind(7); }
+        compositeShader.setUniformi("u_weather", weatherDrawn ? 7 : 0);
+        compositeShader.setUniformf("u_weatherEnabled", weatherDrawn ? 1 : 0);
         compositeShader.setUniformf("u_heatEnabled", molten ? 1 : 0);
         compositeShader.setUniformf("u_heatGlowStrength", glowActive ? 0.12f : 0);
         compositeShader.setUniformf("u_fogEnabled", hasScattering() ? 1 : 0);
@@ -481,8 +589,16 @@ final class GpuAtmosphere implements Disposable {
         compositeShader.setUniformf("u_exposure", exposure());
         compositeShader.setUniformf("u_tint", lighting.tint().r, lighting.tint().g, lighting.tint().b);
         compositeShader.setUniformf("u_saturation", lighting.saturation());
-        compositeShader.setUniformf("u_sky", lighting.sky().r, lighting.sky().g, lighting.sky().b);
-        compositeShader.setUniformf("u_horizon", lighting.horizon().r, lighting.horizon().g, lighting.horizon().b);
+        compositeShader.setUniformf("u_whiteBalanceShift", whiteBalanceShift);
+        compositeShader.setUniformf("u_colorAdjust", options.saturation() - 1, options.contrast() - 1);
+        Color sky = backdropSky(), horizon = backdropHorizon();
+        compositeShader.setUniformf("u_sky", sky.r, sky.g, sky.b);
+        compositeShader.setUniformf("u_horizon", horizon.r, horizon.g, horizon.b);
+        // With "Show lighting sky", the lighting image fills the background as the lit surfaces see it.
+        var environment = options.lightingSky() && lighting.environmentImage() != null && terrain != null
+              ? terrain.environment().get(GpuEnvironmentLighting.class, GpuEnvironmentLighting.TYPE) : null;
+        if (environment != null) { environment.bindImage(compositeShader, 8); }
+        else { compositeShader.setUniformf("u_environmentImage", 0, 1); }
         compositeShader.setUniformf("u_transparentBackground", transparentBackground ? 1 : 0);
         compositeShader.setUniformMatrix("u_inverseView", camera.invProjectionView);
         compositeShader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.width(), BoardGeometry.height());
@@ -496,6 +612,7 @@ final class GpuAtmosphere implements Disposable {
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
         Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
         if (target != null) { target.end(); }
+        else if (antiAliased) { smaa.end(sceneDepth, camera, bottom); }
     }
 
     /** A distant light follows the viewing angle and perspective FOV, independently of camera position. */
@@ -527,6 +644,128 @@ final class GpuAtmosphere implements Disposable {
               options.sunGlare() * Math.min(1, peak) * horizon * facing * edge * visibility, aspect);
         compositeShader.setUniformf("u_glareColor", worldLighting.direct().r / peak,
               worldLighting.direct().g / peak, worldLighting.direct().b / peak);
+    }
+
+    /**
+     * Evaluate the completed HDR scene once per hex, before grid/text. Pan, zoom and scene resolution changes retain
+     * the learned ink. The two tiny RG8 targets are separate from the resize-dependent scene buffers.
+     */
+    void prepareContrast(Camera camera, BoardScene board, int bottom) {
+        if (contrastThreshold <= 0 || board.tiles().isEmpty()) { return; }
+        try {
+            if (contrastRead == null || contrastBoardId != board.boardId() || contrastRead.getWidth() != board.width()
+                  || contrastRead.getHeight() != board.height() || contrastPositionsChanged(board.tiles())) {
+                resetContrast();
+                if (contrastShader == null) {
+                    contrastShader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU hex ink history",
+                          GpuShaderSource.read("hex-ink.vert"), GpuShaderSource.read("hex-ink.frag")), next -> contrastShader = next);
+                }
+                try {
+                    contrastRead = contrastTarget(board.width(), board.height());
+                    contrastWrite = contrastTarget(board.width(), board.height());
+                    float[] points = new float[board.tiles().size() * 3];
+                    int at = 0;
+                    for (var tile : board.tiles()) {
+                        points[at++] = tile.coords().getX();
+                        points[at++] = tile.coords().getY();
+                        points[at++] = tile.elevation();
+                    }
+                    contrastPoints = new Mesh(true, board.tiles().size(), 0,
+                          new VertexAttribute(VertexAttributes.Usage.Generic, 3, "a_hex"));
+                    contrastPoints.setVertices(points);
+                    contrastBoardId = board.boardId();
+                } catch (RuntimeException failure) {
+                    resetContrast();
+                    throw failure;
+                }
+            }
+            contrastTiles = board.tiles();
+            if (contrastInvalidated) {
+                contrastRead.begin();
+                screenState();
+                ScreenUtils.clear(0, 0, 0, 0);
+            }
+            contrastWrite.begin();
+            screenState();
+            Gdx.gl.glEnable(org.lwjgl.opengl.GL20.GL_VERTEX_PROGRAM_POINT_SIZE);
+            contrastShader.bind();
+            contrastRead.getColorBufferTexture().bind(0);
+            sceneColor.getColorBufferTexture().bind(1);
+            contrastShader.setUniformi("u_history", 0);
+            contrastShader.setUniformi("u_scene", 1);
+            contrastShader.setUniformMatrix("u_projection", camera.combined);
+            contrastShader.setUniformf("u_hexSize", BoardGeometry.width(), BoardGeometry.height(), BoardGeometry.level());
+            contrastShader.setUniformf("u_boardSize", board.width(), board.height());
+            contrastShader.setUniformf("u_thresholds", contrastThreshold, contrastDark, contrastLight);
+            contrastShader.setUniformf("u_exposure", exposure());
+            contrastPoints.render(contrastShader, GL20.GL_POINTS);
+            FrameBuffer previous = contrastRead;
+            contrastRead = contrastWrite;
+            contrastWrite = previous;
+            contrastPrepared = true;
+            contrastInvalidated = false;
+        } finally {
+            Gdx.gl.glDisable(org.lwjgl.opengl.GL20.GL_VERTEX_PROGRAM_POINT_SIZE);
+            FrameBuffer.unbind();
+            HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight);
+            Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
+            Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
+            Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+            Gdx.gl.glDepthMask(true);
+        }
+    }
+
+    private boolean contrastPositionsChanged(List<BoardScene.Tile> next) {
+        if (contrastTiles == next) { return false; }
+        if (contrastTiles == null || contrastTiles.size() != next.size()) { return true; }
+        for (int i = 0; i < next.size(); i++) {
+            var before = contrastTiles.get(i);
+            var after = next.get(i);
+            if (!before.coords().equals(after.coords()) || before.elevation() != after.elevation()) { return true; }
+        }
+        return false;
+    }
+
+    private static FrameBuffer contrastTarget(int width, int height) {
+        var builder = new GLFrameBuffer.FrameBufferBuilder(width, height);
+        builder.addColorTextureAttachment(GL30.GL_RG8, GL30.GL_RG, GL20.GL_UNSIGNED_BYTE);
+        FrameBuffer result = builder.build();
+        try {
+            result.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+            result.getColorBufferTexture().setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
+            result.begin();
+            ScreenUtils.clear(0, 0, 0, 0);
+            return result;
+        } catch (RuntimeException failure) {
+            result.dispose();
+            throw failure;
+        }
+    }
+
+    /** Defer the GL clear until the next completed scene; preserve the owner mesh and both small targets. */
+    private void invalidateContrast() {
+        contrastInvalidated = true;
+        contrastPrepared = false;
+    }
+
+    /** A same-sized board replacement is explicit; style/label edits and window resizes do not clear history. */
+    void resetContrast() {
+        if (contrastRead != null) { contrastRead.dispose(); contrastRead = null; }
+        if (contrastWrite != null) { contrastWrite.dispose(); contrastWrite = null; }
+        if (contrastPoints != null) { contrastPoints.dispose(); contrastPoints = null; }
+        contrastTiles = null;
+        contrastPrepared = false;
+        contrastInvalidated = false;
+    }
+
+    /** Bind only a prepared ink atlas. A zero threshold never allocates, updates or binds contrast resources. */
+    void bindContrast(ShaderProgram shader, int textureUnit) {
+        boolean enabled = contrastThreshold > 0 && contrastPrepared;
+        shader.setUniformf("u_contrastEnabled", enabled ? 1 : 0);
+        if (!enabled) { return; }
+        contrastRead.getColorBufferTexture().bind(textureUnit);
+        shader.setUniformi("u_contrastInk", textureUnit);
+        Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
     }
 
     /** Borrowed hardware camera depth in the red channel, valid after end(). */
@@ -622,13 +861,29 @@ final class GpuAtmosphere implements Disposable {
         compositeShader.setUniformf("u_sandLight", ground.r * dust.r, ground.g * dust.g, ground.b * dust.b);
     }
 
-    /** Draw after restoring opaque depth, before tactical markings and screen annotations. */
+    /**
+     * Capture premultiplied linear weather against the scene's existing opaque depth. The composite puts it over
+     * fogged terrain before grading: distant terrain's fog column must not attenuate near-camera precipitation.
+     * As before, weather itself has no per-particle volumetric fog integration.
+     */
     void renderWeather(Camera camera, BoardScene board) {
         if (settings.effects().hasParticles()) {
             if (particles == null) {
                 particles = new GpuWeatherParticles();
             }
-            particles.render(camera, board, settings.effects(), particleLight(), clock);
+            try {
+                if (weatherLayer == null) {
+                    var next = GpuHeatGlow.buffer(sceneColor.getWidth(), sceneColor.getHeight());
+                    try { attachDepthTexture(next, sceneDepth); }
+                    catch (RuntimeException failure) { next.dispose(); throw failure; }
+                    next.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+                    weatherLayer = next;
+                }
+                weatherLayer.begin();
+                ScreenUtils.clear(0, 0, 0, 0, false);
+                particles.render(camera, board, settings.effects(), sceneParticleLight(), clock);
+                weatherDrawn = true;
+            } finally { sceneColor.begin(); }
         }
     }
 
@@ -659,6 +914,7 @@ final class GpuAtmosphere implements Disposable {
               ? BoardAtmosphere.clouds(settings).scattering() * options.rays() / BoardGeometry.width() : 0);
         fogShader.setUniformf("u_sunColor", lighting.direct().r, lighting.direct().g, lighting.direct().b);
         fogShader.setUniformf("u_sunDirection", -lighting.direction().x, -lighting.direction().y, -lighting.direction().z);
+        fogShader.setUniformf("u_cloudEnabled", 0);
         fogShader.setUniformi("u_cloudShadow", 0);
         fogShader.setUniformi("u_geometryShadow", 0);
         if (hasRays()) {
@@ -683,6 +939,8 @@ final class GpuAtmosphere implements Disposable {
     }
 
     private void disposeBuffers() {
+        if (weatherLayer != null) { weatherLayer.dispose(); weatherLayer = null; }
+        weatherDrawn = false;
         if (sceneColor != null) {
             sceneColor.dispose();
             sceneColor = null;
@@ -700,7 +958,10 @@ final class GpuAtmosphere implements Disposable {
 
     @Override
     public void dispose() {
+        resetContrast();
+        GpuShaderManager.dispose(contrastShader);
         disposeBuffers();
+        if (smaa != null) { smaa.dispose(); }
         if (particles != null) {
             particles.dispose();
         }

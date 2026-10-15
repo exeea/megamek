@@ -207,4 +207,17 @@ class UnitDamageDisplayTest {
         assertFalse(wrecked.has(UnitDamageDisplay.Overlay.TYPE));
         assertTrue(material.has(UnitDamageDisplay.Overlay.TYPE), "Shared artwork remains untouched");
     }
+
+    @Test
+    void wreckedImportedMaterialsKeepTheirLinearColorContract() {
+        Material material = new Material("paint", new GpuLinearColors());
+        Material wrecked = UnitDamageDisplay.wrecked(material);
+        var color = wrecked.get(ColorAttribute.class, ColorAttribute.Diffuse).color;
+        assertEquals(.03968191f, color.r, .000001f, "The authored .22 wreck palette is decoded once");
+        assertEquals(color.r, color.g);
+        assertEquals(color.r, color.b);
+        assertEquals(1, color.a);
+        assertTrue(wrecked.has(GpuLinearColors.TYPE));
+        assertFalse(material.has(ColorAttribute.Diffuse), "The shared original remains untouched");
+    }
 }

@@ -83,6 +83,8 @@ final class GpuBoardOverlay implements Disposable {
     private static final List<Band> HOVERED = List.of(new Band(.05f, .06f, alpha(Color.WHITE, .85f)));
 
     private final ModelBatch batch = new ModelBatch((camera, renderables) -> { });
+    private final ModelBatch ghostBatch = new ModelBatch(GpuShaderManager.provider("Movement ghosts", GpuUnitShader::displayProvider),
+          (camera, renderables) -> { });
     /** Draws the marks every frame, GpuBattleView draws its selection bands. */
     private final ShapeRenderer shapes = new ShapeRenderer();
     private final BoardSurface.Cache surfaces = new BoardSurface.Cache();
@@ -387,9 +389,9 @@ final class GpuBoardOverlay implements Disposable {
         Vector3 to = BoardGeometry.center(arrival.coords(), arrival.elevation());
         ghost.transform.setToTranslation(to).rotate(Vector3.Z, (mover.location().facing() - arrival.facing()) * 60)
               .translate(-from.x, -from.y, -from.z).mul(source.transform);
-        batch.begin(camera);
-        batch.render(ghost, ghostLight);
-        batch.end();
+        ghostBatch.begin(camera);
+        ghostBatch.render(ghost, ghostLight);
+        ghostBatch.end();
     }
 
     /**
@@ -398,12 +400,13 @@ final class GpuBoardOverlay implements Disposable {
      */
     private void surge(float surge) {
         float opaque = Math.min(1, surge) * GpuRoutePulse.GHOST_SURGE_OPACITY;
+        Color authoredGlow = new Color(GpuRoutePulse.GHOST_SURGE).mul(surge).add(GHOST_GLOW);
         for (int index = 0; index < ghost.materials.size; index++) {
             Material material = ghost.materials.get(index);
             ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity =
                   ghostOpacity[index] + (1 - ghostOpacity[index]) * opaque;
             Color glow = ((ColorAttribute) material.get(ColorAttribute.Emissive)).color;
-            glow.set(GpuRoutePulse.GHOST_SURGE).mul(surge).add(GHOST_GLOW);
+            glow.set(GpuLinearColors.authored(material, authoredGlow));
         }
     }
 
@@ -411,12 +414,15 @@ final class GpuBoardOverlay implements Disposable {
      * Turns a copied material into the ghost's: a lit, translucent cyan that keeps only a cut-out (alpha-tested)
      * texture, so that a flat sprite keeps its outline.
      */
-    private void ghostly(Material material) {
+    static void ghostly(Material material) {
         Attribute alphaTest = material.get(FloatAttribute.AlphaTest);
         Attribute cutOut = alphaTest == null ? null : material.get(TextureAttribute.Diffuse);
         Attribute cullFace = material.get(IntAttribute.CullFace);
+        Attribute linearColors = material.get(GpuLinearColors.TYPE);
         material.clear();
-        material.set(ColorAttribute.createDiffuse(GHOST), ColorAttribute.createEmissive(GHOST_GLOW),
+        if (linearColors != null) { material.set(linearColors); }
+        material.set(ColorAttribute.createDiffuse(GpuLinearColors.authored(material, GHOST)),
+              ColorAttribute.createEmissive(GpuLinearColors.authored(material, GHOST_GLOW)),
               new BlendingAttribute(GHOST_OPACITY), new DepthTestAttribute(GL20.GL_ALWAYS, false));
         if (cutOut != null) {
             material.set(alphaTest, cutOut);
@@ -961,6 +967,7 @@ final class GpuBoardOverlay implements Disposable {
         pulse.dispose();
         surfaces.clear();
         batch.dispose();
+        ghostBatch.dispose();
         shapes.dispose();
     }
 

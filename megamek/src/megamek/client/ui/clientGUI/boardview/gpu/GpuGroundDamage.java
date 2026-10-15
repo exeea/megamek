@@ -404,11 +404,11 @@ final class GpuGroundDamage implements Disposable {
 
     /** Editable RGBA artwork: alpha is coverage; dark values are char/melt, light values disturbed debris. */
     private static List<Pixmap> loadBrush(Style style) {
-        var file = new FileHandle(new File(Configuration.dataDir(), "models/board/textures/scars/" + style.file + ".png"));
+        var file = new FileHandle(new File(Configuration.dataDir(), "models/board/textures/terrain/damage/" + style.file + ".png"));
         var levels = new ArrayList<Pixmap>();
         Pixmap source = null;
         try {
-            source = new Pixmap(file);
+            source = GpuColorTexture.decode(file);
             int left = source.getWidth(), top = source.getHeight(), right = -1, bottom = -1;
             for (int y = 0; y < source.getHeight(); y++) {
                 for (int x = 0; x < source.getWidth(); x++) {

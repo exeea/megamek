@@ -234,7 +234,7 @@ final class GpuBoardTestUi {
     static <T extends Actor> T tuning(GpuBoardTuning tuning, String name) {
         Actor control = Stream.of(tuning.defaults(), tuning.reloadAssets(), tuning.editShaders())
               .filter(button -> name.equals(button.getName())).findFirst().orElse(null);
-        for (Table page : List.of(tuning.cameraRows(), tuning.boardRows(), tuning.atmosphereRows(),
+        for (Table page : List.of(tuning.cameraRows(), tuning.displayRows(), tuning.boardRows(), tuning.atmosphereRows(),
               tuning.terrainRows())) {
             control = control != null ? control : page.findActor(name);
         }

@@ -57,8 +57,8 @@ final class BoardBridgeTruss {
 
     static Area append(List<BoardBridge.Facet> faces, Area carriageway, Area kerbs, BoardBridge.Deck bridge) {
         String replacement = bridge.colours().slot(0);
-        // Authored Body vertices were uniformly coloured: use the same replacement as RigidGlb.recolour.
-        Color colour = Color.valueOf(replacement == null ? BODY.colour() : replacement);
+        // Authored Body vertices were uniformly coloured: this is the same linear replacement as RigidGlb.recolour.
+        Color colour = GpuColor.linear(Color.valueOf(replacement == null ? BODY.colour() : replacement));
         Area steel = new Area(), concrete = new Area();
         for (var contour : BoardBridgeMesh.contours(kerbs)) {
             Area loop = area(contour);
@@ -441,3 +441,5 @@ final class BoardBridgeTruss {
         }
     }
 }
+
+

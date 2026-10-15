@@ -856,6 +856,7 @@ tasks.register('gpuBoardSmoke', Test) {
     jacoco.enabled = false
     systemProperty 'java.awt.headless', 'false'
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
+    systemProperties System.properties.findAll { it.key.toString().startsWith('megamek.gpu.') }
     outputs.upToDateWhen { false }
 }
 

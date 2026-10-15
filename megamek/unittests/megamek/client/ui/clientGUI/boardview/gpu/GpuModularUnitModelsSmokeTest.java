@@ -61,7 +61,7 @@ class GpuModularUnitModelsSmokeTest {
             @Override
             public void create() {
                 var library = new GpuUnitModels();
-                var batch = new ModelBatch();
+                var batch = new ModelBatch(GpuUnitShader.provider());
                 try {
                     var body = library.modular(ROOT + "bodies/warhammer.json");
                     var gun = library.modular(ROOT + "equipment/ppc.json");
@@ -119,8 +119,8 @@ class GpuModularUnitModelsSmokeTest {
                     first.getNode("LA-forearm").rotation.set(Vector3.X, 20);
                     first.calculateTransforms();
                     second.transform.setToTranslation(35, 0, 0).scale(.85f, .85f, .85f);
-                    first.getMaterial("paint").set(ColorAttribute.createDiffuse(.55f, .8f, .58f, 1));
-                    second.getMaterial("paint").set(ColorAttribute.createDiffuse(.85f, .5f, .35f, 1));
+                    first.getMaterial("paint").set(ColorAttribute.createDiffuse(GpuColor.linear(.55f, .8f, .58f)));
+                    second.getMaterial("paint").set(ColorAttribute.createDiffuse(GpuColor.linear(.85f, .5f, .35f)));
                     var instances = new ArrayList<>(List.of(first, second, barrel));
                     attachment.update();
                     attach(first, body, gun, "RA-front", instances);
@@ -344,37 +344,38 @@ class GpuModularUnitModelsSmokeTest {
         environment.add(new DirectionalLight().set(.38f, .38f, .38f, .5f, .8f, -.35f));
         File output = new File(System.getProperty("megamek.gpu.screenshots"));
         assertTrue(output.isDirectory() || output.mkdirs());
-        int columns = 3;
-        int rows = (FULL_VIEWS.length + columns - 1) / columns;
-        int cellWidth = Gdx.graphics.getWidth() / columns;
-        int cellHeight = Gdx.graphics.getHeight() / rows;
-        var camera = new OrthographicCamera(width, width * cellHeight / (float) cellWidth);
-        camera.near = 1;
-        camera.far = 1000;
-        Gdx.gl.glViewport(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        Gdx.gl.glClearColor(.24f, .16f, .13f, 1);
-        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
-        for (int index = 0; index < FULL_VIEWS.length; index++) {
-            // A viewport does not bound glClear, so depth is cleared whole between cells; the
-            // colour buffer is left alone and each cell paints into its own rectangle.
-            Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
-            Gdx.gl.glViewport((index % columns) * cellWidth,
-                  (rows - 1 - index / columns) * cellHeight, cellWidth, cellHeight);
-            place(camera, FULL_VIEWS[index], focus);
-            camera.update();
-            batch.begin(camera);
-            for (var instance : instances) {
-                batch.render(instance, environment);
+        try (var surface = new GpuSceneTestOutput(Gdx.graphics.getWidth(), Gdx.graphics.getHeight())) {
+            int columns = 3;
+            int rows = (FULL_VIEWS.length + columns - 1) / columns;
+            int cellWidth = Gdx.graphics.getWidth() / columns;
+            int cellHeight = Gdx.graphics.getHeight() / rows;
+            var camera = new OrthographicCamera(width, width * cellHeight / (float) cellWidth);
+            camera.near = 1;
+            camera.far = 1000;
+            surface.begin(.24f, .16f, .13f, 1);
+            for (int index = 0; index < FULL_VIEWS.length; index++) {
+                // A viewport does not bound glClear, so depth is cleared whole between cells; the
+                // colour buffer is left alone and each cell paints into its own rectangle.
+                Gdx.gl.glDepthMask(true);
+                Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+                Gdx.gl.glViewport((index % columns) * cellWidth,
+                      (rows - 1 - index / columns) * cellHeight, cellWidth, cellHeight);
+                place(camera, FULL_VIEWS[index], focus);
+                camera.update();
+                batch.begin(camera);
+                for (var instance : instances) {
+                    batch.render(instance, environment);
+                }
+                batch.end();
             }
-            batch.end();
-        }
-        Gdx.gl.glViewport(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        caption(unit);
-        Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        try {
-            PixmapIO.writePNG(new FileHandle(new File(output, name + "-full.png")), pixels, -1, true);
-        } finally {
-            pixels.dispose();
+            surface.display();
+            caption(unit);
+            Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            try {
+                PixmapIO.writePNG(new FileHandle(new File(output, name + "-full.png")), pixels, -1, true);
+            } finally {
+                pixels.dispose();
+            }
         }
     }
 
@@ -410,25 +411,26 @@ class GpuModularUnitModelsSmokeTest {
         camera.far = 1000;
         File output = new File(System.getProperty("megamek.gpu.screenshots"));
         assertTrue(output.isDirectory() || output.mkdirs());
-        for (boolean top : new boolean[] { false, true }) {
-            camera.position.set(top ? new Vector3(0, 0, 300) : new Vector3(70, 200, 150));
-            camera.up.set(top ? Vector3.Y : Vector3.Z);
-            camera.lookAt(0, 5, top ? 0 : focus);
-            camera.update();
-            Gdx.gl.glViewport(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-            Gdx.gl.glClearColor(.24f, .16f, .13f, 1);
-            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
-            batch.begin(camera);
-            for (var instance : instances) {
-                batch.render(instance, environment);
-            }
-            batch.end();
-            Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-            try {
-                PixmapIO.writePNG(new FileHandle(new File(output, name + "-" + (top ? "top" : "isometric")
-                      + ".png")), pixels, -1, true);
-            } finally {
-                pixels.dispose();
+        try (var surface = new GpuSceneTestOutput(Gdx.graphics.getWidth(), Gdx.graphics.getHeight())) {
+            for (boolean top : new boolean[] { false, true }) {
+                camera.position.set(top ? new Vector3(0, 0, 300) : new Vector3(70, 200, 150));
+                camera.up.set(top ? Vector3.Y : Vector3.Z);
+                camera.lookAt(0, 5, top ? 0 : focus);
+                camera.update();
+                surface.begin(.24f, .16f, .13f, 1);
+                batch.begin(camera);
+                for (var instance : instances) {
+                    batch.render(instance, environment);
+                }
+                batch.end();
+                surface.display();
+                Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                try {
+                    PixmapIO.writePNG(new FileHandle(new File(output, name + "-" + (top ? "top" : "isometric")
+                          + ".png")), pixels, -1, true);
+                } finally {
+                    pixels.dispose();
+                }
             }
         }
     }

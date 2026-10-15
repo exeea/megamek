@@ -13,7 +13,7 @@ void waterHabitat(out vec4 habitat, out vec4 mixture) {
     if (dot(connected, vec4(1.0)) > .5) mixture = connected;
 }
 
-vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authored, WaterLighting illumination) {
+vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 tint, vec3 authored, WaterLighting illumination) {
     bool procedural = u_waterMaterial.y > 0.5;
     vec2 rest = v_cloudPosition.xy;
 #ifdef waterSurfaceFlag
@@ -208,21 +208,20 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     foam *= foamWater * (1.0 - wetShore * .94);
 
     vec3 kept = waterTransmission(mixture, depth);
+    // One optical normal owns the Fresnel budget, direct glint and environment reflection.
+    normal = shadingNormal(normal, geometric, view);
     float facing = clamp(dot(normal, view), 0.0, 1.0);
-    // Air/water Fresnel: clear from above, reflective at grazing angles.
-    float fresnel = 0.02037 + 0.97963 * pow(1.0 - facing, 5.0);
-    vec3 reflected = reflect(viewDirection(), normal);
-    // A brighter band low in the sky, so waves reflecting lower show lighter.
-    vec3 sky = mix(u_rainHorizon * 1.15, u_rainSky, smoothstep(0.0, 1.0, reflected.z));
-#ifdef cloudShadowFlag
-    // The clouds overhead stand in the water: where the reflected ray meets the cloud base, the shadow atlas
-    // tells how much cloud there is.
-    if (reflected.z > 0.05) {
-        float base = -u_cloudProjection[3][2] / u_cloudProjection[2][2];
-        vec3 overhead = v_cloudPosition + reflected * ((base - v_cloudPosition.z) / reflected.z);
-        sky = mix(sky, illumination.whiteLight * 0.9, (1.0 - cloudTransmission(overhead)) * 0.8);
-    }
-#endif
+    // Pixel footprint broadens unresolved wave facets. The same roughness filters sky and directional reflection.
+    // The footprint filter is always on; specular anti-aliasing adds the mesh's own variance. The larger of the two
+    // widenings applies, so the water never widens twice and keeps its look with the setting off.
+    vec2 texels = fwidth(u_waterOceanScale.x > 0.0 ? rest * fineUV : position * 2.0) * OCEAN_SIZE;
+    float calm = clamp(0.16 + 0.04 * u_waterWind.z, 0.16, 0.45);
+    float footprint = clamp(calm + 0.06 * log2(1.0 + max(texels.x, texels.y)), 0.16, 0.45);
+    float roughness = max(footprint, antialiasedRoughness(calm, surfaceVariance));
+    roughness = mix(roughness, .45, falling ? 0.0 : min(length(surfaceNormal.xy) * 20.0, 1.0));
+    float fresnel = specularAlbedo(facing, roughness, vec3(.02037)).r;
+    vec3 reflection = environmentSpecular(normal, view, roughness, vec3(.02037),
+          illumination.ground, illumination.ambient);
     vec3 glint = vec3(0.0);
     vec3 glow = vec3(0.0);
     vec3 facets = illumination.light;
@@ -240,18 +239,10 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     facets += illumination.sunlight * (max(dot(broadNormal, toSun), 0.0) - toSun.z) * 0.8;
     // The sun's glitter, from facets as rough as the waves a pixel averages: close up each wave flashes, far off
     // their spread becomes a broad path of glitter instead of aliasing into lines.
-    vec2 texels = fwidth(u_waterOceanScale.x > 0.0 ? rest * fineUV : position * 2.0) * OCEAN_SIZE;
-    float roughness = clamp(0.16 + 0.06 * log2(1.0 + max(texels.x, texels.y)) + 0.04 * u_waterWind.z, 0.16, 0.45);
     // Water running down a slope is broken: a descent spreads the sun's glitter instead of drawing it as a line along
     // its curve. The mesh normal is exactly up on level water, which keeps its sharp glint.
-    roughness = mix(roughness, .45, falling ? 0.0 : min(length(surfaceNormal.xy) * 20.0, 1.0));
-    float a2 = roughness * roughness * roughness * roughness;
-    vec3 halfway = normalize(view + toSun);
-    float schlick = 0.02 + 0.98 * pow(1.0 - clamp(dot(halfway, view), 0.0, 1.0), 5.0);
-    float nh = max(dot(normal, halfway), 0.0);
-    float spread = nh * nh * (a2 - 1.0) + 1.0;
-    glint = illumination.sunlight * schlick * a2 / (3.14159 * spread * spread) * step(0.0, dot(normal, toSun))
-          / (4.0 * max(facing, 0.1)) * 0.6 * effects;
+    glint = illumination.sunlight * float(dot(geometric, toSun) > 0.0)
+          * surfaceReflectance(normal, toSun, view, roughness, vec3(.02037));
     // Thin crests let the sun through, brightest when the viewer looks toward it: they glow turquoise like the
     // shallows. Light scattered inside the water lifts every crest a little even with the sun behind the viewer.
     float behind = max(dot(normalize(viewDirection().xy + 1e-5), normalize(toSun.xy + 1e-5)), 0.0);
@@ -277,15 +268,13 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
         bodyAlpha = min(bodyAlpha * clarity, WATER_MAX_OPACITY);
     } else {
         bodyAlpha = 1.0;
-        body = authored * tint * facets;
+        body = materialReflectance(authored * tint) * facets;
     }
     // Suspended peat/silt joins shallow marsh pools and bare mud to open water over several metres.
-    vec3 wetColor = mix(vec3(.105, .14, .072), vec3(.24, .195, .105),
+    vec3 wetColor = mix(toLinear(vec3(.105, .14, .072)), toLinear(vec3(.24, .195, .105)),
           clamp((habitat.z + habitat.w) / max(dot(habitat.yzw, vec3(1.0)), .0001), 0.0, 1.0));
     body = mix(body, wetColor * facets * bodyAlpha, wetShore);
     body += glow * max(bodyAlpha, 0.35) * (1.0 - wetShore);
-    // Wind-roughened faces scatter a soft image of the sky across the column: waves show under any light.
-    body += sky * (bodyAlpha * (1.0 - fresnel) * 0.15);
     // Raindrop rings: each crest and trough catches the light differently.
     body *= 1.0 + clamp(ripples.z, -1.0, 1.0) * 0.35;
     // Churning water carries air: paler and more opaque long before it breaks into foam; spray thrown up by a
@@ -295,12 +284,13 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     bodyAlpha = mix(bodyAlpha, 0.85, aerated);
     // The column thins to nothing at the bank, so water meets its shore without a drawn edge.
     float edge = smoothstep(0.0, 0.02, shore);
-    color = (body * (1.0 - fresnel) + sky * fresnel + glint * (1.0 - foam)) * edge;
+    color = (body * (1.0 - fresnel) + reflection + glint * (1.0 - foam)) * edge;
     alpha = (bodyAlpha * (1.0 - fresnel) + fresnel) * edge;
     // Foam is never flat white: thicker and thinner froth, and bubbles churning below a fall, whose freshly
     // aerated water glows brightest.
     float grain = mix(noise + 0.5, bubbles, boil);
-    color = mix(color, froth * illumination.whiteLight * ((0.78 + 0.34 * grain) * (1.0 + 0.25 * boil)), foam);
+    vec3 foamReflectance = materialReflectance(froth * ((0.78 + 0.34 * grain) * (1.0 + 0.25 * boil)));
+    color = mix(color, foamReflectance * illumination.whiteLight, foam);
     alpha = mix(alpha, 1.0, foam);
     float grid = terrainGrid(position);
     color *= grid;

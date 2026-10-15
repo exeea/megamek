@@ -266,7 +266,7 @@ class GpuBoardSourceTest {
                 assertTrue(tile.features().stream().anyMatch(feature -> feature.asset().contains("/fuel_tanks/fuel_tank_medium_")
                       && feature.height() == 2 && feature.kind() == BoardScene.FeatureKind.PROP));
                 assertTrue(tile.features().stream().anyMatch(feature -> feature.asset().contains("/misc/heavy_industrial_")
-                      && feature.height() == 3 && feature.kind() == BoardScene.FeatureKind.PROP));
+                      && feature.height() == 3 && feature.kind() == BoardScene.FeatureKind.INDUSTRIAL));
             });
         }
     }

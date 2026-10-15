@@ -36,7 +36,6 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
@@ -62,7 +61,7 @@ class GpuDamageTuningSmokeTest {
                 var glass = plate(new Color(.21f, .67f, .73f, 1));
                 var damage = new UnitDamageDisplay();
                 var batch = new ModelBatch(GpuUnitShader.provider());
-                var buffer = new FrameBuffer(Pixmap.Format.RGBA8888, 128, 128, true);
+                var buffer = new GpuSceneTestOutput(128, 128);
                 try {
                     var instance = new ModelInstance(model);
                     var preview = UnitDamageDisplay.preview(BoardScene.LocationDamage.NONE, true, 1);
@@ -111,7 +110,7 @@ class GpuDamageTuningSmokeTest {
                     camera.update();
                     assertArrayEquals(original, pixels(batch, buffer, camera, instance), "Damage stays attached during movement");
                 } catch (Throwable error) { failure.set(error); }
-                finally { buffer.dispose(); batch.dispose(); damage.dispose(); glass.dispose(); model.dispose(); Gdx.app.exit(); }
+                finally { buffer.close(); batch.dispose(); damage.dispose(); glass.dispose(); model.dispose(); Gdx.app.exit(); }
             }
         }, GpuBoardWindow.configuration(false));
         if (failure.get() != null) { throw new AssertionError("Damage texture rendering failed", failure.get()); }
@@ -129,13 +128,12 @@ class GpuDamageTuningSmokeTest {
         return builder.end();
     }
 
-    private static int[] pixels(ModelBatch batch, FrameBuffer buffer, OrthographicCamera camera, ModelInstance instance) {
-        buffer.begin();
-        Gdx.gl.glClearColor(1, 0, 1, 1);
-        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+    private static int[] pixels(ModelBatch batch, GpuSceneTestOutput buffer, OrthographicCamera camera, ModelInstance instance) {
+        buffer.begin(1, 0, 1, 1);
         batch.begin(camera);
         batch.render(instance);
         batch.end();
+        buffer.display();
         var pixels = Pixmap.createFromFrameBuffer(0, 0, 128, 128);
         try {
             int[] result = new int[112 * 112];
@@ -143,7 +141,7 @@ class GpuDamageTuningSmokeTest {
                 for (int x = 8; x < 120; x++) { result[(y - 8) * 112 + x - 8] = pixels.getPixel(x, y); }
             }
             return result;
-        } finally { pixels.dispose(); buffer.end(); }
+        } finally { pixels.dispose(); buffer.pixels().end(); }
     }
 
     @Test

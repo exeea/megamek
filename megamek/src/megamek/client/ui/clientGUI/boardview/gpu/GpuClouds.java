@@ -139,6 +139,7 @@ final class GpuClouds implements Disposable {
     }
 
     void bindShadow(ShaderProgram shader, int unit) {
+        shader.setUniformf("u_cloudEnabled", attribute.enabled ? 1 : 0);
         attribute.texture.bind(unit);
         shader.setUniformi("u_cloudShadow", unit);
         shader.setUniformMatrix("u_cloudProjection", projection);

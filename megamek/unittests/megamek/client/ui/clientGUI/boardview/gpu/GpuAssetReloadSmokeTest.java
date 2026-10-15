@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
@@ -19,6 +20,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
@@ -55,6 +57,10 @@ class GpuAssetReloadSmokeTest {
                 else { Files.copy(path, target); }
             }
         }
+        // The merged board editor initializes its schema even when this test opens a battle view.
+        Path blueprint = directory.resolve("board-editor/blueprint.json");
+        Files.createDirectories(blueprint.getParent());
+        Files.copy(data.toPath().resolve("board-editor/blueprint.json"), blueprint);
         var failure = new AtomicReference<Throwable>();
         Configuration.setImagesDir(images);
         Configuration.setFontsDir(fonts);
@@ -73,6 +79,10 @@ class GpuAssetReloadSmokeTest {
                 int step;
                 GpuTerrain originalTerrain;
                 Texture originalTexture;
+                TextureArray originalSculpt;
+                TextureArray originalRoughness;
+                List<String> sculptLayers;
+                float sculptTile;
                 GpuUnitModels.ModularAsset originalUnit;
                 ModelInstance originalInstance;
                 float treeHeight, rockHeight, scatterHeight, otherScatterHeight, unitHeight;
@@ -106,7 +116,11 @@ class GpuAssetReloadSmokeTest {
                         Label status = model.assetReloadStatus();
                         if (step == 0 && frames() >= 5 && !terrain().busy()) {
                             originalTerrain = terrain();
-                            originalTexture = assets().material("terrain/rock");
+                            originalTexture = assets().material("terrain/classic/rock");
+                            sculptLayers = sculptLayers();
+                            originalSculpt = assets().sculptArray(sculptLayers);
+                            originalRoughness = assets().sculptRoughness(sculptLayers).maps();
+                            sculptTile = assets().sculptTile("grass");
                             treeHeight = assets().model("tree").calculateBoundingBox(new BoundingBox()).getHeight();
                             rockHeight = BoardRocks.rock(true, 0).height();
                             scatterHeight = BoardScatter.bush(BoardScene.Surface.SAND, 0).height();
@@ -121,16 +135,35 @@ class GpuAssetReloadSmokeTest {
                             originalPrograms = programs();
                             assertTrue(originalPrograms.keySet().stream().anyMatch(key -> key.startsWith("units")));
                             Files.createDirectories(shaders);
-                            compositeSource = GpuShaderSource.read("atmosphere-composite.frag")
-                                  .replace("fragColor = vec4(color, 1.0);",
-                                        "fragColor = vec4(vec3(0.85, 0.15, 0.65) + color * 0.001, 1.0);");
+                            String composite = GpuShaderSource.read("atmosphere-composite.frag");
+                            String outputColor = "fragColor = vec4(color,";
+                            assertTrue(composite.contains(outputColor), "The reload fixture must edit the actual display output");
+                            compositeSource = composite.replace(outputColor,
+                                  "fragColor = vec4(vec3(0.85, 0.15, 0.65) + color * 0.001,");
                             unitSource = GpuShaderSource.read("unit-material.frag")
                                   .replace("return diffuse;", "return diffuse.bgr; // asset-reload-unit");
                             Files.writeString(shaders.resolve("atmosphere-composite.frag"), compositeSource);
                             Files.writeString(shaders.resolve("unit-material.frag"), unitSource);
                             Files.writeString(shaders.resolve("light-model.glsl"),
                                   GpuShaderSource.read("light-model.glsl") + "\n// asset-reload-include\n");
-                            GpuAssetReloadTest.png(directory.resolve("models/board/textures/terrain/rock.png"), 0xff0000ff);
+                            GpuAssetReloadTest.png(directory.resolve("models/board/textures/terrain/classic/rock.png"), 0xff0000ff);
+                            // Finished material exports change both packed data maps and the authoring scale.
+                            // Deliberately distinct alpha values expose accidental sRGB conversion of height/AO.
+                            GpuAssetReloadTest.png(directory.resolve("models/board/textures/terrain/surfaces/grass.png"), 0x401080e0);
+                            GpuAssetReloadTest.png(directory.resolve("models/board/textures/terrain/surfaces/grass-normal.png"), 0x6040c0f0);
+                            Path sculptDefinition = directory.resolve("models/board/textures/terrain/surfaces/grass.json");
+                            var mapper = new ObjectMapper();
+                            var definition = (ObjectNode) mapper.readTree(sculptDefinition.toFile());
+                            definition.put("tile", sculptTile * 1.25f)
+                                  .put("roughness", .13f).put("roughness_map", "grass-roughness.png");
+                            var roughnessImage = new java.awt.image.BufferedImage(originalRoughness.getWidth(),
+                                  originalRoughness.getHeight(), java.awt.image.BufferedImage.TYPE_INT_RGB);
+                            for (int y = 0; y < roughnessImage.getHeight(); y++) {
+                                for (int x = 0; x < roughnessImage.getWidth(); x++) { roughnessImage.setRGB(x, y, 0x808080); }
+                            }
+                            assertTrue(javax.imageio.ImageIO.write(roughnessImage, "png",
+                                  directory.resolve("models/board/textures/terrain/surfaces/grass-roughness.png").toFile()));
+                            mapper.writerWithDefaultPrettyPrinter().writeValue(sculptDefinition.toFile(), definition);
                             scaleMesh(directory.resolve("models/board/tree.glb"));
                             scaleMesh(directory.resolve("models/board/rocks/block-0.glb"));
                             scaleMesh(directory.resolve("models/board/scatter/bush-0.glb"));
@@ -155,7 +188,28 @@ class GpuAssetReloadSmokeTest {
                             assertCompositePixels();
                             assertNotSame(originalTerrain, terrain());
                             assertEquals(0, originalTexture.getTextureObjectHandle(), "Old textures must be released");
-                            Texture texture = assets().material("terrain/rock");
+                            assertEquals(0, originalSculpt.getTextureObjectHandle(), "Old authored map arrays must be released");
+                            TextureArray sculpt = assets().sculptArray(sculptLayers);
+                            assertNotSame(originalSculpt, sculpt);
+                            assertEquals(sculptTile * 1.25f, assets().sculptTile("grass"), .0001f,
+                                  "Reload must refresh the material definition as well as its maps");
+                            int grassLayer = sculptLayers.indexOf("grass") * 2;
+                            assertTrue(grassLayer >= 0);
+                            // Independent sRGB reference values; height, tangent normal and AO stay numerical.
+                            assertArrayEquals(new float[] { .005181517f, .2158605f, .7454042f, 64f / 255f },
+                                  arrayPixel(sculpt, grassLayer), .0006f);
+                            assertArrayEquals(new float[] { 64f / 255f, 192f / 255f, 240f / 255f, 96f / 255f },
+                                  arrayPixel(sculpt, grassLayer + 1), .0006f);
+                            assertEquals(0, originalRoughness.getTextureObjectHandle(), "Old roughness arrays must be released");
+                            var authored = assets().sculptRoughness(sculptLayers);
+                            assertNotSame(originalRoughness, authored.maps());
+                            assertEquals(.13f, authored.metadata()[grassLayer], .00001f);
+                            int roughnessLayer = (int) authored.metadata()[grassLayer + 1];
+                            assertTrue(roughnessLayer >= 0, "Reload must retain the authored map binding");
+                            assertArrayEquals(new float[] { 128f / 255, 0, 0, 1 },
+                                  arrayPixel(authored.maps(), roughnessLayer), .0006f,
+                                  "The new raw R8 data must reach GPU memory after the actual Reload assets action");
+                            Texture texture = assets().material("terrain/classic/rock");
                             ByteBuffer pixels = ByteBuffer.allocateDirect(texture.getWidth() * texture.getHeight() * 4);
                             texture.bind();
                             GL11.glGetTexImage(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, pixels);
@@ -224,6 +278,11 @@ class GpuAssetReloadSmokeTest {
                     }
                 }
 
+                @SuppressWarnings("unchecked")
+                List<String> sculptLayers() throws Exception {
+                    return (List<String>) field(terrain(), "SCULPT_LAYERS");
+                }
+
                 GpuTerrain terrain() throws Exception { return (GpuTerrain) field(this, "terrain"); }
                 GpuAssets assets() throws Exception { return (GpuAssets) field(terrain(), "assets"); }
                 GpuUnitModels library() throws Exception { return (GpuUnitModels) field(this, "unitModels"); }
@@ -253,6 +312,27 @@ class GpuAssetReloadSmokeTest {
             BoardScatter.reload();
             BoardGeometry.tune(BoardGeometry.DEFAULTS);
             SwingUtilities.invokeAndWait(() -> { });
+        }
+    }
+
+    /** Read one real array layer without allocating a copy of the entire terrain array. */
+    private static float[] arrayPixel(TextureArray array, int layer) {
+        int read = GL11.glGetInteger(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER_BINDING);
+        int draw = GL11.glGetInteger(org.lwjgl.opengl.GL30.GL_DRAW_FRAMEBUFFER_BINDING);
+        int target = org.lwjgl.opengl.GL30.glGenFramebuffers();
+        try {
+            org.lwjgl.opengl.GL30.glBindFramebuffer(GL20.GL_FRAMEBUFFER, target);
+            org.lwjgl.opengl.GL30.glFramebufferTextureLayer(GL20.GL_FRAMEBUFFER, GL20.GL_COLOR_ATTACHMENT0,
+                  array.getTextureObjectHandle(), 0, layer);
+            assertEquals(GL20.GL_FRAMEBUFFER_COMPLETE,
+                  org.lwjgl.opengl.GL30.glCheckFramebufferStatus(GL20.GL_FRAMEBUFFER));
+            var pixel = ByteBuffer.allocateDirect(16).order(ByteOrder.nativeOrder()).asFloatBuffer();
+            GL11.glReadPixels(0, 0, 1, 1, GL20.GL_RGBA, GL20.GL_FLOAT, pixel);
+            return new float[] { pixel.get(0), pixel.get(1), pixel.get(2), pixel.get(3) };
+        } finally {
+            org.lwjgl.opengl.GL30.glBindFramebuffer(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER, read);
+            org.lwjgl.opengl.GL30.glBindFramebuffer(org.lwjgl.opengl.GL30.GL_DRAW_FRAMEBUFFER, draw);
+            org.lwjgl.opengl.GL30.glDeleteFramebuffers(target);
         }
     }
 

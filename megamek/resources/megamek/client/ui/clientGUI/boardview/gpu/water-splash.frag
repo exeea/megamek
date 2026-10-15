@@ -4,6 +4,7 @@ layout(location = 0) out vec4 fragColor;
 in vec2 v_uv;
 in vec2 v_effect;
 uniform vec3 u_light;
+// LIGHT_MODEL
 void main() {
     float radius = length(v_uv);
     float alpha;
@@ -13,5 +14,5 @@ void main() {
     } else {
         alpha = 1.0 - smoothstep(0.25, 1.0, radius);
     }
-    fragColor = vec4(vec3(0.65, 0.83, 0.9) * u_light, alpha * v_effect.y);
+    fragColor = vec4(toLinear(vec3(0.65, 0.83, 0.9)) * u_light, alpha * v_effect.y);
 }

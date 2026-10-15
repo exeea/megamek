@@ -8,9 +8,9 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
-import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.Environment;
@@ -42,6 +42,8 @@ final class GpuEditorModelPreviews implements Disposable {
     private Future<ModelData> pending;
     private Request current;
     private ModelBatch batch;
+    private GpuSceneDisplay display;
+    private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
 
     void add(String asset, Image target) { add(asset, megamek.common.board.BoardDecoration.Colours.NONE, target); }
 
@@ -96,9 +98,11 @@ final class GpuEditorModelPreviews implements Disposable {
         Map<String, Texture> textures = new HashMap<>();
         Model model = null;
         FrameBuffer image = null;
+        FrameBuffer scene = null;
         try {
             model = ModelTextures.create(data, textures,
-                  key -> textures.computeIfAbsent(key, file -> new Texture(new FileHandle(file), true)));
+                  (key, color) -> textures.computeIfAbsent((color ? "color:" : "data:") + key,
+                        ignored -> color ? GpuColorTexture.create(new FileHandle(key), true) : GpuColorTexture.createData(new FileHandle(key), true)));
             ModelInstance instance = new ModelInstance(model);
             BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox());
             Vector3 center = bounds.getCenter(new Vector3());
@@ -109,19 +113,31 @@ final class GpuEditorModelPreviews implements Disposable {
             camera.position.set(center).add((top ? new Vector3(0, -.25f, 1) : new Vector3(1, -1.3f, 1)).nor().scl(radius * (top ? 3 : 3.7f)));
             camera.lookAt(center); camera.near = radius / 100; camera.far = radius * 10; camera.update();
             Environment light = new Environment();
-            light.set(new ColorAttribute(ColorAttribute.AmbientLight, .55f, .55f, .55f, 1));
-            light.add(new DirectionalLight().set(.85f, .85f, .8f, -1, -1, -2));
-            if (batch == null) { batch = new ModelBatch(); }
-            image = new FrameBuffer(Pixmap.Format.RGBA8888, 128, 96, true);
-            image.begin();
+            var lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
+            float exposure = lighting.adaptation();
+            float backdropScale = GpuSceneRadiance.SCALE / exposure;
+            environmentLighting.set(lighting);
+            light.set(environmentLighting);
+            light.set(ColorAttribute.createAmbientLight(lighting.ambient()));
+            light.add(new DirectionalLight().set(lighting.direct(), lighting.direction()));
+            if (batch == null) { batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider)); }
+            if (display == null) { display = new GpuSceneDisplay(); }
+            scene = GpuHeatGlow.buffer(128, 96, true);
+            image = GpuAtmosphere.buffer(128, 96, true);
+            scene.begin();
             try {
-                ScreenUtils.clear(.045f, .06f, .065f, 1, true);
+                Gdx.gl.glDepthMask(true);
+                ScreenUtils.clear(GpuColor.linear(.045f) * backdropScale,
+                      GpuColor.linear(.06f) * backdropScale,
+                      GpuColor.linear(.065f) * backdropScale, 1, true);
                 batch.begin(camera);
                 try { batch.render(instance, light); } finally { batch.end(); }
-            } finally { image.end(); }
+            } finally { scene.end(); }
+            try { display.render(scene, image, exposure); } finally { image.end(); }
             TextureRegion region = new TextureRegion(image.getColorBufferTexture()); region.flip(false, true);
             target.setDrawable(new TextureRegionDrawable(region)); target.setUserObject("Ready"); images.put(target, image); image = null;
         } finally {
+            if (scene != null) { scene.dispose(); }
             if (image != null) { image.dispose(); }
             if (model != null) { model.dispose(); }
             textures.values().forEach(Texture::dispose);
@@ -133,5 +149,10 @@ final class GpuEditorModelPreviews implements Disposable {
         if (pending != null) { pending.cancel(true); pending = null; current = null; }
         images.values().forEach(FrameBuffer::dispose); images.clear();
     }
-    @Override public void dispose() { clear(); worker.shutdownNow(); if (batch != null) { batch.dispose(); } }
+    @Override public void dispose() {
+        clear(); worker.shutdownNow();
+        if (batch != null) { batch.dispose(); }
+        if (display != null) { display.dispose(); }
+        environmentLighting.dispose();
+    }
 }

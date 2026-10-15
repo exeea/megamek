@@ -44,9 +44,21 @@ final class GpuIceShader extends FloatAttribute {
 
     static Material lake(Material material) { return apply(material, 3); }
 
+    static Material waterfall(Material material) { return apply(material, 6); }
+
     static boolean floating(Material material) {
+        return mode(material) == 3 || mode(material) == 6;
+    }
+
+    /** Material modes are fixed when geometry is built; specialize only variants actually drawn. */
+    static int mode(Material material) {
         var ice = material.get(GpuIceShader.class, TYPE);
-        return ice != null && ice.value == 3;
+        return ice == null ? 0 : (int) ice.value;
+    }
+
+    static String prefix(Material material) {
+        int mode = mode(material);
+        return mode == 0 ? "" : "#define iceFlag\n#define ICE_MODE " + mode + ".0\n";
     }
 
     private static Material apply(Material material, int mode) {
@@ -59,8 +71,7 @@ final class GpuIceShader extends FloatAttribute {
     static String fragment(String source) {
         // Compose after shared lighting/cloud insertion. Only iced material variants compile the extra samplers.
         return source.replace("void main()", "void iceBaseSurface()") + "\n"
-              + GpuShaderSource.read("terrain-ice.glsl")
-              + "\nvoid main() {\n    iceBaseSurface();\n#ifdef iceFlag\n    fragColor.rgb = iceFinish(fragColor.rgb);\n#endif\n}\n";
+              + GpuShaderSource.read("terrain-ice.glsl");
     }
 
     static void register(DefaultShader shader, GpuAssets assets) {

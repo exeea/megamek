@@ -28,9 +28,8 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
+import com.badlogic.gdx.utils.BufferUtils;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -50,13 +49,13 @@ class GpuStarShellsSmokeTest {
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
-                var batch = new ModelBatch();
+                var batch = new ModelBatch(GpuUnitShader.provider());
                 var starShells = new GpuStarShells();
                 var depth = new GpuEffectDepth();
                 List<Model> models = new ArrayList<>();
-                FrameBuffer buffer = null;
+                GpuSceneTestOutput buffer = null;
                 try {
-                    buffer = GpuAtmosphere.buffer(SIZE, SIZE, true);
+                    buffer = new GpuSceneTestOutput(SIZE, SIZE);
                     Coords flare = new Coords(8, 8);
                     Vector3 centre = BoardGeometry.center(flare, 0);
                     float hex = BoardGeometry.height();
@@ -90,6 +89,7 @@ class GpuStarShellsSmokeTest {
                     camera.update();
                     var shells = scene(new BoardScene.StarShell(flare, 3, 5, true));
                     starShells.update(shells, Map.of(), 3);
+                    verifySceneLight(buffer, batch, ground, camera, starShells, depth, centre);
                     File folder = new File(System.getProperty("megamek.gpu.screenshots"));
                     assertTrue(folder.isDirectory() || folder.mkdirs());
                     BufferedImage dark = frame(buffer, batch, scene, camera, starShells, depth, 0, false, .12f);
@@ -141,7 +141,7 @@ class GpuStarShellsSmokeTest {
                     batch.dispose();
                     models.forEach(Model::dispose);
                     if (buffer != null) {
-                        buffer.dispose();
+                        buffer.close();
                     }
                     Gdx.app.exit();
                 }
@@ -174,13 +174,43 @@ class GpuStarShellsSmokeTest {
         return .3f * (rgb >> 16 & 255) + .59f * (rgb >> 8 & 255) + .11f * (rgb & 255);
     }
 
-    private static BufferedImage frame(FrameBuffer buffer, ModelBatch batch, List<ModelInstance> scene,
+    /** The same light must multiply stored radiance, add canonical light, and leave coverage unchanged. */
+    private static void verifySceneLight(GpuSceneTestOutput output, ModelBatch batch, ModelInstance ground,
+          PerspectiveCamera camera, GpuStarShells shells, GpuEffectDepth depth, Vector3 centre) {
+        output.begin(0, 0, 0, 1);
+        batch.begin(camera);
+        batch.render(ground);
+        batch.end();
+        Vector3 at = camera.project(centre.cpy(), 0, 0, SIZE, SIZE);
+        int x = Math.round(at.x), y = Math.round(at.y);
+        assertTrue(x >= 0 && x < SIZE && y >= 0 && y < SIZE, "The light probe must lie in the framebuffer");
+        float[] red = new float[2];
+        var pixel = BufferUtils.newFloatBuffer(4);
+        for (int sample = 0; sample < red.length; sample++) {
+            // Keep the real ground depth, replacing only its color with two controlled canonical inputs.
+            float radiance = sample * .25f * GpuSceneRadiance.SCALE;
+            Gdx.gl.glClearColor(radiance, radiance, radiance, .375f);
+            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+            depth.begin();
+            shells.renderLight(camera, depth, 0);
+            pixel.clear();
+            Gdx.gl.glReadPixels(x, y, 1, 1, GL20.GL_RGBA, GL20.GL_FLOAT, pixel);
+            red[sample] = pixel.get(0) / GpuSceneRadiance.SCALE;
+            assertEquals(.375f, pixel.get(3), 0, "Illumination must not change scene coverage");
+        }
+        // The authored night maximum is three times .02 radiance. Half-float storage contributes <.0001 here.
+        assertTrue(red[0] > 0 && red[0] <= .0601f, "The additive lift must stay in canonical units: " + red[0]);
+        float gain = (red[1] - red[0]) / .25f;
+        assertTrue(gain > 3.1f && gain <= 4.001f, "The dimensionless night gain must not be storage-scaled: " + gain);
+        output.scene().end();
+    }
+
+    private static BufferedImage frame(GpuSceneTestOutput buffer, ModelBatch batch, List<ModelInstance> scene,
           PerspectiveCamera camera, GpuStarShells starShells, GpuEffectDepth depth, float daylight, boolean lit,
           float ambient) {
-        buffer.begin();
+        buffer.begin(.02f * (1 + 20 * daylight), .025f * (1 + 20 * daylight),
+              .04f * (1 + 15 * daylight), 1);
         try {
-            ScreenUtils.clear(new Color(.02f * (1 + 20 * daylight), .025f * (1 + 20 * daylight), .04f * (1 + 15 * daylight), 1),
-                  true);
             var environment = new Environment();
             environment.set(new ColorAttribute(ColorAttribute.AmbientLight, ambient, ambient, ambient * 1.2f, 1));
             environment.add(new DirectionalLight().set(ambient, ambient, ambient, -.3f, .4f, -1));
@@ -197,6 +227,7 @@ class GpuStarShellsSmokeTest {
                 starShells.renderFlares(camera, daylight);
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            buffer.display();
             Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, SIZE, SIZE);
             try {
                 BufferedImage image = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_RGB);
@@ -210,7 +241,7 @@ class GpuStarShellsSmokeTest {
                 pixels.dispose();
             }
         } finally {
-            buffer.end();
+            buffer.pixels().end();
         }
     }
 

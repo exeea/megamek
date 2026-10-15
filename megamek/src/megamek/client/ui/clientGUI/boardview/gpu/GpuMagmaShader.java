@@ -34,13 +34,6 @@ final class GpuMagmaShader extends Attribute {
 
     boolean flowing() { return mode == LAVA || mode == FALL; }
 
-    /** Both programs share texture projection; each owns its relief, advection and heat treatment. */
-    static String functions(boolean flowing) {
-        return (flowing ? GpuShaderSource.read("liquid-flow.glsl") : "")
-              + GpuShaderSource.read("terrain-magma.glsl").replace("// MAGMA_CONDITION",
-                    GpuShaderSource.read(flowing ? "magma-flow.glsl" : "magma-solid.glsl"));
-    }
-
     @Override
     public GpuMagmaShader copy() { return withField(field); }
 

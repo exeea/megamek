@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import com.badlogic.gdx.Application;
@@ -48,7 +49,9 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
+import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
@@ -123,6 +126,8 @@ class GpuHudInputTest {
         when(Gdx.files.classpath(anyString())).thenAnswer(call -> new Lwjgl3Files().classpath(call.getArgument(0)));
         Gdx.graphics = mock(Graphics.class);
         Gdx.gl = mock(GL20.class);
+        AtomicInteger textures = new AtomicInteger();
+        when(Gdx.gl.glGenTexture()).thenAnswer(call -> textures.incrementAndGet());
         Gdx.gl20 = Gdx.gl;
         Gdx.input = mock(Input.class);
         when(source.moves()).thenReturn(moves);
@@ -152,6 +157,53 @@ class GpuHudInputTest {
             Gdx.gl20 = gl20;
             Gdx.input = input;
         }
+    }
+
+    /**
+     * The tuning's Display mode asks the view to switch the window and shows the window's mode, however it was
+     * switched, without asking again. Defaults changes neither it nor the saved anti-aliasing choice.
+     */
+    @Test
+    void displayModeAsksForTheSwitchAndFollowsTheWindow() {
+        var tuning = new GpuBoardTuning(theme.skin);
+        List<Boolean> asked = new ArrayList<>();
+        tuning.onDisplayMode(asked::add);
+        SelectBox<String> mode = tuning.displayRows().findActor("tuning-display-mode");
+        SelectBox<String> antiAliasing = tuning.displayRows().findActor("tuning-anti-aliasing");
+        assertEquals("Windowed", mode.getSelected());
+        mode.setSelected("Fullscreen");
+        assertEquals(List.of(true), asked, "Picking Fullscreen asks the view to switch");
+        tuning.showFullscreen(false);
+        assertEquals("Windowed", mode.getSelected(), "The choice shows the window's mode");
+        tuning.showFullscreen(true);
+        assertEquals(List.of(true), asked, "Showing the window's mode asks for nothing");
+        antiAliasing.setSelectedIndex(1);
+        tuning.defaults().fire(new ChangeListener.ChangeEvent());
+        assertEquals("Fullscreen", mode.getSelected(), "Defaults leaves the display mode alone");
+        assertEquals(1, antiAliasing.getSelectedIndex(), "and anti-aliasing");
+        assertEquals(List.of(true), asked);
+        // The choice is saved: leave Off behind for the tests that follow in this process.
+        antiAliasing.setSelectedIndex(0);
+    }
+
+    /**
+     * "Show lighting sky" follows "Choose lighting environment..." on the Atmosphere page, starts off, feeds the
+     * atmosphere options, and Defaults turns it off.
+     */
+    @Test
+    void showLightingSkyFeedsTheBackdropOptionAndDefaultsClearIt() {
+        var tuning = new GpuBoardTuning(theme.skin);
+        Table rows = tuning.atmosphereRows();
+        CheckBox sky = rows.findActor("tuning-lighting-sky");
+        assertEquals(rows.getChildren().indexOf(rows.findActor("tuning-environment-image"), true) + 1,
+              rows.getChildren().indexOf(sky, true), "Right after the environment choice");
+        assertFalse(sky.isChecked());
+        assertFalse(tuning.atmosphereOptions().lightingSky());
+        sky.setChecked(true);
+        assertTrue(tuning.atmosphereOptions().lightingSky());
+        tuning.defaults().fire(new ChangeListener.ChangeEvent());
+        assertFalse(sky.isChecked(), "Defaults turns it off");
+        assertFalse(tuning.atmosphereOptions().lightingSky());
     }
 
     @Test

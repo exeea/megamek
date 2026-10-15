@@ -13,6 +13,7 @@ import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Attribute;
+import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.TextureDescriptor;
 import com.badlogic.gdx.math.Vector3;
@@ -60,6 +61,35 @@ final class GpuSurfaceBlend extends Attribute {
     public int hashCode() {
         return java.util.Objects.hash(super.hashCode(), texture, Arrays.hashCode(families), Arrays.hashCode(responses),
               Arrays.deepHashCode(tiles), Arrays.deepHashCode(layers));
+    }
+
+    /**
+     * The sole ordinary family in a volcanic palette, -2 for all-volcanic, or -1 for generic dispatch.
+     * A family can share one evaluator only when every effective slot has identical maps and scales.
+     * Derive from the owned uniforms each time; ordinary palettes and missing magma assets stay generic.
+     */
+    static int ordinaryFamily(Material material) {
+        var blend = material.get(GpuSurfaceBlend.class, TYPE);
+        if (blend == null || !material.has(GpuMagmaShader.TYPE)) { return -1; }
+        int ordinary = -1;
+        for (int slot = 0; slot < 4; slot++) {
+            float family = blend.families[slot];
+            if (family != (int) family || family < 0 || family >= BoardSurfaceBlend.FAMILIES
+                  || family == BoardScene.Surface.CONCRETE.ordinal()) { return -1; }
+            if (family >= BoardSurfaceBlend.CRUST) { continue; }
+            // The fourth slot historically borrows the base by family alone, even with a map override.
+            int source = slot == 3 && family == blend.families[0] ? 0 : slot;
+            if (ordinary < 0) { ordinary = source; }
+            else if (family != blend.families[ordinary]
+                  || !sameVector(blend.tiles[source], blend.tiles[ordinary])
+                  || !sameVector(blend.layers[source], blend.layers[ordinary])) { return -1; }
+        }
+        return ordinary < 0 ? -2 : (int) blend.families[ordinary];
+    }
+
+    /** GLSL vector equality, including signed zero, for the four map/scale uniforms. */
+    private static boolean sameVector(float[] a, float[] b) {
+        return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3];
     }
 
     static String vertex(String source) {

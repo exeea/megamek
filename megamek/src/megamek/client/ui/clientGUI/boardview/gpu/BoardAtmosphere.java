@@ -20,12 +20,12 @@ final class BoardAtmosphere {
     /** Blowing sand keeps at least this much ground fog, so its dust reads even with fog none. */
     static final float MIN_SAND_FOG = 0.05f;
     /** Fraction of the night sky's fill moved into moonlight where the moon casts shadows; 0 keeps the plain moon. */
-    static final float MOONLIGHT_SHADOW_CONTRAST = 0.7f;
+    static final float MOONLIGHT_SHADOW_CONTRAST = 0.25f;
     /** Artistic palette blends, not gas opacity or a change to gameplay visibility. */
     static final float TAINTED_COLOR_STRENGTH = 0.45f;
     static final float TOXIC_COLOR_STRENGTH = 1.0f;
     static final float DEFAULT_TAINT_STRENGTH = 1.0f;
-    /** How much of the air's palette blend reaches the display-space grade that covers every drawn surface. */
+    /** How much of the air's palette blend reaches the linear scene grade that covers every drawn surface. */
     static final float TAINT_GRADE_SHARE = 0.75f;
 
     private static final int CAUSTIC_TAINT_COLOR = 0xc4c07aff;
@@ -53,22 +53,29 @@ final class BoardAtmosphere {
     private static final float AIR_MASS_OFFSET = 0.12f;
     /** Sunlight against sky fill on clear noon level ground: deep shadows, as in the desert reference. */
     private static final float KEY_FILL = 4;
+    static final float DEFAULT_AMBIENT_SHARE = 1 / (1 + KEY_FILL);
     /** A neutral day sky fill, a little cooler than the sun, that falls to SKY_HORIZON as the sun sets. */
     private static final Color SKY_TINT = rgb(0.96f, 1, 1.06f);
     private static final float SKY_HORIZON = 0.3f;
+    /** The illustrative backdrop is more saturated than incident sky light. Preserve radiance, bound its chroma. */
+    private static final float ENVIRONMENT_CHROMA = 0.25f;
+    /** Readable moonless fill, in units of the night-sky budget; presentation light, not astronomical irradiance. */
+    private static final float MOONLESS_SKY_SHARE = 2.1f;
     /** Around sunset the deep blue sky overhead fills the shade, cool against the golden sun. */
     private static final Color TWILIGHT_SKY = rgb(0.68f, 0.96f, 1.32f);
     /** Dawn and dusk warm the diffuse fill toward the glowing horizon, at constant luminance. */
     private static final Color WARM_GLOW = rgb(1, 0.78f, 0.58f);
     private static final float WARM_SHARE = 0.25f;
     /** Moonlight and the night sky are cool, but only a little blue. */
-    private static final Color NIGHT_TINT = rgb(0.85f, 0.93f, 1);
+    private static final Color NIGHT_TINT = rgb(0.70f, 0.90f, 1.30f);
     /** Full-moon light on level ground against clear noon, in stops, after the view's adaptation. */
-    private static final float FULL_MOON_STOPS = -2;
+    private static final float FULL_MOON_STOPS = -1.75f;
     /** The full moon on level ground against the night sky, before MOONLIGHT_SHADOW_CONTRAST moves fill into it. */
     private static final float MOON_KEY = 2.5f;
     /** The view adapts to this share of a change in light, in stops: dusk and night stay darker, but readable. */
     private static final float ADAPTATION = 0.6f;
+    /** Preserve the established exposure ceiling independently of the full-moon readability target. */
+    private static final float MIN_METERED_LIGHT = 1f / 112;
     /** Fog and haze scatter this share of the light that reaches level ground. */
     private static final float FOG_ALBEDO = 0.8f;
     /** Linear albedo of blowing sand: the sand fog and the composite's sand veil (GpuAtmosphere.bindSand) share it. */
@@ -176,14 +183,37 @@ final class BoardAtmosphere {
 
     /**
      * Derived afresh when settings change. Colors and direction are read-only to consumers. {@code direct},
-     * {@code ambient} and {@code fog} are linear light, already exposed for the view, in the model's unit: clear noon
+     * {@code ambient} and {@code fog} are linear light, before view adaptation, in the model's unit: clear noon
      * light gives white level ground luminance 1. Direct light can exceed 1, so these colors never pass through
-     * libGDX's clamping Color operations. {@code sky} and {@code horizon} are display-encoded colors of the air
-     * itself; {@code tint} and {@code saturation} grade every drawn surface in the composite, which is the only
+     * libGDX's clamping Color operations. {@code sky} and {@code horizon} are linear radiance of the air itself;
+     * {@code tint} and {@code saturation} grade every drawn surface in the composite, which is the only
      * stage that sees the board and the sky together.
      */
     record Lighting(Vector3 direction, Color direct, Color ambient, Color fog, Color sky, Color horizon, Color tint,
-          float saturation, float daylight, boolean sunlight) {
+          float saturation, float daylight, boolean sunlight, float shadowStrength,
+          Color environmentSky, Color environmentHorizon, GpuLightingEnvironment environmentImage, float environmentGain) {
+        Lighting(Vector3 direction, Color direct, Color ambient, Color fog, Color sky, Color horizon, Color tint,
+              float saturation, float daylight, boolean sunlight) {
+            this(direction, direct, ambient, fog, sky, horizon, tint, saturation, daylight, sunlight,
+                  1, sky, horizon, null, 1);
+        }
+
+        /** Local preview controls leave the visible sky and the atmospheric palette alone. */
+        Lighting tuned(float shadows, float ambientShare, float skyContribution, GpuLightingEnvironment image) {
+            if (shadows == 1 && ambientShare == DEFAULT_AMBIENT_SHARE && skyContribution == 1 && image == null) {
+                return this;
+            }
+            float directGain = (1 - ambientShare) / (1 - DEFAULT_AMBIENT_SHARE);
+            float skyGain = ambientShare / DEFAULT_AMBIENT_SHARE * skyContribution;
+            Color diffuse = image == null ? ambient : image.upwardIrradiance();
+            return new Lighting(direction, scaled(direct, directGain), scaled(diffuse, skyGain), fog, sky, horizon,
+                  tint, saturation, daylight, sunlight, shadows, scaled(environmentSky, skyGain),
+                  scaled(environmentHorizon, skyGain), image, skyGain);
+        }
+
+        private static Color scaled(Color color, float gain) {
+            return rgb(color.r * gain, color.g * gain, color.b * gain);
+        }
         boolean hasDirectLight() {
             return direct.r > 0 || direct.g > 0 || direct.b > 0;
         }
@@ -193,15 +223,29 @@ final class BoardAtmosphere {
             return BoardAtmosphere.groundLight(direction, direct, ambient);
         }
 
+        /** One gain for the completed scene, derived after the final sky and daylight white point. */
+        float adaptation() {
+            return BoardAtmosphere.adaptation(groundLight());
+        }
+
         /** Keep the light at the same screen bearing through the board camera's yaw, tilt, pan and zoom. */
         Lighting relativeTo(Camera camera) {
             // The source stays above the screen and board, including the overhead camera pole.
             Vector3 relative = new Vector3(camera.direction).crs(camera.up).nor().scl(direction.x)
                   .mulAdd(camera.up, -Math.abs(direction.y)).mulAdd(camera.direction, -direction.z).nor();
+            // Free flight can look above the horizon. Keep the source above the board there too: crossing zero
+            // incidence would otherwise create infinite, then negative light. Ordinary board poses stay unchanged.
+            if (relative.z > -.05f) {
+                if (relative.x * relative.x + relative.y * relative.y < 1e-12f) { relative.set(1, 0, 0); }
+                float horizontal = (float) Math.sqrt((1 - .05f * .05f)
+                      / (relative.x * relative.x + relative.y * relative.y));
+                relative.set(relative.x * horizontal, relative.y * horizontal, -.05f);
+            }
             // Tilting changes incidence on level ground; retain its established direct illumination.
             float compensation = direction.z / relative.z;
             Color compensated = rgb(direct.r * compensation, direct.g * compensation, direct.b * compensation);
-            return new Lighting(relative, compensated, ambient, fog, sky, horizon, tint, saturation, daylight, sunlight);
+            return new Lighting(relative, compensated, ambient, fog, sky, horizon, tint, saturation, daylight, sunlight,
+                  shadowStrength, environmentSky, environmentHorizon, environmentImage, environmentGain);
         }
     }
 
@@ -279,7 +323,7 @@ final class BoardAtmosphere {
             case DAY, DUSK_DAWN, FULL_MOON -> 0; // the light's own adaptation sets these
             case GLARE -> 0.6f;
             case SOLAR_FLARE -> 1.2f;
-            case MOONLESS -> -0.6f;
+            case MOONLESS -> 0;
             case PITCH_BLACK -> -1.0f;
         };
         boolean air = !inSpace && !conditions.getAtmosphere().isVacuum();
@@ -373,6 +417,11 @@ final class BoardAtmosphere {
     }
 
     static Lighting lighting(Settings settings, float moonShadowContrast, float taintStrength) {
+        return lighting(settings, moonShadowContrast, taintStrength, true);
+    }
+
+    private static Lighting lighting(Settings settings, float moonShadowContrast, float taintStrength,
+          boolean calibrateDaylight) {
         // Coverage affects the sky palette. Spatial transmission alone attenuates surface sunlight.
         float clouds = cloudiness(settings);
         float angle = (settings.hour() - 6) * MathUtils.PI / 12;
@@ -387,7 +436,7 @@ final class BoardAtmosphere {
         // Warm light peaks at the horizon, independently of how much daylight remains.
         float warmth = smooth(-0.20f, 0.015f, altitude) * (1 - smooth(0.16f, 0.50f, altitude)) * scattering;
         float twilight = (1 - smooth(0.05f, 0.45f, Math.abs(altitude))) * scattering;
-        Color warm = settings.hour() < 12 ? new Color(1, 0.53f, 0.33f, 1) : new Color(1, 0.43f, 0.20f, 1);
+        Color warm = settings.hour() < 12 ? GpuColor.linear(1, .53f, .33f) : GpuColor.linear(1, .43f, .20f);
         // One light casts shadows. The sun's fade out as it sets and the moon's fade in as the twilight darkens (the
         // reverse at dawn); the shadow direction flips at HANDOVER, where both have faded out, so it never jumps.
         // The sun outshines the twilight sky, so its fade eases out gently; the faint moon's starts steeply. Either
@@ -398,8 +447,8 @@ final class BoardAtmosphere {
         Vector3 direction = direction(settings.hour(), sunlight);
         float incidence = -direction.z;
         float moonIncidence = -direction(settings.hour(), false).z;
-        // Extinction alone dims and warms the sinking sun. It does not depend on pressure, so airless and
-        // standard air light the ground alike.
+        // The existing sun model keeps the same directional irradiance across pressures. Airless worlds lose
+        // atmospheric fill below, where the shared visible/environment sky becomes black.
         Color transmittance = transmittance(altitude);
         float sun = SUN_LEVEL * sunShadows;
         float fill = SKY_LEVEL * (SKY_HORIZON + (1 - SKY_HORIZON) * Math.max(altitude, 0)) * daylight
@@ -408,10 +457,13 @@ final class BoardAtmosphere {
         float night = NIGHT_LEVEL / (1 + MOON_KEY) * (1 - daylight) / luminance(NIGHT_TINT);
         float moon = settings.moonlight() ? night * MOON_KEY / NOON_INCIDENCE : 0;
         // Moonlight whose shadows the twilight sky washes out still lights the ground, as fill. The moon contrast
-        // moves night-sky fill into the shadow-casting moonlight; lit level ground keeps its light.
+        // moves night-sky fill into the shadow-casting moonlight; lit level ground keeps its luminance.
         float transfer = moonShadowContrast * moonShadows;
         float moonlight = moon * moonShadows + night * transfer / incidence;
-        float nightFill = night * (1 - transfer) + moon * (1 - moonShadows) * moonIncidence;
+        // Removing the moon keeps the default residual sky floor; it must not return the missing moon's
+        // transferred energy as ambient light. The live moon-contrast control still affects only moonlight.
+        float skyShare = 1 - (settings.moonlight() ? transfer : MOONLIGHT_SHADOW_CONTRAST);
+        float nightFill = night * skyShare + moon * (1 - moonShadows) * moonIncidence;
         Color direct = rgb(sun * transmittance.r + moonlight * NIGHT_TINT.r,
               sun * transmittance.g + moonlight * NIGHT_TINT.g, sun * transmittance.b + moonlight * NIGHT_TINT.b);
         Color ambient = rgb(fill * SKY_TINT.r, fill * SKY_TINT.g, fill * SKY_TINT.b);
@@ -420,45 +472,37 @@ final class BoardAtmosphere {
         ambient.r += nightFill * NIGHT_TINT.r;
         ambient.g += nightFill * NIGHT_TINT.g;
         ambient.b += nightFill * NIGHT_TINT.b;
-        // Pre-expose: the view adapts to part of the change in light on level ground; clear noon keeps the unit.
-        float exposure = (float) Math.pow(luminance(groundLight(direction, direct, ambient)), -ADAPTATION);
-        scale(direct, exposure);
-        scale(ambient, exposure);
-        // Fog and dust scatter the light that reaches the ground: warm by day, golden at dusk, moonlit at night.
-        Color ground = groundLight(direction, direct, ambient);
-        float sand = settings.effects().sand();
-        Color fog = rgb(ground.r * MathUtils.lerp(FOG_ALBEDO, SAND_DUST.r, sand),
-              ground.g * MathUtils.lerp(FOG_ALBEDO, SAND_DUST.g, sand),
-              ground.b * MathUtils.lerp(FOG_ALBEDO, SAND_DUST.b, sand));
-        // Display-encoded air colors, authored for the composite's neutral exposure of one.
-        Color sky = new Color(0.031f, 0.049f, 0.106f, 1)
-              .lerp(new Color(0.154f, 0.335f, 0.579f, 1), daylight)
-              .lerp(new Color(0.14f, 0.20f, 0.42f, 1), twilight * 0.65f);
-        Color horizon = new Color(0.075f, 0.088f, 0.15f, 1)
-              .lerp(new Color(0.54f, 0.72f, 0.888f, 1), daylight)
-              .lerp(new Color(0.44f, 0.30f, 0.36f, 1), twilight)
+        // Decode authored palette stops once. Time, cloud cover, taint and the on-screen gradient all blend
+        // linear radiance; the atmosphere composite alone applies the final display encoding.
+        Color sky = GpuColor.linear(.031f, .049f, .106f)
+              .lerp(GpuColor.linear(.154f, .335f, .579f), daylight)
+              .lerp(GpuColor.linear(.14f, .20f, .42f), twilight * .65f);
+        Color horizon = GpuColor.linear(.075f, .088f, .15f)
+              .lerp(GpuColor.linear(.54f, .72f, .888f), daylight)
+              .lerp(GpuColor.linear(.44f, .30f, .36f), twilight)
               .lerp(new Color(warm).mul(0.75f, 0.75f, 0.75f, 1), warmth * 0.9f);
         // A smooth cloud-colored veil is strongest overhead and fades toward the horizon. No sky texture/pass.
-        Color overcast = new Color(0.057f, 0.066f, 0.097f, 1)
-              .lerp(new Color(0.618f, 0.669f, 0.734f, 1), daylight)
-              .lerp(new Color(0.48f, 0.32f, 0.34f, 1), twilight * 0.55f);
+        Color overcast = GpuColor.linear(.057f, .066f, .097f)
+              .lerp(GpuColor.linear(.618f, .669f, .734f), daylight)
+              .lerp(GpuColor.linear(.48f, .32f, .34f), twilight * .55f);
         sky.lerp(overcast, clouds * 0.92f);
         horizon.lerp(overcast, clouds * 0.10f);
         if (settings.pressure().isVacuum()) {
-            sky.set(0.002f, 0.003f, 0.006f, 1);
+            sky.set(GpuColor.linear(.002f, .003f, .006f));
             horizon.set(sky);
-            fog.set(sky);
         }
         // The light carries the white balance, so the grade holds only the air's taint.
         Color tint = new Color(Color.WHITE);
+        Color taintPalette = null;
+        float fogTaint = 0;
         if (!settings.taint().isBreathable() && scattering > 0 && taintStrength > 0) {
             // Hazard categories do not specify gas composition: these restrained hues are visual cues only.
-            Color palette = new Color(switch (settings.taint()) {
+            Color palette = GpuColor.linear(new Color(switch (settings.taint()) {
                 case TAINTED_CAUSTIC, TOXIC_CAUSTIC -> CAUSTIC_TAINT_COLOR;
                 case TAINTED_POISON, TOXIC_POISON -> POISON_TAINT_COLOR;
                 case TAINTED_FLAME, TOXIC_FLAME -> FLAMMABLE_TAINT_COLOR;
                 case BREATHABLE -> throw new IllegalStateException("Breathable air has no taint palette");
-            });
+            }));
             // Warm horizon light owns dawn and dusk, so the palette recedes while it shines.
             float toxicityStrength = (settings.taint().isToxic() ? TOXIC_COLOR_STRENGTH : TAINTED_COLOR_STRENGTH);
             float strength = toxicityStrength
@@ -467,12 +511,91 @@ final class BoardAtmosphere {
             // Existing gradients/volumes provide depth. Weather alone decides whether scattering is rendered.
             tintAtmosphere(sky, palette, strength * 0.55f);
             tintAtmosphere(horizon, palette, strength);
-            tintAtmosphere(fog, palette, strength);
+            taintPalette = palette;
+            fogTaint = strength;
             // The composite grades every drawn surface, so the air reaches the board and not only the sky.
             tintAtmosphere(tint, palette, strength * TAINT_GRADE_SHARE);
         }
+        // The environment is L(z) = horizon + (sky - horizon) * sqrt(z) above the horizon. Its upward-facing
+        // cosine integral E/pi is exactly .2*horizon + .8*sky. Keep the accepted backdrop's radiance unchanged;
+        // its illustrative saturation is separately bounded for the environment used by every material.
+        Color integratedSky = rgb(.2f * horizon.r + .8f * sky.r, .2f * horizon.g + .8f * sky.g,
+              .2f * horizon.b + .8f * sky.b);
+        float skyScale = settings.pressure().isVacuum() ? 1
+              : luminance(ambient) / Math.max(1e-8f, luminance(integratedSky));
+        scale(sky, skyScale);
+        scale(horizon, skyScale);
+        scale(integratedSky, skyScale);
+        Color environmentSky = new Color(sky), environmentHorizon = new Color(horizon);
+        if (!settings.pressure().isVacuum()) {
+            tintAtmosphere(environmentSky, Color.WHITE, 1 - ENVIRONMENT_CHROMA);
+            tintAtmosphere(environmentHorizon, Color.WHITE, 1 - ENVIRONMENT_CHROMA);
+            // Increase diffuse night illumination rather than scene exposure: emissive lava must not brighten
+            // just to make unlit terrain readable. The added fill vanishes continuously through dawn.
+            if (!settings.moonlight()) {
+                float gain = 1 + night * (MOONLESS_SKY_SHARE - skyShare) * luminance(NIGHT_TINT)
+                      / Math.max(1e-8f, luminance(integratedSky));
+                scale(environmentSky, gain);
+                scale(environmentHorizon, gain);
+            }
+        }
+        if (!settings.moonlight()) {
+            // The readability fill is not a visible moon. Keep even the faint airless backdrop dark under adaptation.
+            float backdrop = MathUtils.lerp(.35f, 1, daylight);
+            scale(sky, backdrop);
+            scale(horizon, backdrop);
+        }
+        ambient.set(rgb(.2f * environmentHorizon.r + .8f * environmentSky.r,
+              .2f * environmentHorizon.g + .8f * environmentSky.g,
+              .2f * environmentHorizon.b + .8f * environmentSky.b));
+        if (calibrateDaylight) {
+            // One mildly warm daylight white point for direct, diffuse and reflected light. No material tint.
+            // The visible sky retains its established presentation; it is not a calibrated HDR light probe.
+            calibrateDaylight(direct, daylight, DaylightWhitePoint.GAIN);
+            calibrateDaylight(ambient, daylight, DaylightWhitePoint.GAIN);
+            calibrateDaylight(environmentSky, daylight, DaylightWhitePoint.GAIN);
+            calibrateDaylight(environmentHorizon, daylight, DaylightWhitePoint.GAIN);
+            calibrateDaylight(sky, daylight, DaylightWhitePoint.VISIBLE_GAIN);
+            calibrateDaylight(horizon, daylight, DaylightWhitePoint.VISIBLE_GAIN);
+        }
+        // Fog and dust scatter this same environment and sun, after sky normalization and before display exposure.
+        Color ground = groundLight(direction, direct, ambient);
+        float sand = settings.effects().sand();
+        Color fog = rgb(ground.r * MathUtils.lerp(FOG_ALBEDO, SAND_DUST.r, sand),
+              ground.g * MathUtils.lerp(FOG_ALBEDO, SAND_DUST.g, sand),
+              ground.b * MathUtils.lerp(FOG_ALBEDO, SAND_DUST.b, sand));
+        if (taintPalette != null) { tintAtmosphere(fog, taintPalette, fogTaint); }
         return new Lighting(direction, direct, ambient, fog, sky, horizon, tint,
-              0.78f + 0.22f * daylight, daylight, sunlight);
+              0.78f + 0.22f * daylight, daylight, sunlight, 1,
+              environmentSky, environmentHorizon, null, 1);
+    }
+
+    /** Lazy initialization avoids referring to partially initialized defaults while TACTICAL is being built. */
+    private static final class DaylightWhitePoint {
+        private static final Color GAIN = gains(false);
+        private static final Color VISIBLE_GAIN = gains(true);
+
+        private static Color gains(boolean visible) {
+            Lighting reference = lighting(new Settings(12, 0, 0, STANDARD_GROUND_LAYER_HEIGHT, 0, 0),
+                  MOONLIGHT_SHADOW_CONTRAST, 0, false);
+            Color white = reference.groundLight();
+            Color target = rgb(1.02f, 1, .96f);
+            scale(target, 1 / luminance(target));
+            if (visible) {
+                Color sky = reference.sky(), horizon = reference.horizon();
+                white = groundLight(reference.direction(), reference.direct(), rgb(
+                      .2f * horizon.r + .8f * sky.r, .2f * horizon.g + .8f * sky.g,
+                      .2f * horizon.b + .8f * sky.b));
+                target.set(Color.WHITE);
+            }
+            return rgb(target.r / white.r, target.g / white.g, target.b / white.b);
+        }
+    }
+
+    private static void calibrateDaylight(Color color, float daylight, Color gain) {
+        color.r *= MathUtils.lerp(1, gain.r, daylight);
+        color.g *= MathUtils.lerp(1, gain.g, daylight);
+        color.b *= MathUtils.lerp(1, gain.b, daylight);
     }
 
     /** The rendered source direction. A small north/south component avoids the shadow camera's pole, even at noon. */
@@ -498,7 +621,8 @@ final class BoardAtmosphere {
         Color direct = rgb(noon.direct().r * compensation, noon.direct().g * compensation,
               noon.direct().b * compensation);
         return new Lighting(direction, direct, noon.ambient(), noon.fog(), noon.sky(), noon.horizon(),
-              new Color(Color.WHITE), 1, noon.daylight(), true);
+              new Color(Color.WHITE), 1, noon.daylight(), true, noon.shadowStrength(),
+              noon.environmentSky(), noon.environmentHorizon(), noon.environmentImage(), noon.environmentGain());
     }
 
     private static Color groundLight(Vector3 direction, Color direct, Color ambient) {
@@ -522,6 +646,14 @@ final class BoardAtmosphere {
         color.b *= factor;
     }
 
+    /**
+     * View adaptation from the actual level-ground source. The established night metering range bounds gain in
+     * vacuum or a black environment; this readability floor changes exposure, never the source light itself.
+     */
+    static float adaptation(Color ground) {
+        return (float) Math.pow(Math.max(MIN_METERED_LIGHT, luminance(ground)), -ADAPTATION);
+    }
+
     private static float luminance(Color color) {
         return 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
     }
@@ -532,7 +664,7 @@ final class BoardAtmosphere {
         float blend = MathUtils.clamp(strength, 0, 1);
         if (blend <= 0) { return; }
         float energy = luminance(color) / luminance(palette);
-        // Color.mul/lerp clamp to LDR. A multiplicative display grade can legitimately exceed one; clamping
+        // Color.mul/lerp clamp to LDR. A multiplicative linear grade can legitimately exceed one; clamping
         // its luminance-matched target darkened the whole board when increasing taint (especially white daylight).
         color.r += (palette.r * energy - color.r) * blend;
         color.g += (palette.g * energy - color.g) * blend;

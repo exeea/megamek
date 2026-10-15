@@ -19,7 +19,7 @@ import megamek.common.board.BoardDecoration;
 
 /** Shared CPU geometry for the terrain-rock and scatter kits; no GL resources or placement policy. */
 record BoardShape(List<BoardShape.Polygon> polygons, float height) {
-    /** One flat face, counter-clockwise seen from outside; {@code material} names its source material. */
+    /** One flat face, counter-clockwise seen from outside; linear {@code color}, and its source {@code material}. */
     record Polygon(Vector3[] points, Vector3 normal, Color color, String material) { }
 
     static Map<String, BoardShape> loadKit(String asset) {
@@ -80,7 +80,9 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
                     Vector3 normal = new Vector3(mesh.vertices[offset], mesh.vertices[offset + 1],
                           mesh.vertices[offset + 2]).mul(normals).nor();
                     Color color = new Color(colors.get(part.materialId));
-                    color.mul(mesh.vertices[offset + 3], mesh.vertices[offset + 4], mesh.vertices[offset + 5], 1);
+                    color.r *= mesh.vertices[offset + 3];
+                    color.g *= mesh.vertices[offset + 4];
+                    color.b *= mesh.vertices[offset + 5];
                     polygons.add(new Polygon(points, normal, color, part.materialId));
                 }
             }

@@ -5,6 +5,6 @@ vec4 jetParticle() {
     float edge = 1.0 - smoothstep(0.05, 1.0, radius);
     float tip = 1.0 - smoothstep(0.55, 1.0, v_uv.y);
     float core = (1.0 - smoothstep(0.0, 0.4, radius)) * (1.0 - smoothstep(0.1, 0.65, v_uv.y));
-    vec3 blue = mix(vec3(0.025, 0.22, 1.0), vec3(0.08, 0.72, 1.0), edge);
-    return vec4(mix(blue, vec3(0.85, 0.96, 1.0), core), edge * tip * v_effect.y);
+    vec3 blue = mix(toLinear(vec3(0.025, 0.22, 1.0)), toLinear(vec3(0.08, 0.72, 1.0)), edge);
+    return vec4(mix(blue, toLinear(vec3(0.85, 0.96, 1.0)), core), edge * tip * v_effect.y);
 }

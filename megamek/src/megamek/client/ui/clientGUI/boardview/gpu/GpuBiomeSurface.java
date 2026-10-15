@@ -13,6 +13,8 @@ import megamek.common.board.Coords;
 final class GpuBiomeSurface implements Disposable {
     /** The biome bits of a texel; R bits 4..7 above them flag the stencil quarters. */
     private static final int BIOME = 0x0f000000;
+    /** G bit 4: a dry, same-biome/elevation two-ring neighbourhood; low G bits remain the aqueous palette. */
+    private static final int UNIFORM_BIOME = 0x00100000;
     /**
      * In metres, as terrain-biome-mask.glsl: biome weights reach 14 m beyond a hex outline, a palette 5 m beyond it from
      * a position the noise moves up to 3 m along each axis. The margin covers float rounding at quarter edges.
@@ -40,7 +42,7 @@ final class GpuBiomeSurface implements Disposable {
         if (scene != null) {
             for (var tile : scene.tiles()) {
                 var kind = BoardBiome.kind(tile);
-                // R is Biome, plus the stencil's reached quarters (below); G is aqueous palette + 1 (zero excludes
+                // R is Biome, plus the stencil's reached quarters (below); low G is aqueous palette + 1 (zero excludes
                 // dry/frozen/molten tiles), B is the ice shown (1 frozen land, 2 frozen water, 3 detected black ice),
                 // A is elevation + 64.
                 int color = kind.ordinal() << 24;
@@ -79,6 +81,12 @@ final class GpuBiomeSurface implements Disposable {
                     next[index] |= quarters(next, w, h, new Coords(index % w, index / w)) << 28;
                 }
             }
+            // Every possible stencil hex in this cell is within two rings. At their shared plateau height the
+            // normalized coverage is exactly one, so the fragment can skip the whole stencil. Board edges and
+            // mixed heights/biomes keep the ordinary path; ice bits are independent of this coverage metadata.
+            for (int index = 0; index < next.length; index++) {
+                if (uniformBiome(next, w, h, new Coords(index % w, index / w))) { next[index] |= UNIFORM_BIOME; }
+            }
         }
         previous = scene == null ? null : scene.tiles();
         active = any || Integer.bitCount(palettes) > 1;
@@ -97,6 +105,18 @@ final class GpuBiomeSurface implements Disposable {
             } else { texture.draw(map, 0, 0); }
             pixels = next; width = w; height = h;
         } finally { map.dispose(); }
+    }
+
+    private static boolean uniformBiome(int[] colors, int w, int h, Coords hex) {
+        int identityMask = BIOME | 0x000f0000 | 0xff;
+        int identity = colors[hex.getY() * w + hex.getX()] & identityMask;
+        if ((identity & BIOME) == 0 || (identity & 0x000f0000) != 0) { return false; }
+        for (Coords near : hex.allAtDistanceOrLess(2)) {
+            if (!inside(near, w, h) || (colors[near.getY() * w + near.getX()] & identityMask) != identity) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

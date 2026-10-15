@@ -41,11 +41,24 @@ final class GpuModelMaterial extends Attribute {
         });
         // A recolourable model's shared mesh drawn one by one (tilted or faded placements, hover copies, combat scars, the
         // side view): its placement's colours. Instanced batches carry them per instance instead (GpuTreeInstances).
-        shader.register("u_slotColours", new BaseShader.LocalSetter() {
+        shader.register("u_slotColours[0]", new BaseShader.LocalSetter() {
+            private final float[] linear = new float[12];
+
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 float[] colours = RigidGlb.slotColours(renderable.userData);
-                target.set(id, colours[0], colours[1], colours[2], colours[3]);
+                for (int slot = 0; slot < 4; slot++) {
+                    int at = slot * 3;
+                    if (colours[slot] < 0) {
+                        linear[at] = linear[at + 1] = linear[at + 2] = -1;
+                    } else {
+                        int rgb = (int) colours[slot];
+                        linear[at] = GpuColor.linear((rgb >> 16 & 255) / 255f);
+                        linear[at + 1] = GpuColor.linear((rgb >> 8 & 255) / 255f);
+                        linear[at + 2] = GpuColor.linear((rgb & 255) / 255f);
+                    }
+                }
+                target.program.setUniform3fv(target.loc(id), linear, 0, linear.length);
             }
         });
         shader.register("u_modelView", new BaseShader.GlobalSetter() {

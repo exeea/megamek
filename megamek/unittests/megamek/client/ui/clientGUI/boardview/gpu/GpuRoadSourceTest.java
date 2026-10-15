@@ -75,21 +75,21 @@ class GpuRoadSourceTest {
     }
 
     @Test
-    void lavaTubesBridgeFloorsUseNativeRockInsteadOfTheVioletLegacyTile() throws Exception {
+    void lavaTubesBridgeFloorsKeepTheNativeVolcanicGround() throws Exception {
         var scene = scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
         var bridges = scene.tiles().stream().filter(t -> t.features().stream().anyMatch(f -> f.asset().equals("bridge")))
               .toList();
         assertEquals(4, bridges.size());
         for (var tile : bridges) {
             assertTrue(tile.detailedGround(), "Native ground beneath bridge " + tile.coords().getBoardNum());
-            assertEquals(BoardScene.Surface.ROCK, tile.surface());
+            assertEquals(BoardScene.Surface.VOLCANO, tile.surface());
             assertFalse(tile.liquid().present());
             assertEquals(-2, tile.elevation());
         }
     }
 
     @Test
-    void minesCapturesEveryAuthoredRoadExitWithSandUnderTheCurves() throws Exception {
+    void minesCapturesEveryAuthoredRoadExitWithDesertGroundUnderTheCurves() throws Exception {
         Board board = new Board();
         board.load(new File("data/boards/Deserts/16x17 Mines 1.board"));
         BoardScene scene = minesScene();
@@ -102,7 +102,7 @@ class GpuRoadSourceTest {
             assertEquals(BoardRoad.Kind.PAVED, tile.road(), tile.coords().getBoardNum());
             assertEquals(hex.getTerrain(Terrains.ROAD).getExits(), tile.roadExits(), tile.coords().getBoardNum());
             assertTrue(BoardRoad.rendered(tile), "Native road including curved artwork: " + tile.coords().getBoardNum());
-            assertEquals(BoardScene.Surface.SAND, tile.surface(), "Desert ground: " + tile.coords().getBoardNum());
+            assertEquals(BoardScene.Surface.DESERT, tile.surface(), "Desert ground: " + tile.coords().getBoardNum());
         }
         assertEquals(30, roads);
         assertEquals(9, decorated);
@@ -210,12 +210,15 @@ class GpuRoadSourceTest {
                 fixture.source.refresh();
                 var curve = fixture.source.takeFrame().scene().tile(at);
                 assertTrue(BoardRoad.rendered(curve));
-                assertEquals(BoardScene.Surface.SAND, curve.surface());
+                assertEquals(BoardScene.Surface.DESERT, curve.surface());
                 custom = custom.duplicate();
                 custom.addTerrain(new Terrain(Terrains.ROAD_FLUFF, 3));
                 fixture.game.getBoard().setHex(at, custom);
                 fixture.source.refresh();
-                assertFalse(BoardRoad.rendered(fixture.source.takeFrame().scene().tile(at)));
+                var decorated = fixture.source.takeFrame().scene().tile(at);
+                assertTrue(BoardRoad.rendered(decorated), "Cosmetic road artwork keeps the native carriageway");
+                assertEquals(BoardRoad.capture(custom), decorated.road());
+                assertEquals(custom.getTerrain(Terrains.ROAD).getExits(), decorated.roadExits());
                 fixture.game.getBoard().setHex(at, new Hex(0));
                 fixture.source.refresh();
                 assertEquals(BoardRoad.Kind.NONE, fixture.source.takeFrame().scene().tile(at).road());

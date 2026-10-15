@@ -110,6 +110,18 @@ vec4 roadProfile() {
 }
 
 void main() {
+    vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
+    // Before the mask's discard, like the face above.
+    vec3 face = normalize(v_normal);
+    surfaceVariance = normalVariance(dFdx(face), dFdy(face));
+    vec2 uv = v_diffuseUV;
+#ifdef bridgeDeckFlag
+    // A rotated bridge shares the adjacent road's scale, orientation and texture phase.
+    uv = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_worldMetre;
+#endif
+#ifdef roadCoatFlag
+    mat2 roadGradient = mat2(dFdx(uv), dFdy(uv));
+#endif
     RoadMaps m = roadMaps();
     vec4 roadColor = v_color;
 #ifdef roadMaskFlag
@@ -118,13 +130,13 @@ void main() {
     roadColor = texture(u_roadMask, v_roadMaskRegion.xy + maskUV * v_roadMaskRegion.zw);
     if (roadColor.a < .002) { discard; }
 #endif
-    vec2 uv = v_diffuseUV;
-#ifdef bridgeDeckFlag
-    // A rotated bridge shares the adjacent road's scale, orientation and texture phase.
-    uv = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_worldMetre;
-#endif
     vec3 tint = roadColor.rgb;
     if (m.mapped && (m.transition > .5 || m.transition < -1.5)) { tint = vec3(1.0); }
+#ifdef roadMaskFlag
+    // Ordinary masks repeat one authored tint at every texel, including transparent borders, so filtering cannot
+    // change it. Their shared atlas also holds join coordinates and wheel directions, which must remain data.
+    else { tint = toLinear(tint); }
+#endif
     vec3 albedo = roadAlbedo(m, uv).rgb * tint;
     vec4 properties = m.mapped ? roadSurface(m, uv) : vec4(.5);
     float roadCoverage = 1.0;
@@ -202,8 +214,12 @@ void main() {
         }
     }
     groundFilm(albedo, normal, puddle);
-    albedo = m.mapped ? groundLighting(albedo, normal, wet, response, puddle, properties.g, mix(1.0, properties.b, .7))
-          : groundLighting(albedo, normal, wet, response, puddle, -1.0, 1.0);
+    float roughness = m.mapped ? properties.g : -1.0;
+#ifdef roadCoatFlag
+    if (!m.mapped) roughness = authoredRoughness(float((m.maps - 3) * 2), uv, roadGradient, roughness);
+#endif
+    albedo = groundLighting(albedo, normal, geometric, wet, response, puddle, roughness,
+          m.mapped ? mix(1.0, properties.b, .7) : 1.0);
 #ifdef roadFlag
     // The road's outer strip carries coverage. World-anchored grain breaks up its dusty verge.
     float grain = m.mapped ? properties.r : roadAlbedo(m, uv * 2.3).r;

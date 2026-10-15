@@ -30,7 +30,6 @@ import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
 import org.junit.jupiter.api.Tag;
@@ -49,13 +48,13 @@ class GpuExplosionSmokeTest {
             public void create() {
                 var effects = new GpuExplosionEffects();
                 Model wall = null;
-                FrameBuffer buffer = null;
-                ModelBatch batch = new ModelBatch();
+                GpuSceneTestOutput buffer = null;
+                ModelBatch batch = new ModelBatch(GpuUnitShader.provider());
                 try {
                     var missile = RigidGlb.loadLods(new FileHandle(new File(Configuration.dataDir(),
                           "models/effects/missile-body.glb"))).getFirst();
                     assertEquals(4, UnitModelDescriptor.triangleCount(missile));
-                    buffer = GpuAtmosphere.buffer(SIZE, SIZE, true);
+                    buffer = new GpuSceneTestOutput(SIZE, SIZE);
                     var top = new OrthographicCamera(24, 24);
                     top.position.set(0, 0, 30);
                     top.up.set(Vector3.Y);
@@ -161,7 +160,7 @@ class GpuExplosionSmokeTest {
                 finally {
                     effects.dispose();
                     if (wall != null) { wall.dispose(); }
-                    if (buffer != null) { buffer.dispose(); }
+                    if (buffer != null) { buffer.close(); }
                     batch.dispose();
                     Gdx.app.exit();
                 }
@@ -170,32 +169,31 @@ class GpuExplosionSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Explosion shader review failed", failure.get()); }
     }
 
-    private static BufferedImage frame(FrameBuffer buffer, GpuExplosionEffects effects, Camera camera,
+    private static BufferedImage frame(GpuSceneTestOutput buffer, GpuExplosionEffects effects, Camera camera,
           float age, float fire, ModelInstance wall, ModelBatch batch) {
         return frame(buffer, effects, camera, age, fire, wall, batch, true);
     }
 
-    private static BufferedImage frame(FrameBuffer buffer, GpuExplosionEffects effects, Camera camera,
+    private static BufferedImage frame(GpuSceneTestOutput buffer, GpuExplosionEffects effects, Camera camera,
           float age, float fire, ModelInstance wall, ModelBatch batch, boolean draw) {
         return frame(buffer, effects, camera, wall, batch, Color.BLACK,
               () -> { if (draw) { effects.add(Vector3.Zero, 7, age, fire, 1, 17); } });
     }
 
-    private static BufferedImage frame(FrameBuffer buffer, GpuExplosionEffects effects, Camera camera,
+    private static BufferedImage frame(GpuSceneTestOutput buffer, GpuExplosionEffects effects, Camera camera,
           ModelInstance wall, ModelBatch batch, Color background, Runnable enqueue) {
-        buffer.begin();
+        buffer.begin(background.r, background.g, background.b, background.a);
         try {
-            ScreenUtils.clear(background, true);
             if (wall != null) { batch.begin(camera); batch.render(wall); batch.end(); }
             effects.begin();
             enqueue.run();
             effects.render(camera);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-            return snapshot();
-        } finally { buffer.end(); }
+            return snapshot(buffer);
+        } finally { FrameBuffer.unbind(); }
     }
 
-    private static void verifyDeathPlayback(FrameBuffer buffer) {
+    private static void verifyDeathPlayback(GpuSceneTestOutput buffer) {
         var effects = new GpuAttackEffects();
         effects.setWind(wind(.4f, 60));
         var unit = UnitPlaybackTest.unit(1, 0);
@@ -208,33 +206,34 @@ class GpuExplosionSmokeTest {
         camera.near = .1f;
         camera.far = 100;
         camera.update();
-        buffer.begin();
         try {
             attack.seconds = attack.duration * .4f;
             effects.update(attack, null, Map.of());
-            ScreenUtils.clear(Color.BLACK, true);
+            buffer.begin(0, 0, 0, 1);
             effects.render(camera);
-            var burning = snapshot();
+            var burning = snapshot(buffer);
             assertTrue(changed(burning) > 500, "Destruction playback must use the volume renderer");
-            ScreenUtils.clear(Color.BLACK, true);
+            buffer.begin(0, 0, 0, 1);
             effects.render(camera);
-            assertTrue(Arrays.equals(pixels(burning), pixels(snapshot())), "Pausing the attack preserves its fire and smoke");
+            assertTrue(Arrays.equals(pixels(burning), pixels(snapshot(buffer))), "Pausing the attack preserves its fire and smoke");
             attack.seconds = attack.duration * .75f;
-            ScreenUtils.clear(Color.BLACK, true);
+            buffer.begin(0, 0, 0, 1);
             effects.render(camera);
-            assertTrue(warmth(snapshot()) < warmth(burning), "The same attack clock cools the blast into smoke");
+            assertTrue(warmth(snapshot(buffer)) < warmth(burning), "The same attack clock cools the blast into smoke");
             effects.update((UnitAttack) null, null, Map.of());
-            ScreenUtils.clear(Color.BLACK, true);
+            buffer.begin(0, 0, 0, 1);
             effects.render(camera);
-            assertEquals(0, changed(snapshot()), "Skipping playback must clear the complete effect");
+            assertEquals(0, changed(snapshot(buffer)), "Skipping playback must clear the complete effect");
             attack.seconds = attack.duration;
             effects.update(attack, null, Map.of());
+            buffer.begin(0, 0, 0, 1);
             effects.render(camera);
-            assertEquals(0, changed(snapshot()), "Completed playback must not leave retained smoke");
-        } finally { buffer.end(); effects.dispose(); }
+            assertEquals(0, changed(snapshot(buffer)), "Completed playback must not leave retained smoke");
+        } finally { FrameBuffer.unbind(); effects.dispose(); }
     }
 
-    private static BufferedImage snapshot() {
+    private static BufferedImage snapshot(GpuSceneTestOutput buffer) {
+        buffer.display();
         Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, SIZE, SIZE);
         try {
             BufferedImage image = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_RGB);
@@ -245,7 +244,7 @@ class GpuExplosionSmokeTest {
         } finally { pixels.dispose(); }
     }
 
-    private static void verifyWind(FrameBuffer buffer, GpuExplosionEffects effects, ModelBatch batch,
+    private static void verifyWind(GpuSceneTestOutput buffer, GpuExplosionEffects effects, ModelBatch batch,
           File output) throws java.io.IOException {
         var top = new OrthographicCamera(40, 40);
         top.position.set(0, 0, 30);

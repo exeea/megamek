@@ -31,7 +31,6 @@ import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.JsonReader;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Configuration;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -46,14 +45,14 @@ class GpuResourcesSmokeTest {
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
-                try {
+                try (var frame = new GpuSceneTestOutput()) {
                     checkAtlas();
                     checkAssets();
                     checkInteriorCourtyard(1);
                     checkInteriorCourtyard(BoardGeometry.MODEL_LEVEL_HEIGHT);
                     checkChunkPicking();
-                    checkFeatureAndWaterTransparency();
-                    checkModelShadows();
+                    checkFeatureAndWaterTransparency(frame);
+                    checkModelShadows(frame);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
@@ -153,8 +152,12 @@ class GpuResourcesSmokeTest {
             assertEquals(moved, expected.coords());
             assertNotEquals(BoardGeometry.hit(scene, ray), expected,
                   "The elevation edit must change the exact hit distance");
+            assertEquals(terrain.hit(scene, ray), terrain.hit(elevatedScene, ray),
+                  "Picking must follow the displayed surface until the edited terrain is installed");
+            terrain.update(elevatedScene);
             assertEquals(expected, terrain.hit(elevatedScene, ray),
-                  "A new scene must use its edited surface before terrain.update");
+                  "Installing the edited terrain must publish its picking surface at the same time");
+            terrain.update(scene);
             // Splitting a shared artwork slot must rebuild the edited chunk without rebuilding distant geometry.
             Coords edited = new Coords(8, 8), distant = new Coords(0, 0);
             var untouched = terrain.tacticalSurface(distant);
@@ -208,7 +211,7 @@ class GpuResourcesSmokeTest {
         }
     }
 
-    private void checkFeatureAndWaterTransparency() {
+    private void checkFeatureAndWaterTransparency(GpuSceneTestOutput frame) {
         GpuTerrain terrain = new GpuTerrain();
         GpuBoardSkin skin = new GpuBoardSkin();
         GpuBoardTuning tuning = new GpuBoardTuning(skin.skin);
@@ -216,7 +219,7 @@ class GpuResourcesSmokeTest {
         Slider opacity = GpuBoardTestUi.tuning(tuning, "Building opacity");
         assertEquals(0.5f, tuning.buildingOpacity());
         assertNull(tuning.boardRows().findActor("Tree opacity"));
-        ModelBatch units = new ModelBatch();
+        ModelBatch units = new ModelBatch(GpuUnitShader.provider());
         var model = new ModelBuilder().createBox(14, 14, 10,
               new Material(ColorAttribute.createDiffuse(Color.RED)),
               VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal);
@@ -253,15 +256,13 @@ class GpuResourcesSmokeTest {
                 }
                 unit.transform.setToTranslation(center.x, center.y, bed + 5.5f);
                 terrain.animate(0, List.of());
-                drawModel(terrain, camera, units, unit);
-                terrain.renderTransparent(camera.camera);
+                drawModel(frame, terrain, camera, units, unit, true);
                 int obscured = rgba(camera, new Vector3(center.x, center.y, bed + 10));
                 if (depth < 0) {
                     GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"), "building-opaque.png"));
                 }
                 terrain.animate(0.1f, List.of(unit));
-                drawModel(terrain, camera, units, unit);
-                terrain.renderTransparent(camera.camera);
+                drawModel(frame, terrain, camera, units, unit, true);
                 int visible = rgba(camera, new Vector3(center.x, center.y, bed + 10));
                 int red = visible >>> 24;
                 int green = (visible >>> 16) & 255;
@@ -275,19 +276,28 @@ class GpuResourcesSmokeTest {
                           "The unoccupied roof must occlude the red unit: before="
                           + Integer.toHexString(obscured) + ", after=" + Integer.toHexString(visible));
                     int revision = BoardGeometry.revision();
+                    // Calibrate visibility against the same lit unit without floors in front of it. Fixed
+                    // display-byte contrast is not an opacity measure after linear blending and the BRDF.
+                    frame.begin(.035f, .055f, .075f, 1);
+                    units.begin(camera.camera);
+                    units.render(unit, terrain.environment());
+                    units.end();
+                    frame.display();
+                    int uncovered = rgba(camera, new Vector3(center.x, center.y, bed + 10));
+                    int uncoveredContrast = (uncovered >>> 24) - ((uncovered >>> 16) & 255);
                     int previousContrast = Integer.MAX_VALUE;
                     for (int percent : new int[] { 0, 25, 75, 100 }) {
                         opacity.setValue(percent);
                         terrain.animate(0, List.of(unit), tuning.buildingOpacity());
-                        drawModel(terrain, camera, units, unit);
-                        terrain.renderTransparent(camera.camera);
+                        drawModel(frame, terrain, camera, units, unit, true);
                         int pixel = rgba(camera, new Vector3(center.x, center.y, bed + 10));
                         int contrast = (pixel >>> 24) - ((pixel >>> 16) & 255);
                         assertTrue(contrast < previousContrast, "A stationary unit must respond to live opacity changes");
                         previousContrast = contrast;
                         if (percent == 0) {
-                            assertTrue(contrast > 100 && contrast < 240,
-                                  "Hidden walls reveal the unit while upper floors retain some opacity");
+                            assertTrue(contrast > 10 && contrast < uncoveredContrast - 2,
+                                  "Hidden walls reveal the unit while upper floors retain some opacity: covered="
+                                        + contrast + ", uncovered=" + uncoveredContrast);
                         } else if (percent == 100) {
                             assertEquals(obscured, pixel, "100% restores opaque rendering while the unit remains inside");
                         }
@@ -297,13 +307,13 @@ class GpuResourcesSmokeTest {
                     // Sample a column's top in the opaque pass, then move the red unit directly beneath it.
                     Vector3 strutTop = new Vector3(center).add(13.5f, 0, 3 * BoardGeometry.LEVEL);
                     terrain.animate(0, List.of(unit), 0);
-                    drawModel(terrain, camera, units, unit);
+                    drawModel(frame, terrain, camera, units, unit, false);
                     int solidStrut = rgba(camera, strutTop);
                     assertTrue(Math.abs((solidStrut >>> 24) - ((solidStrut >>> 16) & 255)) < 20);
                     unit.transform.setToTranslation(strutTop.x, strutTop.y, bed + 5.5f);
                     for (float alpha : new float[] { 0, 0.25f, 0.75f }) {
                         terrain.animate(0, List.of(unit), alpha);
-                        drawModel(terrain, camera, units, unit);
+                        drawModel(frame, terrain, camera, units, unit, false);
                         assertEquals(solidStrut, rgba(camera, strutTop), "Struts must stay opaque and occlude units below");
                     }
                     unit.transform.setToTranslation(center.x, center.y, bed + 5.5f);
@@ -311,21 +321,20 @@ class GpuResourcesSmokeTest {
                     assertNull(tuning.boardRows().findActor("Speed gain / hex"));
                     assertEquals(0.5f, tuning.buildingOpacity());
                     terrain.animate(0, List.of());
-                    drawModel(terrain, camera, units, unit);
+                    drawModel(frame, terrain, camera, units, unit, false);
                     assertEquals(obscured, rgba(camera, new Vector3(center.x, center.y, bed + 10)),
                           "Opacity restores when a visible unit leaves");
                     terrain.animate(0, List.of(unit));
-                    checkSolidFeatureShadows(scene, camera, units, unit, center);
+                    checkSolidFeatureShadows(frame, scene, camera, units, unit, center);
                 }
                 camera.setIsometric(true);
                 camera.fit(scene);
-                drawModel(terrain, camera, units, unit);
-                terrain.renderTransparent(camera.camera);
+                drawModel(frame, terrain, camera, units, unit, true);
                 File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                 assertTrue(output.isDirectory() || output.mkdirs());
                 GpuBoardTestUi.capture(new File(output, depth < 0 ? "feature-visibility.png" : "water-depth-" + depth + ".png"));
                 if (depth < 0) {
-                    checkOpaqueTrees(scene, camera, units, unit, target);
+                    checkOpaqueTrees(frame, scene, camera, units, unit, target);
                 }
             }
         } finally {
@@ -336,7 +345,7 @@ class GpuResourcesSmokeTest {
         }
     }
 
-    private void checkSolidFeatureShadows(BoardScene scene, BoardCamera camera, ModelBatch units,
+    private void checkSolidFeatureShadows(GpuSceneTestOutput frame, BoardScene scene, BoardCamera camera, ModelBatch units,
           ModelInstance unit, Vector3 center) {
         BoardScene lit = new BoardScene(scene.boardId(), scene.width(), scene.height(), scene.tiles(),
               scene.units(), scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), new BoardScene.Light(38, 0));
@@ -348,7 +357,7 @@ class GpuResourcesSmokeTest {
                 terrain.update(lit);
                 terrain.animate(0, List.of(unit), opacity);
                 terrain.renderShadows(camera.camera, List.of(unit));
-                drawModel(terrain, camera, units, unit);
+                drawModel(frame, terrain, camera, units, unit, false);
                 int[] samples = new int[3];
                 for (int index = 0; index < samples.length; index++) {
                     samples[index] = rgba(camera, new Vector3(center).add(50 + index * 10, 0, 0));
@@ -366,7 +375,8 @@ class GpuResourcesSmokeTest {
         }
     }
 
-    private void checkOpaqueTrees(BoardScene scene, BoardCamera camera, ModelBatch units, ModelInstance unit, Coords target) {
+    private void checkOpaqueTrees(GpuSceneTestOutput frame, BoardScene scene, BoardCamera camera,
+          ModelBatch units, ModelInstance unit, Coords target) {
         List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
         BoardScene.Tile tile = scene.tile(target);
         tiles.set(target.getX() * scene.height() + target.getY(), new BoardScene.Tile(target, 0, -1, false, 0,
@@ -380,14 +390,12 @@ class GpuResourcesSmokeTest {
             camera.setIsometric(false);
             camera.fit(trees);
             terrain.animate(0, List.of());
-            drawModel(terrain, camera, units, unit);
-            terrain.renderTransparent(camera.camera);
+            drawModel(frame, terrain, camera, units, unit, true);
             int opaque = rgba(camera, point);
             assertTrue((opaque >>> 24) < ((opaque >>> 16) & 255) + 20, "The canopy must occlude the red unit");
             for (float buildingOpacity : new float[] { 0, .5f, 1 }) {
                 terrain.animate(0, List.of(unit), buildingOpacity);
-                drawModel(terrain, camera, units, unit);
-                terrain.renderTransparent(camera.camera);
+                drawModel(frame, terrain, camera, units, unit, true);
                 assertEquals(opaque, rgba(camera, point), "Occupancy and building opacity must not fade trees");
             }
         } finally {
@@ -439,14 +447,14 @@ class GpuResourcesSmokeTest {
         return new BoardScene.Pixels(image);
     }
 
-    private void checkModelShadows() {
+    private void checkModelShadows(GpuSceneTestOutput frame) {
         BufferedImage ground = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
         java.awt.Graphics2D graphics = ground.createGraphics();
         graphics.setColor(java.awt.Color.WHITE);
         graphics.fillRect(0, 0, 84, 72);
         graphics.dispose();
         GpuTerrain terrain = new GpuTerrain();
-        ModelBatch batch = new ModelBatch();
+        ModelBatch batch = new ModelBatch(GpuUnitShader.provider());
         ModelBuilder builder = new ModelBuilder();
         builder.begin();
         builder.part("shadow-probe", GL20.GL_TRIANGLES, VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal,
@@ -471,7 +479,7 @@ class GpuResourcesSmokeTest {
                 assertEquals(24 * BoardGeometry.UNIT_SCALE, bounds.getHeight(), 0.01f,
                       "Token size must follow its artwork, not the hex scale");
                 terrain.renderShadows(camera.camera, List.of(unit));
-                drawModel(terrain, camera, batch, unit);
+                drawModel(frame, terrain, camera, batch, unit, false);
                 int left = brightness(camera, -35);
                 int right = brightness(camera, 35);
                 assertTrue(direction > 0 ? right < left - 20 : left < right - 20,
@@ -507,7 +515,7 @@ class GpuResourcesSmokeTest {
                   unit.calculateBoundingBox(new BoundingBox()).mul(unit.transform).getDepth(), 0.001f);
             visual.place(unit, camera.camera, new Vector3(position).add(0, -100, 0), 0, 2, false);
             terrain.renderShadows(camera.camera, List.of(unit));
-            drawModel(terrain, camera, batch, unit);
+            drawModel(frame, terrain, camera, batch, unit, false);
             assertEquals(brightness(camera, -35), brightness(camera, 35), 3,
                   "Moving a visual must clear its old shadow");
 
@@ -520,7 +528,7 @@ class GpuResourcesSmokeTest {
             for (float direction : new float[] { 38, -38 }) {
                 terrain.update(shadowScene(floor, 0, new BoardScene.Light(direction, 0)));
                 terrain.renderShadows(camera.camera, List.of(unit));
-                drawModel(terrain, camera, batch, unit);
+                drawModel(frame, terrain, camera, batch, unit, false);
                 sideBrightness[index++] = brightness(camera, new Vector3(position).add(12, 0, BoardGeometry.LEVEL));
             }
             assertTrue(Math.abs(sideBrightness[0] - sideBrightness[1]) > 20,
@@ -546,13 +554,15 @@ class GpuResourcesSmokeTest {
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of(), light);
     }
 
-    private void drawModel(GpuTerrain terrain, BoardCamera camera, ModelBatch batch, ModelInstance unit) {
-        Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
-        ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
+    private void drawModel(GpuSceneTestOutput frame, GpuTerrain terrain, BoardCamera camera, ModelBatch batch,
+          ModelInstance unit, boolean transparent) {
+        frame.begin(.035f, .055f, .075f, 1);
         terrain.render(camera.camera, false);
         batch.begin(camera.camera);
         batch.render(unit, terrain.environment());
         batch.end();
+        if (transparent) { terrain.renderTransparent(camera.camera); }
+        frame.display();
     }
 
     private int rgba(BoardCamera camera, Vector3 position) {

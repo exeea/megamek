@@ -53,6 +53,13 @@ class GpuConcreteProjectionSmokeTest {
         // Optional historical source proves that the regression check detects the old axis projection.
         String source = System.getProperty("megamek.gpu.concreteProjectionSource", "");
         String concrete = source.isBlank() ? GpuShaderSource.read("terrain-concrete.glsl") : Files.readString(Path.of(source));
+        String roughness = source.isBlank() ? "#define SCULPT_MATERIAL_COUNT 1\n"
+              + GpuShaderSource.read("terrain-roughness.glsl") : "";
+        String call = source.isBlank()
+              ? "concreteSlab(world, dFdx(world), dFdy(world), face, vec3(u_direction, 0.0), local.y, 12.0 - local.y, "
+                    + "albedo, normal, occlusion, cavity, roughness);"
+              : "concreteSlab(world, face, vec3(u_direction, 0.0), local.y, 12.0 - local.y, "
+                    + "albedo, normal, occlusion, cavity);";
         var shader = GpuGlsl.compile("concrete-projection-test", """
               in vec2 a_position;
               void main() { gl_Position = vec4(a_position, 0.0, 1.0); }
@@ -66,7 +73,7 @@ class GpuConcreteProjectionSmokeTest {
               const float u_metre = 1.0, u_levelHeight = 6.0, u_normalMaps = 1.0, terrainNormalDetail = 1.0;
               const vec4 u_sculptTiles = vec4(8.0), u_sculptLayers = vec4(0.0);
               const mat2 TURN = mat2(1.0);
-              """ + GpuShaderSource.read("terrain-projection.glsl") + concrete + """
+              """ + GpuShaderSource.read("terrain-projection.glsl") + roughness + concrete + """
               void main() {
                   // View each face head-on in its own coordinates, isolating projection from perspective and light.
                   vec2 local = gl_FragCoord.xy * .04 + vec2(.137, .219);
@@ -76,22 +83,26 @@ class GpuConcreteProjectionSmokeTest {
                   vec3 world = across * local.x + vec3(u_direction * (12.0 - local.y) * u_slope, local.y);
                   pixelMetres = .04;
                   vec3 albedo = vec3(0.0), normal = face;
-                  float occlusion = 1.0, cavity = 1.0;
-                  concreteSlab(world, face, vec3(u_direction, 0.0), local.y, 12.0 - local.y,
-                        albedo, normal, occlusion, cavity);
+                  float occlusion = 1.0, cavity = 1.0, roughness = .9;
+                  CONCRETE_CALL
                   vec3 detail = vec3(dot(normal, across), dot(normal, down), dot(normal, face));
-                  fragColor = vec4(u_mode == 0 ? albedo : detail * .5 + .5, 1.0);
+                  fragColor = vec4(u_mode == 2 ? vec3(roughness) : u_mode == 0 ? albedo : detail * .5 + .5, 1.0);
               }
-              """);
+              """.replace("CONCRETE_CALL", call));
         try {
             Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
             Gdx.gl.glDisable(GL20.GL_BLEND);
             assets.sculptArray(List.of("cast")).bind(0);
             noise.bind(1);
+            if (source.isBlank()) { assets.sculptRoughness(List.of("cast")).maps().bind(2); }
             shader.bind();
             shader.setUniformi("u_terrainLayers", 0);
             shader.setUniformi("u_rainNoise", 1);
+            if (source.isBlank()) {
+                shader.setUniformi("u_roughnessLayers", 2);
+                shader.setUniformf("u_sculptRoughness[0]", -1, -1);
+            }
             for (float slope : new float[] { 0, .5f, 1 }) {
                 shader.setUniformf("u_slope", slope);
                 for (int mode = 0; mode < 2; mode++) {
@@ -106,6 +117,20 @@ class GpuConcreteProjectionSmokeTest {
                         double difference = meanDifference(reference, ScreenUtils.getFrameBufferPixels(false));
                         String description = "slope=" + slope + ", mode=" + mode + ", angle=" + angle;
                         assertTrue(difference < .05, description + ": mean byte difference " + difference);
+                    }
+                }
+            }
+            if (source.isBlank()) {
+                // Exercise the real slab implementation, including its absent-property fallback.
+                shader.setUniformi("u_mode", 2);
+                for (float scalar : new float[] { -1, .15f, .85f }) {
+                    shader.setUniformf("u_sculptRoughness[0]", scalar, -1);
+                    quad.render(shader, GL20.GL_TRIANGLE_STRIP);
+                    byte[] response = ScreenUtils.getFrameBufferPixels(false);
+                    float expected = scalar < 0 ? .9f : scalar;
+                    for (int channel = 0; channel < 3; channel++) {
+                        assertEquals(expected * 255, response[channel] & 255, 1,
+                              "Cast slab must respect its authored scalar or preserve the legacy fallback");
                     }
                 }
             }

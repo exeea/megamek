@@ -11,10 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -22,22 +19,15 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.awt.AWTEvent;
 import java.awt.Color;
-import java.awt.GraphicsEnvironment;
-import java.awt.Toolkit;
-import java.awt.event.AWTEventListener;
+import java.awt.Window;
 import java.awt.event.InputEvent;
 import java.io.File;
-import java.lang.reflect.Field;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import javax.swing.JFrame;
+import java.util.Set;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
-import javax.swing.JSpinner;
 
 import megamek.client.Client;
 import megamek.client.ui.Messages;
@@ -45,7 +35,7 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.RulerDialog;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
@@ -69,8 +59,8 @@ import org.junit.jupiter.api.Timeout;
 
 /**
  * The Swing cut's EDT side (I3): the board state's tactical capture leaves out what the HUD draws itself (G4), the
- * minefield display's undeployed question and the map menu go through the native window (D12, D13), and line of sight
- * stays MegaMek's ruler, which shows over the native window (G3, the user's decision of 2026-10-03).
+ * minefield display's undeployed question and the map menu go through the native window, and native line of sight
+ * uses the shared ruler model without constructing a Swing ruler.
  */
 @Timeout(120)
 class GpuSwingCutTest {
@@ -317,97 +307,76 @@ class GpuSwingCutTest {
               .toList();
     }
 
-    /**
-     * G3, the user's decision of 2026-10-03: line of sight stays MegaMek's Swing ruler. Over the battle window a Ctrl
-     * measurement shows it, raised above the window by its dialog listener, and its Close ends the measurement. The
-     * menu's line of sight from a unit measures with it too, ending a Ctrl measurement that waits for its second
-     * point.
-     */
+    /** Native LOS owns the ray, its panel and pointed heights; no Swing ruler opens over the battle window. */
     @Test
-    void theRulerShowsOverTheBattleWindowForAMeasurementAndTheMenusLineOfSight() throws Exception {
-        assumeFalse(GraphicsEnvironment.isHeadless(), "Shows the Swing ruler");
+    void nativeMeasurementsAndTheMenusLineOfSightShareTheRulerWithoutSwingWindows() throws Exception {
         ClientGUI gui = mock(ClientGUI.class);
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             BoardClientState view = spy(fixture.view);
             doReturn(gui).when(view).getClientgui();
-            JFrame frame = onSwing(JFrame::new);
-            // The ruler belongs to the client's Swing window, whose dialogs the battle window's listener judges.
-            when(gui.getFrame()).thenReturn(frame);
-            RulerDialog ruler = onSwing(() -> new RulerDialog(frame, view, fixture.game));
-            var field = ClientGUI.class.getDeclaredField("rulers");
-            field.setAccessible(true);
-            field.set(gui, new HashMap<>(Map.of(view.getBoardId(), ruler)));
-            doCallRealMethod().when(gui).measureLineOfSight(anyInt(), any(), any());
-            doCallRealMethod().when(gui).setRulerHeight(anyInt(), any(), anyInt());
-            // The source measures on the board the client shows.
             doReturn(Optional.of(view)).when(gui).getCurrentBoardState();
             GpuBoardSource source = onSwing(() -> new GpuBoardSource(view, () -> fixture.panel));
             Coords from = fixture.entity.getPosition();
             Coords to = new Coords(from.getX(), from.getY() - 3);
-            GpuBoardWindow window = present(gui, view, source);
-            Field listenerField = GpuBoardWindow.class.getDeclaredField("dialogListener");
-            listenerField.setAccessible(true);
-            AWTEventListener listener = (AWTEventListener) listenerField.get(window);
-            Toolkit.getDefaultToolkit().addAWTEventListener(listener, AWTEvent.COMPONENT_EVENT_MASK);
+            Set<Window> windows = onSwing(() -> Set.of(Window.getWindows()));
+            present(gui, view, source);
             try {
-                measure(view, source, from, to);
-                assertTrue(onSwing(ruler::isVisible), "A Ctrl measurement shows the ruler over the battle window");
-                assertTrue(onSwing(ruler::isAlwaysOnTop), "raised above it by the window's dialog listener");
-                assertEquals(List.of(from, to), onSwing(() -> List.of(view.getRulerStart(), view.getRulerEnd())));
+                source.measure(from, InputEvent.ALT_DOWN_MASK, Float.NaN);
+                source.measure(to, 0, Float.NaN);
                 onSwing(() -> {
-                    GpuDialogRoutingTest.press(ruler, Messages.getString("Ruler.Close"));
+                    var frame = source.takeFrame();
+                    var ruler = frame.panels().los();
+                    assertTrue(ruler.open());
+                    assertEquals(List.of(from, to), List.of(ruler.start().coords(), ruler.end().coords()));
+                    assertEquals(ruler.ruler(), frame.scene().tactical().ruler(), "The panel and ray share one model");
+                    assertNull(view.getRuler(), "The Legacy 2D ruler stays untouched");
                     return null;
                 });
-                assertFalse(onSwing(ruler::isVisible), "Its Close hides it");
-                assertNull(onSwing(view::getRulerStart), "and ends the measurement");
+                source.changeRuler(source.takeFrame().boardGeneration(), RulerModel::clear);
+                onSwing(() -> {
+                    assertFalse(source.takeFrame().panels().los().open(), "Close clears the native measurement");
+                    assertNull(source.takeFrame().scene().tactical().ruler());
+                    return null;
+                });
 
                 Coords other = new Coords(from.getX() + 1, from.getY() - 2);
+                source.measure(to, InputEvent.ALT_DOWN_MASK, Float.NaN);
                 onSwing(() -> {
-                    view.checkLOS(to);
+                    assertEquals(InputEvent.ALT_DOWN_MASK, source.takeFrame().panels().los().pending());
                     return null;
                 });
                 source.los().lineOfSight(fixture.entity.getId(), other, Float.NaN);
-                onSwing(() -> null);
-                assertEquals(List.of(true, from, other), onSwing(() -> List.of(ruler.isVisible(),
-                      view.getRulerStart(), view.getRulerEnd())), "The menu's line of sight measures with the ruler");
-                assertNull(onSwing(view::getFirstLOS), "and ends the Ctrl measurement waiting for its second point");
+                onSwing(() -> {
+                    var ruler = source.takeFrame().panels().los();
+                    assertEquals(List.of(from, other), List.of(ruler.start().coords(), ruler.end().coords()),
+                          "The menu replaces the pending Alt measurement with its unit and target");
+                    assertEquals(0, ruler.pending());
+                    return null;
+                });
 
-                // Ctrl clicks at the heights the pointer shows (the user's decision of 2026-10-03): a building's floor
-                // two levels above its hex for the first point, the ground for the second.
+                // A building's floor two levels above its hex, then the ground, at the pointer's world height.
                 Coords up = new Coords(from.getX() + 1, from.getY() - 1);
                 Coords down = new Coords(from.getX(), from.getY() - 2);
                 float level = BoardGeometry.level();
                 int upLevel = onSwing(() -> view.getBoard().getHex(up).getLevel());
                 int downLevel = onSwing(() -> view.getBoard().getHex(down).getLevel());
-                source.measure(up, InputEvent.CTRL_DOWN_MASK, (upLevel + 2) * level + .1f);
-                source.measure(down, InputEvent.CTRL_DOWN_MASK, downLevel * level + .1f);
-                onSwing(() -> null);
-                assertEquals(List.of(up, down, 2, 0), onSwing(() -> {
-                    List<JSpinner> heights = GpuDialogRoutingTest.components(ruler, JSpinner.class);
-                    return List.of(view.getRulerStart(), view.getRulerEnd(), heights.get(0).getValue(),
-                          heights.get(1).getValue());
-                }), "The ruler measures from and to the pointed heights");
+                source.measure(up, InputEvent.ALT_DOWN_MASK, (upLevel + 2) * level + .1f);
+                source.measure(down, 0, downLevel * level + .1f);
+                onSwing(() -> {
+                    var ruler = source.takeFrame().panels().los();
+                    assertEquals(List.of(up, down, 2, 0), List.of(ruler.start().coords(), ruler.end().coords(),
+                          ruler.start().height(), ruler.end().height()), "LOS uses the pointed floor heights");
+                    assertEquals(windows, Set.of(Window.getWindows()), "Native LOS constructs no Swing dialogs");
+                    return null;
+                });
             } finally {
-                Toolkit.getDefaultToolkit().removeAWTEventListener(listener);
                 dismiss();
                 onSwing(() -> {
-                    ruler.dispose();
                     source.close();
-                    frame.dispose();
                     return null;
                 });
             }
         }
     }
 
-    /** EDT: a Ctrl measurement between two hexes, as MegaMek's board reports both ends, then a capture. */
-    private static void measure(BoardClientState view, GpuBoardSource source, Coords from, Coords to)
-          throws Exception {
-        onSwing(() -> {
-            view.checkLOS(from);
-            view.checkLOS(to);
-            source.refresh();
-            return null;
-        });
-    }
 }

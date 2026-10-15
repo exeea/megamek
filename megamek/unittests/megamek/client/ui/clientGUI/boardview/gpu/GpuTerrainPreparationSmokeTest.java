@@ -12,7 +12,10 @@ import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
@@ -21,6 +24,12 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
+import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.g3d.Attribute;
+import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -33,10 +42,75 @@ import org.lwjgl.opengl.GL20C;
 /** Material readiness is a draw boundary, including board replacement and changes to lighting flags. */
 @Tag("on-demand")
 class GpuTerrainPreparationSmokeTest {
+    /**
+     * Inspect installed indexed mesh ranges, not sampled pixels or source-generation labels. Returned counts are
+     * blended parts, blended ground triangles, blended cliff triangles, blended shore triangles, and concrete cliffs.
+     * Called outside timing ranges; all meshes/materials remain borrowed from the terrain that owns them.
+     */
+    @SuppressWarnings("unchecked")
+    static int[] checkBlendedRoles(GpuTerrain terrain, String label) throws ReflectiveOperationException {
+        int[] counts = new int[5];
+        Map<Mesh, float[]> vertices = new IdentityHashMap<>();
+        Map<Mesh, short[]> indices = new IdentityHashMap<>();
+        long sculptType = Attribute.getAttributeType("boardSculpt");
+        var chunks = GpuTerrain.class.getDeclaredField("chunks");
+        chunks.setAccessible(true);
+        for (Object chunk : (List<?>) chunks.get(terrain)) {
+            var opaque = chunk.getClass().getDeclaredField("opaque");
+            opaque.setAccessible(true);
+            for (var part : GpuTerrainDepth.snapshot((List<ModelInstance>) opaque.get(chunk))) {
+                if (!part.material.has(sculptType)) { continue; }
+                boolean blended = part.material.has(GpuSurfaceBlend.TYPE);
+                if (blended) { counts[0]++; }
+                var sculpt = part.material.get(FloatAttribute.class, sculptType);
+                Mesh mesh = part.meshPart.mesh;
+                var color = mesh.getVertexAttribute(VertexAttributes.Usage.ColorPacked);
+                assertTrue(color != null, label + ": sculpt kind must have packed color storage");
+                assertEquals(GL20.GL_TRIANGLES, part.meshPart.primitiveType, label);
+                assertEquals(0, part.meshPart.size % 3, label);
+                int stride = mesh.getVertexSize() / Float.BYTES, offset = color.offset / Float.BYTES;
+                float[] data = vertices.computeIfAbsent(mesh, key ->
+                      key.getVertices(new float[key.getNumVertices() * stride]));
+                short[] elements = indices.computeIfAbsent(mesh, key -> {
+                    short[] result = new short[key.getNumIndices()];
+                    if (result.length > 0) { key.getIndices(result); }
+                    return result;
+                });
+                for (int at = part.meshPart.offset; at < part.meshPart.offset + part.meshPart.size; at += 3) {
+                    boolean ground = true, cliff = true, shore = true;
+                    int[] kinds = new int[3];
+                    for (int corner = 0; corner < 3; corner++) {
+                        int index = elements.length == 0 ? at + corner : Short.toUnsignedInt(elements[at + corner]);
+                        int packed = Float.floatToRawIntBits(data[index * stride + offset]);
+                        int kind = packed >>> 16 & 255;
+                        kinds[corner] = kind;
+                        ground &= kind < 32;
+                        cliff &= kind >= 96 && kind < 160;
+                        shore &= kind < 32 && (packed >>> 24) < 64;
+                    }
+                    if (blended) {
+                        // A ground-to-cliff triangle would interpolate through excluded plant kinds even though
+                        // both endpoint roles are individually legal. Require one legal interval for the whole face.
+                        assertTrue(ground || cliff, label + ": blended triangle crosses a legacy kind interval: "
+                              + java.util.Arrays.toString(kinds));
+                        if (ground) { counts[1]++; }
+                        if (cliff) { counts[2]++; }
+                        if (shore) { counts[3]++; }
+                    }
+                    if (cliff && sculpt.value == BoardScene.Surface.CONCRETE.ordinal()) { counts[4]++; }
+                }
+            }
+        }
+        System.out.println(label + " packed roles [blend parts, ground, cliff, shore, concrete cliff]="
+              + java.util.Arrays.toString(counts));
+        return counts;
+    }
+
     @Test
     void preparesOnlyRequiredVariantsBeforeDrawingIncludingBoardAndLightingChanges() throws Exception {
         var captured = new AtomicReference<BoardScene>();
         var uniform = new AtomicReference<BoardScene>();
+        var frozen = new AtomicReference<BoardScene>();
         SwingUtilities.invokeAndWait(() -> {
             Board board = Board.createEmptyBoard(5, 4);
             for (int x = 0; x < 5; x++) {
@@ -54,6 +128,16 @@ class GpuTerrainPreparationSmokeTest {
             }
             game.setBoard(plain);
             try (var source = new GpuMapSource(game, null, null)) { uniform.set(source.takeFrame().scene()); }
+            // Actual uploaded lake and cascade materials share the same attribute mask but ICE_MODE differs.
+            Board ice = Board.createEmptyBoard(5, 4);
+            for (int x = 0; x < 5; x++) {
+                for (int y = 0; y < 4; y++) {
+                    ice.setHex(new Coords(x, y), new Hex(y < 2 ? 3 : 0,
+                          x == 2 ? "water:2;ice:1" : "", "snow"));
+                }
+            }
+            game.setBoard(ice);
+            try (var source = new GpuMapSource(game, null, null)) { frozen.set(source.takeFrame().scene()); }
         });
         var report = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
               "terrain-preparation.log").toPath();
@@ -75,6 +159,8 @@ class GpuTerrainPreparationSmokeTest {
             private final Set<String> variants = new HashSet<>();
             private final Set<String> sources = new HashSet<>();
             private final Set<String> compiledSources = new HashSet<>();
+            private final Set<String> compiledIceModes = new HashSet<>();
+            private final Set<String> compiledPalettes = new HashSet<>();
 
             @Override
             public void create() {
@@ -102,12 +188,39 @@ class GpuTerrainPreparationSmokeTest {
             }
 
             private void checkTerrainSource(String text, boolean compiled) throws IOException {
-                if (!text.contains("vec3 groundToneFor(")) { return; }
-                assertFalse(drawing, "An expensive terrain variant reached visible draw in phase " + phase);
+                // Recognize actual ice fragment programs as well as sculpt assembly; unrelated vegetation
+                // includes groundToneFor too. The macro plus fragment helper excludes ice vertex sources.
+                boolean ice = text.contains("#define iceFlag\n") && text.contains("vec3 iceFinish(");
+                if (!ice && !text.contains("// sculpt-material-functions")) {
+                    if (drawing && !compiled && text.contains("vec3 groundToneFor(")) {
+                        Files.writeString(report, String.format(Locale.ROOT,
+                              "phase %d non-sculpt shared-ground source %08x submitted during draw (%d chars)%n",
+                              phase, text.hashCode(), text.length()), StandardOpenOption.APPEND);
+                    }
+                    return;
+                }
+                assertFalse(drawing, "A sculpt or ice variant reached visible draw in phase " + phase
+                      + " (source " + Integer.toHexString(text.hashCode()) + ")");
                 for (String flag : new String[] { "iceFlag", "volcanicFlag", "terrainBlendFlag", "cloudShadowFlag" }) {
                     if (text.contains("#define " + flag)) { variants.add(flag); }
                 }
                 if (!text.contains("#define shadowMapFlag")) { variants.add("unlit"); }
+                if (compiled) {
+                    String ordinaryFamily = null;
+                    for (String line : text.split("\\R")) {
+                        if (line.startsWith("#define VOLCANIC_ORDINARY_FAMILY ")) {
+                            ordinaryFamily = line.substring("#define VOLCANIC_ORDINARY_FAMILY ".length());
+                        }
+                        if (line.startsWith("#define ICE_MODE ")) {
+                            compiledIceModes.add(line.substring("#define ICE_MODE ".length())
+                                  + (text.contains("#define surfaceScarFlag") ? " scar" : " ordinary"));
+                        }
+                    }
+                    if (text.contains("#define volcanicFlag") && text.contains("#define terrainBlendFlag")) {
+                        compiledPalettes.add((ordinaryFamily == null ? "generic" : ordinaryFamily)
+                              + (text.contains("#define surfaceScarFlag") ? " scar" : " ordinary"));
+                    }
+                }
                 boolean first = sources.add(text);
                 if (compiled ? compiledSources.add(text) : first) {
                     Files.writeString(report, String.format(Locale.ROOT,
@@ -119,13 +232,43 @@ class GpuTerrainPreparationSmokeTest {
                 }
             }
 
-            private void nextPhase() {
+            private void nextPhase() throws ReflectiveOperationException {
                 started = System.nanoTime();
                 deadline = started + 240_000_000_000L;
                 camera.fit(scene);
-                frame.configure(phase == 2 ? new BoardAtmosphere.Settings(0, 0, 0, 2, 0, 0,
+                frame.configure(phase == 2 || phase == 6 ? new BoardAtmosphere.Settings(0, 0, 0, 2, 0, 0,
                       BoardAtmosphere.Effects.NONE, Atmosphere.STANDARD, 25, false)
                       : new BoardAtmosphere.Settings(13, phase == 3 ? .7f : 0, 0, 2, 0, 0));
+                if (phase == 4) {
+                    // Use the same material construction and preparation entry points as uploaded geometry.
+                    // Distinct ordinary families/overrides need programs; different slot orders must share them.
+                    var blend = GpuTerrain.class.getDeclaredMethod("blendMaterial", GpuSurfaceBlend.Palette.class);
+                    var prepare = GpuTerrain.class.getDeclaredMethod("prepareTerrainMaterial", Material.class,
+                          VertexAttributes.class);
+                    blend.setAccessible(true);
+                    prepare.setAccessible(true);
+                    int rock = BoardScene.Surface.ROCK.ordinal(), grass = BoardScene.Surface.GRASS.ordinal();
+                    int sand = BoardScene.Surface.SAND.ordinal();
+                    var palettes = new GpuSurfaceBlend.Palette[] {
+                          new GpuSurfaceBlend.Palette(rock, BoardSurfaceBlend.CRUST, BoardSurfaceBlend.BANK,
+                                BoardSurfaceBlend.CRUST),
+                          new GpuSurfaceBlend.Palette(rock, BoardSurfaceBlend.BANK, rock, rock),
+                          new GpuSurfaceBlend.Palette(sand, BoardSurfaceBlend.CRUST, sand, sand),
+                          new GpuSurfaceBlend.Palette(grass, grass, BoardSurfaceBlend.CRUST, BoardSurfaceBlend.CRUST),
+                          new GpuSurfaceBlend.Palette(grass, grass, BoardSurfaceBlend.CRUST, BoardSurfaceBlend.CRUST),
+                          new GpuSurfaceBlend.Palette(BoardSurfaceBlend.CRUST, BoardSurfaceBlend.BANK,
+                                BoardSurfaceBlend.CRUST, BoardSurfaceBlend.CRUST)
+                    };
+                    for (int i = 0; i < palettes.length; i++) {
+                        var material = (Material) blend.invoke(terrain, palettes[i]);
+                        if (i == 4) {
+                            var cover = material.get(GpuSurfaceBlend.class, GpuSurfaceBlend.TYPE);
+                            cover.tiles[1][0] *= .63f;
+                            cover.layers[1][0] = cover.layers[2][0];
+                        }
+                        prepare.invoke(terrain, material, GpuSurfaceBlend.VERTICES);
+                    }
+                }
             }
 
             @Override
@@ -141,20 +284,74 @@ class GpuTerrainPreparationSmokeTest {
                     Files.writeString(report, String.format(Locale.ROOT, "phase %d ready after %.3f ms%n",
                           phase, (System.nanoTime() - started) / 1_000_000.0), StandardOpenOption.APPEND);
                     if (phase == 0) {
-                        assertEquals(1, sources.size(), "Uniform grass needs only its ordinary sculpt program");
+                        assertEquals(1, compiledSources.stream().filter(text -> !text.contains("#define surfaceScarFlag")).count(),
+                              "Uniform grass needs one ordinary sculpt program");
+                        assertEquals(GpuGroundDamage.COMBAT_SCARS ? 1 : 0,
+                              compiledSources.stream().filter(text -> text.contains("#define surfaceScarFlag")).count(),
+                              "The matching scar program must be prepared before the first impact");
                         assertFalse(variants.contains("terrainBlendFlag"), "A uniform board must not prepare unused blends");
                     }
+                    if (phase == 1) {
+                        int[] roles = checkBlendedRoles(terrain, "preparation phase " + phase);
+                        assertTrue(roles[0] > 0, "The mixed fixture must contain installed blended geometry");
+                        // Frozen land and its dry neighbour share attribute/vertex masks, but compile different
+                        // ICE_MODE programs. Readiness must cover both, including their eventual scar receivers.
+                        assertTrue(compiledIceModes.containsAll(Set.of("1.0 ordinary", "4.0 ordinary")),
+                              "Both same-mask ice modes must be compiled before drawing: " + compiledIceModes);
+                        if (GpuGroundDamage.COMBAT_SCARS) {
+                            assertTrue(compiledIceModes.containsAll(Set.of("1.0 scar", "4.0 scar")),
+                                  "Ice scars must not defer compilation until an impact: " + compiledIceModes);
+                        }
+                    }
+                    if (phase == 4) {
+                        for (String palette : new String[] { "3", "2", "0", "-2", "generic" }) {
+                            assertTrue(compiledPalettes.contains(palette + " ordinary"),
+                                  "Readiness must include each ordinary-family dispatch: " + compiledPalettes);
+                            if (GpuGroundDamage.COMBAT_SCARS) {
+                                assertTrue(compiledPalettes.contains(palette + " scar"),
+                                      "Scars must retain each palette's own specialization: " + compiledPalettes);
+                            }
+                        }
+                        for (String family : new String[] { "3", "2", "0", "-2" }) {
+                            String prefix = "#define VOLCANIC_ORDINARY_FAMILY " + family + "\n";
+                            assertEquals(1, compiledSources.stream().filter(text -> text.contains(prefix)
+                                        && !text.contains("#define surfaceScarFlag")).count(),
+                                  "Slot order must not multiply a family's prepared ordinary programs: " + family);
+                            assertEquals(GpuGroundDamage.COMBAT_SCARS ? 1 : 0,
+                                  compiledSources.stream().filter(text -> text.contains(prefix)
+                                        && text.contains("#define surfaceScarFlag")).count(),
+                                  "Slot order must not multiply a family's prepared scar programs: " + family);
+                        }
+                    }
+                    if (phase >= 5) {
+                        assertTrue(compiledIceModes.containsAll(Set.of("3.0 ordinary", "6.0 ordinary")),
+                              "Actual slab and fall programs must be published before drawing: " + compiledIceModes);
+                        assertFalse(compiledIceModes.contains("3.0 scar") || compiledIceModes.contains("6.0 scar"),
+                              "Transparent ice must not prepare unused scar variants: " + compiledIceModes);
+                    }
+                    int preparedSources = compiledSources.size();
+                    long drawStarted = System.nanoTime();
                     drawing = true;
-                    try { frame.render(terrain, camera, scene); }
+                    try {
+                        frame.render(terrain, camera, scene);
+                        if (phase >= 5) { terrain.renderEditorSection(camera.camera, new Coords(2, 1), ""); }
+                    }
                     finally { drawing = false; }
+                    assertEquals(preparedSources, compiledSources.size(),
+                          "The first same-scene frame must reuse the prepared terrain programs in phase " + phase);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Prepared draw in phase " + phase);
-                    if (++phase == 5) {
+                    Files.writeString(report, String.format(Locale.ROOT,
+                          "phase %d first draw wall %.3f ms; prepared sources %d; after draw %d%n",
+                          phase, (System.nanoTime() - drawStarted) / 1_000_000.0, preparedSources, compiledSources.size()),
+                          StandardOpenOption.APPEND);
+                    if (++phase == 7) {
                         assertTrue(variants.containsAll(Set.of("iceFlag", "volcanicFlag", "terrainBlendFlag", "cloudShadowFlag", "unlit")),
                               "The fixture must exercise every required variant: " + variants);
                         Gdx.app.exit();
                     } else {
                         if (phase == 1) { scene = captured.get(); terrain.boardChanged(); }
                         if (phase == 4) { scene = GpuMagmaSmokeTest.scene(false); terrain.boardChanged(); }
+                        if (phase == 5) { scene = frozen.get(); terrain.boardChanged(); }
                         nextPhase();
                     }
                 } catch (Throwable error) { failure.set(error); Gdx.app.exit(); }

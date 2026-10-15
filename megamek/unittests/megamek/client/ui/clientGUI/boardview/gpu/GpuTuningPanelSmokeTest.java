@@ -18,6 +18,7 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.Toolkit;
 import java.awt.event.AWTEventListener;
+import java.awt.event.KeyEvent;
 import java.awt.event.WindowEvent;
 import java.util.ArrayList;
 import java.util.List;
@@ -124,7 +125,10 @@ class GpuTuningPanelSmokeTest {
 
         /** The model's control of that name, on either of its pages. */
         <T extends Actor> T model(String name) {
-            T actor = tuning.boardRows().findActor(name);
+            T actor = tuning.displayRows().findActor(name);
+            if (actor == null) {
+                actor = tuning.boardRows().findActor(name);
+            }
             if (actor == null) {
                 actor = tuning.atmosphereRows().findActor(name);
             }
@@ -190,10 +194,13 @@ class GpuTuningPanelSmokeTest {
 
         /** Scrolls the page that holds the actor so that the actor shows. */
         private void reveal(Actor actor) {
+            // Dynamic notes can change the wrapped page height; settle layout before deriving scroll coordinates.
+            show();
             for (Group parent = actor.getParent(); parent != null; parent = parent.getParent()) {
                 if (parent instanceof ScrollPane page) {
                     Vector2 corner = actor.localToAscendantCoordinates(page.getActor(), new Vector2());
-                    page.scrollTo(corner.x, corner.y, actor.getWidth(), actor.getHeight());
+                    // Keep click targets away from the scroll viewport's clipped edge on long pages.
+                    page.scrollTo(corner.x, corner.y, actor.getWidth(), actor.getHeight(), false, true);
                     page.updateVisualScroll();
                     show();
                     return;
@@ -208,6 +215,130 @@ class GpuTuningPanelSmokeTest {
             hud.dispose();
             batch.dispose();
         }
+    }
+
+    @Test
+    void clickedSlidersTakeArrowKeysUntilAnotherControlOrTheBoardIsClicked() {
+        GpuHudTestStage.run(harness -> {
+            try (Hud hud = new Hud(harness)) {
+                hud.show();
+                hud.click("tuning-button");
+                hud.click("tuning-board-tab");
+                Slider slider = hud.find("Hex scale");
+                hud.click(slider);
+                assertSame(slider, hud.hud.stage.getKeyboardFocus());
+                float initial = slider.getValue();
+                for (int[] key : new int[][] {
+                      { Input.Keys.RIGHT, KeyEvent.VK_RIGHT, 1 }, { Input.Keys.LEFT, KeyEvent.VK_LEFT, -1 },
+                      { Input.Keys.UP, KeyEvent.VK_UP, 1 }, { Input.Keys.DOWN, KeyEvent.VK_DOWN, -1 } }) {
+                    float previous = slider.getValue();
+                    assertTrue(hud.hud.keyDown(key[0], key[1], 0), "The slider consumes the camera's arrow key");
+                    assertTrue(hud.hud.keyUp(key[0], key[1]));
+                    hud.show();
+                    assertEquals(previous + key[2] * slider.getStepSize(), slider.getValue(), NEAR);
+                    assertEquals(slider.getValue(), hud.<Slider>model("Hex scale").getValue(), NEAR);
+                }
+                assertEquals(initial, slider.getValue(), NEAR);
+
+                Slider other = hud.find("Unit scale");
+                hud.click(other);
+                assertSame(other, hud.hud.stage.getKeyboardFocus());
+                hud.click("tuning-fps");
+                assertFalse(slider.hasKeyboardFocus());
+                assertFalse(other.hasKeyboardFocus());
+                hud.click(slider);
+                hud.hud.stage.touchDown(20, 300, 0, Input.Buttons.LEFT);
+                hud.hud.stage.touchUp(20, 300, 0, Input.Buttons.LEFT);
+                assertNull(hud.hud.stage.getKeyboardFocus(), "A board click releases the slider");
+                assertFalse(hud.hud.stage.keyDown(Input.Keys.RIGHT));
+                assertEquals(initial, slider.getValue(), NEAR);
+
+                hud.click(slider);
+                hud.click("tuning-atmosphere-tab");
+                assertNull(hud.hud.stage.getKeyboardFocus(), "The old tab must not retain its slider's focus");
+                Slider clouds = hud.find("Cloud cover");
+                hud.click(clouds);
+                assertSame(clouds, hud.hud.stage.getKeyboardFocus());
+                hud.click("tuning-close");
+                assertNull(hud.hud.stage.getKeyboardFocus());
+            }
+        });
+    }
+
+    @Test
+    void heldArrowsRespectBoundsAndReleaseFocusWhenDisabledHiddenOrRemoved() {
+        GpuHudTestStage.run(harness -> {
+            try (Hud hud = new Hud(harness)) {
+                hud.show();
+                hud.click("tuning-button");
+                hud.click("tuning-board-tab");
+                Slider slider = hud.find("Hex scale");
+                Slider.SliderStyle normal = slider.getStyle();
+                int listeners = hud.hud.stage.getRoot().getCaptureListeners().size;
+                hud.click(slider);
+                assertSame(normal.knobOver, slider.getStyle().knob, "Keyboard focus highlights the handle");
+                Input original = Gdx.input;
+                Input keys = mock(Input.class);
+                when(keys.isKeyPressed(Input.Keys.RIGHT)).thenReturn(true);
+                try {
+                    Gdx.input = keys;
+                    float initial = slider.getValue();
+                    float step = slider.getStepSize();
+                    assertTrue(hud.hud.keyDown(Input.Keys.RIGHT, KeyEvent.VK_RIGHT, 0));
+                    assertEquals(initial + step, slider.getValue(), NEAR);
+                    hud.hud.stage.act(.15f);
+                    assertEquals(initial + step, slider.getValue(), NEAR, "Held keys wait before repeating");
+                    hud.hud.stage.act(.16f);
+                    assertEquals(initial + 2 * step, slider.getValue(), NEAR);
+                    hud.hud.stage.act(.05f);
+                    assertEquals(initial + 3 * step, slider.getValue(), NEAR);
+                    assertTrue(hud.hud.keyUp(Input.Keys.RIGHT, KeyEvent.VK_RIGHT));
+                    hud.hud.stage.act(1);
+                    assertEquals(initial + 3 * step, slider.getValue(), NEAR, "Release stops repetition");
+
+                    slider.setValue(slider.getMaxValue());
+                    assertTrue(hud.hud.keyDown(Input.Keys.RIGHT, KeyEvent.VK_RIGHT, 0));
+                    hud.hud.stage.act(.5f);
+                    hud.hud.keyUp(Input.Keys.RIGHT, KeyEvent.VK_RIGHT);
+                    assertEquals(slider.getMaxValue(), slider.getValue(), NEAR);
+                    slider.setValue(slider.getMinValue());
+                    assertTrue(hud.hud.keyDown(Input.Keys.LEFT, KeyEvent.VK_LEFT, 0));
+                    hud.hud.keyUp(Input.Keys.LEFT, KeyEvent.VK_LEFT);
+                    assertEquals(slider.getMinValue(), slider.getValue(), NEAR);
+
+                    hud.hud.keyDown(Input.Keys.RIGHT, KeyEvent.VK_RIGHT, 0);
+                    float beforeBlur = slider.getValue();
+                    hud.<Slider>model("Hex scale").setDisabled(true);
+                    hud.show();
+                    assertNull(hud.hud.stage.getKeyboardFocus());
+                    hud.hud.stage.act(1);
+                    assertEquals(beforeBlur, slider.getValue(), NEAR);
+                    hud.click(slider);
+                    assertNull(hud.hud.stage.getKeyboardFocus(), "Disabled sliders cannot take focus");
+                    hud.hud.keyUp(Input.Keys.RIGHT, KeyEvent.VK_RIGHT);
+                    assertSame(normal, slider.getStyle());
+                    assertEquals(listeners, hud.hud.stage.getRoot().getCaptureListeners().size);
+
+                    hud.<Slider>model("Hex scale").setDisabled(false);
+                    hud.click(slider);
+                    hud.hud.keyDown(Input.Keys.RIGHT, KeyEvent.VK_RIGHT, 0);
+                    beforeBlur = slider.getValue();
+                    hud.find("tuning-panel").setVisible(false);
+                    hud.hud.stage.act(1);
+                    assertNull(hud.hud.stage.getKeyboardFocus(), "Hidden panels release slider focus");
+                    assertEquals(beforeBlur, slider.getValue(), NEAR);
+                    hud.hud.keyUp(Input.Keys.RIGHT, KeyEvent.VK_RIGHT);
+                    assertSame(normal, slider.getStyle());
+
+                    hud.show();
+                    hud.click(slider);
+                    slider.remove();
+                    assertNull(hud.hud.stage.getKeyboardFocus());
+                    assertEquals(listeners, hud.hud.stage.getRoot().getCaptureListeners().size,
+                          "Removing a slider removes its stage listener too");
+                } finally { Gdx.input = original; }
+            }
+        });
     }
 
     @Test
@@ -239,6 +370,8 @@ class GpuTuningPanelSmokeTest {
                     hud.click(utility);
                     assertSame(GpuHudState.Dialog.TUNING, hud.hud.state.dialog);
                     assertTrue(utility.isChecked(), "the utility is pressed while the panel is open");
+                    assertTrue(hud.find("tuning-display").isVisible(), "the Display page is the first " + at);
+                    hud.click("tuning-board-tab");
                     Rectangle panel = GpuHudTestStage.bounds(hud.find("tuning-frame"));
                     assertEquals(size[0] - metrics.gap(), panel.x + panel.width, .5f, "at the right gap " + at);
                     assertEquals(360, panel.width, .5f, at);
@@ -248,7 +381,7 @@ class GpuTuningPanelSmokeTest {
                     assertTrue(hud.<ScrollPane>find("tuning-board").isScrollY(), "and scrolls " + at);
                     assertTrue(hud.hits(panel.x + 3, panel.y + panel.height - 3), "the panel takes its presses");
                     assertFalse(hud.hits(size[0] / 2f, size[1] / 2f), "presses beside it reach the board");
-                    for (String page : List.of("tuning-board", "tuning-atmosphere", "tuning-camera")) {
+                    for (String page : List.of("tuning-display", "tuning-board", "tuning-atmosphere", "tuning-camera")) {
                         hud.click(page + "-tab");
                         GpuBoardTestUi.assertHorizontalBounds(hud.find("tuning-frame"), hud.find("tuning-frame"));
                     }
@@ -275,12 +408,18 @@ class GpuTuningPanelSmokeTest {
     }
 
     @Test
-    void ambientWearSliderUpdatesImmediatelyAndDefaultsRestoreFullIntensity() {
+    void terrainAppearanceControlsUpdateImmediatelyAndDefaultsRestoreThem() {
         GpuHudTestStage.run(harness -> {
             try (Hud hud = new Hud(harness)) {
                 hud.show();
                 hud.click("tuning-button");
                 hud.click("tuning-terrain-tab");
+                assertTrue(hud.tuning.elevationGrading(), "Elevation grading starts enabled");
+                hud.click("tuning-elevation-grading");
+                assertFalse(hud.tuning.elevationGrading(), "The panel updates the render setting immediately");
+                hud.click("tuning-elevation-grading");
+                assertTrue(hud.tuning.elevationGrading());
+                hud.click("tuning-elevation-grading");
                 Slider slider = hud.find("Ambient wear");
                 assertEquals(0, slider.getMinValue(), NEAR);
                 assertEquals(1, slider.getMaxValue(), NEAR);
@@ -299,6 +438,7 @@ class GpuTuningPanelSmokeTest {
                 hud.click("tuning-defaults");
                 assertEquals(1, hud.tuning.terrainWear(), NEAR);
                 assertEquals("1.00", reading(hud, "Ambient wear"));
+                assertTrue(hud.tuning.elevationGrading(), "Defaults restores the grading constant");
             }
         });
     }
@@ -310,14 +450,18 @@ class GpuTuningPanelSmokeTest {
                 hud.show();
                 hud.click("tuning-button");
                 // Every named control of both model pages, on the page's tab, and Defaults, by name and kind.
+                List<Actor> display = controls(hud.tuning.displayRows());
                 List<Actor> board = controls(hud.tuning.boardRows());
                 List<Actor> atmosphere = controls(hud.tuning.atmosphereRows());
                 hud.click("tuning-atmosphere-tab");
                 assertMirrored(hud, atmosphere);
+                hud.click("tuning-display-tab");
+                assertMirrored(hud, display);
                 hud.click("tuning-board-tab");
                 assertMirrored(hud, board);
                 assertMirrored(hud, List.of(hud.tuning.defaults()));
-                List<Actor> every = new ArrayList<>(board);
+                List<Actor> every = new ArrayList<>(display);
+                every.addAll(board);
                 every.addAll(atmosphere);
                 assertEquals(every.size(), every.stream().map(Actor::getName).distinct().count(),
                       "the model's control names are unique");
@@ -344,9 +488,11 @@ class GpuTuningPanelSmokeTest {
                 hud.click("tuning-normal-maps");
                 assertFalse(hud.tuning.normalMaps(), "Normal maps off");
                 assertFalse(hud.<UiKit.Checkbox>find("tuning-normal-maps").isTicked());
+                hud.click("tuning-display-tab");
                 boolean vsync = hud.<CheckBox>model("tuning-vsync").isChecked();
                 hud.click("tuning-vsync");
                 assertEquals(!vsync, hud.<CheckBox>model("tuning-vsync").isChecked(), "VSync switched");
+                hud.click("tuning-board-tab");
 
                 // Unit family sizes.
                 for (UnitFamilyScale family : UnitFamilyScale.values()) {
@@ -475,6 +621,26 @@ class GpuTuningPanelSmokeTest {
                 assertEquals(12, hud.tuning.atmosphere().hour(), NEAR);
                 assertEquals(.5f, hud.tuning.atmosphere().exposure(), NEAR);
                 assertEquals("12:00", reading(hud, "Time of day"));
+                hud.drag("Shadows", 45);
+                hud.drag("Ambient light", 32);
+                hud.drag("Sky contribution", 60);
+                assertEquals(.45f, hud.tuning.atmosphereOptions().shadowStrength(), NEAR);
+                assertEquals(.32f, hud.tuning.atmosphereOptions().ambientShare(), NEAR);
+                assertEquals(.60f, hud.tuning.atmosphereOptions().skyContribution(), NEAR);
+                hud.drag("White balance", .5f);
+                hud.drag("Tint", -.25f);
+                hud.drag("Saturation", 1.5f);
+                hud.drag("Contrast", 1.2f);
+                var grade = hud.tuning.atmosphereOptions();
+                assertEquals(.5f, grade.whiteBalance(), NEAR);
+                assertEquals(-.25f, grade.tint(), NEAR);
+                assertEquals(1.5f, grade.saturation(), NEAR);
+                assertEquals(1.2f, grade.contrast(), NEAR);
+                assertEquals("+0.50", reading(hud, "White balance"));
+                assertEquals("-0.25", reading(hud, "Tint"));
+                assertEquals("1.50", reading(hud, "Saturation"));
+                assertEquals("1.20", reading(hud, "Contrast"));
+                hud.capture("tuning-color-controls");
                 boolean moonlight = hud.tuning.atmosphere().moonlight();
                 hud.click("tuning-moonlight");
                 assertEquals(!moonlight, hud.tuning.atmosphere().moonlight(), "Moonlight switched");
@@ -586,6 +752,10 @@ class GpuTuningPanelSmokeTest {
                 hud.click("tuning-defaults");
                 assertEquals(BoardAtmosphere.DEFAULTS, hud.tuning.atmosphere());
                 assertEquals(initialOptions, hud.tuning.atmosphereOptions());
+                assertEquals("+0.00", reading(hud, "White balance"));
+                assertEquals("+0.00", reading(hud, "Tint"));
+                assertEquals("1.00", reading(hud, "Saturation"));
+                assertEquals("1.00", reading(hud, "Contrast"));
                 assertEquals(BoardAtmosphere.DEFAULTS.clouds(), hud.<Slider>find("Cloud cover").getValue(), .01f);
             }
         });

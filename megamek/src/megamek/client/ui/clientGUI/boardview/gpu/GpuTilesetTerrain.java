@@ -12,6 +12,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
@@ -32,11 +33,19 @@ import megamek.common.board.Coords;
  * its lower neighbours or the board's floor. A road meeting a hex of another level ramps through the edge between them,
  * and a bridge's art lies on its deck. Open liquid moves in its animated frames above a recessed bed and pours into the
  * liquid below. Natural shores round into land-textured banks and sandy shallows; concrete quays keep their fitted
- * vertical edges. This class holds the geometry only: {@link GpuTerrain} builds a Classic chunk from these columns
- * ({@link #write}) on its terrain workers, and draws, shadows, picks and drapes them as it does its 3D relief.
+ * vertical edges. This class holds the column geometry and material treatment: {@link GpuTerrain} builds a Classic chunk
+ * ({@link #write}) on its terrain workers, and draws, shadows, picks and drapes it as it does its 3D relief.
  * Concrete outlines and adjacent water share the fitted corners of {@link BoardConcrete} with the sculpted view.
  */
 final class GpuTilesetTerrain {
+    /** Isolates graded column artwork from props and animated liquids with otherwise identical materials. */
+    static final class Grading extends Attribute {
+        static final long TYPE = register("boardColumnGrading");
+        Grading() { super(TYPE); }
+        @Override public Attribute copy() { return new Grading(); }
+        @Override public int compareTo(Attribute other) { return Long.compare(type, other.type); }
+    }
+
     /** The old board's material walls: their art repeats every 96 units at hex scale 1. */
     private static final float WALL_REPEAT = 96;
     /** A deck at its hex's own level lies this far above the ground, in hex-scale units, as the libGDX board's did. */
@@ -58,6 +67,16 @@ final class GpuTilesetTerrain {
 
     private GpuTilesetTerrain() { }
 
+    /** Apply the shared elevation cue to completed column reflectance, before the existing model lighting. */
+    static String fragment(String source) {
+        String helpers = "// model-lighting-functions";
+        source = GpuShaderSource.replaceOnce(source, helpers, GpuShaderSource.read("terrain-ground-color.glsl")
+              + "\nuniform float u_levelHeight;\n" + helpers, "column");
+        String reflectance = "albedo = materialReflectance(albedo);";
+        return GpuShaderSource.replaceOnce(source, reflectance,
+              reflectance + "\n    albedo = levelGrade(albedo, v_cloudPosition.z / u_levelHeight);", "column");
+    }
+
     /**
      * Writes the hex's column {@code surface} into a chunk: its art tops, banks, shallows, walls and bridge deck into
      * {@code opaque}, which casts and receives shadows, and its open liquid into {@code liquid}, molten liquid into
@@ -70,11 +89,11 @@ final class GpuTilesetTerrain {
           BiConsumer<Material, Consumer<MeshPartBuilder>> opaque, BiConsumer<Material, Consumer<MeshPartBuilder>> liquid,
           Map<String, GpuTerrain.LiquidSurface> animations, BoundingBox bounds) {
         Coords coords = tile.coords();
-        String rock = tile.liquid().molten() ? "terrain/rock" : null;
+        String rock = tile.liquid().molten() ? "terrain/classic/rock" : null;
         for (BoardSurface.Face face : surface.faces()) {
             bounds.ext(face.a()).ext(face.b()).ext(face.c());
             if (face.finish() == BoardSurface.Finish.BANK || face.finish() == BoardSurface.Finish.BED) {
-                opaque.accept(material(assets.material(rock != null ? rock : "terrain/water_bed")),
+                opaque.accept(material(assets.material(rock != null ? rock : "terrain/classic/water_bed")),
                       mesh -> bank(mesh, tile, face, false));
                 continue;
             }
@@ -83,7 +102,7 @@ final class GpuTilesetTerrain {
             opaque.accept(material(region == null ? null : region.getTexture()),
                   mesh -> artTriangle(mesh, coords, face, region, concrete));
             if (face.finish() == BoardSurface.Finish.SHORE) {
-                Material sand = material(assets.material(rock != null ? rock : "terrain/sand"));
+                Material sand = material(assets.material(rock != null ? rock : "terrain/classic/sand"));
                 sand.set(new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA),
                       new DepthTestAttribute(GL20.GL_LEQUAL, false));
                 opaque.accept(sand, mesh -> bank(mesh, tile, face, true));
@@ -354,7 +373,7 @@ final class GpuTilesetTerrain {
     /** Grassland shows its dirt on an incline's side and its rock on a cliff's; other ground keeps its own material. */
     private static String side(BoardScene.Surface surface, BoardSurface.Finish finish) {
         return surface == BoardScene.Surface.GRASS && finish != BoardSurface.Finish.OUTCROP
-              ? BoardScene.Surface.DIRT.wall : surface.wall;
+              ? BoardScene.Surface.DIRT.classicWall : surface.classicWall;
     }
 
     private static void quad(List<BoardSurface.Face> faces, Vector3 a, Vector3 b, Vector3 c, Vector3 d,
@@ -376,6 +395,7 @@ final class GpuTilesetTerrain {
     private static Material liquid(Liquid key, GpuAssets assets, Map<String, GpuTerrain.LiquidSurface> animations) {
         Texture frame = assets.liquid(key.source(), 0);
         Material material = material(frame);
+        material.remove(Grading.TYPE);
         material.id = "column-liquid:" + key;
         material.set(new GpuLiquidShader.Frame(frame), new FloatAttribute(GpuLiquidShader.Frame.BLEND, 0));
         if (!key.liquid().molten()) {
@@ -512,7 +532,7 @@ final class GpuTilesetTerrain {
 
     /** One fixed id: equal materials share one draw in their chunk layer. */
     private static Material material(Texture texture) {
-        Material material = new Material("column", IntAttribute.createCullFace(GL20.GL_NONE));
+        Material material = new Material("column", IntAttribute.createCullFace(GL20.GL_NONE), new Grading());
         material.set(texture == null ? ColorAttribute.createDiffuse(Color.GRAY) : TextureAttribute.createDiffuse(texture));
         return material;
     }

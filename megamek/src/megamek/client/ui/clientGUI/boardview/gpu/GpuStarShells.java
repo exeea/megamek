@@ -50,7 +50,7 @@ final class GpuStarShells implements Disposable {
      */
     private static final float LIFT = .02f;
     /** Near-white and a touch warm, so the colours of what it lights stay true. */
-    private static final Color LIGHT = new Color(1, .96f, .9f, 1);
+    private static final Color LIGHT = GpuColor.linear(1, .96f, .9f);
     private static final int CORE = 0, HALO = 1, RAY = 2, SMOKE = 4;
     private static final int RAYS = 4;
     private static final int SMOKE_PUFFS = 5;
@@ -263,13 +263,13 @@ final class GpuStarShells implements Disposable {
                 lightShader.setUniform1fv("u_flareStrength[0]", flareStrengths, 0, count);
                 lightShader.setUniformf("u_boxCenter", (minX + maxX) / 2, (minY + maxY) / 2, 0);
                 lightShader.setUniformf("u_boxHalf", (maxX - minX) / 2, (maxY - minY) / 2, BoardGeometry.level() * 60);
-                // dst * (1 + src): the scene's own colours brighten.
-                Gdx.gl.glBlendFunc(GL20.GL_DST_COLOR, GL20.GL_ONE);
+                // A dimensionless gain multiplies stored scene RGB directly; it must not be storage-scaled.
+                Gdx.gl.glBlendFuncSeparate(GL20.GL_DST_COLOR, GL20.GL_ONE, GL20.GL_ZERO, GL20.GL_ONE);
                 lightShader.setUniformf("u_light", LIGHT.r, LIGHT.g, LIGHT.b, 1);
                 box.render(lightShader, GL20.GL_TRIANGLES);
-                // dst + src: an even lift, so what was near black is seen.
-                Gdx.gl.glBlendFunc(GL20.GL_ONE, GL20.GL_ONE);
-                lightShader.setUniformf("u_light", LIGHT.r, LIGHT.g, LIGHT.b, LIFT);
+                // The additive lift is radiance: convert to scene storage units once. Both passes preserve coverage.
+                Gdx.gl.glBlendFuncSeparate(GL20.GL_ONE, GL20.GL_ONE, GL20.GL_ZERO, GL20.GL_ONE);
+                lightShader.setUniformf("u_light", LIGHT.r, LIGHT.g, LIGHT.b, LIFT * GpuSceneRadiance.SCALE);
                 box.render(lightShader, GL20.GL_TRIANGLES);
             }
         } finally {

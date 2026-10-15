@@ -41,6 +41,9 @@ class GpuShaderCompileSmokeTest {
             public void create() {
                 GL20 original = Gdx.gl20;
                 var calls = new Calls(original);
+                // These checks count compiles and links, which loading a stored program skips.
+                var cache = GpuGlsl.programCache;
+                GpuGlsl.programCache = null;
                 try {
                     stage("render context ready; compiling single link");
                     Gdx.gl20 = calls.proxy();
@@ -76,7 +79,12 @@ class GpuShaderCompileSmokeTest {
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     stage("all shader ownership assertions passed");
                 } catch (Throwable error) { failure.set(error); }
-                finally { stage("exiting render context"); Gdx.gl20 = original; Gdx.app.exit(); }
+                finally {
+                    stage("exiting render context");
+                    Gdx.gl20 = original;
+                    GpuGlsl.programCache = cache;
+                    Gdx.app.exit();
+                }
             }
         }, GpuBoardWindow.configuration(false));
         stage("render context closed");

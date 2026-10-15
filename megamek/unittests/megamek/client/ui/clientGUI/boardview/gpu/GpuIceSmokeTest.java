@@ -43,7 +43,7 @@ class GpuIceSmokeTest {
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(settings(13));
                 var tactical = new GpuTactical(terrain::tacticalSurface);
-                try {
+                try (var pixels = new GpuSceneTestOutput()) {
                     var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                     assertTrue(output.isDirectory() || output.mkdirs());
                     var camera = new BoardCamera();
@@ -51,36 +51,46 @@ class GpuIceSmokeTest {
                     camera.fit(dry);
                     terrain.setAtmosphere(frame.lighting());
                     terrain.update(dry);
-                    int[] road = sample(terrain, camera, ROAD);
+                    int[] road = sample(pixels, terrain, camera, ROAD);
                     GpuReviewFrame.save(new File(output, "ice-debug-dry.png"));
                     terrain.update(hidden);
-                    assertArrayEquals(road, sample(terrain, camera, ROAD), "Undetected ice must be visually identical");
+                    assertArrayEquals(road, sample(pixels, terrain, camera, ROAD), "Undetected ice must be visually identical");
                     terrain.update(detected);
-                    int[] glazed = sample(terrain, camera, ROAD);
+                    int[] glazed = sample(pixels, terrain, camera, ROAD);
                     GpuReviewFrame.save(new File(output, "ice-debug-detected.png"));
                     assertTrue(difference(road, glazed) > 1, "Discovery must visibly coat the road: " + difference(road, glazed));
                     terrain.setNormalMaps(false);
                     camera.setIsometric(true);
                     camera.camera.zoom = .16f;
                     camera.center(BoardGeometry.center(LAKE, 0));
-                    int[] flat = sample(terrain, camera, LAKE);
+                    int[] flat = sample(pixels, terrain, camera, LAKE);
                     terrain.setNormalMaps(true);
-                    double normalChange = difference(flat, sample(terrain, camera, LAKE));
+                    double normalChange = difference(flat, sample(pixels, terrain, camera, LAKE));
                     assertTrue(normalChange > .05, "Ice normal maps must reach the GL shader: " + normalChange);
                     frame.render(terrain, camera, detected);
                     GpuReviewFrame.save(new File(output, "ice-lake-detail.png"));
                     // Substitute two opaque backgrounds under the same sheet. A fake opaque ice texture
                     // would give identical pixels, whereas actual transmission must reveal the difference.
-                    ScreenUtils.clear(.05f, .12f, .3f, 1, true);
+                    pixels.scene().begin();
+                    Gdx.gl.glDepthMask(true);
+                    // These are the original scene-radiance stimuli, not authored sRGB material pigments.
+                    // Store them in the scene's units and let the shared display boundary encode the result.
+                    ScreenUtils.clear(.05f * GpuSceneRadiance.SCALE, .12f * GpuSceneRadiance.SCALE,
+                          .3f * GpuSceneRadiance.SCALE, 1, true);
                     var profiler = new GLProfiler(Gdx.graphics);
                     profiler.enable();
                     terrain.renderTransparent(camera.camera);
                     int iceDraws = profiler.getDrawCalls();
                     profiler.disable();
+                    pixels.display();
                     // Snow on the slab is opaque; its bare ice is not. Sample a wide area of the hex.
                     int[] blue = read(camera, LAKE, 240);
-                    ScreenUtils.clear(.3f, .08f, .03f, 1, true);
+                    pixels.scene().begin();
+                    Gdx.gl.glDepthMask(true);
+                    ScreenUtils.clear(.3f * GpuSceneRadiance.SCALE, .08f * GpuSceneRadiance.SCALE,
+                          .03f * GpuSceneRadiance.SCALE, 1, true);
                     terrain.renderTransparent(camera.camera);
+                    pixels.display();
                     double transmitted = difference(blue, read(camera, LAKE, 240));
                     System.out.println("Lake ice transmission difference: " + transmitted);
                     assertTrue(transmitted > .5, "Lake ice must transmit the scene behind it");
@@ -104,12 +114,12 @@ class GpuIceSmokeTest {
                     GpuReviewFrame.save(new File(output, "ice-night.png"));
                     frame.configure(settings(13));
                     terrain.setAtmosphere(frame.lighting());
-                    int[] beforeRemoval = sample(terrain, camera, ROAD);
+                    int[] beforeRemoval = sample(pixels, terrain, camera, ROAD);
                     terrain.update(dry);
-                    int[] restored = sample(terrain, camera, ROAD);
+                    int[] restored = sample(pixels, terrain, camera, ROAD);
                     assertTrue(difference(beforeRemoval, restored) > 1, "Removing ice must remove the visible coat");
                     terrain.update(hidden);
-                    assertArrayEquals(restored, sample(terrain, camera, ROAD), "Hidden ice retains the restored dry surface");
+                    assertArrayEquals(restored, sample(pixels, terrain, camera, ROAD), "Hidden ice retains the restored dry surface");
                     var marker = BoardEditorTerrain.capture(new Hex(0, "black_ice:1;bldg_base_collapsed:1", ""), ROAD,
                           java.util.Set.of());
                     var marked = new BoardScene(hidden.boardId(), hidden.width(), hidden.height(), hidden.tiles(),
@@ -140,7 +150,7 @@ class GpuIceSmokeTest {
         return new BoardAtmosphere.Settings(hour, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0);
     }
 
-    private static BoardScene scene(int discovery) throws Exception {
+    static BoardScene scene(int discovery) throws Exception {
         var task = new FutureTask<BoardScene>(() -> {
             var game = new Game();
             var board = Board.createEmptyBoard(7, 5);
@@ -162,10 +172,8 @@ class GpuIceSmokeTest {
         return task.get();
     }
 
-    private static int[] sample(GpuTerrain terrain, BoardCamera camera, Coords coords) {
-        ScreenUtils.clear(.02f, .025f, .035f, 1, true);
-        terrain.render(camera.camera, false);
-        terrain.renderTransparent(camera.camera);
+    private static int[] sample(GpuSceneTestOutput output, GpuTerrain terrain, BoardCamera camera, Coords coords) {
+        output.draw(terrain, camera.camera, true);
         return read(camera, coords);
     }
 

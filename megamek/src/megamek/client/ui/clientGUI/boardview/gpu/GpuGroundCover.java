@@ -300,12 +300,10 @@ final class GpuGroundCover implements Disposable {
               + "\n#define GRASS_MAX_HEIGHT " + MAX_HEIGHT_FRACTION + "\n"
               + GpuGroundDamage.shaderSource() + GpuShaderSource.read("terrain-grass.glsl");
         // A root beyond its density leaves every vertex of its blade outside the clip volume.
-        return source.replace("void main() {", wind + meadow + blade + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
+        return GpuShaderSource.coverVertex(source.replace("void main() {",
+              wind + meadow + blade + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
                     + "if (!grassBlade(a_position, coverPosition, coverNormal, coverColor)) {\n"
-                    + "gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }\n")
-              .replace("vec4 pos = u_worldTrans * vec4(a_position, 1.0);", "vec4 pos = vec4(coverPosition, 1.0);")
-              .replace("vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = coverNormal;")
-              .replace("v_color = a_color;", "v_color = coverColor;");
+                    + "gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }\n"));
     }
 
     private static float density(float pixels) {
@@ -327,8 +325,8 @@ final class GpuGroundCover implements Disposable {
             revision = BoardGeometry.revision();
             boardId = scene.boardId();
         }
-        float viewportPixels = Gdx.graphics == null ? camera.viewportHeight
-              : camera.viewportHeight * Gdx.graphics.getBackBufferHeight() / Math.max(1f, Gdx.graphics.getHeight());
+        float viewportPixels = Gdx.graphics == null ? camera.viewportHeight : camera.viewportHeight
+              * Gdx.graphics.getBackBufferHeight() * BoardCamera.renderScale / Math.max(1f, Gdx.graphics.getHeight());
         long now = System.nanoTime();
         arrivals.values().removeIf(arrived -> now - arrived >= GROWTH_NANOS);
         if (view != null && arrivals.isEmpty() && view.viewportPixels() == viewportPixels
@@ -383,8 +381,8 @@ final class GpuGroundCover implements Disposable {
             int detail = chunk.nearPixels >= 280 ? 1 : 0;
             if (chunk.nearPixels > START_PIXELS) {
                 if (turfTexture == null && !chunk.turf.isEmpty()) {
-                    turfTexture = new Texture(new FileHandle(new File(Configuration.dataDir(),
-                          "models/board/textures/foliage/bank-turf.png")), true);
+                    turfTexture = GpuColorTexture.create(new FileHandle(new File(Configuration.dataDir(),
+                          "models/board/textures/vegetation/bank-turf.png")), true);
                     turfTexture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
                     turfTexture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
                 }

@@ -41,8 +41,8 @@ class BoardBridgeFootingTest {
         var originalData = Configuration.dataDir();
         var source = originalData.toPath().resolve("models/board");
         var target = Files.createDirectories(directory.resolve("models/board"));
-        Files.createDirectories(target.resolve("textures/sculpt"));
-        Files.copy(source.resolve("textures/sculpt/concrete.png"), target.resolve("textures/sculpt/concrete.png"));
+        Files.createDirectories(target.resolve("textures/terrain/surfaces"));
+        Files.copy(source.resolve("textures/terrain/surfaces/concrete.png"), target.resolve("textures/terrain/surfaces/concrete.png"));
         // The reload also rereads the pier kits, the bridge's and the maglev's.
         Files.createDirectories(target.resolve("bridges"));
         Files.copy(source.resolve("bridges/bridge-pier.glb"), target.resolve("bridges/bridge-pier.glb"));

@@ -1,48 +1,80 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.HashSet;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.TextureData;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelTexture;
 
 /** Models borrow textures from their library's cache; each cache alone owns their disposal. */
 final class ModelTextures {
     private ModelTextures() { }
 
-    static Model create(ModelData data, Map<String, Texture> cache, Function<String, Texture> external) {
-        com.badlogic.gdx.graphics.g3d.utils.TextureProvider provider = key -> {
+    static Model create(ModelData data, Map<String, Texture> cache, BiFunction<String, Boolean, Texture> external) {
+        BiFunction<String, Boolean, Texture> load = (key, color) -> {
             var image = data instanceof RigidGlb.Data glb ? glb.images.get(key) : null;
-            if (image == null) { return external.apply(key); }
-            return cache.computeIfAbsent(key, ignored -> {
-                Texture texture = image.encoded() == null
-                      ? new Texture(new com.badlogic.gdx.files.FileHandle(image.file()), true)
-                      : new Texture(new Encoded(image.encoded()));
+            if (image == null) { return external.apply(key, color); }
+            return cache.computeIfAbsent((color ? "color:" : "data:") + key, ignored -> {
+                Texture texture;
+                if (image.encoded() == null) {
+                    var file = new com.badlogic.gdx.files.FileHandle(image.file());
+                    texture = color ? GpuColorTexture.create(file, true) : GpuColorTexture.createData(file, true);
+                } else if (color) {
+                    texture = GpuColorTexture.create(image.encoded(), true);
+                } else {
+                    texture = GpuColorTexture.createData(image.encoded(), true);
+                }
                 texture.setFilter(filter(image.minFilter()), filter(image.magFilter()));
                 texture.setWrap(wrap(image.wrapS()), wrap(image.wrapT()));
                 return texture;
             });
         };
+        var colors = new HashSet<String>();
         // Decode first, so an invalid image cannot strand meshes inside a partially constructed Model.
         for (var material : data.materials) {
             if (material.textures == null) { continue; }
-            for (var texture : material.textures) { provider.load(texture.fileName); }
+            for (var texture : material.textures) {
+                boolean color = color(texture.usage);
+                if (color) { colors.add(texture.fileName); }
+                load.apply(texture.fileName, color);
+            }
         }
         if (data instanceof RigidGlb.Data glb) {
             glb.surfaces.values().stream().map(RigidGlb.Surface::map).filter(java.util.Objects::nonNull)
-                  .forEach(provider::load);
+                  .forEach(key -> load.apply(key, false));
         }
-        Model model = new Model(data, provider);
+        Model model = new Model(data, key -> load.apply(key, colors.contains(key)));
+        // glTF permits one source image in both a color and a data role. Each role needs its own GPU storage.
+        for (var source : data.materials) {
+            if (source.textures == null) { continue; }
+            var material = model.getMaterial(source.id);
+            for (var texture : source.textures) {
+                long type = switch (texture.usage) {
+                    case ModelTexture.USAGE_DIFFUSE -> TextureAttribute.Diffuse;
+                    case ModelTexture.USAGE_EMISSIVE -> TextureAttribute.Emissive;
+                    case ModelTexture.USAGE_SPECULAR -> TextureAttribute.Specular;
+                    case ModelTexture.USAGE_NORMAL -> TextureAttribute.Normal;
+                    case ModelTexture.USAGE_AMBIENT -> TextureAttribute.Ambient;
+                    case ModelTexture.USAGE_BUMP -> TextureAttribute.Bump;
+                    case ModelTexture.USAGE_REFLECTION -> TextureAttribute.Reflection;
+                    default -> 0;
+                };
+                var attribute = material.get(TextureAttribute.class, type);
+                if (attribute != null) { attribute.textureDescription.texture = load.apply(texture.fileName, color(texture.usage)); }
+            }
+        }
         if (data instanceof RigidGlb.Data glb) {
+            model.materials.forEach(material -> material.set(new GpuLinearColors()));
             glb.surfaces.forEach((id, surface) -> model.getMaterial(id).set(new GpuModelMaterial(
-                  surface.roughness(), surface.metallic(), surface.map() == null ? null : provider.load(surface.map()))));
+                  surface.roughness(), surface.metallic(), surface.map() == null ? null : load.apply(surface.map(), false))));
             glb.alphaTests.forEach((id, cutoff) -> model.getMaterial(id).set(
                   new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
                   new FloatAttribute(FloatAttribute.AlphaTest, cutoff)));
@@ -52,6 +84,11 @@ final class ModelTextures {
             if (owned.next() instanceof Texture) { owned.remove(); }
         }
         return model;
+    }
+
+    private static boolean color(int usage) {
+        return usage == ModelTexture.USAGE_DIFFUSE || usage == ModelTexture.USAGE_EMISSIVE
+              || usage == ModelTexture.USAGE_SPECULAR || usage == ModelTexture.USAGE_REFLECTION;
     }
 
     private static Texture.TextureFilter filter(int value) {
@@ -68,36 +105,4 @@ final class ModelTextures {
         throw new IllegalArgumentException("Unknown texture wrap: " + value);
     }
 
-    /** Decode on preparation, release native pixels after upload, retain encoded bytes for context restoration. */
-    private static final class Encoded implements TextureData {
-        private final byte[] bytes;
-        private Pixmap pixels;
-        private int width;
-        private int height;
-        private Pixmap.Format format;
-
-        Encoded(byte[] bytes) { this.bytes = bytes; }
-        @Override public TextureDataType getType() { return TextureDataType.Pixmap; }
-        @Override public boolean isPrepared() { return pixels != null; }
-        @Override public void prepare() {
-            if (pixels != null) { throw new IllegalStateException("Texture is already prepared"); }
-            pixels = new Pixmap(bytes, 0, bytes.length);
-            width = pixels.getWidth();
-            height = pixels.getHeight();
-            format = pixels.getFormat();
-        }
-        @Override public Pixmap consumePixmap() {
-            if (pixels == null) { throw new IllegalStateException("Texture is not prepared"); }
-            Pixmap result = pixels;
-            pixels = null;
-            return result;
-        }
-        @Override public boolean disposePixmap() { return true; }
-        @Override public void consumeCustomData(int target) { throw new UnsupportedOperationException("Pixmap texture"); }
-        @Override public int getWidth() { return width; }
-        @Override public int getHeight() { return height; }
-        @Override public Pixmap.Format getFormat() { return format; }
-        @Override public boolean useMipMaps() { return true; }
-        @Override public boolean isManaged() { return true; }
-    }
 }

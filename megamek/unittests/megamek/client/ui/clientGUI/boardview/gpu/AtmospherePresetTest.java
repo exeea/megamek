@@ -35,7 +35,7 @@ class AtmospherePresetTest {
     }
 
     @Test
-    void nightPresetsControlBothTheSourceAndItsExposure() {
+    void nightPresetsControlTheSourceAndRemainOrderedAfterAdaptation() {
         var moon = AtmospherePreset.FULL_MOON.settings(0.5);
         var moonless = AtmospherePreset.MOONLESS.settings(0.5);
         var dark = AtmospherePreset.PITCH_BLACK.settings(0.5);
@@ -47,13 +47,23 @@ class AtmospherePresetTest {
         assertFalse(BoardAtmosphere.lighting(dark).hasDirectLight());
         assertEquals(moon.hour(), moonless.hour());
         assertEquals(moonless.hour(), dark.hour());
-        assertTrue(dark.exposure() < moonless.exposure() && moonless.exposure() < moon.exposure());
+        assertTrue(dark.exposure() < moonless.exposure());
+        // EV alone cannot rank different sources: moonless uses readable sky fill without a directional moon.
+        assertTrue(displayedGround(moon) > displayedGround(moonless));
+        assertTrue(displayedGround(moonless) > displayedGround(dark));
         for (int sample = 0; sample < 128; sample++) {
             float dawn = AtmospherePreset.DAWN.settings(sample / 128.0).hour();
             float dusk = AtmospherePreset.DUSK.settings(sample / 128.0).hour();
             assertTrue(dawn >= 6 && dawn <= 6.75f);
             assertTrue(dusk >= 17.25f && dusk <= 18);
         }
+    }
+
+    private static float displayedGround(BoardAtmosphere.Settings settings) {
+        var light = BoardAtmosphere.lighting(settings);
+        var ground = light.groundLight();
+        float luminance = .2126f * ground.r + .7152f * ground.g + .0722f * ground.b;
+        return luminance * light.adaptation() * (float) Math.pow(2, settings.exposure());
     }
 
     @Test

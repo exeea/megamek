@@ -43,11 +43,13 @@ class GpuShaderSourceTest {
                 shaders++;
                 String source = COMMENT.matcher(Files.readString(file))
                       .replaceAll(match -> match.group().replaceAll("[^\\n]", " "));
-                if (source.contains("void main(")) {
-                    assertTrue(source.startsWith("#version 330 core"), "Standalone stage version: " + file);
+                // Included modules may replace main (terrain-ice.glsl), inheriting the enclosing stage's header.
+                if (!file.toString().endsWith(".glsl") && source.contains("void main(")) {
+                    assertTrue(source.stripLeading().startsWith("#version 330 core"), "Standalone stage version: " + file);
                     // A depth-only stage with an empty main (water-depth.frag) writes no colour and declares no output.
                     if (file.toString().endsWith(".frag") && !source.matches("(?s).*void main\\(\\)\\s*\\{\\s*\\}.*")) {
-                        assertTrue(source.contains("layout(location = 0) out vec4 fragColor;"), "Explicit output: " + file);
+                        assertTrue(source.matches("(?s).*\\blayout\\s*\\(\\s*location\\s*=\\s*0\\s*\\)"
+                              + "\\s*out\\s+vec4\\s+fragColor\\s*;.*"), "Explicit output: " + file);
                     }
                 }
                 String[] lines = source.split("\n", -1);

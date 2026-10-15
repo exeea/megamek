@@ -324,6 +324,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String GUI_SCALE = "GUIScale";
     public static final String BOARD_VIEW_3D = "BoardView3D";
     public static final String BOARD_VIEW_3D_GRAPHICS_CARD = "BoardView3DGraphicsCard";
+    /** The 3D board's anti-aliasing, a choice of its Tuning panel: OFF or SMAA. */
+    public static final String BOARD_ANTI_ALIASING = "BoardAntiAliasing";
+    /** Whether the 3D board widens highlights by the surface normal's variance over a pixel. */
+    public static final String BOARD_SPECULAR_ANTI_ALIASING = "BoardSpecularAntiAliasing";
     /** The 3D board's graphics, a {@link BoardGraphics} name. */
     public static final String BOARD_GRAPHICS = "BoardGraphics";
     /** The 3D board editor's Layers share of its right column; negative: their natural height. */
@@ -881,6 +885,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(GUI_SCALE, 1);
         store.setDefault(BOARD_VIEW_3D, true);
         store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "SYSTEM");
+        store.setDefault(BOARD_ANTI_ALIASING, "OFF");
+        store.setDefault(BOARD_SPECULAR_ANTI_ALIASING, true);
         store.setDefault(BOARD_GRAPHICS, BoardGraphics.ENHANCED.name());
         store.setDefault(BOARD_EDITOR_LAYERS_SPLIT, -1f);
         store.setDefault(BOARD_EDITOR_SIDE_VIEW, true);
@@ -1939,6 +1945,24 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setBoardGraphicsCard(String card) {
         store.setValue(BOARD_VIEW_3D_GRAPHICS_CARD, card);
+    }
+
+    /** The 3D board's anti-aliasing: OFF or SMAA. */
+    public String getBoardAntiAliasing() {
+        return store.getString(BOARD_ANTI_ALIASING);
+    }
+
+    public void setBoardAntiAliasing(String antiAliasing) {
+        store.setValue(BOARD_ANTI_ALIASING, antiAliasing);
+    }
+
+    /** Whether the 3D board's specular anti-aliasing is on. */
+    public boolean getBoardSpecularAntiAliasing() {
+        return store.getBoolean(BOARD_SPECULAR_ANTI_ALIASING);
+    }
+
+    public void setBoardSpecularAntiAliasing(boolean enabled) {
+        store.setValue(BOARD_SPECULAR_ANTI_ALIASING, enabled);
     }
 
     /** Classic or Enhanced 3D graphics; unlike the graphics card, a change applies at once. */

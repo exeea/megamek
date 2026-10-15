@@ -33,6 +33,7 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
+import megamek.client.ui.gdx.UiSliderInput;
 import megamek.client.ui.gdx.UiTheme;
 
 /**
@@ -153,12 +154,13 @@ final class GpuTuningPanel implements GpuHud.Component {
             }
         });
         frame.add(header).growX().row();
-        UiKit.Segmented tabs = ui.segmented("hud-tab", false, text("GpuBoard.hud.tuning.board"),
-              text("GpuBoard.hud.tuning.atmosphere"), text("GpuBoard.hud.tuning.terrain"),
-              text("GpuBoard.hud.tuning.camera"));
+        UiKit.Segmented tabs = ui.segmented("hud-tab", false, text("GpuBoard.hud.tuning.display"),
+              text("GpuBoard.hud.tuning.board"), text("GpuBoard.hud.tuning.atmosphere"),
+              text("GpuBoard.hud.tuning.terrain"), text("GpuBoard.hud.tuning.camera"));
         tabs.left().pad(2, 14, 0, 14);
         frame.add(tabs).growX().row();
-        List<ScrollPane> pages = List.of(page("tuning-board", mirror(tuning.boardRows())),
+        List<ScrollPane> pages = List.of(page("tuning-display", mirror(tuning.displayRows())),
+              page("tuning-board", mirror(tuning.boardRows())),
               page("tuning-atmosphere", mirror(tuning.atmosphereRows())),
               page("tuning-terrain", mirror(tuning.terrainRows())), page("tuning-camera", cameraPage()));
         Cell<ScrollPane> shown = frame.add(pages.getFirst()).grow().minHeight(0);
@@ -214,7 +216,8 @@ final class GpuTuningPanel implements GpuHud.Component {
                 page.add(checkbox(box.getName(), box.getText().toString(), tooltip(box), box::isChecked,
                       box::setChecked)).colspan(span).left().pad(5, 0, 5, 0);
             } else if (model instanceof TextButton toggle) {
-                page.add(toggle(toggle)).colspan(span).width(NAME_WIDTH).left().pad(2, 0, 2, 0);
+                var buttonCell = page.add(toggle(toggle)).colspan(span).left().pad(2, 0, 2, 0);
+                if (span > 1) { buttonCell.growX(); } else { buttonCell.width(NAME_WIDTH); }
             } else if (model instanceof SelectBox<?> choice) {
                 // A button is never narrower than its text; the face's long choice ends in an ellipsis instead.
                 page.add(select(choice)).colspan(span).growX().minWidth(0).pad(3, 8, 3, 0);
@@ -226,6 +229,7 @@ final class GpuTuningPanel implements GpuHud.Component {
             } else if (model instanceof Label note && span > 1) {
                 Label shown = ui.label(note.getText().toString(), "hud-small", 11.5f, UiTheme.MUTED);
                 shown.setWrap(true);
+                shows.add(() -> shown.setText(note.getText()));
                 page.add(shown).colspan(span).growX().pad(2, 0, 4, 0);
             } else if (model instanceof Label name) {
                 Label shown = ui.label(name.getText().toString(), "hud-body", 12, UiTheme.ACCENT);
@@ -352,10 +356,11 @@ final class GpuTuningPanel implements GpuHud.Component {
 
     /**
      * A slider of the model's range and step, enabled as the model's and at its value, except while it is dragged; a
-     * drag sets the model's value.
+     * drag or an arrow-key step sets the model's value.
      */
     private Slider slider(Slider model) {
         Slider slider = new Slider(model.getMinValue(), model.getMaxValue(), model.getStepSize(), false, sliders);
+        new UiSliderInput(slider);
         slider.setName(model.getName());
         tip(slider, model);
         onChange(slider, () -> model.setValue(slider.getValue()));

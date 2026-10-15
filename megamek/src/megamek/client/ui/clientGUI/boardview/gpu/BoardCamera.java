@@ -113,11 +113,21 @@ final class BoardCamera {
         camera.zoom = 1;
     }
 
-    /** Projected size at the orbit pivot, including framebuffer/display scaling. */
+    /**
+     * The 3D scene's render resolution, a share of the window's pixels; the tuning panel sets it for the window. The
+     * scene's pixel footprints ({@link #pixelsPerUnit}, detail and shader fades) count the scene's own pixels.
+     */
+    static float renderScale = 1;
+
+    /** Projected size at the orbit pivot in scene pixels, including framebuffer/display scaling. */
     static float pixelsPerUnit(Camera camera) {
-        float scale = Gdx.graphics == null ? 1
-              : Gdx.graphics.getBackBufferHeight() / (float) Math.max(1, Gdx.graphics.getHeight());
-        return scale / worldUnitsPerPixel(camera);
+        return scenePixelScale() / worldUnitsPerPixel(camera);
+    }
+
+    /** Scene pixels per logical window pixel: the display's framebuffer scaling times the render resolution. */
+    static float scenePixelScale() {
+        return Gdx.graphics == null ? 1
+              : Gdx.graphics.getBackBufferHeight() / (float) Math.max(1, Gdx.graphics.getHeight()) * renderScale;
     }
 
     static float worldUnitsPerPixel(Camera camera) {
@@ -127,9 +137,7 @@ final class BoardCamera {
     }
 
     static float pixelsPerUnit(Camera camera, Vector3 point) {
-        float scale = Gdx.graphics == null ? 1
-              : Gdx.graphics.getBackBufferHeight() / (float) Math.max(1, Gdx.graphics.getHeight());
-        return scale / worldUnitsPerPixel(camera, point);
+        return scenePixelScale() / worldUnitsPerPixel(camera, point);
     }
 
     /** World distance corresponding to one logical screen pixel at the supplied point's camera depth. */

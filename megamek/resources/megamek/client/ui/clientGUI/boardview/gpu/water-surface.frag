@@ -11,6 +11,9 @@ in float v_waterCrest;
 // water-pool-functions
 
 void main() {
+    vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
+    vec3 face = normalize(v_normal);
+    surfaceVariance = normalVariance(dFdx(face), dFdy(face));
     if (waterHidden()) discard;
     vec4 habitat, mixture;
     waterHabitat(habitat, mixture);
@@ -18,5 +21,5 @@ void main() {
     bool procedural = u_waterMaterial.y > 0.5;
     vec3 authored = procedural ? vec3(0.0) : texture(u_diffuseTexture, v_diffuseUV).rgb;
     WaterLighting illumination = waterLighting();
-    waterOutput(waterPool(false, habitat, mixture, tint, authored, illumination));
+    waterOutput(waterPool(false, geometric, habitat, mixture, tint, authored, illumination));
 }

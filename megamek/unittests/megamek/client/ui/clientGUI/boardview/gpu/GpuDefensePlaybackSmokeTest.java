@@ -178,15 +178,13 @@ class GpuDefensePlaybackSmokeTest {
     private static void waterFrame(GpuPlaybackReview.ReviewRenderer renderer, BoardScene scene, ModelInstance model,
           GpuWaterImpacts splash, Map<Integer, UnitMotion> motions, int frame) {
         var center = BoardGeometry.center(scene.units().getFirst().location().coords(), 0);
-        renderer.buffer.begin();
+        renderer.begin();
         renderer.camera.viewportWidth = 180;
         renderer.camera.viewportHeight = 135;
         renderer.camera.position.set(center).add(renderer.topView ? new Vector3(0, 0, 260) : renderer.viewOffset);
         renderer.camera.up.set(renderer.topView ? Vector3.Y : Vector3.Z);
         renderer.camera.lookAt(center);
         renderer.camera.update();
-        Gdx.gl.glClearColor(.15f, .19f, .23f, 1);
-        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
         renderer.batch.begin(renderer.camera);
         renderer.batch.render(model, renderer.light);
         renderer.batch.end();
@@ -208,12 +206,13 @@ class GpuDefensePlaybackSmokeTest {
             assertTrue(contact.y >= bounds.min.y && contact.y <= bounds.max.y, "Splash must originate on the posed body, not its movement anchor");
         }
         if (frame % 4 == 0) {
+            renderer.output.display();
             File output = new File(System.getProperty("megamek.gpu.screenshots"), "playback-water-fall-" + (renderer.topView ? "top" : "iso"));
             assertTrue(output.isDirectory() || output.mkdirs());
             var pixels = Pixmap.createFromFrameBuffer(0, 0, 640, 480);
             PixmapIO.writePNG(new FileHandle(new File(output, String.format("%03d.png", frame))), pixels, -1, true);
             pixels.dispose();
         }
-        renderer.buffer.end();
+        renderer.output.scene().end();
     }
 }

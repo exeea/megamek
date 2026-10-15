@@ -14,9 +14,10 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
-import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.DirectionalLightsAttribute;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -27,6 +28,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Widget;
 import com.badlogic.gdx.scenes.scene2d.utils.ScissorStack;
 import com.badlogic.gdx.utils.Align;
+import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
@@ -45,8 +47,8 @@ import megamek.common.board.Coords;
  * the right-hand column for each of the session's {@link Level}s (pills at one level stack; the column stays inside the
  * widget, see {@link #stack}). Dragging a pill, or the geometry, moves its levels by the session's HEIGHT command, one
  * undo step per drag: whole levels, Ctrl quarter levels for objects. With a prop or decal card armed, a click on a guide places it on that support, in air at a fixed level.
- * Only its framebuffer is owned here; the image is rendered again when the document, the hex, the direction, the size
- * or the installed geometry changes, and while the terrain is building.
+ * Only its render targets and display pass are owned here; the image is rendered again when the document, the hex,
+ * the direction, the size or the installed geometry changes, and while the terrain is building.
  */
 final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Disposable {
     /** The message keys of the six directions the view can look along, clockwise from north. */
@@ -75,7 +77,10 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
     private BoardEditorSession.Snapshot snapshot, laidOut;
     private long generation;
     private List<GpuTerrain.EditorObject> objects = List.of();
-    private FrameBuffer buffer;
+    private FrameBuffer buffer, sceneBuffer;
+    private GpuSceneDisplay display;
+    // View-owned scalar copies: the cached image belongs to the last successful lighting draw.
+    private final FloatArray lighting = new FloatArray(24), renderedLighting = new FloatArray(24);
     private TextureRegion image;
     /** The ground cut in widget coordinates, projected when the image was rendered; {@code solid}: under a liquid, its bed. */
     private List<Vector2> profile = List.of(), solid = List.of();
@@ -502,10 +507,37 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
             if (stale || laidOut != snapshot || laidWidth != (int) getWidth() || laidHeight != (int) getHeight()
                   || laidDirection != direction) { layoutView(); }
             boolean busy = terrain.get().busy();
-            if (render || busy || wasBusy) { renderImage(batch); }
+            boolean lightChanged = lightingChanged();
+            if (render || busy || wasBusy || lightChanged) {
+                renderImage(batch);
+                renderedLighting.clear();
+                renderedLighting.addAll(lighting);
+            }
             wasBusy = busy;
             drawOverlay(batch, parentAlpha);
         }
+    }
+
+    /** Copy the published uniforms, not Color.equals (which quantizes RGB) or mutable light references. */
+    private boolean lightingChanged() {
+        var environment = terrain.get().environment();
+        lighting.clear();
+        var ambient = environment.get(ColorAttribute.class, ColorAttribute.AmbientLight);
+        lighting.add(ambient == null ? 0 : 1);
+        if (ambient != null) { lighting.add(ambient.color.r, ambient.color.g, ambient.color.b); }
+        var sky = environment.get(GpuEnvironmentLighting.class, GpuEnvironmentLighting.TYPE);
+        lighting.add(sky == null ? 0 : 1);
+        if (sky != null) { sky.appendColors(lighting); }
+        var directions = environment.get(DirectionalLightsAttribute.class, DirectionalLightsAttribute.Type);
+        lighting.add(directions == null ? 0 : directions.lights.size);
+        if (directions != null) {
+            for (var light : directions.lights) {
+                lighting.add(light.color.r, light.color.g, light.color.b);
+                lighting.add(light.direction.x, light.direction.y, light.direction.z);
+            }
+        }
+        lighting.add(environment.shadowMap == null ? 0 : 1);
+        return !lighting.equals(renderedLighting);
     }
 
     /** Renders the hex into the framebuffer and projects the ground cut. */
@@ -519,10 +551,14 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
         Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
         try {
             if (buffer == null || buffer.getWidth() != width || buffer.getHeight() != height) {
-                if (buffer != null) { buffer.dispose(); }
-                buffer = new FrameBuffer(Pixmap.Format.RGBA8888, width, height, true);
+                if (buffer != null) { buffer.dispose(); buffer = null; }
+                if (sceneBuffer != null) { sceneBuffer.dispose(); sceneBuffer = null; }
+                buffer = GpuAtmosphere.buffer(width, height, true);
+                try { sceneBuffer = GpuHeatGlow.buffer(width, height, true); }
+                catch (RuntimeException failure) { buffer.dispose(); buffer = null; throw failure; }
                 image = new TextureRegion(buffer.getColorBufferTexture()); image.flip(false, true);
             }
+            if (display == null) { display = new GpuSceneDisplay(); }
             camera.viewportHeight = height / ppl * level; camera.viewportWidth = width / ppl * level;
             // The widget's centre: the plot's hex centre lies at cx, the plot's levels from its bottom margin.
             float offset = centreOffset + (width / 2f - cx) * level / ppl;
@@ -530,11 +566,17 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
                   (lo + (height / 2f - BOTTOM) / ppl) * level).mulAdd(right, offset);
             camera.position.set(centre).mulAdd(look, -10000);
             camera.up.set(Vector3.Z); camera.lookAt(centre); camera.near = 1; camera.far = 20000; camera.update();
-            buffer.begin();
+            float exposure = terrain.get().lightAdaptation();
+            float backdropScale = GpuSceneRadiance.SCALE / exposure;
+            sceneBuffer.begin();
             renders++;
             try {
-                ScreenUtils.clear(BACKDROP.r, BACKDROP.g, BACKDROP.b, 1, true);
+                Gdx.gl.glDepthMask(true);
+                ScreenUtils.clear(GpuColor.linear(BACKDROP.r) * backdropScale,
+                      GpuColor.linear(BACKDROP.g) * backdropScale,
+                      GpuColor.linear(BACKDROP.b) * backdropScale, 1, true);
                 terrain.get().renderEditorSection(camera, shown(), reveal ? snapshot.object() : "");
+                display.render(sceneBuffer, buffer, exposure);
             } finally { buffer.end(); }
             profile = reveal ? List.of() : cut(false, width, height);
             solid = reveal ? List.of() : cut(true, width, height);
@@ -647,5 +689,10 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
     }
 
     @Override public float getPrefHeight() { return 196; }
-    @Override public void dispose() { if (buffer != null) { buffer.dispose(); buffer = null; } }
+    @Override public void dispose() {
+        if (buffer != null) { buffer.dispose(); buffer = null; }
+        if (sceneBuffer != null) { sceneBuffer.dispose(); sceneBuffer = null; }
+        if (display != null) { display.dispose(); display = null; }
+        image = null;
+    }
 }

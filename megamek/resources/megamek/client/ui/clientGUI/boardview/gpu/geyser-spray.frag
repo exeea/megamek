@@ -4,6 +4,7 @@ layout(location = 0) out vec4 fragColor;
 in vec2 v_uv;
 in vec2 v_effect;
 uniform vec3 u_light; // The terrain's linear daylight, shaded before the shared atmosphere composite.
+// This spray palette already represents linear scattering, like the incident light.
 
 float hash(vec2 p) { return fract(sin(dot(mod(p, 40.0), vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
@@ -48,5 +49,5 @@ void main() {
     }
     alpha *= v_effect.y;
     if (alpha < .002) discard;
-    fragColor = vec4(pow(max(color * u_light, vec3(0.0)), vec3(1.0 / 2.2)), alpha);
+    fragColor = vec4(max(color * u_light, vec3(0.0)), alpha);
 }

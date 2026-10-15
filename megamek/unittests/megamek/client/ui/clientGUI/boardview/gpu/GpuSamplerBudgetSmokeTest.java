@@ -59,12 +59,23 @@ class GpuSamplerBudgetSmokeTest {
     void everyBattleViewProgramFitsMacTextureUnits() throws Exception {
         var over = new TreeMap<String, Integer>();
         var used = new TreeMap<String, Integer>();
+        BoardScene ice = GpuIceSmokeTest.scene(2);
         var failure = new AtomicReference<Throwable>();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
                 try {
+                    System.out.println("Sampler audit GL_RENDERER=" + Gdx.gl.glGetString(GL20.GL_RENDERER)
+                          + "; GL_VERSION=" + Gdx.gl.glGetString(GL20.GL_VERSION));
+                    var limit = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder()).asIntBuffer();
+                    for (int name : new int[] {GL20.GL_MAX_TEXTURE_IMAGE_UNITS,
+                          GL20.GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, GL20.GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS}) {
+                        limit.clear();
+                        Gdx.gl.glGetIntegerv(name, limit);
+                        System.out.println("Texture limit 0x" + Integer.toHexString(name) + "=" + limit.get(0));
+                    }
                     for (Scene scene : SCENES) { review(scene, used, over); }
+                    reviewIce(ice, used, over);
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
@@ -78,6 +89,10 @@ class GpuSamplerBudgetSmokeTest {
               .forEach(program -> System.out.println(program.getValue() + " " + program.getKey()));
         assertTrue(used.keySet().stream().anyMatch(program -> program.contains("volcanicFlag")),
               "Reach the volcanic terrain programs: " + used.keySet());
+        for (String feature : List.of("iceFlag", "roadCoatFlag", "u_roughnessLayers", "u_magmaMaps")) {
+            assertTrue(used.keySet().stream().anyMatch(program -> program.contains(feature)),
+                  "Reach the material-array consumer: " + feature);
+        }
         assertTrue(over.isEmpty(), "Programs over macOS's " + MAC_TEXTURE_UNITS + " texture units: " + over);
     }
 
@@ -105,6 +120,25 @@ class GpuSamplerBudgetSmokeTest {
             }
         } catch (Throwable error) {
             throw new AssertionError(scene.toString(), error);
+        }
+    }
+
+    /** Reuse the actual land/black/lake ice specimen: the historical seven-board scan reached no iceFlag program. */
+    private static void reviewIce(BoardScene scene, Map<String, Integer> used, Map<String, Integer> over) throws Exception {
+        var terrain = new GpuTerrain();
+        var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, .5f, 0,
+              BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+        try {
+            var camera = new BoardCamera();
+            camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            camera.fit(scene);
+            frame.prepare(terrain, camera, scene);
+            terrain.update(scene);
+            frame.render(terrain, camera, scene);
+            scan(new Scene("GpuIceSmokeTest.scene(2)", Weather.CLEAR, Light.DAY, Fog.FOG_NONE), used, over);
+        } finally {
+            frame.dispose();
+            terrain.dispose();
         }
     }
 
@@ -137,6 +171,14 @@ class GpuSamplerBudgetSmokeTest {
             }
             String label = (program instanceof GpuShaderUniforms named ? named.name : "libGDX") + " " + flags(program)
                   + " " + names;
+            // A conservative source-design estimate, not a linked candidate measurement. Each mixed array adds
+            // one sampler; sculpt's environment layer moves to the already-existing standalone atlas owner.
+            int extra = 0;
+            for (String mixed : List.of("u_terrainLayers", "u_sculptMaps", "u_roadMaps", "u_magmaMaps")) {
+                if (names.contains(mixed)) { extra++; }
+            }
+            if (flags(program).contains("environmentArrayFlag")) { extra++; }
+            if (extra > 0) { System.out.println("Proposed split upper bound: " + units + " -> " + (units + extra) + " " + label); }
             used.merge(label, units, Math::max);
             if (units > MAC_TEXTURE_UNITS) { over.merge(label + " in " + scene, units, Math::max); }
         }

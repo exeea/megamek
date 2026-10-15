@@ -241,7 +241,7 @@ final class BoardRelief {
 
     /** Surface kinds written into the rendered vertex data. */
     enum Kind {
-        GROUND, SUBMERGED_CLIFF, PLANT, CLIFF, PIT_WALL, PIT, ROCK;
+        GROUND, SUBMERGED_CLIFF, PLANT, LEAF, CLIFF, PIT_WALL, PIT, ROCK;
 
         boolean cliff() { return this == CLIFF || this == PIT_WALL; }
     }
@@ -3093,6 +3093,8 @@ final class BoardRelief {
         if (pitBoundary && clearance(base.x, base.y) < radius
               || cosmetic && !visibleScatter(base, height) || obstructed(base, radius, height)) { return; }
         for (BoardShape.Polygon polygon : rock.polygons()) {
+            // Preserve authored tissue identity once per polygon; wood and unknown roles stay opaque.
+            Kind tissue = kind == Kind.PLANT && BoardScatter.leaf(polygon.material()) ? Kind.LEAF : kind;
             Vector3 n = polygon.normal();
             float nx = n.x / sx, ny = n.y / sy;
             Vector3 normal = new Vector3(c * nx - s * ny, s * nx + c * ny, n.z / sz).nor();
@@ -3104,7 +3106,7 @@ final class BoardRelief {
                 float occlusion = .45f + .55f * smooth(z / (height * .7f));
                 if (kind == Kind.PLANT) {
                     var color = polygon.color();
-                    shades.put(points[i], new Shade(normal, kind, occlusion, self.level(), color.r, color.g, color.b));
+                    shades.put(points[i], new Shade(normal, tissue, occlusion, self.level(), color.r, color.g, color.b));
                 } else {
                     shades.put(points[i], new Shade(normal, kind, occlusion, self.level(), z / m, (height - z) / m, tint));
                 }

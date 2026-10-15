@@ -677,7 +677,7 @@ class GpuBridgeSmokeTest {
             assertNotNull(shape, name + ": a flat or sloped truss has one installed generated shape");
             var steel = shape.facets().stream().filter(f -> f.part() == BoardBridge.Part.STEEL).toList();
             assertFalse(steel.isEmpty(), name + ": a truss draws its steel");
-            var expected = com.badlogic.gdx.graphics.Color.valueOf(at.getX() == 1 ? GREEN : "732417");
+            var expected = GpuColor.linear(com.badlogic.gdx.graphics.Color.valueOf(at.getX() == 1 ? GREEN : "732417"));
             for (var facet : steel) {
                 assertNotNull(facet.colour(), name + ": every steel facet carries its material colour");
                 assertTrue(Math.abs(facet.colour().r - expected.r) < .01f && Math.abs(facet.colour().g - expected.g) < .01f

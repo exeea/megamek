@@ -25,6 +25,89 @@ class GpuWaterWavesSmokeTest {
     private static final int FOAM_FRAMES = 1800;
 
     @Test
+    void halfPrecisionTransformMatchesIndependentDoublePrecisionDft() {
+        run(ocean -> {
+            double[] cosine = new double[TEXELS], sine = new double[TEXELS];
+            for (int p = 0; p < SIZE; p++) {
+                for (int k = 0; k < SIZE; k++) {
+                    double angle = 2 * Math.PI * p * k / SIZE;
+                    cosine[p * SIZE + k] = Math.cos(angle);
+                    sine[p * SIZE + k] = Math.sin(angle);
+                }
+            }
+            for (float gravity : new float[] { .0981f, 9.81f, 98.1f }) {
+                for (float strength : new float[] { 0, .5f, 1 }) {
+                    // Release prior wind transitions: each reference describes the spectrum actually being drawn.
+                    ocean.dispose();
+                    float time = 1.25f;
+                    ocean.update(time, new Vector3(.8f, .6f, strength), gravity);
+                    assertNotNull(ocean.spectrum());
+                    float[] spectrum = read(ocean.spectrum());
+                    for (int cascade = 0; cascade < GpuOcean.PATCHES.length; cascade++) {
+                        double[] expected = referenceHeight(spectrum, cascade, time, gravity, cosine, sine);
+                        float[] actual = read(ocean.waves(cascade));
+                        double error = 0, energy = 0;
+                        for (int p = 0; p < TEXELS; p++) {
+                            assertTrue(Float.isFinite(actual[p * 4 + 2]), "Half-float transform must remain finite");
+                            double delta = actual[p * 4 + 2] - expected[p];
+                            error += delta * delta;
+                            energy += expected[p] * expected[p];
+                        }
+                        double relative = Math.sqrt(error / Math.max(energy, 1e-20));
+                        System.out.printf(java.util.Locale.ROOT, "FFT gravity %.4f wind %.1f cascade %d relative RMS %.6f%n",
+                              gravity, strength, cascade, relative);
+                        assertTrue(relative < .01, "Wave-height RMS error must stay below 1%: " + relative);
+                    }
+                }
+            }
+        });
+    }
+
+    /** Direct separable DFT, without the GPU's butterflies or packed displacement arithmetic. */
+    private static double[] referenceHeight(float[] spectrum, int cascade, float time, float gravity,
+          double[] cosine, double[] sine) {
+        double[] real = new double[TEXELS], imaginary = new double[TEXELS];
+        int width = SIZE * GpuOcean.PATCHES.length;
+        // Use the public simulation's quantized frequency, with all integration and summation in doubles.
+        float loop = (float) (Math.PI * 2 / 1000);
+        for (int y = 0; y < SIZE; y++) {
+            for (int x = 0; x < SIZE; x++) {
+                int p = y * SIZE + x, source = (y * width + cascade * SIZE + x) * 4;
+                double k = Math.hypot(x - SIZE / 2, y - SIZE / 2) * Math.PI * 2 / GpuOcean.PATCHES[cascade];
+                double phase = Math.floor(Math.sqrt(gravity * Math.max(k, 1e-6)) / loop) * loop * time;
+                double c = Math.cos(phase), s = Math.sin(phase);
+                real[p] = (spectrum[source] + spectrum[source + 2]) * c
+                      + (spectrum[source + 1] - spectrum[source + 3]) * s;
+                imaginary[p] = (spectrum[source + 1] + spectrum[source + 3]) * c
+                      + (spectrum[source + 2] - spectrum[source]) * s;
+            }
+        }
+        double[] rowReal = new double[TEXELS], rowImaginary = new double[TEXELS];
+        for (int y = 0; y < SIZE; y++) {
+            for (int x = 0; x < SIZE; x++) {
+                int p = y * SIZE + x;
+                for (int k = 0; k < SIZE; k++) {
+                    int source = y * SIZE + k, wave = x * SIZE + k;
+                    rowReal[p] += real[source] * cosine[wave] - imaginary[source] * sine[wave];
+                    rowImaginary[p] += real[source] * sine[wave] + imaginary[source] * cosine[wave];
+                }
+            }
+        }
+        double[] result = new double[TEXELS];
+        for (int y = 0; y < SIZE; y++) {
+            for (int x = 0; x < SIZE; x++) {
+                int p = y * SIZE + x;
+                for (int k = 0; k < SIZE; k++) {
+                    int source = k * SIZE + x, wave = y * SIZE + k;
+                    result[p] += rowReal[source] * cosine[wave] - rowImaginary[source] * sine[wave];
+                }
+                if (((x + y) & 1) != 0) { result[p] = -result[p]; }
+            }
+        }
+        return result;
+    }
+
+    @Test
     void cascadesDescribeOneMovingSeaWithSharpCrestsAndFoamOnThem() {
         run(ocean -> {
             float time = run(ocean, 0, new Vector3(.8f, .6f, 0), 1);

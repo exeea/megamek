@@ -239,23 +239,24 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
     /** Render materials. A tile's surface supplies its geology; groundCover can put shared SAND over any theme. */
     enum Surface {
-        GRASS("terrain/rock"),
-        DIRT("terrain/dirt"),
-        SAND("terrain/sand"),
-        ROCK("terrain/rock"),
-        CONCRETE("terrain/concrete"),
-        SNOW("terrain/snow"),
-        LUNAR("terrain/lunar"),
-        FUNGUS("sculpt/fungus-cliff"),
-        DESERT("terrain/sand"),
-        MARS("sculpt/mars-bedrock"),
-        VOLCANO("sculpt/volcano-basalt"),
-        TROPICAL("terrain/rock");
+        GRASS("terrain/classic/rock"),
+        DIRT("terrain/classic/dirt"),
+        SAND("terrain/classic/sand"),
+        ROCK("terrain/classic/rock"),
+        CONCRETE("terrain/classic/concrete"),
+        SNOW("terrain/classic/snow"),
+        LUNAR("terrain/classic/lunar"),
+        FUNGUS("terrain/classic/fungus"),
+        DESERT("terrain/classic/sand"),
+        MARS("terrain/classic/mars"),
+        VOLCANO("terrain/classic/volcano"),
+        TROPICAL("terrain/classic/rock");
 
-        final String wall;
+        /** The Classic column wall artwork; Enhanced uses the physical family materials. */
+        final String classicWall;
 
-        Surface(String wall) {
-            this.wall = wall;
+        Surface(String classicWall) {
+            this.classicWall = classicWall;
         }
     }
 
@@ -816,7 +817,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               && tactical.equals(other.tactical) && plannedPath.equals(other.plannedPath)
               && firingLines.equals(other.firingLines) && rangeBorders.equals(other.rangeBorders)
               && rangeLabels.equals(other.rangeLabels) && fieldOfView.equals(other.fieldOfView)
-              && electronicWarfare.equals(other.electronicWarfare) && starShells.equals(other.starShells);
+              && electronicWarfare.equals(other.electronicWarfare) && designations.equals(other.designations)
+              && starShells.equals(other.starShells);
     }
 
     /**

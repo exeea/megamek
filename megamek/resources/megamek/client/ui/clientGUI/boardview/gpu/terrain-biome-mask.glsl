@@ -1,15 +1,22 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // After terrain-hexes.glsl, which supplies the per-hex texture, hash, noise and hex distance.
-float biomeWetness(vec2 p) {
-    vec2 q = p + 1.3 * (vec2(biomeNoise(p / 4.0 + vec2(31.0, 0.0)),
-          biomeNoise(p / 4.0 + vec2(0.0, -23.0))) - .5);
-    return .55 * biomeNoise(q / 5.7) + .30 * biomeNoise(q / 2.0 + vec2(19.0, -7.0))
-          + .15 * biomeNoise(q / .65);
+// Same five noise evaluations as BoardBiome.wetness, with the domain warp's Jacobian carried through each octave.
+// This can stay inside a spatial wetland branch; no quad derivatives or extra neighbouring field evaluations.
+vec3 biomeWetnessGradient(vec2 p) {
+    vec3 warpX = biomeNoiseGradient(p / 4.0 + vec2(31.0, 0.0));
+    vec3 warpY = biomeNoiseGradient(p / 4.0 + vec2(0.0, -23.0));
+    vec2 q = p + 1.3 * (vec2(warpX.x, warpY.x) - .5);
+    vec3 a = biomeNoiseGradient(q / 5.7), b = biomeNoiseGradient(q / 2.0 + vec2(19.0, -7.0));
+    vec3 c = biomeNoiseGradient(q / .65);
+    vec2 gradient = .55 / 5.7 * a.yz + .30 / 2.0 * b.yz + .15 / .65 * c.yz;
+    gradient = gradient.x * (vec2(1.0, 0.0) + 1.3 / 4.0 * warpX.yz)
+          + gradient.y * (vec2(0.0, 1.0) + 1.3 / 4.0 * warpY.yz);
+    return vec3(.55 * a.x + .30 * b.x + .15 * c.x, gradient);
 }
 
 // One bounded stencil serves both the shoreline treatment and the connected liquid's optical mixture.
 // A negative waterLevel disables the liquid work for dry terrain. No additional textures or per-hex draws.
-void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, out vec4 fringe, out vec4 liquids,
+void terrainCoverage(vec3 world, float edge, float waterLevel, float fineMix, out vec4 cover, out vec4 fringe, out vec4 liquids,
       out float tundra) {
     cover = vec4(0.0); fringe = vec4(0.0); liquids = vec4(0.0); tundra = 0.0;
     if (u_biomeBoard.x < 1.0) return;
@@ -23,7 +30,22 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
     int home = int(floor(rows));
     ivec2 hex = clamp(ivec2(column, home), ivec2(0), ivec2(u_biomeBoard) - 1);
     int quarter = (fract(world.x / (width * .75)) < .5 ? 4 : 5) + (fract(rows) < .5 ? 0 : 2);
-    if (hex == ivec2(column, home) && ((int(texelFetch(u_biomeHexes, hex, 0).r * 255.0 + .5) >> quarter) & 1) == 0) return;
+    if (hex == ivec2(column, home)) {
+        vec4 tile = texelFetch(u_biomeHexes, hex, 0);
+        int flags = int(tile.r * 255.0 + .5);
+        if (((flags >> quarter) & 1) == 0) return;
+        // The CPU proves all stencil candidates are dry and share this biome/elevation. On their supported
+        // plateau each numerator equals its denominator, including the narrow field and broad bank masks.
+        float z = (tile.a * 255.0 - 64.0) * u_levelHeight / u_metre;
+        if (waterLevel <= -1000.0 && edge == 14.0 && (int(tile.g * 255.0 + .5) & 16) != 0
+              && abs(world.z - z) <= .15) {
+            int kind = flags & 15;
+            cover = vec4(kind == 1, kind == 2, kind == 3, kind == 4);
+            fringe = cover;
+            tundra = float(kind == 5);
+            return;
+        }
+    }
     bool aqueous = waterLevel > -1000.0;
     vec2 mixed = world.xy;
     if (aqueous) {
@@ -31,7 +53,6 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
         mixed += (vec2(biomeNoise(mixed / 2.7 + 31.0), biomeNoise(mixed / 2.1 - 9.0)) - .5) * 2.0;
     }
     float filament = aqueous ? biomeNoise(mixed / 1.3) * 7.0 : 0.0;
-    float fineMix = 1.0 - smoothstep(.08, .4, length(fwidth(world.xy)));
     // Soil/peat reaches onto the adjoining slope; crops and standing pools keep the narrower height support.
     // Both masks share this stencil, with no extra texture fetches.
     float edgeNoise = biomeNoise(world.xy / 3.2 + 41.0);
@@ -85,7 +106,7 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
                 float wetWeight = dot(wet, vec3(1.0));
                 wetAbove += wetWeight * step(world.z + .15, z);
                 wetBelow += wetWeight * step(z + .15, world.z);
-                int liquid = int(tile.g * 255.0 + .5);
+                int liquid = int(tile.g * 255.0 + .5) & 15;
                 liquids += vec4(liquid == 1, liquid == 2, liquid == 3, liquid == 4) * lw
                       * (1.0 - smoothstep(.05, .25, abs(waterLevel - level)));
             }
@@ -101,6 +122,18 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
     float connected = smoothstep(0.0, .18, min(wetAbove, wetBelow) / max(total, .0001));
     fringe.yzw = max(fringe.yzw, wetTiles / max(total, .0001) * connected);
     liquids /= max(dot(liquids, vec4(1.0)), .0001);
+}
+
+// Callers without an earlier spatial branch may capture their footprint here, before the per-cell shortcuts.
+void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, out vec4 fringe, out vec4 liquids,
+      out float tundra) {
+    float fineMix = 1.0 - smoothstep(.08, .4, length(fwidth(world.xy)));
+    terrainCoverage(world, edge, waterLevel, fineMix, cover, fringe, liquids, tundra);
+}
+
+void biomeCoverage(vec3 world, float edge, float footprint, out vec4 cover, out vec4 fringe, out float tundra) {
+    vec4 liquids;
+    terrainCoverage(world, edge, -10000.0, 1.0 - smoothstep(.08, .4, footprint), cover, fringe, liquids, tundra);
 }
 
 void biomeCoverage(vec3 world, float edge, out vec4 cover, out vec4 fringe, out float tundra) {

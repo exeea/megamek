@@ -30,10 +30,15 @@ final class GpuHeatGlow implements Disposable {
         }
     }
 
-    /** Shared floating-point target for the scene and heat halo; preserves values above one in either encoding. */
+    /** Shared linear half-float target for scene radiance, fog, particles and the heat halo. */
     static FrameBuffer buffer(int width, int height) {
+        return buffer(width, height, false);
+    }
+
+    static FrameBuffer buffer(int width, int height, boolean depth) {
         var builder = new GLFrameBuffer.FrameBufferBuilder(width, height);
         builder.addFloatAttachment(GL30.GL_RGBA16F, GL20.GL_RGBA, GL20.GL_FLOAT, true);
+        if (depth) { builder.addDepthRenderBuffer(GL30.GL_DEPTH_COMPONENT24); }
         FrameBuffer result = builder.build();
         Texture texture = result.getColorBufferTexture();
         texture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);

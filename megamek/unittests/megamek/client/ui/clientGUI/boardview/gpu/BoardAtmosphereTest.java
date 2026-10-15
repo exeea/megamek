@@ -42,14 +42,67 @@ class BoardAtmosphereTest {
     }
 
     @Test
-    void clearNoonIsTheLightUnitWithAWarmSunAndANeutralFill() {
-        // Every lit shader and the composite rely on this unit: clear noon light gives white level ground luminance 1.
+    void clearNoonIsTheLightUnitWithAWarmSunAndABlueSkyFill() {
+        // Clear noon retains unit luminance. Its mildly warm combined white point is a declared lighting
+        // choice; the illustrative sky must not wash every material with its much stronger blue chroma.
         var noon = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(12, 0, 0, 2, 0, 0));
+        for (float hour : new float[] { 6, 12, 18 }) {
+            var light = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour, 0, 0, 2, 0, 0));
+            String[] names = { "direct", "ambient", "sky", "horizon", "environmentSky", "environmentHorizon" };
+            Color[] colors = { light.direct(), light.ambient(), light.sky(), light.horizon(),
+                  light.environmentSky(), light.environmentHorizon() };
+            for (int index = 0; index < names.length; index++) {
+                Color color = colors[index];
+                System.out.printf(java.util.Locale.ROOT,
+                      "LIGHTING_PROBE hour=%.2f source=%s rgb=%.9f,%.9f,%.9f gain=%.9f%n",
+                      hour, names[index], color.r, color.g, color.b, light.adaptation());
+            }
+        }
         assertEquals(1, luminance(noon.groundLight()), 0.005f);
-        float sun = blueToRed(noon.direct());
-        assertTrue(sun > 0.7f && sun < 0.95f, "The noon sun is warm white, not orange: B/R " + sun);
+        assertEquals(1.0186106f, noon.groundLight().r, .00001f);
+        assertEquals(.9986379f, noon.groundLight().g, .00001f);
+        assertEquals(.9586923f, noon.groundLight().b, .00001f);
+        // This is a perceptual color check: a linear-channel ratio is not a display saturation threshold.
+        float sun = GpuColor.display(noon.direct().b) / GpuColor.display(noon.direct().r);
+        assertTrue(sun > .8f && sun < .95f, "The noon sun remains warm white in display color: B/R " + sun);
+        assertTrue(noon.direct().r > noon.direct().g && noon.direct().g > noon.direct().b,
+              "The directional source stays warm while the sky supplies the complementary blue fill");
         float fill = blueToRed(noon.ambient());
-        assertTrue(fill >= 1 && fill < 1.2f, "The sky fill is neutral, a little cooler than the sun: B/R " + fill);
+        assertTrue(fill > 1 && fill < 2, "Diffuse sky fill is blue without inheriting the backdrop's extreme cast: B/R " + fill);
+    }
+
+    @Test
+    void daylightWhitePointIsSharedByIncidentSourcesAndLeavesTheNightPaletteUntouched() throws ReflectiveOperationException {
+        for (float hour : new float[] { 0, 6, 9, 12, 18, 21 }) {
+            for (float clouds : new float[] { 0, .5f, 1 }) {
+                var settings = new BoardAtmosphere.Settings(hour, clouds, 0, 2, 0, 0);
+                var before = uncalibrated(settings);
+                var after = BoardAtmosphere.lighting(settings);
+                if (before.daylight() == 0) {
+                    assertSameLighting(before, after, "The established night palette stays unchanged");
+                }
+                Color[] original = { before.direct(), before.ambient(), before.environmentSky(), before.environmentHorizon() };
+                Color[] calibrated = { after.direct(), after.ambient(), after.environmentSky(), after.environmentHorizon() };
+                for (int source = 1; source < original.length; source++) {
+                    assertEquals(calibrated[0].r / original[0].r, calibrated[source].r / original[source].r, .00001f,
+                          "Direct, diffuse and reflected sky share one red calibration at " + hour);
+                    assertEquals(calibrated[0].g / original[0].g, calibrated[source].g / original[source].g, .00001f);
+                    assertEquals(calibrated[0].b / original[0].b, calibrated[source].b / original[source].b, .00001f);
+                }
+                // A white-point correction must not be repurposed as an exposure change away from noon.
+                assertEquals(luminance(before.groundLight()), luminance(after.groundLight()),
+                      luminance(before.groundLight()) * .015f, "Off-noon luminance remains close to the canonical source");
+            }
+        }
+    }
+
+    private static BoardAtmosphere.Lighting uncalibrated(BoardAtmosphere.Settings settings)
+          throws ReflectiveOperationException {
+        var lighting = BoardAtmosphere.class.getDeclaredMethod("lighting", BoardAtmosphere.Settings.class,
+              float.class, float.class, boolean.class);
+        lighting.setAccessible(true);
+        return (BoardAtmosphere.Lighting) lighting.invoke(null, settings,
+              BoardAtmosphere.MOONLIGHT_SHADOW_CONTRAST, BoardAtmosphere.DEFAULT_TAINT_STRENGTH, false);
     }
 
     @Test
@@ -69,20 +122,88 @@ class BoardAtmosphereTest {
     }
 
     @Test
-    void theFullMoonLightsTwoStopsBelowNoonOnlyALittleBlueAndMoonlessNightsDarker() {
+    void fullMoonIsSlightlyBrighterAndBlueWhileMoonlessRemainsReadableBelowIt() {
         var noon = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(12, 0, 0, 2, 0, 0));
         var moon = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(0, 0, 0, 2, 0, 0));
-        float stops = log2(luminance(moon.groundLight()) / luminance(noon.groundLight()));
-        assertTrue(stops > -2.1f && stops < -1.9f, "The full moon lights level ground two stops below noon: " + stops);
+        assertEquals(.04819409f, luminance(moon.groundLight()), .000001f,
+              "The source is distinct from its adapted display level");
+        assertEquals(6.168843f, moon.adaptation(), .00001f);
+        float stops = log2(adaptedGround(moon) / adaptedGround(noon));
+        assertEquals(-1.75f, stops, .00001f, "Full moon is one quarter-stop brighter than the former two-stop target");
         float blue = blueToRed(moon.direct());
-        assertTrue(blue > 1 && blue <= 1.3f, "Moonlight is cool, but only a little blue: B/R " + blue);
+        assertTrue(blue > 1.8f && blue < 1.9f, "Full moon has a deliberate blue directional source: B/R " + blue);
+        assertTrue(blueToRed(moon.groundLight()) > 1.62f && blueToRed(moon.groundLight()) < 1.9f,
+              "Combined moon and sky are bluer than the former full-moon B/R of 1.62");
         // The composite applies the scenario's exposure compensation on top of the light.
         var conditions = new PlanetaryConditions();
         conditions.setLight(Light.FULL_MOON);
         float fullMoon = displayedGround(BoardAtmosphere.fromScenario(conditions, false, 0.5));
         conditions.setLight(Light.MOONLESS);
         float moonless = displayedGround(BoardAtmosphere.fromScenario(conditions, false, 0.5));
-        assertTrue(log2(moonless / fullMoon) <= -1, "A moonless night is at least a stop darker than the full moon");
+        assertTrue(fullMoon > .25f && fullMoon < .32f, "Full moon is slightly brighter than its former .25 output");
+        assertTrue(moonless > .23f && moonless < .25f,
+              "Moonless is readable just below the former full moon, rather than the former .049 moonless level");
+        assertTrue(moonless < fullMoon);
+        conditions.setLight(Light.PITCH_BLACK);
+        float pitch = displayedGround(BoardAtmosphere.fromScenario(conditions, false, 0.5));
+        assertTrue(pitch > .04944679f && pitch < moonless, "Pitch black is above former moonless and below new moonless");
+    }
+
+    @Test
+    void nightPresetsKeepASharedDimSkyWithoutInventingDirectionalLight() {
+        var conditions = new PlanetaryConditions();
+        for (Atmosphere pressure : new Atmosphere[] { Atmosphere.STANDARD, Atmosphere.THIN, Atmosphere.VACUUM }) {
+            conditions.setAtmosphere(pressure);
+            for (double time : new double[] { 0, .25, .5, .75, .999 }) {
+                conditions.setLight(Light.FULL_MOON);
+                var fullSettings = BoardAtmosphere.fromScenario(conditions, false, time);
+                var full = BoardAtmosphere.lighting(fullSettings);
+                conditions.setLight(Light.MOONLESS);
+                var moonlessSettings = BoardAtmosphere.fromScenario(conditions, false, time);
+                var moonless = BoardAtmosphere.lighting(moonlessSettings);
+                conditions.setLight(Light.PITCH_BLACK);
+                var blackSettings = BoardAtmosphere.fromScenario(conditions, false, time);
+                var black = BoardAtmosphere.lighting(blackSettings);
+                assertTrue(full.hasDirectLight());
+                assertFalse(moonless.hasDirectLight());
+                assertFalse(black.hasDirectLight());
+                assertSameLighting(moonless, black, "Pitch black changes presentation, never the source");
+                float fullGain = full.adaptation() * (float) Math.pow(2, fullSettings.exposure());
+                float moonlessGain = moonless.adaptation() * (float) Math.pow(2, moonlessSettings.exposure());
+                float blackGain = black.adaptation() * (float) Math.pow(2, blackSettings.exposure());
+                assertTrue(displayedGround(fullSettings) > displayedGround(moonlessSettings));
+                assertTrue(luminance(full.sky()) * fullGain > luminance(moonless.sky()) * moonlessGain,
+                      "Removing the moon must not brighten the default visible sky at " + fullSettings.hour());
+                assertTrue(luminance(full.horizon()) * fullGain > luminance(moonless.horizon()) * moonlessGain);
+                assertEquals(moonlessGain * .5f, blackGain, .000001f,
+                      "Pitch black retains a distinct one-stop presentation below moonless");
+                if (pressure == Atmosphere.STANDARD && time == .5) {
+                    assertEquals(.29730178, displayedGround(fullSettings), .00001);
+                    assertEquals(.06370752, luminance(full.ambient()) * fullGain, .00001,
+                          "Readable full-moon shadow fill retains directional contrast");
+                    assertEquals(.24235836, displayedGround(moonlessSettings), .00001);
+                    assertEquals(.12117918, displayedGround(blackSettings), .00001);
+                }
+            }
+        }
+    }
+
+    @Test
+    void moonlessFillRemainsContinuousThroughTwilight() {
+        float previous = 0;
+        for (int minute = 0; minute <= 24 * 60; minute++) {
+            var settings = new BoardAtmosphere.Settings(minute / 60f, 0, 0, 2, 0, 0,
+                  BoardAtmosphere.Effects.NONE, Atmosphere.STANDARD, 25, false);
+            var light = BoardAtmosphere.lighting(settings);
+            float fill = luminance(light.ambient());
+            assertTrue(fill > 0 && Float.isFinite(fill));
+            if (minute > 0) {
+                assertTrue(Math.abs(log2(fill / previous)) < .12f,
+                      "No ambient step on the one-minute tuning grid at " + settings.hour());
+            }
+            if (!light.sunlight()) { assertFalse(light.hasDirectLight()); }
+            previous = fill;
+        }
     }
 
     @Test
@@ -100,18 +221,70 @@ class BoardAtmosphereTest {
     /** A vertical wall facing the light's direction: half the sky and the whole beam. */
     private static float wallTurnedToTheLight(BoardAtmosphere.Lighting light) {
         float across = (float) Math.hypot(light.direction().x, light.direction().y);
-        return 0.5f * luminance(light.ambient()) + across * luminance(light.direct());
+        return (0.5f * luminance(light.ambient()) + across * luminance(light.direct())) * light.adaptation();
     }
 
     @Test
-    void airlessWorldsLightTheGroundLikeStandardAirAtMidday() {
+    void airlessWorldsKeepSunlightButHaveNoAtmosphericSkyFill() {
         var standard = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0, 2, 0, 0));
         for (Atmosphere pressure : Atmosphere.values()) {
             var light = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0, 2, 0, 0,
                   BoardAtmosphere.Effects.NONE, pressure));
             assertSameColor(standard.direct(), light.direct(), "Sunlight at 13:00, " + pressure.name());
-            assertSameColor(standard.ambient(), light.ambient(), "Sky fill at 13:00, " + pressure.name());
+            if (pressure.isVacuum()) {
+                assertTrue(luminance(light.ambient()) < .001f, "A black airless sky cannot provide atmospheric fill");
+            } else {
+                assertSameColor(standard.ambient(), light.ambient(), "Sky fill at 13:00, " + pressure.name());
+            }
         }
+    }
+
+    @Test
+    void diffuseSkyMatchesTheCosineIntegralOfItsLightingEnvironment() {
+        // Numerical hemisphere quadrature independent of the analytic .2/.8 coefficients used in production.
+        for (float hour : new float[] { 0, 6, 9, 12, 18, 21 }) {
+            for (float clouds : new float[] { 0, .5f, 1 }) {
+                var light = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour, clouds, 0, 2, 0, 0));
+                float[] sum = new float[3];
+                for (int step = 0; step < 4096; step++) {
+                    float z = (step + .5f) / 4096;
+                    // Color.lerp clamps to one; radiance can exceed one, so integrate its channels directly.
+                    float blend = (float) Math.sqrt(z);
+                    Color sky = light.environmentSky(), horizon = light.environmentHorizon();
+                    sum[0] += (horizon.r + (sky.r - horizon.r) * blend) * 2 * z / 4096;
+                    sum[1] += (horizon.g + (sky.g - horizon.g) * blend) * 2 * z / 4096;
+                    sum[2] += (horizon.b + (sky.b - horizon.b) * blend) * 2 * z / 4096;
+                }
+                assertEquals(sum[0], light.ambient().r, 0.000002f);
+                assertEquals(sum[1], light.ambient().g, 0.000002f);
+                assertEquals(sum[2], light.ambient().b, 0.000002f);
+            }
+        }
+    }
+
+    @Test
+    void previewTuningAndTacticalKeepTheBoundedLightingEnvironment() {
+        for (float hour : new float[] { 0, 6, 12, 18 }) {
+            var original = BoardAtmosphere.lighting(at(hour));
+            var tuned = original.tuned(.5f, BoardAtmosphere.DEFAULT_AMBIENT_SHARE, .4f, null);
+            assertSameColor(original.sky(), tuned.sky(), "Lighting contribution does not recolor the visible sky");
+            assertSameColor(original.horizon(), tuned.horizon(), "Lighting contribution does not recolor the horizon");
+            assertSameColor(original.direct(), tuned.direct(), "Sky contribution leaves the directional source alone");
+            Color[] before = { original.ambient(), original.environmentSky(), original.environmentHorizon() };
+            Color[] after = { tuned.ambient(), tuned.environmentSky(), tuned.environmentHorizon() };
+            for (int index = 0; index < before.length; index++) {
+                assertEquals(before[index].r * .4f, after[index].r, .000001f);
+                assertEquals(before[index].g * .4f, after[index].g, .000001f);
+                assertEquals(before[index].b * .4f, after[index].b, .000001f);
+            }
+            assertEquals(.4f, tuned.environmentGain());
+            assertEquals(.5f, tuned.shadowStrength());
+        }
+        var defaults = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
+        assertSameColor(defaults.environmentSky(), BoardAtmosphere.TACTICAL.environmentSky(),
+              "Tactical must not replace bounded incident radiance with the illustrative backdrop");
+        assertSameColor(defaults.environmentHorizon(), BoardAtmosphere.TACTICAL.environmentHorizon(),
+              "Tactical preserves the same environment endpoints as its source lighting");
     }
 
     @Test
@@ -158,12 +331,36 @@ class BoardAtmosphereTest {
                               "A steeper incidence raises direct light, unclipped");
                     }
                     assertSameColor(world.ambient(), fixed.ambient(), "The fixed light moves no fill");
+                    assertEquals(world.adaptation(), fixed.adaptation(), .00001f, "Camera pose does not change exposure");
                     camera.pan(120, -90);
                     camera.zoom(0.8f);
                     assertSameLighting(fixed, world.relativeTo(camera.camera), "Pan and zoom must not move the light");
                 }
             }
             assertEquals(originalDirection, world.direction(), "Camera presentation must not mutate the world lighting");
+        }
+    }
+
+    @Test
+    void cameraRelativeLightRemainsFiniteWhenFreeFlightLooksAboveTheHorizon() {
+        GdxNativesLoader.load();
+        for (float hour : new float[] { 0, 6, 12, 18 }) {
+            var world = BoardAtmosphere.lighting(at(hour));
+            var camera = new BoardCamera();
+            camera.camera.viewportWidth = 1280;
+            camera.camera.viewportHeight = 800;
+            camera.setFirstPerson(true);
+            for (int pitch = 0; pitch < 180; pitch++) {
+                camera.look(13, 1);
+                var light = world.relativeTo(camera.camera);
+                assertTrue(light.direction().z <= -.04999f);
+                assertEquals(1, light.direction().len(), .00001f);
+                assertTrue(Float.isFinite(light.direct().r) && light.direct().r >= 0);
+                assertTrue(Float.isFinite(light.direct().g) && light.direct().g >= 0);
+                assertTrue(Float.isFinite(light.direct().b) && light.direct().b >= 0);
+                assertSameColor(world.groundLight(), light.groundLight(), "Free flight preserves ground illumination");
+                assertEquals(world.adaptation(), light.adaptation(), .00001f);
+            }
         }
     }
 
@@ -225,30 +422,34 @@ class BoardAtmosphereTest {
     }
 
     @Test
-    void skyColorsChangeContinuouslyThroughDayTwilightAndNight() {
+    void displayedSkyColorsChangeContinuouslyThroughDayTwilightAndNight() {
         var previous = BoardAtmosphere.lighting(at(0));
         // Resolve the short source handover at ten-second intervals, as well as the broader sky palette.
         for (int step = 1; step <= 24 * 360; step++) {
             float hour = step / 360f;
             var next = BoardAtmosphere.lighting(at(hour));
-            assertTrue(colorDistance(previous.sky(), next.sky()) < 0.01f, "Sky discontinuity at " + hour);
-            assertTrue(colorDistance(previous.horizon(), next.horizon()) < 0.01f, "Horizon discontinuity at " + hour);
+            assertTrue(displayDistance(previous.sky(), previous.adaptation(), next.sky(), next.adaptation()) < 0.01f, "Sky discontinuity at " + hour);
+            assertTrue(displayDistance(previous.horizon(), previous.adaptation(), next.horizon(), next.adaptation()) < 0.01f, "Horizon discontinuity at " + hour);
             assertTrue(colorDistance(previous.ambient(), next.ambient()) < 0.01f, "Ambient discontinuity at " + hour);
             previous = next;
         }
     }
 
     @Test
-    void cloudCoverTintsTheSkyFromTheTopAtEveryTimeOfDay() {
+    void cloudCoverTintsTheSkyFromTheTopAtEveryTimeOfDay() throws ReflectiveOperationException {
         for (float hour : new float[] { 0, 5, 6, 6.75f, 12, 17.25f, 18, 19 }) {
             var clear = BoardAtmosphere.lighting(at(hour));
+            var clearEnergy = uncalibrated(at(hour));
             float lastChange = 0;
             for (float cover : new float[] { 0.25f, 0.6f, 1 }) {
-                var cloudy = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour, cover, 0, 2.5f, 0, 0));
+                var settings = new BoardAtmosphere.Settings(hour, cover, 0, 2.5f, 0, 0);
+                var cloudy = BoardAtmosphere.lighting(settings);
                 float overheadChange = colorDistance(clear.sky(), cloudy.sky());
                 assertTrue(overheadChange > lastChange, "Every increase in cover must affect the sky");
-                assertTrue(overheadChange > colorDistance(clear.horizon(), cloudy.horizon()),
-                      "The cloud veil fades toward the horizon at " + hour);
+                // Compare source energy before white-point calibration: its common RGB gains act on different
+                // cloud chromaticities, so their final luminances need not be identical.
+                assertEquals(luminance(clearEnergy.ambient()), luminance(uncalibrated(settings).ambient()), .000001f,
+                      "Cloud palette changes redistribute the same canonical source energy at " + hour);
                 lastChange = overheadChange;
             }
         }
@@ -262,6 +463,18 @@ class BoardAtmosphereTest {
         return Math.abs(first.r - second.r) + Math.abs(first.g - second.g) + Math.abs(first.b - second.b);
     }
 
+    private static float displayDistance(Color first, float firstGain, Color second, float secondGain) {
+        return Math.max(Math.abs(displayChannel(first.r * firstGain) - displayChannel(second.r * secondGain)),
+              Math.max(Math.abs(displayChannel(first.g * firstGain) - displayChannel(second.g * secondGain)),
+                    Math.abs(displayChannel(first.b * firstGain) - displayChannel(second.b * secondGain))));
+    }
+
+    private static float displayChannel(float radiance) {
+        // Compare visible continuity after the shared HDR shoulder; raw horizon radiance can exceed one.
+        return GpuColor.display(Math.min(radiance, .6f)
+              + .4f * (1 - (float) Math.exp(-Math.max(radiance - .6f, 0) / .4f)));
+    }
+
     @Test
     void sourceDirectionColorAndVisibilityAgreeThroughoutTheSunMoonHandover() {
         var previous = BoardAtmosphere.lighting(at(0));
@@ -273,14 +486,9 @@ class BoardAtmosphereTest {
                   settings.fog(), settings.groundLayerHeight(), settings.haze(), settings.exposure(), settings.effects(),
                   settings.pressure(), settings.temperature(), false));
             if (light.sunlight()) {
-                // A moon still up at dawn or dusk lights the ground as fill only, never from the sun's direction; the
-                // view's adaptation to that fill may only scale the sunlight.
+                // A moon still up at dawn or dusk adds fill only; late view adaptation cannot alter the sun source.
                 assertTrue(light.direction().epsilonEquals(moonless.direction(), 0.000001f));
-                if (light.hasDirectLight()) {
-                    float scale = light.direct().r / moonless.direct().r;
-                    assertEquals(scale, light.direct().g / moonless.direct().g, 0.0001f, "A moon tints sunlight");
-                    assertEquals(scale, light.direct().b / moonless.direct().b, 0.0001f, "A moon tints sunlight");
-                }
+                assertSameColor(light.direct(), moonless.direct(), "A moon does not alter canonical sunlight");
                 assertTrue(luminance(light.groundLight()) >= luminance(moonless.groundLight()), "A moon adds light");
             } else {
                 assertFalse(moonless.hasDirectLight(), "Afterglow must not invent sunlight or moonlight");
@@ -306,7 +514,7 @@ class BoardAtmosphereTest {
             var light = BoardAtmosphere.lighting(at(hour));
             assertTrue(Math.abs(shadowStrength(light) - shadowStrength(previous)) < 0.03f,
                   "Shadows strengthen and weaken gradually at " + hour);
-            assertTrue(Math.abs(log2(luminance(light.groundLight()) / luminance(previous.groundLight()))) < 0.05f,
+            assertTrue(Math.abs(log2(adaptedGround(light) / adaptedGround(previous))) < 0.05f,
                   "Level ground brightens and dims gradually at " + hour);
             if (light.sunlight() != previous.sunlight()) { flips.add(hour); }
             previous = light;
@@ -343,7 +551,7 @@ class BoardAtmosphereTest {
                   "Dawn and dusk must cast shadows in opposite directions");
         }
         float moonShade = shadowShare(BoardAtmosphere.lighting(at(0)));
-        assertTrue(moonShade > 0.05f && moonShade < 0.15f, "Full Moon shadows should be deep while keeping some fill");
+        assertEquals(3f / 14, moonShade, .00001f, "Full Moon keeps readable fill and a stronger directional beam");
     }
 
     @Test
@@ -352,7 +560,7 @@ class BoardAtmosphereTest {
             var settings = at(hour);
             var original = BoardAtmosphere.lighting(settings, 0);
             float previousShade = shadowShare(original);
-            for (float contrast : new float[] { 0.5f, BoardAtmosphere.MOONLIGHT_SHADOW_CONTRAST, 1 }) {
+            for (float contrast : new float[] { BoardAtmosphere.MOONLIGHT_SHADOW_CONTRAST, 0.5f, 1 }) {
                 var light = BoardAtmosphere.lighting(settings, contrast);
                 if (light.sunlight()) {
                     assertSameLighting(original, light, "Moon contrast must not change daylight or dawn/dusk");
@@ -362,15 +570,16 @@ class BoardAtmosphereTest {
                     previousShade = shadowShare(light);
                     assertTrue(light.direct().b > light.direct().r, "Moonlight retains its cool color");
                 }
-                float incidence = -light.direction().z;
-                assertEquals(original.ambient().r + incidence * original.direct().r,
-                      light.ambient().r + incidence * light.direct().r, 0.00001f);
-                assertEquals(original.ambient().g + incidence * original.direct().g,
-                      light.ambient().g + incidence * light.direct().g, 0.00001f);
-                assertEquals(original.ambient().b + incidence * original.direct().b,
-                      light.ambient().b + incidence * light.direct().b, 0.00001f);
-                assertEquals(original.sky(), light.sky());
-                assertEquals(original.horizon(), light.horizon());
+                assertEquals(luminance(original.groundLight()), luminance(light.groundLight()), 0.00001f,
+                      "Moving energy from sky to moon keeps lit-ground luminance");
+                if (luminance(light.ambient()) > 0) {
+                    assertEquals(blueToRed(original.sky()), blueToRed(light.sky()), 0.00001f,
+                          "The shared sky becomes dimmer without changing palette chromaticity");
+                    assertEquals(blueToRed(original.horizon()), blueToRed(light.horizon()), 0.00001f);
+                } else {
+                    assertEquals(0, luminance(light.sky()));
+                    assertEquals(0, luminance(light.horizon()));
+                }
                 for (float channel : new float[] { light.direct().r, light.direct().g, light.direct().b }) {
                     assertTrue(Float.isFinite(channel) && channel >= 0);
                 }
@@ -399,7 +608,7 @@ class BoardAtmosphereTest {
         // Cloud cover leaves this light alone (cloudOpenings...); GpuAtmosphereSmokeTest renders overcast twilight.
         for (int quarter = 0; quarter < 96; quarter++) {
             var light = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(quarter / 4f, 0, 0, 2, 0, 0));
-            float stops = log2(luminance(light.groundLight()));
+            float stops = log2(adaptedGround(light));
             assertTrue(stops >= -3, "No dark gap in the sun/moon handover at " + quarter / 4f + ": level ground "
                   + stops + " stops below noon");
         }
@@ -419,15 +628,18 @@ class BoardAtmosphereTest {
     }
 
     @Test
-    void cloudOpeningsRetainClearSkyIncidentLightWithoutGlobalDoubleAttenuation() {
+    void cloudOpeningsRetainClearSkyIncidentLightWithoutGlobalDoubleAttenuation() throws ReflectiveOperationException {
         for (int hour = 0; hour < 24; hour++) {
-            var clear = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour, 0, 0, 2.5f, 0, 0));
+            var settings = new BoardAtmosphere.Settings(hour, 0, 0, 2.5f, 0, 0);
+            var clear = BoardAtmosphere.lighting(settings);
+            var clearEnergy = uncalibrated(settings);
             for (float cover : new float[] { 0.25f, 0.6f, 1 }) {
-                var cloudy = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour, cover, 0, 2.5f, 0, 0));
+                var cloudySettings = new BoardAtmosphere.Settings(hour, cover, 0, 2.5f, 0, 0);
+                var cloudy = BoardAtmosphere.lighting(cloudySettings);
                 assertSameColor(clear.direct(), cloudy.direct(),
                       "The spatial cloud integral handles sun/moon attenuation");
-                assertSameColor(clear.ambient(), cloudy.ambient(),
-                      "Cloud shadows retain the established ambient floor");
+                assertEquals(luminance(clearEnergy.ambient()), luminance(uncalibrated(cloudySettings).ambient()),
+                      .000001f, "Clouds retain canonical source energy before the shared white-point calibration");
                 assertSameColor(clear.tint(), cloudy.tint(), "Cloud cover does not grade the board");
                 assertEquals(clear.saturation(), cloudy.saturation());
             }
@@ -486,7 +698,7 @@ class BoardAtmosphereTest {
             } else if (light.isDuskOrFullMoonOrMoonlessOrPitchBack()) {
                 assertEquals(0, daylight);
                 float expectedExposure = switch (light) {
-                    case MOONLESS -> -0.6f;
+                    case MOONLESS -> 0;
                     case PITCH_BLACK -> -1.0f;
                     default -> 0;
                 };
@@ -727,13 +939,123 @@ class BoardAtmosphereTest {
               "Thin atmospheres suppress fog and its cloud cover");
     }
 
+    @Test
+    void adaptationMetersTheFinalVacuumMixtureInsteadOfDiscardedAtmosphericFill() {
+        var day = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(12, 0, 0, 2, 0, 0));
+        var vacuumDay = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(12, 0, 0, 2, 0, 0,
+              BoardAtmosphere.Effects.NONE, Atmosphere.VACUUM));
+        assertSameColor(day.direct(), vacuumDay.direct(), "Pressure does not change canonical noon sunlight");
+        assertEquals(1, day.adaptation(), .000001f);
+        assertTrue(luminance(vacuumDay.ambient()) < .001f, "Metering adds no atmospheric light in vacuum");
+        assertTrue(vacuumDay.adaptation() > day.adaptation(), "The final airless mixture has less sky light");
+        assertEquals(Math.pow(luminance(vacuumDay.groundLight()), -.6), vacuumDay.adaptation(), .000001,
+              "Exposure is based on the final vacuum source, including its actual sky and white point");
+        assertTrue(adaptedGround(vacuumDay) < adaptedGround(day), "Partial adaptation retains the darker mixture");
+
+        var conditions = new PlanetaryConditions();
+        conditions.setAtmosphere(Atmosphere.VACUUM);
+        for (Light category : new Light[] { Light.FULL_MOON, Light.MOONLESS, Light.PITCH_BLACK }) {
+            conditions.setLight(category);
+            var settings = BoardAtmosphere.fromScenario(conditions, false, .5);
+            var lighting = BoardAtmosphere.lighting(settings);
+            assertEquals(category == Light.FULL_MOON, lighting.hasDirectLight());
+            assertTrue(lighting.adaptation() > 1 && lighting.adaptation() <= Math.pow(112, .6) + .0001);
+            if (category != Light.FULL_MOON) {
+                assertEquals(Math.pow(112, .6), lighting.adaptation(), .0001,
+                      "Almost-black vacuum is bounded by the established moonless exposure range");
+                assertTrue(displayedGround(settings) < .004, "The meter floor does not invent sky fill");
+            }
+        }
+    }
+
+    @Test
+    void zeroLightHasFiniteBoundedAdaptationWithoutChangingAnySourceChannel() {
+        // Keep the established 1/112-noon metering floor even when the physical night source is dimmer.
+        double maximum = Math.pow(112, .6);
+        for (float value : new float[] { 0, Float.MIN_NORMAL, .000001f, .005f }) {
+            Color source = new Color(value, value, value, .25f);
+            float gain = BoardAtmosphere.adaptation(source);
+            assertEquals(maximum, gain, .0001);
+            assertTrue(Float.isFinite(gain));
+            assertEquals(value, source.r);
+            assertEquals(value, source.g);
+            assertEquals(value, source.b);
+            assertEquals(.25f, source.a, "Adaptation never mutates coverage or stored source light");
+        }
+        assertEquals(Math.pow(.7, -.6), BoardAtmosphere.adaptation(new Color(.7f, .7f, .7f, 1)), .000001,
+              "A manual neutral environment is metered from its own ambient level, not default daylight");
+        assertEquals(1, BoardAtmosphere.adaptation(Color.WHITE), .000001);
+        // A bound on output error, not a nearest-rounding assumption: one adjacent RGBA16F subnormal step.
+        double maximumDisplayError = Math.scalb(1.0, -19) * maximum * 4 * 12.92 * 255;
+        assertTrue(maximumDisplayError < .5, "The adaptation cap plus maximum EV preserves dark half-float resolution");
+    }
+
+    @Test
+    void exposureCompensationChangesOnlyTheCompletedSceneNotItsSourcesOrAdaptation() {
+        for (Atmosphere pressure : new Atmosphere[] { Atmosphere.STANDARD, Atmosphere.VACUUM }) {
+            for (float hour : new float[] { 0, 6, 12, 18 }) {
+                var referenceSettings = new BoardAtmosphere.Settings(hour, .7f, 0, 2, 0, 0,
+                      BoardAtmosphere.Effects.NONE, pressure);
+                var reference = BoardAtmosphere.lighting(referenceSettings);
+                for (float ev : new float[] { -2, -.6f, 1, 2 }) {
+                    var settings = new BoardAtmosphere.Settings(hour, .7f, 0, 2, 0, ev,
+                          BoardAtmosphere.Effects.NONE, pressure);
+                    var lighting = BoardAtmosphere.lighting(settings);
+                    assertSameLighting(reference, lighting, "EV must not alter a source or its metering");
+                    assertEquals(reference.adaptation(), lighting.adaptation());
+                    assertEquals(Math.pow(2, ev), displayedGround(settings) / displayedGround(referenceSettings), .000001);
+                }
+            }
+        }
+        var defaultLight = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
+        assertSameColor(defaultLight.groundLight(), BoardAtmosphere.TACTICAL.groundLight(),
+              "The tactical direction preserves its source illumination");
+        assertEquals(defaultLight.adaptation(), BoardAtmosphere.TACTICAL.adaptation(), .000001f);
+    }
+
+    @Test
+    void finalSourceAdaptationRemainsBoundedAndContinuousAcrossAirlessSunMoonHandover() {
+        double maximum = Math.pow(112, .6);
+        for (boolean moon : new boolean[] { false, true }) {
+            for (int minute = 0; minute <= 24 * 60; minute++) {
+                var settings = new BoardAtmosphere.Settings(minute / 60f, 0, 0, 2, 0, 0,
+                      BoardAtmosphere.Effects.NONE, Atmosphere.VACUUM, 25, moon);
+                var light = BoardAtmosphere.lighting(settings);
+                float gain = light.adaptation();
+                assertTrue(Float.isFinite(gain) && gain > 0 && gain <= maximum + .0001);
+            }
+            // Both source directions flip at altitude -.09. Test convergence around that boundary,
+            // rather than requiring a slow visible fade when the last real light disappears in vacuum.
+            float offset = (float) (Math.asin(.09) * 12 / Math.PI);
+            for (float handover : new float[] { 6 - offset, 18 + offset }) {
+                float wide = vacuumGainDifference(handover, .001f, moon);
+                float narrow = vacuumGainDifference(handover, .0001f, moon);
+                assertTrue(narrow <= wide * .2f + .00001f,
+                      "Exposure converges across the source handover rather than jumping between directions");
+            }
+        }
+    }
+
+    private static float vacuumGainDifference(float hour, float halfWidth, boolean moon) {
+        var before = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour - halfWidth, 0, 0, 2, 0, 0,
+              BoardAtmosphere.Effects.NONE, Atmosphere.VACUUM, 25, moon));
+        var after = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour + halfWidth, 0, 0, 2, 0, 0,
+              BoardAtmosphere.Effects.NONE, Atmosphere.VACUUM, 25, moon));
+        return Math.abs(after.adaptation() - before.adaptation());
+    }
+
+
     private static BoardAtmosphere.Settings at(float hour) {
         return new BoardAtmosphere.Settings(hour, 0.15f, 0.08f, 2.5f, 0.2f, 0);
     }
 
-    /** Level-ground luminance on screen: the light, times the scenario's exposure compensation in the composite. */
+    private static float adaptedGround(BoardAtmosphere.Lighting lighting) {
+        return luminance(lighting.groundLight()) * lighting.adaptation();
+    }
+
+    /** Linear output before the shoulder: shared adaptation followed by the scenario's EV compensation. */
     private static float displayedGround(BoardAtmosphere.Settings settings) {
-        return luminance(BoardAtmosphere.lighting(settings).groundLight()) * (float) Math.pow(2, settings.exposure());
+        return adaptedGround(BoardAtmosphere.lighting(settings)) * (float) Math.pow(2, settings.exposure());
     }
 
     /** Light compared as floats: Color equality rounds to 8 bits and overflows above one. */
@@ -751,6 +1073,11 @@ class BoardAtmosphereTest {
         assertSameColor(expected.sky(), actual.sky(), message);
         assertSameColor(expected.horizon(), actual.horizon(), message);
         assertSameColor(expected.tint(), actual.tint(), message);
+        assertSameColor(expected.environmentSky(), actual.environmentSky(), message);
+        assertSameColor(expected.environmentHorizon(), actual.environmentHorizon(), message);
+        assertEquals(expected.environmentImage(), actual.environmentImage(), message);
+        assertEquals(expected.environmentGain(), actual.environmentGain(), message);
+        assertEquals(expected.shadowStrength(), actual.shadowStrength(), message);
         assertEquals(expected.saturation(), actual.saturation(), message);
         assertEquals(expected.daylight(), actual.daylight(), message);
         assertEquals(expected.sunlight(), actual.sunlight(), message);

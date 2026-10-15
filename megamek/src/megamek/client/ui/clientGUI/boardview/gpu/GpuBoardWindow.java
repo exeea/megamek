@@ -662,7 +662,8 @@ public final class GpuBoardWindow {
             return;
         }
         Lwjgl3Window window = graphics.getWindow();
-        if (window == null || window.isIconified()) {
+        // Fullscreen (Alt+Enter) keeps the windowed bounds it returns to, which are also what the next start opens.
+        if (window == null || window.isIconified() || graphics.isFullscreen()) {
             return;
         }
         long handle = window.getWindowHandle();

@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -40,10 +41,10 @@ class GpuEmbeddedTexturesSmokeTest {
                         var fixture = new RigidGlbTest();
                         fixture.directory = Files.createDirectories(directory.resolve(format));
                         var levels = RigidGlb.loadLods(fixture.embedded(format));
-                        var lod0 = ModelTextures.create(levels.getFirst(), textures, key -> {
+                        var lod0 = ModelTextures.create(levels.getFirst(), textures, (key, color) -> {
                             throw new AssertionError("An embedded image must not ask for an external file");
                         });
-                        var lod2 = ModelTextures.create(levels.get(2), textures, key -> {
+                        var lod2 = ModelTextures.create(levels.get(2), textures, (key, color) -> {
                             throw new AssertionError("An embedded image must not ask for an external file");
                         });
                         try {
@@ -51,9 +52,12 @@ class GpuEmbeddedTexturesSmokeTest {
                                   .textureDescription.texture;
                             assertSame(texture, lod2.materials.first().get(TextureAttribute.class, TextureAttribute.Diffuse)
                                   .textureDescription.texture);
-                            assertSame(texture, lod0.materials.first().get(GpuModelMaterial.class, GpuModelMaterial.TYPE).map);
-                            assertSame(texture, lod2.materials.first().get(GpuModelMaterial.class, GpuModelMaterial.TYPE).map,
-                                  "Packed surface maps share the model library's image/sampler ownership");
+                            Texture surface = lod0.materials.first().get(GpuModelMaterial.class, GpuModelMaterial.TYPE).map;
+                            assertNotSame(texture, surface, "One image used as color and data needs distinct GPU storage");
+                            assertTrue(GpuColorTexture.isColor(texture));
+                            assertFalse(GpuColorTexture.isColor(surface));
+                            assertSame(surface, lod2.materials.first().get(GpuModelMaterial.class, GpuModelMaterial.TYPE).map,
+                                  "Packed surface maps share the data-role image/sampler ownership across LODs");
                             assertEquals(2, texture.getWidth());
                             assertEquals(Texture.TextureWrap.ClampToEdge, texture.getUWrap());
                             assertEquals(Texture.TextureWrap.MirroredRepeat, texture.getVWrap());
@@ -63,6 +67,9 @@ class GpuEmbeddedTexturesSmokeTest {
                             assertFalse(data.isPrepared());
                             texture.load(data);
                             assertEquals(2, texture.getHeight(), "Encoded bytes support a second upload");
+                            assertTrue(surface.isManaged());
+                            surface.load(surface.getTextureData());
+                            assertEquals(2, surface.getHeight(), "Data-role copies also retain independent restoration data");
                         } finally {
                             lod0.dispose();
                             lod2.dispose();

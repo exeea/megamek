@@ -19,7 +19,6 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
@@ -55,11 +54,11 @@ class GpuForestBenchmarkSmokeTest {
                 GpuTerrain terrain = new GpuTerrain();
                 GLProfiler profiler = new GLProfiler(Gdx.graphics);
                 GL20 rawGl20 = Gdx.gl20;
-                try (var timings = new GpuStageTimings()) {
+                try (var timings = new GpuStageTimings(); var outputFrame = new GpuSceneTestOutput()) {
                     report.append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append(" / ")
                           .append(Gdx.gl.glGetString(GL20.GL_VERSION)).append('\n');
                     report.append("1440x1080; 24 warmup + 40 samples; profiler excluded from timings.\n")
-                          .append("Terrain-only steady frames with glFinish; not full-game FPS.\n");
+                          .append("Terrain and display steady frames with glFinish; not full-game FPS.\n");
                     BoardAtmosphere.Settings settings = new BoardAtmosphere.Settings(13, 0, 0,
                           BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0);
                     terrain.setAtmosphere(BoardAtmosphere.lighting(settings));
@@ -81,26 +80,26 @@ class GpuForestBenchmarkSmokeTest {
                         camera.center(BoardGeometry.center(new Coords(SIZE / 2, SIZE / 2), 0));
                         long lod = System.nanoTime();
                         terrain.renderShadows(camera.camera, List.of());
-                        frame(terrain, camera, null);
+                        frame(outputFrame, terrain, camera, null);
                         Gdx.gl.glFinish();
                         double switchMillis = (System.nanoTime() - lod) / 1e6;
                         for (int i = 0; i < WARMUP; i++) {
                             timings.beginFrame(false);
-                            frame(terrain, camera, timings);
+                            frame(outputFrame, terrain, camera, timings);
                             Gdx.gl.glFinish();
                         }
                         double[] times = new double[FRAMES];
                         for (int i = 0; i < FRAMES; i++) {
                             timings.beginFrame();
                             long t = System.nanoTime();
-                            frame(terrain, camera, timings);
+                            frame(outputFrame, terrain, camera, timings);
                             Gdx.gl.glFinish();
                             times[i] = (System.nanoTime() - t) / 1e6;
                         }
                         Arrays.sort(times);
                         profiler.reset();
                         profiler.enable();
-                        frame(terrain, camera, null);
+                        frame(outputFrame, terrain, camera, null);
                         GpuStageTimings.stopCounting(profiler, rawGl20);
                         report.append(String.format(Locale.ROOT,
                               "  zoom %.2f: first frame %.0f ms, median frame %.1f ms, draws=%d vertices=%.0f,"
@@ -124,12 +123,15 @@ class GpuForestBenchmarkSmokeTest {
         System.out.print(report);
     }
 
-    private static void frame(GpuTerrain terrain, BoardCamera camera, GpuStageTimings timings) {
+    private static void frame(GpuSceneTestOutput output, GpuTerrain terrain, BoardCamera camera,
+          GpuStageTimings timings) {
         if (timings != null) { timings.stage("opaque"); }
-        ScreenUtils.clear(.42f, .56f, .69f, 1, true);
+        output.begin(.42f, .56f, .69f, 1);
         terrain.render(camera.camera, false);
         if (timings != null) { timings.stage("transparent"); }
         terrain.renderTransparent(camera.camera);
+        if (timings != null) { timings.stage("display"); }
+        output.display();
         if (timings != null) { timings.stage(null); }
     }
 

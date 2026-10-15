@@ -37,11 +37,11 @@ final class GpuFlareCanopies implements Disposable {
     private static final int STRIDE = 7;
     private static final int TRIANGLES_PER_CANOPY = COLUMNS * (RINGS - 1) * 2 + GORES * 2;
     private static final int CANOPIES_PER_BATCH = 16;
-    private static final float[] WHITE = { .92f, .91f, .88f };
-    private static final float[] GREY = { .70f, .70f, .67f };
-    private static final float[] LINE = { .82f, .81f, .78f };
+    private static final float[] WHITE = { GpuColor.linear(.92f), GpuColor.linear(.91f), GpuColor.linear(.88f) };
+    private static final float[] GREY = { GpuColor.linear(.70f), GpuColor.linear(.70f), GpuColor.linear(.67f) };
+    private static final float[] LINE = { GpuColor.linear(.82f), GpuColor.linear(.81f), GpuColor.linear(.78f) };
     /** The flare's own light on the fabric: near white, a touch rose like its halo. */
-    private static final float[] FLARE_LIGHT = { 1f, .84f, .80f };
+    private static final float[] FLARE_LIGHT = { GpuColor.linear(1f), GpuColor.linear(.84f), GpuColor.linear(.80f) };
 
     private final Vector3[][] dome = new Vector3[RINGS][COLUMNS];
     private final Vector3[][] normals = new Vector3[RINGS][COLUMNS];
@@ -155,7 +155,7 @@ final class GpuFlareCanopies implements Disposable {
         vertices[offset++] = at.z;
         for (int channel = 0; channel < 3; channel++) {
             float colour = panel[channel] * shade * MathUtils.lerp(1, FLARE_LIGHT[channel], Math.min(1, tint));
-            vertices[offset++] = MathUtils.clamp(colour, 0, 1);
+            vertices[offset++] = colour; // Linear light may exceed diffuse white before scene composition.
         }
         vertices[offset++] = opacity;
     }
@@ -197,7 +197,8 @@ final class GpuFlareCanopies implements Disposable {
         Gdx.gl.glDepthMask(true);
         Gdx.gl.glDisable(GL20.GL_CULL_FACE);
         Gdx.gl.glEnable(GL20.GL_BLEND);
-        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+        Gdx.gl.glBlendFuncSeparate(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA,
+              GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA);
         try {
             shader.bind();
             shader.setUniformMatrix("u_projView", camera.combined);
@@ -216,7 +217,8 @@ final class GpuFlareCanopies implements Disposable {
     private void create() {
         // The missile shader draws coloured triangles as they come, which is all a canopy needs.
         shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU flare canopy",
-              GpuShaderSource.read("missile.vert"), GpuShaderSource.read("missile.frag")), next -> shader = next);
+                    GpuShaderSource.read("missile.vert"), GpuSceneRadiance.fragment(GpuShaderSource.read("missile.frag"))),
+              next -> shader = next);
         vertices = new float[CANOPIES_PER_BATCH * TRIANGLES_PER_CANOPY * 3 * STRIDE];
         mesh = new Mesh(false, vertices.length / STRIDE, 0, VertexAttribute.Position(),
               VertexAttribute.ColorUnpacked());

@@ -162,7 +162,7 @@ final class GpuBoardSpaceHarness implements Disposable {
             }
         }
         boolean based = units && tactical && bases != null;
-        atmosphere.updateLight(camera.camera, tactical);
+        atmosphere.updateLight(camera);
         terrain.setAtmosphere(atmosphere.lighting());
         terrain.animate(0, shown);
         terrain.renderShadows(camera.camera, shown);

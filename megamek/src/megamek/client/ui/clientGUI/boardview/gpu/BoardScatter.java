@@ -68,6 +68,14 @@ final class BoardScatter {
         return bush(surface, 0);
     }
 
+    /** Authored tissue identity shared by field shrubs and captured bushes; unknown roles remain opaque. */
+    static boolean leaf(String material) {
+        return switch (material) {
+            case "dry-leaf", "dry-tip", "green-leaf", "green-tip" -> true;
+            default -> false;
+        };
+    }
+
     /** Bushes stand just above tall grass, with a level cap to keep unusually shallow boards readable. */
     static float bushScale(BoardShape shape, float scale) {
         float variation = Math.clamp((scale - .7f) / .5f, 0, 1);

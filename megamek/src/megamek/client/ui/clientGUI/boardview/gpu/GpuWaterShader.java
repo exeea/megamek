@@ -81,9 +81,10 @@ final class GpuWaterShader extends Attribute {
         List<Coords> pools = new ArrayList<>(List.of(tile.coords()));
         for (int direction = 0; direction < 6; direction++) {
             BoardScene.Tile beside = scene.tile(tile.coords().translated(direction));
-            if (beside != null && beside.elevation() == tile.elevation() && !beside.frozen()
+            if (beside != null && beside.elevation() == tile.elevation()
                   && tile.liquid().connects(beside.liquid())) {
-                pools.add(beside.coords());
+                BoardSurface frozen = beside.frozen() ? surfaces.apply(beside.coords()) : null;
+                if (!beside.frozen() || frozen != null && !frozen.waterFaces.isEmpty()) { pools.add(beside.coords()); }
             }
         }
         Vector3 middle = BoardGeometry.center(tile.coords(), 0);
@@ -91,7 +92,7 @@ final class GpuWaterShader extends Attribute {
         for (Coords pool : pools) {
             for (int direction = 0; direction < 6; direction++) {
                 BoardSurface upper = surfaces.apply(pool.translated(direction));
-                if (upper == null) { continue; }
+                if (upper == null || upper.tile.frozen()) { continue; }
                 for (BoardSurface.Side fall : upper.waterfalls) {
                     Coords below = upper.tile.coords().translated(BoardGeometry.edgeDirection(fall.edge()));
                     if (!below.equals(pool)) { continue; }
@@ -643,10 +644,13 @@ final class GpuWaterShader extends Attribute {
             if (pools.containsKey(coords)) { return pools.get(coords); }
             BoardScene.Tile tile = scene.tile(coords);
             Pool pool = null;
-            if (tile != null && tile.liquid().present() && tile.liquid().molten() == molten && !tile.frozen()) {
+            if (tile != null && tile.liquid().present() && tile.liquid().molten() == molten) {
                 BoardSurface surface = surfaces.get(coords);
-                pool = new Pool(surface == null ? new BoardSurface(scene, tile) : surface,
-                      currents.getOrDefault(coords, BoardFlow.Current.STILL));
+                if (surface == null) { surface = new BoardSurface(scene, tile); }
+                // Only actual liquid openings participate in a frozen tile; the remaining slab stays a bank.
+                if (!tile.frozen() || !surface.waterFaces.isEmpty()) {
+                    pool = new Pool(surface, currents.getOrDefault(coords, BoardFlow.Current.STILL));
+                }
             }
             pools.put(coords, pool);
             return pool;
@@ -800,6 +804,10 @@ final class GpuWaterShader extends Attribute {
                 if (face.finish() == BoardSurface.Finish.ICE || face.finish() == BoardSurface.Finish.DRESSING) { continue; }
                 waterline(segments, surface, face);
             }
+            if (surface.tile.frozen()) {
+                // Existing cut-edge skirts intersect the opening's water level: reuse those real ice banks.
+                for (BoardSurface.Face face : surface.iceBroken) { waterline(segments, surface, face); }
+            }
             for (BoardSurface.Face face : surface.cliffWater) {
                 for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
                     lowX = Math.min(lowX, p.x);
@@ -831,6 +839,9 @@ final class GpuWaterShader extends Attribute {
 
         boolean contains(float x, float y) {
             if (x < minX || x > maxX || y < minY || y > maxY) { return false; }
+            if (surface.tile.frozen()) {
+                return surface.waterFaces.stream().anyMatch(face -> Float.isFinite(face.height(x, y)));
+            }
             boolean inside = false;
             for (int i = 0, j = outline.length - 2; i < outline.length; j = i, i += 2) {
                 float xi = outline[i], yi = outline[i + 1], xj = outline[j], yj = outline[j + 1];

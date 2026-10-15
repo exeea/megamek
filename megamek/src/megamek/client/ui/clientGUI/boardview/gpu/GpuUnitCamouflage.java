@@ -59,7 +59,7 @@ final class GpuUnitCamouflage implements Disposable {
                 continue;
             }
             var material = part.material.copy();
-            material.set(ColorAttribute.createDiffuse(color));
+            material.set(ColorAttribute.createDiffuse(GpuLinearColors.authored(material, color)));
             if (camo != null && camo.image() != null) {
                 var diffuse = TextureAttribute.createDiffuse(texture(camo.image(), true));
                 float density = 10f / Math.max(1, camo.scale());
@@ -88,7 +88,7 @@ final class GpuUnitCamouflage implements Disposable {
                         pixmap.drawPixel(x, y, pixels.rgba(y * pixels.width() + x));
                     }
                 }
-                Texture texture = new Texture(pixmap, true);
+                Texture texture = GpuColorTexture.create(pixmap, true);
                 var wrap = repeat ? Texture.TextureWrap.MirroredRepeat : Texture.TextureWrap.ClampToEdge;
                 texture.setWrap(wrap, wrap);
                 texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);

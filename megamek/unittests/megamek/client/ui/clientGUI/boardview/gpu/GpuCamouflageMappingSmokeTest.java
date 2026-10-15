@@ -46,7 +46,8 @@ class GpuCamouflageMappingSmokeTest {
             @Override
             public void create() {
                 var paints = new GpuUnitCamouflage();
-                var batch = new ModelBatch(GpuUnitShader.provider());
+                // This mapping fixture compares authored display pixels, without the board's shoulder/vignette.
+                var batch = new ModelBatch(GpuUnitShader.displayProvider());
                 var buffer = new FrameBuffer(Pixmap.Format.RGBA8888, 84, 72, true);
                 var model = splitBox();
                 try {
@@ -214,7 +215,12 @@ class GpuCamouflageMappingSmokeTest {
         var sprite = builder.createBox(84, 72, 72,
               new Material("sprite", ColorAttribute.createDiffuse(Color.WHITE), texture.copy()),
               VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.TextureCoordinates);
-        var standard = new ModelBatch();
+        // The scene texture is sRGB storage: the upstream reference also needs one display encode after sampling.
+        var standard = new ModelBatch(new com.badlogic.gdx.graphics.g3d.utils.DefaultShaderProvider(
+              com.badlogic.gdx.graphics.g3d.shaders.DefaultShader.getDefaultVertexShader(),
+              GpuShaderSource.replaceOnce(com.badlogic.gdx.graphics.g3d.shaders.DefaultShader.getDefaultFragmentShader(),
+                    "void main() {", GpuShaderSource.read("color-space.glsl") + "\nvoid sampleMaterial() {", "mapping reference")
+                    + "\nvoid main() { sampleMaterial(); gl_FragColor.rgb = toDisplay(gl_FragColor.rgb); }\n"));
         try {
             var instance = new ModelInstance(sprite);
             instance.transform.setToTranslation(0, 0, 36);

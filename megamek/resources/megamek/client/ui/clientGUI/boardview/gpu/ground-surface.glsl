@@ -7,6 +7,8 @@ vec3 mappedNormal(vec4 texel, float strength) {
     if (u_normalMaps > 0.5) {
         // Neutral is exactly (128,128,255); world X/right and -Y/down also cover slopes.
         vec3 detail = (texel.rgb * 255.0 - 128.0) / 127.0;
+        // The strength scales the filtered relief's slopes, and so its variance (light-model.glsl).
+        surfaceVariance += normalMapVariance(length(detail)) * strength * strength;
         detail.xy *= strength;
         vec3 tangent = normalize(vec3(normal.z, 0.0, -normal.x));
         normal = normalize(tangent * detail.x - cross(normal, tangent) * detail.y + normal * detail.z);
@@ -34,19 +36,21 @@ void groundFilm(inout vec3 albedo, inout vec3 normal, float puddle) {
         albedo *= 1.0 - 0.18 * puddle;
         vec3 waterNormal = normalize(vec3(rainRipples(v_cloudPosition.xy * u_rainScale), 1.0));
         normal = normalize(mix(normal, waterNormal, puddle));
+        // A puddle lies flat over the relief.
+        surfaceVariance *= 1.0 - puddle;
     }
 }
 
-vec3 groundLighting(vec3 albedo, vec3 normal, float wet, float response, float puddle, float roughness, float occlusion) {
+vec3 groundLighting(vec3 albedo, vec3 normal, vec3 geometric, float wet, float response, float puddle, float roughness, float occlusion) {
+    albedo = materialReflectance(albedo);
 #ifdef lightingFlag
-    albedo = toLinear(albedo);
+    normal = shadingNormal(normal, geometric, -viewDirection());
     vec3 ambient, direct, sheen;
-    surfaceLighting(normal, wet * mix(response, 1.0, puddle), roughness, ambient, direct, sheen);
+    surfaceLighting(normal, geometric, wet * mix(response, 1.0, puddle), roughness, ambient, direct, sheen);
     ambient *= occlusion;
     albedo *= ambient + direct;
     albedo += sheen;
-    albedo = toDisplay(albedo);
-    if (puddle > 0.0) { albedo = rainReflection(albedo, normal, puddle); }
+    albedo += surfaceEnvironment(normal, wet * mix(response, 1.0, puddle), roughness, GROUND_ALBEDO) * occlusion;
 #endif
     return albedo;
 }

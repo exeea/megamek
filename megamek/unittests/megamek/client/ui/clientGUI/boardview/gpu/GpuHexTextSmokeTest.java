@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -37,6 +38,8 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
@@ -158,10 +161,581 @@ class GpuHexTextSmokeTest {
             checkTopGrid(camera, scene);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Overlay drawing must leave valid GL state");
             checkStaticMeshes(batch);
+            checkContrast(terrain, atmosphere, batch, font, outline);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
             object.dispose(); batch.dispose(); skin.dispose(); labels.dispose(); atmosphere.dispose(); terrain.dispose();
         }
+    }
+
+    /** Known HDR backgrounds exercise the real composite, grid, static glyphs and borrowed-scene bindings. */
+    private static void checkContrast(GpuTerrain terrain, GpuAtmosphere atmosphere, SpriteBatch batch,
+          BitmapFont font, BitmapFont outline) {
+        GpuHexText labels = new GpuHexText();
+        GpuHexGrid grid = new GpuHexGrid();
+        BoardScene scene = contrastScene(0xff000000);
+        BoardCamera camera = new BoardCamera();
+        camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight() - BOTTOM);
+        try {
+            for (boolean perspective : List.of(false, true)) {
+                camera.setPerspective(perspective);
+                for (boolean isometric : List.of(false, true)) {
+                    camera.setIsometric(isometric);
+                    camera.camera.zoom = .20f;
+                    camera.center(BoardGeometry.center(LABELED, 0));
+                    for (boolean outlined : List.of(false, true)) {
+                        labels.update(scene, font, outline, c -> null, false, false, outlined);
+                        List<Object> uploaded = pages(labels);
+                        for (int source = 0; source < 3; source++) {
+                            float[] rgb = source == 0 ? new float[] { .003f, .003f, .003f }
+                                  : source == 1 ? new float[] { .214f, .214f, .214f }
+                                  : new float[] { 2, .7f, .02f };
+                            contrastFrame(terrain, atmosphere, camera, scene, rgb, 0);
+                            Pixmap background = pixels();
+                            labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM);
+                            Pixmap reference = pixels();
+                            float[] depth = source == 0 && !outlined ? contrastDepth() : null;
+                            contrastFrame(terrain, atmosphere, camera, scene, rgb, 0);
+                            labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM, atmosphere);
+                            Pixmap adaptive = pixels();
+                            try {
+                                if (depth != null) { assertArrayEquals(depth, contrastDepth(), "Adaptive ink cannot change depth"); }
+                                double ink = contrastInk(background, reference, adaptive, false);
+                                assertTrue(source == 0 ? ink > 245 : ink < 10,
+                                      "Actual neutral ink must contrast dark, mid-gray and HDR colored surfaces: " + ink);
+                                if (outlined) {
+                                    double ring = contrastInk(background, reference, adaptive, true);
+                                    assertTrue(source == 0 ? ring < 10 : ring > 245,
+                                          "The enabled outline retains complementary polarity: " + ring);
+                                }
+                                contrastFrame(terrain, atmosphere, camera, scene, rgb, 0);
+                                labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM, atmosphere);
+                                Pixmap repeated = pixels();
+                                try { assertTrue(adaptive.getPixels().equals(repeated.getPixels()), "Paused source repeats exactly"); }
+                                finally { repeated.dispose(); }
+                                assertEquals(uploaded, pages(labels), "Lighting changes must not rebuild any glyph page");
+                                if (!perspective && outlined) { capture("contrast-" + isometric + "-" + source); }
+                            } finally { background.dispose(); reference.dispose(); adaptive.dispose(); }
+                        }
+                    }
+                }
+            }
+
+            camera.setPerspective(false);
+            camera.setIsometric(false);
+            camera.camera.zoom = .20f;
+            camera.center(BoardGeometry.center(LABELED, 0));
+            labels.update(scene, font, outline, c -> null, false, false, false);
+            List<Object> uploaded = pages(labels);
+            boolean sawWhite = false, sawBlack = false;
+            float[] twilight = { .06f, .06f, .06f };
+            for (int ev = -2; ev <= 2; ev++) {
+                contrastFrame(terrain, atmosphere, camera, scene, twilight, ev);
+                Pixmap background = pixels();
+                labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM);
+                Pixmap reference = pixels();
+                contrastFrame(terrain, atmosphere, camera, scene, twilight, ev);
+                labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM, atmosphere);
+                Pixmap adaptive = pixels();
+                try {
+                    double ink = contrastInk(background, reference, adaptive, false);
+                    System.out.printf(java.util.Locale.ROOT, "HEX_INK ev=%d mean=%.9f%n", ev, ink);
+                    assertTrue(ink < 10 || ink > 245, "A hex must choose binary ink, never intermediate gray");
+                    // Compare the binary choice: antialiased white blends and the quantized mask vary with the background.
+                    assertFalse(sawBlack && ink > 245, "Increasing shared exposure cannot switch black ink back to white");
+                    if (ev == -2) { assertTrue(ink > 245); }
+                    if (ev == 2) { assertTrue(ink < 10); }
+                    sawWhite |= ink > 245;
+                    sawBlack |= ink < 10;
+                    assertEquals(uploaded, pages(labels), "Exposure only changes uniforms");
+                } finally { background.dispose(); reference.dispose(); adaptive.dispose(); }
+            }
+            assertTrue(sawWhite && sawBlack, "The exposure sweep must exercise both sides of the fixed threshold");
+
+            // Independent linear grays bracket display brightness .2 (approximately .194 and .206).
+            // Normalize by the actual exposure so this tests the requested threshold rather than a particular sun.
+            atmosphere.configure(new BoardAtmosphere.Settings(12, 0, 0, 1.5f, 0, 0));
+            for (float exposed : new float[] { .031f, .035f }) {
+                atmosphere.resetContrast();
+                float source = exposed / atmosphere.exposure();
+                float[] rgb = { source, source, source };
+                contrastFrame(terrain, atmosphere, camera, scene, rgb, 0);
+                Pixmap background = pixels();
+                labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM);
+                Pixmap reference = pixels();
+                contrastFrame(terrain, atmosphere, camera, scene, rgb, 0);
+                labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM, atmosphere);
+                Pixmap adaptive = pixels();
+                try {
+                    double ink = contrastInk(background, reference, adaptive, false);
+                    assertTrue(exposed == .031f ? ink > 245 : ink < 10,
+                          "The fixed display .2 threshold must lie between the two independent gray controls: " + ink);
+                    assertEquals(uploaded, pages(labels), "Threshold checks must not rebuild glyph pages");
+                } finally { background.dispose(); reference.dispose(); adaptive.dispose(); }
+            }
+
+            // A single hex crossing a dark/bright split must keep one ink everywhere. Two owning hexes
+            // wholly on opposite sides must choose independently, using the same retained source in one draw.
+            float[] split = { .003f, .003f, .003f, .8f, .8f, .8f };
+            for (boolean sameHex : List.of(true, false)) {
+                BoardScene splitScene = sameHex ? scene : contrastScene(0xff000000, true);
+                labels.update(splitScene, font, outline, c -> null, false, false, false);
+                List<Object> splitPages = pages(labels);
+                contrastFrame(terrain, atmosphere, camera, splitScene, split, 0);
+                Pixmap background = pixels();
+                labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM);
+                Pixmap reference = pixels();
+                contrastFrame(terrain, atmosphere, camera, splitScene, split, 0);
+                labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM, atmosphere);
+                Pixmap adaptive = pixels();
+                try {
+                    int[] count = new int[2];
+                    long[] sum = new long[2];
+                    for (int y = 0; y < reference.getHeight(); y++) {
+                        for (int x = 0; x < reference.getWidth(); x++) {
+                            assertEquals(reference.getPixel(x, y) & 255, adaptive.getPixel(x, y) & 255);
+                            if ((reference.getPixel(x, y) >>> 8) != 0 || reference.getPixel(x, y) == background.getPixel(x, y)
+                                  || Math.abs(x - reference.getWidth() / 2) < 5) { continue; }
+                            int side = x < reference.getWidth() / 2 ? 0 : 1;
+                            count[side]++;
+                            sum[side] += adaptive.getPixel(x, y) >>> 24;
+                        }
+                    }
+                    assertTrue(count[0] > 100 && count[1] > 100, "Both sides must contain actual opaque glyph pixels");
+                    if (sameHex) {
+                        assertTrue(reference.getPixels().equals(adaptive.getPixels()),
+                              "One hex has one black ink, including letters over its dark half; no mottled glyphs");
+                    } else {
+                        assertTrue(sum[0] / (double) count[0] > 245 && sum[1] / (double) count[1] < 10,
+                              "Different owning hexes choose white and black independently in the same draw");
+                    }
+                    assertEquals(splitPages, pages(labels), "Sampling never rebuilds glyph pages");
+                    capture(sameHex ? "contrast-whole-hex" : "contrast-neighbour-hexes");
+                } finally { background.dispose(); reference.dispose(); adaptive.dispose(); }
+            }
+
+            checkContrastHistory(terrain, atmosphere, batch, labels, camera, scene, font, outline);
+            checkContrastDisabled(terrain, batch, camera, scene, font, outline);
+
+            // Colored labels AND their rings must remain pixel-identical with the new scene binding enabled.
+            BoardScene colored = contrastScene(0xffff00ff);
+            labels.update(colored, font, outline, c -> null, false, false, true);
+            for (float value : new float[] { .003f, .214f }) {
+                float[] rgb = { value, value, value };
+                contrastFrame(terrain, atmosphere, camera, colored, rgb, 0);
+                labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM);
+                Pixmap coloredReference = pixels();
+                contrastFrame(terrain, atmosphere, camera, colored, rgb, 0);
+                labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM, atmosphere);
+                Pixmap coloredAdaptive = pixels();
+                try {
+                    assertTrue(pink(coloredReference) > 250);
+                    assertTrue(coloredReference.getPixels().equals(coloredAdaptive.getPixels()), "Authored colored glyphs/rings stay exact");
+                } finally { coloredReference.dispose(); coloredAdaptive.dispose(); }
+
+                atmosphere.resetContrast(); // Independent uniform-source grid control, including edge slivers.
+                contrastFrame(terrain, atmosphere, camera, scene, rgb, 0);
+                Pixmap gridBackground = pixels();
+                grid.render(camera, scene, false, false, GpuBattleStatus.Arc.NONE, false, atmosphere);
+                Pixmap adaptiveGrid = pixels();
+                try {
+                    int lighter = 0, darker = 0, changed = 0;
+                    String firstWrong = "none";
+                    for (int y = 0; y < gridBackground.getHeight(); y++) {
+                        for (int x = 0; x < gridBackground.getWidth(); x++) {
+                            int before = gridBackground.getPixel(x, y), after = adaptiveGrid.getPixel(x, y);
+                            int difference = (after >>> 24) - (before >>> 24);
+                            if (difference > 2) { lighter++; }
+                            if (difference < -2) { darker++; }
+                            if (before != after) { changed++; }
+                            if ((value < .01f ? difference < -2 : difference > 2) && firstWrong.equals("none")) {
+                                firstWrong = x + "," + y + " rgba=" + Integer.toHexString(before)
+                                      + "->" + Integer.toHexString(after);
+                            }
+                        }
+                    }
+                    System.out.printf(java.util.Locale.ROOT,
+                          "HEX_GRID source=%.6f lighter=%d darker=%d changed=%d firstWrong=%s%n",
+                          value, lighter, darker, changed, firstWrong);
+                    capture("contrast-grid-" + value);
+                    assertTrue(value < .01f ? lighter > 100 && darker == 0 : darker > 100 && lighter == 0,
+                          "Only contrasting grid lines should change the completed background");
+                    assertTrue(changed < gridBackground.getWidth() * gridBackground.getHeight() / 5,
+                          "Grid-only drawing must not shade hex interiors");
+                } finally { gridBackground.dispose(); adaptiveGrid.dispose(); }
+
+                contrastFrame(terrain, atmosphere, camera, scene, rgb, 0);
+                grid.render(camera, scene, false, true, GpuBattleStatus.Arc.NONE);
+                Pixmap tactical = pixels();
+                contrastFrame(terrain, atmosphere, camera, scene, rgb, 0);
+                grid.render(camera, scene, false, true, GpuBattleStatus.Arc.NONE, false, atmosphere);
+                Pixmap tacticalBound = pixels();
+                try { assertTrue(tactical.getPixels().equals(tacticalBound.getPixels()), "Tactical palette ignores adaptive ink"); }
+                finally { tactical.dispose(); tacticalBound.dispose(); }
+            }
+            labels.update(scene, font, outline, c -> null, true, false, true);
+            assertFalse(pages(labels).isEmpty(), "Tactical coordinate control must contain real neutral glyphs");
+            contrastFrame(terrain, atmosphere, camera, scene, twilight, -2);
+            labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM);
+            Pixmap tacticalText = pixels();
+            contrastFrame(terrain, atmosphere, camera, scene, twilight, -2);
+            labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM, atmosphere);
+            Pixmap tacticalTextBound = pixels();
+            try {
+                assertTrue(tacticalText.getPixels().equals(tacticalTextBound.getPixels()),
+                      "Tactical neutral glyphs and rings ignore adaptive ink");
+            } finally { tacticalText.dispose(); tacticalTextBound.dispose(); }
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        } finally { grid.dispose(); labels.dispose(); }
+    }
+
+    /** Panning moves the seven taps across source pixels; history must suppress threshold-only toggles. */
+    private static void checkContrastHistory(GpuTerrain terrain, GpuAtmosphere atmosphere, SpriteBatch batch,
+          GpuHexText labels, BoardCamera camera, BoardScene scene, BitmapFont font, BitmapFont outline) {
+        camera.setPerspective(false);
+        camera.setIsometric(false);
+        camera.camera.zoom = .20f;
+        labels.update(scene, font, outline, c -> null, false, false, false);
+        List<Object> uploaded = pages(labels);
+        atmosphere.configure(new BoardAtmosphere.Settings(12, 0, 0, 1.5f, 0, 0));
+        float gain = atmosphere.exposure();
+        float[] split = { .030f / gain, .030f / gain, .030f / gain, .036f / gain, .036f / gain, .036f / gain };
+        // Three corners remain on either side. Only the center tap moves: means .0325714/.0334286
+        // straddle linear(.2)=.0331048, both inside the display .18/.22 hysteresis band.
+        for (float scale : new float[] { 1, .5f }) {
+            int flips = 0;
+            boolean previous = false;
+            for (int step = 0; step < 16; step++) {
+                camera.center(BoardGeometry.center(LABELED, 0));
+                camera.pan(step % 2 == 0 ? -.75f : .75f, 0);
+                atmosphere.resetContrast();
+                boolean white = inkFrame(terrain, atmosphere, batch, labels, camera, scene, split, scale) > 245;
+                if (step > 0 && white != previous) { flips++; }
+                previous = white;
+            }
+            assertEquals(15, flips, "Fresh decisions must reproduce the previous stateless subpixel-pan flicker");
+            for (boolean white : List.of(true, false)) {
+                atmosphere.resetContrast();
+                camera.center(BoardGeometry.center(LABELED, 0));
+                float value = (white ? .005f : .1f) / gain;
+                double initial = inkFrame(terrain, atmosphere, batch, labels, camera, scene,
+                      new float[] { value, value, value }, scale);
+                assertTrue(white ? initial > 245 : initial < 10, "The initial strong control selects the expected ink");
+                Object points = field(atmosphere, "contrastPoints");
+                Object read = field(atmosphere, "contrastRead"), write = field(atmosphere, "contrastWrite");
+                Set<Object> targets = Set.of(read, write);
+                for (int step = 0; step < 16; step++) {
+                    camera.center(BoardGeometry.center(LABELED, 0));
+                    camera.pan(step % 2 == 0 ? -.75f : .75f, 0);
+                    double ink = inkFrame(terrain, atmosphere, batch, labels, camera, scene, split, scale);
+                    assertTrue(white ? ink > 245 : ink < 10, "Subpixel panning retains the entire hex's binary ink");
+                    assertSame(points, field(atmosphere, "contrastPoints"), "Panning cannot rebuild owner positions");
+                    assertEquals(targets, Set.of(field(atmosphere, "contrastRead"), field(atmosphere, "contrastWrite")),
+                          "Panning reuses both small history targets");
+                    assertEquals(uploaded, pages(labels), "Panning must not rebuild glyph pages");
+                }
+                float crossing = (white ? .1f : .005f) / gain;
+                double changed = inkFrame(terrain, atmosphere, batch, labels, camera, scene,
+                      new float[] { crossing, crossing, crossing }, scale);
+                assertTrue(white ? changed < 10 : changed > 245, "A clear lighting change crosses the band immediately");
+                System.out.printf(java.util.Locale.ROOT, "HEX_INK_PAN scale=%.2f initialWhite=%b statelessFlips=%d historyFlips=0%n",
+                      scale, white, flips);
+            }
+        }
+
+        // High contrast at one source texel defeats hysteresis with nearest sampling: six .024 taps
+        // and one .024/.15 tap average .024/.042, across both .18/.22 display thresholds. At +/- .1
+        // display pixels the bilinear means are near .033, inside the band at either scene resolution.
+        float low = .024f / gain, high = .15f / gain;
+        float[] stripe = { low, low, low, high, high, high };
+        for (float scale : new float[] { 1, .5f }) {
+            for (boolean white : List.of(true, false)) {
+                camera.center(BoardGeometry.center(LABELED, 0));
+                atmosphere.resetContrast();
+                float seed = (white ? .005f : .1f) / gain;
+                double initial = inkFrame(terrain, atmosphere, batch, labels, camera, scene,
+                      new float[] { seed, seed, seed }, scale);
+                assertTrue(white ? initial > 245 : initial < 10);
+                for (int step = 0; step < 16; step++) {
+                    camera.center(BoardGeometry.center(LABELED, 0));
+                    camera.pan(step % 2 == 0 ? -.1f : .1f, 0);
+                    double ink = inkFrame(terrain, atmosphere, batch, labels, camera, scene, stripe, scale, true);
+                    assertTrue(white ? ink > 245 : ink < 10,
+                          "Bilinear HDR taps suppress a high-contrast texel crossing, beyond hysteresis alone");
+                }
+            }
+        }
+
+        // A partial hex cannot replace a learned full-hex average with its changing visible subset.
+        camera.center(BoardGeometry.center(LABELED, 0));
+        atmosphere.resetContrast();
+        float darkEdge = .005f / gain, brightEdge = .1f / gain;
+        assertTrue(inkFrame(terrain, atmosphere, batch, labels, camera, scene,
+              new float[] { darkEdge, darkEdge, darkEdge }, 1) > 245);
+        camera.pan(-camera.camera.viewportWidth / 2 + 60, 0);
+        var edge = camera.camera.project(BoardGeometry.center(LABELED, 0),
+              0, 0, camera.camera.viewportWidth, camera.camera.viewportHeight);
+        assertTrue(edge.x > 0 && edge.x < BoardGeometry.width() * .325f / camera.camera.zoom,
+              "The center remains visible while at least the left inset tap is outside");
+        assertTrue(inkFrame(terrain, atmosphere, batch, labels, camera, scene,
+              new float[] { brightEdge, brightEdge, brightEdge }, 1) > 245,
+              "A clipped footprint retains the established ink instead of learning a new subset");
+        camera.center(BoardGeometry.center(LABELED, 0));
+        assertTrue(inkFrame(terrain, atmosphere, batch, labels, camera, scene,
+              new float[] { brightEdge, brightEdge, brightEdge }, 1) < 10,
+              "The complete footprint immediately responds to a genuine brightness change");
+
+        checkContrastEdges(terrain, atmosphere, camera, scene, gain);
+
+        camera.center(BoardGeometry.center(LABELED, 0));
+        float bright = .1f / gain, near = .031f / gain;
+        inkFrame(terrain, atmosphere, batch, labels, camera, scene, new float[] { bright, bright, bright }, 1);
+        Object read = field(atmosphere, "contrastRead"), write = field(atmosphere, "contrastWrite");
+        Object points = field(atmosphere, "contrastPoints");
+        Set<Object> targets = Set.of(read, write);
+        // Reallocating the full scene for render-resolution changes must not reset small per-board history.
+        for (float scale : new float[] { .5f, 1 }) {
+            assertTrue(inkFrame(terrain, atmosphere, batch, labels, camera, scene,
+                  new float[] { near, near, near }, scale) < 10, "Scene resize preserves initialized black ink inside the band");
+            assertEquals(targets, Set.of(field(atmosphere, "contrastRead"), field(atmosphere, "contrastWrite")));
+            assertSame(points, field(atmosphere, "contrastPoints"));
+        }
+        BoardScene relabeled = contrastScene(0xff000000);
+        labels.update(relabeled, font, outline, c -> null, false, false, false);
+        assertTrue(inkFrame(terrain, atmosphere, batch, labels, camera, relabeled,
+              new float[] { near, near, near }, 1) < 10, "A new tile snapshot with unchanged owners retains history");
+        assertSame(points, field(atmosphere, "contrastPoints"));
+
+        camera.pan(10000, 0);
+        contrastFrame(terrain, atmosphere, camera, relabeled, new float[] { .001f, .001f, .001f }, 0);
+        camera.center(BoardGeometry.center(LABELED, 0));
+        assertTrue(inkFrame(terrain, atmosphere, batch, labels, camera, relabeled,
+              new float[] { near, near, near }, 1) < 10, "Offscreen owners must not learn an unrelated viewport-edge value");
+
+        BoardScene replacement = new BoardScene(scene.boardId() + 1, scene.width(), scene.height(), scene.tiles(),
+              List.of(), List.of(), -1, "", List.of());
+        assertTrue(inkFrame(terrain, atmosphere, batch, labels, camera, replacement,
+              new float[] { near, near, near }, 1) > 245, "A different board starts with the .2 first-state threshold");
+        inkFrame(terrain, atmosphere, batch, labels, camera, replacement, new float[] { bright, bright, bright }, 1);
+        atmosphere.resetContrast();
+        assertNull(field(atmosphere, "contrastRead"));
+        assertNull(field(atmosphere, "contrastWrite"));
+        assertNull(field(atmosphere, "contrastPoints"));
+        assertTrue(inkFrame(terrain, atmosphere, batch, labels, camera, replacement,
+              new float[] { near, near, near }, 1) > 245, "Explicit same-sized board-generation reset clears prior ink");
+    }
+
+    /** Visible slivers and wholly offscreen owners differ even when neither has an inset sample. */
+    private static void checkContrastEdges(GpuTerrain terrain, GpuAtmosphere atmosphere,
+          BoardCamera camera, BoardScene scene, float gain) {
+        float[] dark = { .005f / gain, .005f / gain, .005f / gain };
+        float[] bright = { .1f / gain, .1f / gain, .1f / gain };
+        float width = BoardGeometry.width() / camera.camera.zoom;
+        float height = BoardGeometry.height() / camera.camera.zoom;
+        for (float scale : new float[] { 1, .5f }) {
+            placeInkOwner(camera, -.6f * width, camera.camera.viewportHeight / 2);
+            atmosphere.resetContrast();
+            contrastFrame(terrain, atmosphere, camera, scene, dark, 0, scale);
+            assertEquals(1, ownerInk(atmosphere, camera), "Wholly offscreen fallback stays unlearned");
+            placeInkOwner(camera, -.4f * width, camera.camera.viewportHeight / 2);
+            // The right corner is visible, but the furthest inset tap is still left of the viewport.
+            for (boolean white : List.of(true, false)) {
+                atmosphere.resetContrast();
+                contrastFrame(terrain, atmosphere, camera, scene, white ? dark : bright, 0, scale);
+                assertEquals(white ? 3 : 2, ownerInk(atmosphere, camera), "A first visible sliver learns its fallback");
+                for (int step = 0; step < 16; step++) {
+                    placeInkOwner(camera, -.4f * width + (step % 2 == 0 ? -.25f : .25f), camera.camera.viewportHeight / 2);
+                    contrastFrame(terrain, atmosphere, camera, scene, white ? bright : dark, 0, scale);
+                    assertEquals(white ? 3 : 2, ownerInk(atmosphere, camera), "Subpixel slivers retain their learned ink");
+                }
+            }
+            // Both projected bounds enter the viewport, but the hex misses its bottom-left corner.
+            placeInkOwner(camera, -.45f * width, -.45f * height);
+            atmosphere.resetContrast();
+            contrastFrame(terrain, atmosphere, camera, scene, dark, 0, scale);
+            assertEquals(1, ownerInk(atmosphere, camera), "A diagonal offscreen hex must not learn a false AABB overlap");
+
+            placeInkOwner(camera, -.4f * width, camera.camera.viewportHeight / 2);
+            contrastFrame(terrain, atmosphere, camera, scene, bright, 0, scale);
+            assertEquals(2, ownerInk(atmosphere, camera));
+            Set<Object> targets = Set.of(field(atmosphere, "contrastRead"), field(atmosphere, "contrastWrite"));
+            Object points = field(atmosphere, "contrastPoints");
+            contrastFrame(terrain, atmosphere, camera, scene, bright, -2, scale);
+            assertEquals(3, ownerInk(atmosphere, camera), "Exposure changes relearn a clipped owner immediately");
+            contrastFrame(terrain, atmosphere, camera, scene, bright, 2, scale);
+            assertEquals(2, ownerInk(atmosphere, camera));
+            contrastFrame(terrain, atmosphere, camera, scene, dark, 0, scale);
+            assertEquals(3, ownerInk(atmosphere, camera));
+            atmosphere.setOptions(new GpuAtmosphere.Options(.5f, true));
+            contrastFrame(terrain, atmosphere, camera, scene, bright, 0, scale);
+            assertEquals(2, ownerInk(atmosphere, camera), "A changed lighting option invalidates clipped ink");
+            atmosphere.setOptions(new GpuAtmosphere.Options(.5f, true));
+            contrastFrame(terrain, atmosphere, camera, scene, dark, 0, scale);
+            assertEquals(2, ownerInk(atmosphere, camera), "Equal-valued per-frame options preserve the learned choice");
+            assertEquals(targets, Set.of(field(atmosphere, "contrastRead"), field(atmosphere, "contrastWrite")),
+                  "Lighting changes clear history without reallocating either target");
+            assertSame(points, field(atmosphere, "contrastPoints"), "Lighting changes do not reupload owner positions");
+            atmosphere.setOptions(GpuAtmosphere.Options.DEFAULTS);
+        }
+    }
+
+    private static void placeInkOwner(BoardCamera camera, float x, float y) {
+        camera.center(BoardGeometry.center(LABELED, 0));
+        camera.pan(x - camera.camera.viewportWidth / 2, camera.camera.viewportHeight / 2 - y);
+        var projected = camera.camera.project(BoardGeometry.center(LABELED, 0),
+              0, 0, camera.camera.viewportWidth, camera.camera.viewportHeight);
+        assertEquals(x, projected.x, .02f, "The fixture owner reaches its intended horizontal clipping position");
+        assertEquals(y, projected.y, .02f, "The fixture owner reaches its intended vertical clipping position");
+    }
+
+    /** R and G are checked separately: bit 0 is white ink, bit 1 says the visible owner learned it. */
+    private static int ownerInk(GpuAtmosphere atmosphere, BoardCamera camera) {
+        FrameBuffer target = (FrameBuffer) field(atmosphere, "contrastRead");
+        target.begin();
+        try {
+            byte[] pixel = ScreenUtils.getFrameBufferPixels(LABELED.getX(), LABELED.getY(), 1, 1, false);
+            int ink = pixel[0] & 255, learned = pixel[1] & 255;
+            assertTrue((ink == 0 || ink == 255) && (learned == 0 || learned == 255));
+            return (ink == 255 ? 1 : 0) | (learned == 255 ? 2 : 0);
+        } finally {
+            target.end();
+            HdpiUtils.glViewport(0, BOTTOM, (int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight);
+        }
+    }
+
+    /** Uses actual opaque glyph pixels as the oracle, rather than merely reading the private history texel. */
+    private static double inkFrame(GpuTerrain terrain, GpuAtmosphere atmosphere, SpriteBatch batch, GpuHexText labels,
+          BoardCamera camera, BoardScene scene, float[] rgb, float scale) {
+        return inkFrame(terrain, atmosphere, batch, labels, camera, scene, rgb, scale, false);
+    }
+
+    private static double inkFrame(GpuTerrain terrain, GpuAtmosphere atmosphere, SpriteBatch batch, GpuHexText labels,
+          BoardCamera camera, BoardScene scene, float[] rgb, float scale, boolean stripe) {
+        contrastFrame(terrain, atmosphere, camera, scene, rgb, 0, scale, stripe);
+        Pixmap background = pixels();
+        labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM);
+        Pixmap reference = pixels();
+        contrastFrame(terrain, atmosphere, camera, scene, rgb, 0, scale, stripe);
+        labels.render(batch, camera, atmosphere.depthTexture(), null, BOTTOM, atmosphere);
+        Pixmap adaptive = pixels();
+        try { return contrastInk(background, reference, adaptive, false); }
+        finally { background.dispose(); reference.dispose(); adaptive.dispose(); }
+    }
+
+    private static void checkContrastDisabled(GpuTerrain terrain, SpriteBatch batch, BoardCamera camera,
+          BoardScene scene, BitmapFont font, BitmapFont outline) {
+        GpuAtmosphere disabled = new GpuAtmosphere(0);
+        GpuHexText labels = new GpuHexText();
+        GpuHexGrid grid = new GpuHexGrid();
+        GLProfiler profiler = new GLProfiler(Gdx.graphics);
+        try {
+            labels.update(scene, font, outline, c -> null, false, false, false);
+            float[] dark = { .001f, .001f, .001f };
+            contrastFrame(terrain, disabled, camera, scene, dark, 0);
+            profiler.enable();
+            disabled.prepareContrast(camera.camera, scene, BOTTOM);
+            assertEquals(0, profiler.getDrawCalls(), "Zero threshold skips the history update pass");
+            assertEquals(0, profiler.getShaderSwitches(), "Zero threshold does not bind an adaptive shader");
+            assertEquals(0, profiler.getTextureBindings(), "Zero threshold does not bind adaptive source/history textures");
+            profiler.disable();
+            for (String resource : List.of("contrastRead", "contrastWrite", "contrastPoints", "contrastShader")) {
+                assertNull(field(disabled, resource), "Zero threshold allocates no adaptive resource: " + resource);
+            }
+            labels.render(batch, camera, disabled.depthTexture(), null, BOTTOM);
+            grid.render(camera, scene, false, false, GpuBattleStatus.Arc.NONE);
+            Pixmap authored = pixels();
+            contrastFrame(terrain, disabled, camera, scene, dark, 0);
+            labels.render(batch, camera, disabled.depthTexture(), null, BOTTOM, disabled);
+            grid.render(camera, scene, false, false, GpuBattleStatus.Arc.NONE, false, disabled);
+            Pixmap bypassed = pixels();
+            try { assertTrue(authored.getPixels().equals(bypassed.getPixels()), "Zero keeps authored grid/text pixels exact"); }
+            finally { authored.dispose(); bypassed.dispose(); }
+        } finally { profiler.disable(); labels.dispose(); grid.dispose(); disabled.dispose(); }
+    }
+
+    private static BoardScene contrastScene(int argb) {
+        return contrastScene(argb, false);
+    }
+
+    private static BoardScene contrastScene(int argb, boolean neighbours) {
+        Font font = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
+        List<BoardHexText> text = List.of(new BoardHexText("0404 LEVEL", 36, font, argb, true, 0));
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 7; x++) {
+            for (int y = 0; y < 7; y++) {
+                Coords coords = new Coords(x, y);
+                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS,
+                      null, null, null, List.of(), (neighbours
+                            ? y == LABELED.getY() && Math.abs(x - LABELED.getX()) == 1
+                            : coords.equals(LABELED)) ? text : List.of()));
+            }
+        }
+        return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    private static void contrastFrame(GpuTerrain terrain, GpuAtmosphere atmosphere, BoardCamera camera,
+          BoardScene scene, float[] rgb, int ev) {
+        contrastFrame(terrain, atmosphere, camera, scene, rgb, ev, 1);
+    }
+
+    private static void contrastFrame(GpuTerrain terrain, GpuAtmosphere atmosphere, BoardCamera camera,
+          BoardScene scene, float[] rgb, int ev, float scale) {
+        contrastFrame(terrain, atmosphere, camera, scene, rgb, ev, scale, false);
+    }
+
+    private static void contrastFrame(GpuTerrain terrain, GpuAtmosphere atmosphere, BoardCamera camera,
+          BoardScene scene, float[] rgb, int ev, float scale, boolean stripe) {
+        // A diagnostic constant scene is cleared directly into the existing RGBA16F target. No second color path.
+        atmosphere.configure(new BoardAtmosphere.Settings(12, 0, 0, 1.5f, 0, ev));
+        Gdx.gl.glDepthMask(true);
+        ScreenUtils.clear(.4f, .2f, .6f, 1, true); // Distinct dock background, never an opaque black glyph.
+        atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, scale, 0);
+        ScreenUtils.clear(rgb[0] * GpuSceneRadiance.SCALE, rgb[1] * GpuSceneRadiance.SCALE,
+              rgb[2] * GpuSceneRadiance.SCALE, 1, true);
+        if (rgb.length == 6) {
+            // The second RGB triplet fills the right half, or one HDR texel column for the filter probe.
+            int width = atmosphere.depthTexture().getWidth(), height = atmosphere.depthTexture().getHeight();
+            Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
+            Gdx.gl.glScissor(width / 2, 0, stripe ? 1 : width - width / 2, height);
+            try {
+                ScreenUtils.clear(rgb[3] * GpuSceneRadiance.SCALE, rgb[4] * GpuSceneRadiance.SCALE,
+                      rgb[5] * GpuSceneRadiance.SCALE, 1, true);
+            } finally { Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST); }
+        }
+        atmosphere.end(camera.camera, terrain, scene, BOTTOM, null, false);
+        atmosphere.prepareContrast(camera.camera, scene, BOTTOM);
+    }
+
+    private static float[] contrastDepth() {
+        int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
+        var buffer = com.badlogic.gdx.utils.BufferUtils.newFloatBuffer(width * height);
+        Gdx.gl.glReadPixels(0, 0, width, height, GL20.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, buffer);
+        float[] values = new float[buffer.capacity()];
+        buffer.get(values);
+        return values;
+    }
+
+    /** Quantized old black/white glyph pixels define the independent mask; their mean classifies ink polarity. */
+    private static double contrastInk(Pixmap background, Pixmap reference, Pixmap actual, boolean ring) {
+        int target = ring ? 0xffffff : 0;
+        int count = 0;
+        long sum = 0;
+        for (int y = 0; y < reference.getHeight(); y++) {
+            for (int x = 0; x < reference.getWidth(); x++) {
+                int expected = reference.getPixel(x, y);
+                assertEquals(expected & 255, actual.getPixel(x, y) & 255, "Adaptive ink preserves every alpha sample");
+                if ((expected >>> 8) != target || expected == background.getPixel(x, y)) { continue; }
+                int observed = actual.getPixel(x, y);
+                assertTrue(Math.abs((observed >>> 24) - (observed >>> 16 & 255)) <= 1,
+                      "Neutral ink has no color cast beyond display quantization");
+                assertTrue(Math.abs((observed >>> 24) - (observed >>> 8 & 255)) <= 1,
+                      "Neutral ink has no color cast beyond display quantization");
+                count++;
+                sum += observed >>> 24;
+            }
+        }
+        assertTrue(count > 100, "The independent opaque glyph/ring mask must be substantial: " + count);
+        return sum / (double) count;
     }
 
     private record LegacyChunk(BitmapFontCache glyphs, BoundingBox bounds) { }
@@ -300,16 +874,24 @@ class GpuHexTextSmokeTest {
             Mesh mesh = field(page, "mesh");
             assertTrue(mesh.getNumVertices() <= 65_532);
             assertEquals(mesh.getNumVertices() / 4 * 6, mesh.getNumIndices());
-            float[] vertices = new float[mesh.getNumVertices() * 5];
+            assertEquals(36, mesh.getVertexSize(), "Position/color/UV, role, and one static owning hex");
+            float[] vertices = new float[mesh.getNumVertices() * 9];
             mesh.getVertices(vertices);
-            actual.addAll(vertices);
+            for (int vertex = 0; vertex < vertices.length; vertex += 9) {
+                actual.addAll(vertices, vertex, 5);
+                assertEquals(0, vertices[vertex + 5], "These authored pink glyphs and rings must retain their color");
+                for (int component = 6; component < 9; component++) {
+                    assertEquals(vertices[vertex / 36 * 36 + component], vertices[vertex + component],
+                          "Every glyph corner retains the same owning tile, independent of its position");
+                }
+            }
             short[] indices = new short[mesh.getNumIndices()];
             mesh.getIndices(indices);
             int[] quad = { 0, 1, 2, 2, 3, 0 };
             for (int i = 0; i < indices.length; i++) {
                 assertEquals(i / 6 * 4 + quad[i % 6], Short.toUnsignedInt(indices[i]), "SpriteBatch quad winding");
             }
-            for (int i = 0; i < vertices.length / 20; i++) { assertSame(textures.get(glyph++), field(page, "texture")); }
+            for (int i = 0; i < vertices.length / 36; i++) { assertSame(textures.get(glyph++), field(page, "texture")); }
         }
         assertEquals(expected.size, actual.size);
         for (int i = 0; i < expected.size; i++) {
@@ -561,7 +1143,10 @@ class GpuHexTextSmokeTest {
                     Pixmap covered = pixels();
                     try {
                         assertTrue(pink(expected) > 250);
-                        if (height == 0 && !isometric) {
+                        // The depth texture maps onto the window (its size can differ: the render resolution). Straight
+                        // down, the covering depth lies over each glyph's own hex, which HEIGHT pierces as its own
+                        // content; angled rays reach it over other hexes.
+                        if (!isometric) {
                             assertEquals(0, missing(expected, covered), "Every enabled overlay glyph must survive full occlusion");
                         } else {
                             assertEquals(0, pink(covered), "HEIGHT and angled ground labels must respect foreign scene depth");

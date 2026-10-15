@@ -138,7 +138,8 @@ final class GpuTerrainEffects implements Disposable {
         int width = Math.max(1, (depth.width + 1) / 2), height = Math.max(1, (depth.height + 1) / 2);
         if (buffer == null || buffer.getWidth() != width || buffer.getHeight() != height) {
             if (buffer != null) { buffer.dispose(); }
-            buffer = GpuAtmosphere.buffer(width, height, false);
+            // Integrate and upsample premultiplied linear radiance without clipping the emissive flame.
+            buffer = GpuHeatGlow.buffer(width, height);
             buffer.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
         }
         try {
@@ -222,7 +223,7 @@ final class GpuTerrainEffects implements Disposable {
         if (shader != null) { return; }
         try {
             shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU terrain fire/smoke",
-                  GpuShaderSource.read("terrain-effects.vert"), GpuShaderSource.read("terrain-effects.frag")), next -> shader = next);
+                  GpuShaderSource.read("terrain-effects.vert"), GpuEffectBatch.fragment("terrain-effects.frag")), next -> shader = next);
             composite = GpuShaderManager.program(() -> GpuAtmosphere.shader("terrain-effects-composite.frag"), next -> composite = next);
             quad = GpuAtmosphere.screenQuad();
             noise = GpuAtmosphere.noise();

@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.lang.ref.Reference;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -133,8 +134,10 @@ final class GpuHexMasks implements Disposable {
             values.bind();
             var buffer = BufferUtils.newFloatBuffer(parameters.length);
             buffer.put(parameters).flip();
-            Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL30.GL_RGBA32F, scene.width(), scene.height(), 0,
-                  GL20.GL_RGBA, GL20.GL_FLOAT, buffer);
+            try {
+                Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL30.GL_RGBA16F, scene.width(), scene.height(), 0,
+                      GL20.GL_RGBA, GL20.GL_FLOAT, buffer);
+            } finally { Reference.reachabilityFence(buffer); }
             color.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
             values.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
             return new Layer(color, values, chunks);

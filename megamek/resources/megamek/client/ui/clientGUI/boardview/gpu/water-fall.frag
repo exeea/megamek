@@ -8,16 +8,19 @@ layout(location = 0) out vec4 fragColor;
 // water-pool-functions
 
 void main() {
+    vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
+    vec3 surfaceNormal = normalize(v_normal);
+    surfaceVariance = normalVariance(dFdx(surfaceNormal), dFdy(surfaceNormal));
     vec4 habitat, mixture;
     waterHabitat(habitat, mixture);
     vec3 tint = waterTint(mixture);
     bool procedural = u_waterMaterial.y > 0.5;
     vec3 authored = procedural ? vec3(0.0) : texture(u_diffuseTexture, v_diffuseUV).rgb;
     WaterLighting illumination = waterLighting();
-    vec4 pool = waterPool(true, habitat, mixture, tint, authored, illumination);
+    vec4 pool = waterPool(true, geometric, habitat, mixture, tint, authored, illumination);
     float palette = u_waterMaterial.x, effects = u_waterEffects;
     vec2 position = v_cloudPosition.xy * u_rainScale;
-    vec3 surfaceNormal = normalize(v_normal), view = -viewDirection();
+    vec3 view = -viewDirection();
     vec3 scatter = waterScatter(mixture), froth = waterFroth(mixture, tint);
     float drop = v_color.r;    // 0 where the sheet leaves the pool, 1 where it lands
     float fray = v_color.g;    // 0 at a free side, 1 inside it and where the next fall carries on
@@ -53,34 +56,33 @@ void main() {
     float sides = smoothstep(0.05, 0.9, fray + (clumps - 0.5) * 0.5);
     // The white foot plunges whole into the boil it raises and only vanishes, raggedly, in its last metre.
     float dissolve = smoothstep(0.0, 0.6, metres - fallen - 0.8 * (1.0 - billows));
-    float sheetFresnel = 0.03 + 0.97 * pow(1.0 - clamp(dot(surfaceNormal, view), 0.0, 1.0), 5.0);
-    vec3 sheetSky = mix(u_rainHorizon, u_rainSky,
-          smoothstep(-0.1, 0.7, reflect(viewDirection(), surfaceNormal).z));
+    float sheetRoughness = mix(.16, .45, aerate);
+    // Preserve the geometric lip and volume-scattering normal; only the shared optical reflection frame is repaired.
+    vec3 reflectionNormal = shadingNormal(surfaceNormal, geometric, view);
+    sheetRoughness = antialiasedRoughness(sheetRoughness, surfaceVariance);
+    float sheetFresnel = specularAlbedo(max(0.0, dot(reflectionNormal, view)), sheetRoughness, vec3(.02037)).r;
+    vec3 sheetReflection = environmentSpecular(reflectionNormal, view, sheetRoughness, vec3(.02037),
+          illumination.ground, illumination.ambient);
     // Clear water pouring over the crest shows the pool's blue, lit through and mirroring the sky.
-    vec3 glass = procedural ? mix(waterShallows(palette), scatter, 0.35) * illumination.light * 1.1
-          : authored * tint * illumination.light;
-    sheetFresnel = max(sheetFresnel, 0.3);
-    glass = (glass * (1.0 - sheetFresnel) + sheetSky * sheetFresnel) * (0.85 + 0.35 * ribbons);
+    vec3 glassPigment = procedural ? mix(waterShallows(palette), scatter, 0.35) * 1.1 : authored * tint;
+    vec3 glass = materialReflectance(glassPigment * (0.85 + 0.35 * ribbons))
+          * illumination.light * (1.0 - sheetFresnel) + sheetReflection;
     vec3 fallLight = illumination.whiteLight;
 #if defined(lightingFlag) && numDirectionalLights > 0
     vec3 sun = -u_dirLights[0].direction;
     float facingSun = dot(surfaceNormal, sun);
     // White water scatters light through its thickness: faces turned to the sun glow, and light passing through
     // lifts the shaded side. The glassy crest mirrors the sun in a bright line.
-    fallLight = max(illumination.whiteLight, toDisplay(illumination.ambient + illumination.sunLinear * (0.3 * max(sun.z, 0.0)
-          + 0.7 * max(facingSun, 0.0) + 0.3 * max(-facingSun, 0.0))));
+    fallLight = max(illumination.whiteLight, illumination.ambient + illumination.sunlight * (0.3 * max(sun.z, 0.0)
+          + 0.7 * max(facingSun, 0.0) + 0.3 * max(-facingSun, 0.0)));
     // Only water still smooth mirrors the sun: bubbles scatter the glint away as the sheet aerates.
-    vec3 halfSun = normalize(view + sun);
     float glassy = (1.0 - aerate) * (1.0 - aerate);
-    glass += illumination.sunlight * (0.02 + 0.98 * pow(1.0 - clamp(dot(halfSun, view), 0.0, 1.0), 5.0))
-          * pow(max(dot(surfaceNormal, halfSun), 0.0), 60.0) * 2.5 * glassy * effects;
-    // The crest's rounded edge catches the light from above: a bright line along the lip.
-    glass += fallLight * (0.4 * smoothstep(0.25, 0.55, surfaceNormal.z)
-          * (1.0 - smoothstep(0.75, 0.97, surfaceNormal.z)));
+    glass += illumination.sunlight * float(dot(geometric, sun) > 0.0)
+          * surfaceReflectance(reflectionNormal, sun, view, sheetRoughness, vec3(.02037)) * glassy;
 #endif
     // Between the streaks the water itself turns milky and opaque as bubbles fill it.
     glass = mix(glass, froth * fallLight * 0.8, aerate * 0.5);
-    vec3 sheet = mix(glass, froth * fallLight * mix(0.85, 1.35, foamy), white);
+    vec3 sheet = mix(glass, materialReflectance(froth * mix(0.85, 1.35, foamy)) * fallLight, white);
     float cover = mix(mix(0.55, 0.85, aerate) + 0.15 * ribbons, 0.97, white) * sides * dissolve;
     // Still level where it leaves the pool it keeps the pool's look; once it curves over, the fall's own.
     float lipping = procedural && drop < 0.5 ? smoothstep(0.88, 0.995, surfaceNormal.z) : 0.0;

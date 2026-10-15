@@ -50,6 +50,7 @@ import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.DirectionalLightsAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
@@ -82,6 +83,7 @@ import megamek.common.board.Coords;
 final class GpuTerrain implements Disposable {
     static final int CHUNK_SIZE = TerrainLod.CHUNK_SIZE;
     static final float DEFAULT_TERRAIN_WEAR = 1f;
+    static final boolean DEFAULT_ELEVATION_GRADING = true;
     // Extra texels pay for the camera guard band without reducing the former 2048-map's world-space detail.
     static final int SHADOW_RESOLUTION = 2304;
     private static final float SHADOW_GUARD_SCALE = 1.1f;
@@ -121,9 +123,9 @@ final class GpuTerrain implements Disposable {
      * Classic build packs.
      */
     private record DecalSlot(Coords coords, int kind) { }
-    private final GpuTextures<GroundSlot> ground = new GpuTextures<>(true);
+    private final GpuTextures<GroundSlot> ground = new GpuTextures<>(true, true);
     private final BoardRim rims = new BoardRim();
-    private final GpuTextures<DecalSlot> decals = new GpuTextures<>();
+    private final GpuTextures<DecalSlot> decals = new GpuTextures<>(false, true);
     private final GpuTextures<Coords> tactical = new GpuTextures<>();
     private final GpuTerrainBatch terrainBatch = new GpuTerrainBatch(material -> material.has(Ground.TYPE)
           && !material.has(GpuLiquidShader.Frame.TYPE) && !material.has(GpuWaterShader.TYPE));
@@ -136,6 +138,8 @@ final class GpuTerrain implements Disposable {
           GpuCloudShadow.fragment(GpuUnitShader.linearFragment(DefaultShader.getDefaultFragmentShader()), false)) {
         private final DefaultShader.Config groundShader = new DefaultShader.Config(config.vertexShader,
               litFragment("terrain-normal.frag"));
+        private final DefaultShader.Config pitShader = new DefaultShader.Config(config.vertexShader,
+              GpuShaderSource.read("terrain-pit.frag"));
         private final DefaultShader.Config roadShader = new DefaultShader.Config(GpuRoads.vertex(config.vertexShader),
               litFragment("terrain-road.frag"));
         private final DefaultShader.Config sculptShader = new DefaultShader.Config(GpuSurfaceBlend.vertex(config.vertexShader),
@@ -147,7 +151,7 @@ final class GpuTerrain implements Disposable {
         private final DefaultShader.Config instancedPropShader = new DefaultShader.Config(
               GpuTreeInstances.vertex(config.vertexShader), config.fragmentShader);
         private final DefaultShader.Config vegetationShader = new DefaultShader.Config(GpuGroundCover.vertex(config.vertexShader),
-              rainFragment(GpuCloudShadow.fragment(GpuShaderSource.read("terrain-vegetation.frag"), true)));
+              GpuShaderSource.terrainLighting(GpuCloudShadow.fragment(GpuShaderSource.read("terrain-vegetation.frag"), true)));
         private final DefaultShader.Config biomeVegetationShader = new DefaultShader.Config(
               GpuBiomeVegetation.vertex(config.vertexShader), vegetationShader.fragmentShader);
         private final DefaultShader.Config bankTurfShader = new DefaultShader.Config(
@@ -176,6 +180,10 @@ final class GpuTerrain implements Disposable {
 
         @Override
         protected Shader createShader(Renderable renderable) {
+            boolean linearTexture = linearDiffuse(renderable.material);
+            int ordinaryFamily = GpuSurfaceBlend.ordinaryFamily(renderable.material);
+            boolean environmentArray = renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.TYPE)
+                  && (renderable.material.has(Sculpt.TYPE) || renderable.material.has(GpuBankTurf.Turf.TYPE));
             var water = renderable.material.get(GpuWaterShader.class, GpuWaterShader.TYPE);
             var waterMode = water == null ? null : water.mode;
             var magma = renderable.material.get(GpuMagmaShader.class, GpuMagmaShader.TYPE);
@@ -186,6 +194,7 @@ final class GpuTerrain implements Disposable {
                   ? renderable.material.has(Foliage.TYPE)
                         ? GpuTreeInstances.instanced(renderable) ? instancedFoliageShader : foliageShader
                         : GpuTreeInstances.instanced(renderable) ? instancedPropShader : config
+                  : renderable.material.has(Pit.TYPE) ? pitShader
                   : magma != null && !renderable.material.has(Sculpt.TYPE)
                         ? flowingMagma ? flowingMagmaShader : solidMagmaShader
                   : renderable.material.has(GpuBankTurf.Turf.TYPE) ? bankTurfShader
@@ -202,12 +211,22 @@ final class GpuTerrain implements Disposable {
                       case SPRAY -> sprayShader;
                       case CUT -> waterCutShader;
                   } : animated ? liquidShader : config;
+            // Only these programs use linearFragment; custom surfaces own their factor color contracts.
+            boolean modelColors = chosen == config || chosen == instancedPropShader || chosen == liquidShader;
             if (renderable.material.has(GpuSurfaceScars.Marking.TYPE)) {
                 chosen = new DefaultShader.Config(GpuSurfaceScars.vertex(chosen.vertexShader),
                       GpuSurfaceScars.fragment(chosen.fragmentShader, renderable.material.has(Sculpt.TYPE)));
             }
             String prefix = GpuCloudShadow.prefix(renderable, chosen)
+                  + (renderable.environment != null ? "#define sceneUnlitFlag\n" : "")
+                  + (environmentArray ? "#define environmentArrayFlag\n" : "")
+                  + (renderable.material.has(Sculpt.TYPE) || waterMode != null
+                        || renderable.material.has(GpuGroundCover.Wind.TYPE)
+                        || renderable.material.has(GpuBiomeVegetation.Kind.TYPE)
+                        || renderable.material.has(Impostor.TYPE)
+                        || renderable.material.has(GpuRoads.Coats.TYPE) ? "#define vertexDataFlag\n" : "")
                   + (renderable.material.has(GpuSurfaceScars.Marking.TYPE) ? "#define surfaceScarFlag\n" : "")
+                  + "#define SCULPT_MATERIAL_COUNT " + SCULPT_LAYERS.size() + "\n"
                   + "#define SURFACE_FAMILIES " + BoardScene.Surface.values().length + "\n"
                   + "#define LUNAR_FAMILY " + BoardScene.Surface.LUNAR.ordinal() + ".0\n"
                   + "#define FUNGUS_FAMILY " + BoardScene.Surface.FUNGUS.ordinal() + ".0\n"
@@ -217,10 +236,11 @@ final class GpuTerrain implements Disposable {
                   + "#define TROPICAL_FAMILY " + BoardScene.Surface.TROPICAL.ordinal() + ".0\n"
                   + "#define VOLCANIC_CRUST_FAMILY " + BoardSurfaceBlend.CRUST + ".0\n"
                   + "#define VOLCANIC_BANK_FAMILY " + BoardSurfaceBlend.BANK + ".0\n"
-                  + (renderable.material.has(GpuIceShader.TYPE) ? "#define iceFlag\n" : "")
+                  + GpuIceShader.prefix(renderable.material)
                   + (renderable.material.has(GpuBiomeVegetation.Kind.TYPE) ? "#define biomeVegetationFlag\n" : "")
                   + (renderable.material.has(GpuBankTurf.Turf.TYPE) ? "#define bankTurfFlag\n" : "")
                   + (renderable.material.has(GpuSurfaceBlend.TYPE) ? "#define terrainBlendFlag\n" : "")
+                  + (ordinaryFamily != -1 ? "#define VOLCANIC_ORDINARY_FAMILY " + ordinaryFamily + "\n" : "")
                   + (renderable.material.has(GpuMagmaShader.TYPE) ? "#define volcanicFlag\n" : "")
                   + (renderable.material.has(GpuRoads.TYPE) ? "#define roadFlag\n" : "")
                   + (renderable.material.has(GpuRoads.Mask.TYPE) ? "#define roadMaskFlag\n" : "")
@@ -230,10 +250,29 @@ final class GpuTerrain implements Disposable {
                   + (renderable.material.has(GpuRoads.Maps.TYPE) ? "#define roadMapsFlag\n" : "")
                   + (renderable.material.has(Impostor.TYPE) && GpuTreeInstances.instanced(renderable)
                         ? "#define impostorFlag\n" : "");
+            String fragment = renderable.material.has(GpuBuildingCutaway.TYPE)
+                  ? GpuBuildingCutaway.fragment(chosen.fragmentShader, "v_cloudPosition.z") : chosen.fragmentShader;
+            if (renderable.material.has(GpuTilesetTerrain.Grading.TYPE)) {
+                fragment = GpuTilesetTerrain.fragment(fragment);
+            }
+            // Unlit tactical pages share this provider but draw after scene composition in display units.
+            if (renderable.environment != null && waterMode != GpuWaterShader.Mode.DEPTH) {
+                fragment = GpuSceneRadiance.fragment(fragment);
+            }
+            String shaderName = "GPU terrain / " + (renderable.material.has(Sculpt.TYPE) ? "sculpt"
+                  : renderable.material.has(Pit.TYPE) ? "pit"
+                  : magma != null ? flowingMagma ? "magma-flow" : "magma-solid"
+                  : waterMode != null ? "water-" + waterMode : renderable.material.has(Ground.TYPE) ? "ground" : "model")
+                  + (renderable.material.has(GpuSurfaceBlend.TYPE) ? " blend" : "")
+                  + (ordinaryFamily != -1 ? " ordinary-" + ordinaryFamily : "")
+                  + (renderable.material.has(GpuMagmaShader.TYPE) ? " volcanic" : "")
+                  + (renderable.material.has(GpuSurfaceScars.Marking.TYPE) ? " scar" : "")
+                  + (GpuIceShader.mode(renderable.material) != 0 ? " ice-" + GpuIceShader.mode(renderable.material) : "")
+                  + (renderable.environment != null && renderable.environment.has(GpuCloudShadow.TYPE) ? " cloud" : "")
+                  + (renderable.environment != null && renderable.environment.shadowMap != null ? " shadow" : "")
+                  + (GpuTreeInstances.instanced(renderable) ? " instanced" : "");
             DefaultShader result = new DefaultShader(renderable, chosen,
-                  GpuGlsl.compile("GPU terrain", prefix, chosen.vertexShader,
-                        renderable.material.has(GpuBuildingCutaway.TYPE)
-                              ? GpuBuildingCutaway.fragment(chosen.fragmentShader, "v_cloudPosition.z") : chosen.fragmentShader)) {
+                  GpuGlsl.compile(shaderName, prefix, chosen.vertexShader, fragment)) {
                 private final int normalMapsUniform = register("u_normalMaps");
                 private final int iceNormalsUniform = register("u_iceNormals");
                 private final int magmaTimeUniform = register("u_magmaTime");
@@ -246,6 +285,7 @@ final class GpuTerrain implements Disposable {
                 private final int perspectiveUniform = register("u_perspective");
                 private final int rainNoiseUniform = register("u_rainNoise");
                 private final int terrainWearUniform = register("u_terrainWear");
+                private final int elevationGradingUniform = register("u_elevationGrading");
                 private final int groundDamageUniform = register("u_groundDamage");
                 private final int groundDamageSizeUniform = register("u_groundDamageSize");
                 private final int groundDamageGridUniform = register("u_groundDamageGrid");
@@ -286,22 +326,28 @@ final class GpuTerrain implements Disposable {
                 private final int biomeHexesUniform = register("u_biomeHexes");
                 private final int biomeBoardUniform = register("u_biomeBoard");
                 private final int iceBoardUniform = register("u_iceBoard");
-                private final int biomeSoilUniform = register("u_biomeSoil");
-                private final int biomeSoilNormalUniform = register("u_biomeSoilNormal");
+                private final int biomeSoilUniform = register("u_biomeSoilLayer");
                 private final int biomeSoilTileUniform = register("u_biomeSoilTile");
+                private final int roughnessLayersUniform = register("u_roughnessLayers");
+                // Upload before render-time texture-unit assignment, like the other shared maps.
+                private final GpuAssets.SculptRoughness sculptRoughness = program.hasUniform("u_sculptRoughness[0]")
+                      ? assets.sculptRoughness(SCULPT_LAYERS) : null;
+                private final float[] sculptNormalSpread = program.hasUniform("u_sculptNormalSpread[0]")
+                      ? assets.sculptNormalSpread(SCULPT_LAYERS) : null;
+                private int roughnessLayersUnit = -1;
                 private final int tundraLayersUniform = register("u_tundraLayers");
                 private final int tundraTilesUniform = register("u_tundraTiles");
                 private final Vector3 detailPosition = new Vector3();
                 private int rainNoiseUnit = -1, waterDetailUnit = -1, biomeUnit = -1;
                 private int groundDamageUnit = -1;
                 private final int[] waterOceanUnits = { -1, -1, -1 };
-                private int biomeSoilUnit = -1, biomeSoilNormalUnit = -1;
                 private int magmaOceanUnit = -1;
                 private int waterShapeUnit = -1;
                 private int waterExposureUnit = -1;
                 private int waterNearestUnit = -1;
                 private long globalsPass = -1;
                 private final long instances = instanceMask(renderable);
+                private final int iceMode = GpuIceShader.mode(renderable.material);
 
                 @Override
                 public boolean canRender(Renderable other) {
@@ -311,6 +357,7 @@ final class GpuTerrain implements Disposable {
                     // libGDX binds only the instance attributes of the renderable a shader was created for: crop rows
                     // must not reuse a reed shader, which never binds a_coverRow and would draw rows as clumps.
                     return waterMode == (otherWater == null ? null : otherWater.mode)
+                          && sameMaterialVariant(other.material, iceMode, linearTexture, ordinaryFamily)
                           && flowingMagma == (otherMagma != null && otherMagma.flowing())
                           // A shadow map changes the compiled samplers without changing the environment's mask.
                           && shadowMap == (other.environment != null && other.environment.shadowMap != null)
@@ -345,12 +392,15 @@ final class GpuTerrain implements Disposable {
                     set(vegetationPhaseUniform, vegetationPhase);
                     set(metreUniform, BoardRelief.detailMetres(1));
                     set(coverHexWidthUniform, BoardGeometry.width());
+                    // Scene pixels: the render resolution's target, not the window's.
                     set(coverPixelsUniform, BoardGeometry.width() * Math.abs(camera.projection.val[Matrix4.M11])
-                          * camera.viewportHeight * .5f * Gdx.graphics.getBackBufferHeight() / Math.max(1f, Gdx.graphics.getHeight()));
+                          * camera.viewportHeight * .5f * Gdx.graphics.getBackBufferHeight() * BoardCamera.renderScale
+                          / Math.max(1f, Gdx.graphics.getHeight()));
                     set(gridShadeUniform, BoardGeometry.tuning().gridShade());
                     set(levelUniform, BoardGeometry.level());
                     set(clayUniform, clay ? 1f : 0f);
                     set(terrainWearUniform, clay ? 0f : terrainWear);
+                    set(elevationGradingUniform, !clay && elevationGrading ? 1f : 0f);
                     // The Tactical View shows no craters or ground damage (setFluffHidden).
                     boolean damaged = combatScars && !clay && !fluffHidden && groundDamage.marks() > 0
                           && groundDamage.texture() != null;
@@ -361,14 +411,25 @@ final class GpuTerrain implements Disposable {
                     set(waterExposureMapUniform, waterExposure.mapping[0], waterExposure.mapping[1],
                           waterExposure.mapping[2], waterExposure.mapping[3]);
                     set(wavePixelsUniform, BoardGeometry.width() * Math.abs(camera.projection.val[Matrix4.M11])
-                          * Gdx.graphics.getBackBufferHeight() * .5f);
+                          * Gdx.graphics.getBackBufferHeight() * BoardCamera.renderScale * .5f);
                     float waveStart = Math.max(8, TerrainLod.tuning().threshold(2) * 1.1f);
                     set(waveFadeUniform, waveStart, Math.max(50, waveStart + 1));
                     if (has(biomeHexesUniform)) {
                         set(biomeBoardUniform, (float) biomes.width(), (float) biomes.height());
                         set(iceBoardUniform, (float) biomes.iceWidth(), (float) biomes.iceHeight());
                     }
-                    if (has(biomeSoilUniform)) { set(biomeSoilTileUniform, assets.sculptTile("earth") * .45f); }
+                    if (has(biomeSoilUniform)) {
+                        set(biomeSoilUniform, 2f * SCULPT_LAYERS.indexOf("earth"));
+                        set(biomeSoilTileUniform, assets.sculptTile("earth") * .45f);
+                    }
+                    if (sculptRoughness != null) {
+                        float[] metadata = sculptRoughness.metadata();
+                        program.setUniform2fv("u_sculptRoughness[0]", metadata, 0, metadata.length);
+                    }
+                    if (sculptNormalSpread != null) {
+                        program.setUniform4fv("u_sculptNormalSpread[0]", sculptNormalSpread, 0,
+                              sculptNormalSpread.length);
+                    }
                     if (has(tundraLayersUniform)) {
                         set(tundraLayersUniform, (float) SCULPT_LAYERS.indexOf("tundra-earth") * 2,
                               (float) SCULPT_LAYERS.indexOf("tundra-fungus") * 2,
@@ -379,8 +440,8 @@ final class GpuTerrain implements Disposable {
                     // BaseShader skips uniforms absent from a program. All lit surfaces share the same rain clock.
                     set(rainScaleUniform, 1f / BoardGeometry.width());
                     set(rainTimeUniform, clock);
-                    Color sky = atmosphere == null ? Color.GRAY : atmosphere.sky();
-                    Color horizon = atmosphere == null ? Color.LIGHT_GRAY : atmosphere.horizon();
+                    Color sky = atmosphere == null ? GpuColor.linear(Color.GRAY) : atmosphere.sky();
+                    Color horizon = atmosphere == null ? GpuColor.linear(Color.LIGHT_GRAY) : atmosphere.horizon();
                     set(skyUniform, sky.r, sky.g, sky.b);
                     set(horizonUniform, horizon.r, horizon.g, horizon.b);
                     if (has(waterOceanScaleUniform)) {
@@ -398,21 +459,25 @@ final class GpuTerrain implements Disposable {
                 }
 
                 @Override
+                protected void bindMaterial(Attributes attributes) {
+                    super.bindMaterial(attributes);
+                    GpuUnitShader.bindSceneBlending(context, attributes);
+                }
+
+                @Override
                 public void render(Renderable part, Attributes attributes) {
                     // Chunk/material textures can evict these shared textures from the binder's LRU slots.
                     // Touch them for each draw so their sampler uniforms never point at another chunk's field.
                     // BaseShader.set skips uniforms absent from this shader; resident textures are reused.
+                    if (sculptRoughness != null) {
+                        roughnessLayersUnit = bindShared(roughnessLayersUniform, sculptRoughness.maps(), roughnessLayersUnit);
+                    }
                     rainNoiseUnit = bindShared(rainNoiseUniform, rainNoise, rainNoiseUnit);
                     if (has(groundDamageUniform)) {
                         groundDamageUnit = bindShared(groundDamageUniform, groundDamage.binding(), groundDamageUnit);
                     }
                     waterDetailUnit = bindShared(waterDetailUniform, waterDetail, waterDetailUnit);
                     if (has(biomeHexesUniform)) { biomeUnit = bindShared(biomeHexesUniform, biomes.texture(), biomeUnit); }
-                    if (has(biomeSoilUniform)) {
-                        var soil = assets.sculpt("earth");
-                        biomeSoilUnit = bindShared(biomeSoilUniform, soil.color(), biomeSoilUnit);
-                        biomeSoilNormalUnit = bindShared(biomeSoilNormalUniform, soil.normal(), biomeSoilNormalUnit);
-                    }
                     for (int cascade = 0; cascade < waterOceanUniforms.length; cascade++) {
                         Texture waves = ocean.waves(cascade);
                         waterOceanUnits[cascade] = bindShared(waterOceanUniforms[cascade],
@@ -453,7 +518,16 @@ final class GpuTerrain implements Disposable {
                     set(rainDetailUniform, detail.rain());
                 }
             };
+            if (modelColors) {
+                GpuUnitShader.registerMaterialColors(result, renderable.environment != null || linearTexture);
+            }
             GpuCloudShadow.register(result);
+            GpuEnvironmentLighting.register(result, environmentArray ? SCULPT_LAYERS.size() * 2 : -1);
+            if (!environmentArray && renderable.environment != null) {
+                var lighting = renderable.environment.get(GpuEnvironmentLighting.class, GpuEnvironmentLighting.TYPE);
+                // Texture uploads must finish before local setters begin assigning the draw's sampler bindings.
+                if (lighting != null) { lighting.texture(); }
+            }
             GpuLavaLighting.register(result);
             GpuModelMaterial.register(result);
             GpuBuildingCutaway.register(result);
@@ -528,6 +602,13 @@ final class GpuTerrain implements Disposable {
                     if (foliage != null) { target.set(id, foliage.value); }
                 }
             });
+            result.register("u_foliageProxy", new BaseShader.LocalSetter() {
+                @Override
+                public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                    String role = renderable.material.id;
+                    target.set(id, "canopy-cutout".equals(role) || "canopy-snow-cutout".equals(role) ? 1f : 0f);
+                }
+            });
             result.register("u_impostorLift", new BaseShader.LocalSetter() {
                 @Override
                 public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
@@ -570,7 +651,7 @@ final class GpuTerrain implements Disposable {
                 public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                     SculptLayers maps = attributes.get(SculptLayers.class, SculptLayers.TYPE);
                     if (maps != null) { target.set(id, maps.texture); }
-                    else if (attributes.has(GpuBankTurf.Turf.TYPE)) { target.set(id, assets.sculptArray(SCULPT_LAYERS)); }
+                    else if (attributes.has(GpuBankTurf.Turf.TYPE)) { target.set(id, terrainLayers()); }
                 }
             });
             for (var family : BoardScene.Surface.values()) {
@@ -629,6 +710,7 @@ final class GpuTerrain implements Disposable {
     /** Every tree of the board, drawn instanced; each pass gathers the trees of the chunks it draws. */
     private final GpuTreeInstances trees;
     private final Environment environment = new Environment();
+    private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
     private final GpuLavaLighting lavaLighting = new GpuLavaLighting();
     private final List<Chunk> chunks = new ArrayList<>();
     // At most four in-flight chunks and eight replaced chunks. Half the cores, at most eight, build terrain: each
@@ -694,6 +776,7 @@ final class GpuTerrain implements Disposable {
     private final GpuSurfaceScars surfaceScars = new GpuSurfaceScars(groundDamage);
     private long scarSurfaceRevision;
     private float terrainWear = DEFAULT_TERRAIN_WEAR;
+    private boolean elevationGrading = DEFAULT_ELEVATION_GRADING;
     private boolean combatScars = GpuGroundDamage.COMBAT_SCARS;
     private final GpuPropBatch propBatch = new GpuPropBatch();
     private final GpuFungus fungus = new GpuFungus();
@@ -796,64 +879,20 @@ final class GpuTerrain implements Disposable {
     /** A custom lit surface's fragment shader: its source with cloud shadows and the shared functions. */
     static String litFragment(String file) {
         String source = GpuShaderSource.read(file);
-        if (source.contains("// terrain-ground-color-functions")) {
-            source = source.replace("// terrain-ground-color-functions", GpuShaderSource.read("terrain-ground-color.glsl"));
-        }
-        if (source.contains("// terrain-projection-functions")) {
-            source = source.replace("// terrain-projection-functions", GpuShaderSource.read("terrain-detail.glsl")
-                  + GpuShaderSource.read("terrain-projection.glsl"));
-        }
-        if (source.contains("// water-uniforms")) {
-            source = source.replace("// water-uniforms", GpuShaderSource.read("water-uniforms.glsl"));
-        }
         // Compose shared lighting first so cloud modulation reaches the actual lighting function, not just main.
-        return GpuIceShader.fragment(GpuCloudShadow.fragment(rainFragment(source), true));
+        return GpuIceShader.fragment(GpuCloudShadow.fragment(GpuShaderSource.terrainLighting(source), true));
     }
 
-    /** Every custom surface shares the light model, rain field, lighting, geometry shadows and water optics. */
-    private static String rainFragment(String source) {
-        String functions = GpuShaderSource.read("light-model.glsl");
-        functions += GpuShaderSource.read("rain-surface.glsl");
-        functions += GpuShaderSource.read("lava-lighting.glsl");
-        functions += GpuShaderSource.read("surface-lighting.glsl");
-        functions += GpuShaderSource.read("terrain-meadow.glsl");
-        functions += GpuShaderSource.read("terrain-patterns.glsl");
-        functions += GpuShaderSource.read("water-optics.glsl");
-        functions += GpuShaderSource.read("terrain-hexes.glsl");
-        if (source.contains("bankTurfFlag")) {
-            functions += "\n#ifdef bankTurfFlag\n" + GpuShaderSource.read("terrain-ground-color.glsl")
-                  + GpuShaderSource.read("terrain-bank-color.glsl") + "\n#endif\n";
-        }
-        if (source.contains("// sculpt-material-functions") || source.contains("// biome-water-functions")) {
-            functions += GpuShaderSource.read("terrain-biome-mask.glsl");
-        }
-        if (source.contains("// sculpt-material-functions")) {
-            functions += GpuShaderSource.read("terrain-concrete.glsl");
-            functions += "\n#ifdef volcanicFlag\n" + GpuMagmaShader.functions(false) + "\n#endif\n";
-            functions += GpuShaderSource.read("terrain-materials.glsl");
-            functions += "#define GROUND_DAMAGE_FRAGMENT\n" + GpuGroundDamage.shaderSource();
-            functions += GpuShaderSource.read("scar-material.glsl");
-            functions += GpuShaderSource.read("terrain-damage.glsl");
-            functions += GpuShaderSource.read("terrain-tundra.glsl");
-            functions += GpuShaderSource.read("terrain-biome.glsl");
-        }
-        if (source.contains("// magma-solid-functions") || source.contains("// magma-flow-functions")) {
-            functions += GpuShaderSource.read("terrain-detail.glsl");
-            functions += GpuMagmaShader.functions(source.contains("// magma-flow-functions"));
-            functions += GpuShaderSource.read("magma-lighting.glsl");
-        }
-        if (source.contains("// ground-surface-functions")) {
-            functions += GpuShaderSource.read("ground-surface.glsl");
-        }
-        if (source.contains("// water-lighting-functions")) {
-            functions += GpuShaderSource.read("water-lighting.glsl");
-        }
-        if (source.contains("// water-pool-functions")) {
-            functions += GpuShaderSource.read("liquid-flow.glsl");
-            functions += GpuShaderSource.read("water-interactions.glsl");
-            functions += GpuShaderSource.read("water-wave.glsl") + GpuShaderSource.read("water-pool.glsl");
-        }
-        return source.replace("void main() {", "// terrain-lighting-functions\n" + functions + "\nvoid main() {");
+    private static boolean linearDiffuse(Material material) {
+        var diffuse = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
+        return diffuse != null && GpuColorTexture.isColor(diffuse.textureDescription.texture);
+    }
+
+    /** Non-mask distinctions shared by live shaders and their sculpt/scar warmup samples. */
+    private static boolean sameMaterialVariant(Material material, int iceMode, boolean linearTexture,
+          int ordinaryFamily) {
+        return GpuIceShader.mode(material) == iceMode && linearDiffuse(material) == linearTexture
+              && GpuSurfaceBlend.ordinaryFamily(material) == ordinaryFamily;
     }
 
     /** The per-instance attribute layout, which DefaultShader.canRender does not compare; 0 when not instanced. */
@@ -906,6 +945,8 @@ final class GpuTerrain implements Disposable {
         this.liquidShaderAnimation = liquidShaderAnimation;
         this.proceduralWater = proceduralWater;
         environment.set(lavaLighting);
+        environmentLighting.set(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS));
+        environment.set(environmentLighting);
         borrowedAssets = borrowed != null;
         assets = borrowedAssets ? borrowed : new GpuAssets();
         trees = new GpuTreeInstances((name, level) -> foliage(assets.lodModel(name, level)));
@@ -1089,6 +1130,16 @@ final class GpuTerrain implements Disposable {
         }
     }
 
+    /** Ultra-sublevel caps have no lighting response; their distinct mask isolates the black shader. */
+    private static final class Pit extends FloatAttribute {
+        static final long TYPE = register("boardPit");
+
+        Pit() { super(TYPE, 1); }
+
+        @Override
+        public Pit copy() { return new Pit(); }
+    }
+
     /** Bridge asphalt uses the road's world UVs, even when its model instance rotates or changes length. */
     private static final class BridgeDeck extends FloatAttribute {
         static final long TYPE = register("boardBridgeDeck");
@@ -1150,12 +1201,12 @@ final class GpuTerrain implements Disposable {
 
     /**
      * Whether the terrain shader ladder ({@code batch}'s createShader) draws this material with the plain or foliage
-     * shader, which have instanced variants; ground, sculpt, water, magma, liquid and vegetation shaders do not. The
+     * shader, which have instanced variants; pit, ground, sculpt, water, magma, liquid and vegetation shaders do not. The
      * ladder decides by this predicate first, so instancing and shader choice cannot disagree.
      */
     private static boolean instancedShader(Material material) {
         long mask = material.getMask();
-        if ((mask & (GpuBankTurf.Turf.TYPE | GpuBiomeVegetation.Kind.TYPE | GpuGroundCover.Wind.TYPE)) != 0
+        if ((mask & (Pit.TYPE | GpuBankTurf.Turf.TYPE | GpuBiomeVegetation.Kind.TYPE | GpuGroundCover.Wind.TYPE)) != 0
               || (mask & GpuMagmaShader.TYPE) != 0 && (mask & Sculpt.TYPE) == 0) { return false; }
         return (mask & Foliage.TYPE) != 0
               || (mask & (Sculpt.TYPE | Ground.TYPE | GpuWaterShader.TYPE | GpuLiquidShader.Frame.TYPE)) == 0;
@@ -1175,7 +1226,7 @@ final class GpuTerrain implements Disposable {
      * The four materials of each surface family, by ordinal: ground on open tops, debris on rims, cliff feet, talus
      * and slopes, the wall on cliffs and the rock kit, and the mantle that covers low steps of grassland (earth),
      * snowfields (snow) and pavement (cast concrete) and caps their high cliffs. Names refer to
-     * {@code textures/sculpt}.
+     * {@code textures/terrain/surfaces}.
      */
     private static final String[][] SCULPT_MATERIALS = {
           { "grass", "scree", "granite-contact", "soil-contact" },
@@ -1193,7 +1244,7 @@ final class GpuTerrain implements Disposable {
     };
     private static final List<String> SCULPT_LAYERS = java.util.stream.Stream.concat(
           Arrays.stream(SCULPT_MATERIALS).flatMap(Arrays::stream),
-          java.util.stream.Stream.of("tundra-crust", "tundra-earth", "tundra-fungus"))
+          java.util.stream.Stream.of("tundra-crust", "tundra-earth", "tundra-fungus", "earth"))
           .distinct().toList();
 
     /**
@@ -1752,7 +1803,8 @@ final class GpuTerrain implements Disposable {
         boolean targetColumns = requested == null ? installedColumns : requested.columns();
         if (target == null || !sameBoard(target, scene) || !sameTerrain(target.tiles(), scene.tiles(), columns)
               || !sameSettings(targetSettings, settings) || targetColumns != columns
-              || targetSettings.geometry().unitScale() != settings.geometry().unitScale()) {
+              || targetSettings.geometry().unitScale() != settings.geometry().unitScale()
+                    && scene.tiles().stream().anyMatch(GpuTerrain::hasLimb)) {
             // Coalesce continuous painting into one latest snapshot without starving the build already underway.
             // Board/geometry-setting and graphics changes still cancel work whose result no longer applies.
             if (requested == null || !sameBoard(target, scene) || !sameSettings(targetSettings, settings)
@@ -1865,6 +1917,12 @@ final class GpuTerrain implements Disposable {
     GpuSurfaceScars surfaceScars() { return surfaceScars; }
     static boolean sculpted(Material material) { return material.has(Sculpt.TYPE); }
 
+    /** Static opaque sculpt scatter can share a page; exclude dynamic masks, ice and liquid additions. */
+    static boolean batchableSculpt(Material material) {
+        return material.getMask() == (TextureAttribute.Diffuse | IntAttribute.CullFace | Sculpt.TYPE
+              | Ground.TYPE | SculptTiles.TYPE | SculptLayers.TYPE);
+    }
+
     void impact(BoardScene scene, GpuGroundDamage.Impact impact) {
         groundDamage.update(scene);
         surfaceScars.update(scene);
@@ -1873,6 +1931,8 @@ final class GpuTerrain implements Disposable {
 
     /** Live material intensity, independent of combat history and terrain geometry. */
     void setTerrainWear(float intensity) { terrainWear = MathUtils.clamp(intensity, 0f, 1f); }
+
+    void setElevationGrading(boolean enabled) { elevationGrading = enabled; }
 
     void setCombatScars(boolean scars) { combatScars = scars; }
 
@@ -1925,7 +1985,7 @@ final class GpuTerrain implements Disposable {
                 Coords at = tile.coords();
                 if (nextFloor != previousFloor && (at.getX() == 0 || at.getY() == 0
                       || at.getX() == scene.width() - 1 || at.getY() == scene.height() - 1)) { changedTiles.add(at); }
-                if (changedLimbScale && tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.LIMB)) {
+                if (changedLimbScale && hasLimb(tile)) {
                     changedTiles.add(tile.coords());
                 }
                 BoardScene.Tile before = beforeScene.tiles().get(index);
@@ -2218,7 +2278,8 @@ final class GpuTerrain implements Disposable {
               : editing && (requested != null || rebuild != null) ? 12_000_000
               : installedColumns != columns || atlasColumns != columns ? 8_000_000 : 2_000_000);
         drainRetired(deadline);
-        if (requested == null && rebuild == null && detailJob == null) { return false; }
+        // A settled board still needs the camera scan in advanceBuild to start a new detail job after zooming.
+        if (camera == null && requested == null && rebuild == null && detailJob == null) { return false; }
         do {
             if (advanceBuild(camera, deadline)) { return true; }
             if (detailJob != null && !detailJob.ready()
@@ -2643,13 +2704,17 @@ final class GpuTerrain implements Disposable {
         });
     }
 
-    /** Retain one layout per sculpt variant, including ice/volcanic flags discovered in actual chunk materials. */
+    /** Retain one layout per sculpt or ice variant discovered in actual chunk materials. */
     private void prepareTerrainMaterial(Material material, VertexAttributes attributes) {
-        if (GpuGroundDamage.COMBAT_SCARS && !material.has(GpuSurfaceScars.Marking.TYPE)) {
+        // Terrain scar receivers are sculpted; transparent ice and plain ground do not acquire scar variants.
+        if (GpuGroundDamage.COMBAT_SCARS && material.has(Sculpt.TYPE)
+              && !material.has(GpuSurfaceScars.Marking.TYPE)) {
             prepareTerrainMaterial(GpuSurfaceScars.material(material), GpuSurfaceScars.attributes(attributes));
         }
         for (Renderable sample : terrainMaterialSamples) {
             if (sample.material.getMask() == material.getMask()
+                  && sameMaterialVariant(material, GpuIceShader.mode(sample.material), linearDiffuse(sample.material),
+                        GpuSurfaceBlend.ordinaryFamily(sample.material))
                   && sample.meshPart.mesh.getVertexAttributes().equals(attributes)) { return; }
         }
         Renderable sample = new Renderable();
@@ -2712,6 +2777,11 @@ final class GpuTerrain implements Disposable {
         detailPixelsPerUnit = Float.NaN;
         shadowDirty = true;
         updateLight(coverScene.light());
+    }
+
+    /** Fallen limbs are the only terrain props whose geometry follows the unit scale setting. */
+    private static boolean hasLimb(BoardScene.Tile tile) {
+        return tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.LIMB);
     }
 
     /** Whether a build from {@code next} would draw the same as {@code tiles}'; {@code columns} for a Classic build. */
@@ -2973,6 +3043,21 @@ final class GpuTerrain implements Disposable {
             Material ice = GpuIceShader.lake(material(assets.ice().color(), true));
             ice.set(new Ground(1));
             liquid.addTriangles(ice, meshes -> drawnIce(meshes, surface));
+            if (!surface.waterfalls.isEmpty()) {
+                Material frozenFall = GpuIceShader.waterfall(material(assets.ice().color(), true));
+                frozenFall.set(new Ground(1), IntAttribute.createCullFace(GL20.GL_BACK));
+                for (var frozen : surface.frozenFalls()) {
+                    var frozenFaces = frozen.faces();
+                    var frozenNormals = wallNormals(frozenFaces);
+                    liquid.addTriangles(frozenFall, meshes -> {
+                        for (int index = 0; index < frozenFaces.size(); index++) {
+                            iceTriangle(meshes.get(), frozenFaces.get(index), point -> Color.WHITE, frozenNormals,
+                                  frozen.uv(), index * 6);
+                        }
+                    });
+                    for (var face : frozenFaces) { chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c()); }
+                }
+            }
         }
         for (BoardSurface.Face face : sculpted ? List.<BoardSurface.Face>of() : surface.faces) {
             if (face.scatter()) { continue; }
@@ -2986,33 +3071,26 @@ final class GpuTerrain implements Disposable {
             }
             // Flat road hexes keep their ground path, but their rocks use the same geology as sculpted hexes.
             if (magma == null && face.finish() == BoardSurface.Finish.OUTCROP) { outcrops.add(face); continue; }
-            boolean artwork = !tile.liquid().molten() && (face.finish() == BoardSurface.Finish.TOP
-                  || face.finish() == BoardSurface.Finish.ICE || face.finish() == BoardSurface.Finish.SHORE);
             BoardScene.Tile land = face.landEdge() < 0 ? null
                   : scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(face.landEdge())));
             BoardScene.Tile cover = land != null && !land.liquid().present() ? land : tile;
-            boolean physical = !tile.liquid().volcanic() && face.finish() != BoardSurface.Finish.ICE
+            // Keep explicit special top/neighbor artwork. Other body faces use Enhanced materials.
+            boolean physical = !tile.liquid().volcanic()
                   && (cover.detailedGround() || face.finish() == BoardSurface.Finish.BED
-                  || face.finish() == BoardSurface.Finish.BANK || face.finish() == BoardSurface.Finish.RIM);
+                  || face.finish() == BoardSurface.Finish.BANK || face.finish() == BoardSurface.Finish.RIM
+                  || (face.finish() != BoardSurface.Finish.TOP && (land == null || land.liquid().present())));
             if (magma != null) {
                 smoothTop.add(face);
             } else if (physical) {
-                // Non-sculpted ground is the graded road/approach mesh; water already uses sculpt().
+                // Use the existing physical family mapping on the retained road/approach/body geometry.
                 smoothTop.add(face);
             } else if (land != null && !land.liquid().present()) {
                 TextureRegion bankArt = ground.region(new GroundSlot(land.coords(), false));
                 solid.add(groundMaterial(bankArt.getTexture(), scene, land),
                       mesh -> bank(mesh, tile.coords(), face, land.coords(), bankArt));
             } else {
-                Texture texture = artwork ? top.getTexture() : assets.material(tile.liquid().molten() ? "terrain/rock"
-                      : face.finish() == BoardSurface.Finish.BED ? "terrain/water_bed"
-                      : tile.liquid().present() ? "terrain/sand" : tile.surface().wall);
-                solid.add(artwork ? groundMaterial(texture, scene, tile) : material(texture, false),
-                      mesh -> surface(mesh, tile.coords(), face, artwork ? top : null, 0));
-            }
-            if (face.finish() == BoardSurface.Finish.SHORE && !physical && magma == null) {
-                overlay.add(material(assets.material(tile.liquid().molten() ? "terrain/rock" : "terrain/sand"), true),
-                      mesh -> shore(mesh, tile, face));
+                solid.add(groundMaterial(top.getTexture(), scene, tile),
+                      mesh -> surface(mesh, tile.coords(), face, top, 0));
             }
         }
         for (var group : byFamily(surface, outcrops).entrySet()) {
@@ -3035,7 +3113,7 @@ final class GpuTerrain implements Disposable {
         }
         if (!surface.retainingPanels.isEmpty()) {
             // Precast retaining walls share the tunnel portals' concrete.
-            solid.add(material(assets.material("tunnel-concrete"), false), mesh -> {
+            solid.add(material(assets.material("scenery/tunnel-concrete"), false), mesh -> {
                 for (var face : surface.retainingPanels) { panel(mesh, face); }
             });
             for (var face : surface.retainingPanels) { chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c()); }
@@ -3068,14 +3146,14 @@ final class GpuTerrain implements Disposable {
                   mesh -> sculptedFaces(mesh, surface, wallFaces, Float.NaN, scene, surfaces));
         }
         if (!bridgeSupports.isEmpty()) {
-            solid.addTriangles(material(assets.material("sculpt/concrete"), false), meshes -> {
+            solid.addTriangles(material(assets.material("terrain/surfaces/concrete"), false), meshes -> {
                 for (var face : bridgeSupports) {
                     var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
                     bridgeFace(meshes.get(), face.a(), face.b(), face.c(), normal, Color.WHITE);
                 }
             });
         }
-        if (!surface.water.isEmpty()) {
+        if (!surface.water.isEmpty() || !surface.waterFaces.isEmpty()) {
             BoardLiquid.Textures source = tile.liquid().textures(tile.waterDepth(), tile.elevation());
             BoardFlow.Current current = prepared.currents().getOrDefault(tile.coords(), BoardFlow.Current.STILL);
             GpuWaterShader.Field field = tile.liquid().molten() ? chunk.lavaField : chunk.waterField;
@@ -3122,7 +3200,7 @@ final class GpuTerrain implements Disposable {
                 }
                 chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c());
             }
-            if (!surface.waterfalls.isEmpty()) {
+            if (!tile.frozen() && !surface.waterfalls.isEmpty()) {
                 Material fall = liquidMaterial(scene, surface, source, true, field);
                 if (animatedFrames) { animations.put(fall.id, new LiquidSurface(fall, source, true, BoardFlow.Current.STILL)); }
                 Material back = null, spray = null;
@@ -3277,11 +3355,18 @@ final class GpuTerrain implements Disposable {
                 // Road approaches can extend into a hex that has no road terrain of its own.
                 if (!tile.liquid().present() && surface.ramps == 0
                       && !(tile.detailedGround() && feature.asset().equals("scatter-grass"))) {
-                    if (build.scatterMaterial == null) {
-                        build.scatterMaterial = new Material(ColorAttribute.createDiffuse(Color.WHITE),
-                              TextureAttribute.createDiffuse(assets.scatter()));
+                    Material material;
+                    if (feature.asset().equals("scatter-plant")) {
+                        // The same authored leaf/stem material as field shrubs, with unchanged scatter placement.
+                        material = sculptMaterial(tile.surface());
+                    } else {
+                        if (build.scatterMaterial == null) {
+                            build.scatterMaterial = new Material(ColorAttribute.createDiffuse(Color.WHITE),
+                                  TextureAttribute.createDiffuse(assets.scatter()), new GpuLinearColors());
+                        }
+                        material = build.scatterMaterial;
                     }
-                    scatter.add(build.scatterMaterial, mesh -> GpuScatter.build(mesh, tile, surface, feature));
+                    scatter.add(material, mesh -> GpuScatter.build(mesh, tile, surface, feature));
                     chunk.scatterDiameter = Math.max(chunk.scatterDiameter, GpuScatter.diameter(feature));
                     chunk.bounds.ext(BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()),
                           (tile.elevation() + feature.height()) * BoardGeometry.level());
@@ -3334,10 +3419,10 @@ final class GpuTerrain implements Disposable {
                     // Terrain scenery shares the ground's lighting and weather response.
                     material.set(new Ground(.15f));
                     if (material.id.equals("rubble-concrete")) {
-                        material.set(TextureAttribute.createNormal(assets.material("sculpt/concrete-normal")));
+                        material.set(TextureAttribute.createNormal(assets.materialData("terrain/surfaces/concrete-normal")));
                     } else if (material.id.equals("geyser-rock")) {
-                        material.set(TextureAttribute.createNormal(assets.material(feature.asset().endsWith("magma")
-                              ? "sculpt/volcano-basalt-normal" : "sculpt/rock-normal")));
+                        material.set(TextureAttribute.createNormal(assets.materialData(feature.asset().endsWith("magma")
+                              ? "terrain/surfaces/volcano-basalt-normal" : "terrain/surfaces/rock-normal")));
                     } else if (material.id.equals("geyser-lava")) {
                         Material lava = GpuMagmaShader.material(assets, GpuMagmaShader.LAVA, null);
                         if (lava != null) { for (Attribute attribute : lava) { material.set(attribute.copy()); } }
@@ -3385,7 +3470,7 @@ final class GpuTerrain implements Disposable {
                 routePiers = build.chunk.columns ? List.of() : BoardBridgeFooting.piers(scene, tile, feature, lod, surfaces);
                 if (!routePiers.isEmpty()) {
                     var shape = BoardBridge.shape(BoardScene.Surface.CONCRETE, tile.elevation(), routePiers);
-                    Material concrete = material(assets.material("sculpt/concrete"), false);
+                    Material concrete = material(assets.material("terrain/surfaces/concrete"), false);
                     bridgeFooting(solid, shape, concrete, concrete, null);
                     chunk.bounds.ext(shape.bounds());
                 }
@@ -3965,7 +4050,7 @@ final class GpuTerrain implements Disposable {
             chunk.waterRenderables = GpuTerrainDepth.snapshot(chunk.water);
             for (Array<Renderable> layer : List.of(chunk.terrainRenderables, chunk.scatterRenderables, chunk.waterRenderables)) {
                 for (Renderable part : layer) {
-                    if (part.material.has(Sculpt.TYPE)) {
+                    if (part.material.has(Sculpt.TYPE) || part.material.has(GpuIceShader.TYPE)) {
                         prepareTerrainMaterial(part.material, part.meshPart.mesh.getVertexAttributes());
                     }
                 }
@@ -4022,7 +4107,7 @@ final class GpuTerrain implements Disposable {
             if (GpuGroundDamage.COMBAT_SCARS && !chunk.columns) {
                 for (var layer : List.of(chunk.sharedProps, chunk.propRenderables, chunk.decorationRenderables)) {
                     for (Renderable part : layer) {
-                        if (instancedShader(part.material) && !part.material.has(Foliage.TYPE) && !part.material.has(BlendingAttribute.Type)) {
+                        if (instancedShader(part.material) && scarReceiver(part)) {
                             prepareTerrainMaterial(GpuSurfaceScars.material(part.material),
                                   GpuSurfaceScars.attributes(part.meshPart.mesh.getVertexAttributes()));
                         }
@@ -4121,11 +4206,14 @@ final class GpuTerrain implements Disposable {
         return result;
     }
 
-    private static GpuSurfaceScars.Source scarSource(GpuSurfaceScars.Receiver receiver, Renderable view) {
+    private static boolean scarReceiver(Renderable view) {
         var blend = view.material.get(BlendingAttribute.class, BlendingAttribute.Type);
-        if (view.material.has(Foliage.TYPE) || blend != null && blend.blended) { return null; }
-        return view.meshPart.primitiveType != GL20.GL_TRIANGLES || view.bones != null ? null
-              : new GpuSurfaceScars.Source(receiver, view);
+        return !view.material.has(Foliage.TYPE) && (blend == null || !blend.blended)
+              && view.meshPart.primitiveType == GL20.GL_TRIANGLES && view.bones == null;
+    }
+
+    private static GpuSurfaceScars.Source scarSource(GpuSurfaceScars.Receiver receiver, Renderable view) {
+        return scarReceiver(view) ? new GpuSurfaceScars.Source(receiver, view) : null;
     }
 
     /** Ground cover of the installed tile, planted on its support at its chunk's detail; null when it grows none. */
@@ -4335,8 +4423,8 @@ final class GpuTerrain implements Disposable {
         Material deck = roadMaterial(GpuRoads.texture(bridge.kind()).substring("roads/".length()), false);
         deck.set(GpuIceShader.road(deck, scene, tile));
         deck.set(new BridgeDeck());
-        Material concrete = material(assets.material("sculpt/concrete"), false);
-        Material steel = bridge.truss() ? new Material(ColorAttribute.createDiffuse(Color.WHITE)) : null;
+        Material concrete = material(assets.material("terrain/surfaces/concrete"), false);
+        Material steel = bridge.truss() ? new Material(ColorAttribute.createDiffuse(Color.WHITE), new GpuLinearColors()) : null;
         bridgeFooting(solid, shape, deck, concrete, steel);
     }
 
@@ -4349,7 +4437,13 @@ final class GpuTerrain implements Disposable {
             if (part == BoardBridge.Part.STEEL && (steel == null || shape.facets().stream().noneMatch(f -> f.part() == part))) {
                 continue;
             }
-            solid.addTriangles(part == BoardBridge.Part.TOP ? deck : part == BoardBridge.Part.STEEL ? steel : structure, meshes -> {
+            Material material = part == BoardBridge.Part.TOP ? deck : part == BoardBridge.Part.STEEL ? steel : structure;
+            if (part == BoardBridge.Part.STEEL) {
+                // The generated facets already carry the span's linear steel colour.
+                material = material.copy();
+                material.set(ColorAttribute.createDiffuse(Color.WHITE), new GpuLinearColors());
+            }
+            solid.addTriangles(material, meshes -> {
                 for (var face : shape.facets()) {
                     var drawn = face.part() == BoardBridge.Part.TOP || face.part() == BoardBridge.Part.STEEL && steel != null
                           ? face.part() : BoardBridge.Part.STRUCTURE;
@@ -4420,7 +4514,7 @@ final class GpuTerrain implements Disposable {
                 // The mask page stands in as the diffuse texture only to give the coat its texture coordinates.
                 material = material(mask.textureDescription.texture, true);
                 material.set(new Ground(.65f));
-                material.set(new GpuRoads.Coats(roadMaps, assets.sculptArray(SCULPT_LAYERS)));
+                material.set(new GpuRoads.Coats(roadMaps, terrainLayers()));
                 coat = GpuRoads.coat(maps, patch, "dirt".equals(road) ? .15f : .65f);
             } else if (road != null) {
                 material = roadMaterial(road, true);
@@ -4491,7 +4585,7 @@ final class GpuTerrain implements Disposable {
         material.set(new Sculpt(family.ordinal()), new Ground(family == BoardScene.Surface.SNOW ? -1
               : groundResponse(family)));
         material.set(new SculptTiles(sculptTiles(family)),
-              new SculptLayers(assets.sculptArray(SCULPT_LAYERS), sculptLayers(family)));
+              new SculptLayers(terrainLayers(), sculptLayers(family)));
         return material;
     }
 
@@ -4534,7 +4628,7 @@ final class GpuTerrain implements Disposable {
             tiles[i] = sculptTiles(ordinary);
             layers[i] = sculptLayers(ordinary);
         }
-        material.set(new GpuSurfaceBlend(assets.sculptArray(SCULPT_LAYERS), ids, responses, tiles, layers));
+        material.set(new GpuSurfaceBlend(terrainLayers(), ids, responses, tiles, layers));
         if (palette.volcanic() && !material.has(GpuMagmaShader.TYPE)) {
             Material volcanic = GpuMagmaShader.material(assets, GpuMagmaShader.CRUST, null);
             if (volcanic != null) { for (Attribute attribute : volcanic) { material.set(attribute.copy()); } }
@@ -4868,7 +4962,7 @@ final class GpuTerrain implements Disposable {
         }
     }
 
-    private static MeshPartBuilder.VertexInfo sculptVertex(Vector3 p, BoardRelief.Shade shade, float shore, BoardSurface surface) {
+    static MeshPartBuilder.VertexInfo sculptVertex(Vector3 p, BoardRelief.Shade shade, float shore, BoardSurface surface) {
         if (shade == null) {
             return vertex(p, Vector3.Z, 0, 0, new Color(1, 64 / 255f, 1, 1));
         }
@@ -4882,8 +4976,9 @@ final class GpuTerrain implements Disposable {
         }
         float kind = switch (shade.kind()) {
             case GROUND, SUBMERGED_CLIFF -> 0;
-            // .25 is the earlier procedural shrub format; .3 carries authored RGB in UV/alpha.
+            // .25 is the earlier shrub format; .3/.35 carry authored wood/leaf RGB in UV/alpha.
             case PLANT -> .3f;
+            case LEAF -> .35f;
             case CLIFF -> Float.isFinite(shade.projection()) ? .45f : .5f;
             case PIT_WALL -> .6f;
             case PIT -> .75f;
@@ -4996,7 +5091,8 @@ final class GpuTerrain implements Disposable {
 
     /** Opaque black, without terrain pigment, specular response or transparency: the pit cannot reveal the sky. */
     static Material pitMaterial() {
-        return new Material("pit", ColorAttribute.createDiffuse(Color.BLACK), IntAttribute.createCullFace(GL20.GL_NONE));
+        return new Material("pit", new Pit(), ColorAttribute.createDiffuse(Color.BLACK),
+              IntAttribute.createCullFace(GL20.GL_NONE));
     }
 
     private static Material material(Texture texture, boolean blend) {
@@ -5036,11 +5132,13 @@ final class GpuTerrain implements Disposable {
 
     /** Magma glows in its own frames; hazardous liquid is tinted green. The Tactical View's liquids share this. */
     static void liquidColour(Material material, BoardLiquid liquid, Texture frame) {
+        material.set(new GpuLinearColors());
         if (liquid.molten()) {
-            material.set(ColorAttribute.createDiffuse(0.35f, 0.35f, 0.35f, 1));
-            material.set(TextureAttribute.createEmissive(frame), ColorAttribute.createEmissive(0.65f, 0.65f, 0.65f, 1));
+            material.set(ColorAttribute.createDiffuse(GpuColor.linear(.35f, .35f, .35f)));
+            material.set(TextureAttribute.createEmissive(frame),
+                  ColorAttribute.createEmissive(GpuColor.linear(.65f, .65f, .65f)));
         } else if (liquid.kind() == BoardLiquid.Kind.HAZARDOUS) {
-            material.set(ColorAttribute.createDiffuse(0.4f, 1, 0.12f, 1));
+            material.set(ColorAttribute.createDiffuse(GpuColor.linear(.4f, 1, .12f)));
         }
     }
 
@@ -5164,12 +5262,24 @@ final class GpuTerrain implements Disposable {
     }
 
     private static void iceTriangle(MeshPartBuilder mesh, BoardSurface.Face face, Function<Vector3, Color> colors) {
+        iceTriangle(mesh, face, colors, Map.of());
+    }
+
+    private static void iceTriangle(MeshPartBuilder mesh, BoardSurface.Face face, Function<Vector3, Color> colors,
+          Map<Vector3, Vector3> normals) {
+        iceTriangle(mesh, face, colors, normals, null, 0);
+    }
+
+    private static void iceTriangle(MeshPartBuilder mesh, BoardSurface.Face face, Function<Vector3, Color> colors,
+          Map<Vector3, Vector3> normals, float[] uv, int offset) {
         Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
         float repeat = 96 * BoardGeometry.hexScale();
         MeshPartBuilder.VertexInfo[] corners = new MeshPartBuilder.VertexInfo[3];
         Vector3[] points = { face.a(), face.b(), face.c() };
         for (int i = 0; i < 3; i++) {
-            corners[i] = vertex(points[i], normal, points[i].x / repeat, points[i].y / repeat, colors.apply(points[i]));
+            float u = uv == null ? points[i].x / repeat : uv[offset + i * 2];
+            float v = uv == null ? points[i].y / repeat : uv[offset + i * 2 + 1];
+            corners[i] = vertex(points[i], normals.getOrDefault(points[i], normal), u, v, colors.apply(points[i]));
         }
         mesh.triangle(corners[0], corners[1], corners[2]);
     }
@@ -5188,20 +5298,6 @@ final class GpuTerrain implements Disposable {
         // Mirror only the texture sample into the neighbor: geometry and the waterline stay unchanged.
         Vector3 sample = new Vector3(point).mulAdd(outward, -2 * new Vector3(point).sub(edge).dot(outward));
         return topVertex(sample, land, art, Color.WHITE).setPos(point).setNor(normal);
-    }
-
-    private static void shore(MeshPartBuilder mesh, BoardScene.Tile tile, BoardSurface.Face face) {
-        Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
-        mesh.triangle(shoreVertex(tile, face.a(), normal), shoreVertex(tile, face.b(), normal),
-              shoreVertex(tile, face.c(), normal));
-    }
-
-    private static MeshPartBuilder.VertexInfo shoreVertex(BoardScene.Tile tile, Vector3 point, Vector3 normal) {
-        float wet = Math.max(0, Math.min(1, (tile.elevation() * BoardGeometry.level() - point.z) / BoardGeometry.hexScale()));
-        // Sand appears gradually across the bank and darkens slightly at the waterline.
-        float shade = 1 - wet * 0.12f;
-        return surfaceVertex(point, tile.coords(), normal, null, 0.035f * BoardGeometry.hexScale())
-              .setCol(shade, shade, shade, wet);
     }
 
     private static void grid(MeshPartBuilder mesh, Coords coords, float z, TextureRegion region) {
@@ -5362,6 +5458,22 @@ final class GpuTerrain implements Disposable {
 
     Environment environment() {
         return environment;
+    }
+
+    /** A borrowed section view meters the environment actually published by applyLight, including manual light. */
+    float lightAdaptation() {
+        var ambient = environment.get(ColorAttribute.class, ColorAttribute.AmbientLight);
+        Color ground = new Color(ambient == null ? Color.BLACK : ambient.color);
+        var directions = environment.get(DirectionalLightsAttribute.class, DirectionalLightsAttribute.Type);
+        if (directions != null) {
+            for (var source : directions.lights) {
+                float incidence = Math.max(0, -source.direction.z);
+                ground.r += source.color.r * incidence;
+                ground.g += source.color.g * incidence;
+                ground.b += source.color.b * incidence;
+            }
+        }
+        return BoardAtmosphere.adaptation(ground);
     }
 
     BoundingBox roofBounds(Coords coords) {
@@ -5725,7 +5837,9 @@ final class GpuTerrain implements Disposable {
                         Renderable part = pool.obtain();
                         part.worldTransform.idt(); part.material = range.material();
                         part.meshPart.set("editor-section", range.mesh(), range.offset(), range.count(), GL20.GL_TRIANGLES);
-                        if (part.material.has(Sculpt.TYPE)) { prepareTerrainMaterial(part.material, range.mesh().getVertexAttributes()); }
+                        if (part.material.has(Sculpt.TYPE) || part.material.has(GpuIceShader.TYPE)) {
+                            prepareTerrainMaterial(part.material, range.mesh().getVertexAttributes());
+                        }
                         out.add(part);
                     }
                 }, environment);
@@ -6383,7 +6497,16 @@ final class GpuTerrain implements Disposable {
     /** Isolate authored frame interpolation from surface deformation in native reference comparisons. */
     void setWaterEffects(boolean enabled) { waterEffects = enabled; }
 
+    private TextureArray terrainLayers() {
+        TextureArray array = assets.sculptArray(SCULPT_LAYERS);
+        environmentLighting.terrainArray(array, SCULPT_LAYERS.size() * 2);
+        return array;
+    }
+
     private void applyLight() {
+        BoardAtmosphere.Lighting lighting = atmosphere != null ? atmosphere
+              : BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
+        environmentLighting.set(lighting);
         if (light == null && atmosphere == null) {
             if (shadow != null) {
                 environment.remove(shadow);
@@ -6393,12 +6516,12 @@ final class GpuTerrain implements Disposable {
             }
             environment.shadowMap = null;
             // Linear light: 0.7 shows albedo as 0.85 would in display space.
-            environment.set(ColorAttribute.createAmbientLight(0.7f, 0.7f, 0.7f, 1));
+            var ambient = ColorAttribute.createAmbientLight(0.7f, 0.7f, 0.7f, 1);
+            environment.set(ambient);
+            environmentLighting.set(ambient.color);
             return;
         }
         // Without an atmosphere, the scene's light direction takes the default atmosphere's light.
-        BoardAtmosphere.Lighting lighting = atmosphere != null ? atmosphere
-              : BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
         if (!lighting.hasDirectLight()) {
             // Moonless and pitch-black nights retain ambient readability, but have no directional source.
             if (shadow != null) { environment.remove(shadow); }
@@ -6550,6 +6673,9 @@ final class GpuTerrain implements Disposable {
             shadowTransforms.get(index).set(unit.transform);
             shadowPoses.add(shadowPose(unit));
         }
+        // The previous frame's screen passes disable depth writes. libGDX's shadow.begin() clears before
+        // ModelBatch restores that state, so enable writes now or old depth survives beside cleared packed color.
+        Gdx.gl.glDepthMask(true);
         int buffers = GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT;
         if (shadowDirty) { boardShadowValid = false; }
         boolean boardShadowCurrent = boardWide && boardShadowValid && sameFit(boardShadowFit, lightCamera);
@@ -6802,6 +6928,7 @@ final class GpuTerrain implements Disposable {
         decals.dispose();
         tactical.dispose();
         batch.dispose();
+        environmentLighting.dispose();
         depthBatch.dispose();
         if (staticShadow != null) { staticShadow.dispose(); }
         if (boardShadow != null) { boardShadow.dispose(); }

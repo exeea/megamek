@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 
@@ -101,6 +102,8 @@ class GpuTacticalOverlaysTest {
         when(Gdx.files.classpath(anyString())).thenAnswer(call -> new Lwjgl3Files().classpath(call.getArgument(0)));
         Gdx.graphics = mock(Graphics.class);
         Gdx.gl = mock(GL20.class);
+        AtomicInteger textures = new AtomicInteger();
+        when(Gdx.gl.glGenTexture()).thenAnswer(call -> textures.incrementAndGet());
         Gdx.gl20 = Gdx.gl;
         Gdx.input = mock(Input.class);
         when(source.record()).thenReturn(mock(GpuUnitRecord.class));

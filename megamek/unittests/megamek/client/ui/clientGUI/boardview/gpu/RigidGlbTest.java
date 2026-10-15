@@ -96,8 +96,16 @@ class RigidGlbTest {
     }
 
     @Test
-    void preservesRigidHierarchyWhileConvertingAxesAndLinearColorsWithoutOpenGl() throws Exception {
-        var data = RigidGlb.load(file(document(), false));
+    void preservesRigidHierarchyAndLinearColorsWhileConvertingAxesWithoutOpenGl() throws Exception {
+        var document = document();
+        ((ObjectNode) document.get("materials").get(0).get("pbrMetallicRoughness"))
+              .putArray("baseColorFactor").add(.02).add(.18).add(.5).add(.4);
+        var data = RigidGlb.load(file(document, false));
+        var factor = data.materials.first().diffuse;
+        assertEquals(.02f, factor.r, 1e-7);
+        assertEquals(.18f, factor.g, 1e-7);
+        assertEquals(.5f, factor.b, 1e-7);
+        assertEquals(.4f, factor.a, 1e-7);
         var node = data.nodes.first().children[0];
         assertEquals("arm", node.id);
         assertEquals("paint", node.parts[0].materialId);
@@ -112,7 +120,7 @@ class RigidGlbTest {
         assertEquals(-3, vertices[1]);
         assertEquals(2, vertices[2]);
         assertEquals(1, vertices[5]);
-        assertEquals(.73664694f, vertices[6], 1e-6);
+        assertEquals(128 / 255f, vertices[6], 1e-6);
         assertEquals(1, vertices[7]);
         assertEquals(0, vertices[8]);
         assertEquals(.25f, vertices[10]);
@@ -350,7 +358,10 @@ class RigidGlbTest {
     }
 
     FileHandle embedded(String format) throws Exception {
-        byte[] bytes = encodedImage(format);
+        return embedded(format, encodedImage(format));
+    }
+
+    FileHandle embedded(String format, byte[] bytes) throws Exception {
         var document = levels();
         int view = document.get("bufferViews").size();
         ((com.fasterxml.jackson.databind.node.ArrayNode) document.get("bufferViews")).addObject()
@@ -413,6 +424,7 @@ class RigidGlbTest {
         RigidGlb.recolour(silver, megamek.common.board.BoardDecoration.Colours.of("#b8b8b8"));
         float[] before = own.meshes.first().vertices, after = silver.meshes.first().vertices;
         var paint = com.badlogic.gdx.graphics.Color.valueOf(slots.getFirst().colour());
+        paint.r = linear(paint.r); paint.g = linear(paint.g); paint.b = linear(paint.b);
         int painted = 0;
         for (int vertex = 0; vertex < own.slots.length; vertex++) {
             int at = vertex * RigidGlb.STRIDE + 6;
@@ -420,7 +432,8 @@ class RigidGlbTest {
                 assertArrayEquals(java.util.Arrays.copyOfRange(before, at, at + 4), java.util.Arrays.copyOfRange(after, at, at + 4));
             } else if (Math.abs(before[at] - paint.r) + Math.abs(before[at + 1] - paint.g) + Math.abs(before[at + 2] - paint.b) < .003f) {
                 // The default paint itself becomes the replacement, to within an 8-bit step.
-                assertEquals(0xb8 / 255f, after[at], .5f / 255); assertEquals(0xb8 / 255f, after[at + 2], .5f / 255);
+                assertEquals(linear(0xb8 / 255f), after[at], .5f / 255);
+                assertEquals(linear(0xb8 / 255f), after[at + 2], .5f / 255);
                 painted++;
             }
         }
@@ -456,7 +469,7 @@ class RigidGlbTest {
                     float colour = shared.vertices[at + 6 + channel];
                     if (slot >= 0 && packed[slot] >= 0) {
                         int rgb = Math.round(packed[slot]);
-                        colour = srgb(shared.vertices[at + RigidGlb.STRIDE + channel] * linear((rgb >> (16 - 8 * channel) & 255) / 255f));
+                        colour = shared.vertices[at + RigidGlb.STRIDE + channel] * linear((rgb >> (16 - 8 * channel) & 255) / 255f);
                         slotted++;
                     }
                     assertEquals(expected[vertex * RigidGlb.STRIDE + 6 + channel], colour, 1e-5f, entry.getKey() + " vertex " + vertex);
@@ -471,10 +484,6 @@ class RigidGlbTest {
         return display <= .04045f ? display / 12.92f : (float) Math.pow((display + .055) / 1.055, 2.4);
     }
 
-    private static float srgb(float linear) {
-        return linear <= .0031308f ? 12.92f * linear : (float) (1.055 * Math.pow(linear, 1 / 2.4) - .055);
-    }
-
     /** A tree's winter form is its bare file read with the snow material variant: snow cards, untinted crown. */
     @Test
     void aWinterFormIsTheBareTreesSnowVariant() {
@@ -486,7 +495,7 @@ class RigidGlbTest {
         var snow = RigidGlb.loadLods(source, root.toPath());
         com.badlogic.gdx.graphics.g3d.model.data.ModelMaterial crown = null;
         for (var material : snow.getFirst().materials) { if (material.id.equals("canopy-snow-cutout")) { crown = material; } }
-        assertTrue(crown.textures.first().fileName.replace('\\', '/').contains("textures/foliage/conifer-snow-cutout.png"));
+        assertTrue(crown.textures.first().fileName.replace('\\', '/').contains("textures/vegetation/conifer-snow-cutout.png"));
         float[] bareVertices = bare.getFirst().meshes.first().vertices, snowVertices = snow.getFirst().meshes.first().vertices;
         assertEquals(bareVertices.length, snowVertices.length, "The winter form keeps the bare geometry");
         boolean tinted = false;

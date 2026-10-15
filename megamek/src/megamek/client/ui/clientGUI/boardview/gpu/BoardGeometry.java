@@ -397,7 +397,23 @@ final class BoardGeometry {
                     struck = face;
                 }
             }
-            for (BoardSurface.Side side : finished == null ? surface.waterfalls : finished.waterfalls()) {
+            if (tile.frozen()) {
+                // Installed pointer queries borrow the completed draw groups.
+                for (var fall : finished == null ? surface.frozenFalls() : finished.frozenFalls()) {
+                    for (BoardSurface.Face face : fall.faces()) {
+                        if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
+                              && nearer(ray.origin.dst2(hit), nearest, candidate.order(), nearestOrder)) {
+                            nearest = ray.origin.dst2(hit);
+                            nearestOrder = candidate.order();
+                            result = tile.coords();
+                            hardSurface = false;
+                            struck = face;
+                        }
+                    }
+                }
+            }
+            for (BoardSurface.Side side : tile.frozen() ? List.<BoardSurface.Side>of()
+                  : finished == null ? surface.waterfalls : finished.waterfalls()) {
                 Vector3 lowerA = new Vector3(side.a().x, side.a().y, side.lowA());
                 Vector3 lowerB = new Vector3(side.b().x, side.b().y, side.lowB());
                 float distance = Float.POSITIVE_INFINITY;

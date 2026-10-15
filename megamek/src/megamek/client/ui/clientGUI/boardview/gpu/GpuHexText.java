@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -23,11 +24,11 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.BitmapFontCache;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Align;
+import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
@@ -41,14 +42,19 @@ import megamek.common.board.Coords;
 final class GpuHexText implements Disposable {
     /** Four vertices per glyph, with unsigned 16-bit indices. */
     private static final int PAGE_GLYPHS = 16_383;
-    private static final int GLYPH_FLOATS = 20;
+    private static final int GLYPH_FLOATS = 36;
     private record Plane(int elevation, float headroom, boolean overlay) { }
     /** A chunk's glyph vertices, one array per page of the outline font and of the text font, in drawing order. */
     private record Chunk(List<FloatArray> outlines, List<FloatArray> pages, BoundingBox bounds) {
-        static void add(List<FloatArray> pages, BitmapFontCache glyphs) {
+        static void add(List<FloatArray> pages, BitmapFontCache glyphs, float contrast, BoardScene.Tile tile) {
             for (int page = 0; page < glyphs.getPageCount(); page++) {
                 if (pages.size() == page) { pages.add(new FloatArray()); }
-                pages.get(page).addAll(glyphs.getVertices(page), 0, glyphs.getVertexCount(page));
+                float[] vertices = glyphs.getVertices(page);
+                for (int at = 0; at < glyphs.getVertexCount(page); at += 5) {
+                    pages.get(page).addAll(vertices, at, 5);
+                    pages.get(page).add(contrast);
+                    pages.get(page).add(tile.coords().getX(), tile.coords().getY(), tile.elevation());
+                }
             }
         }
     }
@@ -84,6 +90,7 @@ final class GpuHexText implements Disposable {
           .thenComparingDouble(Plane::headroom));
     private ShaderProgram shader;
     private final Matrix4 transform = new Matrix4();
+    private final IntBuffer viewport = BufferUtils.newIntBuffer(4);
     private List<BoardScene.Tile> tiles;
     private BitmapFont font;
     private BitmapFont outline;
@@ -102,9 +109,7 @@ final class GpuHexText implements Disposable {
 
     private static ShaderProgram program() {
         String vertex = GpuShaderSource.read("hex-text.vert");
-        String fragment = GpuShaderSource.read("hex-text.frag")
-              .replace("// GROUND_LAYER", GpuShaderSource.read("ground-layer.glsl"))
-              .replace("// CAMERA_DEPTH", GpuShaderSource.read("camera-depth.glsl"));
+        String fragment = GpuShaderSource.read("hex-text.frag");
         return GpuGlsl.compile("GPU hex text", vertex, fragment);
     }
 
@@ -151,6 +156,9 @@ final class GpuHexText implements Disposable {
                           .ext(centerX + BoardGeometry.width(), centerY + BoardGeometry.width(), z + 1);
                     font.getData().setScale(label.font().getSize2D() / GpuBoardSkin.FONT_RESOLUTION);
                     int argb = label.argb();
+                    // Preserve deliberately colored labels and their outline. Neutral ink adapts without rebuilding.
+                    boolean neutral = (argb >>> 16 & 255) == (argb >>> 8 & 255)
+                          && (argb >>> 8 & 255) == (argb & 255);
                     font.setColor(((argb >>> 16) & 255) / 255f, ((argb >>> 8) & 255) / 255f,
                           (argb & 255) / 255f, ((argb >>> 24) & 255) / 255f);
                     GlyphLayout layout = new GlyphLayout(font, label.text());
@@ -176,11 +184,11 @@ final class GpuHexText implements Disposable {
                         rings.clear();
                         rings.addText(new GlyphLayout(outline, label.text(), ringColor, 0, Align.left, false),
                               left - GpuBoardSkin.OUTLINE * outline.getData().scaleX, top);
-                        Chunk.add(chunk.outlines(), rings);
+                        Chunk.add(chunk.outlines(), rings, neutral ? -1 : 0, tile);
                     }
                     glyphs.clear();
                     glyphs.addText(layout, left, top);
-                    Chunk.add(chunk.pages(), glyphs);
+                    Chunk.add(chunk.pages(), glyphs, neutral ? 1 : 0, tile);
                 }
             }
         } finally {
@@ -306,7 +314,9 @@ final class GpuHexText implements Disposable {
         Mesh mesh = new Mesh(true, glyphs * 4, indices.length,
               new VertexAttribute(VertexAttributes.Usage.Position, 2, ShaderProgram.POSITION_ATTRIBUTE),
               new VertexAttribute(VertexAttributes.Usage.ColorPacked, 4, ShaderProgram.COLOR_ATTRIBUTE),
-              new VertexAttribute(VertexAttributes.Usage.TextureCoordinates, 2, ShaderProgram.TEXCOORD_ATTRIBUTE + "0"));
+              new VertexAttribute(VertexAttributes.Usage.TextureCoordinates, 2, ShaderProgram.TEXCOORD_ATTRIBUTE + "0"),
+              new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_contrast"),
+              new VertexAttribute(VertexAttributes.Usage.Generic, 3, "a_hex"));
         try {
             mesh.setVertices(vertices.items, 0, vertices.size);
             mesh.setIndices(indices);
@@ -333,6 +343,12 @@ final class GpuHexText implements Disposable {
     }
 
     void render(SpriteBatch batch, BoardCamera boardCamera, Texture depth, Texture unitDepth, int bottom) {
+        render(batch, boardCamera, depth, unitDepth, bottom, null);
+    }
+
+    /** Prepared per-hex ink is borrowed for this draw; glyph geometry and depth/occlusion policy are unchanged. */
+    void render(SpriteBatch batch, BoardCamera boardCamera, Texture depth, Texture unitDepth, int bottom,
+          GpuAtmosphere atmosphere) {
         if (groups.isEmpty()) { return; }
         Camera camera = boardCamera.camera;
         ShaderProgram previous = batch.getShader();
@@ -352,6 +368,8 @@ final class GpuHexText implements Disposable {
             } else {
                 Gdx.gl.glDisable(GL20.GL_BLEND);
             }
+            shader.setUniformf("u_contrastEnabled", 0);
+            if (!tactical && atmosphere != null) { atmosphere.bindContrast(shader, 3); }
             depth.bind(1);
             if (unitDepth != null) { unitDepth.bind(2); }
             Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
@@ -362,7 +380,10 @@ final class GpuHexText implements Disposable {
             shader.setUniformf("u_projectionDepth", camera.projection.val[Matrix4.M22], camera.projection.val[Matrix4.M23],
                   camera.projection.val[Matrix4.M32], camera.projection.val[Matrix4.M33]);
             shader.setUniformMatrix("u_inverseView", camera.invProjectionView);
-            shader.setUniformf("u_viewport", 0, HdpiUtils.toBackBufferY(bottom), depth.getWidth(), depth.getHeight());
+            // The destination's viewport: the scene's depth captures can have another size (the render resolution).
+            viewport.clear();
+            Gdx.gl.glGetIntegerv(GL20.GL_VIEWPORT, viewport);
+            shader.setUniformf("u_viewport", viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
             shader.setUniformf("u_groundBoard", 0, 0, BoardGeometry.width(), BoardGeometry.height());
             for (var group : groups.entrySet()) {
                 float z = group.getKey().elevation() * BoardGeometry.level();

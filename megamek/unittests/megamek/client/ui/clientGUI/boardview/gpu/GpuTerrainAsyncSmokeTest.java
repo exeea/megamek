@@ -17,7 +17,6 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.utils.ScreenUtils;
 import jdk.jfr.Event;
 import jdk.jfr.Name;
 import jdk.jfr.StackTrace;
@@ -56,6 +55,7 @@ class GpuTerrainAsyncSmokeTest {
             config.setForegroundFPS(0);
             new Lwjgl3Application(new ApplicationAdapter() {
                 GpuTerrain terrain;
+                GpuSceneTestOutput outputFrame;
                 final BoardCamera camera = new BoardCamera();
                 BoardScene scene;
                 int phase, quiet, warmup;
@@ -67,6 +67,7 @@ class GpuTerrainAsyncSmokeTest {
                 @Override
                 public void create() {
                     terrain = new GpuTerrain();
+                    outputFrame = new GpuSceneTestOutput();
                     scene = fixture.source.takeFrame().scene();
                     camera.resize(1280, 900);
                     camera.setIsometric(true);
@@ -96,19 +97,19 @@ class GpuTerrainAsyncSmokeTest {
                         frame.refineMs = (System.nanoTime() - start) / 1e6;
                         boolean ready = terrain.ready(scene);
                         try (var ignored = TerrainSettings.use(terrain.settings())) {
-                            ScreenUtils.clear(.2f, .26f, .31f, 1, true);
                             if (ready) {
                                 terrain.animate(0, List.of());
                                 long stage = System.nanoTime();
                                 terrain.renderShadows(camera.camera, List.of());
                                 frame.shadowsMs = (System.nanoTime() - stage) / 1e6;
+                                outputFrame.begin(.2f, .26f, .31f, 1);
                                 stage = System.nanoTime();
                                 terrain.render(camera.camera, false);
                                 frame.opaqueMs = (System.nanoTime() - stage) / 1e6;
                                 stage = System.nanoTime();
                                 terrain.renderTransparent(camera.camera);
                                 frame.transparentMs = (System.nanoTime() - stage) / 1e6;
-                            }
+                            } else { outputFrame.begin(.2f, .26f, .31f, 1); }
                         }
                         frame.end();
                         double elapsed = (System.nanoTime() - start) / 1e6;
@@ -160,11 +161,12 @@ class GpuTerrainAsyncSmokeTest {
                         if (screenshots != null) {
                             // Let incremental page caches settle before comparing images; exclude this from timings.
                             for (int i = 0; i < 20; i++) {
-                                ScreenUtils.clear(.2f, .26f, .31f, 1, true);
                                 terrain.renderShadows(camera.camera, List.of());
+                                outputFrame.begin(.2f, .26f, .31f, 1);
                                 terrain.render(camera.camera, false);
                                 terrain.renderTransparent(camera.camera);
                             }
+                            outputFrame.display();
                             GpuBoardTestUi.capture(new File(screenshots, "async-phase-" + phase + ".png"));
                         }
                         if (++phase == 5) { Gdx.app.exit(); }
@@ -173,7 +175,7 @@ class GpuTerrainAsyncSmokeTest {
                 }
 
                 @Override
-                public void dispose() { terrain.dispose(); }
+                public void dispose() { outputFrame.close(); terrain.dispose(); }
             }, config);
         } finally { BoardGeometry.tune(original); }
         if (failure.get() != null) { throw new AssertionError("Async terrain renderer benchmark", failure.get()); }

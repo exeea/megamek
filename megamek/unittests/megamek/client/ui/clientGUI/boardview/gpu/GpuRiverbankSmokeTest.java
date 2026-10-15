@@ -2,11 +2,13 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -24,11 +26,11 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Riverbanks must continue the actual adjacent artwork, including when an atlas slot changes. */
+/** Sculpted riverbanks continue adjacent material cover and rebuild when that cover changes. */
 @Tag("on-demand")
 class GpuRiverbankSmokeTest {
     @Test
-    void banksMatchSandGrassAndSnowAndFollowArtworkUpdates() throws Exception {
+    void banksMatchSandGrassAndSnowAndFollowSurfaceUpdates() throws Exception {
         Hex[] hexes = new Hex[49];
         for (int y = 0; y < 7; y++) {
             for (int x = 0; x < 7; x++) {
@@ -49,37 +51,57 @@ class GpuRiverbankSmokeTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create(new Board(7, 7, hexes))) {
             SwingUtilities.invokeAndWait(fixture.source::refresh);
             BoardScene scene = fixture.source.takeFrame().scene();
+            Coords river = new Coords(3, 3);
+            int sandEdge = IntStream.range(0, 6).filter(edge -> {
+                var tile = scene.tile(river.translated(BoardGeometry.edgeDirection(edge)));
+                return tile.waterDepth() < 0 && tile.groundCover().sand() > .9f;
+            }).findFirst().orElseThrow(() -> new AssertionError("The river fixture must have a sand-covered bank"));
+            Coords land = river.translated(BoardGeometry.edgeDirection(sandEdge));
+            // Capture through the real source so all cover, biome and artwork metadata is retained.
+            // Replacing only Tile.ground is not a material edit for the sculpted-bank shader.
+            SwingUtilities.invokeAndWait(() -> {
+                Hex edited = fixture.game.getBoard().getHex(land).duplicate();
+                edited.removeTerrain(Terrains.SAND);
+                edited.setTheme("snow");
+                edited.addTerrain(new Terrain(Terrains.SNOW, 1));
+                fixture.game.getBoard().setHex(land, edited);
+                fixture.source.refresh();
+            });
+            BoardScene edited = fixture.source.takeFrame().scene();
+            // Gameplay sand is captured as loose cover over the theme's geology, not Tile.surface().
+            assertTrue(scene.tile(land).groundCover().sand() > .9f);
+            assertEquals(BoardScene.Surface.SNOW, edited.tile(land).surface());
             new Lwjgl3Application(new ApplicationAdapter() {
                 @Override
                 public void create() {
                     GpuTerrain terrain = new GpuTerrain();
-                    try {
-                        Coords river = new Coords(3, 3);
+                    try (var outputFrame = new GpuSceneTestOutput()) {
                         BoardCamera camera = new BoardCamera();
                         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                         camera.center(BoardGeometry.center(river, 0));
                         camera.zoom(0.25f);
                         terrain.update(scene);
-                        draw(terrain, camera);
+                        int[] roles = GpuTerrainPreparationSmokeTest.checkBlendedRoles(terrain, "submerged riverbank");
+                        assertTrue(roles[3] > 0, "The bank fixture must contain blended shore triangles");
+                        draw(outputFrame, terrain, camera);
                         File output = new File(System.getProperty("megamek.gpu.screenshots"));
                         GpuBoardTestUi.capture(new File(output, "riverbank-terrain-top.png"));
-                        checkBanks(camera, river);
+                        checkBanks(scene, river);
+                        int sandyBank = bankPixels(camera, river, sandEdge);
+                        draw(outputFrame, terrain, camera);
+                        assertEquals(sandyBank, bankPixels(camera, river, sandEdge), "A paused bank keeps the same pixels");
                         camera.setIsometric(true);
-                        draw(terrain, camera);
+                        draw(outputFrame, terrain, camera);
                         GpuBoardTestUi.capture(new File(output, "riverbank-terrain-isometric.png"));
 
-                        // Change pixels without changing terrain metadata or the water hex, as an atlas update does.
-                        Coords land = river.translated(5);
-                        BoardScene.Tile old = scene.tile(land);
-                        var tiles = new ArrayList<>(scene.tiles());
-                        tiles.set(land.getX() * scene.height() + land.getY(), new BoardScene.Tile(land,
-                              old.elevation(), old.waterDepth(), old.frozen(), old.roadExits(), old.surface(),
-                              scene.tile(river.translated(2)).ground(), old.decals(), old.tactical(), old.features(), old.text()));
-                        terrain.update(new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, scene.units(),
-                              scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light()));
+                        terrain.update(edited);
+                        GpuTerrainPreparationSmokeTest.checkBlendedRoles(terrain, "edited submerged riverbank");
                         camera.setIsometric(false);
-                        draw(terrain, camera);
-                        checkBanks(camera, river);
+                        draw(outputFrame, terrain, camera);
+                        checkBanks(edited, river);
+                        assertNotEquals(sandyBank, bankPixels(camera, river, sandEdge),
+                              "Changing the adjacent sand to snow must rebuild the visible bank material");
+                        GpuBoardTestUi.capture(new File(output, "riverbank-updated-snow.png"));
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     } catch (Throwable error) {
                         failure.set(error);
@@ -93,41 +115,64 @@ class GpuRiverbankSmokeTest {
         assertNull(failure.get(), () -> String.valueOf(failure.get()));
     }
 
-    private static void draw(GpuTerrain terrain, BoardCamera camera) {
-        ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
+    private static void draw(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera) {
+        outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
         terrain.render(camera.camera, false);
         terrain.renderTransparent(camera.camera);
+        outputFrame.display();
     }
 
-    private static void checkBanks(BoardCamera camera, Coords river) {
+    private static void checkBanks(BoardScene scene, Coords river) {
+        var water = scene.tile(river);
+        for (int edge : new int[] { 0, 2, 3, 5 }) {
+            var neighbor = scene.tile(river.translated(BoardGeometry.edgeDirection(edge)));
+            int dominant = 0;
+            for (int family = 1; family < BoardSurfaceBlend.FAMILIES; family++) {
+                if (neighbor.groundCover().weight(family) > neighbor.groundCover().weight(dominant)) { dominant = family; }
+            }
+            Vector3 a = BoardGeometry.corner(river, water.elevation(), edge);
+            Vector3 b = BoardGeometry.corner(river, water.elevation(), edge + 1);
+            Vector3 outward = new Vector3(b).sub(a).crs(Vector3.Z).nor();
+            float epsilon = BoardRelief.metres(.001f);
+            for (float along : new float[] { .25f, .5f, .75f }) {
+                Vector3 seam = new Vector3(a).lerp(b, along);
+                Vector3 bank = new Vector3(seam).mulAdd(outward, -epsilon);
+                Vector3 land = new Vector3(seam).mulAdd(outward, epsilon);
+                var bankCover = BoardSurfaceBlend.sample(scene, water, bank.x, bank.y, bank.z);
+                var landCover = BoardSurfaceBlend.sample(scene, neighbor, land.x, land.y, land.z);
+                // These are the shared material weights supplied to the sculpted vertices. Outgoing RGB
+                // need not match: the sloped wet bank and flat ground have different normals and roughness.
+                for (int family = 0; family < BoardSurfaceBlend.FAMILIES; family++) {
+                    assertEquals(landCover.weight(family), bankCover.weight(family), .003f,
+                          "Bank material continuity at edge " + edge + ", position " + along + ", family " + family);
+                }
+                assertTrue(bankCover.weight(dominant) > .5f,
+                      "The bank must retain its adjacent dominant cover " + dominant + " at edge " + edge);
+            }
+        }
+    }
+
+    private static int bankPixels(BoardCamera camera, Coords river, int edge) {
         Pixmap pixels = ScreenUtils.getFrameBufferPixmap(0, 0,
               Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {
-            for (int edge : new int[] { 0, 2, 3, 5 }) {
-                Vector3 a = BoardGeometry.corner(river, 0, edge);
-                Vector3 b = BoardGeometry.corner(river, 0, edge + 1);
-                Vector3 outward = new Vector3(b).sub(a).crs(Vector3.Z).nor();
-                Vector3 middle = new Vector3(a).lerp(b, 0.5f);
-                Vector3 bank = camera.camera.project(new Vector3(middle).mulAdd(outward, -2));
-                Vector3 land = camera.camera.project(new Vector3(middle).mulAdd(outward, 2));
-                for (int shift : new int[] { 8, 16, 24 }) {
-                    // The bank continues the dry artwork under a slightly darker wet margin at the waterline.
-                    assertEquals(channel(pixels, land, shift), channel(pixels, bank, shift), 16,
-                          "Riverbank artwork must continue its dry neighbor at edge " + edge + ", channel " + shift);
+            Vector3 a = BoardGeometry.corner(river, 0, edge);
+            Vector3 b = BoardGeometry.corner(river, 0, edge + 1);
+            Vector3 outward = new Vector3(b).sub(a).crs(Vector3.Z).nor();
+            int hash = 1;
+            for (float along : new float[] { .25f, .5f, .75f }) {
+                Vector3 point = camera.camera.project(new Vector3(a).lerp(b, along).mulAdd(outward, -2));
+                int px = Math.round(point.x * pixels.getWidth() / Gdx.graphics.getWidth());
+                int py = Math.round(point.y * pixels.getHeight() / Gdx.graphics.getHeight());
+                assertTrue(px >= 1 && px + 1 < pixels.getWidth() && py >= 1 && py + 1 < pixels.getHeight(),
+                      "Bank sample must remain in the framebuffer: " + px + ", " + py);
+                for (int y = -1; y <= 1; y++) {
+                    for (int x = -1; x <= 1; x++) { hash = 31 * hash + pixels.getPixel(px + x, py + y); }
                 }
             }
+            return hash;
         } finally {
             pixels.dispose();
         }
-    }
-
-    private static int channel(Pixmap pixels, Vector3 point, int shift) {
-        int sum = 0;
-        for (int y = -1; y <= 1; y++) {
-            for (int x = -1; x <= 1; x++) {
-                sum += (pixels.getPixel(Math.round(point.x) + x, Math.round(point.y) + y) >>> shift) & 255;
-            }
-        }
-        return sum / 9;
     }
 }

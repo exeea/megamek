@@ -13,7 +13,6 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -38,7 +37,7 @@ class GpuCliffSeamSmokeTest {
             @Override
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
-                try {
+                try (var frame = new GpuSceneTestOutput()) {
                     File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                     assertTrue(output.isDirectory() || output.mkdirs());
                     terrain.update(scene);
@@ -50,9 +49,10 @@ class GpuCliffSeamSmokeTest {
                         camera.camera.zoom = .18f;
                         camera.center(BoardGeometry.center(new Coords(10, 10), 1));
                         terrain.renderShadows(camera.camera, List.of());
-                        ScreenUtils.clear(.3f, .55f, .8f, 1, true);
+                        frame.begin(.3f, .55f, .8f, 1);
                         terrain.render(camera.camera, false);
                         terrain.renderTransparent(camera.camera);
+                        frame.display();
                         GpuBoardTestUi.capture(new File(output, "commcenter-cliffs-" + tilt + ".png"));
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());

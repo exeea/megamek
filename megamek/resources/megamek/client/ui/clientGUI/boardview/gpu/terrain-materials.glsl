@@ -4,7 +4,7 @@
 uniform float u_terrainWear; // 0: no ambient weathering; 1: full material weathering and cover erosion
 
 struct TerrainMaterial {
-    vec3 color;
+    vec3 color; // linear reflectance; color maps are decoded at upload, before filtering
     vec3 normal;
     float cavity;
     float height;
@@ -15,22 +15,30 @@ struct TerrainMaterial {
 
 float materialBlendWidth() { return .13 + min(.2, pixelMetres * .16); }
 
-// Dry dielectric surfaces still reflect light. These are art-directed estimates from the existing relief/cavity
-// channels, not measured roughness scans. Keep loose grains matte and let the cleaner stone faces catch the sun.
+// Perceptual roughness estimates for dry materials, not measured scans. Cavity is visibility, not roughness:
+// it must not make a crevice a different material. Small grain variation uses height independently of AO.
 // Fine variation fades with the normal maps; distant materials retain their broad response without extra reads.
-float mappedRoughness(float base, float height, float cavity) {
-    return clamp(base + terrainNormalDetail * ((.5 - height) * .12 + (1.0 - cavity) * .25), .55, .98);
+float mappedRoughness(float base, float height) {
+    return clamp(base + terrainNormalDetail * (.5 - height) * .08, .55, .98);
 }
 
 float stoneRoughness(float familyId, float hardness) {
     float stone = mix(.80, .66, hardness);
+    if (abs(familyId - LUNAR_FAMILY) < .5) return .92;
+    if (abs(familyId - FUNGUS_FAMILY) < .5) return .84;
     if (abs(familyId - 2.0) < .5 || abs(familyId - DESERT_FAMILY) < .5
           || abs(familyId - MARS_FAMILY) < .5) stone += .08;
     return stone;
 }
 
 float coverRoughness(float familyId) {
-    return abs(familyId - 2.0) < .5 || abs(familyId) < .5 || abs(familyId - TROPICAL_FAMILY) < .5 ? .94 : .88;
+    if (abs(familyId - LUNAR_FAMILY) < .5) return .96;
+    if (abs(familyId - 2.0) < .5 || abs(familyId - TROPICAL_FAMILY) < .5) return .94;
+    if (abs(familyId) < .5) return .92;
+    if (abs(familyId - 3.0) < .5 || abs(familyId - 4.0) < .5) return .80;
+    if (abs(familyId - 5.0) < .5) return .82;
+    if (abs(familyId - FUNGUS_FAMILY) < .5) return .84;
+    return .90;
 }
 
 // Natural wear follows the existing relief, modulated by continuous world fields instead of repeated stamps.
@@ -46,7 +54,8 @@ vec4 terrainWear(vec3 fields, float height, float cavity, vec3 face, vec3 normal
     return vec4(recess * exposure, low * exposure, edge * abrasion, high * abrasion) * terrainNormalDetail;
 }
 
-// Small relative pigment changes preserve each source texture, including fungal mauve/cyan and cool snow.
+// Authored pigment-control deltas, calibrated once at the final albedo multiplication. Roughness keeps
+// these original control strengths; changing pigment contrast must not change the physical surface response.
 // Keep the softened desert baseline: the previous .30 darkening was too strong. These are visual material
 // estimates, not simulated erosion or a second terrain layer. No new maps, geometry or sampling are needed.
 vec3 materialWeathering(float familyId, vec4 wear, vec3 fields, float cavity) {
@@ -124,8 +133,8 @@ MaterialProjection materialProjection(vec3 world, vec3 face) {
 }
 
 // A role's map is a layer of u_terrainLayers: colour/height, and normal/AO at the next layer.
-vec4 materialTexel(float layer, vec2 uv, mat2 gradient) {
-    return textureGrad(u_terrainLayers, vec3(uv, layer), gradient[0], gradient[1]);
+vec4 materialTexel(sampler2DArray maps, float layer, vec2 uv, mat2 gradient) {
+    return textureGrad(maps, vec3(uv, layer), gradient[0], gradient[1]);
 }
 
 // Overlapping translated samples break the fungal source's recognisable repeats. Use identical offsets for
@@ -134,65 +143,116 @@ vec2 materialOffset(vec2 cell) {
     return fract(sin(vec2(dot(cell, vec2(127.1, 311.7)), dot(cell, vec2(269.5, 183.3)))) * 43758.5453) * 8.0;
 }
 
-vec4 fungusTexel(float layer, vec2 uv, mat2 gradient) {
+vec4 fungusTexel(sampler2DArray maps, float layer, vec2 uv, mat2 gradient) {
     vec2 cell = floor(uv), blend = smoothstep(.15, .85, fract(uv));
-    vec4 a = materialTexel(layer, uv + materialOffset(cell), gradient);
-    vec4 b = materialTexel(layer, uv + materialOffset(cell + vec2(1.0, 0.0)), gradient);
-    vec4 c = materialTexel(layer, uv + materialOffset(cell + vec2(0.0, 1.0)), gradient);
-    vec4 d = materialTexel(layer, uv + materialOffset(cell + vec2(1.0, 1.0)), gradient);
+    vec4 a = materialTexel(maps, layer, uv + materialOffset(cell), gradient);
+    vec4 b = materialTexel(maps, layer, uv + materialOffset(cell + vec2(1.0, 0.0)), gradient);
+    vec4 c = materialTexel(maps, layer, uv + materialOffset(cell + vec2(0.0, 1.0)), gradient);
+    vec4 d = materialTexel(maps, layer, uv + materialOffset(cell + vec2(1.0, 1.0)), gradient);
     return mix(mix(a, b, blend.x), mix(c, d, blend.x), blend.y);
 }
 
 // Select neighbouring source offsets from a continuous world field, not the UV tile or hex ID. Two reads keep the
 // original feature size and wind/bedding direction without the recognisable motif repeating on a square grid.
 // Color/height and normal/AO must use the same selector; a translation does not rotate or resize their normals.
-vec4 translatedTexel(float layer, vec2 uv, mat2 gradient, float variation) {
+vec4 translatedTexel(sampler2DArray maps, float layer, vec2 uv, mat2 gradient, float variation) {
     float choice = variation * 8.0, index = floor(choice);
-    vec4 a = materialTexel(layer, uv + materialOffset(vec2(index, 0.0)), gradient);
-    vec4 b = materialTexel(layer, uv + materialOffset(vec2(index + 1.0, 0.0)), gradient);
+    vec4 a = materialTexel(maps, layer, uv + materialOffset(vec2(index, 0.0)), gradient);
+    vec4 b = materialTexel(maps, layer, uv + materialOffset(vec2(index + 1.0, 0.0)), gradient);
     return mix(a, b, smoothstep(.2, .8, fract(choice)));
 }
 
 // The ground's variation field is constant down a vertical face. Advance the source selection with projected
 // height as well, otherwise a tall cliff repeats the same two patches at every map period. Blends use a different
 // interval from the source repeat; both maps keep their scale and upright grain, with the same two texture reads.
+vec4 cliffTexel(sampler2DArray maps, float layer, vec2 uv, mat2 gradient, float variation) {
+    return translatedTexel(maps, layer, uv, gradient, variation + uv.y * .173);
+}
+
+vec4 materialTexel(float layer, vec2 uv, mat2 gradient) {
+    return materialTexel(u_terrainLayers, layer, uv, gradient);
+}
+vec4 fungusTexel(float layer, vec2 uv, mat2 gradient) {
+    return fungusTexel(u_terrainLayers, layer, uv, gradient);
+}
+vec4 translatedTexel(float layer, vec2 uv, mat2 gradient, float variation) {
+    return translatedTexel(u_terrainLayers, layer, uv, gradient, variation);
+}
 vec4 cliffTexel(float layer, vec2 uv, mat2 gradient, float variation) {
-    return translatedTexel(layer, uv, gradient, variation + uv.y * .173);
+    return cliffTexel(u_terrainLayers, layer, uv, gradient, variation);
 }
 
 // Every role shares projection and metre scale through a bend. No UV origin at an individual hex's rim or foot.
+// One projection implementation for color/height and authored scalar maps. No pigment transforms here.
+vec4 sampleMaterialMap(sampler2DArray maps, float layer, float tile, MaterialProjection p,
+      float variation, bool fungus, bool singleScale) {
+    vec4 pigment = vec4(0.0);
+    if (p.lying > 0.0) {
+        pigment = fungus ? fungusTexel(maps, layer, p.top / tile, p.topGradient / tile)
+              : singleScale
+              ? translatedTexel(maps, layer, p.top / tile, p.topGradient / tile, variation)
+              : mix(materialTexel(maps, layer, p.top / tile, p.topGradient / tile),
+              materialTexel(maps, layer, TURN * p.top / (tile * 2.37) + .31,
+                    TURN * p.topGradient / (tile * 2.37)), variation);
+        // Keep resolved sand ripples and cap fractures; their explicit gradients already select filtered mips.
+        if (farDetail > 0.0 && !singleScale) {
+            pigment = mix(pigment, materialTexel(maps, layer, p.top / tile, p.topGradient * (4096.0 / tile)), farDetail);
+        }
+    }
+    if (p.lying < 1.0) {
+        vec4 steep = fungus ? mix(fungusTexel(maps, layer, p.y / tile + .37, p.yGradient / tile),
+              fungusTexel(maps, layer, p.x / tile, p.xGradient / tile), p.side)
+              : mix(cliffTexel(maps, layer, p.y / tile + .37, p.yGradient / tile, variation),
+                    cliffTexel(maps, layer, p.x / tile, p.xGradient / tile, variation), p.side);
+        pigment = mix(steep, pigment, p.lying);
+    }
+    return pigment;
+}
+
 vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection p,
       vec3 world, float variation, float fine, float region, bool groundMap, bool singleScale,
       float familyId, vec2 contact) {
     if (amount < .0001) return vec4(0.0);
     bool fungus = abs(familyId - FUNGUS_FAMILY) < .5;
-    vec4 pigment = vec4(0.0);
-    if (p.lying > 0.0) {
-        pigment = fungus ? fungusTexel(colorMap, p.top / tile, p.topGradient / tile)
-              : singleScale
-              ? translatedTexel(colorMap, p.top / tile, p.topGradient / tile, variation)
-              : mix(materialTexel(colorMap, p.top / tile, p.topGradient / tile),
-              materialTexel(colorMap, TURN * p.top / (tile * 2.37) + .31,
-                    TURN * p.topGradient / (tile * 2.37)), variation);
-        // Keep resolved sand ripples and cap fractures; their explicit gradients already select filtered mips.
-        if (farDetail > 0.0 && !singleScale) {
-            pigment = mix(pigment, materialTexel(colorMap, p.top / tile, p.topGradient * (4096.0 / tile)), farDetail);
-        }
-    }
-    if (p.lying < 1.0) {
-        vec4 steep = fungus ? mix(fungusTexel(colorMap, p.y / tile + .37, p.yGradient / tile),
-              fungusTexel(colorMap, p.x / tile, p.xGradient / tile), p.side)
-              : mix(cliffTexel(colorMap, p.y / tile + .37, p.yGradient / tile, variation),
-                    cliffTexel(colorMap, p.x / tile, p.xGradient / tile, variation), p.side);
-        pigment = mix(steep, pigment, p.lying);
-    }
+    vec4 pigment = sampleMaterialMap(u_terrainLayers, colorMap, tile, p, variation, fungus, singleScale);
     vec3 color = pigment.rgb;
     if (groundMap) color = groundToneFor(familyId, color, world, variation, fine, region, contact.x, contact.y);
     if (abs(familyId - 2.0) < .5) {
         float mineral = dot(color, vec3(.2126, .7152, .0722));
-        color = mix(color, mineral * vec3(.86, .92, .98), greySand());
+        color = mix(color, mineral * toLinear(vec3(.86, .92, .98)), greySand());
     }
-    return vec4(toLinear(color), pigment.a);
+    return vec4(color, pigment.a);
+}
+
+// Base surface authority is independent of optional normal detail and its distance fade.
+float materialRoughness(float colorMap, float tile, float weight, MaterialProjection p,
+      float variation, bool fungus, bool singleScale, float fallback) {
+    if (weight <= 0.0) return fallback;
+    vec2 authored = u_sculptRoughness[int(colorMap * .5)];
+    if (authored.y >= 0.0) {
+        return sampleMaterialMap(u_roughnessLayers, authored.y, tile, p, variation, fungus, singleScale).r;
+    }
+    return authored.x >= 0.0 ? authored.x : fallback;
+}
+
+// Legacy planar/slab/rock paths retain their own colour-map projection.
+float planarRoughness(float layer, vec2 p, mat2 gradient, float tile, float mixer, float fallback) {
+    vec2 authored = u_sculptRoughness[int(layer * .5)];
+    if (authored.y < 0.0) return authored.x >= 0.0 ? authored.x : fallback;
+    float value = mix(authoredRoughness(layer, p / tile, gradient / tile, fallback),
+          authoredRoughness(layer, TURN * p / (tile * 2.37) + .31, TURN * gradient / (tile * 2.37), fallback), mixer);
+    return farDetail > 0.0 ? mix(value, textureLod(u_roughnessLayers, vec3(p / tile, authored.y), 12.0).r, farDetail) : value;
+}
+
+float translatedRoughness(float layer, vec2 uv, mat2 gradient, float variation, float fallback) {
+    vec2 authored = u_sculptRoughness[int(layer * .5)];
+    if (authored.y >= 0.0) return translatedTexel(u_roughnessLayers, authored.y, uv, gradient, variation).r;
+    return authored.x >= 0.0 ? authored.x : fallback;
+}
+
+float wallRoughness(float layer, vec2 x, vec2 y, mat2 dx, mat2 dy, float side, float fallback) {
+    if (!hasAuthoredRoughness(layer)) return fallback;
+    return mix(authoredRoughness(layer, y, dy, fallback), authoredRoughness(layer, x, dx, fallback), side);
 }
 
 // Height blending often discards a present layer entirely. Its normal/cavity cannot affect the result then.
@@ -200,6 +260,8 @@ vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection
 vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjection p, vec3 face, float variation,
       bool fungus, bool singleScale) {
     if (weight <= 0.0 || u_normalMaps <= .5) return vec4(face, 1.0);
+    // Detail faded with distance keeps its spread, so the highlight does not sharpen (light-model.glsl).
+    mapVariance = max(mapVariance, normalSpread(normalMap) * (1.0 - terrainNormalDetail));
     if (terrainNormalDetail <= 0.0) return vec4(face, TERRAIN_DISTANT_CAVITY);
     vec3 normal = face;
     float cavity = 1.0;
@@ -211,6 +273,7 @@ vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjectio
                     TURN * p.topGradient / (tile * 2.37));
         vec3 detail = fungus || singleScale ? mix(near.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail)
               : planarNormal(near, far, variation).rgb;
+        if (fungus || singleScale) mapVariance = max(mapVariance, normalMapVariance(length(near.rgb * 2.0 - 1.0)));
         normal = upNormal(detail, face);
         cavity = mix(near.a, far.a, variation);
     }
@@ -220,6 +283,7 @@ vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjectio
         vec4 ny = fungus ? fungusTexel(normalMap, p.y / tile + .37, p.yGradient / tile)
               : cliffTexel(normalMap, p.y / tile + .37, p.yGradient / tile, variation);
         vec3 x = nx.rgb * 2.0 - 1.0, y = ny.rgb * 2.0 - 1.0;
+        mapVariance = max(mapVariance, mix(normalMapVariance(length(y)), normalMapVariance(length(x)), p.side));
         vec3 wall = normalize(mix(vec3(-y.x * sign(face.y) + face.x, y.z * face.y, face.z - y.y),
               vec3(x.z * face.x, x.x * sign(face.x) + face.y, face.z - x.y), p.side));
         normal = normalize(mix(wall, normal, p.lying));
@@ -229,22 +293,37 @@ vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjectio
           mix(TERRAIN_DISTANT_CAVITY, mix(.55, 1.0, cavity), terrainNormalDetail));
 }
 
-TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float belowRim, float rock,
-      float hardness, float broad, float fine, float region, float familyId, vec4 tiles, vec4 layers, float sediment) {
 #ifdef volcanicFlag
-    if (familyId > VOLCANIC_CRUST_FAMILY - .5) {
-        Volcanic material = magmaSurface(world, face, -viewDirection(), vec3(0.0), 1.0, vec4(0.0));
-        return TerrainMaterial(material.albedo, material.normal, material.surface.b, material.surface.r,
-              magmaEmission(material.heat, familyId > VOLCANIC_BANK_FAMILY - .5 ? magmaBankHeat(v_cloudPosition.xy) : 1.0),
-              material.surface.g, 1.0);
-    }
+TerrainMaterial volcanicMaterial(Volcanic material, float strength) {
+    return TerrainMaterial(material.albedo, material.normal, material.surface.b, material.surface.r,
+          magmaEmission(material.heat, strength), material.surface.g, 1.0);
+}
+
+TerrainMaterial volcanicMaterial(Volcanic material, float familyId, float bankHeat) {
+    return volcanicMaterial(material, familyId > VOLCANIC_BANK_FAMILY - .5 ? bankHeat : 1.0);
+}
 #endif
-    MaterialProjection projection = materialProjection(world, face);
+
+// Shared world fields are sampled before varying palette coverage branches. The family test is draw-uniform.
+vec2 materialNoise(vec3 world, vec4 families) {
+    float pockets = texture(u_rainNoise, (world.xy + world.z * vec2(.43, .27)) / 92.0 + .57).g;
+    float fray = 0.0;
+    if (any(lessThan(abs(families), vec4(.5)))
+          || any(lessThan(abs(families - TROPICAL_FAMILY), vec4(.5)))) {
+        fray = texture(u_rainNoise, (world.xy + world.z * vec2(.29, .41)) / 28.0 + .217).r;
+    }
+    return vec2(pockets, fray);
+}
+
+// Ordinary families only: blendCovers handles volcanic slots with one shared surface sample.
+TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, vec3 world, vec3 face,
+      float aboveFoot, float belowRim, float rock, float hardness, float broad, float fine, float region,
+      float familyId, vec4 tiles, vec4 layers, float sediment) {
     float up = clamp(face.z, 0.0, 1.0);
     // Loose sand keeps its tile-cover behaviour. Weathering controls erosion of the supporting material;
     // full intensity preserves the authored material mix, and zero keeps the slope's underlying geology.
     float erosion = abs(familyId - 2.0) < .5 ? 1.0 : u_terrainWear;
-    float pockets = texture(u_rainNoise, (world.xy + world.z * vec2(.43, .27)) / 92.0 + .57).g;
+    float pockets = noise.x;
     float variation = broad * .4 + fine * .25 + pockets * .35;
     float foot = exp(-max(aboveFoot, 0.0) / (1.5 + 6.0 * variation));
     float rim = 1.0 - smoothstep(.1, 1.0 + 2.0 * broad, belowRim);
@@ -282,7 +361,7 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
         // Color remains legible from above when individual blades are too small to draw.
         float levelMetres = u_levelHeight / u_metre;
         float twoLevels = 1.0 - smoothstep(.05, .3, abs((aboveFoot + belowRim) / levelMetres - 2.0));
-        float fray = texture(u_rainNoise, (world.xy + world.z * vec2(.29, .41)) / 28.0 + .217).r;
+        float fray = noise.y;
         float lipDepth = levelMetres * (mix(.2, .65, fine * .45 + pockets * .55) + .14 * (fray - .5));
         float lip = 1.0 - smoothstep(.05, lipDepth, belowRim);
         float middle = abs(aboveFoot / levelMetres - 1.0 - (pockets - .5) * .18);
@@ -382,18 +461,11 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
           world, fine, fine, region, false, false, familyId, vec2(0.0));
     vec4 d = sampleMaterial(layers.z, tiles.z, roles.w * candidates.w * (1.0 - capShare), projection,
           world, broad, fine, region, false, false, familyId, vec2(0.0));
-    d.rgb *= toLinear(bedTintFor(familyId, hardness));
-    // Exposed horizontal mineral faces retain a legible pigment difference after fine normals fade out.
-    // Granite is paler than compact soil; lunar bedrock is darker than its blanket of fine regolith.
-    if (abs(familyId - 1.0) < .5 || abs(familyId - 3.0) < .5) {
-        d.rgb *= toLinear(vec3(mix(1.0, 1.18, smoothstep(.85, .99, up))));
-    } else if (abs(familyId - 6.0) < .5) {
-        d.rgb *= toLinear(vec3(mix(1.0, .78, smoothstep(.85, .99, up))));
-    }
     if (desert) {
         // Pale abraded sandstone at the actual rim reads from above; deeper faces retain their warm brown.
-        float abrasion = (1.0 - smoothstep(.15, 2.2, belowRim)) * smoothstep(.45, .95, up) * u_terrainWear;
-        d.rgb *= toLinear(mix(vec3(.98, .91, .85), vec3(1.14, 1.15, 1.13), abrasion));
+        float abrasion = (1.0 - smoothstep(.15, 2.2, belowRim)) * smoothstep(.45, .95, up);
+        vec3 weathering = mix(vec3(.98, .91, .85), vec3(1.14, 1.15, 1.13), abrasion);
+        d.rgb *= authoredPigmentGain(mix(vec3(1.0), weathering, u_terrainWear));
     }
     float rockHeight = plates ? mix(d.a, b.a, capShare) : d.a;
     vec4 weights = materialWeights(roles, vec4(a.a, b.a, c.a, rockHeight));
@@ -406,15 +478,20 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     vec4 nc = materialNormal(layers.y + 1.0, tiles.y, weights.z, projection, face, fine, fungus, false);
     vec4 nd = materialNormal(layers.z + 1.0, tiles.z, weights.w, projection, face, broad, fungus, false);
     TerrainMaterial result;
-    result.color = toDisplay(a.rgb * weights.x + b.rgb * weights.y + c.rgb * weights.z + d.rgb * weights.w);
+    result.color = a.rgb * weights.x + b.rgb * weights.y + c.rgb * weights.z + d.rgb * weights.w;
     result.normal = normalize(na.rgb * weights.x + nb.rgb * weights.y + nc.rgb * weights.z + nd.rgb * weights.w);
     result.cavity = dot(vec4(na.a, nb.a, nc.a, nd.a), weights);
     result.height = dot(vec4(a.a, b.a, c.a, d.a), weights);
     result.emission = vec3(0.0);
-    vec4 roughness = vec4(mappedRoughness(coverRoughness(familyId), a.a, na.a),
-          mappedRoughness(arid ? stoneRoughness(familyId, hardness) : .92, b.a, nb.a),
-          mappedRoughness(.90, c.a, nc.a),
-          mappedRoughness(stoneRoughness(familyId, hardness), d.a, nd.a));
+    float mantleRoughness = abs(familyId - 5.0) < .5 ? coverRoughness(familyId)
+          : arid ? stoneRoughness(familyId, hardness) : .92;
+    vec4 roughness = vec4(mappedRoughness(coverRoughness(familyId), a.a),
+          mappedRoughness(mantleRoughness, b.a), mappedRoughness(.90, c.a),
+          mappedRoughness(stoneRoughness(familyId, hardness), d.a));
+    roughness.x = materialRoughness(layers.x, tiles.x, weights.x, projection, broad, fungus, sand, roughness.x);
+    roughness.y = materialRoughness(layers.w, tiles.w, weights.y, projection, mantleVariation, fungus, plates, roughness.y);
+    roughness.z = materialRoughness(layers.y, tiles.y, weights.z, projection, fine, fungus, false, roughness.z);
+    roughness.w = materialRoughness(layers.z, tiles.z, weights.w, projection, broad, fungus, false, roughness.w);
     result.roughness = dot(roughness, weights);
     result.volcanic = 0.0;
     return result;
@@ -422,8 +499,24 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
 
 TerrainMaterial naturalMaterial(vec3 world, vec3 face, float aboveFoot, float belowRim, float rock,
       float hardness, float broad, float fine, float region, float sediment) {
-    return naturalMaterialFor(world, face, aboveFoot, belowRim, rock, hardness, broad, fine, region,
-          u_sculptFamily, u_sculptTiles, u_sculptLayers, sediment);
+#ifdef volcanicFlag
+#ifndef terrainBlendFlag
+    // Non-blended volcanic sculpt materials are constructed only for crust/bank families.
+    {
+#else
+    if (u_sculptFamily > VOLCANIC_CRUST_FAMILY - .5) {
+#endif
+        Volcanic material = magmaSurface(world, face, -viewDirection(), vec3(0.0), 1.0, vec4(0.0));
+        return volcanicMaterial(material,
+              u_sculptFamily > VOLCANIC_BANK_FAMILY - .5 ? magmaBankHeat(v_cloudPosition.xy) : 1.0);
+    }
+#endif
+#if !defined(volcanicFlag) || defined(terrainBlendFlag)
+    MaterialProjection projection = materialProjection(world, face);
+    vec2 noise = materialNoise(world, vec4(u_sculptFamily));
+    return naturalMaterialFor(projection, noise, world, face, aboveFoot, belowRim, rock, hardness, broad, fine,
+          region, u_sculptFamily, u_sculptTiles, u_sculptLayers, sediment);
+#endif
 }
 
 #ifdef terrainBlendFlag
@@ -440,34 +533,164 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
       inout vec3 color, inout vec3 normal, inout float cavity, inout float height, inout float grass, inout float sand,
       inout vec3 bounce, inout float response, inout float rainCover,
       out vec3 emission, out float roughness, out float volcanic, out vec4 weights) {
-    TerrainMaterial a;
-    if (abs(u_coverFamilies.x - 4.0) < .5) {
-        a = TerrainMaterial(color, normal, cavity, height, vec3(0.0), .9, 0.0);
-    } else {
-        a = naturalMaterialFor(world, face, foot, rim, rock, hardness, broad, fine, region,
-              u_coverFamilies.x, u_coverTiles0, u_coverLayers0, sediment);
-    }
-    TerrainMaterial b = naturalMaterialFor(world, face, foot, rim, rock, hardness, broad, fine, region,
-          u_coverFamilies.y, u_coverTiles1, u_coverLayers1, sediment);
-    TerrainMaterial c = naturalMaterialFor(world, face, foot, rim, rock, hardness, broad, fine, region,
-          u_coverFamilies.z, u_coverTiles2, u_coverLayers2, sediment);
-    TerrainMaterial d = a;
-    if (u_coverFamilies.w != u_coverFamilies.x) {
-        d = naturalMaterialFor(world, face, foot, rim, rock, hardness, broad, fine, region,
-              u_coverFamilies.w, u_coverTiles3, u_coverLayers3, sediment);
-    }
     vec4 raw = max(v_coverWeights, vec4(0.0));
+    MaterialProjection projection = materialProjection(world, face);
+    vec2 noise = vec2(0.0);
 #ifdef volcanicFlag
-    // Within the lava's margin a cooled bank in the palette takes the contact, and magmaBankHeat keeps its
-    // fissures glowing: a buffer of hot crust between the melt and the ground beside it.
+    if (any(lessThan(u_coverFamilies, vec4(VOLCANIC_CRUST_FAMILY - .5))))
+#endif
+    {
+        noise = materialNoise(world, u_coverFamilies);
+    }
+#ifdef volcanicFlag
+    MagmaProjection magmaCoordinates = magmaProjectionFor(world);
+    // A bank can acquire coverage here even if its incoming vertex weight was zero. Sample the field
+    // before varying coverage branches; bank emission reuses the same derivative-safe shore sample.
     vec4 bank = vec4(greaterThan(u_coverFamilies, vec4(VOLCANIC_BANK_FAMILY - .5)));
+    float shore = -.4;
     if (u_magmaFieldMap.x > 0.0 && dot(bank, vec4(1.0)) > 0.0) {
-        raw = mix(raw, bank, 1.0 - smoothstep(0.0, MAGMA_MARGIN, -magmaShore(magmaField(v_cloudPosition.xy))));
+        shore = magmaShore(magmaField(v_cloudPosition.xy));
+        raw = mix(raw, bank, 1.0 - smoothstep(0.0, MAGMA_MARGIN, -shore));
+    }
+    float bankHeat = magmaBankHeat(shore);
+    // Crust and bank use this draw's same relief, maps and normal; only their emission strength differs.
+    // Preserve the base evaluation and zero-weight substrate needed by the later sand transfer.
+    vec4 volcanicNeeded = max(raw, vec4(lessThan(abs(u_coverFamilies - u_sculptFamily), vec4(.5))));
+    volcanicNeeded.x = 1.0;
+    Volcanic magmaMaterial = Volcanic(vec3(0.0), face, vec4(0.0), vec2(0.0), vec3(0.0));
+    if (dot(volcanicNeeded, vec4(greaterThan(u_coverFamilies, vec4(VOLCANIC_CRUST_FAMILY - .5)))) > 0.0) {
+        magmaMaterial = magmaSurface(magmaCoordinates, face, -viewDirection(), vec3(0.0), 1.0, vec4(0.0));
     }
 #endif
+#if defined(VOLCANIC_ORDINARY_FAMILY) && VOLCANIC_ORDINARY_FAMILY >= 0
+    // This draw has one ordinary material identity. Its family is constant for compilation; maps/scales
+    // remain the original uniforms. Repeated matching slots share all sampled material channels.
+    vec4 ordinaryTiles = u_coverTiles0, ordinaryLayers = u_coverLayers0;
+    if (u_coverFamilies.x != float(VOLCANIC_ORDINARY_FAMILY)) {
+        if (u_coverFamilies.y == float(VOLCANIC_ORDINARY_FAMILY)) {
+            ordinaryTiles = u_coverTiles1; ordinaryLayers = u_coverLayers1;
+        } else if (u_coverFamilies.z == float(VOLCANIC_ORDINARY_FAMILY)) {
+            ordinaryTiles = u_coverTiles2; ordinaryLayers = u_coverLayers2;
+        } else {
+            ordinaryTiles = u_coverTiles3; ordinaryLayers = u_coverLayers3;
+        }
+    }
+    // The base was unconditional; other slots were evaluated only for coverage or a sand substrate.
+    // Projection gradients and noise were captured above, before this varying coverage guard.
+    vec4 ordinaryNeeded = max(raw, vec4(lessThan(abs(u_coverFamilies - u_sculptFamily), vec4(.5))));
+    ordinaryNeeded.x = 1.0;
+    TerrainMaterial ordinary = TerrainMaterial(vec3(0.0), face, 1.0, 0.0, vec3(0.0), 1.0, 0.0);
+    if (dot(ordinaryNeeded, vec4(equal(u_coverFamilies, vec4(float(VOLCANIC_ORDINARY_FAMILY))))) > 0.0) {
+        ordinary = naturalMaterialFor(projection, noise, world, face, foot, rim, rock, hardness, broad, fine,
+              region, float(VOLCANIC_ORDINARY_FAMILY), ordinaryTiles, ordinaryLayers, sediment);
+    }
+#endif
+    TerrainMaterial a;
+#if defined(VOLCANIC_ORDINARY_FAMILY) && VOLCANIC_ORDINARY_FAMILY < 0
+    a = volcanicMaterial(magmaMaterial, u_coverFamilies.x, bankHeat);
+#else
+    if (abs(u_coverFamilies.x - 4.0) < .5) {
+        a = TerrainMaterial(color, normal, cavity, height, vec3(0.0), coverRoughness(4.0), 0.0);
+#ifdef volcanicFlag
+    } else if (u_coverFamilies.x > VOLCANIC_CRUST_FAMILY - .5) {
+        a = volcanicMaterial(magmaMaterial, u_coverFamilies.x, bankHeat);
+#endif
+    } else {
+#ifdef VOLCANIC_ORDINARY_FAMILY
+        a = ordinary;
+#else
+        a = naturalMaterialFor(projection, noise, world, face, foot, rim, rock, hardness, broad, fine, region,
+              u_coverFamilies.x, u_coverTiles0, u_coverLayers0, sediment);
+#endif
+    }
+#endif
+    // Unused palette slots repeat the base family. Reuse its complete material instead of evaluating its
+    // textures and volcanic relief again. Constructed concrete differs from transported aggregate; keep that
+    // distinction, and retain any explicit per-slot texture/scale overrides. These branches are draw-uniform.
+    TerrainMaterial b = a;
+    if (u_coverFamilies.y != u_coverFamilies.x || abs(u_coverFamilies.x - 4.0) < .5
+          || any(notEqual(u_coverTiles1, u_coverTiles0)) || any(notEqual(u_coverLayers1, u_coverLayers0))) {
+#ifdef volcanicFlag
+        if (u_coverFamilies.y > VOLCANIC_CRUST_FAMILY - .5) {
+            // Zero coverage stays zero unless later sand exposure transfers weight into the substrate.
+            if (raw.y > 0.0 || abs(u_coverFamilies.y - u_sculptFamily) < .5) {
+                b = volcanicMaterial(magmaMaterial, u_coverFamilies.y, bankHeat);
+            }
+        }
+#if !defined(VOLCANIC_ORDINARY_FAMILY) || VOLCANIC_ORDINARY_FAMILY >= 0
+        else
+#endif
+#endif
+#if !defined(VOLCANIC_ORDINARY_FAMILY) || VOLCANIC_ORDINARY_FAMILY >= 0
+        if (raw.y > 0.0 || abs(u_coverFamilies.y - u_sculptFamily) < .5) {
+            // An absent cover cannot affect height competition; retain any substrate sand can expose later.
+#ifdef VOLCANIC_ORDINARY_FAMILY
+            b = ordinary;
+#else
+            b = naturalMaterialFor(projection, noise, world, face, foot, rim, rock, hardness, broad, fine, region,
+                  u_coverFamilies.y, u_coverTiles1, u_coverLayers1, sediment);
+#endif
+        }
+#endif
+    }
+    TerrainMaterial c = a;
+    if (u_coverFamilies.z != u_coverFamilies.x || abs(u_coverFamilies.x - 4.0) < .5
+          || any(notEqual(u_coverTiles2, u_coverTiles0)) || any(notEqual(u_coverLayers2, u_coverLayers0))) {
+#ifdef volcanicFlag
+        if (u_coverFamilies.z > VOLCANIC_CRUST_FAMILY - .5) {
+            // Zero coverage stays zero unless later sand exposure transfers weight into the substrate.
+            if (raw.z > 0.0 || abs(u_coverFamilies.z - u_sculptFamily) < .5) {
+                c = volcanicMaterial(magmaMaterial, u_coverFamilies.z, bankHeat);
+            }
+        }
+#if !defined(VOLCANIC_ORDINARY_FAMILY) || VOLCANIC_ORDINARY_FAMILY >= 0
+        else
+#endif
+#endif
+#if !defined(VOLCANIC_ORDINARY_FAMILY) || VOLCANIC_ORDINARY_FAMILY >= 0
+        if (raw.z > 0.0 || abs(u_coverFamilies.z - u_sculptFamily) < .5) {
+            // An absent cover cannot affect height competition; retain any substrate sand can expose later.
+#ifdef VOLCANIC_ORDINARY_FAMILY
+            c = ordinary;
+#else
+            c = naturalMaterialFor(projection, noise, world, face, foot, rim, rock, hardness, broad, fine, region,
+                  u_coverFamilies.z, u_coverTiles2, u_coverLayers2, sediment);
+#endif
+        }
+#endif
+    }
+    TerrainMaterial d = a;
+    if (u_coverFamilies.w != u_coverFamilies.x) {
+#ifdef volcanicFlag
+        if (u_coverFamilies.w > VOLCANIC_CRUST_FAMILY - .5) {
+            // Zero coverage stays zero unless later sand exposure transfers weight into the substrate.
+            if (raw.w > 0.0 || abs(u_coverFamilies.w - u_sculptFamily) < .5) {
+                d = volcanicMaterial(magmaMaterial, u_coverFamilies.w, bankHeat);
+            }
+        }
+#if !defined(VOLCANIC_ORDINARY_FAMILY) || VOLCANIC_ORDINARY_FAMILY >= 0
+        else
+#endif
+#endif
+#if !defined(VOLCANIC_ORDINARY_FAMILY) || VOLCANIC_ORDINARY_FAMILY >= 0
+        if (raw.w > 0.0 || abs(u_coverFamilies.w - u_sculptFamily) < .5) {
+            // An absent cover cannot affect height competition; retain any substrate sand can expose later.
+#ifdef VOLCANIC_ORDINARY_FAMILY
+            d = ordinary;
+#else
+            d = naturalMaterialFor(projection, noise, world, face, foot, rim, rock, hardness, broad, fine, region,
+                  u_coverFamilies.w, u_coverTiles3, u_coverLayers3, sediment);
+#endif
+        }
+#endif
+    }
     // Broad coverage is shared with vegetation. Height adds small interlocking edges, never a new family.
-    vec4 patches = vec4(coverPatch(world, u_coverFamilies.x), coverPatch(world, u_coverFamilies.y),
-          coverPatch(world, u_coverFamilies.z), coverPatch(world, u_coverFamilies.w));
+    // Unused slots repeat the base family; their contact noise is identical regardless of material overrides.
+    // Family comparisons are draw-uniform, so the retained texture derivatives remain defined.
+    vec4 patches = vec4(coverPatch(world, u_coverFamilies.x));
+    if (u_coverFamilies.y != u_coverFamilies.x) patches.y = coverPatch(world, u_coverFamilies.y);
+    if (u_coverFamilies.z != u_coverFamilies.x) patches.z = coverPatch(world, u_coverFamilies.z);
+    if (u_coverFamilies.w != u_coverFamilies.x) patches.w = coverPatch(world, u_coverFamilies.w);
     float patchStrength = mix(1.5, 2.4, 1.0 - smoothstep(.35, .85, face.z));
     weights = materialWeights(raw, vec4(a.height, b.height, c.height, d.height) * .45 + patches * patchStrength);
     // Soften neighbouring covers without losing their interlocking texture. Authored tropical mixtures keep
@@ -481,16 +704,19 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     // Loose deposits leave a few windows onto this tile's actual substrate. Transfer coverage, not just colour,
     // so exposed turf/rock keeps its own normals, height, cavity and wet response. The CPU uses this same field
     // for grass roots; neither the board's SAND flag nor the terrain/support mesh changes.
+#if !defined(VOLCANIC_ORDINARY_FAMILY) || VOLCANIC_ORDINARY_FAMILY == 2
+    // Without a sand slot the transfer is exactly zero. Skip its two noise fields; specialized palettes
+    // can contain sand only when their sole ordinary family is SAND. Generic presence is draw-uniform.
     vec4 sandy = vec4(lessThan(abs(u_coverFamilies - 2.0), vec4(.5)));
     vec4 substrate = vec4(lessThan(abs(u_coverFamilies - u_sculptFamily), vec4(.5)));
     float substrateCount = dot(substrate, vec4(1.0));
-    if (abs(u_sculptFamily - 2.0) > .5 && substrateCount > 0.0) {
+    if (dot(sandy, vec4(1.0)) > 0.0 && abs(u_sculptFamily - 2.0) > .5 && substrateCount > 0.0) {
         float exposed = sandExposure(world.xy) * (1.0 - sediment);
         float amount = dot(weights, sandy) * exposed;
         weights = weights * (1.0 - sandy * exposed) + substrate * (amount / substrateCount);
     }
-    color = toDisplay(toLinear(a.color) * weights.x + toLinear(b.color) * weights.y
-          + toLinear(c.color) * weights.z + toLinear(d.color) * weights.w);
+#endif
+    color = a.color * weights.x + b.color * weights.y + c.color * weights.z + d.color * weights.w;
     normal = normalize(a.normal * weights.x + b.normal * weights.y + c.normal * weights.z + d.normal * weights.w);
     cavity = dot(vec4(a.cavity, b.cavity, c.cavity, d.cavity), weights);
     height = dot(vec4(a.height, b.height, c.height, d.height), weights);

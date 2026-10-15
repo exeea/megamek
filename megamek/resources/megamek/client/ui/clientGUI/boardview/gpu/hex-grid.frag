@@ -11,8 +11,11 @@ flat in ivec3 v_style;    // x: cliffs topped (bits 0-5), cliffs below (6-11), 1
                           // y: area outline (0-5), fill code (6-11); z: smoke (0-1), fire (2), on a liquid (3)
 flat in vec4 v_overlay;   // the enemy's arc code (1 rear, 2 side, 3 front), distance, rear rays, side dashes
 flat in float v_level;    // the hex's level
+flat in float v_ink;
 uniform int u_ground;     // 1: the Tactical View's ground layer; 0: the grid alone
 uniform vec3 u_levels;    // level shading: the board's lowest level, the lightening per level above it (0: off), its cap
+// LIGHT_MODEL
+// SCENE_RADIANCE
 // TERRAIN_PATTERNS
 
 const float APOTHEM = 36.0;
@@ -103,7 +106,8 @@ vec4 fill(int code) {
 void main() {
     float grid = 1.0 - terrainGrid(v_board);
     if (u_ground == 0) {
-        fragColor = vec4(0.0, 0.0, 0.0, grid);
+        if (grid <= 0.0) discard;
+        fragColor = vec4(vec3(v_ink), grid);
         return;
     }
     pixel = max(fwidth(v_local.x), fwidth(v_local.y)) / APOTHEM;
@@ -182,5 +186,7 @@ void main() {
             color = over(color, AMBER * .92, .85 * band(side(d), 0.0, 1.6));
         }
     }
-    fragColor = color;
+    // The tactical ground palette is authored in display colors, but blends into the linear scene.
+    // The grid-only path above is drawn after the scene's final display conversion.
+    fragColor = vec4(storeScene(toLinear(color.rgb)), color.a);
 }

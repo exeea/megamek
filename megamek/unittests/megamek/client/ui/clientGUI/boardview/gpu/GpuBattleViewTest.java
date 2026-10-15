@@ -2,9 +2,14 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
@@ -66,6 +71,39 @@ class GpuBattleViewTest {
         assertEquals(-12, corner.x, 1e-4, "A corner scrolls both ways");
         assertEquals(12, corner.y, 1e-4);
         assertEquals(-12, GpuBattleView.edgePan(800, 900, 300, 100, 1300, 900, 50, 12).y, 1e-4, "The bottom edge brings in what lies below");
+    }
+
+    /**
+     * Alt+Enter is the window's fullscreen switch and never an Enter: its press, the newline the window types for it
+     * and its repeats, and its release reach neither the HUD nor the game's bindings. A plain Enter still does.
+     */
+    @Test
+    void altEnterSwitchesFullscreenWithoutReachingTheHudOrTheGame() {
+        var keys = new GpuBattleView(null).fullscreenKey;
+        Input original = Gdx.input;
+        Gdx.input = mock(Input.class);
+        try {
+            assertFalse(keys.keyDown(Input.Keys.ENTER), "A plain Enter goes on to the HUD and the game");
+            assertFalse(keys.keyTyped('\n'));
+            assertFalse(keys.keyUp(Input.Keys.ENTER));
+            when(Gdx.input.isKeyPressed(Input.Keys.ALT_RIGHT)).thenReturn(true);
+            for (int enter : new int[] { Input.Keys.ENTER, Input.Keys.NUMPAD_ENTER }) {
+                assertTrue(keys.keyDown(enter), "Either Alt with either Enter is the switch");
+                assertTrue(keys.keyTyped('\n'), "The newline typed for the press");
+                assertTrue(keys.keyTyped('\n'), "and for each repeat");
+                assertFalse(keys.keyTyped('a'), "Other characters pass");
+                assertTrue(keys.keyUp(enter), "Its release");
+                assertFalse(keys.keyTyped('\n'), "After the release Enter types again");
+            }
+            // The window may never deliver the release (focus lost): the next plain Enter is the game's again.
+            assertTrue(keys.keyDown(Input.Keys.ENTER));
+            when(Gdx.input.isKeyPressed(Input.Keys.ALT_RIGHT)).thenReturn(false);
+            assertFalse(keys.keyDown(Input.Keys.ENTER));
+            assertFalse(keys.keyTyped('\n'));
+            assertFalse(keys.keyUp(Input.Keys.ENTER));
+        } finally {
+            Gdx.input = original;
+        }
     }
 
     private static BoardScene.Unit unit(boolean airborne) {

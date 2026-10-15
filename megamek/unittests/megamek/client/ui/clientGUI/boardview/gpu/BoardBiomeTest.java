@@ -134,12 +134,15 @@ class BoardBiomeTest {
         for (var kind : List.of(BoardScene.Biome.FIELD, BoardScene.Biome.MARSH)) {
             var scene = BoardSurfaceBlendTest.scene(c -> tile(c, kind, 0));
             var all = new HashSet<String>();
+            var sharedRows = new HashSet<Integer>();
             int count = 0;
             for (var coords : List.of(center, center.translated(2))) {
                 var tile = scene.tile(coords);
                 var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
                 var patch = new GpuBiomeVegetation.Patch(scene, tile, surface, null);
                 patch.prepare(scene, tile);
+                assertFalse(patch.roots.isEmpty(), "Both populated hexes must exercise placement");
+                var rows = new HashSet<Integer>();
                 for (int i = 0; i < patch.roots.size; i += 4) {
                     float x = patch.roots.items[i], y = patch.roots.items[i + 1], z = patch.roots.items[i + 2];
                     assertTrue(all.add(x + ":" + y), "Shared edges cannot duplicate roots");
@@ -148,15 +151,22 @@ class BoardBiomeTest {
                         float row = BoardBiome.row(x / metre, y / metre);
                         assertTrue(Math.abs(row - Math.round(row)) < .061, "Rows have no tile-local rotation/phase");
                         assertEquals(0, Math.floorMod(Math.round(row), 2), "Alternate furrows stay open across hex boundaries");
+                        rows.add(Math.round(row));
                     } else {
                         float wet = BoardBiome.wetness(x / metre, y / metre);
                         assertTrue(wet >= .48f && wet <= .80f, "Reeds grow on wet edges and hummocks, leaving the pools open");
                     }
                     count++;
                 }
+                if (coords.equals(center)) { sharedRows.addAll(rows); }
+                else { sharedRows.retainAll(rows); }
             }
-            // Crop clumps need fewer roots, but still exercise many sites across the shared boundary.
-            assertTrue(count > (kind == BoardScene.Biome.FIELD ? 150 : 30), kind + " roots: " + count);
+            if (kind == BoardScene.Biome.FIELD) {
+                // Crop roots represent strips whose length changes with plant spacing, not individual plants.
+                assertTrue(sharedRows.size() > 1, "Several planted furrows must continue across the shared boundary");
+            } else {
+                assertTrue(count > 30, kind + " roots: " + count);
+            }
         }
     }
 

@@ -86,7 +86,8 @@ final class GpuEditorPreview implements Disposable {
           .collect(Collectors.toUnmodifiableSet());
 
     /** Submission order: the stand-ins' hidden pass, then their visible pass, then the ghosts. */
-    private final ModelBatch batch = new ModelBatch((camera, renderables) -> { });
+    private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Editor ghosts", GpuUnitShader::displayProvider),
+          (camera, renderables) -> { });
     private final Environment light = new Environment();
     /** What the built geometry shows, for which renderer, and whether that renderer was busy then. */
     private Data built = Data.NONE;
@@ -296,13 +297,17 @@ final class GpuEditorPreview implements Disposable {
      * A ghost's material: Paint keeps the model's look, translucent; Erase turns it red and keeps only a cut-out, so a
      * flat sprite keeps its outline. Neither writes depth.
      */
-    private static void ghostly(Material material, boolean erase) {
+    static void ghostly(Material material, boolean erase) {
         if (erase) {
             Attribute alphaTest = material.get(FloatAttribute.AlphaTest);
             Attribute cutOut = alphaTest == null ? null : material.get(TextureAttribute.Diffuse);
             Attribute cullFace = material.get(IntAttribute.CullFace);
+            Attribute linearColors = material.get(GpuLinearColors.TYPE);
             material.clear();
-            material.set(ColorAttribute.createDiffuse(ERASE), ColorAttribute.createEmissive(ERASE.r * .5f, ERASE.g * .3f, ERASE.b * .3f, 1));
+            if (linearColors != null) { material.set(linearColors); }
+            material.set(ColorAttribute.createDiffuse(GpuLinearColors.authored(material, ERASE)),
+                  ColorAttribute.createEmissive(GpuLinearColors.authored(material,
+                        new Color(ERASE.r * .5f, ERASE.g * .3f, ERASE.b * .3f, 1))));
             if (cutOut != null) { material.set(alphaTest, cutOut); }
             if (cullFace != null) { material.set(cullFace); }
         }

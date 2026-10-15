@@ -7,11 +7,12 @@ uniform float u_normalMaps;
 uniform float u_magmaMode; // solid crust 0, cooled bank 3
 // magma-solid-functions
 void main() {
+    vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
     vec3 face = normalize(v_normal);
     if (!gl_FrontFacing) face = -face;
     vec3 position = v_cloudPosition / u_metre;
     terrainMaterialLod(position, face);
     vec3 eye = -viewDirection();
     Volcanic material = magmaSurface(position, face, eye, vec3(0.0), 1.0, vec4(0.0));
-    fragColor = magmaOutput(material, 1.0, u_magmaMode > 2.5 ? magmaBankHeat(v_cloudPosition.xy) : 1.0);
+    fragColor = magmaOutput(material, geometric, 1.0, u_magmaMode > 2.5 ? magmaBankHeat(v_cloudPosition.xy) : 1.0);
 }

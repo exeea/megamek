@@ -4,6 +4,7 @@ layout(location = 0) out vec4 fragColor;
 // Soft luminous spore wisps. The shared effects batch supplies a seeded age and lifetime opacity per puff.
 in vec2 v_uv;
 in vec2 v_effect;
+// LIGHT_MODEL
 
 float sporeHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 
@@ -23,6 +24,6 @@ void main() {
     vec2 q = p * 3.0 + curl * .45 + vec2(seed, -age * 2.0);
     float wisps = sporeNoise(q) * .65 + sporeNoise(q * 2.13 + 3.7) * .35;
     float density = smoothstep(.14, .72, wisps);
-    vec3 pink = mix(vec3(.73, .20, .58), vec3(1.08, .64, .91), wisps);
+    vec3 pink = mix(toLinear(vec3(.73, .20, .58)), 1.08 * toLinear(vec3(1.0, .64 / 1.08, .91 / 1.08)), wisps);
     fragColor = vec4(pink, envelope * density * v_effect.y);
 }

@@ -197,7 +197,8 @@ class BoardLiquidTest {
                             BoardSurface solid = new BoardSurface(crust, crust.tile(coords), lod);
                             BoardSurface ordinary = new BoardSurface(rock, rock.tile(coords), lod);
                             assertTrue(solid.relief.sculpted());
-                            assertEquals(ordinary.faces, solid.faces, "Crust keeps the canonical sculpted top");
+                            assertEquals(ordinary.foundation(), solid.foundation(),
+                                  "Crust keeps the canonical terrain; ordinary rock alone carries loose rim stones");
                             assertEquals(ordinary.walls(rock, -50), solid.walls(crust, -50),
                                   "Crust keeps every slope and cliff, including both halves of the shared edge");
                         }

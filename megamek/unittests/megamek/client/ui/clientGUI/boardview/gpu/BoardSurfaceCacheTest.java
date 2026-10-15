@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -18,28 +19,31 @@ class BoardSurfaceCacheTest {
     private static final Coords CENTER = new Coords(3, 3);
 
     @Test
-    void geologyTuningUpdatesSupportWithoutChangingTheBoardSnapshot() {
+    void geologyTuningUpdatesCliffsWithoutChangingTheBoardSnapshot() {
         var original = BoardRelief.geology();
         BoardScene scene = scene(0, 7, 7, true);
+        scene = replace(scene, shape(scene.tile(CENTER), 3, 0, BoardScene.Surface.GRASS));
         BoardSurface.Cache cache = new BoardSurface.Cache();
         BoardSurface first = cache.get(scene, scene.tile(CENTER));
-        Vector3 edge = sharedEdge();
-        float before = first.height(edge.x, edge.y);
-        assertTrue(Math.abs(before) > .01f);
+        float floor = BoardGeometry.floor(scene);
+        var before = first.walls(scene, floor);
+        assertTrue(!before.isEmpty(), "The fixture exercises a cliff affected by geology");
+        Vector3 center = BoardGeometry.center(CENTER, 3);
         try {
             var next = new ArrayList<>(original);
             var g = next.get(BoardScene.Surface.GRASS.ordinal());
             next.set(BoardScene.Surface.GRASS.ordinal(), new BoardRelief.Geology(g.cellWidth(), g.cellHeight(),
-                  g.cells(), g.fractures(), g.strata(), g.bedding(), g.buttress(), g.recess(), 0,
+                  g.cells(), g.fractures(), g.strata(), g.bedding(), g.buttress(), g.recess() + 1, g.relief(),
                   g.cap(), g.talus(), g.round(), g.bank(), g.lean(), g.cast(), g.stones(), g.shrubs()));
             BoardRelief.tuneGeology(next);
-            BoardSurface flat = cache.get(scene, scene.tile(CENTER));
-            assertNotSame(first, flat);
-            assertEquals(0, flat.height(edge.x, edge.y), .003f, "Support follows the tuned ground relief");
+            BoardSurface changed = cache.get(scene, scene.tile(CENTER));
+            assertNotSame(first, changed);
+            assertNotEquals(before, changed.walls(scene, floor), "Cliff geometry follows the tuned recess");
+            assertEquals(center.z, changed.height(center.x, center.y), .003f, "Geology keeps the playing height");
             BoardRelief.tuneGeology(next);
-            assertSame(flat, cache.get(scene, scene.tile(CENTER)), "Unchanged tuning retains cached geometry");
+            assertSame(changed, cache.get(scene, scene.tile(CENTER)), "Unchanged tuning retains cached geometry");
             BoardRelief.tuneGeology(original);
-            assertEquals(before, cache.get(scene, scene.tile(CENTER)).height(edge.x, edge.y), .003f);
+            assertEquals(before, cache.get(scene, scene.tile(CENTER)).walls(scene, floor));
         } finally {
             BoardRelief.tuneGeology(original);
         }
@@ -69,13 +73,13 @@ class BoardSurfaceCacheTest {
         BoardSurface.Cache cache = new BoardSurface.Cache();
         BoardSurface first = cache.get(scene, scene.tile(CENTER));
         Vector3 edge = sharedEdge();
-        assertTrue(Math.abs(first.height(edge.x, edge.y)) > .01f, "Matching neighbors share sculpted landforms");
+        assertEquals(0, first.height(edge.x, edge.y), .003f, "Matching neighbors share the flat playing level");
         BoardScene.Tile neighbor = scene.tile(CENTER.translated(1));
         BoardScene edited = replace(scene, shape(neighbor, 0, 0, BoardScene.Surface.SAND));
 
         BoardSurface changed = cache.get(edited, edited.tile(CENTER));
         assertNotSame(first, changed);
-        // Different families at one level stay joined; both sides derive the same, re-blended edge relief.
+        // A material edit invalidates derived geometry while both flat tops keep their shared playing level.
         BoardSurface other = cache.get(edited, edited.tile(CENTER.translated(1)));
         assertEquals(changed.height(edge.x, edge.y), other.height(edge.x, edge.y), .003f,
               "A material boundary keeps one continuous surface");
@@ -91,7 +95,7 @@ class BoardSurfaceCacheTest {
         BoardSurface first = cache.get(scene, scene.tile(CENTER));
         Vector3 edge = sharedEdge();
         assertEquals(0, BoardSurface.ramps(scene, scene.tile(neighbor)));
-        assertTrue(Math.abs(first.height(edge.x, edge.y)) > .01f);
+        assertEquals(0, first.height(edge.x, edge.y), .003f);
 
         BoardScene edited = replace(scene, shape(scene.tile(road), 1, 1 << 4, BoardScene.Surface.GRASS));
         assertSame(scene.tile(CENTER), edited.tile(CENTER));

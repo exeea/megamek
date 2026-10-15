@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
@@ -22,7 +23,6 @@ import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -73,8 +73,9 @@ class GpuCliffMaterialsSmokeTest {
                     assertEquals(Texture.TextureFilter.MipMapLinearLinear, texture.getMinFilter());
                 }
             }
-            assertEquals(2, assets.sculpt("missing-material").color().getWidth(), "Missing maps retain a neutral fallback");
-            assertNotNull(assets.sculpt("missing-material").normal());
+            var missing = assertThrows(IllegalArgumentException.class, () -> assets.sculpt("missing-material"));
+            assertTrue(missing.getMessage().contains("Missing required Enhanced terrain asset"), missing.getMessage());
+            assertTrue(missing.getMessage().contains("missing-material.json"), missing.getMessage());
         } finally {
             assets.dispose();
         }
@@ -85,7 +86,7 @@ class GpuCliffMaterialsSmokeTest {
         if (road) { output = new File(output, "road-walls"); }
         assertTrue(output.isDirectory() || output.mkdirs());
         GpuTerrain terrain = new GpuTerrain();
-        try {
+        try (var surface = new GpuSceneTestOutput()) {
             for (BoardScene.Surface family : BoardScene.Surface.values()) {
                 BoardScene scene = scene(family, road);
                 assertEquals(!road, new BoardSurface(scene, scene.tile(RAISED)).relief.sculpted(),
@@ -107,26 +108,30 @@ class GpuCliffMaterialsSmokeTest {
                     camera.lookAt(target);
                     camera.update();
                     Vector3 light = outward.cpy().mulAdd(along, .7f).add(0, 0, .65f).nor().scl(-1);
+                    // This controlled normal-map probe needs its declared ambient fill in the PBR environment too.
+                    // A black sky/horizon would leave self-shadowed folds lit only by weak ground bounce.
+                    Color ambient = new Color(.23f, .25f, .28f, 1);
                     terrain.setAtmosphere(new BoardAtmosphere.Lighting(light, new Color(.85f, .82f, .76f, 1),
-                          new Color(.23f, .25f, .28f, 1), Color.BLACK, Color.BLACK, Color.BLACK, Color.WHITE, 1, 1, true));
+                          ambient, Color.BLACK, ambient, ambient, Color.WHITE, 1, 1, true));
                     terrain.renderShadows(camera, List.of());
                     terrain.setNormalMaps(false);
-                    int[] flat = samples(terrain, camera, a, b);
+                    int[] flat = samples(surface, terrain, camera, a, b);
                     if (edge == 4) { GpuBoardTestUi.capture(new File(output, "cliff-" + family + "-flat.png")); }
                     terrain.setNormalMaps(true);
-                    int[] relief = samples(terrain, camera, a, b);
+                    int[] relief = samples(surface, terrain, camera, a, b);
                     double difference = difference(flat, relief);
                     if (difference <= .5) {
                         GpuBoardTestUi.capture(new File(output, "failed-" + family + "-" + edge + "-relief.png"));
                         terrain.setNormalMaps(false);
-                        samples(terrain, camera, a, b);
+                        samples(surface, terrain, camera, a, b);
                         GpuBoardTestUi.capture(new File(output, "failed-" + family + "-" + edge + "-flat.png"));
                     }
-                    assertTrue(difference > .5, family + " edge " + edge + " must respond to mapped relief: " + difference);
+                    assertTrue(difference > .5, family + " edge " + edge + " must respond to mapped relief: " + difference
+                          + "; mean display channels flat=" + meanChannel(flat) + ", mapped=" + meanChannel(relief));
                     if (edge == 4) {
                         GpuBoardTestUi.capture(new File(output, "cliff-" + family + "-relief.png"));
                         terrain.setWetness(1);
-                        int[] wet = samples(terrain, camera, a, b);
+                        int[] wet = samples(surface, terrain, camera, a, b);
                         if (family != BoardScene.Surface.SNOW) {
                             assertTrue(difference(wet, relief) > 1, "Exposed cliffs respond to rain: " + family);
                         } else {
@@ -137,7 +142,7 @@ class GpuCliffMaterialsSmokeTest {
                     }
                 }
             }
-            captureOverview(terrain, review, output);
+            captureOverview(surface, terrain, review, output);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
             terrain.dispose();
@@ -161,7 +166,8 @@ class GpuCliffMaterialsSmokeTest {
         }
     }
 
-    private static void captureOverview(GpuTerrain terrain, BoardScene scene, File output) throws Exception {
+    private static void captureOverview(GpuSceneTestOutput surface, GpuTerrain terrain, BoardScene scene, File output)
+          throws Exception {
         terrain.update(scene);
         BoardCamera camera = new BoardCamera();
         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -169,23 +175,26 @@ class GpuCliffMaterialsSmokeTest {
         camera.tilt(10);
         camera.camera.zoom = .32f;
         camera.center(BoardGeometry.center(new Coords(5, 5), 2));
+        Color ambient = new Color(.25f, .28f, .32f, 1);
         terrain.setAtmosphere(new BoardAtmosphere.Lighting(new Vector3(-.9f, .5f, -.65f).nor(),
-              new Color(.9f, .84f, .75f, 1), new Color(.25f, .28f, .32f, 1),
-              Color.BLACK, Color.BLACK, Color.BLACK, Color.WHITE, 1, 1, true));
+              new Color(.9f, .84f, .75f, 1), ambient, Color.BLACK, ambient, ambient, Color.WHITE, 1, 1, true));
         terrain.renderShadows(camera.camera, List.of());
         for (boolean relief : new boolean[] { false, true }) {
             terrain.setNormalMaps(relief);
-            ScreenUtils.clear(.16f, .20f, .24f, 1, true);
+            surface.begin(.16f, .20f, .24f, 1);
             terrain.render(camera.camera, false);
             terrain.renderTransparent(camera.camera);
+            surface.display();
             GpuBoardTestUi.capture(new File(output, "cliff-board-" + (relief ? "relief" : "flat") + ".png"));
         }
     }
 
-    private static int[] samples(GpuTerrain terrain, OrthographicCamera camera, Vector3 a, Vector3 b) {
-        ScreenUtils.clear(.06f, .07f, .09f, 1, true);
+    private static int[] samples(GpuSceneTestOutput surface, GpuTerrain terrain, OrthographicCamera camera, Vector3 a,
+          Vector3 b) {
+        surface.begin(.06f, .07f, .09f, 1);
         terrain.render(camera, false);
         terrain.renderTransparent(camera);
+        surface.display();
         Pixmap image = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {
             int[] samples = new int[121];
@@ -213,6 +222,12 @@ class GpuCliffMaterialsSmokeTest {
             }
         }
         return total / (a.length * 3.0);
+    }
+
+    private static double meanChannel(int[] pixels) {
+        long total = 0;
+        for (int pixel : pixels) { total += (pixel >>> 24) + ((pixel >>> 16) & 255) + ((pixel >>> 8) & 255); }
+        return total / (pixels.length * 3.0);
     }
 
     private static BoardScene scene(BoardScene.Surface family, boolean road) {

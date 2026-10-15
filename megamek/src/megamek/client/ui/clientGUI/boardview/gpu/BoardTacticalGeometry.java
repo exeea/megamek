@@ -41,10 +41,10 @@ final class BoardTacticalGeometry {
     /** Only the finished triangles are retained; none of the terrain builder's scene or shoreline caches. */
     record Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes,
           List<BoardSurface.Face> faces, List<BoardSurface.Face> water, List<BoardSurface.Face> walls,
-          List<BoardSurface.Side> waterfalls, float highestTop) {
+          List<BoardSurface.Side> waterfalls, List<GpuFrozenWaterfall.Geometry> frozenFalls, float highestTop) {
         Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes, List<BoardSurface.Face> faces,
               List<BoardSurface.Face> water, List<BoardSurface.Face> walls, List<BoardSurface.Side> waterfalls) {
-            this(top, slopes, faces, water, walls, waterfalls, highest(top));
+            this(top, slopes, faces, water, walls, waterfalls, List.of(), highest(top));
         }
 
         /** Derived once with this immutable finished-surface snapshot; raised border endpoints reuse it. */
@@ -67,7 +67,8 @@ final class BoardTacticalGeometry {
             if (!surface.tile.frozen()) { top.addAll(surface.waterFaces); }
             List<BoardSurface.Face> walls = List.copyOf(surface.walls(scene, floor));
             return new Surface(List.copyOf(top), BoardGeometry.tuning().stepsBetweenTops() ? lying(walls) : List.of(),
-                  List.copyOf(surface.faces), List.copyOf(surface.waterFaces), walls, List.copyOf(surface.waterfalls));
+                  List.copyOf(surface.faces), List.copyOf(surface.waterFaces), walls, List.copyOf(surface.waterfalls),
+                  surface.frozenFalls(), highest(top));
         }
     }
     private record Edge(float x1, float y1, float x2, float y2) {

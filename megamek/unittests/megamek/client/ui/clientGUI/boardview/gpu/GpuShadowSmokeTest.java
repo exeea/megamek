@@ -16,11 +16,11 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g3d.environment.DirectionalShadowLight;
 import com.badlogic.gdx.graphics.g3d.environment.ShadowMap;
 import com.badlogic.gdx.graphics.g3d.utils.TextureDescriptor;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -53,6 +53,174 @@ class GpuShadowSmokeTest {
         if (failure.get() != null) {
             throw new AssertionError("Cliff shadow regression", failure.get());
         }
+    }
+
+    /** Diagnostic variants keep the shipped Mines mesh, fixed light and zero UI shadow strength unchanged. */
+    @Test
+    void minesCliffLightingSeparatesTriangleGatesFromMappedNormals() throws Exception {
+        runCliffLighting("Deserts/16x17 Mines 1.board", "mines-cliff", new Coords(9, 3), 1, 13, 0);
+    }
+
+    @Test
+    void boxCanyonCliffLightingSeparatesTriangleGatesFromMappedNormals() throws Exception {
+        runCliffLighting("Map Pack Savannahs/16x17 Box Canyon (Savannah).board", "box-canyon-cliff",
+              new Coords(4, 9), 4, 7, 1);
+    }
+
+    private static void runCliffLighting(String board, String name, Coords focus, float level, float hour,
+          float shadows) throws Exception {
+        BoardScene scene = GpuRoadSourceTest.scene(board);
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1058, 1234);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override public void create() {
+                var manager = new GpuShaderManager();
+                try { manager.run(() -> {
+                    try { checkCliffLighting(scene, manager, name, focus, level, hour, shadows); }
+                    catch (Throwable error) { failure.set(error); }
+                }); }
+                catch (Throwable error) { failure.set(error); }
+                finally { try { manager.close(); } finally { Gdx.app.exit(); } }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError(name + " lighting diagnosis", failure.get()); }
+    }
+
+    private static void checkCliffLighting(BoardScene scene, GpuShaderManager manager, String name,
+          Coords focus, float level, float hour, float shadows) throws Exception {
+        String renderer = Gdx.gl.glGetString(GL20.GL_RENDERER);
+        assertTrue(renderer.contains(System.getProperty("megamek.gpu.expectedRenderer", "")), renderer);
+        String original = GpuShaderSource.readDisk("terrain-sculpt.frag");
+        String gate = original.contains("vec3 incidentFace =")
+              ? "dot(incidentFace, light) > 0.0" : "dot(geometric, light) > 0.0";
+        String viewGuard = "normal = shadingNormal(normal, geometric, view);";
+        String output = "fragColor = vec4(result, 1.0);";
+        assertEquals(2, original.split(java.util.regex.Pattern.quote(gate), -1).length - 1);
+        for (String anchor : List.of(viewGuard, output)) {
+            assertEquals(1, original.split(java.util.regex.Pattern.quote(anchor), -1).length - 1);
+        }
+        // These are causal review probes, not proposed fixes. Real opaque back-side rejection stays in production.
+        var variants = new java.util.LinkedHashMap<String, String>();
+        variants.put("baseline", original);
+        variants.put("normal-maps-off", original);
+        variants.put("cliff-light-gate-off", original.replace(gate, "(cliff || " + gate + ")"));
+        variants.put("cliff-view-normal-guard-off", original.replace(viewGuard, "if (!cliff) " + viewGuard));
+        variants.put("incidence", original.replace(output, """
+              #if defined(lightingFlag) && numDirectionalLights > 0
+                  fragColor = cliff ? vec4(.5 + .5 * vec3(dot(geometric, light), dot(face, light),
+                        dot(normal, light)), .5) : vec4(0.0, 0.0, 0.0, 1.0);
+              #else
+                  fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+              #endif
+              """));
+        if (original.contains("vec3 incidentFace =")) {
+            variants.put("cliff-triangle-gate", original.replace(gate, "dot(geometric, light) > 0.0"));
+        }
+        File directory = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), name);
+        java.nio.file.Files.createDirectories(directory.toPath());
+        var report = new ArrayList<java.util.Map<String, Object>>();
+        var probes = new ArrayList<java.util.Map<String, Object>>();
+        var terrain = new GpuTerrain();
+        try (var frame = new GpuSceneTestOutput()) {
+            var lighting = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour, 0, 0,
+                  BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0))
+                  .tuned(shadows, BoardAtmosphere.DEFAULT_AMBIENT_SHARE, 1, null);
+            assertEquals(shadows, lighting.shadowStrength());
+            terrain.update(scene);
+            terrain.animate(.5f, List.of());
+            for (int pose = 0; pose < 2; pose++) {
+                var camera = new BoardCamera();
+                camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                camera.setIsometric(true);
+                camera.camera.zoom = .22f;
+                camera.orbit(pose * 60, 0);
+                camera.center(BoardGeometry.center(focus, level));
+                var relative = lighting.relativeTo(camera.camera);
+                terrain.setAtmosphere(relative);
+                terrain.renderShadows(camera.camera, List.of());
+                float[] reference = null, referenceDepth = null, uncut = null;
+                for (var variant : variants.entrySet()) {
+                    var changed = manager.apply(java.util.Map.of("terrain-sculpt.frag", variant.getValue()));
+                    assertTrue(changed.success(), changed.message());
+                    terrain.setNormalMaps(!variant.getKey().equals("normal-maps-off"));
+                    draw(frame, terrain, camera).dispose();
+                    float[] pixels = frame.linearPixels(), depth = minesDepth(frame);
+                    draw(frame, terrain, camera).dispose();
+                    org.junit.jupiter.api.Assertions.assertArrayEquals(pixels, frame.linearPixels(),
+                          "Fixed scene and clock repeat exactly: " + variant.getKey());
+                    org.junit.jupiter.api.Assertions.assertArrayEquals(depth, minesDepth(frame),
+                          "Frozen geometry depth repeats exactly");
+                    if (reference == null) { reference = pixels; referenceDepth = depth; }
+                    org.junit.jupiter.api.Assertions.assertArrayEquals(referenceDepth, depth,
+                          "Lighting-only variants preserve every visible triangle/depth");
+                    if (variant.getKey().equals("cliff-light-gate-off")) { uncut = pixels; }
+                    if (variant.getKey().equals("cliff-triangle-gate")) {
+                        // Original native captures established these interior chip pixels before the correction.
+                        int[][] points = name.equals("mines-cliff")
+                              ? new int[][] { pose == 0 ? new int[] { 575, 745 } : new int[] { 615, 822 } }
+                              : pose == 0 ? new int[][] { { 702, 407 }, { 819, 522 } } : new int[0][];
+                        for (int[] point : points) {
+                            int at = ((Gdx.graphics.getHeight() - 1 - point[1]) * Gdx.graphics.getWidth() + point[0]) * 4;
+                            assertTrue(reference[at] > pixels[at] + .01f,
+                                  "The reproduced curved cliff keeps incident light at " + java.util.Arrays.toString(point));
+                            assertEquals(uncut[at], reference[at], 0,
+                                  "An already sun-facing base surface needs no eligibility bypass");
+                            probes.add(java.util.Map.of("pose", pose, "x", point[0], "y", point[1],
+                                  "current", reference[at], "triangleGate", pixels[at], "uncut", uncut[at]));
+                        }
+                    }
+                    int altered = 0, cliffs = 0, rejectedSmoothFront = 0, rejectedMappedFront = 0;
+                    float maxChange = 0;
+                    for (int i = 0; i < pixels.length; i += 4) {
+                        float difference = 0;
+                        for (int channel = 0; channel < 4; channel++) {
+                            assertTrue(Float.isFinite(pixels[i + channel]), "Every actual HDR channel is finite");
+                            if (channel < 3) { difference = Math.max(difference, Math.abs(pixels[i + channel] - reference[i + channel])); }
+                        }
+                        if (difference > 0) { altered++; }
+                        maxChange = Math.max(maxChange, difference);
+                        if (variant.getKey().equals("incidence") && pixels[i + 3] == .5f) {
+                            cliffs++;
+                            // RGB stores (N.L+1)/2 for actual triangle, smooth mesh and final mapped normals.
+                            if (pixels[i] <= .5f && pixels[i + 1] > .5f) { rejectedSmoothFront++; }
+                            if (pixels[i] <= .5f && pixels[i + 2] > .5f) { rejectedMappedFront++; }
+                        }
+                    }
+                    if (variant.getKey().equals("incidence")) {
+                        assertTrue(cliffs > 1000, "The diagnostic must actually cover the requested cliff");
+                    }
+                    report.add(java.util.Map.of("pose", pose, "variant", variant.getKey(),
+                          "camera", camera.camera.position.toString(), "light", relative.direction().toString(),
+                          "changedPixels", altered, "maxLinearChange", maxChange, "cliffPixels", cliffs,
+                          "geometricBackSmoothFront", rejectedSmoothFront, "geometricBackMappedFront", rejectedMappedFront));
+                    frame.display();
+                    GpuReviewFrame.save(new File(directory, "pose-" + pose + "-" + variant.getKey() + ".png"));
+                }
+            }
+            new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter()
+                  .writeValue(new File(directory, "diagnostics.json"), report);
+            new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter()
+                  .writeValue(new File(directory, "regression-probes.json"), probes);
+            System.out.println(name + " diagnostic renderer: " + Gdx.gl.glGetString(GL20.GL_RENDERER));
+            System.out.println(name + " diagnosis: " + report);
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        } finally {
+            try { terrain.dispose(); }
+            finally { assertTrue(manager.apply(java.util.Map.of()).success(), "Restore original shader sources"); }
+        }
+    }
+
+    private static float[] minesDepth(GpuSceneTestOutput frame) {
+        frame.scene().begin();
+        try {
+            var buffer = com.badlogic.gdx.utils.BufferUtils.newFloatBuffer(frame.scene().getWidth() * frame.scene().getHeight());
+            Gdx.gl.glReadPixels(0, 0, frame.scene().getWidth(), frame.scene().getHeight(),
+                  GL20.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, buffer);
+            float[] result = new float[buffer.capacity()];
+            buffer.get(result);
+            return result;
+        } finally { frame.scene().end(); }
     }
 
     private static void checkCliffs() throws Exception {
@@ -91,7 +259,28 @@ class GpuShadowSmokeTest {
         var sides = new BoardSurface(scene, scene.tile(raised)).sides(scene, BoardGeometry.floor(scene));
         int compared = 0, mismatched = 0;
         boolean captured = false;
-        try {
+        try (var outputFrame = new GpuSceneTestOutput()) {
+            terrain.setAtmosphere(lighting.relativeTo(camera.camera));
+            Gdx.gl.glDepthMask(true);
+            terrain.renderShadows(camera.camera, List.of());
+            long beforeDisplay = GpuFamilyAssemblyReview.shadowChecksum(terrain);
+            var shadowBuffer = ((DirectionalShadowLight) terrain.environment().shadowMap).getFrameBuffer();
+            shadowBuffer.begin();
+            try {
+                // Stale nearer occluders must be erased, even when equal-depth redraws would pass LEQUAL.
+                Gdx.gl.glDepthMask(true);
+                Gdx.gl.glClearDepthf(0);
+                Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+            } finally {
+                Gdx.gl.glClearDepthf(1);
+                shadowBuffer.end();
+            }
+            draw(outputFrame, terrain, camera).dispose();
+            // The final screen pass disables depth writes. A forced same-view rebuild must still clear its depth.
+            terrain.refreshShadows();
+            terrain.renderShadows(camera.camera, List.of());
+            assertEquals(beforeDisplay, GpuFamilyAssemblyReview.shadowChecksum(terrain),
+                  "Rebuilding shadows after the final display pass retains the exact packed shadow map");
             for (float zoom : new float[] { 0.35f, 0.7f }) {
                 camera.camera.zoom = zoom;
                 for (float tilt : new float[] { 35, 55, 75 }) {
@@ -115,8 +304,8 @@ class GpuShadowSmokeTest {
                                 }
                             }
                         }
-                        Pixmap actual = draw(terrain, camera);
-                        Pixmap reference = drawUnshadowed(terrain, camera, unshadowed);
+                        Pixmap actual = draw(outputFrame, terrain, camera);
+                        Pixmap reference = drawUnshadowed(outputFrame, terrain, camera, unshadowed);
                         try {
                             int errors = 0;
                             for (Vector3 point : samples) {
@@ -127,7 +316,7 @@ class GpuShadowSmokeTest {
                             }
                             mismatched += errors;
                             if (!captured && errors > 0) {
-                                draw(terrain, camera).dispose();
+                                draw(outputFrame, terrain, camera).dispose();
                                 capture("shadow-cliff-banding.png");
                                 captured = true;
                             }
@@ -145,9 +334,9 @@ class GpuShadowSmokeTest {
             camera.orbit(15, 35 - camera.tilt());
             terrain.setAtmosphere(lighting.relativeTo(camera.camera));
             terrain.renderShadows(camera.camera, List.of());
-            draw(terrain, camera).dispose();
+            draw(outputFrame, terrain, camera).dispose();
             capture("shadow-cliff-clean.png");
-            checkCastShadow(terrain, camera, raised, sides, lighting, unshadowed);
+            checkCastShadow(outputFrame, terrain, camera, raised, sides, lighting, unshadowed);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
             terrain.dispose();
@@ -155,7 +344,7 @@ class GpuShadowSmokeTest {
         }
     }
 
-    private static void checkCastShadow(GpuTerrain terrain, BoardCamera camera, Coords raised,
+    private static void checkCastShadow(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, Coords raised,
           List<BoardSurface.Side> sides, BoardAtmosphere.Lighting lighting, Texture unshadowed) {
         camera.setIsometric(false);
         camera.center(BoardGeometry.center(raised, 0));
@@ -168,8 +357,8 @@ class GpuShadowSmokeTest {
         foot.z = 0;
         float length = BoardGeometry.LEVEL * LEVELS * (float) Math.hypot(lighting.direction().x, lighting.direction().y)
               / -lighting.direction().z;
-        Pixmap actual = draw(terrain, camera);
-        Pixmap reference = drawUnshadowed(terrain, camera, unshadowed);
+        Pixmap actual = draw(outputFrame, terrain, camera);
+        Pixmap reference = drawUnshadowed(outputFrame, terrain, camera, unshadowed);
         try {
             for (float distance : new float[] { 2, length / 2, length + 8 }) {
                 Vector3 point = foot.cpy().mulAdd(direction, distance);
@@ -187,7 +376,7 @@ class GpuShadowSmokeTest {
         }
     }
 
-    private static Pixmap drawUnshadowed(GpuTerrain terrain, BoardCamera camera, Texture unshadowed) {
+    private static Pixmap drawUnshadowed(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, Texture unshadowed) {
         var shadow = terrain.environment().shadowMap;
         // Keep the same shader variant and light uniforms, but supply a map with no occluders.
         terrain.environment().shadowMap = new ShadowMap() {
@@ -200,15 +389,16 @@ class GpuShadowSmokeTest {
             public TextureDescriptor<Texture> getDepthMap() { return depth; }
         };
         try {
-            return draw(terrain, camera);
+            return draw(outputFrame, terrain, camera);
         } finally {
             terrain.environment().shadowMap = shadow;
         }
     }
 
-    private static Pixmap draw(GpuTerrain terrain, BoardCamera camera) {
-        ScreenUtils.clear(0.03f, 0.045f, 0.06f, 1, true);
+    private static Pixmap draw(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera) {
+        outputFrame.begin(0.03f, 0.045f, 0.06f, 1);
         terrain.render(camera.camera, false);
+        outputFrame.display();
         return Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
     }
 

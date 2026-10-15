@@ -35,6 +35,12 @@ final class GpuLandingSupportReview {
     private GpuLandingSupportReview() { }
 
     static void verify(GpuUnitModels library, ModelBatch batch) throws Exception {
+        try (var output = new GpuSceneTestOutput()) {
+            verify(output, library, batch);
+        }
+    }
+
+    private static void verify(GpuSceneTestOutput output, GpuUnitModels library, ModelBatch batch) throws Exception {
         var original = BoardGeometry.tuning();
         try (var fixture = GpuBoardFixture.create(new Board(9, 9, Stream.generate(Hex::new).limit(81).toArray(Hex[]::new)))) {
             var ship = (Dropship) new MekFileParser(new File(Configuration.dataDir(), "mekfiles/unit_files.zip"),
@@ -61,7 +67,7 @@ final class GpuLandingSupportReview {
             try {
                 pose(model, placed, animator, scene, unit, camera, 0, UnitMotion.Sample.STILL);
                 contacts(model, placed, scene);
-                render(batch, terrain, camera, scene, placed, "flat");
+                render(output, batch, terrain, camera, scene, placed, "flat");
                 scene = terrain(fixture, ship, 0, ship.getPosition());
                 unit = scene.units().getFirst();
                 assertEquals(1, unit.location().elevation());
@@ -72,7 +78,7 @@ final class GpuLandingSupportReview {
                     var point = contact(placed, support);
                     assertFalse(BoardGeometry.contains(unit.location().coords(), point.x, point.y));
                 }
-                render(batch, terrain, camera, scene, placed, "center-high");
+                render(output, batch, terrain, camera, scene, placed, "center-high");
                 for (boolean top : List.of(false, true)) {
                     camera.setIsometric(!top);
                     camera.fit(scene);
@@ -91,7 +97,7 @@ final class GpuLandingSupportReview {
                 var heights = model.rigs().getFirst().landingSupports().stream().map(support -> Math.round(contact(placed, support).z))
                       .collect(java.util.stream.Collectors.toSet());
                 assertEquals(Set.of(0, Math.round(BoardGeometry.LEVEL)), heights, "Each foot samples its own hex");
-                render(batch, terrain, camera, scene, placed, "mixed-feet");
+                render(output, batch, terrain, camera, scene, placed, "mixed-feet");
                 // A downward ray at a pad outside the hull must hit its current mesh, not just the hull bounds.
                 Vector3 pad = contact(placed, model.rigs().getFirst().landingSupports().getFirst());
                 assertTrue(Float.isFinite(picker.distance(placed, new Ray(new Vector3(pad).add(0, 0, 5), new Vector3(0, 0, -1)))));
@@ -121,8 +127,8 @@ final class GpuLandingSupportReview {
                 // Shadow invalidation must see disabled parts even with an unchanged hull/root transform.
                 terrain.renderShadows(camera.camera, List.of(placed));
                 assertTrue(deployedShadow != GpuFamilyAssemblyReview.shadowChecksum(terrain));
-                render(batch, terrain, camera, scene, placed, "retracted");
-                gearCycle(model, placed, animator, batch, terrain, camera, scene, unit);
+                render(output, batch, terrain, camera, scene, placed, "retracted");
+                gearCycle(output, model, placed, animator, batch, terrain, camera, scene, unit);
                 // Reveal/rebind starts from shared rest art and must immediately restore local contacts.
                 var revealed = new ModelInstance(model.instance);
                 pose(model, revealed, animator, scene, unit, camera, 0, UnitMotion.Sample.STILL);
@@ -136,8 +142,8 @@ final class GpuLandingSupportReview {
                 for (var support : model.rigs().getFirst().landingSupports()) {
                     assertEquals(1, model.instance.getNode(support.shaft()).scale.z, .0001f, "Shared geometry is immutable");
                 }
-                fallback(library, batch, terrain, camera, scene, unit, "aerodyne");
-                fallback(library, batch, terrain, camera, scene, unit, "small-spheroid");
+                fallback(output, library, batch, terrain, camera, scene, unit, "aerodyne");
+                fallback(output, library, batch, terrain, camera, scene, unit, "small-spheroid");
                 assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
             } finally {
                 picker.clear();
@@ -236,8 +242,8 @@ final class GpuLandingSupportReview {
     }
 
     /** A close view of the real grounded gear phases, with flight travel omitted between the two shots. */
-    private static void gearCycle(GpuUnitModel model, ModelInstance placed, UnitAnimator animator, ModelBatch batch,
-          GpuTerrain terrain, BoardCamera camera, BoardScene scene, BoardScene.Unit unit) {
+    private static void gearCycle(GpuSceneTestOutput output, GpuUnitModel model, ModelInstance placed, UnitAnimator animator,
+          ModelBatch batch, GpuTerrain terrain, BoardCamera camera, BoardScene scene, BoardScene.Unit unit) {
         var landing = unit.location().withFootprint(unit.footprint());
         var flight = new BoardScene.Waypoint(landing.coords(), 5, 0).withAeroState(BoardScene.AeroState.AIRBORNE);
         var first = model.rigs().getFirst().landingSupports().getFirst();
@@ -265,13 +271,13 @@ final class GpuLandingSupportReview {
                     assertTrue(placed.getNode(first.foot()).parts.first().enabled, "Partial motion is visible");
                     assertTrue(placed.getNode(first.foot()).scale.epsilonEquals(1, 1, 1, .001f));
                 }
-                draw(batch, terrain, camera, placed);
+                draw(output, batch, terrain, camera, placed);
                 GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"),
                       "runtime-gear-" + (retract ? "retract-" : "extend-") + String.format("%02d", frame) + ".png"));
             }
             if (retract) {
                 hidden(model, placed);
-                stowedInsideHull(model, placed, batch, terrain, camera);
+                stowedInsideHull(output, model, placed, batch, terrain, camera);
                 camera.setIsometric(true);
             } else {
                 contacts(model, placed, scene);
@@ -279,16 +285,16 @@ final class GpuLandingSupportReview {
         }
     }
 
-    private static void stowedInsideHull(GpuUnitModel model, ModelInstance placed, ModelBatch batch, GpuTerrain terrain,
-          BoardCamera camera) {
+    private static void stowedInsideHull(GpuSceneTestOutput output, GpuUnitModel model, ModelInstance placed,
+          ModelBatch batch, GpuTerrain terrain, BoardCamera camera) {
         for (boolean top : List.of(false, true)) {
             camera.setIsometric(!top);
-            draw(batch, terrain, camera, placed);
+            draw(output, batch, terrain, camera, placed);
             long hidden = imageChecksum();
             for (var support : model.rigs().getFirst().landingSupports()) {
                 visibility(placed.getNode(support.node()), true);
             }
-            draw(batch, terrain, camera, placed);
+            draw(output, batch, terrain, camera, placed);
             assertEquals(hidden, imageChecksum(), "Fully stowed supports are already occluded by the hull before hiding");
             for (var support : model.rigs().getFirst().landingSupports()) {
                 visibility(placed.getNode(support.node()), false);
@@ -312,8 +318,8 @@ final class GpuLandingSupportReview {
         }
     }
 
-    private static void fallback(GpuUnitModels library, ModelBatch batch, GpuTerrain terrain, BoardCamera camera,
-          BoardScene scene, BoardScene.Unit unit, String name) {
+    private static void fallback(GpuSceneTestOutput output, GpuUnitModels library, ModelBatch batch, GpuTerrain terrain,
+          BoardCamera camera, BoardScene scene, BoardScene.Unit unit, String name) {
         var selected = new BoardScene.UnitModel("units/modular/families/" + name + ".json", null, "", 1, 0,
               BoardScene.LocationDamage.NONE, unit.model().state());
         var model = library.get(selected, name.hashCode());
@@ -321,35 +327,35 @@ final class GpuLandingSupportReview {
         var placed = new ModelInstance(model.instance);
         pose(model, placed, new UnitAnimator(), scene, unit, camera, 0, UnitMotion.Sample.STILL);
         contacts(model, placed, scene);
-        render(batch, terrain, camera, scene, placed, name);
+        render(output, batch, terrain, camera, scene, placed, name);
         pose(model, placed, new UnitAnimator(), scene, withState(unit, BoardScene.AeroState.AIRBORNE), camera, 0,
               UnitMotion.Sample.STILL);
-        stowedInsideHull(model, placed, batch, terrain, camera);
+        stowedInsideHull(output, model, placed, batch, terrain, camera);
     }
 
-    private static void render(ModelBatch batch, GpuTerrain terrain, BoardCamera camera, BoardScene scene,
-          ModelInstance placed, String name) {
+    private static void render(GpuSceneTestOutput output, ModelBatch batch, GpuTerrain terrain, BoardCamera camera,
+          BoardScene scene, ModelInstance placed, String name) {
         terrain.update(scene);
         for (boolean top : List.of(false, true)) {
             camera.setIsometric(!top);
             camera.fit(scene);
             camera.zoom(.62f);
             camera.center(BoardGeometry.center(scene.units().getFirst().location().coords(), 2));
-            draw(batch, terrain, camera, placed);
+            draw(output, batch, terrain, camera, placed);
             GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"),
                   "runtime-landing-supports-" + name + (top ? "-top.png" : "-isometric.png")));
         }
     }
 
-    private static void draw(ModelBatch batch, GpuTerrain terrain, BoardCamera camera, ModelInstance placed) {
+    private static void draw(GpuSceneTestOutput output, ModelBatch batch, GpuTerrain terrain, BoardCamera camera,
+          ModelInstance placed) {
         terrain.renderShadows(camera.camera, List.of(placed));
-        Gdx.gl.glViewport(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        Gdx.gl.glClearColor(.12f, .16f, .2f, 1);
-        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        output.begin(.12f, .16f, .2f, 1);
         terrain.render(camera.camera, false);
         batch.begin(camera.camera);
         batch.render(placed, terrain.environment());
         batch.end();
+        output.display();
     }
 
 }

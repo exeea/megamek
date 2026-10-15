@@ -8,8 +8,14 @@ uniform sampler2D u_iceColor;
 uniform sampler2D u_iceNormal;
 uniform sampler2D u_iceSurface; // R surface height, G roughness, B cracks and bubbles, A cloudy ice
 // 1 land ice, 2 detected thin black ice, 3 floating lake slab; 4 dry ground beside land ice, 5 paved ground beside
-// land or black ice, which draw their side of the shared border.
+// land or black ice, which draw their side of the shared border; 6 solid frozen waterfall curtains and icicles.
+#ifdef ICE_MODE
+// Whole draw-uniform paths disappear at compilation: slabs need no land borders/base shading, while black ice
+// needs no floe/snow material. GpuTerrain keys shader reuse by this immutable material mode.
+const float u_iceMode = ICE_MODE;
+#else
 uniform float u_iceMode;
+#endif
 uniform float u_iceMetre;
 uniform float u_iceLevel;      // world units per level
 uniform float u_iceWaterline;  // world units from a water hex's level down to its surface
@@ -25,8 +31,8 @@ const vec3 ICE_JOINT = vec3(.46, .54, .59);
 
 // The normal map is baked for the unturned 24 m field. A transformed sample needs the inverse basis change and
 // the matching gradient scale, including the anisotropic wind stretch. Offsets only change the sampled position.
-vec3 iceMappedNormal(vec2 uv, mat2 transform) {
-    vec3 normal = (texture(u_iceNormal, uv).xyz * 255.0 - 128.0) / 127.0;
+vec3 iceMappedNormal(vec2 uv, mat2 transform, vec2 dx, vec2 dy) {
+    vec3 normal = (textureGrad(u_iceNormal, uv, dx, dy).xyz * 255.0 - 128.0) / 127.0;
     return normalize(vec3(transpose(transform) * normal.xy, normal.z));
 }
 
@@ -97,16 +103,104 @@ vec3 iceBorder(vec2 world, float z, bool fringe, bool glazed) {
     return vec3(.5 * (soft - ice), .5 * (hard - ice), glaze);
 }
 
-vec3 iceFinish(vec3 underlying) {
+// Shared by the full sheet and open leads. Keeping one optical response lets each material skip fields it does not
+// use without changing the light, reflection, shadows or the reflection/transmission energy split.
+void iceOptics(vec3 normal, vec3 geometric, float roughness, vec3 f0, out vec3 lit, out vec3 reflection, out vec3 sheen,
+      out float fresnel) {
+    vec3 ambient = vec3(1.0), direct = vec3(0.0);
+    sheen = vec3(0.0);
+    vec3 view = -viewDirection();
+    normal = shadingNormal(normal, geometric, view);
+    roughness = antialiasedRoughness(roughness, surfaceVariance);
+#ifdef lightingFlag
+    incidentLighting(normal, ambient, direct);
+#if numDirectionalLights > 0
+    sheen = u_dirLights[0].color * surfaceVisibility() * float(dot(geometric, -u_dirLights[0].direction) > 0.0)
+          * surfaceReflectance(normal, -u_dirLights[0].direction, view, roughness, f0);
+#endif
+#ifdef cloudShadowFlag
+    float cloudLight = cloudTransmission(v_cloudPosition);
+    direct *= cloudLight;
+    sheen *= cloudLight;
+#endif
+#endif
+    lit = ambient + direct;
+    vec3 ground = GROUND_ALBEDO * lit;
+#ifdef lightingFlag
+    ground = environmentGround(GROUND_ALBEDO);
+#endif
+    reflection = environmentSpecular(normal, view, roughness, f0, ground, ambient);
+    fresnel = specularAlbedo(max(0.0, dot(view, normal)), roughness, f0).r;
+}
+
+// A cascade grows in vertical rivulets, unlike a lake's horizontal floes. Geometry supplies its rounded columns and
+// hanging icicles; these stationary fields add trapped bubbles, frosted ribs and polished blue ice between them.
+// Reuse the lake's maps and optical response, including the scene's actual sun, shadows and environment reflection.
+vec3 iceCascade(vec3 worldDx, vec3 worldDy) {
+    vec3 geometric = visibleFace(worldDx, worldDy, -viewDirection());
+    vec3 face = normalize(v_normal);
+    vec3 world = v_cloudPosition / u_iceMetre;
+    // Authored once with the retained geometry: crest arc length and actual downward path length.
+    // Capture UV gradients before the detail branch; no derivative depends on a coverage discard.
+    vec2 uv = v_diffuseUV, uvDx = dFdx(v_diffuseUV), uvDy = dFdy(v_diffuseUV);
+    // Deliberately retain the broad, world-anchored frost field across the separate closed-surface charts.
+    vec2 along = vec2(.79, .61);
+    vec4 properties = textureGrad(u_iceSurface, uv, uvDx, uvDy);
+    vec3 veins = iceNoise(vec2(dot(world.xy, along), world.z * .09), .65, vec2(18.7, 6.3));
+    float detail = 1.0 - smoothstep(.008, .08, max(length(uvDx), length(uvDy)));
+    float bubbles = properties.b * detail;
+    float rime = smoothstep(.27, .55, veins.x * .70 + properties.a * .30);
+    // Snow settles on upward shelves; the vertical faces retain glazed ribs instead of lake-shaped snow patches.
+    float frost = clamp(rime * .78 + bubbles * .3 + smoothstep(.25, .8, face.z) * .75, 0.0, 1.0);
+    vec3 normal = face;
+    if (u_iceNormals * detail > .001) {
+        float determinant = uvDx.x * uvDy.y - uvDx.y * uvDy.x;
+        if (abs(determinant) > 1e-10) {
+            vec3 tangent = (worldDx * uvDy.y - worldDy * uvDx.y) / determinant;
+            vec3 bitangent = (worldDy * uvDx.x - worldDx * uvDy.x) / determinant;
+            tangent -= face * dot(face, tangent);
+            if (dot(tangent, tangent) > 1e-10) {
+                tangent = normalize(tangent);
+                vec3 perpendicular = cross(face, tangent);
+                bitangent = dot(perpendicular, bitangent) < 0.0 ? -perpendicular : perpendicular;
+                vec3 mapped = iceMappedNormal(uv, mat2(1.0), uvDx, uvDy);
+                normal = normalize(face + (tangent * mapped.x + bitangent * mapped.y)
+                      * detail * u_iceNormals * mix(.32, .65, frost));
+            }
+        }
+    }
+    float roughness = mix(.075 + .14 * properties.g, .62, frost);
+    roughness = mix(roughness, max(roughness, .24), 1.0 - detail);
+    vec3 lit, reflection, sheen;
+    float fresnel;
+    iceOptics(normal, geometric, roughness, vec3(.018), lit, reflection, sheen, fresnel);
+    vec3 blue = mix(vec3(.20, .43, .53), vec3(.43, .65, .70), veins.y);
+    vec3 scattering = materialReflectance(mix(blue, ICE_SNOW, frost));
+    float bodyAlpha = mix(.82, .99, frost);
+    float alpha = fresnel + (1.0 - fresnel) * bodyAlpha;
+    fragColor.a = alpha;
+    return (scattering * lit * bodyAlpha * (1.0 - fresnel) + reflection + sheen) / max(alpha, .001);
+}
+
+// The supporting surface and this optical coat both carry linear scene radiance.
+vec3 iceFinish(vec3 underlying, vec3 worldDx, vec3 worldDy) {
+    vec3 geometric = visibleFace(worldDx, worldDy, -viewDirection());
     vec3 face = normalize(v_normal);
     float slab = step(2.5, u_iceMode) * (1.0 - step(3.5, u_iceMode));
     bool fringe = u_iceMode > 3.5;
     float thin = step(1.5, u_iceMode) * (1.0 - step(2.5, u_iceMode));
+    bool lead = slab > .5 && v_color.r < .5;
+    vec2 world = v_cloudPosition.xy / u_iceMetre;
+    vec2 metres = vec2(world.x, -world.y), uv = metres / 24.0;
+    // The caller captured derivatives before the supporting surface's road/scar coverage discard.
+    // These affine transforms retain the same map footprint through sheet/lead/border early-outs.
+    vec2 metresDx = vec2(worldDx.x, -worldDx.y) / u_iceMetre;
+    vec2 metresDy = vec2(worldDy.x, -worldDy.y) / u_iceMetre;
+    vec2 uvDx = metresDx / 24.0, uvDy = metresDy / 24.0;
+    float pixel = max(length(abs(metresDx) + abs(metresDy)), 1e-4);
     // Snow and ice cover ground up to steep banks; a slab's own cut edges are ice as well.
     float coverage = max(slab, smoothstep(.2, .45, face.z));
     if (coverage <= 0.0) { return underlying; }
-    vec2 world = v_cloudPosition.xy / u_iceMetre;
-    float pixel = max(length(fwidth(world)), 1e-4);
     // How far inside the ice a point on land lies, the ice's thickness there, and its broken edge.
     float inside = 1e4, thickness = 1.0, rim = 0.0, shattered = 0.0;
     vec2 tilt = vec2(0.0);
@@ -137,9 +231,7 @@ vec3 iceFinish(vec3 underlying) {
               near * (1.0 - smoothstep(crack, crack + .1 + pixel, shard.x * 1.6)));
         tilt = (vec2(shard.y, biomeHash(ivec2(floor(shard.y * 6151.0), 11))) - .5) * .16 * (1.0 - thickness);
     }
-    vec2 metres = vec2(world.x, -world.y);
-    vec2 uv = metres / 24.0;
-    vec2 footprint = max(abs(dFdx(uv)), abs(dFdy(uv)));
+    vec2 footprint = max(abs(uvDx), abs(uvDy));
     // Shading LOD follows projected texel footprint; mipmaps filter every map with the same derivatives.
     float detail = 1.0 - smoothstep(.006, .07, max(footprint.x, footprint.y));
     // Broad world fields, and which of two differently rotated samples of the maps shows, so the 24 m repeat does not
@@ -148,89 +240,99 @@ vec3 iceFinish(vec3 underlying) {
     mat2 iceTurn = mat2(.81, -.59, .59, .81) * 1.37;
     vec2 turned = iceTurn * uv + vec2(.41, .17);
     float swap = smoothstep(.40, .60, broad.x);
-    vec4 properties = mix(texture(u_iceSurface, uv), texture(u_iceSurface, turned), swap);
+    vec4 properties = mix(textureGrad(u_iceSurface, uv, uvDx, uvDy),
+          textureGrad(u_iceSurface, turned, iceTurn * uvDx, iceTurn * uvDy), swap);
+    if (lead) {
+        // Leads use only cloudy slush and the unperturbed face. No floes, snow, normal or colour-map fields enter
+        // this result, so avoid computing the sheet beneath an early return that would discard all of them.
+        vec3 lit, reflection, sheen;
+        float fresnel;
+        iceOptics(face, geometric, MIN_ROUGHNESS, vec3(.02037), lit, reflection, sheen, fresnel);
+        float slush = smoothstep(.5, .85, properties.a) * .55;
+        vec3 water = mix(ICE_DEEP * lit, ICE_BARE * lit * .8, slush);
+        float alpha = mix(.86, .95, slush);
+        fragColor.a = alpha;
+        return (water * alpha * (1.0 - fresnel) + reflection + sheen * (1.0 - slush)) / alpha;
+    }
+    float cloudy = clamp(properties.a * mix(.3, .9, broad.y), 0.0, 1.0);
+    if (slab > .5 && face.z < .5) {
+        // A cut face exposes the sheet's ice, not its snow cover. The authored data map describes polished clear
+        // ice and rougher cloudy ice; none of the top surface's snow, floe joints or colour-map fields enter here.
+        float roughness = clamp(properties.g, MIN_ROUGHNESS, 1.0);
+        roughness = mix(roughness, max(roughness, .22), 1.0 - detail);
+        vec3 lit, reflection, sheen;
+        float fresnel;
+        iceOptics(face, geometric, roughness, vec3(.018), lit, reflection, sheen, fresnel);
+        vec3 edge = mix(vec3(.42, .70, .76), ICE_SNOW, .25 + .4 * cloudy) * lit;
+        fragColor.a = .94;
+        return edge * (1.0 - fresnel) + reflection + sheen;
+    }
     float margin = slab * (1.0 - v_color.a);
-    // Floes of two sizes. Most carry wind-packed snow; some are blown bare to grey ice. Refrozen slush fills the joints
-    // of the large ones, and of the small ones in places; many joints have healed. Toward open water they open.
-    // A gentle warp bends the joints the way pressure cracks run, instead of straight lattice seams.
-    vec2 bent = world + (iceNoise(metres, 7.0, vec2(51.3, 12.7)).xy - .5) * 3.5;
-    vec4 plate = iceFloes(bent / 17.0);
-    vec4 floe = iceFloes(bent / 6.5 + vec2(3.7, 8.1));
-    vec3 along = iceNoise(metres, 2.5, vec2(7.7, 30.1));
-    float healed = smoothstep(.25, .65, along.x);
-    float fade = (1.0 - smoothstep(.2, .8, pixel)) * (1.0 - thin);
-    // Drifted snow: shallow wind streaks and the ice's relief showing through where it is thin.
+    float snow = 0.0, depth = 0.0, drift = 0.0, joint = 0.0;
     mat2 windStretch = mat2(.28, 0.0, 0.0, 1.0) * mat2(.94, .34, -.34, .94);
     vec2 wind = windStretch * metres;
-    float drift = iceNoise(wind, 1.6, vec2(11.3, 5.5)).y;
-    // Snow lies on most floes, blown into soft-edged patches that cross their joints; thin ice at a broken edge
-    // carries less.
-    float snow = (1.0 - thin) * (1.0 - .6 * margin) * mix(.3, 1.0, thickness) * smoothstep(.22, .48, plate.y * .5
-          + floe.y * .2 + (broad.z - .5) * .55 + (properties.a - .5) * .35 + (drift - .5) * .35 + .15);
-    float depth = clamp(mix(.55, 1.0, smoothstep(.3, .7, broad.y)) + (drift - .5) * .35, .4, 1.0);
-    // Joints vary in width along their run; snow partly buries them.
-    float width = .09 * mix(.35, 1.7, along.z);
-    float joint = fade * max((1.0 - smoothstep(width, width + pixel + .55 * margin, plate.x * 8.5))
-          * mix(.3, 1.0, healed),
-          (1.0 - smoothstep(.05, .05 + pixel, floe.x * 3.25)) * .55 * smoothstep(.5, .8, broad.y) * (1.0 - healed));
-    joint *= 1.0 - .7 * snow * smoothstep(.45, .8, drift);
-    joint = max(joint, fade * margin * (1.0 - smoothstep(.05, .05 + pixel + .3, floe.x * 3.25)));
-    float cloudy = clamp(properties.a * mix(.3, .9, broad.y), 0.0, 1.0);
+    // Thin black ice has exactly zero snow and joints. Its border still uses the same shards and polished map.
+    if (thin < .5) {
+        // Floes of two sizes. Most carry wind-packed snow; some are blown bare to grey ice. Refrozen slush fills the joints
+        // of the large ones, and of the small ones in places; many joints have healed. Toward open water they open.
+        // A gentle warp bends the joints the way pressure cracks run, instead of straight lattice seams.
+        vec2 bent = world + (iceNoise(metres, 7.0, vec2(51.3, 12.7)).xy - .5) * 3.5;
+        vec4 plate = iceFloes(bent / 17.0);
+        vec4 floe = iceFloes(bent / 6.5 + vec2(3.7, 8.1));
+        vec3 along = iceNoise(metres, 2.5, vec2(7.7, 30.1));
+        float healed = smoothstep(.25, .65, along.x);
+        float fade = (1.0 - smoothstep(.2, .8, pixel)) * (1.0 - thin);
+        // Drifted snow: shallow wind streaks and the ice's relief showing through where it is thin.
+        drift = iceNoise(wind, 1.6, vec2(11.3, 5.5)).y;
+        // Snow lies on most floes, blown into soft-edged patches that cross their joints; thin ice at a broken edge
+        // carries less.
+        snow = (1.0 - thin) * (1.0 - .6 * margin) * mix(.3, 1.0, thickness) * smoothstep(.22, .48, plate.y * .5
+              + floe.y * .2 + (broad.z - .5) * .55 + (properties.a - .5) * .35 + (drift - .5) * .35 + .15);
+        depth = clamp(mix(.55, 1.0, smoothstep(.3, .7, broad.y)) + (drift - .5) * .35, .4, 1.0);
+        // Joints vary in width along their run; snow partly buries them.
+        float width = .09 * mix(.35, 1.7, along.z);
+        joint = fade * max((1.0 - smoothstep(width, width + pixel + .55 * margin, plate.x * 8.5))
+              * mix(.3, 1.0, healed),
+              (1.0 - smoothstep(.05, .05 + pixel, floe.x * 3.25)) * .55 * smoothstep(.5, .8, broad.y) * (1.0 - healed));
+        joint *= 1.0 - .7 * snow * smoothstep(.45, .8, drift);
+        joint = max(joint, fade * margin * (1.0 - smoothstep(.05, .05 + pixel + .3, floe.x * 3.25)));
+    }
     float cracks = properties.b * detail * (1.0 - snow);
     vec3 normal = face;
     if (detail * u_iceNormals > .001 && face.z > .5) {
         // Polished bare ice undulates gently. Snow has its own broader, softer dunes: the same map, stretched
         // along the wind. Shards at a broken edge lean each their own way.
-        vec3 polished = mix(iceMappedNormal(uv, mat2(1.0)), iceMappedNormal(turned, iceTurn), swap);
-        vec3 dunes = iceMappedNormal(wind / 9.0, windStretch * (24.0 / 9.0));
+        vec3 polished = vec3(0.0), dunes = vec3(0.0);
+        if (snow < 1.0) {
+            polished = mix(iceMappedNormal(uv, mat2(1.0), uvDx, uvDy),
+                  iceMappedNormal(turned, iceTurn, iceTurn * uvDx, iceTurn * uvDy), swap);
+        }
+        if (snow > 0.0) {
+            mat2 stretch = windStretch * (24.0 / 9.0);
+            dunes = iceMappedNormal(wind / 9.0, stretch, stretch * uvDx, stretch * uvDy);
+        }
         vec3 micro = mix(polished, dunes, snow);
         vec3 tangent = normalize(vec3(face.z, 0.0, -face.x));
         micro.xy = micro.xy * detail * mix(.45, .8, snow) + tilt;
         normal = normalize(tangent * micro.x - cross(face, tangent) * micro.y + face * micro.z);
     }
-    bool lead = slab > .5 && v_color.r < .5;
-    float roughness = lead ? .04 : mix(mix(.06, .22, cloudy), .8, snow * depth);
-    roughness = mix(roughness, max(roughness, .22), (1.0 - detail) * (lead ? 0.0 : 1.0));
-    vec3 ambient = vec3(1.0), direct = vec3(0.0), sheen = vec3(0.0);
-#ifdef lightingFlag
-    surfaceLighting(lead ? face : normal, 0.0, roughness, ambient, direct, sheen);
-#ifdef cloudShadowFlag
-    float cloudLight = cloudTransmission(v_cloudPosition);
-    direct *= cloudLight;
-    sheen *= cloudLight;
-#endif
-#endif
-    vec3 lit = ambient + direct;
-    vec3 view = -viewDirection();
-    vec3 reflected = reflect(-view, lead ? face : normal);
-    vec3 sky = toLinear(mix(u_rainHorizon, u_rainSky, sqrt(clamp(reflected.z, 0.0, 1.0))));
-    // Rough snow blurs the sky into the ambient light it already receives.
-    sky = mix(sky, ambient * .85, smoothstep(.12, .6, roughness));
-    float fresnel = (.018 + .982 * pow(1.0 - max(0.0, dot(view, lead ? face : normal)), 5.0))
-          * (1.0 - .7 * smoothstep(.15, .8, roughness));
-    vec3 tint = toLinear(mix(texture(u_iceColor, uv).rgb, texture(u_iceColor, turned).rgb, swap));
+    float roughness = mix(mix(.06, .22, cloudy), .8, snow * depth);
+    roughness = mix(roughness, max(roughness, .22), 1.0 - detail);
+    vec3 lit, reflection, sheen;
+    float fresnel;
+    iceOptics(normal, geometric, roughness, vec3(.018), lit, reflection, sheen, fresnel);
+    vec3 tint = mix(textureGrad(u_iceColor, uv, uvDx, uvDy).rgb,
+          textureGrad(u_iceColor, turned, iceTurn * uvDx, iceTurn * uvDy).rgb, swap);
     tint /= max(dot(tint, vec3(.333)), .05);
-    vec3 bare = ICE_BARE * mix(vec3(1.0), tint, .35) * (1.0 + cloudy * .35) + vec3(.55) * cracks;
+    vec3 bare = materialReflectance(ICE_BARE * mix(vec3(1.0), tint, .35) * (1.0 + cloudy * .35)
+          + vec3(.55) * cracks);
     // Snow grain from the drift streaks and the ice's height field.
-    vec3 snowColor = mix(ICE_BARE, ICE_SNOW, depth) * (.92 + .12 * drift + .12 * (properties.r - .5));
+    vec3 snowColor = materialReflectance(mix(ICE_BARE, ICE_SNOW, depth)
+          * (.92 + .12 * drift + .12 * (properties.r - .5)));
     if (slab > .5) {
-        if (lead) {
-            // An open lead along the shore: still, dark water under a skim of slush, mirroring the sky.
-            float slush = smoothstep(.5, .85, properties.a) * .55;
-            vec3 water = mix(ICE_DEEP * lit, ICE_BARE * lit * .8, slush);
-            float alpha = mix(.86, .95, slush);
-            fragColor.a = alpha;
-            return toDisplay((water * alpha * (1.0 - fresnel) + sky * fresnel + sheen * (1.0 - slush)) / alpha);
-        }
-        if (face.z < .5) {
-            // The slab's cut edge: light scattered through the ice leaves it blue-green, whiter where it is frosted.
-            vec3 edge = mix(vec3(.42, .70, .76), ICE_SNOW, .25 + .4 * cloudy) * lit;
-            fragColor.a = .94;
-            return toDisplay(edge * (1.0 - fresnel) + sky * fresnel + sheen);
-        }
         // Over the already-drawn bed and water: bare ice scatters part of the light and darkens what it transmits;
         // snow and slush replace it; open leads show the water; reflection takes over at grazing angles.
-        float bareAlpha = .5 + .25 * cloudy + .3 * cracks;
+        float bareAlpha = min(1.0, .5 + .25 * cloudy + .3 * cracks);
         vec3 body = mix(mix(ICE_DEEP, bare, .8) * lit * bareAlpha, snowColor * lit, snow);
         float bodyAlpha = mix(bareAlpha, 1.0, snow);
         float jointAlpha = mix(.85, .1, margin);
@@ -238,16 +340,40 @@ vec3 iceFinish(vec3 underlying) {
         bodyAlpha = mix(bodyAlpha, jointAlpha, joint);
         float alpha = fresnel + (1.0 - fresnel) * bodyAlpha;
         fragColor.a = alpha;
-        return toDisplay((body * (1.0 - fresnel) + sky * fresnel + sheen) / max(alpha, .001));
+        return (body * (1.0 - fresnel) + reflection + sheen) / max(alpha, .001);
     }
     // Land ice and glaze over their opaque support: the ground shows darker and cooler beneath bare ice, and more
     // plainly where the ice thins toward a broken edge, whose fracture faces catch the light.
-    vec3 beneath = toLinear(underlying) * mix(vec3(.55, .63, .70), vec3(.80, .85, .88), thin);
+    vec3 beneath = underlying * mix(vec3(.55, .63, .70), vec3(.80, .85, .88), thin);
     float glazing = mix(.45 + .25 * cloudy, .08 + .3 * cracks, thin) * mix(.35, 1.0, thickness);
     vec3 glaze = mix(beneath, bare * lit, glazing);
     vec3 body = mix(mix(glaze, snowColor * lit, snow), ICE_JOINT * lit, joint);
-    body += ICE_SNOW * lit * rim * .35 * (1.0 - thin * .6);
-    vec3 iced = body * (1.0 - fresnel) + sky * fresnel + sheen;
-    return mix(underlying, toDisplay(iced), coverage);
+    body = mix(body, ICE_SNOW * lit, rim * .35 * (1.0 - thin * .6));
+    vec3 iced = body * (1.0 - fresnel) + reflection + sheen;
+    return mix(underlying, iced, coverage);
 }
 #endif
+
+void main() {
+#ifdef iceFlag
+    // Capture before iceBaseSurface can discard a road-mask or projected-scar fragment.
+    vec3 worldDx = dFdx(v_cloudPosition), worldDy = dFdy(v_cloudPosition);
+    vec3 iceFace = normalize(v_normal);
+    float iceVariance = normalVariance(dFdx(iceFace), dFdy(iceFace));
+    surfaceVariance = iceVariance;
+    if (u_iceMode > 5.5) {
+        fragColor.rgb = iceCascade(worldDx, worldDy);
+        return;
+    }
+    // Floating slabs replace both RGB and alpha in every optical path. Their ordinary ground material has no
+    // discard or depth side effects: computing its maps, rain response and lighting would only discard the result.
+    // Land and black ice still need their actual underlying surface for transmission and the broken border.
+    if (u_iceMode > 2.5 && u_iceMode < 3.5) fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    else iceBaseSurface();
+    // The coat's own normal, not the variance of the support's maps.
+    surfaceVariance = iceVariance;
+    fragColor.rgb = iceFinish(fragColor.rgb, worldDx, worldDy);
+#else
+    iceBaseSurface();
+#endif
+}

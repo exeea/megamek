@@ -52,10 +52,14 @@ final class GpuLavaLighting extends Attribute {
                 var tile = tiles.get(i);
                 if (!tile.liquid().volcanic()) continue;
                 var point = BoardGeometry.center(tile.coords(), tile.elevation());
-                if (tile.liquid().molten()) point.z = BoardGeometry.waterZ(tile);
+                boolean molten = tile.liquid().molten();
+                if (molten) point.z = BoardGeometry.waterZ(tile);
                 point.z += BoardRelief.metres(.7f);
-                next.add(new Source(i, point, tile.liquid().molten() ? 1f : .035f,
-                      new Vector3(1.8f, .24f, .025f), width));
+                // Mean of the restored raft heat map under the fixed thermal ramp, before shore attenuation.
+                // The existing disk/falloff remains an area-light approximation; solid spill is unchanged.
+                Vector3 color = molten ? new Vector3(0.139038925f, 0.015417211f, 0.0f)
+                      : new Vector3(1.8f, .24f, .025f);
+                next.add(new Source(i, point, molten ? 1f : .035f, color, width));
             }
             sources = List.copyOf(next);
         }

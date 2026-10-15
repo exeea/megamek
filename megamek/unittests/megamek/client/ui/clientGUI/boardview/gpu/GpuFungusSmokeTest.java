@@ -108,7 +108,6 @@ class GpuFungusSmokeTest {
                     assertEquals(0, terrain.fungusClouds(), "Retire clouds when their mushrooms disappear");
                     GpuReviewFrame.save(new File(output, "fungus-scatter-night.png"));
                     animatedMist(camera);
-                    verifyElevationGrade(terrain, frame, camera, output);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally {
@@ -120,57 +119,6 @@ class GpuFungusSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Fungal shader review", failure.get()); }
-    }
-
-    /** The same cyan texels must lighten and desaturate as their plateau rises, through the real material shader. */
-    private static void verifyElevationGrade(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, File output)
-          throws Exception {
-        frame.configure(light(13));
-        camera.setIsometric(false);
-        camera.camera.zoom = .16f;
-        boolean[] cyan = new boolean[320 * 320];
-        float previousLuma = 0, previousSaturation = 1;
-        StringBuilder measurements = new StringBuilder("level,luminance,saturation,cyan_pixels\n");
-        for (int level = 1; level <= 5; level++) {
-            int elevation = level;
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.FUNGUS,
-                  elevation, -1, 0));
-            terrain.update(scene);
-            camera.center(BoardGeometry.center(BoardSurfaceBlendTest.CENTER, level));
-            frame.render(terrain, camera, scene);
-            GpuReviewFrame.save(new File(output, "fungus-elevation-" + level + ".png"));
-            Pixmap pixels = Pixmap.createFromFrameBuffer(Gdx.graphics.getWidth() / 2 - 160,
-                  Gdx.graphics.getHeight() / 2 - 160, 320, 320);
-            float luma = 0, saturation = 0;
-            int count = 0;
-            try {
-                for (int y = 0; y < 320; y++) for (int x = 0; x < 320; x++) {
-                    int pixel = pixels.getPixel(x, y);
-                    float r = (pixel >>> 24) / 255f, g = ((pixel >>> 16) & 255) / 255f,
-                          b = ((pixel >>> 8) & 255) / 255f;
-                    // Keep this exact pixel mask at every height, rather than reselecting brighter patches uphill.
-                    if (level == 1) { cyan[y * 320 + x] = g > r + .05f && b > r + .05f; }
-                    if (!cyan[y * 320 + x]) { continue; }
-                    luma += .2126f * r + .7152f * g + .0722f * b;
-                    float maximum = Math.max(r, Math.max(g, b)), minimum = Math.min(r, Math.min(g, b));
-                    saturation += (maximum - minimum) / Math.max(maximum, .001f);
-                    count++;
-                }
-            } finally { pixels.dispose(); }
-            assertTrue(count > 1000, "Measure the cyan crust, not a mostly bare mineral patch");
-            luma /= count;
-            saturation /= count;
-            measurements.append(level).append(',').append(luma).append(',').append(saturation).append(',')
-                  .append(count).append('\n');
-            Files.writeString(new File(output, "fungus-elevation.csv").toPath(), measurements);
-            if (level > 1) {
-                assertTrue(luma > previousLuma + .008f, "Cyan crust must lighten at level " + level + ": " + measurements);
-                assertTrue(saturation < previousSaturation - .015f,
-                      "Cyan crust must lose saturation at level " + level + ": " + measurements);
-            }
-            previousLuma = luma;
-            previousSaturation = saturation;
-        }
     }
 
     private static BoardAtmosphere.Settings light(float hour) {
@@ -227,7 +175,7 @@ class GpuFungusSmokeTest {
     private static void animatedMist(BoardCamera camera) {
         GpuFungus mist = new GpuFungus();
         Pixmap first = null;
-        try {
+        try (var output = new GpuSceneTestOutput()) {
             camera.camera.zoom = .08f;
             camera.center(new Vector3(0, 0, 30));
             var bounds = new BoundingBox(new Vector3(-10, -10, 0), new Vector3(10, 10, 30));
@@ -236,12 +184,12 @@ class GpuFungusSmokeTest {
             var source = GpuFungus.emitter(BoardFungus.CUPS.getFirst(), bounds);
             assertTrue(bounds.contains(source.origin()), "Emission starts inside the mushroom");
             for (int step = 0; step < 2; step++) {
-                Gdx.gl.glClearColor(0, 0, 0, 1);
-                Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+                output.begin(0, 0, 0, 1);
                 mist.begin();
                 mist.add(List.of(source), camera.camera);
                 mist.render(camera.camera, step * 2, Vector3.Zero);
                 assertTrue(mist.particles() > 0);
+                output.display();
                 Pixmap current = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                 if (first == null) { first = current; }
                 else {

@@ -5,6 +5,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.math.Matrix4;
@@ -15,6 +16,7 @@ final class GpuCloudShadow extends Attribute {
     private static final String MAIN = "void main() {";
     final Texture texture;
     final Matrix4 projection;
+    boolean enabled = true;
 
     GpuCloudShadow(Texture texture, Matrix4 projection) {
         super(TYPE);
@@ -23,13 +25,25 @@ final class GpuCloudShadow extends Attribute {
     }
 
     static String prefix(Renderable renderable, DefaultShader.Config config) {
+        var diffuse = renderable.material.get(TextureAttribute.class, TextureAttribute.Diffuse);
         return DefaultShader.createPrefix(renderable, config)
+              + (diffuse != null && GpuColorTexture.isColor(diffuse.textureDescription.texture) ? "#define linearTextureFlag\n" : "")
+              + (renderable.material.has(GpuLinearColors.TYPE) ? "#define linearColorsFlag\n" : "")
               + (renderable.material.has(GpuModelMaterial.TYPE) ? "#define modelSurfaceFlag\n" : "")
               + (RigidGlb.colourSlotted(renderable.meshPart.mesh.getVertexAttributes()) ? "#define colourSlotsFlag\n" : "")
+              + (renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.TYPE)
+                    ? "#define environmentLightingFlag\n" : "")
               + (renderable.environment != null && renderable.environment.has(TYPE) ? "#define cloudShadowFlag\n" : "");
     }
 
     static void register(DefaultShader shader) {
+        shader.register("u_cloudEnabled", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                GpuCloudShadow cloud = attributes.get(GpuCloudShadow.class, TYPE);
+                target.set(id, cloud != null && cloud.enabled ? 1f : 0f);
+            }
+        });
         shader.register("u_cloudShadow", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
@@ -71,16 +85,14 @@ final class GpuCloudShadow extends Attribute {
     }
 
     private static String insert(String source, String anchor, String replacement) {
-        int index = source.indexOf(anchor);
-        if (index < 0 || source.indexOf(anchor, index + anchor.length()) >= 0) {
-            throw new IllegalStateException("Incompatible cloud shader insertion point: " + anchor);
-        }
-        return source.substring(0, index) + replacement + source.substring(index + anchor.length());
+        return GpuShaderSource.replaceOnce(source, anchor, replacement, "cloud");
     }
 
     @Override
     public Attribute copy() {
-        return new GpuCloudShadow(texture, projection);
+        var copy = new GpuCloudShadow(texture, projection);
+        copy.enabled = enabled;
+        return copy;
     }
 
     @Override

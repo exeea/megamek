@@ -15,7 +15,11 @@ void unitMaterialCoordinates() {
     #ifdef colorFlag
         // The exporter's PALETTE['glass'] identifies cockpit glazing inside shared detail meshes.
         // Test the original vertex color, before player paint, damage or lighting can change it.
-        vec3 glassDifference = a_color.rgb - vec3(0.21, 0.67, 0.73);
+        vec3 glass = vec3(0.21, 0.67, 0.73);
+        #ifdef linearColorsFlag
+            glass = toLinear(glass);
+        #endif
+        vec3 glassDifference = a_color.rgb - glass;
         v_damageMask = step(0.000025, dot(glassDifference, glassDifference));
     #endif
     v_paintPosition = (u_paintTransform * vec4(a_position, 1.0)).xyz;

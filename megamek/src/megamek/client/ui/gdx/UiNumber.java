@@ -11,9 +11,9 @@ import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -68,6 +68,7 @@ public final class UiNumber extends Table {
         slider = new Slider((float) Math.min(min, initial), (float) Math.max(max, initial), (float) step, false, ui.sliderStyle());
         slider.setName("editor-slider-" + name);
         slider.setValue((float) initial);
+        new UiSliderInput(slider, this::finish);
         readout = ui.label(format(initial), "hud-small", 14, UiTheme.TEXT);
         readout.setAlignment(Align.right);
         readout.setName("editor-slider-value-" + name);
@@ -81,10 +82,11 @@ public final class UiNumber extends Table {
         UiKit.onChange(slider, () -> preview(slider.getValue()));
         slider.addListener(new InputListener() {
             @Override public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-                return button == Input.Buttons.LEFT;
+                return pointer == 0 && button == Input.Buttons.LEFT && !slider.isDisabled();
             }
             @Override public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
-                finish(); popup.cancel();
+                finish();
+                if (event.isTouchFocusCancel()) { popup.cancel(); }
             }
         });
         caption.addListener(new InputListener() {

@@ -62,13 +62,13 @@ class GpuIndustrialSmokeTest {
         var assets = new GpuAssets();
         try {
             for (String name : List.of("paint", "steel")) {
-                var texture = assets.material("industrial/" + name);
+                var texture = assets.material("structures/industrial/" + name);
                 assertTrue(texture.getWidth() >= 1024, "Photographic materials retain source resolution");
                 texture.bind();
                 assertEquals(0, org.lwjgl.opengl.GL11.glGetTexParameteri(GL20.GL_TEXTURE_2D,
                       com.badlogic.gdx.graphics.GL30.GL_TEXTURE_BASE_LEVEL), "Industrial detail is not clamped to 128px");
             }
-            var fan = assets.material("industrial/fan");
+            var fan = assets.material("structures/industrial/fan");
             assertEquals(128, fan.getWidth());
             assertEquals(128, fan.getHeight());
             for (int family = 0; family < 4; family++) {

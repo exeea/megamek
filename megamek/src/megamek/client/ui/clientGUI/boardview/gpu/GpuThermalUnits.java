@@ -62,11 +62,13 @@ final class GpuThermalUnits implements Disposable {
     }
 
     private static DefaultShaderProvider provider() {
-        return new DefaultShaderProvider(vertexSource(DefaultShader.getDefaultVertexShader()), GpuShaderSource.read("unit-thermal.frag")) {
+        return new DefaultShaderProvider(vertexSource(DefaultShader.getDefaultVertexShader()),
+              GpuShaderSource.read("unit-thermal.frag")) {
             @Override
             protected Shader createShader(Renderable renderable) {
                 return new DefaultShader(renderable, config, GpuGlsl.compile("GPU thermal unit",
-                      DefaultShader.createPrefix(renderable, config), config.vertexShader, config.fragmentShader)) {
+                      DefaultShader.createPrefix(renderable, config), config.vertexShader,
+                      GpuSceneRadiance.fragment(config.fragmentShader))) {
                     private final int thermal = register("u_thermal");
                     private final int shape = register("u_thermalShape");
 
@@ -84,9 +86,9 @@ final class GpuThermalUnits implements Disposable {
 
     /** libGDX still owns transforms, skinning, normals and sprite UVs, exactly as for the shaded model. */
     static String vertexSource(String source) {
-        source = GpuUnitShader.replaceOnce(GpuGlsl.libGdx(source, true), "void main() {",
+        source = GpuShaderSource.replaceOnce(GpuGlsl.libGdx(source, true), "void main() {",
               "out vec3 v_thermalPosition;\nvoid main() {", "vertex");
-        return GpuUnitShader.replaceOnce(source, "gl_Position = u_projViewTrans * pos;",
+        return GpuShaderSource.replaceOnce(source, "gl_Position = u_projViewTrans * pos;",
               "v_thermalPosition = pos.xyz;\n    gl_Position = u_projViewTrans * pos;", "vertex");
     }
 

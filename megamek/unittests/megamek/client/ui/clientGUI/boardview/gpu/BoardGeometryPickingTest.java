@@ -23,6 +23,12 @@ import org.junit.jupiter.api.Test;
 class BoardGeometryPickingTest {
     @Test
     void badlandsRimRocksOverhangingTheLakeBelongToTheRaisedHex() {
+        // Recessed transition rims can keep this board's small rocks inside their owner's hex. The sharp-rim
+        // presentation deliberately exercises the overhang whose visible geometry must win over the lake below.
+        BoardSculptTest.withTransitions(false, this::assertBadlandsOverhangPicking);
+    }
+
+    private void assertBadlandsOverhangPicking() {
         Board board = new Board();
         board.load(new File("data/boards/Shrapnel 13/16x17 Badlands 2 (Hazardous Liquid).board"));
         List<BoardScene.Tile> tiles = new ArrayList<>();

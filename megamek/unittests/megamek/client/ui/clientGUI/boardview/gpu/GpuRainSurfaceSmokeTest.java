@@ -10,19 +10,18 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -55,7 +54,7 @@ class GpuRainSurfaceSmokeTest {
                 public void create() {
                     GpuTerrain terrain = new GpuTerrain();
                     GLProfiler profiler = new GLProfiler(Gdx.graphics);
-                    try {
+                    try (var outputFrame = new GpuSceneTestOutput()) {
                         Gdx.graphics.setVSync(false);
                         terrain.update(scene);
                         var settings = new BoardAtmosphere.Settings(13, 0.8f, 0, 2.5f, 0, 0,
@@ -65,7 +64,8 @@ class GpuRainSurfaceSmokeTest {
                         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                         profiler.enable();
                         StringBuilder timings = new StringBuilder(Gdx.gl.glGetString(GL20.GL_RENDERER))
-                              .append("\nSynchronized terrain-frame median, 24 alternating samples; includes CPU submission.\n");
+                              .append("\nSynchronized terrain plus display-conversion median, 24 alternating samples; ")
+                              .append("includes CPU submission.\n");
                         for (boolean isometric : new boolean[] { false, true }) {
                             camera.setIsometric(isometric);
                             camera.fit(scene);
@@ -73,18 +73,18 @@ class GpuRainSurfaceSmokeTest {
                             camera.camera.zoom *= 0.55f;
                             camera.camera.update();
                             terrain.renderShadows(List.of());
-                            timings.append(isometric ? "isometric: " : "top: ").append(measure(terrain, camera)).append('\n');
+                            timings.append(isometric ? "isometric: " : "top: ").append(measure(outputFrame, terrain, camera)).append('\n');
                             profiler.reset();
-                            Pixmap dry = frame(terrain, camera, 0);
+                            Pixmap dry = frame(outputFrame, terrain, camera, 0);
                             int draws = profiler.getDrawCalls();
                             profiler.reset();
-                            Pixmap wet = frame(terrain, camera, 1);
+                            Pixmap wet = frame(outputFrame, terrain, camera, 1);
                             assertEquals(draws, profiler.getDrawCalls(), "Rain must not add draw calls");
-                            Pixmap same = frame(terrain, camera, 1);
+                            Pixmap same = frame(outputFrame, terrain, camera, 1);
                             assertEquals(wet.getPixels(), same.getPixels(), "Rendering alone must not advance the rain clock");
                             terrain.animate(0.37f, List.of());
-                            Pixmap laterDry = frame(terrain, camera, 0);
-                            Pixmap laterWet = frame(terrain, camera, 1);
+                            Pixmap laterDry = frame(outputFrame, terrain, camera, 0);
+                            Pixmap laterWet = frame(outputFrame, terrain, camera, 1);
                             try {
                                 save(wet, "rain-surfaces-" + (isometric ? "isometric" : "top"));
                                 assertTrue(animatedRain(dry, wet, laterDry, laterWet, camera, new Coords(5, 4)) > 5,
@@ -106,9 +106,9 @@ class GpuRainSurfaceSmokeTest {
                               / (camera.camera.viewportWidth * 10);
                         camera.camera.update();
                         terrain.renderShadows(List.of());
-                        timings.append("overview: ").append(measure(terrain, camera)).append('\n');
-                        Pixmap distantDry = frame(terrain, camera, 0);
-                        Pixmap distantWet = frame(terrain, camera, 1);
+                        timings.append("overview: ").append(measure(outputFrame, terrain, camera)).append('\n');
+                        Pixmap distantDry = frame(outputFrame, terrain, camera, 0);
+                        Pixmap distantWet = frame(outputFrame, terrain, camera, 1);
                         try {
                             Vector3 water = camera.camera.project(BoardGeometry.center(new Coords(5, 4), 0));
                             assertEquals(distantDry.getPixel((int) water.x, (int) water.y),
@@ -134,8 +134,14 @@ class GpuRainSurfaceSmokeTest {
         if (failure.get() != null) { throw new AssertionError(failure.get()); }
     }
 
-    /** Use neutral ground and a blue sky so reflected water coverage is measurable independently of darkening. */
-    private static void checkRainAmount() throws Exception {
+    private static void checkRainAmount() {
+        var manager = new GpuShaderManager();
+        try { manager.run(() -> checkRainAmount(manager)); }
+        finally { manager.close(); }
+    }
+
+    /** Render actual rain response, then read its material coverage independently of sky-tinted diffuse light. */
+    private static void checkRainAmount(GpuShaderManager manager) {
         BufferedImage gray = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < 72; y++) {
             for (int x = 0; x < 84; x++) { gray.setRGB(x, y, 0xff888888); }
@@ -150,11 +156,13 @@ class GpuRainSurfaceSmokeTest {
         }
         BoardScene scene = new BoardScene(0, 12, 8, tiles, List.of(), List.of(), -1, "", List.of());
         GpuTerrain terrain = new GpuTerrain();
-        try {
+        try (var outputFrame = new GpuSceneTestOutput()) {
             terrain.update(scene);
-            Color sky = new Color(0.12f, 0.4f, 0.8f, 1);
-            terrain.setAtmosphere(new BoardAtmosphere.Lighting(new Vector3(0, 0, -1), Color.BLACK, Color.WHITE,
-                  Color.BLACK, sky, sky, Color.WHITE, 1, 0, false));
+            // Ripple normals need angularly varying illumination: a uniform sky with no sun produces an
+            // almost constant reflection from a flat pool in the top view. Use the actual daylight environment.
+            var lighting = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0,
+                  BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+            terrain.setAtmosphere(lighting);
             BoardCamera camera = new BoardCamera();
             camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             for (boolean isometric : new boolean[] { false, true }) {
@@ -162,21 +170,25 @@ class GpuRainSurfaceSmokeTest {
                 camera.fit(scene);
                 camera.camera.zoom *= 0.75f;
                 camera.camera.update();
-                Pixmap light = frame(terrain, camera, 0.2f), moderate = frame(terrain, camera, 0.6f), heavy = frame(terrain, camera, 1);
-                int[] a = patch(light, camera), b = patch(moderate, camera), c = patch(heavy, camera);
+                terrain.renderShadows(camera.camera, List.of());
+                Pixmap light = frame(outputFrame, terrain, camera, 0.2f);
+                Pixmap moderate = frame(outputFrame, terrain, camera, 0.6f), heavy = frame(outputFrame, terrain, camera, 1);
+                int[] a = patch(light, camera), c = patch(heavy, camera);
                 try {
-                    int lightArea = puddlePixels(a), moderateArea = puddlePixels(b), heavyArea = puddlePixels(c);
-                    assertTrue(moderateArea > lightArea && heavyArea > moderateArea * 1.3 && heavyArea > 1000,
-                          "Rain must expand visible puddles: " + lightArea + ", " + moderateArea + ", " + heavyArea);
                     save(light, "puddle-amount-light-" + isometric);
                     save(moderate, "puddle-amount-moderate-" + isometric);
                     save(heavy, "puddle-amount-heavy-" + isometric);
                     // The former fixed ripple centers repeated their complete pattern every 1.25 seconds.
                     terrain.animate(1.25f, List.of());
-                    Pixmap laterLight = frame(terrain, camera, 0.2f), laterHeavy = frame(terrain, camera, 1);
+                    Pixmap laterLight = frame(outputFrame, terrain, camera, 0.2f), laterHeavy = frame(outputFrame, terrain, camera, 1);
                     try {
                         int lightImpacts = changed(a, patch(laterLight, camera));
                         int heavyImpacts = changed(c, patch(laterHeavy, camera));
+                        save(laterLight, "puddle-amount-light-later-" + isometric);
+                        save(laterHeavy, "puddle-amount-heavy-later-" + isometric);
+                        System.out.println("Rain impacts (isometric=" + isometric + ") light=" + lightImpacts
+                              + ", heavy=" + heavyImpacts + "; direct=" + lighting.direct()
+                              + ", sky=" + lighting.sky() + ", horizon=" + lighting.horizon());
                         assertTrue(heavyImpacts > lightImpacts && heavyImpacts > 50,
                               "Rain must increase impacts and avoid repeating the fixed pattern: " + lightImpacts + ", " + heavyImpacts);
                     } finally {
@@ -185,6 +197,31 @@ class GpuRainSurfaceSmokeTest {
                 } finally {
                     light.dispose(); moderate.dispose(); heavy.dispose();
                 }
+            }
+            // The blue sky also illuminates dry pigment under PBR, so blue-minus-red cannot identify water.
+            // Change only the output expression: the actual wetness, footprint and material coverage stay live.
+            String ground = GpuShaderSource.readDisk("terrain-normal.frag");
+            String output = "fragColor = vec4(groundLighting(albedo, normal, geometric, wet, response, puddle, -1.0, 1.0), 1.0);";
+            assertTrue(ground.contains(output), "The coverage probe must read the production puddle value");
+            var changed = manager.apply(Map.of("terrain-normal.frag",
+                  ground.replace(output, "fragColor = vec4(vec3(step(.01, puddle)), 1.0);")));
+            assertTrue(changed.success() && changed.updated() > 0, changed.message());
+            for (boolean isometric : new boolean[] { false, true }) {
+                camera.setIsometric(isometric);
+                camera.fit(scene);
+                camera.camera.zoom *= .75f;
+                camera.camera.update();
+                int[] areas = new int[4];
+                float[] rain = { 0, .2f, .6f, 1 };
+                for (int i = 0; i < rain.length; i++) {
+                    Pixmap coverage = frame(outputFrame, terrain, camera, rain[i]);
+                    try { areas[i] = puddlePixels(patch(coverage, camera)); }
+                    finally { coverage.dispose(); }
+                }
+                assertEquals(0, areas[0], "Dry ground must contain no rain puddles");
+                assertTrue(areas[2] > areas[1] && areas[3] > areas[2] * 1.3 && areas[3] > 1000,
+                      "Rain must expand visible puddle coverage (isometric=" + isometric + "): " + Arrays.toString(areas));
+                System.out.println("Rain puddle coverage (isometric=" + isometric + "): " + Arrays.toString(areas));
             }
         } finally {
             terrain.dispose();
@@ -205,7 +242,7 @@ class GpuRainSurfaceSmokeTest {
 
     private static int puddlePixels(int[] pixels) {
         int count = 0;
-        for (int pixel : pixels) { if (((pixel >>> 8) & 255) - (pixel >>> 24) > 5) { count++; } }
+        for (int pixel : pixels) { if ((pixel >>> 24) > 128) { count++; } }
         return count;
     }
 
@@ -217,25 +254,26 @@ class GpuRainSurfaceSmokeTest {
         return count;
     }
 
-    private static Pixmap frame(GpuTerrain terrain, BoardCamera camera, float wetness) {
-        draw(terrain, camera, wetness);
+    private static Pixmap frame(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, float wetness) {
+        draw(outputFrame, terrain, camera, wetness);
         return Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
     }
 
-    private static void draw(GpuTerrain terrain, BoardCamera camera, float wetness) {
+    private static void draw(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, float wetness) {
         terrain.setWetness(wetness);
-        ScreenUtils.clear(0.08f, 0.10f, 0.12f, 1, true);
+        outputFrame.begin(0.08f, 0.10f, 0.12f, 1);
         terrain.render(camera.camera, false);
         terrain.renderTransparent(camera.camera);
+        outputFrame.display();
     }
 
-    private static String measure(GpuTerrain terrain, BoardCamera camera) {
+    private static String measure(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera) {
         double[][] samples = new double[2][24];
         for (int i = -8; i < 24; i++) {
             for (int wet = 0; wet < 2; wet++) {
                 Gdx.gl.glFinish();
                 long start = System.nanoTime();
-                draw(terrain, camera, wet);
+                draw(outputFrame, terrain, camera, wet);
                 Gdx.gl.glFinish();
                 if (i >= 0) { samples[wet][i] = (System.nanoTime() - start) / 1e6; }
             }

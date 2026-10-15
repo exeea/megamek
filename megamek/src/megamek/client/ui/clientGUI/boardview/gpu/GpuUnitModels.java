@@ -115,14 +115,16 @@ final class GpuUnitModels implements Disposable {
                             continue;
                         }
                         counts.add(value.validate(geometry, level));
-                        Model model = ModelTextures.create(geometry, modelTextures, filename -> modelTextures.computeIfAbsent(
-                              filename, key -> new Texture(new FileHandle(key), true)));
+                        Model model = ModelTextures.create(geometry, modelTextures, (filename, color) -> modelTextures.computeIfAbsent(
+                              (color ? "color:" : "data:") + filename, key -> color
+                                    ? GpuColorTexture.create(new FileHandle(filename), true)
+                                    : GpuColorTexture.createData(new FileHandle(filename), true)));
                         levels.add(model);
                         for (var material : model.materials) {
                             if ("bark".equals(material.id) && !material.has(TextureAttribute.Diffuse)) {
                                 if (bark == null) {
-                                    Path texture = UnitModelDescriptor.contained(root, root.resolve("board/textures/foliage/bark.png"));
-                                    bark = new Texture(new FileHandle(texture.toFile()), true);
+                                    Path texture = UnitModelDescriptor.contained(root, root.resolve("board/textures/vegetation/bark.png"));
+                                    bark = GpuColorTexture.create(new FileHandle(texture.toFile()), true);
                                     bark.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
                                     bark.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
                                 }

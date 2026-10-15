@@ -19,7 +19,6 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -47,7 +46,7 @@ class GpuRimMaterialSmokeTest {
                 @Override
                 public void create() {
                     GpuTerrain terrain = new GpuTerrain();
-                    try {
+                    try (var outputFrame = new GpuSceneTestOutput()) {
                         terrain.update(scene);
                         BoardCamera camera = new BoardCamera();
                         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -64,7 +63,7 @@ class GpuRimMaterialSmokeTest {
                                       new Color(0.75f, 0.71f, 0.65f, 1), new Color(0.3f, 0.32f, 0.36f, 1),
                                       Color.BLACK, Color.BLACK, Color.BLACK, Color.WHITE, 1, 1, true));
                                 terrain.renderShadows(camera.camera, List.of());
-                                samples(terrain, camera, List.of());
+                                samples(outputFrame, terrain, camera, List.of());
                                 GpuBoardTestUi.capture(new File(output, "cliff-edges-" + (isometric ? "iso" : "top")
                                       + "-light-" + direction + ".png"));
                             }
@@ -122,7 +121,7 @@ class GpuRimMaterialSmokeTest {
         }
         BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
         GpuTerrain terrain = new GpuTerrain();
-        try {
+        try (var outputFrame = new GpuSceneTestOutput()) {
             terrain.update(scene);
             BoardCamera camera = new BoardCamera();
             camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -158,11 +157,11 @@ class GpuRimMaterialSmokeTest {
                     profiler.enable();
                     try {
                         terrain.setNormalMaps(false);
-                        int[] flatLight = samples(terrain, camera, probes);
+                        int[] flatLight = samples(outputFrame, terrain, camera, probes);
                         int draws = profiler.getDrawCalls();
                         profiler.reset();
                         terrain.setNormalMaps(true);
-                        int[] light = samples(terrain, camera, probes);
+                        int[] light = samples(outputFrame, terrain, camera, probes);
                         assertEquals(draws, profiler.getDrawCalls(), "Rim color uses the existing terrain draws");
                         for (int index = 0; index < probes.size(); index++) {
                             assertEquals(flatLight[index] >>> 24, light[index] >>> 24, 2,
@@ -181,9 +180,10 @@ class GpuRimMaterialSmokeTest {
         }
     }
 
-    private static int[] samples(GpuTerrain terrain, BoardCamera camera, List<Vector3> probes) {
-        ScreenUtils.clear(0.03f, 0.045f, 0.06f, 1, true);
+    private static int[] samples(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, List<Vector3> probes) {
+        outputFrame.begin(0.03f, 0.045f, 0.06f, 1);
         terrain.render(camera.camera, false);
+        outputFrame.display();
         Pixmap image = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {
             int[] result = new int[probes.size()];

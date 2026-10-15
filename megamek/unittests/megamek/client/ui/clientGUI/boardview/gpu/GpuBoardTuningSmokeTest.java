@@ -25,7 +25,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.AtmosphericTaint;
 import megamek.common.planetaryConditions.PlanetaryConditions;
@@ -91,7 +90,7 @@ class GpuBoardTuningSmokeTest {
                 assertEquals(1.5f, family.UNIT_SCALE);
                 assertEquals(family.heightScale(), family.HEIGHT_SCALE, "Uniform size does not change height proportions");
             }
-            SelectBox<GpuGraphicsCard> card = tuning.boardRows().findActor("tuning-graphics-card");
+            SelectBox<GpuGraphicsCard> card = tuning.displayRows().findActor("tuning-graphics-card");
             assertEquals(GpuGraphicsCard.cards().isEmpty(), card == null, "A card choice needs two cards to pick");
             press(tuning, "tuning-defaults");
             assertFalse(camera.perspective());
@@ -114,6 +113,10 @@ class GpuBoardTuningSmokeTest {
             set(tuning, "Fog height variation", 0.5f);
             set(tuning, "Fog density variation", 0.4f);
             set(tuning, "Taint strength", 1.5f);
+            set(tuning, "White balance", .5f);
+            set(tuning, "Tint", -.25f);
+            set(tuning, "Saturation", 1.5f);
+            set(tuning, "Contrast", 1.2f);
             for (var preset : AtmospherePreset.values()) {
                 press(tuning, "atmosphere-" + preset.name());
                 assertEquals(source.atmosphereFor(preset), tuning.atmosphere(), preset.label);
@@ -250,16 +253,19 @@ class GpuBoardTuningSmokeTest {
         family.setSelectedIndex(BoardScene.Surface.SAND.ordinal());
         assertEquals(revision, BoardGeometry.revision(), "Browsing materials does not change their geometry");
         assertEquals(.2f, GpuBoardTestUi.<Slider>tuning(tuning, "Ground relief (m)").getValue(), .0001f);
-        List<String> bedrockUnused = List.of("Ground relief (m)", "Corner rounding", "Loose stones / hex",
+        List<String> surfaceControls = List.of("Ground relief (m)", "Corner rounding", "Loose stones / hex",
               "Low shrubs / hex");
-        family.setSelectedIndex(BoardScene.Surface.values().length);
-        for (String name : bedrockUnused) {
-            assertTrue(GpuBoardTestUi.<Slider>tuning(tuning, name).isDisabled(), name + " does not apply to bedrock");
+        assertEquals(BoardScene.Surface.values().length, family.getItems().size,
+              "Every surface family has its own geology; there is no separate bedrock entry");
+        for (BoardScene.Surface surface : BoardScene.Surface.values()) {
+            family.setSelectedIndex(surface.ordinal());
+            for (String name : surfaceControls) {
+                assertFalse(GpuBoardTestUi.<Slider>tuning(tuning, name).isDisabled(), name + " applies to " + surface);
+            }
         }
+        assertEquals(revision, BoardGeometry.revision(), "Browsing every family leaves geometry unchanged");
         family.setSelectedIndex(BoardScene.Surface.SAND.ordinal());
-        for (String name : bedrockUnused) {
-            assertFalse(GpuBoardTestUi.<Slider>tuning(tuning, name).isDisabled(), name + " applies to surface materials");
-        }
+        assertEquals(.2f, GpuBoardTestUi.<Slider>tuning(tuning, "Ground relief (m)").getValue(), .0001f);
         press(tuning, "tuning-defaults");
         assertEquals(BoardRelief.DEFAULTS, BoardRelief.tuning());
         assertTrue(TerrainLod.enabled());
@@ -281,13 +287,14 @@ class GpuBoardTuningSmokeTest {
         var camera = new BoardCamera();
         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.fit(scene);
-        try {
-            int original = terrainPixels(terrain, camera, scene);
+        try (var output = new GpuSceneTestOutput()) {
+            int original = terrainPixels(output, terrain, camera, scene);
             set(tuning, "Transition room (m)", 0);
-            assertNotEquals(original, terrainPixels(terrain, camera, scene),
+            assertNotEquals(original, terrainPixels(output, terrain, camera, scene),
                   "Terrain sliders rebuild the rendered board even when its snapshot is unchanged");
             press(tuning, "tuning-defaults");
-            assertEquals(original, terrainPixels(terrain, camera, scene), "Defaults restores the original terrain mesh");
+            assertEquals(original, terrainPixels(output, terrain, camera, scene),
+                  "Defaults restores the original terrain mesh");
         } finally {
             terrain.dispose();
         }
@@ -304,12 +311,13 @@ class GpuBoardTuningSmokeTest {
         }
     }
 
-    private static int terrainPixels(GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
+    private static int terrainPixels(GpuSceneTestOutput output, GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
         terrain.update(scene);
         terrain.renderShadows(List.of());
-        ScreenUtils.clear(.12f, .16f, .2f, 1, true);
+        output.begin(.12f, .16f, .2f, 1);
         terrain.render(camera.camera, false);
         terrain.renderTransparent(camera.camera);
+        output.display();
         Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {
             return pixels.getPixels().hashCode();

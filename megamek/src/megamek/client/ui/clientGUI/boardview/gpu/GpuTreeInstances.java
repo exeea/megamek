@@ -448,7 +448,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                 String fragment = chosen.fragmentShader == null ? GpuGlsl.libGdx(DepthShader.getDefaultFragmentShader(), false) : chosen.fragmentShader;
                 if (cutaway) {
                     vertex = GpuBuildingCutaway.depthVertex(vertex, instanced);
-                    fragment = "in float v_buildingHeight;\n" + GpuBuildingCutaway.fragment(fragment, "v_buildingHeight");
+                    fragment = "in float v_buildingHeight;\n" + GpuBuildingCutaway.depthFragment(fragment, "v_buildingHeight");
                 }
                 DepthShader result = new DepthShader(renderable, chosen, GpuGlsl.compile("GPU shadow depth",
                       DepthShader.createPrefix(renderable, chosen),
@@ -472,10 +472,6 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     private static String insert(String source, String anchor, String replacement) {
-        int index = source.indexOf(anchor);
-        if (index < 0 || source.indexOf(anchor, index + anchor.length()) >= 0) {
-            throw new IllegalStateException("Incompatible tree instancing insertion point: " + anchor);
-        }
-        return source.substring(0, index) + replacement + source.substring(index + anchor.length());
+        return GpuShaderSource.replaceOnce(source, anchor, replacement, "tree instancing");
     }
 }

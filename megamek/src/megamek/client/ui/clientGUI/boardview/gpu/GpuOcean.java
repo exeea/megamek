@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.lang.ref.Reference;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.Random;
@@ -214,7 +215,12 @@ final class GpuOcean implements Disposable {
         for (int i = 0; i < (lava ? 1 : spectra.length); i++) { spectra[i] = floatTarget(SIZE * cascades, SIZE); }
         for (int i = 0; i < 2; i++) {
             work[i] = floatTarget(SIZE * cascades, SIZE);
-            if (!lava) { seeding[i] = floatTarget(1, 1); }
+            if (!lava) {
+                // This two-value feedback integrator needs small per-frame increments below half-float's ULP.
+                // Wave fields use half precision; retaining the controller's precision avoids a stalled cover error.
+                seeding[i] = new GLFrameBuffer.FrameBufferBuilder(1, 1)
+                      .addFloatAttachment(GL30.GL_RG32F, GL30.GL_RG, GL30.GL_FLOAT, true).build();
+            }
             var output = new GLFrameBuffer.FrameBufferBuilder(SIZE, SIZE);
             // Water: one shading target per cascade, then the longest cascade's displacement.
             for (int target = 0; target < (lava ? 1 : cascades + 1); target++) {
@@ -232,7 +238,9 @@ final class GpuOcean implements Disposable {
             spectra[0].getColorBufferTexture().bind(0);
             FloatBuffer buffer = BufferUtils.newFloatBuffer(SIZE * SIZE * 4);
             buffer.put(lavaSpectrum()).flip();
-            Gdx.gl.glTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 0, 0, SIZE, SIZE, GL20.GL_RGBA, GL20.GL_FLOAT, buffer);
+            try {
+                Gdx.gl.glTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 0, 0, SIZE, SIZE, GL20.GL_RGBA, GL20.GL_FLOAT, buffer);
+            } finally { Reference.reachabilityFence(buffer); }
         } else {
             gauss = Gdx.gl.glGenTexture();
             Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, gauss);
@@ -240,8 +248,10 @@ final class GpuOcean implements Disposable {
             Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MAG_FILTER, GL20.GL_NEAREST);
             FloatBuffer buffer = BufferUtils.newFloatBuffer(SIZE * cascades * SIZE * 2);
             buffer.put(deviates()).flip();
-            Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL30.GL_RG32F, SIZE * cascades, SIZE, 0, GL30.GL_RG,
-                  GL20.GL_FLOAT, buffer);
+            try {
+                Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL30.GL_RG32F, SIZE * cascades, SIZE, 0, GL30.GL_RG,
+                      GL20.GL_FLOAT, buffer);
+            } finally { Reference.reachabilityFence(buffer); }
         }
         // Foam starts seeding where it always used to; the cover moves it from there.
         for (FrameBuffer target : seeding) {
@@ -266,7 +276,7 @@ final class GpuOcean implements Disposable {
 
     private static FrameBuffer floatTarget(int width, int height) {
         return new GLFrameBuffer.FrameBufferBuilder(width, height)
-              .addFloatAttachment(GL30.GL_RGBA32F, GL30.GL_RGBA, GL30.GL_FLOAT, true).build();
+              .addFloatAttachment(GL30.GL_RGBA16F, GL30.GL_RGBA, GL30.GL_FLOAT, true).build();
     }
 
     static ShaderProgram program(String file) {
@@ -274,9 +284,7 @@ final class GpuOcean implements Disposable {
     }
 
     static String fragment(String file) {
-        String source = GpuShaderSource.read(file);
-        return source.contains("// OCEAN_FINISH")
-              ? source.replace("// OCEAN_FINISH", GpuShaderSource.read("ocean-finish.glsl")) : source;
+        return GpuShaderSource.read(file);
     }
 
     /**
