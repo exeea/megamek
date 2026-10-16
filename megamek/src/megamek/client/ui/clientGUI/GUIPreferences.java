@@ -888,7 +888,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(CONSTRUCTOR_FACTOR_WARNING, true);
         store.setDefault(GUI_SCALE, 1);
         store.setDefault(BOARD_VIEW_3D, true);
-        store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "SYSTEM");
+        store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "DISCRETE");
         store.setDefault(BOARD_ANTI_ALIASING, "OFF");
         store.setDefault(BOARD_SPECULAR_ANTI_ALIASING, true);
         store.setDefault(BOARD_AMBIENT_OCCLUSION, false);
@@ -1944,7 +1944,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(BOARD_VIEW_3D, use3D);
     }
 
-    /** The graphics card the 3D board asks for on computers with two: SYSTEM, INTEGRATED or DISCRETE. */
+    /** The graphics card the 3D board asks for on computers with two: INTEGRATED or DISCRETE. */
     public String getBoardGraphicsCard() {
         return store.getString(BOARD_VIEW_3D_GRAPHICS_CARD);
     }

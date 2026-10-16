@@ -1149,8 +1149,8 @@ public final class GpuBoardWindow {
     private static String failureMessage(String key, Throwable failure) {
         String message = Messages.getString(key);
         if (failure.getMessage() != null) { message += "\n\n" + failure.getMessage(); }
-        if (GpuGraphicsCard.applied() != GpuGraphicsCard.SYSTEM) {
-            message += "\n\n" + Messages.getString("GpuBoard.graphicsStartupHint", GpuGraphicsCard.applied().name());
+        if (GpuGraphicsCard.applied() == GpuGraphicsCard.DISCRETE && !GpuGraphicsCard.cards().isEmpty()) {
+            message += "\n\n" + Messages.getString("GpuBoard.graphicsStartupHint", GpuGraphicsCard.DISCRETE);
         }
         return message;
     }

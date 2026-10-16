@@ -19,14 +19,14 @@ import org.lwjgl.system.windows.WinBase;
 
 /**
  * The graphics card the board asks for on a Windows computer with NVIDIA Optimus: exactly two cards, one of them
- * NVIDIA, such as a laptop with Intel and NVIDIA graphics. Optimus's process override, the SHIM_MCCOMPAT environment
- * variable, only says "the NVIDIA card" or "the other card", so other computers get no choice and draw with the card
- * the system picks. Windows ties a process to one card when the process creates its first OpenGL context, and
- * nothing moves it afterwards, not even closing and reopening the board; so a new choice applies from the next start
- * of MegaMek. Everything here other than the saved choice runs only on Windows.
+ * NVIDIA, such as a laptop with Intel and NVIDIA graphics. It asks for the NVIDIA card unless the integrated one is
+ * saved. Optimus's process override, the SHIM_MCCOMPAT environment variable, only says "the NVIDIA card" or "the other
+ * card", and only Optimus reads it, so other computers get no choice and draw with the card the system picks. Windows
+ * ties a process to one card when the process creates its first OpenGL context, and nothing moves it afterwards, not
+ * even closing and reopening the board; so a new choice applies from the next start of MegaMek. Everything here other
+ * than the saved choice runs only on Windows.
  */
 enum GpuGraphicsCard {
-    SYSTEM(null),
     /** The card Optimus pairs with the NVIDIA one, the integrated graphics on a laptop. */
     INTEGRATED("0x800000000"),
     /** The NVIDIA card. */
@@ -47,12 +47,11 @@ enum GpuGraphicsCard {
         this.override = override;
     }
 
-    /** "System default", or the card's name as Windows lists it. */
+    /** The card's name as Windows lists it. */
     @Override
     public String toString() {
-        if (this == SYSTEM) { return "System default"; }
         List<String> names = cards();
-        return names.isEmpty() ? name() : names.get(ordinal() - 1);
+        return names.isEmpty() ? name() : names.get(ordinal());
     }
 
     /** Only Windows can ask for a card; the request is verified with NVIDIA Optimus. */
@@ -69,20 +68,20 @@ enum GpuGraphicsCard {
         return names;
     }
 
-    /** The choice for the next start: the system property's for this run, else the saved preference. */
+    /**
+     * The choice for the next start: the system property's for this run, else the saved preference, else the NVIDIA
+     * card.
+     */
     static GpuGraphicsCard preferred() {
         String name = System.getProperty(PROPERTY, GUIPreferences.getInstance().getBoardGraphicsCard());
         for (GpuGraphicsCard card : values()) {
             if (card.name().equals(name == null ? "" : name.toUpperCase(Locale.ROOT))) { return card; }
         }
-        return SYSTEM;
+        return DISCRETE;
     }
 
-    /** The choice in effect for this run, SYSTEM before the board first opens. */
-    static GpuGraphicsCard applied() {
-        GpuGraphicsCard card = applied;
-        return card == null ? SYSTEM : card;
-    }
+    /** The choice in effect for this run; null before the board first opens. */
+    static GpuGraphicsCard applied() { return applied; }
 
     /**
      * Asks for the preferred card once per run. Call it before the process's first OpenGL context, with LWJGL's
@@ -92,7 +91,7 @@ enum GpuGraphicsCard {
         if (applied != null) { return; }
         GpuGraphicsCard card = preferred();
         applied = card;
-        if (card.override == null || !supported()) { return; }
+        if (!supported()) { return; }
         try (MemoryStack stack = MemoryStack.stackPush()) {
             // Java's own environment is a copy; the driver reads the process's, which only the Windows call changes.
             long function = WinBase.GetProcAddress(WinBase.GetModuleHandle("kernel32.dll"), "SetEnvironmentVariableW");
