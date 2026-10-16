@@ -877,6 +877,8 @@ final class GpuTerrain implements Disposable {
     // chunk spreads its hexes across the pool, while the other half keeps rendering, input and garbage collection
     // responsive. All GL ownership stays on the render thread.
     static final int DEFAULT_WORKERS = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors() / 2));
+    /** Sections built at once, so also the most task lines the loading screen shows. */
+    static final int BUILD_JOBS = 4;
     private final ExecutorService detailWorker = TerrainSettings.workers(DEFAULT_WORKERS);
     private final Map<Integer, Chunk> detailCache = new LinkedHashMap<>();
     /** {@code columns}: a Classic chunk ({@link #setColumns}). */
@@ -2678,7 +2680,7 @@ final class GpuTerrain implements Disposable {
             int columns = (snapshot.width() + CHUNK_SIZE - 1) / CHUNK_SIZE;
             int rows = (snapshot.height() + CHUNK_SIZE - 1) / CHUNK_SIZE;
             boolean loading = !ready(snapshot);
-            while (rebuild.pending.size() + (detailJob == null ? 0 : 1) < 4) {
+            while (rebuild.pending.size() + (detailJob == null ? 0 : 1) < BUILD_JOBS) {
                 int candidate = -1;
                 float priority = -Float.MAX_VALUE;
                 for (int index : rebuild.remaining) {

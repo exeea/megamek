@@ -20,6 +20,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.Stage;
@@ -121,6 +122,8 @@ class GpuLoadingSmokeTest {
                             assertEquals(loading.getWidth(), content.getWidth(), .1f);
                             GpuBoardTestUi.assertHorizontalBounds(content, content);
                             assertTrue(details.getY() >= 0 && details.getTop() <= loading.getHeight());
+                            assertEquals(.06f * loading.getHeight(), details.getY(), .5f,
+                                  "The progress must keep the bottom of the screen");
                             assertTrue(grid.getY() >= 0 && grid.getTop() <= loading.getHeight());
                             boolean advancing = sections.states().contains(TerrainLoadProgress.SectionState.LOADING);
                             if (ready > 0 && advancing && !details.getText().isEmpty() && !captured) {
@@ -129,6 +132,7 @@ class GpuLoadingSmokeTest {
                                 assertTrue(output.isDirectory() || output.mkdirs());
                                 GpuReviewFrame.save(new File(output, "loading-honeycomb.png"));
                                 checkLoadingLayout(loading);
+                                checkShortWindow(loading, output);
                                 capturePreview(loading, output, 25, 25, "loading-honeycomb-625-preview.png");
                                 capturePreview(loading, output, 7, 88, "loading-honeycomb-tall-map-preview.png");
                                 capturePreview(loading, output, 88, 7, "loading-honeycomb-wide-map-preview.png");
@@ -191,6 +195,27 @@ class GpuLoadingSmokeTest {
             }
         }
         shaders.setVisible(compiling);
+    }
+
+    /** A short screen keeps the header and every task line on it; the honeycomb shrinks into the space between. */
+    private static void checkShortWindow(Stage loading, File output) {
+        var viewport = (ScreenViewport) loading.getViewport();
+        float unitsPerPixel = viewport.getUnitsPerPixel();
+        viewport.setUnitsPerPixel(400f / Gdx.graphics.getHeight());
+        viewport.update(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), true);
+        ScreenUtils.clear(.045f, .065f, .075f, 1);
+        loading.draw();
+        GpuLoadingGrid grid = loading.getRoot().findActor("board-loading-grid");
+        Label overall = loading.getRoot().findActor("board-loading-message");
+        Label legend = loading.getRoot().findActor("board-loading-ready");
+        Label details = loading.getRoot().findActor("board-loading-details");
+        assertTrue(grid.getHeight() > 0 && grid.getTop() <= overall.getY(), "The honeycomb must stay below the header");
+        assertTrue(legend.localToStageCoordinates(new Vector2(0, legend.getHeight())).y <= grid.getY(),
+              "The legend must stay below the honeycomb");
+        assertTrue(details.getY() >= 0 && overall.getTop() <= loading.getHeight(), "Every line must stay on screen");
+        GpuReviewFrame.save(new File(output, "loading-honeycomb-short.png"));
+        viewport.setUnitsPerPixel(unitsPerPixel);
+        viewport.update(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), true);
     }
 
     /** UI fixtures rendered through the actual loading layout; no large terrain build is simulated. */

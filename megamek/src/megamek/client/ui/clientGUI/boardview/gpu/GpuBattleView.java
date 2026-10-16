@@ -280,7 +280,8 @@ class GpuBattleView extends ApplicationAdapter {
         loadingStage = new Stage(new ScreenViewport());
         Table content = new Table();
         content.setFillParent(true);
-        content.top().padTop(Value.percentHeight(.06f, content));
+        Value edge = Value.percentHeight(.06f, content);
+        content.pad(edge, Value.zero, edge, Value.zero);
         loadingLabel = new Label(loadingMessage, skin, "hud-phase");
         loadingLabel.setName("board-loading-message");
         loadingLabel.setWrap(true);
@@ -310,11 +311,13 @@ class GpuBattleView extends ApplicationAdapter {
         content.add(new Label("MEGAMEK", skin, "hud-small")).padBottom(12).row();
         content.add(loadingLabel).width(Value.percentWidth(.9f, content)).maxWidth(900)
               .height(loadingLabel.getStyle().font.getLineHeight() * 2).row();
-        content.add(loadingGrid).width(Value.percentWidth(.90f, content)).maxWidth(960)
-              .height(Value.percentHeight(.42f, content)).maxHeight(360).padTop(14).row();
+        // The header keeps the top and the progress the bottom; the honeycomb centers in the space between and shrinks
+        // its hexes to fit. The tasks keep room for every worker, so a change in their count never moves a row.
+        content.add(loadingGrid).width(Value.percentWidth(.9f, content)).growY().padTop(14).row();
         content.add(legend).padTop(10).row();
         content.add(loadingShaders).width(Value.percentWidth(.9f, content)).maxWidth(420).padTop(14).row();
-        content.add(loadingDetails).width(Value.percentWidth(.9f, content)).maxWidth(900).padTop(14);
+        content.add(loadingDetails).width(Value.percentWidth(.9f, content)).maxWidth(900)
+              .height(loadingDetails.getStyle().font.getLineHeight() * GpuTerrain.BUILD_JOBS).padTop(14);
         loadingStage.addActor(content);
     }
 
@@ -325,6 +328,18 @@ class GpuBattleView extends ApplicationAdapter {
             bar.set(shaders.linked() + " / " + shaders.total(), (float) shaders.linked() / shaders.total(),
                   GpuLoadingGrid.READY);
         }
+    }
+
+    /** The loading screen at the HUD's display scale, read each frame since a monitor change keeps the window size. */
+    private void drawLoadingStage() {
+        if (Gdx.graphics.getWidth() <= 0 || Gdx.graphics.getHeight() <= 0) { return; }
+        // The native loading window shows before the first map, and its UI scale preference, arrives.
+        float preference = source == null ? 1 : source.uiPreferences().scale();
+        var viewport = (ScreenViewport) loadingStage.getViewport();
+        viewport.setUnitsPerPixel(1 / DisplayScale.read(preference, displayScale.contentScale()));
+        viewport.update(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), true);
+        loadingStage.act(Math.min(Gdx.graphics.getDeltaTime(), .1f));
+        loadingStage.draw();
     }
 
     private void createBoard() {
@@ -442,9 +457,6 @@ class GpuBattleView extends ApplicationAdapter {
 
     @Override
     public void resize(int width, int height) {
-        if (loadingStage != null && width > 0 && height > 0) {
-            loadingStage.getViewport().update(width, height, true);
-        }
         if (ui == null || width <= 0 || height <= 0) {
             return;
         }
@@ -571,8 +583,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (source == null) {
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
             loadingLabel.setText(loadingMessage);
-            loadingStage.act(Math.min(Gdx.graphics.getDeltaTime(), .1f));
-            loadingStage.draw();
+            drawLoadingStage();
             return;
         }
         if (source.isClosed()) {
@@ -674,8 +685,7 @@ class GpuBattleView extends ApplicationAdapter {
             showShaders(loadingShaders, terrain.shaderProgress());
             loadingDetails.setText(terrain.buildDetails().stream().map(TerrainLoadProgress.Status::text)
                   .collect(Collectors.joining("\n")));
-            loadingStage.act(Math.min(Gdx.graphics.getDeltaTime(), .1f));
-            loadingStage.draw();
+            drawLoadingStage();
             renderStage(null);
             return;
         }
