@@ -65,6 +65,7 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     float roughness = dielectricRoughness(s.film, s.roughness);
     vec3 f0 = mix(dielectricF0(s.film), s.f0, s.metallic);
     vec3 diffuseBudget = 1.0 - specularAlbedo(max(0.0, dot(normal, view)), roughness, f0);
+    vec3 multiscatter = specularMultiscatter(max(0.0, dot(normal, view)), roughness, f0);
     // The sky's ambient occlusion, with the screen-space occlusion of the opaque scene (ambient-occlusion.glsl): once,
     // for every surface, on the sky alone. Local lights and the sun keep their own visibility.
     float occlusion = s.occlusion * screenAmbientOcclusion();
@@ -87,7 +88,7 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     vec3 direct = sun * incident * mix(1.0, s.cavity, .5) * (1.0 + caustic);
     vec3 sheen = vec3(0.0);
     if (s.heat < 1.0 && lit && any(greaterThan(incidence, vec3(0.0)))) {
-        sheen = sun * surfaceReflectance(normal, light, view, roughness, f0) * s.cavity;
+        sheen = sun * surfaceReflectance(normal, light, view, roughness, f0) * multiscatter * s.cavity;
     }
     if (s.heat > 0.0) {
         // The material response and spill light are identical on both sides of the blend. Only the sky bounce,
@@ -104,7 +105,7 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     albedo += sheen;
     // The hot share is matte, matching the dedicated crust and lava programs.
     albedo += environmentSpecular(normal, view, roughness, f0, environmentGround(s.bounce),
-          surfaceAmbient(vec3(0.0, 0.0, 1.0))) * s.specularOcclusion * s.cavity * (1.0 - s.heat);
+          surfaceAmbient(vec3(0.0, 0.0, 1.0))) * multiscatter * s.specularOcclusion * s.cavity * (1.0 - s.heat);
     if (submerged > 0.0) {
         vec3 scattered = surfaceAmbient(vec3(0.0, 0.0, 1.0)) * occlusion + sunOnGround() * (1.0 + caustic);
         albedo = submergedLight(albedo, s.albedo, scattered, submerged);

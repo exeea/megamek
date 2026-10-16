@@ -50,6 +50,15 @@ vec3 specularAlbedo(float nv, float roughness, vec3 f0) {
     return clamp(f0 * brdf.x + brdf.y, 0.0, 1.0);
 }
 
+// Single-scattering GGX loses the light that bounces more than once between microfacets: 1 - E of white light, most
+// at rough grazing views. That light leaves as more of the same lobe, coloured by f0 (Fdez-Aguera 2019), so rough
+// metals, which have no diffuse layer to take it, no longer darken.
+vec3 specularMultiscatter(float nv, float roughness, vec3 f0) {
+    vec2 brdf = integratedBrdf(nv, roughness);
+    float white = max(1e-4, brdf.x + brdf.y);
+    return 1.0 + f0 * ((1.0 - white) / white);
+}
+
 #ifdef environmentLightingFlag
 // The finite-source approximation redistributes the material lobe. Match its directional integral to the original
 // GGX material so the shared reciprocal diffuse budget remains valid, including at nearly tangent views.
