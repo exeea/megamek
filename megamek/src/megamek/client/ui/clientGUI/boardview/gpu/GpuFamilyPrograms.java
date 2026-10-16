@@ -31,15 +31,21 @@ import megamek.logging.MMLogger;
  * time on the terrain compiler queue (GpuTerrain decides when). When one is ready, every live material of its variant
  * gains the {@link Constants} marker, and the shader provider, through the shader manager's handles, resolves those
  * draws to it; a chunk installed later is marked as it is installed. Variants that appear after the load keep the
- * generic program until the next load. A terrain keeps at most {@link #CAPACITY} family programs over all lighting
- * configurations: the provider keeps every program it built, and returning to a configuration finds its programs
- * there.
+ * generic program until the next load. A terrain builds at most {@link #CAPACITY} family programs for each lighting
+ * configuration and twice that in all; once it holds that many, a configuration without programs stays generic. The
+ * provider keeps every program it built, and returning to a configuration finds its programs there.
  */
 final class GpuFamilyPrograms {
     private static final MMLogger LOGGER = MMLogger.create(GpuFamilyPrograms.class);
     /** {@code -Dmegamek.gpu.familyPrograms=false} draws every terrain surface with its generic program. */
     static final String PROPERTY = "megamek.gpu.familyPrograms";
-    /** Family programs a terrain keeps, over all lighting configurations; libGDX frees them with the terrain. */
+    /**
+     * Family programs a terrain builds for each lighting configuration, and twice that in all; libGDX frees them with
+     * the terrain. A board without clouds has four configurations, specular anti-aliasing on or off with or without a
+     * directional light (libGDX 1.14.2 removes an empty directional-light attribute), and the cloud marker's states
+     * make up to eight: the total gives two of them all their programs, and a third configuration draws with the
+     * generic programs, as slow as before family programs.
+     */
     static final int CAPACITY = 32;
     /** The capacity in force; native checks lower it to reach it on a small board. */
     static int capacity = CAPACITY;
@@ -160,8 +166,8 @@ final class GpuFamilyPrograms {
 
     /**
      * Before the terrain draws or prepares: a changed lighting configuration returns every material to its generic
-     * program; the terrain then prepares the generic and family programs of the new configuration. Returns whether any
-     * material changed program.
+     * program; the terrain then prepares the generic and family programs of the new configuration, and takes back the
+     * ones the provider kept from an earlier visit. Returns whether the configuration changed.
      */
     boolean configure(Environment environment) {
         if (!enabled || environment.getMask() == environmentMask && (environment.shadowMap != null) == shadows) {
@@ -169,14 +175,13 @@ final class GpuFamilyPrograms {
         }
         environmentMask = environment.getMask();
         shadows = environment.shadowMap != null;
-        boolean changed = false;
         for (Variant variant : variants.values()) {
-            changed |= variant.mark(false);
+            variant.mark(false);
             variant.ready = variant.failed = false;
         }
         // A link still running finishes into the provider for its own configuration; nothing marks it (prepare).
         waiting = true;
-        return changed;
+        return true;
     }
 
     /**
@@ -227,7 +232,7 @@ final class GpuFamilyPrograms {
         for (Variant variant : candidates) {
             List<Object> program = List.of(variant.key, environmentMask, shadows);
             Material live = variant.live();
-            if (live == null || !built.contains(program) && built.size() >= capacity) { continue; }
+            if (live == null || !built.contains(program) && room() <= 0) { continue; }
             built.add(program);
             variant.sample = new Renderable();
             variant.sample.material = new Material(live);
@@ -254,7 +259,13 @@ final class GpuFamilyPrograms {
             if (variant.ready || variant.failed || variant == compiling || variant.live() == null) { continue; }
             if (built.contains(List.of(variant.key, environmentMask, shadows))) { free++; } else { others++; }
         }
-        return (compiling != null ? 1 : 0) + free + Math.min(others, Math.max(0, capacity - built.size()));
+        return (compiling != null ? 1 : 0) + free + Math.min(others, Math.max(0, room()));
+    }
+
+    /** Programs this configuration may still build: its own capacity, within twice the capacity over all of them. */
+    private int room() {
+        long taken = built.stream().filter(program -> program.subList(1, 3).equals(configuration())).count();
+        return (int) Math.min(capacity - taken, 2L * capacity - built.size());
     }
 
     /** The families of the programs ready in this configuration. */

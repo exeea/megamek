@@ -435,6 +435,7 @@ class GpuBiomeSmokeTest {
     private static void settle(GpuTerrain terrain, GpuBiomeVegetation plants, GpuReviewFrame frame,
           BoardCamera camera, BoardScene scene) throws Exception {
         terrain.update(scene, camera.camera);
+        frame.prepare(terrain, camera, scene);
         GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
         // Plants are installed with the terrain; the first frame after settling draws them all.
         frame.render(terrain, camera, scene);

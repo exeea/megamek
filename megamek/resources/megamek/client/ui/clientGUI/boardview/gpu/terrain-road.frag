@@ -194,14 +194,14 @@ void main() {
     // Only exposed, upward-facing ground receives liquid water. No accumulation or terrain-rule changes.
     float wet = u_wetness * step(0.0, m.response) * smoothstep(0.2, 0.8, v_normal.z);
     float response = max(0.0, m.response);
-    albedo *= 1.0 - wet * mix(0.175, 0.10, response); // This is the darkening of the terrain (the mix(min, max, ...))
+    float absorption = groundAbsorption(wet, response);
     float soilBasins = 0.0;
     if (m.soil) {
         // Compact soil holds patchy mud and shallow water; the basins stay put as rainfall changes.
         soilBasins = texture(u_rainNoise, uv / 22.0).r * .7
               + texture(u_rainNoise, uv / 7.0 + .37).g * .3;
         float mud = wet * smoothstep(.24, .68, soilBasins);
-        albedo *= 1.0 - .30 * mud;
+        absorption = max(absorption, .7 * mud);
         properties.g = mix(properties.g, .55, mud);
     }
     float puddle = groundPuddle(wet, response);
@@ -213,7 +213,8 @@ void main() {
             puddle = max(puddle, basinWater * wet * smoothstep(.98, .999, v_normal.z) * u_rainDetail);
         }
     }
-    groundFilm(albedo, normal, puddle);
+    albedo = wetAlbedo(albedo, absorption);
+    groundFilm(normal, puddle);
     float roughness = m.mapped ? properties.g : -1.0;
 #ifdef roadCoatFlag
     if (!m.mapped) roughness = authoredRoughness(float((m.maps - 3) * 2), uv, roadGradient, roughness);

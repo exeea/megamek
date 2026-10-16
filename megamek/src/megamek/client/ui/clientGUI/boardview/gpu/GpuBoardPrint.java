@@ -37,6 +37,8 @@ final class GpuBoardPrint implements Disposable {
     private final GpuTerrain lender;
     private final BitmapFont font, outline;
     private final BoardAtmosphere.Settings lighting;
+    /** The view's air pressure: the print's lighting air is standard, its landscape the view's. */
+    private final boolean vacuum;
     private final GpuAtmosphere.Options lightingOptions;
     private final BoardCamera camera = new BoardCamera();
     private GpuTerrain terrain;
@@ -57,6 +59,7 @@ final class GpuBoardPrint implements Disposable {
         this.font = font;
         this.outline = outline;
         lighting = lightingOnly(conditions);
+        vacuum = conditions.pressure().isVacuum();
         this.lightingOptions = lightingOptions;
     }
 
@@ -107,6 +110,7 @@ final class GpuBoardPrint implements Disposable {
         // The live view's 3D Graphics (it is ready, so they are installed); a print keeps the fluff of the 3D view.
         terrain.setColumns(lender.columns());
         terrain.setGravity(lighting.gravity());
+        terrain.setVacuum(vacuum);
         atmosphere = new GpuAtmosphere();
         atmosphere.configure(lighting);
         atmosphere.setOptions(lightingOptions);

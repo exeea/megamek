@@ -106,13 +106,13 @@ class GpuTerrainDepthSmokeTest {
                     ModelBatch pass = new ModelBatch(GpuTreeInstances.depthProvider(new DepthShader.Config(null, fragment)),
                           new GpuOpaqueSorter());
                     try {
-                        frame(pass, camera, original); frame(pass, camera, merged);
+                        frame(pass, camera, original, shadows); frame(pass, camera, merged, shadows);
                         profiler.enable();
                         profiler.reset();
-                        byte[] expected = frame(pass, camera, original);
+                        byte[] expected = frame(pass, camera, original, shadows);
                         int oldDraws = profiler.getDrawCalls(), oldShaders = profiler.getShaderSwitches();
                         profiler.reset();
-                        byte[] actual = frame(pass, camera, merged);
+                        byte[] actual = frame(pass, camera, merged, shadows);
                         assertEquals(oldDraws - 6, profiler.getDrawCalls(), "Contiguous depth ranges reduce real draws");
                         assertTrue(profiler.getShaderSwitches() <= oldShaders, "Borrowing materials adds no shader switches");
                         profiler.disable();
@@ -167,11 +167,15 @@ class GpuTerrainDepthSmokeTest {
         return result;
     }
 
-    private static byte[] frame(ModelBatch pass, Camera camera, RenderableProvider provider) {
+    private static byte[] frame(ModelBatch pass, Camera camera, RenderableProvider provider, boolean shadows) {
+        Gdx.gl.glDepthMask(true);
         ScreenUtils.clear(1, 1, 1, 1, true);
-        pass.begin(camera); pass.render(provider); pass.end();
-        return ScreenUtils.getFrameBufferPixels(0, 0, Gdx.graphics.getBackBufferWidth(),
-              Gdx.graphics.getBackBufferHeight(), false);
+        pass.begin(camera);
+        try { pass.render(provider); }
+        finally { pass.end(); }
+        int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
+        return shadows ? GpuFamilyAssemblyReview.depthPixels(width, height)
+              : ScreenUtils.getFrameBufferPixels(0, 0, width, height, false);
     }
 
     private static int varied(byte[] pixels) {

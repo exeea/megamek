@@ -4,8 +4,6 @@ uniform float u_magmaTime; // gravity-scaled flow time, advanced once by the boa
 uniform sampler2D u_magmaOcean; // shared inverse FFT: RG slope, BA horizontal displacement in metres
 uniform float u_magmaOceanScale;
 const float MAGMA_CYCLE = 4.0;
-// 1000 C crack-wall reference in the same fixed radiance units as magmaHeatColor.
-const vec3 MAGMA_CRACK_RADIANCE = vec3(0.0516322131, 0.00391916058, 0.0);
 // The molten pattern spans larger, readable rafts. Solid crust retains its authored 12 m repeat.
 float magmaRepeatMetres() { return 24.0; }
 float magmaDistantRoughness() { return .85; }
@@ -34,8 +32,6 @@ Volcanic magmaPhaseSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec2 velocity, ve
     // pulse at each crossfade. Each phase's cooling skin remains opaque and dark.
     float exposedA = smoothstep(.28, .56, a.heat.x);
     float exposedB = smoothstep(.28, .56, b.heat.x);
-    a.emission = magmaEmission(a.heat, exposedA);
-    b.emission = magmaEmission(b.heat, exposedB);
     // Exposed melt emits; only its cooling skin carries reflected pigment. Apply coverage before the
     // phase blend, just like emission, so the two moving phases cannot pump brightness at their resets.
     a.albedo *= 1.0 - exposedA;
@@ -92,15 +88,6 @@ Volcanic magmaChill(Volcanic material, float shore) {
     material.albedo = mix(material.albedo, vec3(dot(material.albedo, vec3(.3, .59, .11)) * .6), chill);
     material.surface.g = mix(material.surface.g, max(material.surface.g, .8), chill);
     return material;
-}
-
-vec3 magmaHeatColor(float heat) {
-    // Fixed 800/1100/1200 C blackbody references: Planck + CIE 1931, relative to a declared
-    // 100 klux noon Lambert white (E/pi). Nonnegative sRGB preserves the integrated luminance.
-    // The authored heat mask interpolates these references; it is not measured temperature.
-    vec3 body = mix(vec3(0.00181911634, 4.79114167e-05, 0.0), vec3(0.191817863, 0.0193869474, 0.0),
-          smoothstep(.15, .70, heat));
-    return mix(body, vec3(0.597446184, 0.0754564329, 0.0), smoothstep(.68, .94, heat));
 }
 
 vec3 magmaRadiance(Volcanic material, float bank, float strength) {

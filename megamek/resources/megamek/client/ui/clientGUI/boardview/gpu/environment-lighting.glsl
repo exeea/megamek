@@ -4,7 +4,7 @@
 // The separate final row is cosine-weighted BRDF albedo. GpuEnvironmentLighting generates this one table.
 #ifdef environmentLightingFlag
 uniform vec3 u_environmentSky, u_environmentHorizon;
-uniform vec2 u_environmentImage; // image present, radiance gain; visible sky remains separate
+uniform vec2 u_environmentImage; // 0 analytic, 1 imported, 2 generated sky; radiance gain
 uniform sampler2D u_environmentLut;
 
 vec4 environmentTable(vec2 pixel) {
@@ -79,11 +79,22 @@ vec3 diffuseReflectance(vec3 normal, vec3 light, vec3 view, float roughness, vec
     return outgoing * incoming / max(vec3(.0001), 1.0 - averageSpecularAlbedo(roughness, f0)) * nl;
 }
 
+#ifdef environmentLightingFlag
+vec2 environmentWeights(vec3 direction, float roughness) {
+    return environmentTable(vec2(clamp(direction.z * .5 + .5, 0.0, 1.0), clamp(roughness, 0.0, 1.0)) * 127.0).rg;
+}
+#endif
+
 // Radiance of a GGX-filtered analytic sky/ground environment. N=V=R is the usual split-sum approximation.
 vec3 environmentRadiance(vec3 direction, float roughness, vec3 ground, vec3 fallbackSky) {
 #ifdef environmentLightingFlag
-    if (u_environmentImage.x > .5) return imageEnvironment(direction, roughness);
-    vec2 basis = environmentTable(vec2(clamp(direction.z * .5 + .5, 0.0, 1.0), clamp(roughness, 0.0, 1.0)) * 127.0).rg;
+    if (u_environmentImage.x > .5) {
+        vec3 image = imageEnvironment(direction, roughness);
+        // Generated skies contain no lower hemisphere: retain the receiving surface's existing ground bounce.
+        if (u_environmentImage.x > 1.5) image += ground * (1.0 - environmentWeights(direction, roughness).x);
+        return image;
+    }
+    vec2 basis = environmentWeights(direction, roughness);
     return u_environmentHorizon * basis.x + (u_environmentSky - u_environmentHorizon) * basis.y
           + ground * (1.0 - basis.x);
 #else

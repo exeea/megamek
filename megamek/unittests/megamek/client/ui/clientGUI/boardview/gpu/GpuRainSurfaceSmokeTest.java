@@ -18,10 +18,14 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.BufferUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -118,6 +122,7 @@ class GpuRainSurfaceSmokeTest {
                             distantDry.dispose(); distantWet.dispose();
                         }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                        checkWetPigment();
                         checkRainAmount();
                         Files.writeString(new File(System.getProperty("megamek.gpu.screenshots"), "rain-surface-timing.txt")
                               .toPath(), timings);
@@ -134,9 +139,86 @@ class GpuRainSurfaceSmokeTest {
         if (failure.get() != null) { throw new AssertionError(failure.get()); }
     }
 
+    /** Read the production wet-pigment function in linear RGBA16F, without a display curve or lighting. */
+    private static void checkWetPigment() {
+        try (var probe = new WetPigmentProbe()) {
+            for (float[] pigment : new float[][] { { 0, 0, 0 }, { 1, 1, 1 }, { .04f, .18f, .5f }, { .8f, .5f, .2f } }) {
+                float[] dry = probe.read(pigment, 0, 0, 0);
+                for (int channel = 0; channel < 3; channel++) {
+                    assertEquals(pigment[channel], dry[channel], .0005f, "Dry pigment stays unchanged in linear light");
+                }
+                float[] previous = dry;
+                for (float absorption : new float[] { .1f, .25f, .5f, .75f, 1 }) {
+                    float[] wet = probe.read(pigment, absorption, 0, 0);
+                    for (int channel = 0; channel < 3; channel++) {
+                        assertTrue(Float.isFinite(wet[channel]) && wet[channel] >= 0 && wet[channel] <= previous[channel],
+                              "Increasing saturation must not brighten pigment or produce invalid radiance");
+                        if (pigment[channel] == 0 || pigment[channel] == 1) {
+                            assertEquals(pigment[channel], wet[channel], 0, "Black and perfectly scattering white endpoints");
+                        }
+                    }
+                    previous = wet;
+                }
+            }
+            float[] pigment = { .8f, .5f, .2f };
+            float[] saturated = probe.read(pigment, .5f, 1, 0);
+            assertTrue(saturated[2] / pigment[2] < saturated[0] / pigment[0],
+                  "The more absorbing pigment channel must lose a larger fraction; wetting is not a gray light gain");
+            float[] dry = probe.read(pigment, 0, 0, 0);
+            float[] film = probe.read(pigment, 0, 1, 1);
+            assertEquals(0, dry[3], 0, "No rain means no added ground absorption");
+            assertTrue(saturated[3] > film[3] && film[3] > 0,
+                  "Absorbent ground darkens more than material which retains surface film");
+            float previous = 0;
+            for (float wet : new float[] { 0, .25f, .5f, .75f, 1 }) {
+                float amount = probe.read(pigment, 0, wet, .5f)[3];
+                assertTrue(amount >= previous && amount <= 1, "Ground absorption follows wetness continuously");
+                previous = amount;
+            }
+        }
+    }
+
+    private static final class WetPigmentProbe implements AutoCloseable {
+        private final FrameBuffer target = GpuHeatGlow.buffer(4, 4);
+        private final Mesh quad = GpuAtmosphere.screenQuad();
+        private final ShaderProgram shader = GpuGlsl.compile("Wet material pigment reference",
+              GpuShaderSource.read("atmosphere.vert"), """
+              #version 330 core
+              layout(location = 0) out vec4 fragColor;
+              vec3 v_cloudPosition = vec3(0.0);
+              uniform vec3 u_probePigment;
+              uniform float u_probeAbsorption;
+              uniform float u_probeWet;
+              uniform float u_probeResponse;
+              """ + GpuShaderSource.read("rain-surface.glsl") + """
+              void main() {
+                  fragColor = vec4(wetAlbedo(u_probePigment, u_probeAbsorption),
+                        groundAbsorption(u_probeWet, u_probeResponse));
+              }
+              """);
+
+        float[] read(float[] pigment, float absorption, float wet, float response) {
+            target.begin();
+            try {
+                GpuAtmosphere.screenState();
+                shader.bind();
+                shader.setUniformf("u_probePigment", pigment[0], pigment[1], pigment[2]);
+                shader.setUniformf("u_probeAbsorption", absorption);
+                shader.setUniformf("u_probeWet", wet);
+                shader.setUniformf("u_probeResponse", response);
+                quad.render(shader, GL20.GL_TRIANGLES);
+                var pixels = BufferUtils.newFloatBuffer(4);
+                Gdx.gl.glReadPixels(2, 2, 1, 1, GL20.GL_RGBA, GL20.GL_FLOAT, pixels);
+                float[] result = new float[4]; pixels.get(result); return result;
+            } finally { target.end(); }
+        }
+
+        @Override public void close() { shader.dispose(); quad.dispose(); target.dispose(); }
+    }
+
     private static void checkRainAmount() {
         var manager = new GpuShaderManager();
-        try { manager.run(() -> checkRainAmount(manager)); }
+        try { manager.run(() -> { checkRainAmount(manager); checkBiomeRainAbsorption(manager); }); }
         finally { manager.close(); }
     }
 
@@ -226,6 +308,77 @@ class GpuRainSurfaceSmokeTest {
         } finally {
             terrain.dispose();
         }
+    }
+
+    /** Actual enhanced biome materials: rain cannot absorb their already saturated pigment a second time. */
+    private static void checkBiomeRainAbsorption(GpuShaderManager manager) {
+        assertTrue(manager.apply(Map.of()).success());
+        String source = GpuShaderSource.readDisk("terrain-sculpt.frag").replace("\r\n", "\n");
+        String probe = GpuShaderSource.replaceOnce(source, "#ifdef lightingFlag\n    vec3 view = -viewDirection();",
+              "vec3 probePigment = albedo;\n#ifdef lightingFlag\n    vec3 view = -viewDirection();",
+              "wet biome pigment output");
+        probe = GpuShaderSource.replaceOnce(probe, "fragColor = vec4(result, 1.0);",
+              "fragColor = vec4(probePigment, 2.0 + biomeDamp);", "wet biome validity and dampness output");
+        assertTrue(manager.apply(Map.of("terrain-sculpt.frag", probe)).success());
+        try {
+            for (int kind = 0; kind < 4; kind++) {
+                BoardScene.Biome biome = kind == 1 ? BoardScene.Biome.MUD
+                      : kind == 2 ? BoardScene.Biome.QUICKSAND : BoardScene.Biome.MARSH;
+                boolean sand = kind == 3;
+                var scene = BoardSurfaceBlendTest.scene(coords -> {
+                    var tile = BoardBiomeTest.tile(coords, coords.getX() < 5 ? biome : BoardScene.Biome.NONE, 0);
+                    if (!sand) { return tile; }
+                    return new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.SAND, tile.ground(),
+                          null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true,
+                          BoardRoad.Kind.NONE, BoardFireSmoke.NONE, tile.biome());
+                });
+                var terrain = new GpuTerrain();
+                try (var output = new GpuSceneTestOutput()) {
+                    terrain.setAtmosphere(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS));
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    camera.setIsometric(false);
+                    camera.fit(scene);
+                    terrain.update(scene, camera.camera);
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    float[][] frames = new float[3][];
+                    for (int step = 0; step < frames.length; step++) {
+                        terrain.setWetness(step * .5f);
+                        output.draw(terrain, camera.camera, false);
+                        frames[step] = output.linearPixels();
+                    }
+                    int soaked = 0, dryChanged = 0, partial = 0;
+                    float maxSoakedChange = 0;
+                    for (int pixel = 0; pixel < frames[0].length; pixel += 4) {
+                        // Only this actual sculpt program tags alpha above 2; exclude props/vegetation/sky.
+                        float damp = frames[0][pixel + 3] - 2;
+                        if (damp < 0 || damp > 1) { continue; }
+                        assertEquals(frames[0][pixel + 3], frames[2][pixel + 3], 0,
+                              "Rain must not change the permanent biome coverage at a frozen clock");
+                        float difference = 0;
+                        for (int channel = 0; channel < 3; channel++) {
+                            float dry = frames[0][pixel + channel], half = frames[1][pixel + channel];
+                            float wet = frames[2][pixel + channel];
+                            assertTrue(Float.isFinite(wet) && wet >= 0 && wet <= half + .0005f && half <= dry + .0005f,
+                                  "Actual biome pigment must stay bounded and darken monotonically with rain");
+                            difference = Math.max(difference, Math.abs(dry - wet));
+                        }
+                        if (damp >= .30f) { soaked++; maxSoakedChange = Math.max(maxSoakedChange, difference); }
+                        if (damp == 0 && difference > .002f) { dryChanged++; }
+                        if (damp > .01f && damp < .25f) { partial++; }
+                    }
+                    String label = biome + (sand ? "-SAND" : "");
+                    System.out.printf(java.util.Locale.ROOT,
+                          "WET_BIOME %s soaked=%d dryChanged=%d partial=%d maxSoakedChange=%.7f%n",
+                          label, soaked, dryChanged, partial, maxSoakedChange);
+                    assertTrue(soaked > 100 && dryChanged > 100 && partial > 20,
+                          "Real material controls must include soaked, ordinary dry and transitioning pigment: " + label);
+                    assertTrue(maxSoakedChange <= .0005f,
+                          "Already saturated peat/mud/mineral pigment must not darken again in rain: " + label);
+                } finally { terrain.dispose(); }
+            }
+        } catch (Exception error) { throw new AssertionError("Actual biome rain absorption", error); }
+        finally { assertTrue(manager.apply(Map.of()).success()); }
     }
 
     private static int[] patch(Pixmap pixels, BoardCamera camera) {

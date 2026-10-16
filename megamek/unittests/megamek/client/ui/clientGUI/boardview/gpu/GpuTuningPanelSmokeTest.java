@@ -18,22 +18,29 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.Toolkit;
 import java.awt.event.AWTEventListener;
+import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.JButton;
 import javax.swing.SwingUtilities;
 
+import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -43,25 +50,35 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.Pools;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.CancelAction;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.common.board.Board;
 import megamek.common.enums.GamePhase;
+import megamek.common.game.Game;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.AtmosphericTaint;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.lwjgl.glfw.GLFWNativeWin32;
+import org.lwjgl.system.windows.User32;
 
 /**
  * The developer tuning utility (C.1 G17) in the real HUD over a real {@link GpuBoardTuning} model: the utility ends the
  * utility row and opens the panel at its place, one dialog at a time; every control of the model's two pages has its
  * hud-v3 control on the panel, which edits the model, group by group, and shows the model's own changes; the Camera
- * page sets the fixed sun and the board camera's framing; Defaults restores both pages; "Planetary conditions…" opens
- * the existing Swing editor.
+ * page sets the fixed sun and the board camera's framing; the Display page's UI scale is saved; Defaults restores both
+ * pages and the UI scale; "Planetary conditions…" opens the existing Swing editor.
  */
 @Tag("on-demand")
 class GpuTuningPanelSmokeTest {
@@ -445,6 +462,174 @@ class GpuTuningPanelSmokeTest {
                 assertTrue(hud.tuning.elevationGrading(), "Defaults restores the grading constant");
             }
         });
+    }
+
+    @Test
+    void theUiScaleShowsTheSavedShareIsSavedOnceSetAndDefaultsRestoresIt() {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        float saved = preferences.getBoardUiScale();
+        try {
+            preferences.setBoardUiScale(.8f);
+            GpuHudTestStage.run(harness -> {
+                try (Hud hud = new Hud(harness)) {
+                    hud.show();
+                    hud.click("tuning-button");
+                    Slider slider = hud.find("tuning-ui-scale");
+                    assertEquals(50, slider.getMinValue(), NEAR);
+                    assertEquals(100, slider.getMaxValue(), NEAR, "only a reduction of the window's own scale");
+                    assertEquals(5, slider.getStepSize(), NEAR);
+                    assertEquals("80%", reading(hud, "tuning-ui-scale"), "the saved share");
+                    hud.drag("tuning-ui-scale", 65);
+                    assertEquals("65%", reading(hud, "tuning-ui-scale"));
+                    // The board view saves it each frame; the source publishes the saved share to the layout.
+                    hud.tuning.saveUiScale();
+                    SwingUtilities.invokeAndWait(() -> { });
+                    assertEquals(.65f, preferences.getBoardUiScale(), NEAR, "saved");
+                    hud.click("tuning-defaults");
+                    assertEquals("100%", reading(hud, "tuning-ui-scale"));
+                    hud.tuning.saveUiScale();
+                    SwingUtilities.invokeAndWait(() -> { });
+                    assertEquals(1, preferences.getBoardUiScale(), NEAR, "Defaults restores and saves 100%");
+                }
+            });
+        } finally {
+            preferences.setBoardUiScale(saved);
+        }
+    }
+
+    /**
+     * In the map preview or the board editor: Swing's GUI scale keys (Ctrl+NumPad +/-, and Ctrl+0) change neither
+     * Swing's GUI scale nor the 3D UI scale. Then the path a user takes, from Windows mouse messages through the
+     * window's own event loop: the Tuning utility, then a drag on the Display page's UI scale. While the button is held
+     * the HUD keeps its layout; once it is released the HUD lays out at that share of the scale it had, also in a
+     * window whose size limits that scale (the default 1280 x 800 on a high-DPI display).
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    @EnabledOnOs(OS.WINDOWS)
+    void theGuiScaleKeysDoNothingAndAMouseDragOnTheUiScaleRescalesTheHudOnRelease(boolean editing) throws Exception {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        float saved = preferences.getBoardUiScale();
+        float guiScale = preferences.getGUIScale();
+        FutureTask<GpuMapSource> setup = new FutureTask<>(() -> {
+            preferences.setBoardUiScale(1);
+            BoardEditorSession editor = editing ? new BoardEditorSession() : null;
+            Game game = editor == null ? new Game() : editor.game();
+            game.setBoard(Board.createEmptyBoard(9, 9));
+            return new GpuMapSource(game, null, editor, () -> { }, () -> { });
+        });
+        SwingUtilities.invokeAndWait(setup);
+        GpuMapSource source = setup.get();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        try {
+            new Lwjgl3Application(new ApplicationAdapter() {
+                private GpuBattleView view;
+                private long window;
+                private int frame;
+                private float full;
+                private Slider slider;
+
+                @Override
+                public void create() {
+                    view = new GpuBattleView(source);
+                    view.create();
+                    GpuBoardTestUi.present(view);
+                    window = GLFWNativeWin32.glfwGetWin32Window(
+                          ((Lwjgl3Graphics) Gdx.graphics).getWindow().getWindowHandle());
+                }
+
+                @Override
+                public void resize(int width, int height) {
+                    view.resize(width, height);
+                }
+
+                /** The window's own loop: its events are polled, then each frame takes the next step. */
+                @Override
+                public void render() {
+                    try {
+                        view.render();
+                        Stage stage = GpuBoardTestUi.stage();
+                        int step = frame++;
+                        switch (step) {
+                            case 0 -> {
+                                full = stage.getWidth();
+                                GpuBoardTestUi.press(KeyCommandBind.INC_GUI_SCALE);
+                                GpuBoardTestUi.press(KeyCommandBind.DEC_GUI_SCALE);
+                                GpuBoardTestUi.press(KeyCommandBind.INC_GUI_SCALE);
+                                GpuBoardTestUi.withModifiers(InputEvent.CTRL_DOWN_MASK, () -> {
+                                    Gdx.input.getInputProcessor().keyDown(Input.Keys.NUM_0);
+                                    Gdx.input.getInputProcessor().keyUp(Input.Keys.NUM_0);
+                                });
+                            }
+                            case 2 -> {
+                                // Any change they made would have reached the Swing thread by now.
+                                SwingUtilities.invokeAndWait(() -> { });
+                                assertEquals(guiScale, preferences.getGUIScale(), "Swing's GUI scale is untouched");
+                                assertEquals(1, preferences.getBoardUiScale(), "so is the 3D UI scale");
+                                assertEquals(full, stage.getWidth(), .5f, "and the HUD's layout");
+                                Actor tune = stage.getRoot().findActor("tuning-button");
+                                Vector2 at = windowPoint(stage, tune, tune.getWidth() / 2, tune.getHeight() / 2);
+                                mouse(User32.WM_MOUSEMOVE, 0, at);
+                                mouse(User32.WM_LBUTTONDOWN, User32.MK_LBUTTON, at);
+                                mouse(User32.WM_LBUTTONUP, 0, at);
+                            }
+                            case 6 -> {
+                                slider = stage.getRoot().findActor("tuning-ui-scale");
+                                assertTrue(GpuBoardTestUi.shown(slider), "the Display page shows the UI scale");
+                                float middle = slider.getHeight() / 2;
+                                Vector2 start = windowPoint(stage, slider, slider.getWidth() - 1, middle);
+                                mouse(User32.WM_MOUSEMOVE, 0, start);
+                                mouse(User32.WM_LBUTTONDOWN, User32.MK_LBUTTON, start);
+                                mouse(User32.WM_MOUSEMOVE, User32.MK_LBUTTON, windowPoint(stage, slider, 0, middle));
+                            }
+                            case 10 -> {
+                                assertTrue(Gdx.input.isTouched(), "the button is held");
+                                assertEquals(50, slider.getValue(), NEAR, "the drag reached the minimum");
+                                assertEquals(full, stage.getWidth(), .5f, "the layout waits for the release");
+                                mouse(User32.WM_LBUTTONUP, 0, windowPoint(stage, slider, 0, slider.getHeight() / 2));
+                            }
+                            default -> {
+                                // Saved on release, the share reaches the layout through the Swing thread.
+                                if (step > 10 && (stage.getWidth() > full + 1 || step > 120)) {
+                                    assertFalse(Gdx.input.isTouched(), "the button is released");
+                                    assertEquals(.5f, preferences.getBoardUiScale(), NEAR, "the share is saved");
+                                    assertEquals(full / .5f, stage.getWidth(), 1, "the HUD lays out at half its scale");
+                                    assertEquals(guiScale, preferences.getGUIScale(), "Swing's GUI scale is untouched");
+                                    Gdx.app.exit();
+                                }
+                            }
+                        }
+                    } catch (Throwable error) {
+                        failure.set(error);
+                        Gdx.app.exit();
+                    }
+                }
+
+                @Override
+                public void dispose() {
+                    view.dispose();
+                }
+
+                /** Posts a mouse message at the window point, which the window's next event poll delivers. */
+                private void mouse(int message, int buttons, Vector2 at) {
+                    long position = ((long) Math.round(at.y) << 16) | (Math.round(at.x) & 0xFFFF);
+                    assertTrue(User32.PostMessage(window, message, buttons, position), "the window takes the message");
+                }
+            }, GpuBoardWindow.configuration(false));
+        } finally {
+            SwingUtilities.invokeAndWait(() -> {
+                source.close();
+                preferences.setBoardUiScale(saved);
+            });
+        }
+        if (failure.get() != null) {
+            throw new AssertionError(editing ? "UI scale in the editor" : "UI scale in the map preview", failure.get());
+        }
+    }
+
+    /** The window point (y down) of the point (x, y) of {@code actor}. */
+    private static Vector2 windowPoint(Stage stage, Actor actor, float x, float y) {
+        return stage.stageToScreenCoordinates(actor.localToStageCoordinates(new Vector2(x, y)));
     }
 
     @Test

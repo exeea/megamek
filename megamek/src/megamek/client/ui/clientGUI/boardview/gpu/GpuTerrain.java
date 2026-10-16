@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -53,7 +54,6 @@ import com.badlogic.gdx.graphics.g3d.attributes.DirectionalLightsAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
-import com.badlogic.gdx.graphics.g3d.environment.DirectionalShadowLight;
 import com.badlogic.gdx.graphics.g3d.model.MeshPart;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
@@ -65,6 +65,8 @@ import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
+import com.badlogic.gdx.graphics.g3d.utils.RenderableSorter;
+import com.badlogic.gdx.graphics.g3d.utils.ShaderProvider;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
@@ -126,7 +128,11 @@ final class GpuTerrain implements Disposable {
     private final BoardRim rims = new BoardRim();
     private final GpuTextures<DecalSlot> decals = new GpuTextures<>(false, true);
     private final GpuTextures<Coords> tactical = new GpuTextures<>();
-    /** Family programs and the generic program each sorts with (see createShader); others sort alone. */
+    /**
+     * Family programs and the generic program each sorts with (familyGroup); others sort alone. A program's entry lives
+     * from its init, once its provider keeps it, until its dispose: a shader edit disposes the programs it replaced only
+     * after their replacements are installed, and a rejected edit disposes the replacements it prepared.
+     */
     private final Map<Shader, Shader> shaderGroups = new IdentityHashMap<>();
     private final GpuTerrainBatch terrainBatch = new GpuTerrainBatch(material -> material.has(Ground.TYPE)
           && !material.has(GpuLiquidShader.Frame.TYPE) && !material.has(GpuWaterShader.TYPE), this::shaderGroup);
@@ -134,9 +140,35 @@ final class GpuTerrain implements Disposable {
     /** Authored paint of nearby chunks in shared draws: each chunk numbers its paint draws in painter order. */
     private final GpuTerrainPages paintPages = new GpuTerrainPages(part -> true);
     private final GpuWaterPages waterPages = new GpuWaterPages();
-    private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Terrain", () -> new DefaultShaderProvider(
-          GpuCloudShadow.vertex(GpuUnitShader.linearVertex(DefaultShader.getDefaultVertexShader())),
-          GpuCloudShadow.fragment(GpuUnitShader.linearFragment(DefaultShader.getDefaultFragmentShader()), false)) {
+    private final GatheringBatch batch = new GatheringBatch(GpuShaderManager.provider("Terrain",
+          () -> new TerrainShaders(false)), terrainBatch);
+    /**
+     * The depth twins of the terrain's programs (depthPrepass), from the same shader ladder; renderPrepass draws them.
+     * Created with the first twin, so a terrain without the pre-pass composes and registers no second ladder.
+     */
+    private ShaderProvider prepassShaders;
+
+    /**
+     * The terrain's shader ladder. With {@code depthOnly} it builds each program's depth twin instead: the same prefix,
+     * vertex stage and setters, and a fragment stage that writes depth alone, after a cutout's alpha test, which it repeats
+     * exactly (terrain-foliage.frag's depthPrepassFlag). Every vertex stage declares gl_Position invariant, and a cutout's
+     * also the inputs of its alpha test, so a program and its twin cover the same pixels at the same depth.
+     */
+    private final class TerrainShaders extends DefaultShaderProvider {
+        private final boolean depthOnly;
+        /**
+         * A solid surface twin's fragment stage, read while the provider is built: the shader editor tracks the files a
+         * provider reads then, so an edit of it rebuilds the twins.
+         */
+        private final String depthFragment;
+
+        TerrainShaders(boolean depthOnly) {
+            super(invariantPosition(GpuCloudShadow.vertex(GpuUnitShader.linearVertex(DefaultShader.getDefaultVertexShader()))),
+                  GpuCloudShadow.fragment(GpuUnitShader.linearFragment(DefaultShader.getDefaultFragmentShader()), false));
+            this.depthOnly = depthOnly;
+            depthFragment = depthOnly ? GpuShaderSource.read("terrain-depth.frag") : null;
+        }
+
         private final DefaultShader.Config groundShader = new DefaultShader.Config(config.vertexShader,
               litFragment("terrain-normal.frag"));
         private final DefaultShader.Config pitShader = new DefaultShader.Config(config.vertexShader,
@@ -145,14 +177,14 @@ final class GpuTerrain implements Disposable {
               litFragment("terrain-road.frag"));
         private final DefaultShader.Config sculptShader = new DefaultShader.Config(GpuSurfaceBlend.vertex(config.vertexShader),
               litFragment("terrain-sculpt.frag"));
-        private final DefaultShader.Config foliageShader = new DefaultShader.Config(config.vertexShader,
+        private final DefaultShader.Config foliageShader = new DefaultShader.Config(coverageVertex(config.vertexShader),
               litFragment("terrain-foliage.frag"));
         private final DefaultShader.Config instancedFoliageShader = new DefaultShader.Config(
-              GpuTreeInstances.vertex(config.vertexShader), foliageShader.fragmentShader);
+              GpuTreeInstances.vertex(foliageShader.vertexShader), foliageShader.fragmentShader);
         private final DefaultShader.Config instancedPropShader = new DefaultShader.Config(
               GpuTreeInstances.vertex(config.vertexShader), config.fragmentShader);
         private final DefaultShader.Config vegetationShader = new DefaultShader.Config(GpuGroundCover.vertex(config.vertexShader),
-              GpuShaderSource.terrainLighting(GpuCloudShadow.fragment(GpuShaderSource.read("terrain-vegetation.frag"), true)));
+              GpuCloudShadow.fragment(GpuShaderSource.terrainLighting(GpuShaderSource.read("terrain-vegetation.frag")), true));
         private final DefaultShader.Config biomeVegetationShader = new DefaultShader.Config(
               GpuBiomeVegetation.vertex(config.vertexShader), vegetationShader.fragmentShader);
         private final DefaultShader.Config bankTurfShader = new DefaultShader.Config(
@@ -270,6 +302,15 @@ final class GpuTerrain implements Disposable {
                   + (renderable.environment != null && renderable.environment.shadowMap != null ? " shadow" : "")
                   + (GpuTreeInstances.instanced(renderable) ? " instanced" : "")
                   + GpuFamilyPrograms.name(renderable.material, Sculpt.TYPE);
+            if (depthOnly) {
+                // A cutout's twin returns after its alpha test (GpuGlsl.source moves the version line above the define);
+                // a solid surface's twin has an empty fragment stage.
+                fragment = renderable.material.has(FloatAttribute.AlphaTest) ? "#define depthPrepassFlag\n" + fragment
+                      : depthFragment;
+                shaderName += " depth twin";
+            }
+            // The pre-pass draws twin by twin (renderPrepass): a twin sorts with no program.
+            Shader group = depthOnly ? null : familyGroup(renderable, shaders);
             DefaultShader result = new DefaultShader(renderable, chosen,
                   GpuGlsl.compile(shaderName, prefix + GpuFamilyPrograms.defines(renderable.material, Sculpt.TYPE),
                         chosen.vertexShader, fragment)) {
@@ -333,8 +374,6 @@ final class GpuTerrain implements Disposable {
                 // Upload before render-time texture-unit assignment, like the other shared maps.
                 private final GpuAssets.SculptRoughness sculptRoughness = program.hasUniform("u_sculptRoughness[0]")
                       ? assets.sculptRoughness(SCULPT_LAYERS) : null;
-                private final float[] sculptNormalSpread = program.hasUniform("u_sculptNormalSpread[0]")
-                      ? assets.sculptNormalSpread(SCULPT_LAYERS) : null;
                 private int roughnessLayersUnit = -1;
                 private final int tundraLayersUniform = register("u_tundraLayers");
                 private final int tundraTilesUniform = register("u_tundraTiles");
@@ -429,10 +468,6 @@ final class GpuTerrain implements Disposable {
                         float[] metadata = sculptRoughness.metadata();
                         program.setUniform2fv("u_sculptRoughness[0]", metadata, 0, metadata.length);
                     }
-                    if (sculptNormalSpread != null) {
-                        program.setUniform4fv("u_sculptNormalSpread[0]", sculptNormalSpread, 0,
-                              sculptNormalSpread.length);
-                    }
                     if (has(tundraLayersUniform)) {
                         set(tundraLayersUniform, (float) SCULPT_LAYERS.indexOf("tundra-earth") * 2,
                               (float) SCULPT_LAYERS.indexOf("tundra-fungus") * 2,
@@ -465,6 +500,11 @@ final class GpuTerrain implements Disposable {
                 protected void bindMaterial(Attributes attributes) {
                     super.bindMaterial(attributes);
                     GpuUnitShader.bindSceneBlending(context, attributes);
+                    // A draw the depth pre-pass drew keeps that depth: it shades only where its own depth won, writing none.
+                    if (prepassed && twin(this, attributes) != null) {
+                        context.setDepthTest(prepassDepthFunction);
+                        context.setDepthMask(false);
+                    }
                 }
 
                 @Override
@@ -507,6 +547,23 @@ final class GpuTerrain implements Disposable {
                     super.render(part, attributes);
                 }
 
+                @Override
+                public void init() {
+                    super.init();
+                    if (group != null) { shaderGroups.put(this, group); }
+                }
+
+                @Override
+                public void dispose() {
+                    shaderGroups.remove(this);
+                    // A replaced colour program (a key) or twin (a value) leaves its pairs: their draws draw as before
+                    // until the warm-up pairs the replacements, behind the loading stage (prepareTerrainMaterials).
+                    if (prepassTwins.remove(this) != null | prepassTwins.values().removeIf(twin -> twin == this)) {
+                        terrainMaterialsReady = false;
+                    }
+                    super.dispose();
+                }
+
                 private int bindShared(int uniform, GLTexture texture, int previousUnit) {
                     if (!has(uniform)) { return previousUnit; }
                     int unit = context.textureBinder.bind(texture);
@@ -532,6 +589,7 @@ final class GpuTerrain implements Disposable {
                 if (lighting != null) { lighting.texture(); }
             }
             GpuLavaLighting.register(result);
+            GpuAmbientOcclusion.register(result);
             GpuModelMaterial.register(result);
             GpuBuildingCutaway.register(result);
             GpuLiquidShader.register(result);
@@ -692,22 +750,18 @@ final class GpuTerrain implements Disposable {
                     });
                 }
             }
-            if (renderable.material.has(GpuFamilyPrograms.Constants.TYPE)) {
-                // Draw order decides depth-tie winners. A family program sorts as the generic program that draws
-                // the same material unmarked, so swapping it in changes no pixel (GpuOpaqueSorter).
-                Renderable generic = new Renderable().set(renderable);
-                generic.material = new Material(renderable.material);
-                generic.material.remove(GpuFamilyPrograms.Constants.TYPE);
-                for (Shader shader : shaders) {
-                    if (shader.canRender(generic)) {
-                        shaderGroups.put(result, shaderGroup(shader));
-                        break;
-                    }
-                }
-            }
             return result;
         }
-    }), terrainBatch);
+    }
+
+    /** The colour batch; the depth pre-pass draws the renderables it gathered before they flush (renderPrepass). */
+    private static final class GatheringBatch extends ModelBatch {
+        GatheringBatch(ShaderProvider shaders, RenderableSorter sorter) { super(shaders, sorter); }
+
+        /** This flush's renderables in submission order, until end() flushes them. */
+        Array<Renderable> gathered() { return renderables; }
+    }
+
     private final ModelBatch depthBatch = new ModelBatch(GpuShaderManager.provider("Shadows", () ->
           GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.read("shadow-depth.frag")))),
           new GpuOpaqueSorter());
@@ -720,10 +774,76 @@ final class GpuTerrain implements Disposable {
               linearDiffuse(material), GpuSurfaceBlend.ordinaryFamily(material));
     }
 
+    /**
+     * Draw order decides depth-tie winners. A family program sorts as the generic program that draws its material
+     * unmarked, so swapping it in changes no pixel (GpuOpaqueSorter): that program's group, from the provider's programs.
+     * Null for a generic program.
+     */
+    private Shader familyGroup(Renderable renderable, Iterable<Shader> programs) {
+        if (!renderable.material.has(GpuFamilyPrograms.Constants.TYPE)) { return null; }
+        Renderable generic = new Renderable().set(renderable);
+        generic.material = new Material(renderable.material);
+        generic.material.remove(GpuFamilyPrograms.Constants.TYPE);
+        for (Shader program : programs) {
+            if (program.canRender(generic)) { return shaderGroup(program); }
+        }
+        return null;
+    }
+
     /** The shader whose draws a shader's draws sort among: its generic program for a family program. */
     private Shader shaderGroup(Shader shader) {
         Shader program = GpuShaderProvider.unwrap(shader);
         return shaderGroups.getOrDefault(program, program);
+    }
+
+    /**
+     * The depth twin a draw of this colour program takes part in the pre-pass with, or null: it draws as before. The
+     * pre-pass and the colour pass both ask, so a draw takes part in both or in neither.
+     */
+    private Shader twin(Shader colour, Attributes material) {
+        return prepasses(prepass(material)) ? prepassTwins.get(shaderGroup(colour)) : null;
+    }
+
+    /**
+     * Whether the depth pre-pass draws a category: those of depthPrepass, and the relief while ambient occlusion reads
+     * the pre-pass depth (GpuAmbientOcclusion in the environment, so its switch prepares the twins as a lighting change).
+     */
+    private boolean prepasses(Prepass category) {
+        return category != null && (depthPrepass.contains(category)
+              || category == Prepass.RELIEF && environment.has(GpuAmbientOcclusion.TYPE));
+    }
+
+    /**
+     * The pre-pass category of an opaque, depth-writing draw whose twin repeats its coverage exactly; null for any other
+     * draw. Blended, decal, scar, cut-away, tileset, water, liquid, vegetation and road-mask draws, alpha-tested ground,
+     * props, buildings and units stay out.
+     */
+    private static Prepass prepass(Attributes material) {
+        var blend = material.get(BlendingAttribute.class, BlendingAttribute.Type);
+        if (blend != null && blend.blended || material.has(DepthTestAttribute.Type)
+              || material.has(GpuSurfaceScars.Marking.TYPE) || material.has(GpuBuildingCutaway.TYPE)
+              || material.has(GpuTilesetTerrain.Grading.TYPE)) { return null; }
+        // terrain-foliage.frag discards by the alpha test alone, which a cutout's twin repeats.
+        if (material.has(Foliage.TYPE)) { return material.has(Impostor.TYPE) ? Prepass.IMPOSTORS : Prepass.FOLIAGE; }
+        // The relief's fragment stages never discard; these materials' stages do, or are not relief.
+        if (blend != null || material.has(FloatAttribute.AlphaTest) || material.has(GpuWaterShader.TYPE)
+              || material.has(GpuLiquidShader.Frame.TYPE) || material.has(GpuGroundCover.Wind.TYPE)
+              || material.has(GpuBiomeVegetation.Kind.TYPE) || material.has(GpuBankTurf.Turf.TYPE)
+              || material.has(GpuRoads.Mask.TYPE)) { return null; }
+        return material.has(Ground.TYPE) || material.has(Sculpt.TYPE) || material.has(Pit.TYPE)
+              || material.has(GpuMagmaShader.TYPE) ? Prepass.RELIEF : null;
+    }
+
+    /** Every terrain vertex stage: a depth twin and its colour program place each vertex identically. */
+    private static String invariantPosition(String vertex) {
+        return GpuShaderSource.replaceOnce(vertex, "void main() {", "invariant gl_Position;\nvoid main() {",
+              "depth pre-pass");
+    }
+
+    /** A cutout's vertex stage: the outputs its alpha test reads are invariant too (foliage-coverage.glsl). */
+    private static String coverageVertex(String vertex) {
+        return GpuShaderSource.replaceOnce(vertex, "void main() {",
+              GpuShaderSource.read("foliage-coverage.glsl") + "\nvoid main() {", "depth pre-pass");
     }
 
     /** Native checks follow the family programs a view requested. */
@@ -751,7 +871,7 @@ final class GpuTerrain implements Disposable {
     private final GpuTreeInstances trees;
     private final Environment environment = new Environment();
     private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
-    private final GpuLavaLighting lavaLighting = new GpuLavaLighting();
+    private final GpuLavaLighting lavaLighting;
     private final List<Chunk> chunks = new ArrayList<>();
     // At most four in-flight chunks and eight replaced chunks. Half the cores, at most eight, build terrain: each
     // chunk spreads its hexes across the pool, while the other half keeps rendering, input and garbage collection
@@ -824,6 +944,7 @@ final class GpuTerrain implements Disposable {
     private BoardScene coverScene;
     /** GL-thread cache derived from the immutable source tiles; published with the existing terrain rebuild. */
     private List<BoardScene.Tile> lunarSource, lunarTiles;
+    private boolean lunarWeightless;
     private final Vector3 wind = new Vector3();
     private final List<Model> shadowModels = new ArrayList<>();
     private final List<Matrix4> shadowTransforms = new ArrayList<>();
@@ -841,7 +962,7 @@ final class GpuTerrain implements Disposable {
     private BoardConcrete coast;
     private BoardScene.Light light;
     private BoardAtmosphere.Lighting atmosphere;
-    private DirectionalShadowLight shadow;
+    private GpuShadowLight shadow;
     /** Allocated only for gameplay casters. Reuses the unchanged terrain depth when units move. */
     private FrameBuffer staticShadow;
     private boolean staticShadowValid;
@@ -867,6 +988,7 @@ final class GpuTerrain implements Disposable {
     private boolean waterEffects = true;
     /** This frame's visual gravity, converted from the scenario's g multiplier to metres per second squared. */
     private float gravity = BoardAtmosphere.STANDARD_GRAVITY;
+    private boolean vacuum;
     private float wetness;
     private float detailPixelsPerUnit = Float.NaN;
     /** Tuning: small placed objects may hide when zoomed out ({@link TreeLod#SMALL_OBJECTS}). */
@@ -887,15 +1009,51 @@ final class GpuTerrain implements Disposable {
     private boolean atlasColumns;
     /** The Tactical View's draw rule ({@link #setFluffHidden}); it never rebuilds the terrain. */
     private boolean fluffHidden;
+    /**
+     * What the depth pre-pass draws (renderPrepass): ground relief and solid plant parts with an empty fragment stage,
+     * cutout leaves and impostor cards with their own alpha test. Native measurements take one category at a time.
+     */
+    enum Prepass { RELIEF, FOLIAGE, IMPOSTORS }
+
+    /**
+     * The categories the depth pre-pass draws: the trees' leaves and impostor cards, whose cutouts hide the most shading.
+     * {@code -Dmegamek.gpu.depthPrepass=false} turns it off; {@code =all} adds the relief, for measurements only (on an
+     * Iris Xe its twins cost what they save). Twins build behind the loading stage for the categories set then; native
+     * checks also switch it between frames.
+     */
+    static Set<Prepass> depthPrepass = switch (System.getProperty("megamek.gpu.depthPrepass", "trees")) {
+        case "false" -> EnumSet.noneOf(Prepass.class);
+        case "all" -> EnumSet.allOf(Prepass.class);
+        default -> EnumSet.of(Prepass.FOLIAGE, Prepass.IMPOSTORS);
+    };
+    /** The colour pass's depth test for a draw the pre-pass drew; native measurements compare GL_LEQUAL. */
+    static int prepassDepthFunction = GL20.GL_EQUAL;
+    /**
+     * Each generic colour program's depth twin (both libGDX shaders, never shader-manager handles), paired with its warm-up
+     * sample behind the loading stage (prepareTerrainMaterials); its family programs use it (shaderGroup). A pair lives
+     * until its program or its twin is disposed, as a shader edit replaces them; the warm-up then pairs the replacements.
+     */
+    private final Map<Shader, Shader> prepassTwins = new IdentityHashMap<>();
+    /** Tree species whose stand parts are warm-up samples, so their programs and twins build behind the loading stage. */
+    private final Set<String> standSpecies = new HashSet<>();
+    /** Whether this flush's colour draws follow a depth pre-pass (render, bindMaterial). */
+    private boolean prepassed;
+    /** The last pre-pass's twin draws, and the lists it reuses. */
+    private int prepassDraws;
+    private final Array<Renderable> prepassParts = new Array<>();
+    private final Array<Shader> prepassOrder = new Array<>();
     private boolean terrainMaterialsReady;
     private GpuGlsl.Preparation terrainMaterialPreparation;
     /** Sculpt and blend ground switches to programs with constant families once those have compiled. */
     private final GpuFamilyPrograms familyPrograms;
     /** A load, graphics switch or lighting change whose family programs the loading stage still waits for. */
     private boolean familySession = true;
-    private long familySessionStart = System.nanoTime();
     private final List<Renderable> terrainMaterialSamples = new ArrayList<>();
-    private final TerrainLoadProgress terrainMaterialProgress = new TerrainLoadProgress();
+    /**
+     * The last warm-up poll's programs (prepareTerrainMaterials), each sample's generic program and depth twin, and
+     * how many of them it found linked: the loading stage's shader bar reads them (shaderProgress).
+     */
+    private int terrainPrograms, terrainProgramsLinked;
     private long terrainMaterialEnvironment = -1;
     private boolean terrainMaterialShadows;
 
@@ -989,12 +1147,13 @@ final class GpuTerrain implements Disposable {
         this.frameBounds = frameBounds;
         this.liquidShaderAnimation = liquidShaderAnimation;
         this.proceduralWater = proceduralWater;
-        environment.set(lavaLighting);
         environmentLighting.set(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS));
         environment.set(environmentLighting);
         borrowedAssets = borrowed != null;
         familyPrograms = new GpuFamilyPrograms(!borrowedAssets, Sculpt.TYPE, GpuTerrain::familyVariant);
         assets = borrowedAssets ? borrowed : new GpuAssets();
+        lavaLighting = new GpuLavaLighting(assets);
+        environment.set(lavaLighting);
         trees = new GpuTreeInstances((name, level) -> foliage(assets.lodModel(name, level)));
     }
 
@@ -1833,10 +1992,12 @@ final class GpuTerrain implements Disposable {
 
     /** Request only the latest rendering snapshot. Game state and commands remain owned by the source. */
     void update(BoardScene scene, Camera camera) {
-        if (gravity == 0) {
-            if (lunarSource != scene.tiles()) {
-                lunarTiles = List.copyOf(scene.tiles().stream().map(BoardScene.Tile::lunar).toList());
+        boolean weightless = gravity == 0;
+        if (vacuum || weightless) {
+            if (lunarSource != scene.tiles() || lunarWeightless != weightless) {
+                lunarTiles = List.copyOf(scene.tiles().stream().map(tile -> tile.lunar(weightless)).toList());
                 lunarSource = scene.tiles();
+                lunarWeightless = weightless;
             }
             scene = scene.withTiles(lunarTiles);
         } else {
@@ -1886,12 +2047,14 @@ final class GpuTerrain implements Disposable {
     boolean busy() { return requested != null || rebuild != null || detailJob != null || coverScene != null && !materialsReady(); }
 
     /** The loading stage (ready, buildProgress) waits for a session's family programs; busy does not, nor tests. */
-    private void startFamilySession() {
-        familySession = true;
-        familySessionStart = System.nanoTime();
-    }
+    private void startFamilySession() { familySession = true; }
 
     private boolean familiesPending() { return familySession && familyPrograms.pending() > 0; }
+
+    /** Family programs build after the session's chunks and generic programs (refine). */
+    private boolean buildingFamilies() {
+        return familySession && requested == null && rebuild == null && materialsReady();
+    }
 
     /** The installed terrain shows {@code scene}'s board in the wanted graphics: a switch either way shows the loading stage. */
     boolean ready(BoardScene scene) {
@@ -1905,34 +2068,34 @@ final class GpuTerrain implements Disposable {
         return 100 * rebuild.replacements.size() / Math.max(1, rebuild.remaining.size() + rebuild.replacements.size());
     }
 
+    /**
+     * The loading stage's shader bar: the programs linked of those this load needs so far. The generic programs and
+     * their depth twins come from the warm-up's last poll; once the family programs build, their ready and pending
+     * counts are added (pending includes one the provider already holds, adopted at once). Counting them only then
+     * keeps the bar from standing still through the chunk build, when they may all load from the cache.
+     */
+    TerrainLoadProgress.Shaders shaderProgress() {
+        boolean families = buildingFamilies();
+        int ready = families ? familyPrograms.ready().size() : 0;
+        int pending = families ? familyPrograms.pending() : 0;
+        return new TerrainLoadProgress.Shaders(terrainProgramsLinked + ready, terrainPrograms + ready + pending);
+    }
+
     /** Read on the GL thread; each worker contributes one coherent, non-authoritative progress snapshot. */
     List<TerrainLoadProgress.Status> buildDetails() {
-        if (requested == null && coverScene == null) { return List.of(); }
-        List<TerrainLoadProgress.Status> result = new ArrayList<>();
-        if (terrainMaterialPreparation != null && !materialsReady()) {
-            result.add(new TerrainLoadProgress.Status(0, 0, terrainMaterialProgress.snapshot()));
-        } else if (familiesPending()) {
-            int ready = familyPrograms.ready().size();
-            result.add(new TerrainLoadProgress.Status(0, 0, new TerrainLoadProgress.Step("materials", ready,
-                  ready + familyPrograms.pending(), familySessionStart)));
-        }
         if (requested == null || rebuild == null || rebuild.request.generation() != requested.generation()) {
-            return result;
+            return List.of();
         }
         List<DetailJob> jobs = new ArrayList<>(rebuild.pending);
         if (detailJob != null && detailJob.rebuilding()) { jobs.add(detailJob); }
-        if (jobs.isEmpty()) {
-            result.add(new TerrainLoadProgress.Status(0, 0, rebuild.progress.snapshot()));
-            return result;
-        }
+        if (jobs.isEmpty()) { return List.of(new TerrainLoadProgress.Status(0, 0, rebuild.progress.snapshot())); }
         BoardScene scene = rebuild.request.scene();
         int columns = (scene.width() + CHUNK_SIZE - 1) / CHUNK_SIZE;
         int rows = (scene.height() + CHUNK_SIZE - 1) / CHUNK_SIZE;
-        result.addAll(jobs.stream().filter(job -> job.generation() == requested.generation())
+        return jobs.stream().filter(job -> job.generation() == requested.generation())
               .map(job -> new TerrainLoadProgress.Status(TerrainLoadProgress.displayIndex(job.index(), columns, rows) + 1,
                     columns * rows, job.progress().snapshot()))
-              .sorted(Comparator.comparingInt(TerrainLoadProgress.Status::section)).toList());
-        return result;
+              .sorted(Comparator.comparingInt(TerrainLoadProgress.Status::section)).toList();
     }
 
     /** Presentation only: derive cell colors from the current request's existing chunk ownership. */
@@ -2054,6 +2217,7 @@ final class GpuTerrain implements Disposable {
                 // corners, which a neighbour's edit can move, still need checking.
                 boolean same = before == tile;
                 if (!same && (before.blackIce() != tile.blackIce() || before.bare() != tile.bare()
+                      || before.barren() != tile.barren()
                       || before.ultraSublevel() != tile.ultraSublevel()
                       || !before.appearance().equals(tile.appearance()))) { changedTiles.add(tile.coords()); }
                 // Artwork is recomposed for dirtied chunks only, so a hex whose decal or tileset artwork changed is
@@ -2336,7 +2500,7 @@ final class GpuTerrain implements Disposable {
             terrainBatch.clear();
             startFamilySession();
         }
-        if (familySession && requested == null && rebuild == null && materialsReady()) {
+        if (buildingFamilies()) {
             if (familyPrograms.prepare(terrainMaterialPreparation, batch.getShaderProvider(), environment)) {
                 terrainBatch.clear();
             }
@@ -2793,7 +2957,10 @@ final class GpuTerrain implements Disposable {
         Renderable sample = new Renderable();
         sample.material = new Material(material);
         sample.environment = environment;
-        sample.meshPart.set("terrain-material-warmup", new Mesh(true, 0, 0, attributes), 0, 0, GL20.GL_TRIANGLES);
+        // A tree part's program reads its placements from the stand's instance attributes (GpuTreeInstances).
+        Mesh layout = material.has(GpuTreeInstances.Instanced.TYPE) ? GpuTreeInstances.sampleMesh(attributes)
+              : new Mesh(true, 0, 0, attributes);
+        sample.meshPart.set("terrain-material-warmup", layout, 0, 0, GL20.GL_TRIANGLES);
         terrainMaterialSamples.add(sample);
         terrainMaterialsReady = false;
     }
@@ -2806,22 +2973,34 @@ final class GpuTerrain implements Disposable {
             // The Classic columns draw no sculpted material.
             prepareTerrainMaterial(sculptMaterial(BoardScene.Surface.GRASS), MeshBatch.STANDARD);
         }
-        if (terrainMaterialPreparation == null || terrainMaterialEnvironment != environment.getMask()
-              || terrainMaterialShadows != (environment.shadowMap != null)
-              || terrainMaterialProgress.snapshot().total() != terrainMaterialSamples.size()) {
-            terrainMaterialProgress.begin("materials", terrainMaterialSamples.size());
-        }
         if (terrainMaterialPreparation == null) { terrainMaterialPreparation = new GpuGlsl.Preparation(); }
         terrainMaterialEnvironment = environment.getMask();
         terrainMaterialShadows = environment.shadowMap != null;
         terrainMaterialsReady = true;
-        int completed = 0;
+        int programs = 0, linked = 0;
         for (Renderable sample : terrainMaterialSamples) {
-            if (terrainMaterialPreparation.run(() -> sample.shader = batch.getShaderProvider().getShader(sample))) {
-                completed++;
-            } else { terrainMaterialsReady = false; }
+            boolean twinned = prepasses(prepass(sample.material));
+            boolean colour = terrainMaterialPreparation.run(() ->
+                  sample.shader = batch.getShaderProvider().getShader(sample));
+            // Its depth twin links here too, after it, behind the loading stage, never at a first draw.
+            boolean twin = colour && twinned && terrainMaterialPreparation.run(() ->
+                  prepassTwins.put(shaderGroup(sample.shader), GpuShaderProvider.unwrap(twinOf(sample))));
+            programs += twinned ? 2 : 1;
+            linked += (colour ? 1 : 0) + (twin ? 1 : 0);
         }
-        while (terrainMaterialProgress.snapshot().completed() < completed) { terrainMaterialProgress.advance(); }
+        if (linked < programs) { terrainMaterialsReady = false; }
+        terrainPrograms = programs;
+        terrainProgramsLinked = linked;
+    }
+
+    /** A warm-up sample's depth twin, from the twin provider: never the colour program the sample suggests. */
+    private Shader twinOf(Renderable sample) {
+        if (prepassShaders == null) {
+            prepassShaders = GpuShaderManager.provider("Terrain depth", () -> new TerrainShaders(true));
+        }
+        Shader colour = sample.shader;
+        sample.shader = null;
+        try { return prepassShaders.getShader(sample); } finally { sample.shader = colour; }
     }
 
     private void drainRetired(long deadline) {
@@ -4179,6 +4358,16 @@ final class GpuTerrain implements Disposable {
             }
             fungalHexes.forEach((at, colony) -> chunk.spores.add(GpuFungus.cloud(at, colony)));
             chunk.restand();
+            // With the depth pre-pass, the trees' programs and twins also build behind the loading stage.
+            if (depthPrepass.contains(Prepass.FOLIAGE) || depthPrepass.contains(Prepass.IMPOSTORS)) {
+                for (GpuTreeInstances.Stand stand : List.of(chunk.stand, chunk.scatterStand)) {
+                    for (String species : stand.trees.keySet()) {
+                        if (standSpecies.add(species)) {
+                            trees.speciesParts(species, (material, layout) -> prepareTerrainMaterial(material, layout));
+                        }
+                    }
+                }
+            }
             chunk.cacheProps();
             // Combat scars mark the 3D relief and what stands on it; the Classic columns show none.
             if (GpuGroundDamage.COMBAT_SCARS && !chunk.columns) {
@@ -6204,6 +6393,18 @@ final class GpuTerrain implements Disposable {
 
     boolean fluffHidden() { return fluffHidden; }
 
+    /** Native checks: the twin draws of the last depth pre-pass. */
+    int prepassDraws() { return prepassDraws; }
+
+    /** In render's colour stage: whether a depth pre-pass drew, so the scene depth holds its surfaces. */
+    boolean prepassed() { return prepassed; }
+
+    /** The opaque batch's render context, for a pass in render's colour stage (GpuAmbientOcclusion). */
+    RenderContext renderContext() { return batch.getRenderContext(); }
+
+    /** Native checks: each generic colour program with a depth twin, and the twin. */
+    Map<Shader, Shader> prepassTwins() { return Collections.unmodifiableMap(prepassTwins); }
+
     private void recacheProps(Chunk chunk) {
         scarSurfaceRevision++;
         GpuPropBatch.disposeMeshes(chunk.shadowPropRenderables);
@@ -6225,6 +6426,18 @@ final class GpuTerrain implements Disposable {
 
     /** Opaque world first. Tactical overlays are a separate final pass. */
     void render(Camera camera, boolean drawTactical) {
+        render(camera, drawTactical, null, null);
+    }
+
+    /**
+     * The opaque world with a benchmark's stage boundaries: {@code prepassStage} runs after the frame's preparation and
+     * gather, {@code colourStage} after the depth pre-pass, before the colour draws.
+     */
+    void render(Camera camera, Runnable prepassStage, Runnable colourStage) {
+        render(camera, false, prepassStage, colourStage);
+    }
+
+    private void render(Camera camera, boolean drawTactical, Runnable prepassStage, Runnable colourStage) {
         // A changed lighting configuration returns every surface to its generic program before anything draws.
         if (!drawTactical && familyPrograms.configure(environment)) {
             terrainBatch.clear();
@@ -6238,7 +6451,7 @@ final class GpuTerrain implements Disposable {
         if (!drawTactical) {
             packKeptProps();
             updateDetail(camera);
-            lavaLighting.update(coverScene, camera, terrain && !clay);
+            lavaLighting.update(coverScene, terrain && !clay);
             // Upload before the render context tracks bound texture units for this pass.
             if (terrain) {
                 biomes.update(coverScene);
@@ -6294,7 +6507,18 @@ final class GpuTerrain implements Disposable {
         batch.render(trees, environment);
         if (!drawTactical) { propBatch.render(batch, environment); }
         if (!drawTactical) { terrainPages.render(batch, environment); }
-        batch.end();
+        // The depth pre-pass: hidden colour fragments then fail the depth test before they shade. Not in the Tactical View
+        // or on the Classic columns. The gather, the draw order and both flushes stay as they were.
+        if (prepassStage != null) { prepassStage.run(); }
+        prepassed = terrain && fluff && renderPrepass(camera);
+        try {
+            if (colourStage != null) { colourStage.run(); }
+            batch.end();
+        } finally {
+            // Its last draw may have tested EQUAL: passes that enable depth testing directly find the usual LEQUAL.
+            if (prepassed) { Gdx.gl.glDepthFunc(GL20.GL_LEQUAL); }
+            prepassed = false;
+        }
         if (!drawTactical) {
             batch.begin(camera);
             if (terrain && fluff && combatScars && !clay) {
@@ -6321,6 +6545,47 @@ final class GpuTerrain implements Disposable {
             paintPages.render(batch, environment);
             batch.end();
         }
+    }
+
+    /**
+     * The depth pre-pass: each gathered opaque draw with a depth twin (twin) draws it first, with colour writes off and
+     * this frame's gather, instance data and render state; the colour draws then test their own depth
+     * (prepassDepthFunction) without writing it (bindMaterial). Every other draw is unchanged. Whether a twin drew.
+     */
+    private boolean renderPrepass(Camera camera) {
+        prepassDraws = 0;
+        if (depthPrepass.isEmpty() && !environment.has(GpuAmbientOcclusion.TYPE)) { return false; }
+        for (Renderable part : batch.gathered()) {
+            Shader twin = twin(part.shader, part.material);
+            if (twin != null) {
+                prepassParts.add(part);
+                prepassOrder.add(twin);
+            }
+        }
+        if (prepassParts.isEmpty()) { return false; }
+        RenderContext context = batch.getRenderContext();
+        Gdx.gl.glColorMask(false, false, false, false);
+        try {
+            // Twin by twin, each in gathered order: few program switches, and depth alone does not depend on order.
+            for (int first = 0; first < prepassParts.size; first++) {
+                Shader twin = prepassOrder.get(first);
+                if (twin == null) { continue; }
+                twin.begin(camera, context);
+                try {
+                    for (int i = first; i < prepassParts.size; i++) {
+                        if (prepassOrder.get(i) != twin) { continue; }
+                        twin.render(prepassParts.get(i));
+                        prepassOrder.set(i, null);
+                        prepassDraws++;
+                    }
+                } finally { twin.end(); }
+            }
+        } finally {
+            Gdx.gl.glColorMask(true, true, true, true);
+            prepassParts.clear();
+            prepassOrder.clear();
+        }
+        return true;
     }
 
     /** Terrain writes depth first; adding grass must not disable its material/page batching. */
@@ -6553,8 +6818,15 @@ final class GpuTerrain implements Disposable {
         this.wetness = wetness;
     }
 
-    /** Scenario or local preview gravity, in g; update derives lunar terrain at zero without editing game state. */
+    /**
+     * Scenario or local preview gravity, in g. In vacuum ({@link #setVacuum}) or at zero gravity, update derives the
+     * airless lunar terrain ({@link BoardScene.Tile#lunar}) without editing game state: vacuum freezes the water,
+     * zero gravity removes the liquids and what lies loose.
+     */
     void setGravity(float gravity) { this.gravity = gravity * BoardAtmosphere.STANDARD_GRAVITY; }
+
+    /** Whether the scenario or local preview air pressure is vacuum ({@code BoardAtmosphere.Settings#pressure}). */
+    void setVacuum(boolean vacuum) { this.vacuum = vacuum; }
 
     boolean waterVisible() { return gravity > 0; }
 
@@ -6582,6 +6854,8 @@ final class GpuTerrain implements Disposable {
     private GpuAssets.MaterialArrays terrainLayers() { return assets.sculptArray(SCULPT_LAYERS); }
 
     private void applyLight() {
+        // Specular anti-aliasing is compiled in: a switch reaches the programs as a lighting change.
+        GpuEnvironmentLighting.applyAntialiasing(environment);
         BoardAtmosphere.Lighting lighting = atmosphere != null ? atmosphere
               : BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
         environmentLighting.set(lighting);
@@ -6608,7 +6882,7 @@ final class GpuTerrain implements Disposable {
             return;
         }
         if (shadow == null) {
-            shadow = new DirectionalShadowLight(SHADOW_RESOLUTION, SHADOW_RESOLUTION, 1, 1, 1, 2);
+            shadow = new GpuShadowLight(SHADOW_RESOLUTION, SHADOW_RESOLUTION, 1, 1, 1, 2);
             shadowProjectionValid = false;
         }
         if (environment.shadowMap != shadow) {
@@ -6660,32 +6934,33 @@ final class GpuTerrain implements Disposable {
           boolean includeScatter) {
         packKeptProps();
         pass.begin(camera);
-        trees.begin(shadows ? GpuTreeInstances.Pass.SHADOW : GpuTreeInstances.Pass.DEPTH);
-        // What the Tactical View hides casts nothing there (setFluffHidden).
-        boolean fluff = !fluffHidden;
-        // A shadow map whose texel spans half a metre or more cannot resolve leaves: its trees cast the shadow of
-        // their second decimated level at most. Alpha-tested foliage drawn into such a map at the near level was
-        // fragment-bound, 440-510 ms per refit on an Intel Iris Xe over MesaCity 1's woods.
-        int coarsest = shadows && camera.viewportWidth / SHADOW_RESOLUTION >= BoardRelief.metres(.5f) ? 2 : 0;
-        for (Chunk chunk : chunks) {
-            boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
-            boolean scatterVisible = includeScatter && fluff && visible && chunk.scatterVisible;
-            trees.add(chunk.stand, Math.max(chunk.treeLod, coarsest), visible && fluff);
-            trees.add(chunk.scatterStand, Math.max(chunk.treeLod, coarsest), scatterVisible);
-            if (visible) {
-                pass.render(chunk.depthTerrain);
-                if (scatterVisible) {
-                    chunk.scatter.forEach(pass::render);
+        try {
+            trees.begin(shadows ? GpuTreeInstances.Pass.SHADOW : GpuTreeInstances.Pass.DEPTH);
+            // What the Tactical View hides casts nothing there (setFluffHidden).
+            boolean fluff = !fluffHidden;
+            // A shadow map whose texel spans half a metre or more cannot resolve leaves: its trees cast the shadow of
+            // their second decimated level at most. Alpha-tested foliage drawn into such a map at the near level was
+            // fragment-bound, 440-510 ms per refit on an Intel Iris Xe over MesaCity 1's woods.
+            int coarsest = shadows && camera.viewportWidth / SHADOW_RESOLUTION >= BoardRelief.metres(.5f) ? 2 : 0;
+            for (Chunk chunk : chunks) {
+                boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
+                boolean scatterVisible = includeScatter && fluff && visible && chunk.scatterVisible;
+                trees.add(chunk.stand, Math.max(chunk.treeLod, coarsest), visible && fluff);
+                trees.add(chunk.scatterStand, Math.max(chunk.treeLod, coarsest), scatterVisible);
+                if (visible) {
+                    pass.render(chunk.depthTerrain);
+                    if (scatterVisible) {
+                        chunk.scatter.forEach(pass::render);
+                    }
+                    pass.render(!fluff ? chunk.kept : shadows ? chunk.shadowProps : chunk.solidProps);
+                    addDecorations(chunk, pass, null, shadows);
+                    pass.render(chunk.routes);
+                    if (fluff) { trees.add(shadows ? chunk.sharedShadows : chunk.sharedProps); }
                 }
-                pass.render(!fluff ? chunk.kept : shadows ? chunk.shadowProps : chunk.solidProps);
-                addDecorations(chunk, pass, null, shadows);
-                pass.render(chunk.routes);
-                if (fluff) { trees.add(shadows ? chunk.sharedShadows : chunk.sharedProps); }
             }
-        }
-        pass.render(trees);
-        renderDepthUnits(camera, units, pass);
-        pass.end();
+            pass.render(trees);
+            renderDepthUnits(camera, units, pass);
+        } finally { pass.end(); }
     }
 
     private void renderDepthUnits(Camera camera, List<ModelInstance> units, ModelBatch pass) {
@@ -6751,10 +7026,9 @@ final class GpuTerrain implements Disposable {
             shadowTransforms.get(index).set(unit.transform);
             shadowPoses.add(shadowPose(unit));
         }
-        // The previous frame's screen passes disable depth writes. libGDX's shadow.begin() clears before
-        // ModelBatch restores that state, so enable writes now or old depth survives beside cleared packed color.
+        // Screen passes disable depth writes; both a fresh map and units over cached depth must write again.
         Gdx.gl.glDepthMask(true);
-        int buffers = GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT;
+        int buffers = GL20.GL_DEPTH_BUFFER_BIT;
         if (shadowDirty) { boardShadowValid = false; }
         boolean boardShadowCurrent = boardWide && boardShadowValid && sameFit(boardShadowFit, lightCamera);
         if (shadowDirty || projectionChanged || units.isEmpty() && !staticShadowValid) {
@@ -6769,11 +7043,11 @@ final class GpuTerrain implements Disposable {
                 renderUnitShadows(lightCamera, units);
             } else {
                 shadow.begin();
-                renderDepth(lightCamera, boardWide ? List.of() : units, depthBatch, true, true);
-                shadow.end();
+                try { renderDepth(lightCamera, boardWide ? List.of() : units, depthBatch, true, true); }
+                finally { shadow.end(); }
                 if (boardWide) {
                     if (boardShadow == null) {
-                        boardShadow = new FrameBuffer(Pixmap.Format.RGBA8888, SHADOW_RESOLUTION, SHADOW_RESOLUTION, true);
+                        boardShadow = GpuShadowLight.depthBuffer(SHADOW_RESOLUTION, SHADOW_RESOLUTION);
                     }
                     shadow.getFrameBuffer().transfer(boardShadow, buffers);
                     remember(boardShadowFit, lightCamera);
@@ -6786,18 +7060,17 @@ final class GpuTerrain implements Disposable {
                 boardShadow.transfer(shadow.getFrameBuffer(), buffers);
             } else {
                 if (staticShadow == null) {
-                    staticShadow = new FrameBuffer(Pixmap.Format.RGBA8888, SHADOW_RESOLUTION, SHADOW_RESOLUTION, true);
+                    staticShadow = GpuShadowLight.depthBuffer(SHADOW_RESOLUTION, SHADOW_RESOLUTION);
                 }
                 if (!staticShadowValid) {
                     shadow.begin();
-                    renderDepth(lightCamera, List.of(), depthBatch, true, true);
-                    shadow.end();
+                    try { renderDepth(lightCamera, List.of(), depthBatch, true, true); }
+                    finally { shadow.end(); }
                     shadow.getFrameBuffer().transfer(staticShadow, buffers);
                     staticShadowValid = true;
                 } else {
-                    // Copy both packed shader depth and the depth attachment; moved units must erase their old
-                    // shadow and remain occluded by terrain. Reusing just the color attachment would produce stale
-                    // depth.
+                    // The one depth attachment is both the sampled shadow and the depth test: moved units erase
+                    // their old shadows and remain occluded by the cached terrain.
                     staticShadow.transfer(shadow.getFrameBuffer(), buffers);
                 }
             }
@@ -6811,13 +7084,16 @@ final class GpuTerrain implements Disposable {
     private void renderUnitShadows(Camera lightCamera, List<ModelInstance> units) {
         if (units.isEmpty()) { return; }
         shadow.getFrameBuffer().begin();
-        Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
-        Gdx.gl.glScissor(1, 1, SHADOW_RESOLUTION - 2, SHADOW_RESOLUTION - 2);
-        depthBatch.begin(lightCamera);
-        renderDepthUnits(lightCamera, units, depthBatch);
-        depthBatch.end();
-        Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
-        shadow.getFrameBuffer().end();
+        try {
+            Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
+            Gdx.gl.glScissor(1, 1, SHADOW_RESOLUTION - 2, SHADOW_RESOLUTION - 2);
+            depthBatch.begin(lightCamera);
+            try { renderDepthUnits(lightCamera, units, depthBatch); }
+            finally { depthBatch.end(); }
+        } finally {
+            Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+            shadow.getFrameBuffer().end();
+        }
     }
 
     private static boolean sameFit(Camera a, Camera b) {
@@ -7007,7 +7283,9 @@ final class GpuTerrain implements Disposable {
         decals.dispose();
         tactical.dispose();
         batch.dispose();
+        if (prepassShaders != null) { prepassShaders.dispose(); }
         environmentLighting.dispose();
+        lavaLighting.dispose();
         depthBatch.dispose();
         if (staticShadow != null) { staticShadow.dispose(); }
         if (boardShadow != null) { boardShadow.dispose(); }

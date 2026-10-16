@@ -1,9 +1,11 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Renderable;
+import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
@@ -65,6 +67,10 @@ final class GpuIceShader extends FloatAttribute {
         if (mode == 0) { return material; }
         Material result = new Material(material);
         result.set(new GpuIceShader(mode));
+        if (floating(result)) {
+            // Reflection is already weighted by Fresnel; the shader returns the completed optical contribution.
+            result.set(new BlendingAttribute(GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA));
+        }
         return result;
     }
 
@@ -97,15 +103,16 @@ final class GpuIceShader extends FloatAttribute {
                 target.set(id, BoardGeometry.hexScale());
             }
         });
-        String[] uniforms = {"u_iceColor", "u_iceNormal", "u_iceSurface"};
-        for (int index = 0; index < uniforms.length; index++) {
-            int map = index;
-            shader.register(uniforms[index], new BaseShader.LocalSetter() {
-                @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                    var maps = assets.ice();
-                    target.set(id, map == 0 ? maps.color() : map == 1 ? maps.normal() : maps.surface());
-                }
-            });
-        }
+        shader.register("u_iceColor", new BaseShader.LocalSetter() {
+            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, assets.ice().color());
+            }
+        });
+        // Normal and surface share one array, so ice leaves a texture unit for macOS's 16 (GpuSamplerBudgetSmokeTest).
+        shader.register("u_iceMaps", new BaseShader.LocalSetter() {
+            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, assets.ice().maps());
+            }
+        });
     }
 }

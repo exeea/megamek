@@ -54,10 +54,13 @@ class GpuTerrainColorSmokeTest {
     private static void check(GpuShaderManager manager) {
         int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
         String original = GpuShaderSource.readDisk("terrain-sculpt.frag");
+        String shading = GpuShaderSource.readDisk("surface-shading.glsl");
         String boundary = "albedo = materialReflectance(albedo);";
-        String output = "vec3 result = albedo + emission;";
+        String reflection = "albedo += sheen;";
+        String output = "return albedo + s.emission;";
         assertEquals(1, original.split(java.util.regex.Pattern.quote(boundary), -1).length - 1);
-        assertEquals(1, original.split(java.util.regex.Pattern.quote(output), -1).length - 1);
+        assertEquals(1, shading.split(java.util.regex.Pattern.quote(reflection), -1).length - 1);
+        assertEquals(1, shading.split(java.util.regex.Pattern.quote(output), -1).length - 1);
         var pigment = new StringBuilder("\n");
         for (int i = 0; i < COLORS.length; i++) {
             pigment.append(String.format(Locale.ROOT, "%s (gl_FragCoord.x < %.1f) albedo = vec3(%.9f, %.9f, %.9f);\n",
@@ -68,16 +71,15 @@ class GpuTerrainColorSmokeTest {
         // storage, shadows and atmosphere compositor remain in use; no texture or grade can retint the swatch.
         pigment.append("normal = vec3(0,0,1); roughness = .9; film = 0.0; cavity = 1.0; occlusion = 1.0;\n")
               .append("bounce = GROUND_ALBEDO; volcanic = 0.0; emission = vec3(0); caustic = 0.0; submerged = 0.0;\n");
+        // shadeSurface (surface-shading.glsl) returns the diffuse-only and reflection-only rows; nothing emits here.
         String controls = String.format(Locale.ROOT, """
+              if (gl_FragCoord.y < %.1f) return diffuseOnly;
+              if (gl_FragCoord.y < %.1f) return albedo - diffuseOnly;
               %s
-              #ifdef lightingFlag
-              if (gl_FragCoord.y < %.1f) result = pigment * (ambient + direct);
-              else if (gl_FragCoord.y < %.1f)
-                  result = sheen + surfaceEnvironment(normal, film, roughness, bounce) * occlusion * cavity;
-              #endif
-              """, output, height / 3.0, height * 2.0 / 3.0);
-        var changed = manager.apply(Map.of("terrain-sculpt.frag",
-              original.replace(boundary, boundary + pigment).replace(output, controls)));
+              """, height / 3.0, height * 2.0 / 3.0, output);
+        var changed = manager.apply(Map.of("terrain-sculpt.frag", original.replace(boundary, boundary + pigment),
+              "surface-shading.glsl", shading.replace(reflection, "vec3 diffuseOnly = albedo;\n" + reflection)
+                    .replace(output, controls)));
         assertTrue(changed.success(), changed.message());
         var atmosphere = new GpuAtmosphere();
         var terrain = new GpuTerrain();

@@ -100,10 +100,10 @@ class GpuTerrainMaterialsSmokeTest {
         try {
             manager.run(() -> {
                 String sculpt = GpuShaderSource.readDisk("terrain-sculpt.frag");
-                String result = "vec3 result = albedo + emission;";
+                String result = "vec3 result = shadeSurface(surface, caustic, submerged);";
                 assertTrue(sculpt.contains(result), "The absorption probe must read completed material albedo");
                 var changed = manager.apply(Map.of("terrain-sculpt.frag", sculpt.replace(result,
-                      result + "\n#ifdef lightingFlag\nresult = pigment;\n#endif\n")));
+                      result + "\nresult = surface.albedo;\n")));
                 assertTrue(changed.success(), changed.message());
                 GpuTerrain probe = new GpuTerrain();
                 try {

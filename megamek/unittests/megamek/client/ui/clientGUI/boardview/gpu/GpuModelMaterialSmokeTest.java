@@ -89,7 +89,22 @@ class GpuModelMaterialSmokeTest {
                   VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.TextureCoordinates);
             var object = new ModelInstance(model);
             var batch = new ModelBatch(GpuUnitShader.provider());
-            Texture dark = texture(0x000000ff), clear = texture(0xffffffff), cloud = texture(0x404040ff);
+            var darkDepth = GpuShadowSmokeTest.constantDepth(0);
+            var clearDepth = GpuShadowSmokeTest.constantDepth(1);
+            var edgeDepth = GpuShadowSmokeTest.constantDepth(1);
+            Texture dark = darkDepth.getColorBufferTexture(), clear = clearDepth.getColorBufferTexture();
+            Texture cloud = texture(0x404040ff);
+            edgeDepth.begin();
+            try {
+                Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
+                Gdx.gl.glScissor(0, 0, 1, 2);
+                Gdx.gl.glClearDepthf(0);
+                Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+            } finally {
+                Gdx.gl.glClearDepthf(1);
+                Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+                edgeDepth.end();
+            }
             try {
                 for (boolean iso : new boolean[] { false, true }) {
                     var camera = camera(iso);
@@ -98,16 +113,28 @@ class GpuModelMaterialSmokeTest {
                     environment.add(new DirectionalLight().set(.2f, .2f, .2f,
                           -camera.direction.x, -camera.direction.y, camera.direction.z));
                     var depth = new TextureDescriptor<>(clear);
+                    var shadowProjection = new Matrix4().setToScaling(0, 0, 0);
                     environment.shadowMap = new ShadowMap() {
-                        private final Matrix4 projection = new Matrix4().setToScaling(0, 0, 0);
-
-                        @Override public Matrix4 getProjViewTrans() { return projection; }
+                        @Override public Matrix4 getProjViewTrans() { return shadowProjection; }
                         @Override public TextureDescriptor<Texture> getDepthMap() { return depth; }
                     };
                     int lit = red(draw(output, batch, object, camera, environment));
+                    int centerPixel = (SIZE / 2 * SIZE + SIZE / 2) * 4;
+                    float litRadiance = output.linearPixels()[centerPixel];
                     depth.texture = dark;
                     int shadowed = red(draw(output, batch, object, camera, environment));
+                    float shadowRadiance = output.linearPixels()[centerPixel];
                     assertEquals(26, shadowed, 1, "Geometry shadow removes diffuse and specular light, leaving emission");
+                    // Left texels block, right texels pass. The unchanged four taps at U=.125/.625 have
+                    // comparison weights 0/.75, so their mean is .375 (nearest sampling would give .5).
+                    depth.texture = edgeDepth.getColorBufferTexture();
+                    shadowProjection.setTranslation(-.25f, 0, 0);
+                    draw(output, batch, object, camera, environment);
+                    float filteredRadiance = output.linearPixels()[centerPixel];
+                    assertEquals(shadowRadiance + (litRadiance - shadowRadiance) * .375f, filteredRadiance,
+                          .002f * Math.max(litRadiance, .01f),
+                          "The real model provider filters hardware comparisons and leaves emission intact");
+                    shadowProjection.setTranslation(0, 0, 0);
                     depth.texture = clear;
                     var projection = new Matrix4().setToScaling(0, 0, 0).setTranslation(.5f, .5f, 0);
                     environment.set(new GpuCloudShadow(cloud, projection));
@@ -118,8 +145,9 @@ class GpuModelMaterialSmokeTest {
                 assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
             } finally {
                 cloud.dispose();
-                clear.dispose();
-                dark.dispose();
+                edgeDepth.dispose();
+                clearDepth.dispose();
+                darkDepth.dispose();
                 batch.dispose();
                 model.dispose();
             }

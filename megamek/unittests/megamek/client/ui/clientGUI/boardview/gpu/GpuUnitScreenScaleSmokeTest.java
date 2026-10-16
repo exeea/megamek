@@ -48,7 +48,7 @@ class GpuUnitScreenScaleSmokeTest {
     void zoomedOutUnitsGrowUniformlyKeepTheirSizeOnScreenAndStayPickable() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
-        float originalScale = preferences.getGUIScale();
+        float originalScale = preferences.getBoardUiScale();
         try (var fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
                 fixture.source.setVisibleArea(new Rectangle(0, 0, 16, 17));
@@ -63,7 +63,7 @@ class GpuUnitScreenScaleSmokeTest {
                     try {
                         // One logical HUD unit per window pixel, as in the 1920x1080 prototype captures.
                         float preference = .1f / DisplayScale.read(.1f, new GpuDisplayScale().contentScale());
-                        SwingUtilities.invokeAndWait(() -> preferences.setValue(GUIPreferences.GUI_SCALE, preference));
+                        SwingUtilities.invokeAndWait(() -> preferences.setBoardUiScale(preference));
                         view = new GpuBattleView(fixture.source);
                         view.create();
                         // The board arrives once its terrain is built behind the loading screen.
@@ -78,7 +78,7 @@ class GpuUnitScreenScaleSmokeTest {
                 }
             }, configuration);
         } finally {
-            SwingUtilities.invokeAndWait(() -> preferences.setValue(GUIPreferences.GUI_SCALE, originalScale));
+            SwingUtilities.invokeAndWait(() -> preferences.setBoardUiScale(originalScale));
         }
         assertNull(failure.get(), () -> String.valueOf(failure.get()));
     }

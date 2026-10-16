@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
@@ -108,6 +109,63 @@ class GpuSculptMetadataTest {
         assets.dispose();
         assertEquals(9.25f, assets.sculptTile("test"), "Disposal must release cached metadata too");
         assets.dispose();
+    }
+
+    @Test
+    void lavaEmissionUsesRawRgbOnceAndReloadsItsAuthoredScale() throws Exception {
+        com.badlogic.gdx.utils.GdxNativesLoader.load();
+        Path lava = Files.createDirectories(directory.resolve("models/board/textures/terrain/lava"));
+        var image = new BufferedImage(2, 1, BufferedImage.TYPE_INT_ARGB);
+        image.setRGB(0, 0, 0x00ff0000); // Emitted RGB is independent of the retained coverage alpha.
+        image.setRGB(1, 0, 0xff008040);
+        ImageIO.write(image, "png", lava.resolve("lava-heat.png").toFile());
+        Files.writeString(lava.resolve("lava.json"), "{\"emissionScale\":2}");
+        var assets = new GpuAssets();
+        var original = assets.lavaEmission();
+        assertEquals(2, original.scale());
+        assertEquals(1, original.red(), 1e-7);
+        assertEquals(128f / 255, original.green(), 1e-7);
+        assertEquals(64f / 255, original.blue(), 1e-7);
+        Files.writeString(lava.resolve("lava.json"), "{\"emissionScale\":4}");
+        assertSame(original, assets.lavaEmission(), "The installed material keeps its complete source snapshot");
+        var reloaded = new GpuAssets().lavaEmission();
+        assertEquals(original.red() * 2, reloaded.red(), 1e-7);
+        assertEquals(original.green() * 2, reloaded.green(), 1e-7);
+        assertEquals(original.blue() * 2, reloaded.blue(), 1e-7);
+        assets.dispose();
+        assertEquals(reloaded, assets.lavaEmission(), "Disposal releases emission metadata with the maps");
+        var tile = new BoardScene.Tile(new megamek.common.board.Coords(0, 0), 0, -1, false, 0,
+              BoardScene.Surface.ROCK, null, null, null, null, null, List.of(), List.of(),
+              new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0));
+        var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
+        var lights = new GpuLavaLighting(assets);
+        lights.update(scene);
+        assertEquals(1, ((List<?>) GpuMixedUnitBenchmarkSmokeTest.field(lights, "binned")).size(),
+              "The positive source is binned");
+        Files.writeString(lava.resolve("lava.json"), "{\"emissionScale\":0}");
+        var zero = new GpuAssets();
+        var dark = new GpuLavaLighting(zero);
+        dark.update(scene);
+        assertEquals(0, ((List<?>) GpuMixedUnitBenchmarkSmokeTest.field(dark, "binned")).size(),
+              "A disabled emitted source adds no local light");
+        zero.dispose();
+        assets.dispose();
+    }
+
+    @Test
+    void lavaEmissionRejectsMissingOrInvalidAuthoringMetadata() throws Exception {
+        Path lava = Files.createDirectories(directory.resolve("models/board/textures/terrain/lava"));
+        missing("lava.json", () -> new GpuAssets().lavaEmission());
+        Files.writeString(lava.resolve("lava.json"), "{\"emissionScale\":2}");
+        missing("lava-heat.png", () -> new GpuAssets().lavaEmission());
+        Files.copy(sculpt.resolve("test.png"), lava.resolve("lava-heat.png"));
+        for (String value : List.of("-1", "true", "\"2\"", "null", "1e309")) {
+            Files.writeString(lava.resolve("lava.json"), "{\"emissionScale\":" + value + "}");
+            var error = assertThrows(IllegalArgumentException.class, () -> new GpuAssets().lavaEmission());
+            assertTrue(error.getMessage().contains("emissionScale"), error.getMessage());
+        }
+        Files.writeString(lava.resolve("lava.json"), "{}");
+        assertThrows(IllegalArgumentException.class, () -> new GpuAssets().lavaEmission());
     }
 
     private static void missing(String name, org.junit.jupiter.api.function.Executable load) {

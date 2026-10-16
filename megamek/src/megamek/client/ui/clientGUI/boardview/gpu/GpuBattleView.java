@@ -52,6 +52,7 @@ import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiCursorCapture;
+import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
@@ -103,10 +104,14 @@ class GpuBattleView extends ApplicationAdapter {
     private Label loadingDetails;
     private GpuLoadingGrid loadingGrid;
     private Label loadingWaiting, loadingActive, loadingReady;
+    /** The shader bar (showShaders), under the section legend. */
+    private UiKit.Meter loadingShaders;
     private volatile String loadingMessage = Messages.getString("ClientGUI.waitingOnTheServer");
     private final GpuDisplayScale displayScale = new GpuDisplayScale();
     final BoardCamera boardCamera = new BoardCamera();
     private final UnitPlayback playback = new UnitPlayback(this::completeMovement);
+    /** A historical review may finish without handing camera control to the live turn's next unit. */
+    private boolean cameraReviewing;
     /** The round's playback history (A.10): it feeds and reviews the playback; the HUD steers it. */
     private final GpuPlaybackHistory history = new GpuPlaybackHistory(playback);
     private final BoardSurface.Cache groundSurfaces = new BoardSurface.Cache();
@@ -120,6 +125,8 @@ class GpuBattleView extends ApplicationAdapter {
     private final GpuStarShells starShells = new GpuStarShells();
     private final GpuTerrainEffects terrainEffects = new GpuTerrainEffects();
     private final GpuEffectDepth effectDepth = new GpuEffectDepth();
+    /** The opaque scene's ambient occlusion, between the depth pre-pass and the opaque colour (Display: Ambient occlusion). */
+    private final GpuAmbientOcclusion ambientOcclusion = new GpuAmbientOcclusion();
     private final GpuWaterImpacts waterImpacts = new GpuWaterImpacts();
     private record UnitSprite(BoardScene.Pixels pixels, boolean meeple) { }
     private final Map<UnitSprite, GpuUnitModel> spriteModels = new HashMap<>();
@@ -296,14 +303,28 @@ class GpuBattleView extends ApplicationAdapter {
         for (Label entry : List.of(loadingWaiting, loadingActive, loadingReady)) {
             legend.add(entry).padLeft(12).padRight(12);
         }
+        // Hidden while no program is left to link; a hidden bar keeps its row, so the tasks below never move.
+        loadingShaders = new UiKit(skin).meter(Messages.getString("GpuBoard.loadingShaders"), false);
+        loadingShaders.setName("board-loading-shaders");
+        loadingShaders.setVisible(false);
         content.add(new Label("MEGAMEK", skin, "hud-small")).padBottom(12).row();
         content.add(loadingLabel).width(Value.percentWidth(.9f, content)).maxWidth(900)
               .height(loadingLabel.getStyle().font.getLineHeight() * 2).row();
         content.add(loadingGrid).width(Value.percentWidth(.90f, content)).maxWidth(960)
               .height(Value.percentHeight(.42f, content)).maxHeight(360).padTop(14).row();
         content.add(legend).padTop(10).row();
+        content.add(loadingShaders).width(Value.percentWidth(.9f, content)).maxWidth(420).padTop(14).row();
         content.add(loadingDetails).width(Value.percentWidth(.9f, content)).maxWidth(900).padTop(14);
         loadingStage.addActor(content);
+    }
+
+    /** The shader bar shows the programs linked of those the load needs while any is left to link. */
+    static void showShaders(UiKit.Meter bar, TerrainLoadProgress.Shaders shaders) {
+        bar.setVisible(shaders.linked() < shaders.total());
+        if (bar.isVisible()) {
+            bar.set(shaders.linked() + " / " + shaders.total(), (float) shaders.linked() / shaders.total(),
+                  GpuLoadingGrid.READY);
+        }
     }
 
     private void createBoard() {
@@ -416,6 +437,7 @@ class GpuBattleView extends ApplicationAdapter {
         jumpJets.dispose();
         waterImpacts.dispose();
         effectDepth.dispose();
+        ambientOcclusion.dispose();
     }
 
     @Override
@@ -426,6 +448,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (ui == null || width <= 0 || height <= 0) {
             return;
         }
+        // The 3D board's own UI scale (the Tuning panel's); Swing's GUI scale never reaches the native window.
         float preference = source.uiPreferences().scale();
         float scale = DisplayScale.read(preference, displayScale.contentScale());
         int pixelWidth = Gdx.graphics.getBackBufferWidth();
@@ -444,9 +467,6 @@ class GpuBattleView extends ApplicationAdapter {
         ui.resize(width, height, scale);
         // The board fills the window; the HUD's panels float over it (rebuild plan A.1 A1).
         boardCamera.resize(width, height, scene, scale);
-        // In Swing's units (the monitor's scale without the GUI scale): the board editor measures its tools by it.
-        float swingScale = scale / preference;
-        source.setViewport(Math.round(width / swingScale), Math.round(height / swingScale), pixelWidth, pixelHeight);
     }
 
     @Override
@@ -562,6 +582,8 @@ class GpuBattleView extends ApplicationAdapter {
         if (Gdx.graphics.getWidth() <= 0 || Gdx.graphics.getHeight() <= 0) {
             return;
         }
+        // The Tuning panel's UI scale reaches the layout as the saved preference, which the source publishes.
+        tuning.saveUiScale();
         // Moving to another monitor can change DPI without changing the window's dimensions.
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         BoardSource.Frame frame = source.takeFrame();
@@ -603,8 +625,15 @@ class GpuBattleView extends ApplicationAdapter {
         if (!fitted) { updateCameraFocus(scene, frame.centerRequest()); }
         var instantAction = history.speed() == UnitMotion.Speed.INSTANT ? playback.lastAction() : null;
         history.advance(Gdx.graphics.getDeltaTime(), state -> preparePlaybackCamera(state, scene));
-        source.playbackState(frame, playbackBusy());
+        // Historical review is presentation only: it must never signal a live movement completion to Swing.
+        source.playbackState(frame, history.running());
         scene = playback.present(scene);
+        BoardSource.Frame unitFrame = frame.withScene(scene);
+        if (ui instanceof GpuHud hud) {
+            hud.updateState(frame, playbackBusy(), dialog());
+            unitFrame = hud.state.presented(unitFrame);
+            scene = unitFrame.scene();
+        }
         camouflage.retain(scene.units());
         if (unitModels != null) {
             unitModels.retainAssemblies(scene.units().stream().filter(unit -> !unit.sensorContact())
@@ -620,7 +649,9 @@ class GpuBattleView extends ApplicationAdapter {
         atmosphere.updateLight(boardCamera);
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
+        ambientOcclusion.configure(terrain.environment(), tuning.ambientOcclusion(), tuning.ambientOcclusionStrength());
         terrain.setGravity(atmosphereSettings.gravity());
+        terrain.setVacuum(atmosphereSettings.pressure().isVacuum());
         // The 3D Graphics choose what the terrain builds; the first frame already has the saved choice, and a switch
         // rebuilds behind the loading stage below. The Tactical View is the camera and the presentation.
         terrain.setColumns(source.uiPreferences().graphics() == BoardGraphics.CLASSIC);
@@ -640,6 +671,7 @@ class GpuBattleView extends ApplicationAdapter {
                   Collections.frequency(sections.states(), TerrainLoadProgress.SectionState.LOADING)));
             loadingReady.setText(Messages.getString("GpuBoard.loadingLegend.ready",
                   Collections.frequency(sections.states(), TerrainLoadProgress.SectionState.READY), sections.states().size()));
+            showShaders(loadingShaders, terrain.shaderProgress());
             loadingDetails.setText(terrain.buildDetails().stream().map(TerrainLoadProgress.Status::text)
                   .collect(Collectors.joining("\n")));
             loadingStage.act(Math.min(Gdx.graphics.getDeltaTime(), .1f));
@@ -670,9 +702,9 @@ class GpuBattleView extends ApplicationAdapter {
             boardCamera.terrainChanged(scene);
             cameraTerrainRevision = BoardGeometry.revision();
         }
-        fireControl.update(scene, HIDE_TARGET_ARROWS_DURING_ATTACKS && !playback.attacks().isEmpty(), frame.status(),
-              frame.panels().fire());
-        tactical.update(scene, detailChanged, hovered, !frame.panels().move().route().isEmpty(), hoveredUnit);
+        fireControl.update(scene, HIDE_TARGET_ARROWS_DURING_ATTACKS && !playback.attacks().isEmpty(), unitFrame.status(),
+              unitFrame.panels().fire());
+        tactical.update(scene, detailChanged, hovered, !unitFrame.panels().move().route().isEmpty(), hoveredUnit);
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(tuning.fovStyle(), tuning.fovDarkness(), tuning.sensorStyle(), tuning.sensorDarkness());
         attackEffects.setWind(atmosphereSettings.effects());
@@ -815,14 +847,20 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.renderShadows(boardCamera.camera, units);
         renderStage("cloud transmission");
         atmosphere.prepareClouds(terrain, scene, Gdx.graphics.getDeltaTime());
-        renderStage("opaque terrain");
+        // The opaque terrain: its preparation and gather, its depth pre-pass (GpuTerrain.depthPrepass), then its colour.
+        renderStage("opaque preparation");
         ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
         atmosphere.begin((int) boardCamera.camera.viewportWidth, (int) boardCamera.camera.viewportHeight,
               BoardCamera.renderScale, Gdx.graphics.getDeltaTime());
         if (wireframeView) {
+            renderStage("opaque terrain");
             wireframe.fill(boardCamera.camera, terrain);
         } else {
-            terrain.render(boardCamera.camera, false);
+            terrain.render(boardCamera.camera, () -> renderStage("depth pre-pass"), () -> {
+                renderStage("ambient occlusion");
+                ambientOcclusion.render(boardCamera.camera, terrain, atmosphere.depthTexture());
+                renderStage("opaque terrain");
+            });
         }
         if (boardCamera.tactical()) {
             // The Tactical View's ground marks, then the bases, which the meeples cover.
@@ -833,6 +871,8 @@ class GpuBattleView extends ApplicationAdapter {
         }
         renderStage("units");
         renderUnits(wireframeView);
+        // Water and the transparent effects read no occlusion.
+        ambientOcclusion.end();
         renderStage("transparent effects");
         renderTethers();
         if (!wireframeView) { terrain.renderTransparent(boardCamera.camera); }
@@ -1177,11 +1217,10 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /**
-     * Whether live events are still to be presented, queued in the playback or held back while a review runs: the
-     * HUD then presents the units of the last idle capture (C.6), and the client knows that the board animates.
+     * Whether the HUD is presenting live or historical actions. Only history.running() reports live work to Swing.
      */
     private boolean playbackBusy() {
-        return history.running();
+        return history.running() || playback.reviewing() || history.replaying();
     }
 
     /** Benchmark boundary only. Normal gameplay does not allocate queries, read clocks or wait for the GPU. */
@@ -1486,8 +1525,19 @@ class GpuBattleView extends ApplicationAdapter {
             centerSequence = request.sequence();
             cameraSelection = scene.selectedId();
             cameraFollowingPlayback = false;
+            cameraReviewing = false;
             return;
         }
+        if (cameraReviewing && !playback.reviewing()) {
+            // Keep the event's framing when a report replay finishes. Later explicit requests still work.
+            cameraReviewing = false;
+            cameraSelection = scene.selectedId();
+            centerSequence = request.sequence();
+            cameraFollowingPlayback = false;
+            boardCamera.clearPlaybackFrame();
+            if (!playback.busy()) { return; }
+        }
+        cameraReviewing = playback.reviewing();
         boolean firing = playback.attack() != null && playback.attack().shot();
         boolean instant = history.speed() == UnitMotion.Speed.INSTANT;
         if (!instant && !firing && playback.movement() == null) { boardCamera.clearPlaybackFrame(); }
@@ -2661,6 +2711,10 @@ class GpuBattleView extends ApplicationAdapter {
             if (reloadingAssets || assetReloadFailed) { return true; }
             // The binds the client captured on the Swing thread; the bind fields are Swing's (rebuild plan D).
             Set<KeyCommandBind> binds = GpuHud.binds(captured, awt, bindModifiers);
+            // Swing's GUI scale is Swing's alone: its keys do nothing here, and never reach the Swing client.
+            if (binds.contains(KeyCommandBind.INC_GUI_SCALE) || binds.contains(KeyCommandBind.DEC_GUI_SCALE)) {
+                return true;
+            }
             for (KeyCommandBind command : binds) {
                 if (cameraCommand(key, command)) {
                     return true;

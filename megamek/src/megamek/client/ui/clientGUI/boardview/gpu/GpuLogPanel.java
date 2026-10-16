@@ -638,7 +638,12 @@ final class GpuLogPanel implements GpuHud.Component {
         }
         Step step = card.steps().isEmpty() ? null : card.steps().getFirst();
         if (step != null && step.attack() != null) {
-            actions.add(action("play", "GpuBoard.hud.common.replay", () -> state.history.replay(step))).padLeft(6);
+            actions.add(action("play", "GpuBoard.hud.common.replay", () -> {
+                if (state.history.played(step)) {
+                    state.inspected = step.actorId();
+                    state.history.replayStep(step);
+                }
+            })).padLeft(6);
         }
         if (actions.hasChildren()) {
             lines.add(actions).growX().right().padTop(6).row();

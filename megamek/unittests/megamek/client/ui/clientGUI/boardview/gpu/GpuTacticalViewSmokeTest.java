@@ -33,6 +33,7 @@ import com.badlogic.gdx.InputProcessor;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -118,7 +119,7 @@ class GpuTacticalViewSmokeTest {
     void turnsTheUnitsIntoMeeplesOnBasesOverTheGroundLayerAndRestoresTheThreeDimensionalView() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
-        float originalScale = preferences.getGUIScale();
+        float originalScale = preferences.getBoardUiScale();
         BoardGraphics originalGraphics = preferences.getBoardGraphics();
         try (var options = new GpuFieldOfViewTest.Options(); var fixture = GpuBoardFixture.create(board())) {
             SwingUtilities.invokeAndWait(() -> {
@@ -148,7 +149,7 @@ class GpuTacticalViewSmokeTest {
             run(fixture, failure, view -> verify(view, fixture));
         } finally {
             SwingUtilities.invokeAndWait(() -> {
-                preferences.setValue(GUIPreferences.GUI_SCALE, originalScale);
+                preferences.setBoardUiScale(originalScale);
                 preferences.setBoardGraphics(originalGraphics);
             });
         }
@@ -167,7 +168,7 @@ class GpuTacticalViewSmokeTest {
     void hexTypesLabelTheHexesInEveryView() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
-        float originalScale = preferences.getGUIScale();
+        float originalScale = preferences.getBoardUiScale();
         BoardGraphics originalGraphics = preferences.getBoardGraphics();
         boolean coords = preferences.getCoordsEnabled();
         boolean types = preferences.getHexTypesEnabled();
@@ -197,7 +198,7 @@ class GpuTacticalViewSmokeTest {
             SwingUtilities.invokeAndWait(() -> {
                 if (preferences.getCoordsEnabled() != coords) { preferences.toggleCoords(); }
                 if (preferences.getHexTypesEnabled() != types) { preferences.toggleHexTypes(); }
-                preferences.setValue(GUIPreferences.GUI_SCALE, originalScale);
+                preferences.setBoardUiScale(originalScale);
                 preferences.setBoardGraphics(originalGraphics);
             });
         }
@@ -318,7 +319,7 @@ class GpuTacticalViewSmokeTest {
                 try {
                     float preference = .1f / DisplayScale.read(.1f, new GpuDisplayScale().contentScale());
                     SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance()
-                          .setValue(GUIPreferences.GUI_SCALE, preference));
+                          .setBoardUiScale(preference));
                     view = new GpuBattleView(fixture.source);
                     view.create();
                     // The board arrives once its terrain is built behind the loading screen.
@@ -423,8 +424,10 @@ class GpuTacticalViewSmokeTest {
             assertTrue(MeepleVisual.isMeeple(models.get(unit.id() + ":" + unit.part())),
                   "The Tactical View shows " + unit.name() + " as its meeple");
         }
-        assertSame(BoardAtmosphere.TACTICAL, ((GpuAtmosphere) field(view, "atmosphere")).lighting(),
-              "The fixed north-west light");
+        // The fixed light with the sky environment generated for it (GpuAtmosphere#updateLight).
+        var lighting = ((GpuAtmosphere) field(view, "atmosphere")).lighting();
+        assertEquals(BoardAtmosphere.TACTICAL.direction(), lighting.direction(), "The fixed north-west light");
+        assertEquals(BoardAtmosphere.TACTICAL.skySource(), lighting.skySource(), "and its sky");
         assertFalse(((List<?>) field(terrain, "shadowModels")).isEmpty(), "The meeples cast shadows");
         assertFalse(terrain.columns(), "T leaves the terrain to the graphics setting");
         assertTrue(terrain.fluffHidden(), "The Tactical View's draw rule");
@@ -613,17 +616,23 @@ class GpuTacticalViewSmokeTest {
 
     /**
      * In the Tactical View the terrain draws no tree, placed object, building model, scatter, grass or water and none of
-     * the packed props (fuel tank, industry), only the kept ones (the Enhanced bridge), while a click on any hex picks
-     * the same hex and floor, and the overlays and labels drape on the same surfaces, as with the fluff shown: the rule
-     * hides at draw time only.
+     * the packed props (fuel tank, industry), only the kept ones, while the Enhanced bridge, relief geometry
+     * (GpuTerrain#builtBridge), stays drawn with the opaque terrain; a click on any hex picks the same hex and floor, and
+     * the overlays and labels drape on the same surfaces, as with the fluff shown: the rule hides at draw time only.
      */
     private static void verifyFluffHidden(GpuBattleView view, GpuTerrain terrain, BoardScene scene) throws Exception {
-        var drawn = audit(view);
+        Map<String, Integer> drawn;
+        int decks;
+        try (var audit = new GpuDrawCallAudit(view)) {
+            view.render();
+            drawn = audit.totals();
+            decks = audit.draws("opaque", Attribute.getAttributeType("boardBridgeDeck"));
+        }
         for (String source : List.of("instanced-trees", "grass", "scatter", "water", "props", "props-batched")) {
             assertEquals(0, drawn.getOrDefault(source, 0), "The Tactical View draws no " + source + ": " + drawn);
         }
         if (!terrain.columns()) {
-            assertTrue(drawn.getOrDefault("kept-props", 0) > 0, "The bridge's model is kept: " + drawn);
+            assertTrue(decks > 0, "The bridge's deck is drawn with the opaque terrain: " + drawn);
         }
         assertTrue(drawn.keySet().stream().noneMatch(family -> family.startsWith("water-")), "No water: " + drawn);
         List<Object> hidden = new ArrayList<>(), shown = new ArrayList<>();
@@ -771,7 +780,7 @@ class GpuTacticalViewSmokeTest {
     void capturesTheMockUpBattleInTheMovementAndFiringPhases() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
-        float originalScale = preferences.getGUIScale();
+        float originalScale = preferences.getBoardUiScale();
         BoardGraphics originalGraphics = preferences.getBoardGraphics();
         for (GamePhase phase : List.of(GamePhase.MOVEMENT, GamePhase.FIRING)) {
             try (var fixture = GpuBoardFixture.create(BoardFile.read(Path.of(MOCK_BOARD)))) {
@@ -810,7 +819,7 @@ class GpuTacticalViewSmokeTest {
                 });
             } finally {
                 SwingUtilities.invokeAndWait(() -> {
-                    preferences.setValue(GUIPreferences.GUI_SCALE, originalScale);
+                    preferences.setBoardUiScale(originalScale);
                     preferences.setBoardGraphics(originalGraphics);
                 });
             }
@@ -832,7 +841,7 @@ class GpuTacticalViewSmokeTest {
     void theOverlaysPanelDrivesItsOverlaysAndStandsBesideTheRightColumn() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
-        float originalScale = preferences.getGUIScale();
+        float originalScale = preferences.getBoardUiScale();
         BoardGraphics originalGraphics = preferences.getBoardGraphics();
         Map<String, Boolean> original = new java.util.LinkedHashMap<>();
         OVERLAY_SETTINGS.forEach(key -> original.put(key, preferences.getBoolean(key)));
@@ -876,7 +885,7 @@ class GpuTacticalViewSmokeTest {
         } finally {
             SwingUtilities.invokeAndWait(() -> {
                 original.forEach(preferences::setValue);
-                preferences.setValue(GUIPreferences.GUI_SCALE, originalScale);
+                preferences.setBoardUiScale(originalScale);
                 preferences.setBoardGraphics(originalGraphics);
             });
         }

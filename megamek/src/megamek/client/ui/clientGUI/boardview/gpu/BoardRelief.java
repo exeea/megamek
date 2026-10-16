@@ -2835,6 +2835,8 @@ final class BoardRelief {
         float m = metres(1);
         int stones = Math.round(BoardRelief.geology().get(self.family()).stones() * (.3f + 1.4f * random.nextFloat()));
         int shrubs = Math.round(BoardRelief.geology().get(self.family()).shrubs() * (.3f + 1.4f * random.nextFloat()));
+        // Nothing grows on airless ground (BoardScene.Tile.lunar): the same stones lie there alone.
+        if (tile.barren()) { shrubs = 0; }
         for (int i = 0; i < stones + shrubs; i++) {
             boolean shrub = i >= stones;
             float angle = random.nextFloat() * (float) Math.PI * 2;

@@ -23,6 +23,18 @@ uniform vec3 u_rainSky;     // linear atmosphere radiance
 uniform vec3 u_rainHorizon;
 const int RAIN_IMPACT_LAYERS = 6;
 
+// Wet pigment: a susceptible fraction takes one additional internal scattering event.
+// This cheap two-path approximation acts on linear pigment, not incoming light or the water-film BRDF.
+// Susceptibility is an artistic material estimate, not a measured porosity or a gamma-space conversion.
+vec3 wetAlbedo(vec3 dry, float absorption) {
+    return dry * (1.0 - clamp(absorption, 0.0, 1.0) * (1.0 - clamp(dry, 0.0, 1.0)));
+}
+
+// The existing response measures surface water retention: loose absorbent ground retains less film.
+float groundAbsorption(float wet, float response) {
+    return clamp(wet, 0.0, 1.0) * mix(.5, .25, clamp(response, 0.0, 1.0));
+}
+
 vec3 rainHash(vec3 value) {
     value = fract(value * vec3(0.1031, 0.1030, 0.0973));
     value += dot(value, value.yxz + 33.33);

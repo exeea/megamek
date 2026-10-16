@@ -299,10 +299,10 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     }
 
     /**
-     * Water depth -1 means dry. Ground and decals are independent from solid feature geometry. A bare tile is the
-     * zero-gravity rock of {@link #lunar}: nothing lies loose or grows on it, so neither scatter nor field cover
-     * dresses it. The tileset art is the hex's Saxarba art and the bridge art its bridge's, which only the Tactical View
-     * draws.
+     * Water depth -1 means dry. Ground and decals are independent from solid feature geometry. A barren tile is the
+     * airless ground of {@link #lunar}: nothing grows on it, so its field cover keeps only stones. A bare tile is its
+     * zero-gravity rock: nothing lies loose or grows on it, so neither scatter nor field cover dresses it. The tileset
+     * art is the hex's Saxarba art and the bridge art its bridge's, which only the Tactical View draws.
      */
     record Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
           Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
@@ -310,7 +310,20 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
           boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
           boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
           boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
-          java.util.Map<String, megamek.common.board.HexAppearance> appearance, Cover cover) {
+          java.util.Map<String, megamek.common.board.HexAppearance> appearance, Cover cover, boolean barren) {
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
+              Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
+              boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
+              boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
+              java.util.Map<String, megamek.common.board.HexAppearance> appearance, Cover cover) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
+                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+                  cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
+                  cover, false);
+        }
+
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
               Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
@@ -465,7 +478,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
                   decalsWithoutLimbs, marking, features, labels, liquid, tileset, detailedGround, road, fireSmoke, biome,
                   impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
-                  cover);
+                  cover, barren);
         }
 
         /** This tile with other features: the editor preview's tile of a route stroke's next step. */
@@ -475,9 +488,14 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                   impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance);
         }
 
-        /** Zero-gravity presentation only: expose the liquid bed as bare rock, without editing the source hex. */
-        Tile lunar() {
-            int depth = Math.max(0, waterDepth);
+        /**
+         * Airless presentation only (vacuum, and so zero gravity), without editing the source hex: nothing grows, not
+         * even field shrubs ({@code barren}), and the surface is lunar. In vacuum the water and hazardous liquids
+         * freeze, as ICE does, and magma stays. Without gravity ({@code weightless}) the liquids are gone, their beds
+         * exposed, and nothing lies loose either: scatter and field cover go and rough boulders become bedrock outcrops.
+         */
+        Tile lunar(boolean weightless) {
+            int depth = weightless ? Math.max(0, waterDepth) : 0;
             int level = elevation - depth;
             Feature bridge = BoardBridge.feature(this);
             List<Feature> kept = new ArrayList<>();
@@ -490,13 +508,15 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                 }
                 switch (feature.kind()) {
                     case TREE -> { if (feature.authoredPlacement()) { kept.add(feature); } }
-                    case SCATTER -> { }
+                    // Gravity still holds loose stones; grass, plants and fungi do not grow.
+                    case SCATTER -> { if (!weightless && BoardScatter.stone(feature.asset())) { kept.add(feature); } }
+                    // Felled timber goes with the other vegetation; Dragon's Teeth are concrete.
                     case ROUGH -> { if (feature.asset().equals("rough/dragon-tooth")) { kept.add(feature); } }
                     case PROP -> { if (!feature.asset().equals("field")) { kept.add(feature); } }
                     // Nothing lies loose without gravity. Rough is bedrock breaking the surface: every third boulder
                     // becomes an outcrop three times its size, its height a bound. A repeated presentation keeps them.
                     case BOULDER -> {
-                        if (feature.asset().equals(BoardRocks.OUTCROP)) {
+                        if (!weightless || feature.asset().equals(BoardRocks.OUTCROP)) {
                             kept.add(feature);
                         } else if (boulders++ % 3 == 0) {
                             kept.add(new Feature(BoardRocks.OUTCROP, feature.x(), feature.y(), feature.rotation(),
@@ -511,17 +531,24 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             String heightPrefix = Messages.getString("BoardView1.HEIGHT") + " ";
             int bridgeHeight = bridge == null ? 0 : Math.round(bridge.elevation()) + depth;
             String sourceBridge = bridge == null ? null : BoardHexText.bridge(Math.round(bridge.elevation()));
-            // The vegetation, the ice and snow and the liquids are gone with the liquid, so are their labels (FOLIAGE,
-            // the cover, FIELDS, TUNDRA, ICE, BLACK ICE, SNOW, SWAMP, MAGMA, RAPIDS, HAZ. LIQUID and their levels).
-            Set<String> gone = Set.copyOf(Stream.of("LowFoliage", "hexType.cover1", "hexType.cover2",
-                  "hexType.cover3", "hexType.planted_fields", "hexType.tundra", "hexType.ice", "hexType.black_ice",
-                  "hexType.snow", "hexType.snow2", "hexType.swamp", "hexType.swamp2", "hexType.magma",
-                  "hexType.magma2", "hexType.rapids", "hexType.rapids2", "hexType.hazardous_liquid")
-                  .map(key -> Messages.getString("BoardView1." + key)).toList());
+            // The vegetation, the snow, the black ice and the swamp are gone with the old surface, so are their labels
+            // (FOLIAGE, the cover, FIELDS, TUNDRA, SNOW, BLACK ICE, SWAMP). Without gravity the liquids and their ice
+            // go too (ICE, MAGMA, RAPIDS, HAZ. LIQUID and their levels); in vacuum they stay, the water frozen.
+            Stream<String> keys = Stream.of("LowFoliage", "hexType.cover1", "hexType.cover2", "hexType.cover3",
+                  "hexType.planted_fields", "hexType.tundra", "hexType.snow", "hexType.snow2", "hexType.black_ice",
+                  "hexType.swamp", "hexType.swamp2");
+            if (weightless) {
+                keys = Stream.concat(keys, Stream.of("hexType.ice", "hexType.magma", "hexType.magma2",
+                      "hexType.rapids", "hexType.rapids2", "hexType.hazardous_liquid"));
+            }
+            Set<String> gone = Set.copyOf(keys.map(key -> Messages.getString("BoardView1." + key)).toList());
             List<BoardHexText> labels = new ArrayList<>();
             boolean groundLabel = false;
             for (BoardHexText label : text) {
-                if (label.text().equals(sourceLevel) || label.text().startsWith(depthPrefix)) {
+                if (gone.contains(label.text())) { continue; }
+                if (!weightless) {
+                    labels.add(label);
+                } else if (label.text().equals(sourceLevel) || label.text().startsWith(depthPrefix)) {
                     if (!groundLabel && level != 0) {
                         labels.add(new BoardHexText(BoardHexText.level(level), label.baseline(), label.font(),
                               label.argb(), label.fromTop(), 0));
@@ -534,14 +561,16 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                     // The type block's bridge line, on the deck where it is the roof label, keeps the deck's level too.
                     labels.add(new BoardHexText(BoardHexText.bridge(bridgeHeight), label.baseline(), label.font(),
                           label.argb(), label.fromTop(), label.elevation() > 0 ? bridgeHeight : 0));
-                } else if (!gone.contains(label.text())) {
+                } else {
                     labels.add(label);
                 }
             }
-            return new Tile(coords, level, -1, false, roadExits, Surface.LUNAR, ground, null, null, null,
-                  tactical, kept, BoardHexText.settled(labels, text), BoardLiquid.NONE, null, true, road, fireSmoke,
-                  Biome.NONE, impassable, false, cliffTopExits, true, BoardSurfaceBlend.solid(Surface.LUNAR), bridge(),
-                  ultraSublevel, null, null, appearance, cover);
+            boolean iced = !weightless && (frozen || liquid.present() && !liquid.molten());
+            return new Tile(coords, level, weightless ? -1 : waterDepth, iced, roadExits, Surface.LUNAR, ground, null,
+                  null, null, tactical, kept, BoardHexText.settled(labels, text),
+                  weightless ? BoardLiquid.NONE : liquid, null, true, road, fireSmoke, Biome.NONE, impassable, false,
+                  cliffTopExits, weightless, BoardSurfaceBlend.solid(Surface.LUNAR), bridge(), ultraSublevel, null, null,
+                  appearance, cover, true);
         }
 
         Tile {
@@ -591,7 +620,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         boolean sameGeometry(Tile other) {
             return this == other || coords.equals(other.coords) && elevation == other.elevation
                   && waterDepth == other.waterDepth && frozen == other.frozen && roadExits == other.roadExits
-                  && cliffTopExits == other.cliffTopExits && bare == other.bare && ultraSublevel == other.ultraSublevel
+                  && cliffTopExits == other.cliffTopExits && bare == other.bare && barren == other.barren
+                  && ultraSublevel == other.ultraSublevel
                   && surface == other.surface && detailedGround == other.detailedGround && road == other.road && biome == other.biome
                   && liquid.equals(other.liquid) && features.equals(other.features) && groundCover.equals(other.groundCover)
                   && appearance.equals(other.appearance);
@@ -789,6 +819,13 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         return new BoardScene(boardId, width, height, tiles, shown, plannedPath, selectedId, phase, commands, light,
               firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, electronicWarfare, designations,
               starShells);
+    }
+
+    /** Keep the displayed selection without exposing the next turn's commands, route or firing guides. */
+    BoardScene withPlaybackSelection(int id) {
+        return new BoardScene(boardId, width, height, tiles, units, List.of(), id, phase,
+              List.of(), light, List.of(), List.of(), markers, tactical, List.of(), fieldOfView,
+              electronicWarfare, designations, starShells);
     }
 
     /** Board artwork, terrain and authorized contacts advance with the queue; interactive tools stay live. */

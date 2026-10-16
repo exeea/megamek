@@ -25,6 +25,9 @@ uniform vec2 u_fogSize;
 uniform float u_edgeScale;
 uniform vec3 u_sky;
 uniform vec3 u_horizon;
+uniform vec3 u_backdropSky;
+uniform vec3 u_backdropHorizon;
+uniform float u_backdropExposure; // Positive: UI-authored backdrop with user EV only. Zero: incident lighting sky.
 uniform float u_transparentBackground;
 uniform float u_sceneScaled; // 1 at a render resolution below 100%: scale the scene up; 0 reads it 1:1.
 // SCENE_RADIANCE
@@ -119,49 +122,60 @@ void main() {
         skyDirection = vec3(facing * sqrt(1.0 - height * height), height);
     }
     vec3 sky = u_environmentImage.x > .5 ? imageEnvironment(skyDirection, 0.0) : mix(u_horizon, u_sky, skyBlend);
+    if (u_backdropExposure > 0.0 && u_transparentBackground < .5 && coverage < 1.0) {
+        // The illustration uses the reference UI's screen-space gradient in every camera mode.
+        vec3 authored = mix(u_backdropHorizon, u_backdropSky, smoothstep(0.0, 1.0, v_uv.y));
+        sky = backdropRadiance(authored, u_backdropExposure * (1.0 + u_lightning))
+              / max(u_exposure * (1.0 + u_lightning), 1e-8);
+    }
     vec3 color = scene.rgb + (sky - u_sky) * (1.0 - coverage);
-    // Exports store straight alpha: remove the clear sky from partially covered silhouette pixels before grading.
-    if (u_transparentBackground > 0.5) color = (scene.rgb - u_sky * (1.0 - coverage)) / max(coverage, 0.00001);
+    // Cutouts start at transparent black and keep foreground RGB associated until the PNG boundary.
+    if (u_transparentBackground > 0.5) color = scene.rgb;
     vec3 linear = max(color, vec3(0.0));
     vec3 heat = vec3(0.0);
     if (u_heatEnabled > 0.5) {
-        float hot = heatWeight(linear);
+        vec3 source = linear;
+        if (u_transparentBackground > 0.5 && coverage > 0.0) source /= coverage;
+        float hot = heatWeight(source);
         heat = linear * hot;
-        // Only selected heat bypasses night desaturation. Ordinary reflected highlights retain their range too.
+        // Only selected heat bypasses the scenario tint. Ordinary reflected highlights retain their range too.
         linear *= 1.0 - hot;
     }
     vec4 sand = sandLayer(surfaceDepth);
-    linear = (linear * sand.a + sand.rgb) * atmosphere.a + atmosphere.rgb;
+    if (u_transparentBackground > 0.5) {
+        // Fog and sand belong to the covered foreground, not to an invented opaque background.
+        linear = (linear * sand.a + sand.rgb * coverage) * atmosphere.a + atmosphere.rgb * coverage;
+    } else {
+        linear = (linear * sand.a + sand.rgb) * atmosphere.a + atmosphere.rgb;
+    }
     // Weather keeps its opaque-depth test, but foreground flakes/drops do not inherit the background's fog column.
     // Its separate target stores premultiplied linear RGB; all color still reaches the same grade/display boundary.
     if (u_weatherEnabled > 0.5) {
         vec4 weather = sceneSample(u_weather, v_uv);
         weather.rgb = loadScene(weather.rgb);
         float behind = 1.0 - weather.a;
-        if (u_transparentBackground > 0.5) {
-            float backgroundCoverage = coverage * behind;
-            coverage = backgroundCoverage + weather.a;
-            linear = (linear * backgroundCoverage + weather.rgb) / max(coverage, .00001);
-            heat *= backgroundCoverage / max(coverage, .00001);
-        } else {
-            linear = linear * behind + weather.rgb;
-            coverage = coverage * behind + weather.a;
-            heat *= behind;
-        }
+        linear = linear * behind + weather.rgb;
+        coverage = coverage * behind + weather.a;
+        heat *= behind;
     }
     linear = gradeScene(linear, coverage);
     linear += heat * sand.a * atmosphere.a * u_exposure;
+    // A printable cutout keeps physical coverage. Lens effects cannot create opacity in an ordinary RGBA PNG.
+    float lensCoverage = u_transparentBackground > 0.5 ? coverage : 1.0;
     if (u_heatGlowStrength > 0.0) {
         // Fog already attenuated the visible source before blur. Sand also dims the camera halo.
-        linear += loadScene(texture(u_heatGlow, v_uv).rgb) * (u_heatGlowStrength * sand.a * u_exposure);
+        linear += loadScene(texture(u_heatGlow, v_uv).rgb) * (u_heatGlowStrength * sand.a * u_exposure) * lensCoverage;
     }
     // Lens glare borrows the active sun's color, after terrain grading and before display conversion/FoV.
-    linear += sunGlare() * u_exposure;
+    linear += sunGlare() * u_exposure * lensCoverage;
+    if (u_transparentBackground > 0.5) linear = coverage > 0.0 ? linear / coverage : vec3(0.0);
     color = displayScene(linear);
     // Board camera presentation; isolated material previews share only the color conversion.
     vec2 edge = (v_uv - 0.5) * 2.0;
     color *= 1.0 - 0.09 * dot(edge, edge) * 0.5;
     if (u_fovEnabled > 0.5) color = fieldOfView(color, depth);
+    // Display contrast may lift black, but an empty PNG pixel must remain empty.
+    if (u_transparentBackground > 0.5 && coverage == 0.0) color = vec3(0.0);
     fragColor = vec4(color, mix(1.0, coverage, u_transparentBackground));
     // Reuse the scene's hardware depth for tactical occlusion in this same draw.
     DEPTH = depth;

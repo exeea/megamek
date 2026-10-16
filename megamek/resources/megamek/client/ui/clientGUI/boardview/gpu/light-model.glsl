@@ -50,13 +50,14 @@ vec3 visibleFace(vec3 dx, vec3 dy, vec3 view) {
 }
 
 // Geometric specular antialiasing (Kaplanyan et al. 2016; Tokuyoshi and Kaplanyan 2019). A highlight narrower than
-// the normal's spread over a pixel sparkles; widening GGX alpha^2 by that spread keeps it stable. The setting's 0/1
-// scales the widening, so switching it needs no shader variant. Programs that never set it stay unchanged.
-uniform float u_specularAntialiasing;
-const float SPECULAR_ANTIALIASING_KAPPA = .18;
-// The program's normal variance: its normal derivatives plus normal-map filtering (normalMapVariance) and faded detail.
-// Material code raises it; dielectricRoughness and the other lit surfaces read it after shadingNormal.
+// the normal's spread over a pixel sparkles; widening GGX alpha^2 by that spread keeps it stable. The setting compiles
+// it in (specularAntialiasingFlag, GpuEnvironmentLighting.Antialiasing). Without it the helpers below are constants,
+// so the compiler drops every variance computation.
+// The program's normal variance, once per pixel from the screen derivatives of its final shading normal (mapped
+// detail included where derivatives allow). dielectricRoughness and the other lit surfaces read it after shadingNormal.
 float surfaceVariance = 0.0;
+#ifdef specularAntialiasingFlag
+const float SPECULAR_ANTIALIASING_KAPPA = .18;
 
 // The variance of a normal across this pixel, from its screen derivatives and the pixel filter's variance 1/(2 pi)
 // (Tokuyoshi and Kaplanyan 2019). Take dFdx/dFdy in uniform control flow before any discard, as for visibleFace:
@@ -65,21 +66,15 @@ float normalVariance(vec3 dx, vec3 dy) {
     return 0.15915494 * (dot(dx, dx) + dot(dy, dy));
 }
 
-// Toksvig: a mipmapped normal map's averaged, unnormalized texel is shorter where its footprint held differing normals.
-// Encoding and bilinear magnification shorten a resolved texel a little too; the floor keeps that from widening.
-// GpuAssets.normalSpread subtracts the same floor.
-const float NORMAL_MAP_VARIANCE_FLOOR = .005;
-float normalMapVariance(float shortened) {
-    return max(0.0, (1.0 - min(shortened, 1.0)) / max(shortened, 1e-4) - NORMAL_MAP_VARIANCE_FLOOR);
-}
-
 // Perceptual roughness whose GGX alpha^2 (alpha = roughness^2) widens by the variance, bounded by KAPPA.
 float antialiasedRoughness(float roughness, float variance) {
     float alpha = roughness * roughness;
-    float alpha2 = clamp(alpha * alpha + min(2.0 * variance, SPECULAR_ANTIALIASING_KAPPA) * u_specularAntialiasing,
-          0.0, 1.0);
-    return sqrt(sqrt(alpha2));
+    return sqrt(sqrt(clamp(alpha * alpha + min(2.0 * variance, SPECULAR_ANTIALIASING_KAPPA), 0.0, 1.0)));
 }
+#else
+float normalVariance(vec3 dx, vec3 dy) { return 0.0; }
+float antialiasedRoughness(float roughness, float variance) { return roughness; }
+#endif
 
 // Correlated Smith visibility for GGX, with alpha = perceptual roughness squared.
 float ggxVisibility(float nv, float nl, float a2) {

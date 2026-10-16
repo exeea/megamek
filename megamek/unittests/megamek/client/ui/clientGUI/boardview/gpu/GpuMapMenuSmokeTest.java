@@ -48,7 +48,6 @@ class GpuMapMenuSmokeTest {
         AtomicInteger switches = new AtomicInteger();
         GUIPreferences preferences = GUIPreferences.getInstance();
         boolean coordinates = preferences.getCoordsEnabled();
-        float guiScale = preferences.getGUIScale();
         FutureTask<GpuMapSource> setup = new FutureTask<>(() -> {
             preferences.setValue(GUIPreferences.SHOW_COORDS, true);
             BoardEditorSession editor = editing ? new BoardEditorSession() : null;
@@ -97,9 +96,12 @@ class GpuMapMenuSmokeTest {
                         Actor panel = stage.getRoot().findActor("menu-panel");
                         assertTrue(GpuBoardTestUi.shown(panel));
                         assertTrue(menu.isChecked());
-                        UiButton legacy2D = stage.getRoot().findActor("/viewLegacy2D");
-                        assertNotNull(legacy2D);
-                        assertEquals(editing ? "Legacy 2D Preview" : "Legacy 2D", legacy2D.getText().toString());
+                        // The editor's Legacy 2D Preview; a preview switches to Legacy 2D in View > Renderer.
+                        assertEquals(editing, GpuBoardTestUi.shown(stage.getRoot().findActor("/boardPreview2D")));
+                        if (editing) {
+                            UiButton preview2D = stage.getRoot().findActor("/boardPreview2D");
+                            assertEquals("Legacy 2D Preview", preview2D.getText().toString());
+                        }
                         assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/viewClientSettings")));
                         assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/helpAbout")));
                         assertEquals(editing, GpuBoardTestUi.shown(stage.getRoot().findActor("/fileBoardSave")));
@@ -125,7 +127,13 @@ class GpuMapMenuSmokeTest {
                         checkViewMenu(view, source, editing, output);
                         if (editing) { checkEditorEntries(view, source, output); }
                         GpuBoardTestUi.click("utility-menu"); settle(view, source);
-                        GpuBoardTestUi.click("/viewLegacy2D"); settle(view, source);
+                        if (editing) {
+                            GpuBoardTestUi.click("/boardPreview2D"); settle(view, source);
+                        } else {
+                            // checkViewMenu left View closed and its Renderer group open.
+                            GpuBoardTestUi.click("/view"); settle(view, source);
+                            GpuBoardTestUi.click("/view/viewRenderer/viewLegacy2D"); settle(view, source);
+                        }
                         assertEquals(1, switches.get());
                         assertEquals(0, closes.get(), "Switching views must not run the close/discard action");
                         assertFalse(GpuBoardTestUi.shown(panel));
@@ -156,7 +164,6 @@ class GpuMapMenuSmokeTest {
             SwingUtilities.invokeAndWait(() -> {
                 source.close();
                 preferences.setValue(GUIPreferences.SHOW_COORDS, coordinates);
-                preferences.setValue(GUIPreferences.GUI_SCALE, guiScale);
             });
         }
         if (failure.get() != null) { throw new AssertionError(editing ? "Editor menu" : "Preview menu", failure.get()); }
@@ -171,11 +178,13 @@ class GpuMapMenuSmokeTest {
         GpuBoardTestUi.click("utility-menu"); settle(view, source);
         GpuBoardTestUi.click("/view"); settle(view, source);
         var stage = GpuBoardTestUi.stage();
-        for (String id : List.of("viewToggleHexCoords", "viewToggleHexTypes", "viewIncGUIScale", "viewDecGUIScale")) {
+        for (String id : List.of("viewRenderer", "viewToggleHexCoords", "viewToggleHexTypes")) {
             assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/view/" + id)), id);
         }
+        // Not in this View menu: the camera's commands, and Swing's GUI scale, which is Swing's alone.
         for (String id : List.of("viewToggleIsometric", "viewWireframe", "viewZoomIn", "viewZoomOut",
-              "viewZoomReset", "viewZoomOverviewToggle", "viewFitBoard", "viewLOSSetting")) {
+              "viewZoomReset", "viewZoomOverviewToggle", "viewFitBoard", "viewLOSSetting", "viewIncGUIScale",
+              "viewDecGUIScale")) {
             assertFalse(GpuBoardTestUi.shown(stage.getRoot().findActor("/view/" + id)), id);
         }
         GpuBoardTestUi.capture(new File(output, editing ? "editor-view-menu.png" : "preview-view-menu.png"));
@@ -189,7 +198,7 @@ class GpuMapMenuSmokeTest {
         GpuBoardTestUi.click("/view/viewToggleHexCoords"); settle(view, source);
         assertTrue(source.takeFrame().scene().tile(at).text().stream()
               .anyMatch(label -> label.text().equals(at.getBoardNum())));
-        checkBoardGraphics(view, source);
+        checkRenderer(view, source, editing);
 
         // Restore the compact root menu before the remaining modal/document/close checks.
         GpuBoardTestUi.click("utility-menu"); settle(view, source);
@@ -198,10 +207,11 @@ class GpuMapMenuSmokeTest {
     }
 
     /**
-     * The View menu's 3D Graphics group (CommonMenuBar's submenu): a choice sets the shared preference, which reaches
-     * the render thread through the source's preferences, and the view draws the tileset columns at once in Classic.
+     * The View menu's Renderer group (CommonMenuBar's submenu): Legacy 2D, which only a preview can switch to, and the
+     * 3D graphics, checked; a graphics choice sets the shared preference, which reaches the render thread through the
+     * source's preferences, and the view draws the tileset columns at once in Classic.
      */
-    private static void checkBoardGraphics(GpuBattleView view, GpuMapSource source) throws Exception {
+    private static void checkRenderer(GpuBattleView view, GpuMapSource source, boolean editing) throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         BoardGraphics saved = preferences.getBoardGraphics();
         try {
@@ -209,10 +219,13 @@ class GpuMapMenuSmokeTest {
             settle(view, source);
             // The View group is still open from the checks before.
             GpuBoardTestUi.click("utility-menu"); settle(view, source);
-            GpuBoardTestUi.click("/view/viewBoardGraphics"); settle(view, source);
+            GpuBoardTestUi.click("/view/viewRenderer"); settle(view, source);
             var stage = GpuBoardTestUi.stage();
-            assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/view/viewBoardGraphics/viewGraphicsEnhanced")));
-            GpuBoardTestUi.click("/view/viewBoardGraphics/viewGraphicsClassic"); settle(view, source);
+            UiButton legacy2D = stage.getRoot().findActor("/view/viewRenderer/viewLegacy2D");
+            assertTrue(GpuBoardTestUi.shown(legacy2D));
+            assertEquals(editing, legacy2D.isDisabled(), "The editor draws only in 3D");
+            assertTrue(GpuBoardTestUi.shown(stage.getRoot().findActor("/view/viewRenderer/viewGraphicsEnhanced")));
+            GpuBoardTestUi.click("/view/viewRenderer/viewGraphicsClassic"); settle(view, source);
             assertEquals(BoardGraphics.CLASSIC, preferences.getBoardGraphics());
             assertEquals(BoardGraphics.CLASSIC, source.uiPreferences().graphics());
             assertTrue(columns(view), "Classic draws the tileset columns");

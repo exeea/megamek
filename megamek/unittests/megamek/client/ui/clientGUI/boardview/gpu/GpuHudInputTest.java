@@ -45,11 +45,13 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
+import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -569,7 +571,10 @@ class GpuHudInputTest {
         assertSame(record, hud.state.presentedRecord());
         GpuUnitRecord.Snapshot other = record(SECOND);
         hud.update(frame(newer, panels(other)), playing, null, preferences());
-        assertSame(other, hud.state.presentedRecord(), "another unit's record has nothing older to wait for");
+        assertSame(record, hud.state.presentedRecord(), "an automatic next-unit record must wait for playback");
+        hud.state.inspected = SECOND;
+        hud.update(frame(newer, panels(record(SECOND))), playing, null, preferences());
+        assertEquals(SECOND, hud.state.presentedRecord().unitId(), "explicit inspection is still available");
 
         hud.update(frame(newer, panels(damaged)), GpuHud.HudView.EMPTY, null, preferences());
         assertEquals(List.of(after), hud.state.presentedUnits());
@@ -850,6 +855,21 @@ class GpuHudInputTest {
         hud.resize(1280, 720, 1);
         update(moving, panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
         assertFalse(shown(chip), "no pick, no chip");
+    }
+
+    @Test
+    void boardGuidesStayAlignedWhenUiScaleShrinksAndReturns() {
+        GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true));
+        Actor guides = hud.stage.getRoot().findActor("board-fx");
+        for (float uiScale : new float[] { 1, .5f, 1, .5f, 1 }) {
+            hud.resize(1920, 1080, uiScale);
+            update(moving);
+            ((Container<?>) guides.getParent()).validate();
+            Vector2 projectedUnit = new Vector2(hud.stage.getWidth() * .7f, hud.stage.getHeight() * .6f);
+            Vector2 drawnGuide = guides.localToStageCoordinates(new Vector2(projectedUnit));
+            assertEquals(projectedUnit.x, drawnGuide.x, .001f, "guide must stay at the unit's projected x");
+            assertEquals(projectedUnit.y, drawnGuide.y, .001f, "guide must stay at the unit's projected y");
+        }
     }
 
     /** Whether the actor and every group above it are visible. */

@@ -166,7 +166,9 @@ class GpuRoadSmokeTest {
                     camera.camera.zoom = .22f;
                     for (int rise : new int[] { 1, 2, 3 }) {
                         var scene = ramp(BoardRoad.Kind.PAVED, BoardScene.Surface.CONCRETE, rise);
+                        frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
+                        assertTrue(terrain.ready(scene), "Retaining-wall captures require the prepared material families");
                         int[] roles = GpuTerrainPreparationSmokeTest.checkBlendedRoles(terrain, "concrete ramp " + rise);
                         assertTrue(roles[4] > 0, "The road fixture must retain actual concrete cliff triangles");
                         terrain.animate(.5f, List.of());
@@ -180,7 +182,9 @@ class GpuRoadSmokeTest {
                     }
                     for (int exits : new int[] { 31, 63 }) {
                         var scene = BoardRoadRampTest.concreteJunction(exits);
+                        frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
+                        assertTrue(terrain.ready(scene), "Retaining-wall captures require the prepared material families");
                         GpuTerrainPreparationSmokeTest.checkBlendedRoles(terrain, "concrete junction " + exits);
                         terrain.animate(.5f, List.of());
                         camera.camera.zoom = .21f;

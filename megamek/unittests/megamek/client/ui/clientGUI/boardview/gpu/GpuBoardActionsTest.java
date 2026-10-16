@@ -60,7 +60,7 @@ class GpuBoardActionsTest {
     }
 
     @Test
-    void globalBoardSwitchSurvivesPhaseChangesAndStillChecksLiveMenuAvailability() throws Exception {
+    void globalMenuItemSurvivesPhaseChangesAndStillChecksLiveMenuAvailability() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             AtomicInteger clicks = new AtomicInteger();
             AtomicReference<CommonMenuBar> menus = new AtomicReference<>();
@@ -68,7 +68,6 @@ class GpuBoardActionsTest {
             SwingUtilities.invokeAndWait(() -> {
                 menus.set(CommonMenuBar.getMenuBarForGame());
                 menus.get().setPhase(GamePhase.MOVEMENT);
-                menus.get().setBoardView3D(true);
                 menus.get().addActionListener(event -> clicks.incrementAndGet());
                 ClientGUI gui = mock(ClientGUI.class);
                 when(gui.getMenuBar()).thenReturn(menus.get());
@@ -79,12 +78,13 @@ class GpuBoardActionsTest {
                 menus.get().setPhase(GamePhase.MOVEMENT_REPORT);
             });
             try {
-                find(commands.get(), Messages.getString("CommonMenuBar.viewLegacy2D")).action().run();
+                // Player Settings is available during a game, not in the lobby.
+                find(commands.get(), Messages.getString("CommonMenuBar.viewPlayerSettings")).action().run();
                 SwingUtilities.invokeAndWait(() -> { });
                 assertEquals(1, clicks.get(),
-                      "Returning to Legacy 2D is a global action, independent of the old phase");
+                      "A menu bar item is a global action, independent of the old phase");
                 SwingUtilities.invokeAndWait(() -> menus.get().setPhase(GamePhase.LOUNGE));
-                find(commands.get(), Messages.getString("CommonMenuBar.viewLegacy2D")).action().run();
+                find(commands.get(), Messages.getString("CommonMenuBar.viewPlayerSettings")).action().run();
                 SwingUtilities.invokeAndWait(() -> { });
                 assertEquals(1, clicks.get(), "An unavailable global menu item must not execute a stale callback");
             } finally {
@@ -120,17 +120,19 @@ class GpuBoardActionsTest {
     }
 
     /**
-     * The View menu's 3D Graphics submenu, as the GPU Menu panel captures it: its two radio items show the preference,
-     * a choice sets it, and a change made elsewhere (Client Settings, a preview's menu) moves the selection too.
+     * The View menu's Renderer submenu, as the GPU Menu panel captures it: its three radio items show the renderer, a
+     * choice sets it, and a change made elsewhere (Client Settings, a preview's menu) moves the selection too.
      */
     @Test
-    void theGraphicsChoiceIsARadioGroupOverTheSharedPreference() throws Exception {
+    void theRendererChoiceIsARadioGroupOverTheSharedPreferences() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
+        boolean use3D = preferences.getUse3DBoard();
         BoardGraphics saved = preferences.getBoardGraphics();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             AtomicReference<CommonMenuBar> menus = new AtomicReference<>();
             AtomicReference<GpuBoardActions> actions = new AtomicReference<>();
             SwingUtilities.invokeAndWait(() -> {
+                preferences.setUse3DBoard(true);
                 preferences.setBoardGraphics(BoardGraphics.ENHANCED);
                 menus.set(CommonMenuBar.getMenuBarForGame());
                 ClientGUI gui = mock(ClientGUI.class);
@@ -140,19 +142,27 @@ class GpuBoardActionsTest {
                 actions.set(new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { }));
             });
             try {
-                assertEquals(List.of(false, true), graphicsSelection(actions.get()));
+                assertEquals(List.of(false, false, true), rendererSelection(actions.get()));
                 BoardScene.Command classic = GpuBoardActions.menuItem(capture(actions.get()),
                       ClientGUI.VIEW_GRAPHICS_CLASSIC);
                 assertEquals(Messages.getString("CommonMenuBar.viewGraphicsClassic"), classic.label());
                 classic.action().run();
                 SwingUtilities.invokeAndWait(() -> { });
                 assertEquals(BoardGraphics.CLASSIC, preferences.getBoardGraphics());
-                assertEquals(List.of(true, false), graphicsSelection(actions.get()));
-                SwingUtilities.invokeAndWait(() -> preferences.setBoardGraphics(BoardGraphics.ENHANCED));
-                assertEquals(List.of(false, true), graphicsSelection(actions.get()));
+                assertEquals(List.of(false, true, false), rendererSelection(actions.get()));
+                GpuBoardActions.menuItem(capture(actions.get()), ClientGUI.VIEW_LEGACY_2D).action().run();
+                SwingUtilities.invokeAndWait(() -> { });
+                assertFalse(preferences.getUse3DBoard());
+                assertEquals(List.of(true, false, false), rendererSelection(actions.get()));
+                SwingUtilities.invokeAndWait(() -> {
+                    preferences.setUse3DBoard(true);
+                    preferences.setBoardGraphics(BoardGraphics.ENHANCED);
+                });
+                assertEquals(List.of(false, false, true), rendererSelection(actions.get()));
             } finally {
                 SwingUtilities.invokeAndWait(() -> {
                     menus.get().die();
+                    preferences.setUse3DBoard(use3D);
                     preferences.setBoardGraphics(saved);
                 });
             }
@@ -210,10 +220,11 @@ class GpuBoardActionsTest {
         return GpuBoardActions.menuItem(capture(actions), ClientGUI.VIEW_TOGGLE_HEX_TYPES);
     }
 
-    /** Whether the Classic and the Enhanced item are selected, in a fresh capture. */
-    private static List<Boolean> graphicsSelection(GpuBoardActions actions) throws Exception {
+    /** Whether the Legacy 2D, the Classic and the Enhanced item are selected, in a fresh capture. */
+    private static List<Boolean> rendererSelection(GpuBoardActions actions) throws Exception {
         List<BoardScene.Command> commands = capture(actions);
-        return List.of(GpuBoardActions.menuItem(commands, ClientGUI.VIEW_GRAPHICS_CLASSIC).selected(),
+        return List.of(GpuBoardActions.menuItem(commands, ClientGUI.VIEW_LEGACY_2D).selected(),
+              GpuBoardActions.menuItem(commands, ClientGUI.VIEW_GRAPHICS_CLASSIC).selected(),
               GpuBoardActions.menuItem(commands, ClientGUI.VIEW_GRAPHICS_ENHANCED).selected());
     }
 

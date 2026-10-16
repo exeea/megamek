@@ -8,6 +8,61 @@ struct WaterLighting {
     vec3 ground;
 };
 
+// Capture full position derivatives before coverage rejection: a fall's height also moves its reflected cloud ray.
+vec3 waterPositionDx = vec3(0.0), waterPositionDy = vec3(0.0);
+
+// Still water keeps direct reflection, using the existing point-source lobe instead of the finite-source filter.
+vec3 waterDirectReflection(vec3 normal, vec3 light, vec3 view, float roughness) {
+    return u_waterEffects > 0.0 ? surfaceReflectance(normal, light, view, roughness, vec3(.02037))
+          : pointReflectance(normal, light, view, roughness, vec3(.02037));
+}
+
+vec3 waterEnvironmentReflection(vec3 normal, vec3 view, float roughness, WaterLighting illumination) {
+    if (dot(normal, view) <= 0.0) return vec3(0.0);
+    roughness = clamp(roughness, MIN_ROUGHNESS, 1.0);
+    vec3 reflected = reflect(-view, normal);
+    vec3 radiance = environmentRadiance(reflected, roughness, illumination.ground, illumination.ambient);
+#if defined(cloudShadowFlag) && defined(environmentLightingFlag) && defined(lightingFlag)
+    // Imported panoramas retain their own sky. This is an optional approximation of the procedural cloud layer.
+    if (u_waterEffects > 0.0 && u_cloudReflection > .5 && u_environmentImage.x < .5 && reflected.z > .02) {
+        float base = -u_cloudProjection[3][2] / u_cloudProjection[2][2];
+        float height = base - v_cloudPosition.z;
+        vec3 overhead = v_cloudPosition + reflected * (max(height, 0.0) / reflected.z);
+        vec2 uv = (u_cloudProjection * vec4(overhead, 1.0)).xy;
+        if (height > 0.0 && min(uv.x, uv.y) > 0.0 && max(uv.x, uv.y) < 1.0) {
+            // A GGX-alpha cone projected to a horizontal layer. Near the horizon its footprint widens quadratically.
+            // This mip approximation blurs opacity, not a second reflected image or a per-pixel volume march.
+            vec2 scale = vec2(u_cloudProjection[0][0], u_cloudProjection[1][1]);
+            float cone = height * roughness * roughness / (reflected.z * reflected.z);
+            // Differentiate P.xy + (base - P.z) * R.xy/R.z at the local reflected direction.
+            // Keeping dP.z matters on vertical sheets, even when their horizontal pixel footprint is nearly zero.
+            vec2 raySlope = reflected.xy / reflected.z;
+            vec2 projectedDx = waterPositionDx.xy - raySlope * waterPositionDx.z;
+            vec2 projectedDy = waterPositionDy.xy - raySlope * waterPositionDy.z;
+            vec2 footprint = (abs(projectedDx) + abs(projectedDy) + vec2(cone)) * abs(scale);
+            vec2 texels = footprint * vec2(textureSize(u_cloudShadow, 0));
+            float lod = max(0.0, log2(max(max(texels.x, texels.y), 1.0)));
+            float coverage = textureLod(u_cloudShadow, uv, lod).g;
+            vec2 border = smoothstep(vec2(0.0), max(footprint, 1.0 / vec2(textureSize(u_cloudShadow, 0))),
+                  min(uv, 1.0 - uv));
+            coverage *= border.x * border.y * smoothstep(.02, .12, reflected.z);
+            // A unit-albedo isotropic slab source. The upper-hemisphere angular mean of H+(S-H)*sqrt(z)
+            // is (H+2*S)/3. Ground uses the existing neutral bounce; neither receiver shadows nor lava light it.
+            vec3 skyMean = (u_environmentHorizon + 2.0 * u_environmentSky) / 3.0;
+            vec3 ground = GROUND_ALBEDO * (surfaceAmbient(vec3(0.0, 0.0, 1.0)) + sunOnGround());
+            vec3 cloud = .5 * (skyMean + ground);
+#if numDirectionalLights > 0
+            // Directional uniforms are E/pi; isotropic phase 1/(4*pi) therefore contributes color/4.
+            cloud += .25 * u_dirLights[0].color;
+#endif
+            float skyShare = environmentWeights(reflected, roughness).x;
+            radiance = mix(radiance, cloud * skyShare + illumination.ground * (1.0 - skyShare), coverage);
+        }
+    }
+#endif
+    return radiance * specularAlbedo(max(0.0, dot(normal, view)), roughness, vec3(.02037));
+}
+
 vec3 waterTint(vec4 mixture) {
     bool procedural = u_waterMaterial.y > 0.5;
     vec3 tint = vec3(1.0);

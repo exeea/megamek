@@ -334,10 +334,13 @@ class GpuShadingNormalSmokeTest {
             assertEquals(1, sculpt.split(java.util.regex.Pattern.quote(normalBoundary), -1).length - 1);
             sculpt = sculpt.replace(normalBoundary, "normal = vec3(0,0,1); film = 0.0; roughness = .85;"
                   + " cavity = 1.0; volcanic = 0.0; " + normalBoundary);
-            String result = "vec3 result = albedo + emission;";
-            assertEquals(1, sculpt.split(java.util.regex.Pattern.quote(result), -1).length - 1);
-            String controlledCliff = sculpt.replace(result, "vec3 result = direct;");
-            applySources(manager, Map.of("terrain-sculpt.frag", controlledCliff), "controlled-cliff");
+            // shadeSurface (surface-shading.glsl) returns the direct light alone; this material emits nothing.
+            String shading = GpuShaderSource.readDisk("surface-shading.glsl");
+            String result = "return albedo + s.emission;";
+            assertEquals(1, shading.split(java.util.regex.Pattern.quote(result), -1).length - 1);
+            String controlledCliff = sculpt, directOnly = shading.replace(result, "return direct;");
+            applySources(manager, Map.of("terrain-sculpt.frag", controlledCliff, "surface-shading.glsl", directOnly),
+                  "controlled-cliff");
             var materialMethod = GpuTerrain.class.getDeclaredMethod("sculptMaterial", BoardScene.Surface.class);
             materialMethod.setAccessible(true);
             Material cliff = (Material) materialMethod.invoke(preview, BoardScene.Surface.ROCK);
@@ -382,7 +385,8 @@ class GpuShadingNormalSmokeTest {
                 mesh.setVertices(curvedVertices);
                 // A mapped normal facing the sun cannot illuminate the back of the unmapped curved surface.
                 applySources(manager, Map.of("terrain-sculpt.frag", controlledCliff.replace(
-                      "normal = vec3(0,0,1);", "normal = vec3(1,0,0);")), "controlled-cliff-backlight");
+                      "normal = vec3(0,0,1);", "normal = vec3(1,0,0);"), "surface-shading.glsl", directOnly),
+                      "controlled-cliff-backlight");
                 sun.set(1, 1, 1, -1, 0, .25f);
                 assertEquals(0, modelPixel(output, batch, instance, environment, curvedView, preview)[0], 0,
                       "Mapped detail cannot move the curved cliff's incident hemisphere");
@@ -393,17 +397,13 @@ class GpuShadingNormalSmokeTest {
 
             bushTransmission(manager, preview, batch, environment, sun, output);
 
-            String foliage = GpuShaderSource.readDisk("terrain-foliage.frag");
-            String lightSum = "albedo *= ambient + direct;";
-            assertEquals(1, foliage.split(java.util.regex.Pattern.quote(lightSum), -1).length - 1);
-            // Keep the production cloud-insertion marker while isolating the same direct-only response.
-            foliage = foliage.replace(lightSum, "ambient = vec3(0.0);\n" + lightSum)
-                  .replace("albedo += sheen;", "")
-                  .replace("albedo += surfaceEnvironment(face, film, roughness, GROUND_ALBEDO) * surface.r;", "");
-            applySources(manager, Map.of("terrain-foliage.frag", foliage), "controlled-foliage");
-            Texture normal = normalTexture(), white = texture(0xffffffff), tissue = texture(0xffda80ff);
+            // The same direct-only response, after the production cloud insertion in shadeSurface.
+            applySources(manager, Map.of("surface-shading.glsl", shading.replace(result, "return s.albedo * direct;")),
+                  "controlled-foliage");
+            // Reflectance .6 with transmission .5: R + T stays below one, so the thin-tissue bound keeps both sides lit.
+            Texture normal = normalTexture(), pigment = texture(0x999999ff), tissue = texture(0xffda80ff);
             var leaf = surfacePlate(new Material("leaf", ColorAttribute.createDiffuse(Color.WHITE),
-                  TextureAttribute.createDiffuse(white), TextureAttribute.createNormal(normal),
+                  TextureAttribute.createDiffuse(pigment), TextureAttribute.createNormal(normal),
                   TextureAttribute.createAmbient(tissue), IntAttribute.createCullFace(GL20.GL_NONE)), false);
             var foliageMethod = GpuTerrain.class.getDeclaredMethod("foliage", com.badlogic.gdx.graphics.g3d.Model.class);
             foliageMethod.setAccessible(true);
@@ -434,7 +434,7 @@ class GpuShadingNormalSmokeTest {
                         }
                     }
                 }
-            } finally { leaf.dispose(); normal.dispose(); white.dispose(); tissue.dispose(); }
+            } finally { leaf.dispose(); normal.dispose(); pigment.dispose(); tissue.dispose(); }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
             preview.dispose(); table.dispose();
@@ -442,25 +442,29 @@ class GpuShadingNormalSmokeTest {
         }
     }
 
-    /** Real sculpt provider, packed tissue vertices, two real sides, and the production packed-depth caster. */
+    /** Real sculpt provider, packed tissue vertices, two real sides, and the production hardware-depth caster. */
     private static void bushTransmission(GpuShaderManager manager, GpuTerrain preview, ModelBatch batch,
           Environment environment, DirectionalLight sun, GpuSceneTestOutput output) throws Exception {
-        String source = GpuShaderSource.readDisk("terrain-sculpt.frag");
-        String result = "vec3 result = albedo + emission;";
+        // shadeSurface (surface-shading.glsl) returns the direct light alone; these materials emit nothing.
+        String source = GpuShaderSource.readDisk("surface-shading.glsl");
+        String result = "return albedo + s.emission;";
         assertEquals(1, source.split(java.util.regex.Pattern.quote(result), -1).length - 1);
-        applySources(manager, Map.of("terrain-sculpt.frag", source.replace(result, "vec3 result = direct;")),
+        applySources(manager, Map.of("surface-shading.glsl", source.replace(result, "return direct;")),
               "controlled-bush-tissue");
         var materialMethod = GpuTerrain.class.getDeclaredMethod("sculptMaterial", BoardScene.Surface.class);
         materialMethod.setAccessible(true);
         var material = (Material) materialMethod.invoke(preview, BoardScene.Surface.GRASS);
-        var leaf = bushPlate(material, BoardRelief.Kind.LEAF);
-        var wood = bushPlate(material, BoardRelief.Kind.PLANT);
+        // A leaf-dark authored colour keeps R + T below one, so the bound leaves its .35 transmission share whole.
+        var leaf = bushPlate(material, BoardRelief.Kind.LEAF, .3f);
+        var wood = bushPlate(material, BoardRelief.Kind.PLANT, .3f);
+        var white = bushPlate(material, BoardRelief.Kind.LEAF, 1);
         var leafInstance = new ModelInstance(leaf);
         var woodInstance = new ModelInstance(wood);
+        var whiteInstance = new ModelInstance(white);
         var blocker = new ModelBuilder().createBox(100, 100, 4,
               new Material(ColorAttribute.createDiffuse(Color.WHITE)),
               VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal);
-        var shadow = new com.badlogic.gdx.graphics.g3d.environment.DirectionalShadowLight(512, 512, 160, 160, 1, 500);
+        var shadow = new GpuShadowLight(512, 512, 160, 160, 1, 500);
         var depthField = GpuTerrain.class.getDeclaredField("depthBatch");
         depthField.setAccessible(true);
         var depth = (ModelBatch) depthField.get(preview); // Borrowed from the real terrain shadow provider.
@@ -472,14 +476,16 @@ class GpuShadingNormalSmokeTest {
                 float opaque = modelPixel(output, batch, woodInstance, environment, view, preview)[0];
                 float reflected = modelPixel(output, batch, leafInstance, environment, view, preview)[0];
                 assertTrue(opaque > .4, "Front-lit wood is the independent opaque diffuse reference");
-                assertEquals(.65, reflected / opaque, .003, "Leaf reflection redistributes, rather than adds, energy");
+                assertEquals(1, reflected / opaque, .003, "A front-lit leaf reflects like the opaque reference");
                 light.scl(-1);
                 sun.set(1, 1, 1, -light.x, -light.y, -light.z);
                 assertEquals(0, modelPixel(output, batch, woodInstance, environment, view, preview)[0], 0,
                       "Woody stems remain opaque under backlighting");
                 float transmitted = modelPixel(output, batch, leafInstance, environment, view, preview)[0];
-                assertEquals(.35, transmitted / opaque, .003, "Both real leaf sides retain the transmission share");
-                assertEquals(opaque, reflected + transmitted, .003, "The paired diffuse shares retain one energy budget");
+                assertEquals(.35, transmitted / opaque, .003, "A backlit leaf transmits its share from the other side");
+                // The rendered term is T / R; a white leaf (R .92 to 1 with its grain) keeps at most (1 - R) / R.
+                assertTrue(modelPixel(output, batch, whiteInstance, environment, view, preview)[0] / opaque < .09,
+                      "R + T <= 1: a white leaf has no light left to transmit");
 
                 // First include the leaf itself as caster, then add an independent upstream opaque box.
                 var camera = shadow.getCamera();
@@ -504,12 +510,14 @@ class GpuShadingNormalSmokeTest {
             }
         } finally {
             environment.shadowMap = null;
-            shadow.dispose(); blocker.dispose(); leaf.dispose(); wood.dispose();
+            shadow.dispose(); blocker.dispose(); leaf.dispose(); wood.dispose(); white.dispose();
             applySources(manager, Map.of(), "restore-bush-tissue");
         }
     }
 
-    private static com.badlogic.gdx.graphics.g3d.Model bushPlate(Material material, BoardRelief.Kind kind) {
+    /** Both sides of a tissue plate in the authored linear RGB {@code colour} (UV and alpha carry it). */
+    private static com.badlogic.gdx.graphics.g3d.Model bushPlate(Material material, BoardRelief.Kind kind,
+          float colour) {
         var builder = new ModelBuilder();
         builder.begin();
         var mesh = builder.part("authored-bush-tissue", GL20.GL_TRIANGLES,
@@ -518,7 +526,7 @@ class GpuShadingNormalSmokeTest {
         var corners = new Vector3[] { new Vector3(-40, -40, 0), new Vector3(40, -40, 0),
               new Vector3(40, 40, 0), new Vector3(-40, 40, 0) };
         for (int side : new int[] { 1, -1 }) {
-            var shade = new BoardRelief.Shade(new Vector3(0, 0, side), kind, 1, 0, 1, 1, 1);
+            var shade = new BoardRelief.Shade(new Vector3(0, 0, side), kind, 1, 0, colour, colour, colour);
             var vertices = new MeshPartBuilder.VertexInfo[4];
             for (int index = 0; index < 4; index++) {
                 vertices[index] = GpuTerrain.sculptVertex(corners[index], shade, Float.NaN, null);

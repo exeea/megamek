@@ -40,8 +40,10 @@ final class GpuAtmosphere implements Disposable {
     static final float MAX_SAND_OPACITY = 0.25f;
     /** Particle colors are authored bright, so they take this share of the light on level ground. */
     private static final float PARTICLE_ALBEDO = 0.4f;
+    private static final BoardAtmosphere.SkyPalette TACTICAL_BACKDROP = BoardAtmosphere.skyPalette(
+          BoardAtmosphere.DEFAULTS, BoardAtmosphere.DEFAULT_TAINT_STRENGTH, false);
     /** Below this display brightness each hex uses white neutral ink; otherwise black. Zero disables adaptation. */
-    static final float OVERLAY_BRIGHTNESS_THRESHOLD = 0.2f;
+    static final float OVERLAY_BRIGHTNESS_THRESHOLD = 0.1f;
     /** A learned hex changes ink only beyond this small display-brightness band around the threshold. */
     private static final float OVERLAY_BRIGHTNESS_HYSTERESIS = .02f;
 
@@ -166,6 +168,11 @@ final class GpuAtmosphere implements Disposable {
     private BoardAtmosphere.Lighting worldLighting;
     private BoardAtmosphere.Lighting lighting;
     private BoardAtmosphere.Lighting exposureLighting;
+    private BoardAtmosphere.Lighting tacticalLighting;
+    /** One CPU image per current atmosphere; unrelated exposure/weather/camera changes reuse it. */
+    private BoardLightingSky.Source generatedSkySource;
+    private GpuLightingEnvironment generatedSky;
+    private BoardAtmosphere.SkyPalette backdrop;
     private final Vector3 glareRight = new Vector3();
     private float clock;
     private float stormClock;
@@ -294,7 +301,8 @@ final class GpuAtmosphere implements Disposable {
                 stormClock = 0;
             }
             settings = next;
-            worldLighting = BoardAtmosphere.lighting(next, options.moonShadowContrast(), options.taintStrength());
+            worldLighting = generateSky(BoardAtmosphere.lighting(next, options.moonShadowContrast(), options.taintStrength()));
+            backdrop = BoardAtmosphere.skyPalette(next, options.taintStrength(), false);
             exposureLighting = worldLighting;
             lighting = tune(worldLighting);
         }
@@ -331,7 +339,11 @@ final class GpuAtmosphere implements Disposable {
 
     private void updateLight(Camera camera, boolean tactical, boolean freeFlight) {
         // Exposure belongs to the canonical source; moving the displayed sun must not pump its meter.
-        exposureLighting = tactical ? BoardAtmosphere.TACTICAL : worldLighting;
+        if (tactical && tacticalLighting == null) {
+            tacticalLighting = BoardAtmosphere.TACTICAL.withEnvironment(
+                  GpuLightingEnvironment.generated(BoardLightingSky.generate(BoardAtmosphere.TACTICAL.skySource())));
+        }
+        exposureLighting = tactical ? tacticalLighting : worldLighting;
         lighting = tune(options.fixedSun() && !freeFlight && !tactical
               ? exposureLighting.relativeTo(camera) : exposureLighting);
     }
@@ -340,11 +352,21 @@ final class GpuAtmosphere implements Disposable {
         return base.tuned(options.shadowStrength(), options.ambientShare(), options.skyContribution(), options.environmentImage());
     }
 
+    private BoardAtmosphere.Lighting generateSky(BoardAtmosphere.Lighting base) {
+        if (!base.skySource().same(generatedSkySource)) {
+            // Build the complete replacement before publishing it; no old atlas/new ambient mixture.
+            generatedSky = GpuLightingEnvironment.generated(BoardLightingSky.generate(base.skySource()));
+            generatedSkySource = base.skySource();
+        }
+        return base.withEnvironment(generatedSky);
+    }
+
     void setOptions(Options options) {
         if (!this.options.equals(options)) { invalidateContrast(); }
         if (settings != null && (this.options.moonShadowContrast() != options.moonShadowContrast()
               || this.options.taintStrength() != options.taintStrength())) {
-            worldLighting = BoardAtmosphere.lighting(settings, options.moonShadowContrast(), options.taintStrength());
+            worldLighting = generateSky(BoardAtmosphere.lighting(settings, options.moonShadowContrast(), options.taintStrength()));
+            backdrop = BoardAtmosphere.skyPalette(settings, options.taintStrength(), false);
         }
         if (this.options.whiteBalance() != options.whiteBalance() || this.options.tint() != options.tint()) {
             // Relative cool/warm and green/magenta gains, normalized to preserve a neutral gray's luminance.
@@ -361,13 +383,18 @@ final class GpuAtmosphere implements Disposable {
         }
     }
 
-    /** Printable board exports preserve coverage instead of adding a viewport-relative sky gradient. */
+    /** Board-cutout PNGs preserve coverage; additive light outside that coverage has no straight-alpha representation. */
     void setTransparentBackground(boolean enabled) { transparentBackground = enabled; }
 
     /** The backdrop: the visible sky palette, or with "Show lighting sky" the sky that lights the scene. */
     private Color backdropSky() { return options.lightingSky() ? lighting.environmentSky() : lighting.sky(); }
 
     private Color backdropHorizon() { return options.lightingSky() ? lighting.environmentHorizon() : lighting.horizon(); }
+
+    /** Subtract exactly the half-float clear that was stored, so adaptation cannot reveal rounding residue. */
+    private static float clearComponent(float radiance) {
+        return Float.float16ToFloat(Float.floatToFloat16(radiance * GpuSceneRadiance.SCALE)) / GpuSceneRadiance.SCALE;
+    }
 
     /** SMAA on the window's composite (not on offscreen targets); turning it off releases its targets. */
     void setAntiAliasing(boolean enabled) {
@@ -390,6 +417,7 @@ final class GpuAtmosphere implements Disposable {
         // Cloud cover changes uniforms, not the surface program or its preparation requirements.
         if (clouds == null) { clouds = new GpuClouds(quad); }
         clouds.shadow().enabled = cloudsActive;
+        clouds.shadow().reflection = settings.clouds() > 0;
         terrain.environment().set(clouds.shadow());
     }
 
@@ -413,7 +441,7 @@ final class GpuAtmosphere implements Disposable {
     /** Prepare clouds after the final camera/light update; cameras share their field and wind timeline. */
     void prepareClouds(GpuTerrain terrain, BoardScene board, float delta) {
         configureClouds(terrain, board);
-        if (cloudsActive) {
+        if (clouds.shadow().reflection) {
             clouds.update(settings, lighting, board, delta, options.cloudShadowStrength(settings.clouds()));
         }
     }
@@ -469,10 +497,10 @@ final class GpuAtmosphere implements Disposable {
         groundMotion.advance(settings.effects(), delta, options.fogCalmDrift());
         sceneColor.begin();
         Gdx.gl.glDepthMask(true);
-        // Background alpha distinguishes the sky from transparent scene color.
-        Color sky = backdropSky();
-        ScreenUtils.clear(sky.r * GpuSceneRadiance.SCALE, sky.g * GpuSceneRadiance.SCALE,
-              sky.b * GpuSceneRadiance.SCALE, 0, true);
+        // A cutout accumulates associated foreground from transparent black; it has no sky matte to remove.
+        Color sky = transparentBackground ? Color.BLACK : backdropSky();
+        ScreenUtils.clear(clearComponent(sky.r) * GpuSceneRadiance.SCALE, clearComponent(sky.g) * GpuSceneRadiance.SCALE,
+              clearComponent(sky.b) * GpuSceneRadiance.SCALE, 0, true);
     }
 
     static FrameBuffer buffer(int width, int height, boolean depth) {
@@ -593,8 +621,14 @@ final class GpuAtmosphere implements Disposable {
         compositeShader.setUniformf("u_whiteBalanceShift", whiteBalanceShift);
         compositeShader.setUniformf("u_colorAdjust", options.saturation() - 1, options.contrast() - 1);
         Color sky = backdropSky(), horizon = backdropHorizon();
-        compositeShader.setUniformf("u_sky", sky.r, sky.g, sky.b);
+        compositeShader.setUniformf("u_sky", clearComponent(sky.r), clearComponent(sky.g), clearComponent(sky.b));
         compositeShader.setUniformf("u_horizon", horizon.r, horizon.g, horizon.b);
+        // The UI-authored backdrop is independent of illumination adaptation. The optional lighting-sky view
+        // continues to show the actual incident environment, including its panorama and world-space horizon.
+        var visible = exposureLighting == tacticalLighting ? TACTICAL_BACKDROP : backdrop;
+        compositeShader.setUniformf("u_backdropSky", visible.sky().r, visible.sky().g, visible.sky().b);
+        compositeShader.setUniformf("u_backdropHorizon", visible.horizon().r, visible.horizon().g, visible.horizon().b);
+        compositeShader.setUniformf("u_backdropExposure", options.lightingSky() ? 0 : (float) Math.pow(2, settings.exposure()));
         // With "Show lighting sky", the lighting image fills the background as the lit surfaces see it.
         var environment = options.lightingSky() && lighting.environmentImage() != null && terrain != null
               ? terrain.environment().get(GpuEnvironmentLighting.class, GpuEnvironmentLighting.TYPE) : null;
@@ -917,14 +951,15 @@ final class GpuAtmosphere implements Disposable {
         fogShader.setUniformf("u_sunDirection", -lighting.direction().x, -lighting.direction().y, -lighting.direction().z);
         fogShader.setUniformf("u_cloudEnabled", 0);
         fogShader.setUniformi("u_cloudShadow", 0);
-        fogShader.setUniformi("u_geometryShadow", 0);
+        // A comparison sampler must never alias the ordinary depth sampler, even while rays are disabled.
+        fogShader.setUniformi("u_geometryShadow", 2);
+        fogShader.setUniformf("u_hasGeometryShadow", 0);
         if (hasRays()) {
             clouds.bindShadow(fogShader, 1);
             var geometryShadow = terrain.environment().shadowMap;
             fogShader.setUniformf("u_hasGeometryShadow", geometryShadow == null ? 0 : 1);
             if (geometryShadow != null) {
                 geometryShadow.getDepthMap().texture.bind(2);
-                fogShader.setUniformi("u_geometryShadow", 2);
                 fogShader.setUniformMatrix("u_geometryProjection", geometryShadow.getProjViewTrans());
             }
         }

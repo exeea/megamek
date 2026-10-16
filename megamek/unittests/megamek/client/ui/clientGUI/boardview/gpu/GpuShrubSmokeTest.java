@@ -9,8 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.HashMap;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
 
@@ -98,7 +100,7 @@ class GpuShrubSmokeTest {
                             // the selected level's geometry.
                             terrain.refreshShadows();
                             int shadow = count(profiler, () -> terrain.renderShadows(camera.camera, List.of()));
-                            int colour = count(profiler, () -> terrain.render(camera.camera, false));
+                            int colour = colour(profiler, terrain, camera);
                             int depthCount = count(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth));
                             if (lod == 0) { nearColour = colour; nearDepth = depthCount; }
                             assertEquals(3 * (triangles[0] - triangles[lod]), nearColour - colour, family);
@@ -138,6 +140,14 @@ class GpuShrubSmokeTest {
             }
         }, GpuBoardWindow.configuration(false));
         assertNull(failure.get(), () -> String.valueOf(failure.get()));
+    }
+
+    /** The colour pass's own geometry: the depth pre-pass, on by default, submits the trees a second time. */
+    private static int colour(GLProfiler profiler, GpuTerrain terrain, BoardCamera camera) {
+        Set<GpuTerrain.Prepass> prepass = GpuTerrain.depthPrepass;
+        GpuTerrain.depthPrepass = EnumSet.noneOf(GpuTerrain.Prepass.class);
+        try { return count(profiler, () -> terrain.render(camera.camera, false)); }
+        finally { GpuTerrain.depthPrepass = prepass; }
     }
 
     private static int count(GLProfiler profiler, Runnable draw) {

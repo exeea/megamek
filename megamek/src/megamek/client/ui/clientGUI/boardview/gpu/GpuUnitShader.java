@@ -46,6 +46,7 @@ final class GpuUnitShader extends DefaultShader {
             if (environment != null) { environment.texture(); }
         }
         GpuLavaLighting.register(this);
+        GpuAmbientOcclusion.register(this);
         GpuModelMaterial.register(this);
         register("u_normalMaps", new BaseShader.GlobalSetter() {
             @Override
@@ -127,6 +128,15 @@ final class GpuUnitShader extends DefaultShader {
      */
     static String linearFragment(String source) {
         source = GpuGlsl.libGdx(source, false);
+        // Reuse libGDX's shadow sampler and descriptor for models too; every caller supplies the same D24 map.
+        source = replaceOnce(source, "uniform sampler2D u_shadowTexture;",
+              "uniform sampler2DShadow u_shadowTexture;", "model shadow sampler");
+        source = replaceOnce(source,
+              "const vec4 bitShifts = vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0);",
+              "// Comparison and filtering belong to the depth texture.", "model shadow decode");
+        source = replaceOnce(source,
+              "step(v_shadowMapUv.z, dot(texture(u_shadowTexture, v_shadowMapUv.xy + offset), bitShifts))",
+              "texture(u_shadowTexture, vec3(v_shadowMapUv.xy + offset, v_shadowMapUv.z))", "model shadow compare");
         source = replaceOnce(source, MAIN, "// model-lighting-functions\n" + GpuShaderSource.modelLighting() + "\n" + MAIN
               + "\n#if defined(normalFlag) && defined(lightingFlag)\n"
               + "vec3 modelView = u_modelView.w > .5 ? normalize(u_cameraPosition.xyz - v_cloudPosition)"

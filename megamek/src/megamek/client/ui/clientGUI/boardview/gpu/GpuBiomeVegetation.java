@@ -834,8 +834,8 @@ final class GpuBiomeVegetation implements Disposable {
                   front ? PLANT_FILL : ALONG_FILL);
         }
         // The heads fill roughly the top quarter of the stalks.
-        canopy.draw(rows, 0, 10, ROW_PIXELS, 123, 0, 0, 512, 128);
-        canopy.draw(rows, 0, 512, ROW_PIXELS, 128, 0, 128, 512, 128);
+        canopy.drawCutout(rows, 0, 10, ROW_PIXELS, 123, 0, 0, 512, 128);
+        canopy.drawCutout(rows, 0, 512, ROW_PIXELS, 128, 0, 128, 512, 128);
         rows.bleed(0, 512);
         rows.bleed(512, 640);
         canopy.bleed(0, 128);
@@ -895,7 +895,7 @@ final class GpuBiomeVegetation implements Disposable {
                 int top = overhead ? Math.round(y + height / 2f + (plant.top - plant.y) * sy) : y;
                 int width = Math.max(1, Math.round((plant.right - plant.left + 1) * sx));
                 int drawnHeight = overhead ? Math.max(1, Math.round((plant.bottom - plant.top + 1) * sy)) : height;
-                target.draw(pixels, plant.left, plant.top, plant.right - plant.left + 1,
+                target.drawCutout(pixels, plant.left, plant.top, plant.right - plant.left + 1,
                       overhead ? plant.bottom - plant.top + 1 : plant.y - plant.top + 1,
                       left, top, width, drawnHeight);
             }
@@ -915,7 +915,7 @@ final class GpuBiomeVegetation implements Disposable {
               "models/board/textures/vegetation/" + name + ".png")));
         try {
             var pixels = new GpuLinearImage(512, 512);
-            pixels.draw(new GpuLinearImage(source), 0, 0, source.getWidth(), source.getHeight(), 0, 0, 512, 512);
+            pixels.drawCutout(new GpuLinearImage(source), 0, 0, source.getWidth(), source.getHeight(), 0, 0, 512, 512);
             return filteredTexture(pixels);
         } finally { source.dispose(); }
     }

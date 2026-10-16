@@ -105,7 +105,7 @@ class GpuSamplerBudgetSmokeTest {
         assertTrue(!combined.isEmpty(), "Reach the combined sculpt ice/volcanic material: " + used.keySet());
         for (var program : combined) {
             for (String sampler : List.of("u_terrainLayers", "u_terrainData", "u_magmaColor", "u_magmaMaps",
-                  "u_iceColor", "u_iceNormal", "u_iceSurface", "u_environmentLut")) {
+                  "u_iceColor", "u_iceMaps", "u_environmentLut")) {
                 assertTrue(program.getKey().contains(sampler), "Combined program must sample " + sampler + ": " + program);
             }
         }

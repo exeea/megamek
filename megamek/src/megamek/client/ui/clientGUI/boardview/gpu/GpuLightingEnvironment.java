@@ -12,7 +12,7 @@ import com.badlogic.gdx.graphics.Color;
 import org.lwjgl.stb.STBImage;
 import org.lwjgl.system.MemoryStack;
 
-/** A window's optional lighting panorama. CPU filtering runs once off the render thread, never per frame. */
+/** A window's lighting panorama. Imported images filter off-thread; small generated skies rebuild on control changes. */
 final class GpuLightingEnvironment {
     static final int ATLAS_SIZE = 512;
     static final int WIDTH = 128, HEIGHT = 64, LEVELS = 6, TOP = 130;
@@ -20,14 +20,27 @@ final class GpuLightingEnvironment {
     private final float[] pixels;
     private final Color upward;
     final String name;
+    /** Generated skies leave the lower hemisphere to the receiving material's existing ground bounce. */
+    final boolean generated;
 
     private GpuLightingEnvironment(String name, float[] source, int width, int height) {
+        this(name, source, width, height, false, null);
+    }
+
+    private GpuLightingEnvironment(String name, float[] source, int width, int height, boolean generated, Color diffuse) {
         this.name = name;
-        pixels = filter(source, width, height);
+        this.generated = generated;
+        pixels = filter(source, width, height, generated, diffuse);
         upward = new Color();
         int at = ((TOP + (LEVELS - 1) / 3 * (HEIGHT + 2) + 1) * ATLAS_SIZE
               + (LEVELS - 1) % 3 * (WIDTH + 2) + 1) * 4;
         upward.r = pixels[at]; upward.g = pixels[at + 1]; upward.b = pixels[at + 2]; upward.a = 1;
+        if (diffuse != null) { upward.set(diffuse); }
+    }
+
+    static GpuLightingEnvironment generated(BoardLightingSky.Result sky) {
+        return new GpuLightingEnvironment("Generated atmospheric lighting", sky.radiance(),
+              BoardLightingSky.WIDTH, BoardLightingSky.HEIGHT, true, sky.upward());
     }
 
     static GpuLightingEnvironment load(Path path) throws IOException {
@@ -85,35 +98,77 @@ final class GpuLightingEnvironment {
         }
     }
 
-    private static float[] filter(float[] source, int width, int height) {
+    private static float[] filter(float[] source, int width, int height, boolean generated, Color diffuse) {
         float[] result = new float[ATLAS_SIZE * ATLAS_SIZE * 4];
+        float[] hemisphere = generated ? hemisphere(source, width, height) : null;
         for (int level = 0; level < LEVELS; level++) {
+            // This sky has smooth scattering lobes and no disks. Filter its rough levels on a small grid,
+            // then interpolate into the same atlas; imported panoramas retain their full-resolution filtering.
+            boolean compact = generated && level > 0;
+            int columns = compact ? 32 : WIDTH, rows = compact ? 16 : HEIGHT;
+            int sampleCount = generated ? 32 : SAMPLES;
+            float[] filtered = compact ? new float[columns * rows * 3] : result;
             double a2 = Math.pow((double) level / (LEVELS - 1), 4);
-            double[] lx = new double[SAMPLES], ly = new double[SAMPLES], lz = new double[SAMPLES];
-            for (int i = 0; i < SAMPLES; i++) {
-                double u = (i + .5) / SAMPLES, phi = 2 * Math.PI * (Integer.reverse(i) & 0xffffffffL) / 4294967296.0;
+            double[] lx = new double[sampleCount], ly = new double[sampleCount], lz = new double[sampleCount];
+            for (int i = 0; i < sampleCount; i++) {
+                double u = (i + .5) / sampleCount, phi = 2 * Math.PI * (Integer.reverse(i) & 0xffffffffL) / 4294967296.0;
                 double hz = Math.sqrt((1 - u) / (1 + (a2 - 1) * u));
                 double radial = Math.sqrt(Math.max(0, 1 - hz * hz));
                 lx[i] = 2 * hz * radial * Math.cos(phi); ly[i] = 2 * hz * radial * Math.sin(phi);
                 lz[i] = 2 * hz * hz - 1;
             }
-            for (int y = 0; y < HEIGHT; y++) {
-                double theta = Math.PI * (y + .5) / HEIGHT, nz = Math.cos(theta), radial = Math.sin(theta);
-                for (int x = 0; x < WIDTH; x++) {
-                    double phi = 2 * Math.PI * ((x + .5) / WIDTH - .5), cp = Math.cos(phi), sp = Math.sin(phi);
-                    int at = ((TOP + level / 3 * (HEIGHT + 2) + y + 1) * ATLAS_SIZE
-                          + level % 3 * (WIDTH + 2) + x + 1) * 4;
+            for (int y = 0; y < rows; y++) {
+                double theta = Math.PI * (y + .5) / rows, nz = Math.cos(theta), radial = Math.sin(theta);
+                for (int x = 0; x < columns; x++) {
+                    double phi = 2 * Math.PI * ((x + .5) / columns - .5), cp = Math.cos(phi), sp = Math.sin(phi);
+                    int at = compact ? (y * columns + x) * 3
+                          : ((TOP + level / 3 * (HEIGHT + 2) + y + 1) * ATLAS_SIZE
+                                + level % 3 * (WIDTH + 2) + x + 1) * 4;
                     double weight = 0;
-                    int samples = level == 0 ? 1 : SAMPLES;
-                    for (int i = 0; i < samples; i++) {
-                        if (lz[i] <= 0) { continue; }
-                        sample(source, width, height, radial * cp * lz[i] - sp * lx[i] - nz * cp * ly[i],
-                              radial * sp * lz[i] + cp * lx[i] - nz * sp * ly[i], nz * lz[i] + radial * ly[i],
-                              (float) lz[i], result, at);
-                        weight += lz[i];
+                    int samples = level == 0 ? 1 : sampleCount;
+                    if (generated && level == LEVELS - 1) {
+                        // At roughness one GGX's normalized environment kernel is the diffuse cosine kernel.
+                        // Direct quadrature avoids a sparse stochastic lobe bias in the map's diffuse light.
+                        for (int i = 0; i < hemisphere.length; i += 6) {
+                            float cosine = (float) (radial * cp * hemisphere[i] + radial * sp * hemisphere[i + 1]
+                                  + nz * hemisphere[i + 2]);
+                            if (cosine <= 0) { continue; }
+                            for (int c = 0; c < 3; c++) { filtered[at + c] += cosine * hemisphere[i + 3 + c]; }
+                        }
+                    } else {
+                        for (int i = 0; i < samples; i++) {
+                            if (lz[i] <= 0) { continue; }
+                            sample(source, width, height, radial * cp * lz[i] - sp * lx[i] - nz * cp * ly[i],
+                                  radial * sp * lz[i] + cp * lx[i] - nz * sp * ly[i], nz * lz[i] + radial * ly[i],
+                                  (float) lz[i], filtered, at);
+                            weight += lz[i];
+                        }
+                        for (int c = 0; c < 3; c++) { filtered[at + c] /= (float) weight; }
                     }
-                    for (int c = 0; c < 3; c++) { result[at + c] /= (float) weight; }
-                    result[at + 3] = 1;
+                    if (!compact) { result[at + 3] = 1; }
+                }
+            }
+            if (compact) {
+                for (int y = 0; y < HEIGHT; y++) {
+                    double theta = Math.PI * (y + .5) / HEIGHT, z = Math.cos(theta), radial = Math.sin(theta);
+                    for (int x = 0; x < WIDTH; x++) {
+                        double phi = 2 * Math.PI * ((x + .5) / WIDTH - .5);
+                        int at = ((TOP + level / 3 * (HEIGHT + 2) + y + 1) * ATLAS_SIZE
+                              + level % 3 * (WIDTH + 2) + x + 1) * 4;
+                        sample(filtered, columns, rows, radial * Math.cos(phi), radial * Math.sin(phi), z, 1, result, at);
+                        result[at + 3] = 1;
+                    }
+                }
+            }
+            if (generated && level == LEVELS - 1) {
+                // Longitude is undefined at a pole. Use its exact integral throughout the first half-pixel cap,
+                // rather than letting the small filter grid tilt level-ground illumination with its azimuth.
+                for (int x = 0; x < WIDTH; x++) {
+                    int top = ((TOP + level / 3 * (HEIGHT + 2) + 1) * ATLAS_SIZE
+                          + level % 3 * (WIDTH + 2) + x + 1) * 4;
+                    int bottom = top + (HEIGHT - 1) * ATLAS_SIZE * 4;
+                    result[top] = diffuse.r; result[top + 1] = diffuse.g; result[top + 2] = diffuse.b;
+                    result[bottom] = 0; result[bottom + 1] = 0; result[bottom + 2] = 0;
                 }
             }
             for (int y = 0; y < HEIGHT + 2; y++) {
@@ -128,6 +183,23 @@ final class GpuLightingEnvironment {
             }
         }
         return result;
+    }
+
+    /** Upper-hemisphere quadrature directions and RGB radiance times solid angle / pi. */
+    private static float[] hemisphere(float[] source, int width, int height) {
+        float[] samples = new float[width * height / 2 * 6];
+        for (int y = 0; y < height / 2; y++) {
+            double theta = Math.PI * (y + .5) / height, z = Math.cos(theta), radial = Math.sin(theta);
+            double weight = 2.0 / width * (Math.cos(Math.PI * y / height) - Math.cos(Math.PI * (y + 1) / height));
+            for (int x = 0; x < width; x++) {
+                double phi = 2 * Math.PI * ((x + .5) / width - .5);
+                int at = (y * width + x) * 6;
+                samples[at] = (float) (radial * Math.cos(phi)); samples[at + 1] = (float) (radial * Math.sin(phi));
+                samples[at + 2] = (float) z;
+                for (int c = 0; c < 3; c++) { samples[at + 3 + c] = (float) (source[(y * width + x) * 3 + c] * weight); }
+            }
+        }
+        return samples;
     }
 
     private static void sample(float[] source, int width, int height, double x, double y, double z,

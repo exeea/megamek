@@ -36,7 +36,6 @@ import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
 import megamek.common.Configuration;
 import megamek.common.board.TilesetScenery;
-import org.lwjgl.opengl.GL11;
 
 /** GL-thread ownership of shared models, repeating terrain materials, and animated liquid frames. */
 final class GpuAssets implements Disposable {
@@ -56,12 +55,13 @@ final class GpuAssets implements Disposable {
     private final Map<String, Texture> materials = new HashMap<>();
     private final Map<String, Cliff> cliffs = new HashMap<>();
     private final Map<Boolean, MaterialArrays> magmas = new HashMap<>();
+    private LavaEmission lavaEmission;
     private final Map<String, Sculpt> sculpts = new HashMap<>();
     private final Map<String, JsonValue> sculptEntries = new HashMap<>();
     private MaterialArrays sculptArray;
-    private float[] sculptNormalSpread;
     private SculptRoughness sculptRoughness;
     private MaterialArrays roadArray;
+    private Ice ice;
     private final Map<BoardLiquid.Textures, Animation<Texture>> liquids = new HashMap<>();
     private BoardScene.Pixels incline;
     private BoardScene.Pixels highIncline;
@@ -71,10 +71,13 @@ final class GpuAssets implements Disposable {
     /** Three aligned, repeating maps. Surface channels are height, roughness, occlusion and relief range. */
     record Cliff(Texture color, Texture normal, Texture surface) { }
 
+    /** The ice sheet's colour, and its aligned normal and surface maps as layers 0 and 1 of one array. */
+    record Ice(Texture color, TextureArray maps) { }
+
     /**
      * Molten lava's or solid crust's aligned maps in separate colour and numerical arrays:
-     * colour; normal; surface (height, roughness, occlusion, relief range); heat (R heat, GB signed flow, A heat
-     * bleeding onto crack walls). Enhanced materials require the complete set.
+     * colour; normal; surface (height, roughness, occlusion, relief range); heat. Molten heat is normalized linear
+     * emission RGB with original heat coverage in A; crust retains R heat and A crack glow. Both require complete sets.
      */
     MaterialArrays magma(boolean molten) {
         if (magmas.containsKey(molten)) { return magmas.get(molten); }
@@ -85,6 +88,37 @@ final class GpuAssets implements Disposable {
         MaterialArrays maps = repeatingArray(files, 4);
         magmas.put(molten, maps);
         return maps;
+    }
+
+    /** The exported linear emission's scale and area mean, owned with the corresponding material maps. */
+    record LavaEmission(float scale, float red, float green, float blue) { }
+
+    LavaEmission lavaEmission() {
+        if (lavaEmission != null) { return lavaEmission; }
+        FileHandle definition = new FileHandle(new File(root, "textures/terrain/lava/lava.json"));
+        FileHandle image = materialFile("terrain/lava/lava-heat");
+        requireFiles(List.of(definition, image));
+        JsonValue value = new JsonReader().parse(definition).get("emissionScale");
+        if (value == null || !value.isNumber() || !Float.isFinite(value.asFloat()) || value.asFloat() < 0) {
+            throw new IllegalArgumentException("Lava emissionScale must be finite and nonnegative: " + definition);
+        }
+        float scale = value.asFloat();
+        Pixmap pixels = GpuColorTexture.decode(image);
+        try {
+            long red = 0, green = 0, blue = 0;
+            for (int y = 0; y < pixels.getHeight(); y++) {
+                for (int x = 0; x < pixels.getWidth(); x++) {
+                    int rgba = pixels.getPixel(x, y);
+                    red += rgba >>> 24;
+                    green += (rgba >>> 16) & 255;
+                    blue += (rgba >>> 8) & 255;
+                }
+            }
+            // RGB already contains the authored heat/crack/exposed coverage. Alpha must not weight it again.
+            double factor = scale / (255.0 * pixels.getWidth() * pixels.getHeight());
+            lavaEmission = new LavaEmission(scale, (float) (red * factor), (float) (green * factor), (float) (blue * factor));
+            return lavaEmission;
+        } finally { pixels.dispose(); }
     }
 
     /**
@@ -103,35 +137,8 @@ final class GpuAssets implements Disposable {
                 files.add(materialFile("terrain/surfaces/" + name + "-normal"));
             }
             sculptArray = repeatingArray(files, 2);
-            sculptNormalSpread = normalSpread(sculptArray.data(), names.size());
         }
         return sculptArray;
-    }
-
-    /**
-     * Per sculpt material, in the array's order, the normal variance its whole normal map holds: the Toksvig term of
-     * its coarsest mip, which averages all of the map (light-model.glsl normalMapVariance). Terrain whose normal
-     * detail has faded with distance keeps this spread in its highlights. Zero-padded to whole vec4s.
-     */
-    float[] sculptNormalSpread(List<String> names) {
-        sculptArray(names);
-        return sculptNormalSpread;
-    }
-
-    /** Reads back the 1x1 mip of every layer once, after the array generated its mipmaps; light-model.glsl's floor. */
-    private static float[] normalSpread(TextureArray array, int materials) {
-        int level = 31 - Integer.numberOfLeadingZeros(Math.max(array.getWidth(), array.getHeight()));
-        float[] texels = new float[4 * array.getDepth()];
-        array.bind();
-        GL11.glGetTexImage(GL30.GL_TEXTURE_2D_ARRAY, level, GL20.GL_RGBA, GL20.GL_FLOAT, texels);
-        float[] spread = new float[(materials + 3) / 4 * 4];
-        for (int material = 0; material < materials; material++) {
-            int normal = material * 4;
-            float x = texels[normal] * 2 - 1, y = texels[normal + 1] * 2 - 1, z = texels[normal + 2] * 2 - 1;
-            float length = (float) Math.sqrt(x * x + y * y + z * z);
-            spread[material] = Math.max(0, (1 - Math.min(length, 1)) / Math.max(length, 1e-4f) - .005f);
-        }
-        return spread;
     }
 
     /** Optional authored scalar/map metadata in the same stable material order as the sculpt array. */
@@ -688,8 +695,17 @@ final class GpuAssets implements Disposable {
         return relief("roads", name);
     }
 
-    Cliff ice() {
-        return relief("terrain/ice", "sheet");
+    Ice ice() {
+        if (ice == null) {
+            FileHandle color = materialFile("terrain/ice/sheet");
+            List<FileHandle> maps = List.of(materialFile("terrain/ice/sheet-normal"), materialFile("terrain/ice/sheet-surface"));
+            requireFiles(List.of(color, maps.get(0), maps.get(1)));
+            var first = GpuColorTexture.decode(maps.getFirst());
+            int width = first.getWidth(), height = first.getHeight();
+            first.dispose();
+            ice = new Ice(texture(color, true), repeatingArray(new MaterialArrayData(maps, width, height, false)));
+        }
+        return ice;
     }
 
     private Cliff relief(String folder, String family) {
@@ -962,11 +978,13 @@ final class GpuAssets implements Disposable {
         cliffs.clear();
         magmas.values().forEach(MaterialArrays::dispose);
         magmas.clear();
+        lavaEmission = null;
         sculpts.clear();
         sculptEntries.clear();
         if (sculptArray != null) { sculptArray.dispose(); sculptArray = null; }
         if (sculptRoughness != null) { sculptRoughness.maps().dispose(); sculptRoughness = null; }
         if (roadArray != null) { roadArray.dispose(); roadArray = null; }
+        if (ice != null) { ice.maps().dispose(); ice = null; }
         liquids.clear();
         users.clear();
         incline = null;

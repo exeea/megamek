@@ -167,6 +167,7 @@ final class GpuShaderPreview implements Disposable {
                   GpuColor.linear(.065f) * backdropScale,
                   GpuColor.linear(.085f) * backdropScale, 1, true);
             positionCamera(settings);
+            GpuEnvironmentLighting.applyAntialiasing(light);
             batch.begin(camera);
             batch.render(floor, light);
             if (preset == Preset.MATERIAL) {

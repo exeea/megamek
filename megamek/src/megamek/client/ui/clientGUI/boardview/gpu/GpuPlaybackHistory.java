@@ -230,7 +230,14 @@ final class GpuPlaybackHistory {
     void reviewTo(Step step) {
         if (step.equals(cursor)) {
             cursor = null;
-        } else if (playedSet.contains(step)) {
+        } else {
+            replayStep(step);
+        }
+    }
+
+    /** A report's Replay: presents only this step, even when already selected, and leaves the cursor on it. */
+    void replayStep(Step step) {
+        if (playedSet.contains(step)) {
             replaying = false;
             if (running()) {
                 pause();

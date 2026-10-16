@@ -172,7 +172,8 @@ class GpuShaderReloadTest {
               "terrain-road.frag", "water-fall.frag", "water-spray.frag", "water-cut.frag",
               "weather-particles.vert", "weather-particles.frag", "weather-rain.glsl", "weather-snow.glsl",
               "weather-hail.glsl", "weather-sand.glsl", "particles-smoke.glsl", "particles-fire.glsl", "particles-jet.glsl",
-              "terrain-projection.glsl", "terrain-concrete.glsl", "lava-lighting.glsl", "atmosphere-fov.glsl", "atmosphere-grade.glsl",
+              "terrain-projection.glsl", "terrain-concrete.glsl", "surface-shading.glsl", "lava-lighting.glsl",
+              "atmosphere-fov.glsl", "atmosphere-grade.glsl",
               "atmosphere-glare.glsl", "terrain-magma.glsl", "magma-solid.glsl", "magma-flow.glsl", "magma-lighting.glsl",
               "terrain-magma-solid.frag", "terrain-magma-flow.frag", "ocean-finish.glsl",
               "ocean-water-finish.frag", "ocean-lava-finish.frag")
@@ -197,7 +198,8 @@ class GpuShaderReloadTest {
             case "weather-sand.glsl", "atmosphere-fov.glsl", "atmosphere-grade.glsl", "atmosphere-glare.glsl" ->
                   GpuAtmosphere.fragment("atmosphere-composite.frag");
             case "particles-smoke.glsl", "particles-fire.glsl", "particles-jet.glsl" -> GpuEffectBatch.fragment("particles.frag");
-            case "terrain-projection.glsl", "terrain-concrete.glsl" -> GpuTerrain.litFragment("terrain-sculpt.frag");
+            case "terrain-projection.glsl", "terrain-concrete.glsl", "surface-shading.glsl" ->
+                  GpuTerrain.litFragment("terrain-sculpt.frag");
             case "lava-lighting.glsl" -> GpuTerrain.litFragment("terrain-sculpt.frag")
                   + GpuUnitShader.linearFragment(DefaultShader.getDefaultFragmentShader());
             case "terrain-magma.glsl", "magma-solid.glsl" -> GpuTerrain.litFragment("terrain-sculpt.frag")

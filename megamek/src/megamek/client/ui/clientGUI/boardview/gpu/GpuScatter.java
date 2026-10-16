@@ -86,7 +86,7 @@ final class GpuScatter {
               .rotate(Vector3.Z, feature.rotation())
               .scale(feature.scale() * BoardGeometry.hexScale(), feature.scale() * BoardGeometry.hexScale(),
                     feature.height() * BoardGeometry.level());
-        boolean stone = feature.asset().equals("scatter-rock") || feature.asset().equals("scatter-slab");
+        boolean stone = BoardScatter.stone(feature.asset());
         Color color = color(tile.surface(), feature.asset());
         float shade = 1;
         if (!stone) {

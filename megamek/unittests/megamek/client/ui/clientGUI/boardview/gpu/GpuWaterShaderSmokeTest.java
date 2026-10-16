@@ -42,6 +42,334 @@ class GpuWaterShaderSmokeTest {
     private static final Color BACKDROP = new Color(.04f, .06f, .08f, 1);
 
     @Test
+    void reflectedCloudsUseTheirOwnCoverageAndStillWaterKeepsSunlight() {
+        var failure = new AtomicReference<Throwable>();
+        var configuration = GpuBoardWindow.configuration(false);
+        configuration.setWindowedMode(640, 480);
+        configuration.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var manager = new GpuShaderManager();
+                try {
+                    String renderer = Gdx.gl.glGetString(GL20.GL_RENDERER);
+                    System.out.println("Water reflection renderer: " + renderer);
+                    String expected = System.getProperty("megamek.gpu.expectedRenderer", "");
+                    assertTrue(renderer.contains(expected), "Expected renderer " + expected + ", actual " + renderer);
+                    manager.run(() -> checkReflectedClouds(manager));
+                } catch (Throwable error) { failure.set(error); }
+                finally { manager.close(); Gdx.app.exit(); }
+            }
+        }, configuration);
+        if (failure.get() != null) { throw new AssertionError("Water cloud/static reflection", failure.get()); }
+    }
+
+    private static void checkReflectedClouds(GpuShaderManager manager) {
+        var terrain = new GpuTerrain();
+        var pixmap = new Pixmap(128, 128, Pixmap.Format.RGBA8888);
+        pixmap.setColor(1, 0, 1, 1);
+        pixmap.fill();
+        var texture = new com.badlogic.gdx.graphics.Texture(pixmap, true);
+        texture.setFilter(com.badlogic.gdx.graphics.Texture.TextureFilter.MipMapLinearLinear,
+              com.badlogic.gdx.graphics.Texture.TextureFilter.Linear);
+        var projection = new com.badlogic.gdx.math.Matrix4();
+        float width = BoardGeometry.width();
+        projection.val[com.badlogic.gdx.math.Matrix4.M00] = 1 / (40 * width);
+        projection.val[com.badlogic.gdx.math.Matrix4.M11] = 1 / (40 * width);
+        projection.val[com.badlogic.gdx.math.Matrix4.M03] = .5f;
+        projection.val[com.badlogic.gdx.math.Matrix4.M13] = .5f;
+        projection.val[com.badlogic.gdx.math.Matrix4.M22] = 1 / width;
+        projection.val[com.badlogic.gdx.math.Matrix4.M23] = -6;
+        var cloud = new GpuCloudShadow(texture, projection);
+        cloud.enabled = false;
+        cloud.reflection = true;
+        try (var output = new SceneOutput()) {
+            configureParity(terrain);
+            terrain.setWind(BoardAtmosphere.Effects.NONE);
+            terrain.environment().set(cloud);
+            String source = GpuShaderSource.read("water-lighting.glsl");
+            String point = ": pointReflectance(normal, light, view, roughness, vec3(.02037));";
+            assertEquals(1, source.split(java.util.regex.Pattern.quote(point), -1).length - 1);
+            String noPoint = source.replace(point, ": vec3(0.0);");
+            for (boolean falls : new boolean[] { false, true }) {
+                BoardScene scene = parityScene(falls);
+                terrain.setAtmosphere(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS));
+                terrain.update(scene);
+                terrain.animate(.37f, List.of());
+                for (boolean perspective : new boolean[] { false, true }) {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    camera.setPerspective(perspective);
+                    camera.setIsometric(true);
+                    camera.fit(scene);
+                    camera.update();
+                    var base = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
+                    Vector3 direction = new Vector3(-camera.camera.direction.x, -camera.camera.direction.y,
+                          camera.camera.direction.z).nor();
+                    var lighting = new BoardAtmosphere.Lighting(direction, base.direct(), base.ambient(),
+                          base.fog(), base.sky(), base.horizon(), base.tint(), base.saturation(), base.daylight(),
+                          base.sunlight(), 0, base.environmentSky(), base.environmentHorizon(), null, 1);
+                    terrain.setAtmosphere(lighting);
+                    terrain.setWaterEffects(true);
+                    cloud.reflection = false;
+                    for (int warmup = 0; warmup < 4; warmup++) { parityPixels(output, terrain, camera, true); }
+                    byte[] clear = parityPixels(output, terrain, camera, true);
+                    float[] clearScene = waterSceneReadback(output, false);
+                    float[] clearDepth = waterSceneReadback(output, true);
+                    cloud.reflection = true;
+                    setCloudCoverage(texture, pixmap, false);
+                    assertTrue(Arrays.equals(clear, parityPixels(output, terrain, camera, true)),
+                          "Zero cloud opacity must retain the existing complete water output");
+                    setCloudCoverage(texture, pixmap, true);
+                    byte[] reflected = parityPixels(output, terrain, camera, true);
+                    float[] reflectedScene = waterSceneReadback(output, false);
+                    int linearChanges = 0;
+                    for (int index = 0; index < reflectedScene.length; index++) {
+                        assertTrue(Float.isFinite(reflectedScene[index]), "Reflection stores finite RGBA16F values");
+                        if ((index & 3) == 3) {
+                            assertEquals(clearScene[index], reflectedScene[index], "Clouds do not change coverage alpha");
+                        } else if (Math.abs(clearScene[index] - reflectedScene[index]) > .00001f) { linearChanges++; }
+                    }
+                    assertTrue(linearChanges > 100, "Cloud reflection changes raw scene radiance before display");
+                    assertTrue(Arrays.equals(clearDepth, waterSceneReadback(output, true)),
+                          "Cloud reflection does not change opaque/picking depth");
+                    assertVisibleDifference(clear, reflected, "Coverage changes reflection while R/direct shadow stay fixed");
+                    assertTrue(Arrays.equals(reflected, parityPixels(output, terrain, camera, true)),
+                          "Frozen reflection repeats exactly");
+                    float offset = projection.val[com.badlogic.gdx.math.Matrix4.M03];
+                    projection.val[com.badlogic.gdx.math.Matrix4.M03] += .125f;
+                    assertVisibleDifference(reflected, parityPixels(output, terrain, camera, true),
+                          "The reflected layer follows its world projection");
+                    projection.val[com.badlogic.gdx.math.Matrix4.M03] = offset;
+                    assertTrue(Arrays.equals(reflected, parityPixels(output, terrain, camera, true)),
+                          "Restoring cloud projection restores the image");
+                    String label = (falls ? "falls" : "pool") + (perspective ? "-perspective" : "-ortho");
+                    savePixels(reflected, "water-cloud-reflection-" + label);
+                    checkCloudSourceScaling(output, terrain, camera, scene, cloud, lighting,
+                          clearScene, reflectedScene, clearDepth, label);
+                    assertTrue(Arrays.equals(reflected, parityPixels(output, terrain, camera, true)),
+                          "Restoring canonical illumination restores the cloud reflection");
+                    terrain.setWaterEffects(false);
+                    byte[] still = parityPixels(output, terrain, camera, true);
+                    cloud.reflection = false;
+                    assertTrue(Arrays.equals(still, parityPixels(output, terrain, camera, true)),
+                          "Effects-off skips cloud detail without removing base reflections");
+                    var result = manager.apply(Map.of("water-lighting.glsl", noPoint));
+                    assertTrue(result.success(), result.message());
+                    assertTrue(result.updated() > 0);
+                    assertVisibleDifference(parityPixels(output, terrain, camera, true), still,
+                          "Still water retains a real directional reflection");
+                    assertTrue(manager.apply(Map.of()).success());
+                    assertTrue(Arrays.equals(still, parityPixels(output, terrain, camera, true)),
+                          "Restoring the actual point reflection restores still water");
+                }
+            }
+            checkCloudCoverageOwnership(terrain);
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        } catch (ReflectiveOperationException error) { throw new AssertionError(error); }
+        finally {
+            try { manager.apply(Map.of()); }
+            finally {
+                terrain.dispose();
+                texture.dispose();
+                pixmap.dispose();
+            }
+        }
+    }
+
+    /** Check the actual cloud contribution in linear scene storage, independent of the display/background. */
+    private static void checkCloudSourceScaling(SceneOutput output, GpuTerrain terrain, BoardCamera camera,
+          BoardScene scene, GpuCloudShadow cloud, BoardAtmosphere.Lighting reference,
+          float[] clear, float[] reflected, float[] depth, String label) {
+        float[] referenceWater = nearestWaterDepthReadback(terrain);
+        int referenceWaterPixels = 0;
+        if (referenceWater != null) {
+            for (float value : referenceWater) { if (value < 1) { referenceWaterPixels++; } }
+        }
+        System.out.printf("Cloud source %s baseline: nearest-water pixels=%d target=%s%n",
+              label, referenceWaterPixels, referenceWater != null);
+        assertNotNull(referenceWater, "The full-source reference must render the nearest-water target");
+        assertTrue(referenceWaterPixels > 0, "The full-source nearest-water target cannot be empty");
+        assertEquals(depth.length, referenceWater.length, "Nearest-water and scene depth cover the same viewport");
+        double referenceEnergy = 0;
+        for (int index = 0; index < clear.length; index++) {
+            if ((index & 3) != 3) { referenceEnergy += Math.abs(reflected[index] - clear[index]); }
+        }
+        assertTrue(referenceEnergy > 0, "The reference must contain a measurable reflected-cloud contribution");
+        try {
+            for (float scale : new float[] { .5f, 0 }) {
+                // Scale only canonical sources; direction, backdrop, atmosphere presentation and cloud opacity stay fixed.
+                terrain.setAtmosphere(new BoardAtmosphere.Lighting(reference.direction(),
+                      new Color(reference.direct()).mul(scale, scale, scale, 1),
+                      new Color(reference.ambient()).mul(scale, scale, scale, 1),
+                      reference.fog(), reference.sky(), reference.horizon(), reference.tint(), reference.saturation(),
+                      reference.daylight(), reference.sunlight(), reference.shadowStrength(),
+                      new Color(reference.environmentSky()).mul(scale, scale, scale, 1),
+                      new Color(reference.environmentHorizon()).mul(scale, scale, scale, 1),
+                      null, reference.environmentGain()));
+                // A zero direct source changes the actual material variant; settle that existing preparation path.
+                terrain.update(scene);
+                cloud.reflection = false;
+                // Black input deliberately bypasses parityPixels' visible-terrain precondition.
+                output.draw(terrain, camera, true);
+                float[] withoutCloud = waterSceneReadback(output, false);
+                float[] withoutWater = nearestWaterDepthReadback(terrain);
+                cloud.reflection = true;
+                output.draw(terrain, camera, true);
+                byte[] shown = ScreenUtils.getFrameBufferPixels(0, 0, Gdx.graphics.getBackBufferWidth(),
+                      Gdx.graphics.getBackBufferHeight(), false);
+                float[] withCloud = waterSceneReadback(output, false);
+                float[] withWater = nearestWaterDepthReadback(terrain);
+                boolean depthEqual = Arrays.equals(depth, waterSceneReadback(output, true));
+                boolean waterDepthEqual = Arrays.equals(referenceWater, withoutWater)
+                      && Arrays.equals(referenceWater, withWater);
+                int withoutWaterPixels = 0, withWaterPixels = 0;
+                if (withoutWater != null) {
+                    for (float value : withoutWater) { if (value < 1) { withoutWaterPixels++; } }
+                }
+                if (withWater != null) {
+                    for (float value : withWater) { if (value < 1) { withWaterPixels++; } }
+                }
+                double energy = 0;
+                float maximumError = 0, maximumScene = 0;
+                boolean finite = true, alphaEqual = true;
+                for (int index = 0; index < withCloud.length; index++) {
+                    finite &= Float.isFinite(withCloud[index]) && Float.isFinite(withoutCloud[index]);
+                    if ((index & 3) == 3) {
+                        alphaEqual &= withCloud[index] == withoutCloud[index];
+                    } else {
+                        float contribution = withCloud[index] - withoutCloud[index];
+                        energy += Math.abs(contribution);
+                        maximumError = Math.max(maximumError,
+                              Math.abs(contribution - scale * (reflected[index] - clear[index])));
+                        maximumScene = Math.max(maximumScene, Math.max(Math.abs(withCloud[index]),
+                              Math.max(Math.abs(withoutCloud[index]),
+                                    scale * Math.max(Math.abs(reflected[index]), Math.abs(clear[index])))));
+                    }
+                }
+                double ratio = energy / referenceEnergy;
+                System.out.printf("Cloud source %s scale=%.1f: energy ratio=%.8f max error=%.8f scene=%.8f%n",
+                      label, scale, ratio, maximumError, maximumScene);
+                System.out.printf("Cloud source %s scale=%.1f: nearest-water off/on=%d/%d target=%s/%s equal=%s%n",
+                      label, scale, withoutWaterPixels, withWaterPixels,
+                      withoutWater != null, withWater != null, waterDepthEqual);
+                savePixels(shown, "water-cloud-source-" + label + "-" + scale);
+                assertTrue(finite, "Source scaling must retain finite raw scene values");
+                assertTrue(depthEqual, "Source scaling must retain opaque/picking depth");
+                assertTrue(waterDepthEqual,
+                      "Both cloud modes must retain the nonempty full-source water footprint and nearest depth");
+                assertTrue(alphaEqual, "Cloud source intensity cannot change coverage alpha");
+                if (scale == 0) {
+                    assertEquals(0, energy, "A black canonical source cannot produce a reflected cloud contribution");
+                } else {
+                    // Four RGBA16F readbacks and blending may round; the raw contribution must still scale by one half.
+                    assertTrue(maximumError <= .003f * maximumScene + .000002f,
+                          "Cloud radiance must scale before display, without a second gain or additive source");
+                    assertEquals(scale, ratio, .02, "Total reflected-cloud change must scale with source intensity");
+                }
+            }
+        } finally {
+            terrain.setAtmosphere(reference);
+            terrain.update(scene);
+            cloud.reflection = true;
+        }
+    }
+
+    /** Read the existing water-only depth target without allocating a target or disturbing texture bindings. */
+    private static float[] nearestWaterDepthReadback(GpuTerrain terrain) {
+        var texture = terrain.waterDepth();
+        if (texture == null) { return null; }
+        var values = com.badlogic.gdx.utils.BufferUtils.newFloatBuffer(texture.getWidth() * texture.getHeight());
+        int active = org.lwjgl.opengl.GL11.glGetInteger(GL20.GL_ACTIVE_TEXTURE);
+        Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
+        int binding = org.lwjgl.opengl.GL11.glGetInteger(GL20.GL_TEXTURE_BINDING_2D);
+        try {
+            texture.bind();
+            org.lwjgl.opengl.GL11.glGetTexImage(GL20.GL_TEXTURE_2D, 0, GL20.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, values);
+        } finally {
+            Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, binding);
+            Gdx.gl.glActiveTexture(active);
+        }
+        float[] result = new float[values.capacity()];
+        values.get(result);
+        return result;
+    }
+
+    private static float[] waterSceneReadback(SceneOutput output, boolean depth) {
+        output.scene.bind();
+        int width = output.scene.getWidth(), height = output.scene.getHeight();
+        var values = com.badlogic.gdx.utils.BufferUtils.newFloatBuffer(width * height * (depth ? 1 : 4));
+        Gdx.gl.glReadPixels(0, 0, width, height, depth ? GL20.GL_DEPTH_COMPONENT : GL20.GL_RGBA, GL20.GL_FLOAT, values);
+        float[] result = new float[values.capacity()];
+        values.get(result);
+        FrameBuffer.unbind();
+        return result;
+    }
+
+    private static void setCloudCoverage(com.badlogic.gdx.graphics.Texture texture, Pixmap pixels, boolean patterned) {
+        for (int y = 0; y < pixels.getHeight(); y++) {
+            for (int x = 0; x < pixels.getWidth(); x++) {
+                int coverage = patterned && ((x / 16 + y / 16) & 1) == 0 ? 255 : 0;
+                pixels.drawPixel(x, y, 0xff00ffff | coverage << 16);
+            }
+        }
+        texture.draw(pixels, 0, 0);
+        texture.bind(0);
+        Gdx.gl.glGenerateMipmap(GL20.GL_TEXTURE_2D);
+    }
+
+    private static void checkCloudCoverageOwnership(GpuTerrain terrain) throws ReflectiveOperationException {
+        var atmosphere = new GpuAtmosphere();
+        try {
+            BoardScene scene = parityScene(false);
+            var settings = new BoardAtmosphere.Settings(13, .65f, 0, 2.5f, 0, 0);
+            atmosphere.configure(settings);
+            atmosphere.prepareClouds(terrain, scene, 0);
+            var cloud = terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE);
+            assertTrue(cloud.enabled && cloud.reflection);
+            Field owner = GpuAtmosphere.class.getDeclaredField("clouds");
+            owner.setAccessible(true);
+            var clouds = (GpuClouds) owner.get(atmosphere);
+            Field target = GpuClouds.class.getDeclaredField("shadow");
+            target.setAccessible(true);
+            var buffer = (FrameBuffer) target.get(clouds);
+            int[] original = null;
+            for (float strength : new float[] { 1, 0 }) {
+                clouds.update(settings, BoardAtmosphere.lighting(settings), scene, 0, strength);
+                buffer.begin();
+                Pixmap read = Pixmap.createFromFrameBuffer(0, 0, buffer.getWidth(), buffer.getHeight());
+                buffer.end();
+                try {
+                    int[] coverage = new int[read.getWidth() * read.getHeight()];
+                    int nonempty = 0;
+                    for (int index = 0; index < coverage.length; index++) {
+                        int pixel = read.getPixel(index % read.getWidth(), index / read.getWidth());
+                        coverage[index] = pixel >>> 16 & 255;
+                        if (coverage[index] > 0) { nonempty++; }
+                        if (strength == 0) { assertEquals(255, pixel >>> 24); }
+                    }
+                    assertTrue(nonempty > 100, "Actual generated opacity must contain a cloud layer");
+                    if (original != null) {
+                        assertTrue(Arrays.equals(original, coverage), "Shadow strength cannot repaint reflected clouds");
+                    }
+                    original = coverage;
+                } finally { read.dispose(); }
+            }
+            var night = new BoardAtmosphere.Settings(0, .65f, 0, 2.5f, 0, 0,
+                  BoardAtmosphere.Effects.NONE, settings.pressure(), settings.temperature(), false);
+            atmosphere.configure(night);
+            atmosphere.prepareClouds(terrain, scene, 0);
+            assertSame(cloud, terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE));
+            assertFalse(cloud.enabled, "No moon casts no cloud shadow");
+            assertTrue(cloud.reflection, "The moonless cloud layer remains available to sky reflection");
+            assertEquals(0, cloud.projection.val[com.badlogic.gdx.math.Matrix4.M02],
+                  "Moonless preparation actually replaces the old directional atlas projection");
+            assertEquals(0, cloud.projection.val[com.badlogic.gdx.math.Matrix4.M12]);
+            assertTrue(((GpuCloudShadow) cloud.copy()).reflection);
+        } finally { atmosphere.dispose(); }
+    }
+
+    @Test
     void zeroScenarioGravityBuildsLunarTerrainInBothCamerasAndRestoresWater() {
         var failure = new AtomicReference<Throwable>();
         var configuration = GpuBoardWindow.configuration(false);

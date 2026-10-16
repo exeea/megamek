@@ -58,6 +58,11 @@ final class BoardScatter {
         return shape("stone-" + BoardRocks.name(slab || BoardRocks.blocks(surface), variant));
     }
 
+    /** Captured scatter that is loose stone rather than grass, plants or fungi. */
+    static boolean stone(String asset) {
+        return asset.equals("scatter-rock") || asset.equals("scatter-slab");
+    }
+
     static BoardShape bush(BoardScene.Surface surface, int variant) {
         return shape("bush-" + ((surface == BoardScene.Surface.GRASS || surface == BoardScene.Surface.TROPICAL ? BUSHES / 2 : 0)
               + Math.floorMod(variant, BUSHES / 2)));

@@ -136,7 +136,7 @@ final class GpuTilesetTerrain {
         }
     }
 
-    /** Zero-gravity tiles and fixtures without tileset art show their ground. */
+    /** Airless (lunar) tiles and fixtures without tileset art show their ground. */
     static BoardScene.Pixels art(BoardScene.Tile tile) {
         return tile.tileset() != null ? tile.tileset() : tile.ground();
     }

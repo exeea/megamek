@@ -247,7 +247,7 @@ class GpuTerrainLodSmokeTest {
             maximum = Math.max(maximum, elapsed);
             if (changed) { System.out.printf("LOD install %.3f ms%n", elapsed); }
             if (tactical != null && terrain.ready(scene)) { tactical.update(terrain.presentation(scene), changed); }
-            if (!changed && !terrain.busy()) {
+            if (!changed && !terrain.busy() && terrain.ready(scene)) {
                 System.out.printf("LOD maximum render-thread handoff %.3f ms%n", maximum);
                 return;
             }

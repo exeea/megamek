@@ -160,8 +160,18 @@ final class GpuColorTexture {
         @Override public boolean isManaged() { return managed; }
     }
 
-    /** Raw RGBA8 storage; only a required resize decodes, filters and re-encodes colour RGB. */
+    /**
+     * Raw RGBA8 storage; only a required resize decodes, filters and re-encodes colour RGB.
+     * Exact RGBA images borrow the Pixmap's bytes until the synchronous upload completes.
+     */
     static ByteBuffer arrayPixels(Pixmap source, int width, int height, boolean color) {
+        if (source.getWidth() == width && source.getHeight() == height
+              && source.getFormat() == Pixmap.Format.RGBA8888) {
+            var upload = source.getPixels().duplicate();
+            upload.position(0);
+            upload.limit(width * height * 4);
+            return upload;
+        }
         var upload = com.badlogic.gdx.utils.BufferUtils.newByteBuffer(width * height * 4);
         if (source.getWidth() == width && source.getHeight() == height) {
             for (int y = 0; y < height; y++) {

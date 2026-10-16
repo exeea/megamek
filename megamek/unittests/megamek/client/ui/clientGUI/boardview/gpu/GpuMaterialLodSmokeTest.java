@@ -261,6 +261,11 @@ class GpuMaterialLodSmokeTest {
                     camera.update();
                     assertTrue(manager.apply(Map.of()).success());
                     byte[] original = render(surface, terrain, camera);
+                    if (Boolean.getBoolean("megamek.gpu.materialMigrationReview")) {
+                        File output = new File(System.getProperty("megamek.gpu.screenshots"), "material-families");
+                        assertTrue(output.isDirectory() || output.mkdirs());
+                        GpuReviewFrame.save(new File(output, material + "-" + footprint + ".png"));
+                    }
                     if (List.of("desert", "mars", "volcano", "dirt", "rock", "lunar").contains(material)
                           && footprint < 1f) {
                         checkPlateauOutcrops(surface, manager, terrain, camera, original, material, footprint, outcropFailures);
@@ -276,11 +281,10 @@ class GpuMaterialLodSmokeTest {
                         // Molten emission dominates its reflected light; even a large normal change is subtle.
                         assertTrue(difference > .001, description + " still uses its normal map");
                         if (!material.equals("crust") && !material.equals("lava")) {
-                            String lighting = GpuShaderSource.readDisk("surface-lighting.glsl");
-                            changed = manager.apply(Map.of("surface-lighting.glsl", lighting.replace(
-                                  "float dielectricSheen(vec3 normal, vec3 light, vec3 view, float film, float roughness) {",
-                                  "float dielectricSheen(vec3 normal, vec3 light, vec3 view, float film, float roughness) {"
-                                        + " return 0.0;")));
+                            String lighting = GpuShaderSource.readDisk("surface-shading.glsl");
+                            changed = manager.apply(Map.of("surface-shading.glsl", lighting.replace(
+                                  "sheen = sun * surfaceReflectance(normal, light, view, roughness, f0).r * s.cavity;",
+                                  "sheen = vec3(0.0);")));
                             assertTrue(changed.success(), changed.message());
                             assertTrue(difference(original, render(surface, terrain, camera)) > .001,
                                   description + " reflects light even when dry");
@@ -359,7 +363,8 @@ class GpuMaterialLodSmokeTest {
             String roles = "result.emission = vec3(weights.w, weights.x, layers.z != layers.x ? 1.0 : 0.0);";
             assertTrue(material.contains(emission), "The probe reads completed natural-material roles");
             String sculpt = GpuShaderSource.readDisk("terrain-sculpt.frag");
-            String result = "vec3 result = albedo + emission;", output = "fragColor = vec4(result, 1.0);";
+            String result = "vec3 result = shadeSurface(surface, caustic, submerged);";
+            String output = "fragColor = vec4(result, 1.0);";
             assertTrue(sculpt.contains(result) && sculpt.contains(output), "The role probe uses the final scene writer");
             // Ground rock is opaque. An exact alpha tag excludes boulders, cliffs, clear color and other props;
             // alpha is not scaled, while linearPixels restores the production RGB storage units once.
@@ -416,9 +421,9 @@ class GpuMaterialLodSmokeTest {
 
     private static String albedoProbe() {
         String sculpt = GpuShaderSource.readDisk("terrain-sculpt.frag");
-        String result = "vec3 result = albedo + emission;";
+        String result = "vec3 result = shadeSurface(surface, caustic, submerged);";
         assertTrue(sculpt.contains(result), "The palette probe must read the actual completed albedo");
-        return sculpt.replace(result, result + "\n#ifdef lightingFlag\nresult = pigment;\n#endif\n");
+        return sculpt.replace(result, result + "\nresult = surface.albedo;\n");
     }
 
     private static float[] linearPixels(GpuSceneTestOutput surface) {

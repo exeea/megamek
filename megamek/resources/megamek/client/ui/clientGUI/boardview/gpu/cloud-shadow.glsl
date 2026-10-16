@@ -6,6 +6,7 @@ in vec3 v_cloudPosition;
 uniform sampler2D u_cloudShadow;
 uniform mat4 u_cloudProjection;
 uniform float u_cloudEnabled;
+uniform float u_cloudReflection;
 
 float cloudTransmission(vec3 position) {
     if (u_cloudEnabled < 0.5) return 1.0;

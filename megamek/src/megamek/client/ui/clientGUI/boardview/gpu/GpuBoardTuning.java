@@ -115,8 +115,13 @@ final class GpuBoardTuning {
     private final Label renderSize;
     /** The window's physical pixels, which the render resolution's scene size is shown for. */
     private int windowWidth, windowHeight;
+    private final List<Control> uiScale;
+    /** The UI scale last saved: the slider's value once no button is held (see {@link #saveUiScale()}). */
+    private float uiScaleSaved;
     private final SelectBox<String> antiAliasing;
     private final CheckBox specularAntialiasing;
+    private final CheckBox ambientOcclusion;
+    private final List<Control> ambientOcclusionStrength;
     /** The graphics card rows; null on computers without two cards to choose from. */
     private SelectBox<GpuGraphicsCard> graphicsCard;
     private Label cardInUse;
@@ -269,6 +274,12 @@ final class GpuBoardTuning {
         renderSize = new Label("", skin, "small");
         renderSize.setName("tuning-render-size");
         rows.add(renderSize).colspan(3).left().height(18).row();
+        uiScale = controls(skin, List.of(new Knob("UI scale", 50, 100, 5, "%.0f%%")), this::applyUiScale, 0);
+        Slider scale = uiScale.getFirst().slider();
+        scale.setName("tuning-ui-scale");
+        scale.addListener(new TextTooltip("The size of the HUD and the board's labels, as a share of the size the "
+              + "window takes from the display scale and its own size. The board's zoom follows. A drag applies when "
+              + "released; the choice is saved for the next session.", skin, "menu"));
         antiAliasing = choice(skin, "Anti-aliasing", "tuning-anti-aliasing", new String[] { "Off", "SMAA" },
               this::applyAntiAliasing);
         // The saved choice (Off until one is saved). Like the graphics card it persists, and Defaults leaves it alone.
@@ -291,6 +302,24 @@ final class GpuBoardTuning {
                 SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardSpecularAntiAliasing(enabled));
             }
         });
+        ambientOcclusion = checkbox(skin, "Ambient occlusion", "tuning-ambient-occlusion");
+        // The saved choice (off until one is saved); like anti-aliasing, Defaults leaves it alone.
+        ambientOcclusion.setChecked(GUIPreferences.getInstance().getBoardAmbientOcclusion());
+        ambientOcclusion.addListener(new TextTooltip("Darkens the sky light where the ground and the trees hide the sky:"
+              + " cliff feet, hollows, the ground around trunks. Sunlight is unchanged; buildings and units take no part."
+              + " Switching it rebuilds the board's shaders. The choice is saved for the next session.", skin, "menu"));
+        ambientOcclusion.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                boolean enabled = ambientOcclusion.isChecked();
+                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardAmbientOcclusion(enabled));
+            }
+        });
+        ambientOcclusionStrength = controls(skin, List.of(new Knob("Occlusion strength", 0, 2, .05f, "%.2f")),
+              this::applyAmbientOcclusionStrength, 0);
+        ambientOcclusionStrength.getFirst().slider().setName("tuning-ambient-occlusion-strength");
+        ambientOcclusionStrength.getFirst().slider().addListener(new TextTooltip("How much ambient occlusion darkens:"
+              + " 1 as computed, 0 none, 2 twice as deep.", skin, "menu"));
         Label graphics = new Label("Graphics: " + GpuGlsl.description(), skin, "small");
         graphics.setName("tuning-graphics");
         graphics.addListener(new TextTooltip("Detected when the board opens: the board compiles its shaders for the newest "
@@ -494,13 +523,15 @@ final class GpuBoardTuning {
         gravity = controls(skin, List.of(new Knob("Gravity (g)", 0, 10, 0.01f, "%.2f")), this::applyAtmosphere, 0);
         gravity.getFirst().slider().addListener(new TextTooltip(
               "Visual gravity controls water waves, waterfall spray, and the height and timing of new jump animations. "
-                    + "At zero gravity, all liquids and vegetation disappear, the surface becomes rock, "
-                    + "rough ground becomes bedrock outcrops, and liquid depth lowers the ground level. "
-                    + "Air pressure becomes Vacuum and all weather effects are disabled. "
+                    + "At zero gravity or in vacuum, vegetation disappears and the surface becomes lunar; "
+                    + "in vacuum, water freezes and magma stays molten. At zero gravity, all liquids disappear and "
+                    + "liquid depth lowers the ground level, loose stones disappear, rough ground becomes bedrock "
+                    + "outcrops, air pressure becomes Vacuum and all weather effects are disabled. "
                     + "Moves and gameplay rules stay unchanged; an airborne jump finishes its existing arc.", skin, "menu"));
         pressure = choice(skin, "Air pressure", "tuning-atmosphere-pressure", Atmosphere.values(), this::applyAtmosphere);
         pressure.addListener(new TextTooltip("Visual atmosphere pressure: controls sky scattering, clouds and permitted weather. "
-              + "Vacuum clears atmospheric effects; changing pressure never changes the game's rules.", skin, "menu"));
+              + "Vacuum clears atmospheric effects and makes the surface lunar, without vegetation and with frozen water; "
+              + "changing pressure never changes the game's rules.", skin, "menu"));
         temperature = controls(skin, List.of(new Knob("Temperature (C)", -200, 200, 1, "%.0f")), this::applyAtmosphere, 0);
         temperature.getFirst().slider().addListener(new TextTooltip(
               "Scenario temperature controls rain wetness: freezing or colder keeps the ground dry. Visual preview only.", skin, "menu"));
@@ -690,8 +721,9 @@ final class GpuBoardTuning {
         grass.addListener(new TextTooltip("Show wind-blown grass blades on the ground. Uncheck to remove the blades.",
               skin, "menu"));
         waterEffects = checkbox(skin, "Water effects", "tuning-water-effects");
-        waterEffects.addListener(new TextTooltip("Animate water: waves, currents, foam, ripples, sun glints and the "
-              + "light patterns on riverbeds. Uncheck for calm, still water.", skin, "menu"));
+        waterEffects.addListener(new TextTooltip("Animate water: waves, currents, foam, ripples, glitter and the "
+              + "light patterns on riverbeds, with cloud reflections. Uncheck for calm water with simpler sunlight "
+              + "reflection; sky reflection remains.", skin, "menu"));
         terrainLod = checkbox(skin, "Terrain LoD", "tuning-terrain-lod");
         terrainLod.addListener(new TextTooltip("Adjust terrain detail with zoom. Off keeps the full-detail mesh at every distance.",
               skin, "menu"));
@@ -773,7 +805,7 @@ final class GpuBoardTuning {
         reset = new TextButton("Defaults", skin, "menu-control");
         reset.setName("tuning-defaults");
         reset.addListener(new TextTooltip("Restore all tabs: camera projection, geometry, render resolution, "
-              + "terrain, water, geology, family sizes, visibility, light/fog effects, "
+              + "UI scale, terrain, water, geology, family sizes, visibility, light/fog effects, "
               + "the game's current planetary conditions, and disable damage preview.",
               skin, "menu"));
         reset.setProgrammaticChangeEvents(false);
@@ -801,6 +833,10 @@ final class GpuBoardTuning {
             }
         });
         restoreDefaults();
+        // The saved UI scale; unlike the other saved choices, Defaults resets it.
+        setValues(uiScale, new float[] { GUIPreferences.getInstance().getBoardUiScale() * 100 });
+        applyUiScale();
+        uiScaleSaved = value(uiScale, 0) / 100;
     }
 
     boolean takeAssetReloadRequest() {
@@ -928,7 +964,7 @@ final class GpuBoardTuning {
         return result;
     }
 
-    /** The Display page's rows (display mode, VSync, render resolution, anti-aliasing, graphics card). */
+    /** The Display page's rows (display mode, VSync, render resolution, UI scale, anti-aliasing, graphics card). */
     Table displayRows() {
         return display;
     }
@@ -1003,6 +1039,10 @@ final class GpuBoardTuning {
         unitDisplayMode.setSelected(UnitDisplayMode.DEFAULT);
         setValues(renderResolution, new float[] { 100 });
         applyRenderResolution();
+        setValues(ambientOcclusionStrength, new float[] { 1 });
+        applyAmbientOcclusionStrength();
+        setValues(uiScale, new float[] { 100 });
+        applyUiScale();
         grass.setChecked(true);
         waterEffects.setChecked(true);
         objectLod.setChecked(true);
@@ -1182,6 +1222,20 @@ final class GpuBoardTuning {
         return antiAliasing.getSelectedIndex() == 1;
     }
 
+    /** Screen-space ambient occlusion on the opaque scene (GpuAmbientOcclusion). */
+    boolean ambientOcclusion() {
+        return ambientOcclusion.isChecked();
+    }
+
+    /** The exponent on the ambient occlusion's visibility: 1 as computed. */
+    float ambientOcclusionStrength() {
+        return value(ambientOcclusionStrength, 0);
+    }
+
+    private void applyAmbientOcclusionStrength() {
+        updateReadings(ambientOcclusionStrength);
+    }
+
     /** The window's physical size, after a resize: the render resolution shows the scene size it gives. */
     void windowPixels(int width, int height) {
         windowWidth = width;
@@ -1199,6 +1253,22 @@ final class GpuBoardTuning {
         BoardCamera.renderScale = value(renderResolution, 0) / 100;
         updateReadings(renderResolution);
         showRenderSize();
+    }
+
+    /**
+     * Saves the slider's UI scale, each frame, once no mouse button is held: the window lays out at the saved share
+     * (BoardSource.UiPreferences.scale), and the new layout moves the slider under the pointer.
+     */
+    void saveUiScale() {
+        float value = value(uiScale, 0) / 100;
+        if (value != uiScaleSaved && !Gdx.input.isTouched()) {
+            uiScaleSaved = value;
+            SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardUiScale(value));
+        }
+    }
+
+    private void applyUiScale() {
+        updateReadings(uiScale);
     }
 
     private void showRenderSize() {

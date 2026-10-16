@@ -16,6 +16,8 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import megamek.common.planetaryConditions.Atmosphere;
+import megamek.common.planetaryConditions.AtmosphericTaint;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -90,6 +92,19 @@ class GpuLightingSkySmokeTest {
                     assertTrue(red > green + 20L * sky && red > blue + 20L * sky,
                           "The sky shows the red panorama: " + red / sky + ", " + green / sky + ", " + blue / sky);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    if (Boolean.getBoolean("megamek.gpu.skyReview")) {
+                        for (var taint : List.of(AtmosphericTaint.TOXIC_CAUSTIC, AtmosphericTaint.TOXIC_POISON,
+                              AtmosphericTaint.TOXIC_FLAME)) {
+                            for (int hour : new int[] { 0, 6, 18 }) {
+                                frame.configure(new BoardAtmosphere.Settings(hour, 0, 0, 2.5f, 0, 0,
+                                      BoardAtmosphere.Effects.NONE, Atmosphere.STANDARD, 25, true, taint));
+                                atmosphere.setOptions(options(false, null));
+                                capture(terrain, frame, camera, scene, taint.name() + "-" + hour + "-backdrop");
+                                atmosphere.setOptions(options(true, null));
+                                capture(terrain, frame, camera, scene, taint.name() + "-" + hour + "-lighting");
+                            }
+                        }
+                    }
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {

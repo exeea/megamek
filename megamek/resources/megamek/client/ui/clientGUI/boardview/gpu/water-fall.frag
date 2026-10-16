@@ -8,7 +8,10 @@ layout(location = 0) out vec4 fragColor;
 // water-pool-functions
 
 void main() {
-    vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
+    // Capture before coverage rejection, shared by geometric facing and the reflected cloud-plane footprint.
+    waterPositionDx = dFdx(v_cloudPosition);
+    waterPositionDy = dFdy(v_cloudPosition);
+    vec3 geometric = visibleFace(waterPositionDx, waterPositionDy, -viewDirection());
     vec3 surfaceNormal = normalize(v_normal);
     surfaceVariance = normalVariance(dFdx(surfaceNormal), dFdy(surfaceNormal));
     vec4 habitat, mixture;
@@ -61,8 +64,7 @@ void main() {
     vec3 reflectionNormal = shadingNormal(surfaceNormal, geometric, view);
     sheetRoughness = antialiasedRoughness(sheetRoughness, surfaceVariance);
     float sheetFresnel = specularAlbedo(max(0.0, dot(reflectionNormal, view)), sheetRoughness, vec3(.02037)).r;
-    vec3 sheetReflection = environmentSpecular(reflectionNormal, view, sheetRoughness, vec3(.02037),
-          illumination.ground, illumination.ambient);
+    vec3 sheetReflection = waterEnvironmentReflection(reflectionNormal, view, sheetRoughness, illumination);
     // Clear water pouring over the crest shows the pool's blue, lit through and mirroring the sky.
     vec3 glassPigment = procedural ? mix(waterShallows(palette), scatter, 0.35) * 1.1 : authored * tint;
     vec3 glass = materialReflectance(glassPigment * (0.85 + 0.35 * ribbons))
@@ -78,7 +80,7 @@ void main() {
     // Only water still smooth mirrors the sun: bubbles scatter the glint away as the sheet aerates.
     float glassy = (1.0 - aerate) * (1.0 - aerate);
     glass += illumination.sunlight * float(dot(geometric, sun) > 0.0)
-          * surfaceReflectance(reflectionNormal, sun, view, sheetRoughness, vec3(.02037)) * glassy;
+          * waterDirectReflection(reflectionNormal, sun, view, sheetRoughness) * glassy;
 #endif
     // Between the streaks the water itself turns milky and opaque as bubbles fill it.
     glass = mix(glass, froth * fallLight * 0.8, aerate * 0.5);

@@ -22,8 +22,8 @@ void main() {
     vec3 normal = groundNormal(v_diffuseUV, 1.0);
     float wet = u_wetness * step(0.0, u_groundResponse) * smoothstep(0.2, 0.8, v_normal.z);
     float response = max(0.0, u_groundResponse);
-    albedo *= 1.0 - wet * mix(0.175, 0.10, response);
+    albedo = wetAlbedo(albedo, groundAbsorption(wet, response));
     float puddle = groundPuddle(wet, response);
-    groundFilm(albedo, normal, puddle);
+    groundFilm(normal, puddle);
     fragColor = vec4(groundLighting(albedo, normal, geometric, wet, response, puddle, -1.0, 1.0), 1.0);
 }

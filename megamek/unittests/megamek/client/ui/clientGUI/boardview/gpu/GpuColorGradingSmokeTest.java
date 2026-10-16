@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -55,7 +56,7 @@ class GpuColorGradingSmokeTest {
                 assertTrue(saturated.r - saturated.b > original.r - original.b + .05f);
                 assertGray(probe.draw(options(.8f, -.5f, 0, 1), pigment));
                 assertGray(probe.draw(options(.8f, -.5f, 0, 1), null)); // The uncovered sky, too.
-                assertGray(probe.draw(options(.8f, -.5f, 0, 1), new Color(4, .5f, .1f, 1))); // HDR emission.
+                assertGray(probe.draw(options(.8f, -.5f, 0, 1), rgba(4, .5f, .1f, 1))); // HDR emission.
 
                 Color shadows = new Color(.03f, .03f, .03f, 1);
                 Color highlights = new Color(.4f, .4f, .4f, 1);
@@ -67,7 +68,7 @@ class GpuColorGradingSmokeTest {
                 assertEquals(.4f, translucent.a, .005f, "Color grading preserves transparent-export coverage");
                 for (float balance : new float[] { -1, 1 }) {
                     for (float tint : new float[] { -1, 1 }) {
-                        Color extreme = probe.draw(options(balance, tint, 2, 1.5f), new Color(4, 0, .05f, 1));
+                        Color extreme = probe.draw(options(balance, tint, 2, 1.5f), rgba(4, 0, .05f, 1));
                         for (float channel : new float[] { extreme.r, extreme.g, extreme.b }) {
                             assertTrue(Float.isFinite(channel) && channel >= 0 && channel <= 1);
                         }
@@ -81,6 +82,88 @@ class GpuColorGradingSmokeTest {
         });
     }
 
+    @Test
+    void boardCutoutsPreserveCoverageAndCoveredEmissionWithoutInventingOpacity() {
+        nativeCheck(() -> {
+            var combined = GpuHeatGlow.buffer(3, 3);
+            var quad = GpuAtmosphere.screenQuad();
+            var blend = GpuGlsl.compile("PNG source-over", GpuShaderSource.read("atmosphere.vert"),
+                  GpuShaderSource.expand("""
+                        #version 330 core
+                        in vec2 v_uv;
+                        out vec4 fragColor;
+                        uniform sampler2D u_source;
+                        // COLOR_SPACE
+                        void main() {
+                            vec4 source = texture(u_source, v_uv);
+                            fragColor = vec4(toLinear(source.rgb), source.a);
+                        }
+                        """, Map.of()));
+            try (var probe = new Probe()) {
+                var neutral = options(0, 0, 1, 1);
+                Color emission = rgba(8, 2, .5f, 1);
+                assertTrue(emission.r > 1 && emission.g > 1, "The HDR control must reach the upload unclamped");
+                for (Color radiance : List.of(new Color(.2f, .1f, .03f, 1), emission)) {
+                    Color opaque = probe.draw(neutral, radiance);
+                    for (float alpha : new float[] { 1f / 256, .125f, .4f, 1 }) {
+                        Color associated = rgba(radiance.r * alpha, radiance.g * alpha, radiance.b * alpha, alpha);
+                        assertEquals(radiance.r * alpha, associated.r, 0, "Premultiplication must not clamp HDR");
+                        assertEquals(radiance.g * alpha, associated.g, 0);
+                        Color exported = probe.drawAssociated(neutral, associated, true);
+                        assertEquals(alpha, exported.a, 1.1f / 255, "Bright HDR cannot inflate material coverage");
+                        assertEquals(opaque.r, exported.r, .006f, "Unassociate covered radiance once before display");
+                        assertEquals(opaque.g, exported.g, .006f);
+                        assertEquals(opaque.b, exported.b, .006f);
+                        // The saved straight PNG is consumed with standard source-over in linear display light.
+                        // This checks its format contract, not equality with tone-mapping a different HDR backdrop.
+                        for (Color background : List.of(Color.CLEAR, Color.BLACK, Color.WHITE)) {
+                            combined.begin();
+                            try {
+                                GpuAtmosphere.screenState();
+                                ScreenUtils.clear(background.r, background.g, background.b, background.a);
+                                Gdx.gl.glEnable(GL20.GL_BLEND);
+                                Gdx.gl.glBlendFuncSeparate(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA,
+                                      GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA);
+                                blend.bind();
+                                probe.target.getColorBufferTexture().bind(0);
+                                blend.setUniformi("u_source", 0);
+                                quad.render(blend, GL20.GL_TRIANGLES);
+                                var pixel = BufferUtils.newFloatBuffer(4);
+                                Gdx.gl.glReadPixels(1, 1, 1, 1, GL20.GL_RGBA, GL20.GL_FLOAT, pixel);
+                                float remaining = 1 - exported.a;
+                                assertEquals(GpuColor.linear(opaque.r) * exported.a + background.r * remaining,
+                                      pixel.get(0), .006f, "Cutout source-over red on transparent/black/white");
+                                assertEquals(GpuColor.linear(opaque.g) * exported.a + background.g * remaining,
+                                      pixel.get(1), .006f);
+                                assertEquals(GpuColor.linear(opaque.b) * exported.a + background.b * remaining,
+                                      pixel.get(2), .006f);
+                                assertEquals(exported.a + background.a * remaining, pixel.get(3), .001f);
+                            } finally {
+                                Gdx.gl.glDisable(GL20.GL_BLEND);
+                                combined.end();
+                            }
+                        }
+                    }
+                }
+                for (var controls : List.of(neutral, options(0, 0, 1, .5f))) {
+                    for (Color associated : new Color[] { null, Color.CLEAR, rgba(4, 1, .25f, 0) }) {
+                        Color empty = probe.drawAssociated(controls, associated, true);
+                        assertTrue(Float.isFinite(empty.r) && Float.isFinite(empty.g) && Float.isFinite(empty.b));
+                        assertEquals(0, empty.r, 0, "A board cutout omits unsupported zero-coverage additive light");
+                        assertEquals(0, empty.g, 0);
+                        assertEquals(0, empty.b, 0);
+                        assertEquals(0, empty.a, 0, "Display contrast never manufactures PNG support");
+                    }
+                }
+                Color gray = new Color(.18f, .18f, .18f, 1);
+                Color restored = probe.draw(neutral, gray);
+                assertEquals(.461f, restored.r, .005f, "Returning from export retains the ordinary display path");
+                assertEquals(1, restored.a, 0);
+                assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            } finally { blend.dispose(); quad.dispose(); combined.dispose(); }
+        });
+    }
+
     private static void assertGray(Color color) {
         assertEquals(color.r, color.g, .005f, "Zero saturation makes every output channel equal");
         assertEquals(color.g, color.b, .005f);
@@ -88,6 +171,16 @@ class GpuColorGradingSmokeTest {
 
     private static float luminance(Color display) {
         return .2126f * GpuColor.linear(display.r) + .7152f * GpuColor.linear(display.g) + .0722f * GpuColor.linear(display.b);
+    }
+
+    /** The float Color constructor clamps, which would silently turn HDR inputs and readbacks into LDR. */
+    private static Color rgba(float red, float green, float blue, float alpha) {
+        Color color = new Color();
+        color.r = red;
+        color.g = green;
+        color.b = blue;
+        color.a = alpha;
+        return color;
     }
 
     private static GpuAtmosphere.Options options(float balance, float tint, float saturation, float contrast) {
@@ -115,22 +208,37 @@ class GpuColorGradingSmokeTest {
         }
 
         Color draw(GpuAtmosphere.Options options, Color radiance) {
+            return drawAssociated(options, radiance == null ? null
+                  : rgba(radiance.r * radiance.a, radiance.g * radiance.a, radiance.b * radiance.a, radiance.a),
+                  radiance != null && radiance.a < 1);
+        }
+
+        Color drawAssociated(GpuAtmosphere.Options options, Color radiance, boolean transparent) {
             atmosphere.setOptions(options);
-            atmosphere.setTransparentBackground(radiance != null && radiance.a < 1);
+            atmosphere.setTransparentBackground(transparent);
             atmosphere.beginPixels(3, 3, 0);
+            if (transparent && radiance == null) {
+                var clear = BufferUtils.newFloatBuffer(4);
+                Gdx.gl.glReadPixels(1, 1, 1, 1, GL20.GL_RGBA, GL20.GL_FLOAT, clear);
+                for (int channel = 0; channel < 4; channel++) {
+                    assertEquals(0, clear.get(channel), 0, "The actual export target starts at transparent black");
+                }
+            }
             if (radiance != null) {
-                Color sky = atmosphere.lighting().sky();
-                float a = radiance.a, scale = GpuSceneRadiance.SCALE;
-                ScreenUtils.clear((radiance.r * a + sky.r * (1 - a)) * scale,
-                      (radiance.g * a + sky.g * (1 - a)) * scale,
-                      (radiance.b * a + sky.b * (1 - a)) * scale, a, true);
+                float scale = GpuSceneRadiance.SCALE;
+                ScreenUtils.clear(radiance.r * scale, radiance.g * scale, radiance.b * scale, radiance.a, true);
+                if (radiance.r > 1) {
+                    var scene = BufferUtils.newFloatBuffer(4);
+                    Gdx.gl.glReadPixels(1, 1, 1, 1, GL20.GL_RGBA, GL20.GL_FLOAT, scene);
+                    assertTrue(scene.get(0) / scale > 1, "The real scene target must contain the HDR control");
+                }
             }
             atmosphere.end(camera, terrain, scene, 0, null, false, target);
             target.begin();
             try {
                 var pixel = BufferUtils.newFloatBuffer(4);
                 Gdx.gl.glReadPixels(1, 1, 1, 1, GL20.GL_RGBA, GL20.GL_FLOAT, pixel);
-                return new Color(pixel.get(0), pixel.get(1), pixel.get(2), pixel.get(3));
+                return rgba(pixel.get(0), pixel.get(1), pixel.get(2), pixel.get(3));
             } finally { target.end(); }
         }
 

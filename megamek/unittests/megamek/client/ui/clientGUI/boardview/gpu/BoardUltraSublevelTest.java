@@ -47,7 +47,7 @@ class BoardUltraSublevelTest {
                 assertTrue(tile.features().isEmpty());
                 assertFalse(BoardScatter.allowed(tile));
                 assertFalse(BoardSurfaceBlend.natural(tile));
-                assertTrue(tile.lunar().ultraSublevel());
+                assertTrue(tile.lunar(true).ultraSublevel() && tile.lunar(false).ultraSublevel());
                 var marking = new BoardScene.Pixels(new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB));
                 assertTrue(tile.withTactical(marking).ultraSublevel());
                 for (TerrainLod lod : TerrainLod.values()) {

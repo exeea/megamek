@@ -140,8 +140,14 @@ final class GpuGlsl {
         private record Job(Linked linked, CompletableFuture<Void> done) { }
         private final Map<GpuShaderManager.Sources, Job> working = new HashMap<>();
         private final SharedCompiler worker;
+        /**
+         * Native tests set this to put every preparation on the shared-context path: its links finish on another thread,
+         * so one stays pending for at least a step even where the driver's own program cache finishes a parallel link at
+         * once.
+         */
+        static boolean sharedContext;
 
-        Preparation() { this(false); }
+        Preparation() { this(sharedContext); }
 
         /** Force the shared-context path in native tests even on a driver with parallel-compilation support. */
         Preparation(boolean sharedContext) {

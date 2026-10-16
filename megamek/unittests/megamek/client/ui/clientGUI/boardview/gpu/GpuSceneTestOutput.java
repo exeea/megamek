@@ -49,6 +49,9 @@ final class GpuSceneTestOutput implements AutoCloseable {
     /** Restore canonical radiance and encode through the production display boundary. */
     void display() { display.render(scene, pixels); }
 
+    /** Explicit actual-atmosphere fixtures apply the complete-source adaptation once. */
+    void display(float adaptation) { display.render(scene, pixels, adaptation); }
+
     /** Leaves display pixels and the matching depth bound for readback. */
     void draw(GpuTerrain terrain, Camera camera, boolean transparent) {
         // setAtmosphere installs a shadow map; populate it before any lit material samples its visibility.

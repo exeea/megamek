@@ -140,6 +140,13 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
         return result;
     }
 
+    /** The audited draws from {@code category} whose material has an attribute of {@code type}, over the passes. */
+    int draws(String category, long type) {
+        return rows.entrySet().stream()
+              .filter(entry -> entry.getKey().category().equals(category) && (entry.getKey().materialMask() & type) != 0)
+              .mapToInt(entry -> entry.getValue().draws).sum();
+    }
+
     void report(String scenario) {
         System.out.printf("DRAW AUDIT %s: terrain colour ModelBatch only; stage/category submitted draws=%s%n",
               scenario, categories);

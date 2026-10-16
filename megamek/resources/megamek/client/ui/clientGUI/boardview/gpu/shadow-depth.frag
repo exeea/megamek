@@ -16,17 +16,15 @@ in float v_depth;
 void main() {
 #ifdef PackedDepthFlag
     // Measured in shadow texels, this follows the actual face slope, including vertical cliffs.
-    // Half-texel PCF offsets plus nearest sampling reach at most one texel in each axis.
+    // Half-texel PCF offsets plus bilinear comparisons reach at most 1.5 texels in each axis.
     // Evaluate derivatives before alpha discard so cutout edges retain valid neighbor values.
-    float depth = min(1.0, v_depth + fwidth(v_depth) + 0.000001);
+    float depth = min(1.0, v_depth + 1.5 * fwidth(v_depth) + 0.000001);
 #endif
 #if defined(diffuseTextureFlag) && defined(blendedFlag)
     if (texture(u_diffuseTexture, v_texCoords0).a < u_alphaTest) discard;
 #endif
 #ifdef PackedDepthFlag
-    // Keep libGDX's packed RGBA encoding; all ground, prop and unit shaders read this same map.
-    const vec4 carry = vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
-    vec4 color = vec4(depth, fract(depth * 255.0), fract(depth * 65025.0), fract(depth * 16581375.0));
-    fragColor = color - color.yzww * carry;
+    // PackedDepthFlag is libGDX's vertex-depth selector; the framebuffer stores only D24 now.
+    gl_FragDepth = depth;
 #endif
 }

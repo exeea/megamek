@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -10,11 +11,14 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.lwjgl.opengl.GL11;
 
 @Tag("on-demand")
@@ -27,14 +31,8 @@ class GpuWaterWavesSmokeTest {
     @Test
     void halfPrecisionTransformMatchesIndependentDoublePrecisionDft() {
         run(ocean -> {
-            double[] cosine = new double[TEXELS], sine = new double[TEXELS];
-            for (int p = 0; p < SIZE; p++) {
-                for (int k = 0; k < SIZE; k++) {
-                    double angle = 2 * Math.PI * p * k / SIZE;
-                    cosine[p * SIZE + k] = Math.cos(angle);
-                    sine[p * SIZE + k] = Math.sin(angle);
-                }
-            }
+            double[][] trigonometry = GpuOceanTest.trigonometry();
+            var checks = new ArrayList<Executable>();
             for (float gravity : new float[] { .0981f, 9.81f, 98.1f }) {
                 for (float strength : new float[] { 0, .5f, 1 }) {
                     // Release prior wind transitions: each reference describes the spectrum actually being drawn.
@@ -44,67 +42,181 @@ class GpuWaterWavesSmokeTest {
                     assertNotNull(ocean.spectrum());
                     float[] spectrum = read(ocean.spectrum());
                     for (int cascade = 0; cascade < GpuOcean.PATCHES.length; cascade++) {
-                        double[] expected = referenceHeight(spectrum, cascade, time, gravity, cosine, sine);
+                        double choppiness = cascade == 0 ? 1 + .8f * strength : cascade == 1 ? 1.1f : .6f;
+                        var expected = GpuOceanTest.referenceSurface(spectrum, cascade, time, gravity,
+                              choppiness, trigonometry);
+                        String label = "gravity " + gravity + " wind " + strength + " cascade " + cascade;
                         float[] actual = read(ocean.waves(cascade));
-                        double error = 0, energy = 0;
-                        for (int p = 0; p < TEXELS; p++) {
-                            assertTrue(Float.isFinite(actual[p * 4 + 2]), "Half-float transform must remain finite");
-                            double delta = actual[p * 4 + 2] - expected[p];
-                            error += delta * delta;
-                            energy += expected[p] * expected[p];
-                        }
-                        double relative = Math.sqrt(error / Math.max(energy, 1e-20));
-                        System.out.printf(java.util.Locale.ROOT, "FFT gravity %.4f wind %.1f cascade %d relative RMS %.6f%n",
-                              gravity, strength, cascade, relative);
-                        assertTrue(relative < .01, "Wave-height RMS error must stay below 1%: " + relative);
+                        float[] shape = cascade == 0 ? read(ocean.displacement()) : null;
+                        checks.add(() -> checkPrecision(label, expected, actual, shape));
                     }
                 }
             }
+            checks.add(() -> assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError()));
+            assertAll("All 27 representative FFT fields", checks);
         });
     }
 
-    /** Direct separable DFT, without the GPU's butterflies or packed displacement arithmetic. */
-    private static double[] referenceHeight(float[] spectrum, int cascade, float time, float gravity,
-          double[] cosine, double[] sine) {
-        double[] real = new double[TEXELS], imaginary = new double[TEXELS];
-        int width = SIZE * GpuOcean.PATCHES.length;
-        // Use the public simulation's quantized frequency, with all integration and summation in doubles.
-        float loop = (float) (Math.PI * 2 / 1000);
-        for (int y = 0; y < SIZE; y++) {
-            for (int x = 0; x < SIZE; x++) {
-                int p = y * SIZE + x, source = (y * width + cascade * SIZE + x) * 4;
-                double k = Math.hypot(x - SIZE / 2, y - SIZE / 2) * Math.PI * 2 / GpuOcean.PATCHES[cascade];
-                double phase = Math.floor(Math.sqrt(gravity * Math.max(k, 1e-6)) / loop) * loop * time;
-                double c = Math.cos(phase), s = Math.sin(phase);
-                real[p] = (spectrum[source] + spectrum[source + 2]) * c
-                      + (spectrum[source + 1] - spectrum[source + 3]) * s;
-                imaginary[p] = (spectrum[source + 1] + spectrum[source + 3]) * c
-                      + (spectrum[source + 2] - spectrum[source]) * s;
+    @Test
+    void halfPrecisionHighFrequencySlopesMatchTheKnownSpectrum() {
+        run(ocean -> {
+            var wind = new Vector3(.8f, .6f, .5f);
+            ocean.update(0, wind, 9.81f);
+            int[][] modes = { { 25, 0 }, { 0, 25 }, { 17, 19 } };
+            float[] input = new float[TEXELS * GpuOcean.PATCHES.length * 4];
+            for (int cascade = 0; cascade < modes.length; cascade++) {
+                GpuOceanTest.addMode(input, cascade, modes[cascade][0], modes[cascade][1],
+                      GpuOcean.PATCHES[cascade] / SIZE * .125f);
             }
-        }
-        double[] rowReal = new double[TEXELS], rowImaginary = new double[TEXELS];
-        for (int y = 0; y < SIZE; y++) {
-            for (int x = 0; x < SIZE; x++) {
-                int p = y * SIZE + x;
-                for (int k = 0; k < SIZE; k++) {
-                    int source = y * SIZE + k, wave = x * SIZE + k;
-                    rowReal[p] += real[source] * cosine[wave] - imaginary[source] * sine[wave];
-                    rowImaginary[p] += real[source] * sine[wave] + imaginary[source] * cosine[wave];
+            var buffer = BufferUtils.newFloatBuffer(input.length);
+            buffer.put(input).flip();
+            ocean.spectrum().bind(0);
+            // The existing RGBA16F seed target; no new target, format or production injection hook.
+            GL11.glTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 0, 0, SIZE * modes.length, SIZE,
+                  GL20.GL_RGBA, GL20.GL_FLOAT, buffer);
+            assertArrayEquals(input, read(ocean.spectrum()), "The binary amplitudes must survive seed storage exactly");
+            float time = 1.25f;
+            ocean.update(time, wind, 9.81f);
+            assertArrayEquals(input, read(ocean.spectrum()), "The steady wind must use the injected spectrum");
+            double[][] trigonometry = GpuOceanTest.trigonometry();
+            var checks = new ArrayList<Executable>();
+            for (int cascade = 0; cascade < modes.length; cascade++) {
+                double choppiness = cascade == 0 ? 1.4f : cascade == 1 ? 1.1f : .6f;
+                var expected = GpuOceanTest.referenceSurface(input, cascade, time, 9.81f, choppiness, trigonometry);
+                String label = "known mode (" + modes[cascade][0] + "," + modes[cascade][1] + ") cascade " + cascade;
+                float[] actual = read(ocean.waves(cascade));
+                float[] shape = cascade == 0 ? read(ocean.displacement()) : null;
+                checks.add(() -> checkPrecision(label, expected, actual, shape));
+            }
+            checks.add(() -> assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError()));
+            assertAll("All three controlled FFT fields", checks);
+        });
+    }
+
+    @Test
+    void lowGravityCrestPrecisionSeparatesTransformAndFinishError() {
+        run(ocean -> {
+            double[][] trigonometry = GpuOceanTest.trigonometry();
+            var checks = new ArrayList<Executable>();
+            for (float strength : new float[] { .5f, 1 }) {
+                ocean.dispose();
+                float time = 1.25f, gravity = .0981f;
+                ocean.update(time, new Vector3(.8f, .6f, strength), gravity);
+                assertNotNull(ocean.spectrum());
+                double choppiness = 1 + .8f * strength;
+                // The actual stored h0 is common to both paths: initial seed-generation/half-storage error is excluded.
+                double[][] fields = GpuOceanTest.referenceFields(read(ocean.spectrum()), 0, time, gravity, trigonometry);
+                var reference = GpuOceanTest.finishSurface(fields, 0, choppiness);
+                var reconstructed = GpuOceanTest.finishSurface(finalWorkFields(ocean, 0), 0, choppiness);
+                float[] actual = read(ocean.waves(0)), shape = read(ocean.displacement());
+                String label = "low-gravity wind " + strength;
+                checks.add(() -> {
+                    // Stage errors are diagnostic, not new acceptance budgets. The complete path retains every limit.
+                    for (boolean towardZero : new boolean[] { false, true }) {
+                        var finalStore = GpuOceanTest.finishSurface(GpuOceanTest.halfFields(fields, towardZero), 0, choppiness);
+                        comparePrecision(label + " ideal DFT with final spatial half store, "
+                                    + (towardZero ? "toward-zero model" : "nearest-even model"),
+                              reference, finalStore, null, false);
+                    }
+                    comparePrecision(label + " upstream: DFT vs work reconstructed in double",
+                          reference, reconstructed, null, false);
+                    comparePrecision(label + " finish: double reconstruction vs GPU finish",
+                          reconstructed, measuredSurface(actual), shape, false);
+                    checkPrecision(label + " complete path", reference, actual, shape);
+                });
+            }
+            checks.add(() -> assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError()));
+            assertAll("Both compressed low-gravity crest cases", checks);
+        });
+    }
+
+    /** Borrow only the existing final RGBA16F work texture; the ocean retains all resource ownership. */
+    private static double[][] finalWorkFields(GpuOcean ocean, int cascade) {
+        try {
+            var field = GpuOcean.class.getDeclaredField("work");
+            field.setAccessible(true);
+            var work = (FrameBuffer[]) field.get(ocean);
+            assertEquals(2, work.length);
+            // simulate starts in work[0]; its two axes each run log2(SIZE) ping-pong passes, ending in work[0].
+            Texture texture = work[0].getColorBufferTexture();
+            assertEquals(SIZE * GpuOcean.PATCHES.length, texture.getWidth());
+            assertEquals(SIZE, texture.getHeight());
+            texture.bind(0);
+            assertEquals(GL30.GL_RGBA16F,
+                  GL11.glGetTexLevelParameteri(GL20.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_INTERNAL_FORMAT));
+            float[] values = read(texture);
+            double[][] fields = new double[3][TEXELS];
+            for (int y = 0; y < SIZE; y++) {
+                for (int x = 0; x < SIZE; x++) {
+                    int source = (y * texture.getWidth() + cascade * SIZE + x) * 4;
+                    int sign = ((x + y) & 1) == 0 ? 1 : -1;
+                    // oceanSample removes frequency centering; RGB are height, displacement X, displacement Y.
+                    for (int channel = 0; channel < fields.length; channel++) {
+                        fields[channel][y * SIZE + x] = sign * (double) values[source + channel];
+                    }
                 }
             }
+            return fields;
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("Read the existing final FFT work texture", error);
         }
-        double[] result = new double[TEXELS];
-        for (int y = 0; y < SIZE; y++) {
-            for (int x = 0; x < SIZE; x++) {
-                int p = y * SIZE + x;
-                for (int k = 0; k < SIZE; k++) {
-                    int source = k * SIZE + x, wave = y * SIZE + k;
-                    result[p] += rowReal[source] * cosine[wave] - rowImaginary[source] * sine[wave];
-                }
-                if (((x + y) & 1) != 0) { result[p] = -result[p]; }
-            }
+    }
+
+    private static GpuOceanTest.Surface measuredSurface(float[] actual) {
+        double[] height = new double[TEXELS], slopeX = new double[TEXELS], slopeY = new double[TEXELS];
+        for (int p = 0; p < TEXELS; p++) {
+            height[p] = actual[p * 4 + 2];
+            slopeX[p] = actual[p * 4];
+            slopeY[p] = actual[p * 4 + 1];
         }
-        return result;
+        return new GpuOceanTest.Surface(height, slopeX, slopeY, null);
+    }
+
+    /** Compares identical spatial discretization, isolating numerical precision from the stencil's approximation. */
+    private static void checkPrecision(String label, GpuOceanTest.Surface expected, float[] actual, float[] shape) {
+        comparePrecision(label, expected, measuredSurface(actual), shape, true);
+    }
+
+    private static void comparePrecision(String label, GpuOceanTest.Surface expected, GpuOceanTest.Surface actual,
+          float[] shape, boolean requireBudgets) {
+        double heightError = 0, heightEnergy = 0, slopeError = 0, slopeEnergy = 0, angles = 0, maxAngle = 0;
+        int worst = 0;
+        for (int p = 0; p < TEXELS; p++) {
+            assertTrue(Double.isFinite(actual.height()[p]) && Double.isFinite(actual.slopeX()[p])
+                  && Double.isFinite(actual.slopeY()[p]), "Half-float transform must remain finite");
+            double delta = actual.height()[p] - expected.height()[p];
+            heightError += delta * delta;
+            heightEnergy += expected.height()[p] * expected.height()[p];
+            double dx = actual.slopeX()[p] - expected.slopeX()[p], dy = actual.slopeY()[p] - expected.slopeY()[p];
+            slopeError += dx * dx + dy * dy;
+            slopeEnergy += expected.slopeX()[p] * expected.slopeX()[p] + expected.slopeY()[p] * expected.slopeY()[p];
+            double angle = GpuOceanTest.normalAngle(actual.slopeX()[p], actual.slopeY()[p],
+                  expected.slopeX()[p], expected.slopeY()[p]);
+            angles += angle * angle;
+            if (angle > maxAngle) { maxAngle = angle; worst = p; }
+        }
+        double heightRms = Math.sqrt(heightError / Math.max(heightEnergy, 1e-20));
+        double slopeRms = Math.sqrt(slopeError / Math.max(slopeEnergy, 1e-20));
+        double angularRms = Math.sqrt(angles / TEXELS);
+        System.out.printf(java.util.Locale.ROOT,
+              "FFT %s relative height RMS %.6f slope RMS %.6f normal RMS %.6f max %.6f degrees%n",
+              label, heightRms, slopeRms, angularRms, maxAngle);
+        // Only cascade zero exports compression: 1 - compression is its Jacobian clamped to [0,1], not the raw value.
+        System.out.printf(java.util.Locale.ROOT,
+              "FFT %s worst texel (%d,%d) reference slope (%.9f,%.9f) compared slope (%.9f,%.9f) "
+                    + "reference Jacobian %.9f compared Jacobian %.9f GPU Jacobian[0,1] %.9f (NaN means unavailable)%n",
+              label, worst % SIZE, worst / SIZE, expected.slopeX()[worst], expected.slopeY()[worst],
+              actual.slopeX()[worst], actual.slopeY()[worst], expected.jacobian()[worst],
+              actual.jacobian() == null ? Double.NaN : actual.jacobian()[worst],
+              shape == null ? Double.NaN : 1 - shape[worst * 4 + 3]);
+        if (!requireBudgets) { return; }
+        // Predeclared quality limits: keep the old height budget, apply it to slopes, and bound local normal errors.
+        double angularMax = maxAngle;
+        assertAll(label,
+              () -> assertTrue(heightRms < .01, "Wave-height RMS error must stay below 1%: " + heightRms),
+              () -> assertTrue(slopeRms < .01, "Vector-slope RMS error must stay below 1%: " + slopeRms),
+              () -> assertTrue(angularRms < .25, "Normal angular RMS must stay below a quarter degree: " + angularRms),
+              () -> assertTrue(angularMax < 1, "Every normal must stay within one degree: " + angularMax));
     }
 
     @Test

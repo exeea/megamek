@@ -81,7 +81,7 @@ final class BoardSurface {
     record Geometry(int elevation, int waterDepth, boolean frozen, int roadExits, BoardScene.Surface surface,
           BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps,
           List<BoardConcrete.Shift> coast, BoardRoad.Kind road, BoardScene.Biome biome, int cliffTopExits, boolean bare,
-          BoardSurfaceBlend.Cover groundCover, boolean ultraSublevel) { }
+          boolean barren, BoardSurfaceBlend.Cover groundCover, boolean ultraSublevel) { }
 
     /** What of a hex further out can reach a hex's shape: through the water's shore, its level, liquid and ground. */
     record Shape(int elevation, int waterDepth, boolean frozen, BoardLiquid liquid, boolean detailedGround, BoardScene.Surface surface,
@@ -133,7 +133,7 @@ final class BoardSurface {
         return tile == null ? null : new Geometry(tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
               tile.surface(), tile.liquid(), tile.detailedGround(), tile.features(), ramps(scene, tile),
               BoardConcrete.of(scene).corners(tile.coords()), tile.road(), tile.biome(), tile.cliffTopExits(), tile.bare(),
-              tile.groundCover(), tile.ultraSublevel());
+              tile.barren(), tile.groundCover(), tile.ultraSublevel());
     }
 
     static int ramps(BoardScene scene, BoardScene.Tile tile) {

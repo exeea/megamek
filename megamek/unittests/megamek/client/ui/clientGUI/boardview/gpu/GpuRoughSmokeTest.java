@@ -59,6 +59,8 @@ class GpuRoughSmokeTest {
                         camera.setIsometric(oblique);
                         camera.camera.zoom = .52f;
                         camera.center(BoardGeometry.center(new Coords(5, 3), 0));
+                        // Loading must see the same shader flags as the frame that follows (GpuReviewFrame.prepare).
+                        frame.prepare(terrain, camera, scene);
                         terrain.update(scene, camera.camera);
                         GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);

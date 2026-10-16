@@ -328,8 +328,8 @@ final class GpuHud implements GpuBoardHud {
         logSlot = panel(panels, log.actor()).top().fillX();
         solutionSlot = panel(panels, solution.actor()).top().fillX();
         initiativeSlot = panel(panels, initiativeCard.actor()).top().fillX();
-        // Presses pass through the hint line to the board, as in the prototype; board labels keep clear of it.
-        hintSlot = slot(panels, hint.actor());
+        // Side panels cover the hint line; it stays centred on the dock at its full width.
+        hintSlot = slot(labels, hint.actor());
         panelSlots.add(hintSlot);
         // Where the window has no room for the hint line, a pick's chip stands on the dock with Done and Cancel.
         pickSlot = panel(panels, hint.chip());
@@ -352,7 +352,8 @@ final class GpuHud implements GpuBoardHud {
 
         components = List.copyOf(parts);
         windowSlots = List.copyOf(spanning);
-        windowSlots.forEach(Container::fill);
+        // Plain Actors otherwise use their previous size as the minimum and cannot shrink after a UI-scale change.
+        windowSlots.forEach(slot -> slot.minSize(0).fill());
         metrics = Metrics.of(stage.getWidth(), stage.getHeight());
     }
 
@@ -407,8 +408,8 @@ final class GpuHud implements GpuBoardHud {
           GpuBoardSource.UiPreferences preferences) {
         // The panels stay where the last layout put them until this frame's layout. A cleared selection presents the
         // local turn without an acting unit (GpuHudState.presented).
-        inputs = new Inputs(state.presented(frame), view, dialog, preferences, metrics, panelBounds());
         updateState(frame, view.playbackBusy(), dialog);
+        inputs = new Inputs(state.presented(frame), view, dialog, preferences, metrics, panelBounds());
         for (Component component : components) {
             component.update(inputs);
         }
@@ -424,14 +425,14 @@ final class GpuHud implements GpuBoardHud {
      * applies them before its camera frames the frame; called again with the same frame, it applies nothing twice.
      */
     void updateState(GpuBoardSource.Frame frame, boolean playbackBusy, GpuBoardWindow.DialogRequest dialog) {
-        int select = state.update(frame.status(), frame.panels().record(), playbackBusy);
+        int select = state.update(frame, playbackBusy);
         if (select != Entity.NONE) {
             pendingSelect = select;
         }
         if (pendingSelect != Entity.NONE && (!frame.status().myTurn() || state.focus() != pendingSelect)) {
             // The turn or the focus moved on first.
             pendingSelect = Entity.NONE;
-        } else if (pendingSelect != Entity.NONE && dialog == null) {
+        } else if (pendingSelect != Entity.NONE && dialog == null && !playbackBusy) {
             // Not while a dialog is pending: the source's input guard would drop the command.
             source.selectUnit(pendingSelect);
             pendingSelect = Entity.NONE;
@@ -754,6 +755,7 @@ final class GpuHud implements GpuBoardHud {
                 dock.main();
             }
         } else if (binds.contains(KeyCommandBind.NEXT_UNIT) || binds.contains(KeyCommandBind.PREV_UNIT)) {
+            if (inputs.view().playbackBusy()) { return true; }
             // MegaMek's next or previous unit becomes the selected one, also when it is the current unit again.
             state.restoreSelection();
             return false;
@@ -968,6 +970,10 @@ final class GpuHud implements GpuBoardHud {
         if (unit == null) {
             return;
         }
+        if (inputs.view().playbackBusy()) {
+            state.inspected = unitId;
+            return;
+        }
         if (unit.side() == GpuBattleStatus.Side.OWN && !status.myTurn()) {
             state.restoreSelection();
             state.inspected = Entity.NONE;
@@ -1119,10 +1125,11 @@ final class GpuHud implements GpuBoardHud {
         float dockTop = height - gap - dockHeight;
         place(dockSlot, centred(dockWidth, bandLeft, bandRight), dockTop, dockWidth,
               dockHeight);
-        float hintWidth = Math.min(hintSlot.getPrefWidth(), bandRight - bandLeft);
+        float hintWidth = hintSlot.getPrefWidth();
         float hintHeight = hintSlot.getPrefHeight();
         float hintBottom = gap + (dockHeight > 0 ? dockHeight + STACK : 0);
-        place(hintSlot, centred(hintWidth, bandLeft, bandRight), height - hintBottom - hintHeight, hintWidth,
+        place(hintSlot, dockSlot.getX() + (dockSlot.getWidth() - hintWidth) / 2,
+              height - hintBottom - hintHeight, hintWidth,
               hintHeight);
         float pickWidth = Math.min(pickSlot.getPrefWidth(), dockWidth);
         float pickHeight = height(pickSlot);
@@ -1132,8 +1139,11 @@ final class GpuHud implements GpuBoardHud {
         // Top row: the conditions card beside the left column (the sheet's width while it is open), the tactical chip
         // centred in the room that is left.
         float conditionsX = gap + leftWidth() + STACK;
-        float conditionsWidth = Math.min(CONDITIONS_WIDTH, utilityLeft - STACK - conditionsX);
-        place(conditionsSlot, conditionsX, gap, conditionsWidth, height(conditionsSlot));
+        // A narrow window has no space beside the toolbar; keep the card usable in the middle band below it.
+        boolean conditionsBelow = conditionsX + CONDITIONS_WIDTH + STACK > utilityLeft;
+        float conditionsRight = conditionsBelow ? bandRight : utilityLeft - STACK;
+        float conditionsWidth = Math.max(0, Math.min(CONDITIONS_WIDTH, conditionsRight - conditionsX));
+        place(conditionsSlot, conditionsX, conditionsBelow ? rightStart : gap, conditionsWidth, height(conditionsSlot));
         float chipLeft = Math.max(gap + m.left(), shown(conditionsSlot) ? conditionsX + conditionsWidth : 0) + STACK;
         float chipRight = utilityLeft - STACK;
         float chipWidth = chipSlot.getPrefWidth();

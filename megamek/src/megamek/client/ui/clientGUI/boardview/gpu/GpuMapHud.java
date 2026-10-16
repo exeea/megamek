@@ -159,8 +159,10 @@ final class GpuMapHud implements GpuBoardHud {
 
     @Override
     public void resize(int width, int height, float displayScale) {
-        // Keep the complete editing workspace usable when a large desktop UI scale meets a smaller window.
-        scale = editor == null ? displayScale : Math.min(displayScale, Math.min(width / 1280f, height / 800f));
+        // Keep the complete editing workspace usable when a large desktop UI scale meets a smaller window. The Tuning
+        // panel's UI scale, already a share of displayScale, is a share of that limit too, so each of its steps shows.
+        scale = editor == null ? displayScale
+              : Math.min(displayScale, Math.min(width / 1280f, height / 800f) * source.uiPreferences().scale());
         ((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / scale);
         stage.getViewport().update(width, height, true);
         metrics = GpuHud.Metrics.of(stage.getWidth(), stage.getHeight());

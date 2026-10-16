@@ -41,7 +41,6 @@ vec3 modelNormal(vec3 view, out vec3 geometric) {
             vec3 uvBitangent = (dy * ux.x - dx * uy.x) / determinant;
             bitangent *= dot(bitangent, uvBitangent) < 0.0 ? -1.0 : 1.0;
             vec3 mapped = textureGrad(u_normalTexture, v_modelUV, ux, uy).xyz * 2.0 - 1.0;
-            surfaceVariance = normalMapVariance(length(mapped));
             normal = normalize(mat3(tangent, bitangent, normal) * mapped);
         }
     }

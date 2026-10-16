@@ -3,7 +3,7 @@ layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Sculpted tops, cliffs and the rock kit. Geometry supplies the landforms; this shader layers each surface family's
 // four materials (ground, debris, wall, mantle), mapped in world space, and lights them with the board's one light
-// model (light-model.glsl, surface-lighting.glsl): linear albedo times linear light. Scene radiance stays linear
+// model (shadeSurface, surface-shading.glsl): linear albedo times linear light. Scene radiance stays linear
 // through blending and atmosphere; the final composite tones and encodes the whole frame once.
 in vec2 v_diffuseUV;   // ground: rim / foot distance (drowned cliff: height above bed / foot distance);
                             // cliff: height above foot / depth below rim; rock: above root
@@ -160,7 +160,6 @@ void main() {
     vec3 worldDx = dFdx(world), worldDy = dFdy(world);
 #ifdef lightingFlag
     vec3 geometric = visibleFace(worldDx, worldDy, -viewDirection());
-    surfaceVariance = normalVariance(dFdx(face), dFdy(face));
 #endif
     // surface-frame-ready
     terrainMaterialLod(world, face);
@@ -203,6 +202,7 @@ void main() {
     float sand = family(2.0) ? 1.0 : 0.0;
     vec3 bounce = groundBounce();
     float response = u_groundResponse;
+    float shoreAbsorption = 0.0;
     float rainCover = step(0.0, response);
     bool natural = (ground || cliff || bedrock) && !family(4.0);
     float sediment = shore ? 1.0 - smoothstep(-.25, .05, above) : 0.0;
@@ -439,8 +439,6 @@ void main() {
         if (!natural && !plant && u_normalMaps > .5) {
             normal = normalize(mix(face, normal, terrainNormalDetail));
             cavity = mix(TERRAIN_DISTANT_CAVITY, cavity, terrainNormalDetail);
-            mapVariance = max(mapVariance,
-                  normalSpread(ground || pit ? u_sculptLayers.x : u_sculptLayers.z) * (1.0 - terrainNormalDetail));
         }
 #ifdef terrainBlendFlag
         if (ground || cliff) {
@@ -467,7 +465,7 @@ void main() {
         }
         if (waterCovered) {
             // Wet in a band just above the waterline and below it.
-            albedo *= 1.0 - .25 * (1.0 - smoothstep(0.0, .12, above)) * (1.0 - smoothstep(0.0, .20, biomeDamp));
+            shoreAbsorption = .65 * (1.0 - smoothstep(0.0, .12, above)) * (1.0 - smoothstep(0.0, .20, biomeDamp));
         }
         if (watered) {
             // Beneath the waterline the bed keeps the hue its column of water passes and catches caustics
@@ -519,23 +517,27 @@ void main() {
     #ifdef surfaceScarFlag
     if (!ground) groundDamage(world, face, 0.0, sand, exposed, albedo, normal, cavity, roughness);
     #endif
-    if (ground) albedo *= mix(1.0, terrainGrid(v_cloudPosition.xy * u_rainScale), exposed * (1.0 - volcanic));
     // Rain darkens exposed ground and rock, and gathers in puddles on level ground.
     float wet = u_wetness * rainCover * exposed;
     // Moisture darkens porous peat, but does not turn its entire surface into standing water. Rain
     // coating and transient puddles both respect that absorption; permanent pools remain fully wet.
-    float rainRetention = mix(1.0, .15, smoothstep(0.0, .28, biomeDamp));
+    float saturated = smoothstep(0.0, .28, biomeDamp);
+    float rainRetention = mix(1.0, .15, saturated);
     float rainFilm = wet * max(0.0, response);
     float film = max(rainFilm * rainRetention, biomePool);
     if (ground && wet * u_rainDetail > 0.0 && face.z > .97) {
         vec2 position = v_cloudPosition.xy * u_rainScale;
         float rainPool = rainPuddle(position, wet, max(0.0, response))
               * smoothstep(.97, .999, face.z) * u_rainDetail;
-        normal = normalize(mix(normal, normalize(vec3(rainRipples(position), 1.0)), rainPool * rainRetention));
-        mapVariance *= 1.0 - rainPool * rainRetention;
+        // Ripples only where a puddle shows them; elsewhere the weight is zero and the normal stays exactly.
+        vec3 rippled = rainPool > 0.0 ? normalize(vec3(rainRipples(position), 1.0)) : normal;
+        normal = normalize(mix(normal, rippled, rainPool * rainRetention));
         film = max(mix(rainFilm, 1.0, rainPool) * rainRetention, biomePool);
     }
-    albedo *= 1.0 - wet * mix(.18, .11, max(0.0, response));
+    // Biome peat/mud already contains its wet pigment. Rain only darkens the remaining unsaturated share;
+    // the existing film/pool response above still receives the full rain amount.
+    albedo = wetAlbedo(albedo, max(groundAbsorption(wet * (1.0 - saturated), response), shoreAbsorption));
+    if (ground) albedo *= mix(1.0, terrainGrid(v_cloudPosition.xy * u_rainScale), exposed * (1.0 - volcanic));
     albedo *= transmission;
     albedo = materialReflectance(albedo);
     // Grade the completed bounded pigment: later weathering or a reflectance bound must not flatten the lift.
@@ -549,77 +551,30 @@ void main() {
         albedo = mix(levelGrade(albedo, level, fungusGrade), albedo, volcanic);
     }
 #ifdef lightingFlag
-    // Sky from above; from below, light reflected by the sunlit ground: warm in the desert, white on snow.
     vec3 view = -viewDirection();
     normal = shadingNormal(normal, geometric, view);
-    // Pools and puddles lie flat over the relief their maps describe.
-    surfaceVariance += mapVariance * (1.0 - biomePool);
-    float diffuseBudget = dielectricBudget(normal, view, film, roughness);
-    vec3 localLight = lavaIrradiance(v_cloudPosition, normal);
-    vec3 sky = skyLight(normal, bounce);
-    // Match the real-leaf fallback in terrain-foliage: split diffuse energy, never add a wrap lobe.
-    float transmitted = leaf ? .35 : 0.0;
-    if (leaf) sky = mix(sky, skyLight(-normal, bounce), transmitted);
-    vec3 ambient = (sky * occlusion * cavity + localLight * cavity) * diffuseBudget;
-    vec3 direct = vec3(0.0), sheen = vec3(0.0);
-#if numDirectionalLights > 0
-    vec3 light = -u_dirLights[0].direction;
+    // Once per pixel, from the final normal: mapped relief, ripples and flat pools alike (light-model.glsl).
+    surfaceVariance = normalVariance(dFdx(normal), dFdy(normal));
+    // Thin tissue receives the shadow from its sun-facing side; other casters still occlude it.
+    // Keep the single receiver-plane lookup outside the per-pixel tissue/volcanic branches.
+    vec3 light = sunDirection();
+    vec3 receiver = leaf && dot(face, light) < 0.0 ? -face : face;
     // Natural cliffs approximate a curved surface with shared vertex normals. Use that unmapped surface for
     // incident sidedness: a triangle cutoff exposes their tessellation at the light horizon. Planar panels and
     // other geometry retain triangle support; normal-map detail cannot move this incident hemisphere.
-    vec3 incidentFace = cliff && !panel ? face : geometric;
-    float incidence = dot(incidentFace, light) > 0.0
-          ? dielectricDiffuse(normal, light, view, film, roughness) : 0.0;
-    float reflection = 0.0;
-    if (volcanic < 1.0 && dot(incidentFace, light) > 0.0 && incidence > 0.0) reflection = dielectricSheen(normal, light, view, film, roughness);
-    if (leaf) {
-        float through = dot(geometric, light) < 0.0
-              ? dielectricDiffuse(-normal, light, -view, film, roughness) : 0.0;
-        incidence = mix(incidence, through, transmitted);
-    }
-    // Thin tissue receives the shadow from its sun-facing side; other casters still occlude it.
-    // Keep the single receiver-plane lookup outside the per-pixel tissue/volcanic branches.
-    vec3 receiver = leaf && dot(face, light) < 0.0 ? -face : face;
-    vec3 sun = u_dirLights[0].color * sculptShadow(receiver, light);
-    direct = sun * incidence * mix(1.0, cavity, .5) * (1.0 + caustic);
-    if (volcanic < 1.0 && incidence > 0.0) {
-        // Reuse the same shadowed sun and dielectric response as the other mapped materials. No additional
-        // shadow pass or surface-map fetch: roughness follows the calibrated dry family and grain height.
-        sheen = sun * reflection * cavity;
-    }
-#endif
-    if (volcanic > 0.0) {
-        // The material response and spill light are identical on both sides of the blend. Only the sky
-        // bounce, occlusion and shadow filter differ; reuse the expensive terms instead of shading twice.
-        vec3 hotAmbient = (skyLight(normal, GROUND_ALBEDO) + localLight) * diffuseBudget;
-        vec3 hotDirect = vec3(0.0);
-#if numDirectionalLights > 0
-        hotDirect = u_dirLights[0].color * incidence;
-        for (int i = 1; i < numDirectionalLights; i++) {
-            vec3 hotLight = -u_dirLights[i].direction;
-            if (dot(incidentFace, hotLight) > 0.0) {
-                hotDirect += u_dirLights[i].color * dielectricDiffuse(normal, hotLight, view, film, roughness);
-            }
-        }
-#endif
-        float hotVisibility = surfaceVisibility();
-        hotDirect *= hotVisibility;
-        ambient = mix(ambient, hotAmbient * cavity, volcanic);
-        direct = mix(direct, hotDirect, volcanic);
-        sheen *= 1.0 - volcanic;
-    }
-    // Cloud shadows attenuate direct light and sheen here (inserted by GpuCloudShadow).
-    vec3 pigment = albedo;
-    albedo *= ambient + direct;
-    albedo += sheen;
-    // The volcanic share is matte, matching the dedicated crust and lava programs.
-    albedo += surfaceEnvironment(normal, film, roughness, bounce) * occlusion * cavity * (1.0 - volcanic);
-    if (submerged > 0.0) {
-        vec3 scattered = surfaceAmbient(vec3(0.0, 0.0, 1.0)) * occlusion + sunOnGround() * (1.0 + caustic);
-        albedo = submergedLight(albedo, pigment, scattered, submerged);
-    }
-#endif
+    Surface surface = opaqueSurface(albedo, normal, cliff && !panel ? face : geometric, roughness, film,
+          sculptShadow(receiver, light));
+    surface.occlusion = surface.specularOcclusion = occlusion;
+    surface.cavity = cavity;
+    // Match the leaves in terrain-foliage: they pass .35 of their colour from the other side, never a wrap lobe.
+    if (leaf) surface.back = thinTransmission(albedo, .35);
+    surface.heat = volcanic;
+    surface.bounce = bounce;
+    surface.emission = emission;
+    vec3 result = shadeSurface(surface, caustic, submerged);
+#else
     vec3 result = albedo + emission;
+#endif
     // Fade through the final level above the black cap. All walls around one pit share this height reference,
     // even where their rims stand at different levels, so the fade cannot break into wedges at their corners.
     if (abyss) {

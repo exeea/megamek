@@ -260,8 +260,6 @@ float wallRoughness(float layer, vec2 x, vec2 y, mat2 dx, mat2 dy, float side, f
 vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjection p, vec3 face, float variation,
       bool fungus, bool singleScale) {
     if (weight <= 0.0 || u_normalMaps <= .5) return vec4(face, 1.0);
-    // Detail faded with distance keeps its spread, so the highlight does not sharpen (light-model.glsl).
-    mapVariance = max(mapVariance, normalSpread(normalMap) * (1.0 - terrainNormalDetail));
     if (terrainNormalDetail <= 0.0) return vec4(face, TERRAIN_DISTANT_CAVITY);
     vec3 normal = face;
     float cavity = 1.0;
@@ -273,7 +271,6 @@ vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjectio
                     TURN * p.topGradient / (tile * 2.37));
         vec3 detail = fungus || singleScale ? mix(near.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail)
               : planarNormal(near, far, variation).rgb;
-        if (fungus || singleScale) mapVariance = max(mapVariance, normalMapVariance(length(near.rgb * 2.0 - 1.0)));
         normal = upNormal(detail, face);
         cavity = mix(near.a, far.a, variation);
     }
@@ -283,7 +280,6 @@ vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjectio
         vec4 ny = fungus ? fungusTexel(u_terrainData, (normalMap - 1.0) * .5, p.y / tile + .37, p.yGradient / tile)
               : cliffTexel(u_terrainData, (normalMap - 1.0) * .5, p.y / tile + .37, p.yGradient / tile, variation);
         vec3 x = nx.rgb * 2.0 - 1.0, y = ny.rgb * 2.0 - 1.0;
-        mapVariance = max(mapVariance, mix(normalMapVariance(length(y)), normalMapVariance(length(x)), p.side));
         vec3 wall = normalize(mix(vec3(-y.x * sign(face.y) + face.x, y.z * face.y, face.z - y.y),
               vec3(x.z * face.x, x.x * sign(face.x) + face.y, face.z - x.y), p.side));
         normal = normalize(mix(wall, normal, p.lying));

@@ -17,6 +17,8 @@ final class GpuCloudShadow extends Attribute {
     final Texture texture;
     final Matrix4 projection;
     boolean enabled = true;
+    /** The layer can reflect sky light even when no directional source casts a cloud shadow. */
+    boolean reflection;
 
     GpuCloudShadow(Texture texture, Matrix4 projection) {
         super(TYPE);
@@ -33,7 +35,11 @@ final class GpuCloudShadow extends Attribute {
               + (RigidGlb.colourSlotted(renderable.meshPart.mesh.getVertexAttributes()) ? "#define colourSlotsFlag\n" : "")
               + (renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.TYPE)
                     ? "#define environmentLightingFlag\n" : "")
-              + (renderable.environment != null && renderable.environment.has(TYPE) ? "#define cloudShadowFlag\n" : "");
+              + (renderable.environment != null && renderable.environment.has(TYPE) ? "#define cloudShadowFlag\n" : "")
+              + (renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.Antialiasing.TYPE)
+                    ? "#define specularAntialiasingFlag\n" : "")
+              + (renderable.environment != null && renderable.environment.has(GpuAmbientOcclusion.TYPE)
+                    ? "#define ambientOcclusionFlag\n" : "");
     }
 
     static void register(DefaultShader shader) {
@@ -42,6 +48,13 @@ final class GpuCloudShadow extends Attribute {
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 GpuCloudShadow cloud = attributes.get(GpuCloudShadow.class, TYPE);
                 target.set(id, cloud != null && cloud.enabled ? 1f : 0f);
+            }
+        });
+        shader.register("u_cloudReflection", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                GpuCloudShadow cloud = attributes.get(GpuCloudShadow.class, TYPE);
+                target.set(id, cloud != null && cloud.reflection ? 1f : 0f);
             }
         });
         shader.register("u_cloudShadow", new BaseShader.LocalSetter() {
@@ -92,6 +105,7 @@ final class GpuCloudShadow extends Attribute {
     public Attribute copy() {
         var copy = new GpuCloudShadow(texture, projection);
         copy.enabled = enabled;
+        copy.reflection = reflection;
         return copy;
     }
 

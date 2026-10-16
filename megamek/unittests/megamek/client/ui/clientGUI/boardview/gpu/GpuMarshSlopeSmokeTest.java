@@ -160,7 +160,7 @@ class GpuMarshSlopeSmokeTest {
     private static void checkMarshResponse(GpuShaderManager manager, GpuTerrain terrain, BoardCamera camera,
           boolean rain, StringBuilder report) {
         String sculpt = GpuShaderSource.readDisk("terrain-sculpt.frag");
-        String result = "vec3 result = albedo + emission;";
+        String result = "vec3 result = shadeSurface(surface, caustic, submerged);";
         assertTrue(sculpt.contains(result), "The diagnostic must read the completed material");
         String probe = sculpt.replace(result,
               "vec3 result = vec3(dielectricRoughness(film, roughness), biomePool, biomeDamp > .27 ? 4.0 : 0.0);");

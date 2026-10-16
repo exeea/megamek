@@ -80,6 +80,8 @@ class GpuAssetReloadSmokeTest {
                 GpuTerrain originalTerrain;
                 Texture originalTexture;
                 GpuAssets.MaterialArrays originalSculpt;
+                GpuAssets.MaterialArrays originalMagma;
+                GpuAssets.LavaEmission originalEmission;
                 TextureArray originalRoughness;
                 List<String> sculptLayers;
                 float sculptTile;
@@ -119,6 +121,8 @@ class GpuAssetReloadSmokeTest {
                             originalTexture = assets().material("terrain/classic/rock");
                             sculptLayers = sculptLayers();
                             originalSculpt = assets().sculptArray(sculptLayers);
+                            originalMagma = assets().magma(true);
+                            originalEmission = assets().lavaEmission();
                             originalRoughness = assets().sculptRoughness(sculptLayers).maps();
                             sculptTile = assets().sculptTile("grass");
                             treeHeight = assets().model("tree").calculateBoundingBox(new BoundingBox()).getHeight();
@@ -164,6 +168,10 @@ class GpuAssetReloadSmokeTest {
                             assertTrue(javax.imageio.ImageIO.write(roughnessImage, "png",
                                   directory.resolve("models/board/textures/terrain/surfaces/grass-roughness.png").toFile()));
                             mapper.writerWithDefaultPrettyPrinter().writeValue(sculptDefinition.toFile(), definition);
+                            Path lava = directory.resolve("models/board/textures/terrain/lava");
+                            GpuAssetReloadTest.png(lava.resolve("lava-heat.png"), 0x40204080);
+                            Files.writeString(lava.resolve("lava.json"), "{\"emissionScale\":4}");
+                            assertSame(originalEmission, assets().lavaEmission(), "Edits wait for the actual Reload action");
                             scaleMesh(directory.resolve("models/board/tree.glb"));
                             scaleMesh(directory.resolve("models/board/rocks/block-0.glb"));
                             scaleMesh(directory.resolve("models/board/scatter/bush-0.glb"));
@@ -210,6 +218,20 @@ class GpuAssetReloadSmokeTest {
                             assertArrayEquals(new float[] { 128f / 255, 0, 0, 1 },
                                   arrayPixel(authored.maps(), roughnessLayer), .0006f,
                                   "The new raw R8 data must reach GPU memory after the actual Reload assets action");
+                            assertEquals(0, originalMagma.color().getTextureObjectHandle());
+                            assertEquals(0, originalMagma.data().getTextureObjectHandle());
+                            var magma = assets().magma(true);
+                            assertNotSame(originalMagma, magma);
+                            assertArrayEquals(new float[] { 32f / 255, 64f / 255, 128f / 255, 64f / 255 },
+                                  arrayPixel(magma.data(), 2), .0006f, "Emitted RGB and coverage remain raw numeric data");
+                            var emission = assets().lavaEmission();
+                            assertNotSame(originalEmission, emission);
+                            assertEquals(4, emission.scale());
+                            assertEquals(128f / 255, emission.red(), 1e-7);
+                            assertEquals(256f / 255, emission.green(), 1e-7);
+                            assertEquals(512f / 255, emission.blue(), 1e-7);
+                            assertSame(assets(), field(field(terrain(), "lavaLighting"), "assets"),
+                                  "The replaced spill-light snapshot borrows the same reloaded material owner");
                             Texture texture = assets().material("terrain/classic/rock");
                             ByteBuffer pixels = ByteBuffer.allocateDirect(texture.getWidth() * texture.getHeight() * 4);
                             texture.bind();
@@ -271,6 +293,38 @@ class GpuAssetReloadSmokeTest {
                             assertEquals(tuning, BoardGeometry.tuning());
                             assertFalse(boardCamera.isIsometric());
                             assertEquals(generation, fixture.source.takeFrame().boardGeneration());
+                            String nativePlan = System.getProperty("megamek.gpu.nativeMaterialPlan", "");
+                            if (nativePlan.isEmpty()) { Gdx.app.exit(); }
+                            else {
+                                originalTerrain = terrain();
+                                originalSculpt = assets().sculptArray(sculptLayers);
+                                originalRoughness = assets().sculptRoughness(sculptLayers).maps();
+                                originalMagma = assets().magma(true);
+                                originalEmission = assets().lavaEmission();
+                                copyNativeBatch(Path.of(nativePlan), directory);
+                                Files.delete(shaders.resolve("atmosphere-composite.frag"));
+                                Files.delete(shaders.resolve("unit-material.frag"));
+                                Files.delete(shaders.resolve("light-model.glsl"));
+                                GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(this, "tuning-reload-assets"));
+                                assertTrue(button.isDisabled());
+                                step = 8;
+                            }
+                        } else if (step == 8 && !button.isDisabled() && !terrain().busy()) {
+                            assertFalse(status.getText().toString().startsWith("FAIL"));
+                            assertNotSame(originalTerrain, terrain());
+                            assertEquals(0, originalSculpt.color().getTextureObjectHandle());
+                            assertEquals(0, originalSculpt.data().getTextureObjectHandle());
+                            assertEquals(0, originalRoughness.getTextureObjectHandle());
+                            assertEquals(0, originalMagma.color().getTextureObjectHandle());
+                            assertEquals(0, originalMagma.data().getTextureObjectHandle());
+                            assertNotSame(originalEmission, assets().lavaEmission());
+                            assertSame(assets(), field(field(terrain(), "lavaLighting"), "assets"));
+                            checkNativeBatch(assets(), sculptLayers, directory);
+                            assertEquals(tuning, BoardGeometry.tuning());
+                            assertFalse(boardCamera.isIsometric());
+                            assertEquals(generation, fixture.source.takeFrame().boardGeneration());
+                            GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"),
+                                  "official-native-batch-after-reload.png"));
                             Gdx.app.exit();
                         }
                     } catch (Throwable error) {
@@ -315,6 +369,98 @@ class GpuAssetReloadSmokeTest {
             SwingUtilities.invokeAndWait(() -> { });
         }
     }
+
+    /** A fixed, externally verified native export set; copies only into this fixture's disposable data root. */
+    private static void copyNativeBatch(Path planFile, Path destination) throws Exception {
+        var plan = new ObjectMapper().readTree(planFile.toFile());
+        assertEquals(113, plan.path("project_count").asInt());
+        assertEquals(237, plan.path("files").size());
+        Path source = planFile.getParent().resolve("candidate").toAbsolutePath().normalize();
+        Path root = destination.toAbsolutePath().normalize();
+        var paths = new java.util.HashSet<Path>();
+        // Validate the complete set before replacing any temporary input.
+        for (var entry : plan.path("files")) {
+            Path relative = Path.of(entry.path("path").asText());
+            Path from = source.resolve(relative).normalize(), to = root.resolve(relative).normalize();
+            assertTrue(!relative.isAbsolute() && relative.normalize().equals(relative)
+                  && from.startsWith(source) && to.startsWith(root));
+            assertTrue(relative.startsWith(Path.of("models/board/textures")));
+            assertTrue(paths.add(relative), "Native output names are unique");
+            assertTrue(relative.toString().endsWith(".png") || relative.toString().endsWith(".json"));
+            String hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                  .digest(Files.readAllBytes(from)));
+            assertEquals(entry.path("after").asText(), hash, relative.toString());
+        }
+        for (Path relative : paths) {
+            Path to = root.resolve(relative);
+            Files.createDirectories(to.getParent());
+            Files.copy(source.resolve(relative), to, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    /** Compare actual completed uploads with the native PNG bytes, retaining the RGB/data domain boundary. */
+    private static void checkNativeBatch(GpuAssets assets, List<String> layers, Path data) throws Exception {
+        var arrays = assets.sculptArray(layers);
+        var authored = assets.sculptRoughness(layers);
+        var mapper = new ObjectMapper();
+        assertEquals(33, layers.size(), "Current main terrain roles; granite scatter and sand verge are separate");
+        for (int index = 0; index < layers.size(); index++) {
+            String name = layers.get(index);
+            for (boolean color : new boolean[] { true, false }) {
+                Path path = data.resolve("models/board/textures/terrain/surfaces/"
+                      + name + (color ? "" : "-normal") + ".png");
+                var image = javax.imageio.ImageIO.read(path.toFile());
+                TextureArray array = color ? arrays.color() : arrays.data();
+                assertEquals(image.getWidth(), array.getWidth());
+                assertEquals(image.getHeight(), array.getHeight());
+                int argb = image.getRGB(0, 0);
+                assertArrayEquals(new float[] { (argb >>> 16 & 255) / 255f, (argb >>> 8 & 255) / 255f,
+                      (argb & 255) / 255f, (argb >>> 24) / 255f }, arrayPixel(array, index), .0006f,
+                      "Actual post-Reload native " + name + (color ? " color/height" : " normal/AO"));
+            }
+            var metadata = mapper.readTree(data.resolve("models/board/textures/terrain/surfaces/" + name + ".json").toFile());
+            assertEquals((float) metadata.path("tile").asDouble(), assets.sculptTile(name), .000001f, name);
+            assertFalse(metadata.has("roughness") || metadata.has("roughness_map"), "Native default remains opt-in: " + name);
+            assertEquals(-1f, authored.metadata()[index * 2], name + " keeps its existing roughness fallback");
+            assertEquals(-1f, authored.metadata()[index * 2 + 1], name + " has no authored roughness layer");
+        }
+        for (String name : List.of("granite", "sand")) {
+            var metadata = mapper.readTree(data.resolve("models/board/textures/terrain/surfaces/" + name + ".json").toFile());
+            assertEquals((float) metadata.path("tile").asDouble(), assets.sculpt(name).tile(), .000001f, name);
+        }
+        for (String name : List.of("bank-turf", "crop-row-front", "crop-row-side", "crop-row-top")) {
+            Texture image = assets.material("vegetation/" + name);
+            assertEquals(1024, image.getWidth(), name);
+            assertEquals(1024, image.getHeight(), name);
+        }
+        // The earlier edit uses scale 4 and a one-pixel heat map. The official batch must restore
+        // the current authored pair together and refresh the same emission owner used by spill lights.
+        var heat = javax.imageio.ImageIO.read(data.resolve("models/board/textures/terrain/lava/lava-heat.png").toFile());
+        var lava = assets.magma(true);
+        int packed = heat.getRGB(0, 0);
+        assertArrayEquals(new float[] { (packed >>> 16 & 255) / 255f, (packed >>> 8 & 255) / 255f,
+              (packed & 255) / 255f, (packed >>> 24) / 255f }, arrayPixel(lava.data(), 2), .0006f,
+              "Reload restores authored emission and coverage in the actual lava array");
+        var emission = assets.lavaEmission();
+        assertEquals(5f, emission.scale(), "The current official lava definition restores scale 5");
+        long red = 0, green = 0, blue = 0;
+        for (int y = 0; y < heat.getHeight(); y++) {
+            for (int x = 0; x < heat.getWidth(); x++) {
+                int pixel = heat.getRGB(x, y);
+                red += pixel >>> 16 & 255;
+                green += pixel >>> 8 & 255;
+                blue += pixel & 255;
+            }
+        }
+        double factor = 5.0 / (255.0 * heat.getWidth() * heat.getHeight());
+        assertArrayEquals(new float[] { (float) (red * factor), (float) (green * factor), (float) (blue * factor) },
+              new float[] { emission.red(), emission.green(), emission.blue() }, .000001f,
+              "The restored spill source comes from the same authored linear RGB image");
+        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Actual native batch after Reload");
+        System.out.println("Native batch Reload: 113 projects, 237 files; 33 actual color/data array layers; "
+              + "35 physical metadata entries and 4 square vegetation images verified; roughness remains opt-in.");
+    }
+
 
     /** Read one real array layer without allocating a copy of the entire terrain array. */
     private static float[] arrayPixel(TextureArray array, int layer) {

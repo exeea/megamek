@@ -19,6 +19,15 @@ vec3 shoulder(vec3 c) {
     return min(c, vec3(KNEE)) + (1.0 - KNEE) * (1.0 - exp(-max(c - KNEE, vec3(0.0)) / (1.0 - KNEE)));
 }
 
+// The authored UI palette includes its historical gamma-2.2 EV/shoulder response. Map that display target
+// into the current scene's linear domain, undoing only our final shoulder so it is applied exactly once later.
+// This never transforms scene samples: surfaces, particles, weather and their alpha stay scene-linear.
+vec3 backdropRadiance(vec3 authored, float exposure) {
+    vec3 target = toLinear(pow(shoulder(pow(max(authored, vec3(0.0)), vec3(2.2)) * exposure), vec3(1.0 / 2.2)));
+    vec3 above = vec3(KNEE) - (1.0 - KNEE) * log(max((1.0 - target) / (1.0 - KNEE), vec3(1e-7)));
+    return mix(target, above, step(vec3(KNEE), target));
+}
+
 vec3 gradeScene(vec3 linear, float coverage) {
     linear *= u_exposure * (1.0 + u_lightning);
     // Sky colors already carry the time/cover palette; grade in proportion to scene coverage.

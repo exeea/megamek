@@ -117,13 +117,13 @@ final class GpuShaderSource {
     }
 
     static String magma(boolean flowing) {
-        return (flowing ? read("liquid-flow.glsl") : "") + read("terrain-magma.glsl",
+        return (flowing ? "#define magmaEmissionMapFlag\n" + read("liquid-flow.glsl") : "") + read("terrain-magma.glsl",
               Map.of("MAGMA_CONDITION", flowing ? "magma-flow.glsl" : "magma-solid.glsl"));
     }
 
     static String modelLighting() {
         return read("light-model.glsl") + read("environment-lighting.glsl")
-              + read("lava-lighting.glsl") + read("model-surface.glsl");
+              + read("lava-lighting.glsl") + read("ambient-occlusion.glsl") + read("model-surface.glsl");
     }
 
     /** Grass and biome templates share these already-computed vertex outputs. */
@@ -149,11 +149,17 @@ final class GpuShaderSource {
         functions += read("environment-lighting.glsl");
         functions += read("rain-surface.glsl");
         functions += read("lava-lighting.glsl");
+        functions += read("ambient-occlusion.glsl");
         functions += read("surface-lighting.glsl");
         functions += read("terrain-meadow.glsl");
         functions += read("terrain-patterns.glsl");
         functions += read("water-optics.glsl");
         functions += read("terrain-hexes.glsl");
+        String ground = source.contains("// ground-surface-functions") ? read("ground-surface.glsl") : "";
+        // The one lighting entry, wherever a surface is lit through it.
+        if (source.contains("shadeSurface(") || ground.contains("shadeSurface(")) {
+            functions += read("surface-shading.glsl");
+        }
         if (source.contains("// sculpt-material-functions")) {
             functions += read("terrain-roughness.glsl");
         } else if (source.contains("roadCoatFlag")) {
@@ -182,9 +188,7 @@ final class GpuShaderSource {
             functions += magma(source.contains("// magma-flow-functions"));
             functions += read("magma-lighting.glsl");
         }
-        if (source.contains("// ground-surface-functions")) {
-            functions += read("ground-surface.glsl");
-        }
+        functions += ground;
         if (source.contains("// water-lighting-functions")) {
             functions += read("water-lighting.glsl");
         }

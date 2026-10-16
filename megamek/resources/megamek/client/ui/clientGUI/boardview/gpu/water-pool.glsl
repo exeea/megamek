@@ -220,8 +220,7 @@ vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 ti
     float roughness = max(footprint, antialiasedRoughness(calm, surfaceVariance));
     roughness = mix(roughness, .45, falling ? 0.0 : min(length(surfaceNormal.xy) * 20.0, 1.0));
     float fresnel = specularAlbedo(facing, roughness, vec3(.02037)).r;
-    vec3 reflection = environmentSpecular(normal, view, roughness, vec3(.02037),
-          illumination.ground, illumination.ambient);
+    vec3 reflection = waterEnvironmentReflection(normal, view, roughness, illumination);
     vec3 glint = vec3(0.0);
     vec3 glow = vec3(0.0);
     vec3 facets = illumination.light;
@@ -242,7 +241,7 @@ vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 ti
     // Water running down a slope is broken: a descent spreads the sun's glitter instead of drawing it as a line along
     // its curve. The mesh normal is exactly up on level water, which keeps its sharp glint.
     glint = illumination.sunlight * float(dot(geometric, toSun) > 0.0)
-          * surfaceReflectance(normal, toSun, view, roughness, vec3(.02037));
+          * waterDirectReflection(normal, toSun, view, roughness);
     // Thin crests let the sun through, brightest when the viewer looks toward it: they glow turquoise like the
     // shallows. Light scattered inside the water lifts every crest a little even with the sun behind the viewer.
     float behind = max(dot(normalize(viewDirection().xy + 1e-5), normalize(toSun.xy + 1e-5)), 0.0);

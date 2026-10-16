@@ -21,9 +21,10 @@ interface BoardSource extends AutoCloseable {
     public record Bind(KeyCommandBind command, int keyCode, int modifiers, String text) { }
 
     /**
-     * Immutable preference snapshot published to the render thread: the existing preferences the native views read,
-     * whether the battle HUD shows its contacts panel, every key binding, MegaMek's sprint colour, the 3D board's
-     * graphics, MegaMek's jump colour and the overlay switches.
+     * Immutable preference snapshot published to the render thread: the 3D board's UI scale (the Tuning panel's share
+     * of the scale the window takes from the monitor and its size; Swing's GUI scale is Swing's alone), the existing
+     * preferences the native views read, whether the battle HUD shows its contacts panel, every key binding, MegaMek's
+     * sprint colour, the 3D board's graphics, MegaMek's jump colour and the overlay switches.
      */
     public record UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
           boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
@@ -73,7 +74,7 @@ interface BoardSource extends AutoCloseable {
         static UiPreferences capture() {
             var preferences = PreferenceManager.getClientPreferences();
             GUIPreferences gui = GUIPreferences.getInstance();
-            return new UiPreferences(gui.getGUIScale(), preferences.getReportKeywords(),
+            return new UiPreferences(gui.getBoardUiScale(), preferences.getReportKeywords(),
                   preferences.getReportFilterKeywords(), gui.getMinimapEnabled(), gui.getGpuContactsEnabled(),
                   gui.getShowPlanetaryConditionsOverlay(), gui.getTurnDetailsOverlay(),
                   Stream.of(KeyCommandBind.values()).map(bind -> new Bind(bind, bind.key, bind.modifiers,
@@ -152,8 +153,6 @@ interface BoardSource extends AutoCloseable {
 
     // A map preview has no gameplay overlays, chat, selection, or editing input.
     default void setVisibleArea(Rectangle area) { }
-    /** The native window's size in its own units and in pixels. */
-    default void setViewport(int width, int height, int pixelWidth, int pixelHeight) { }
     default void key(int keyCode, boolean down, int modifiers) { }
     default void stopKeys() { }
     /** Full play needs its tactical artwork prepared before interactive frames; map-only views do not. */

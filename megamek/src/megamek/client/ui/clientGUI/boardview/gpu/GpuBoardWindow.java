@@ -22,9 +22,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 import javax.swing.JComponent;
-import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
+import javax.swing.JMenuBar;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
@@ -39,7 +39,9 @@ import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.boardeditor.BoardEditorSession;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
@@ -415,18 +417,29 @@ public final class GpuBoardWindow {
         if (preview2D != null) { showLegacy2D(null, preview2D); }
     }
 
-    /** A file-browser or lobby preview returns to this exact board, including a randomly generated one. */
+    /**
+     * A file-browser or lobby preview's Legacy 2D window, with the 3D preview's Renderer menu: Classic or Enhanced
+     * returns to the 3D preview of this exact board, including a randomly generated one, with the chosen graphics.
+     */
     private static void showLegacy2DPreview(Window owner, Game game) {
         JDialog dialog = boardWindow2D(owner, previewTitle(game.getBoard()), "board-preview-2d", game);
         if (dialog == null) { return; }
-        JButton return3D = new JButton(Messages.getString("CommonMenuBar.viewGpuBoard"));
-        return3D.setName("preview-view-3d");
-        return3D.addActionListener(event -> {
-            openPreview(owner, game.getBoard());
-            if (active != null && active.preview && active.swingWindow == owner
-                  && active.mapGame.getBoard() == game.getBoard()) { dialog.dispose(); }
-        });
-        dialog.add(return3D, BorderLayout.NORTH);
+        JMenuBar menu = new JMenuBar();
+        menu.add(CommonMenuBar.rendererMenu(event -> {
+            String choice = event.getActionCommand();
+            if (!ClientGUI.VIEW_LEGACY_2D.equals(choice)) {
+                GUIPreferences.getInstance().setBoardGraphics(ClientGUI.VIEW_GRAPHICS_CLASSIC.equals(choice)
+                      ? BoardGraphics.CLASSIC : BoardGraphics.ENHANCED);
+                openPreview(owner, game.getBoard());
+                if (active != null && active.preview && active.swingWindow == owner
+                      && active.mapGame.getBoard() == game.getBoard()) { dialog.dispose(); }
+            }
+            // This window draws Legacy 2D for as long as it is open.
+            CommonMenuBar.selectRenderer(menu.getMenu(0), ClientGUI.VIEW_LEGACY_2D);
+        }));
+        menu.getMenu(0).setName("preview-renderer");
+        CommonMenuBar.selectRenderer(menu.getMenu(0), ClientGUI.VIEW_LEGACY_2D);
+        dialog.setJMenuBar(menu);
         showLegacy2D(null, dialog);
     }
 
@@ -518,7 +531,6 @@ public final class GpuBoardWindow {
             ClientGUI gui = window.gui;
             if (gui != null) {
                 GUIPreferences.getInstance().setUse3DBoard(true);
-                gui.getMenuBar().setBoardView3D(true);
                 gui.setMiniReportLocation(false);
             }
             Toolkit.getDefaultToolkit().addAWTEventListener(window.dialogListener,
@@ -1014,7 +1026,6 @@ public final class GpuBoardWindow {
     private static void showLegacy2D(ClientGUI gui, Window window) {
         if (gui != null) {
             gui.setLegacy2DViewEnabled(!gui.getClient().getGame().getPhase().isLounge());
-            gui.getMenuBar().setBoardView3D(false);
         }
         if (window instanceof Frame frame && (frame.getExtendedState() & Frame.ICONIFIED) != 0) {
             frame.setExtendedState(frame.getExtendedState() & ~Frame.ICONIFIED);

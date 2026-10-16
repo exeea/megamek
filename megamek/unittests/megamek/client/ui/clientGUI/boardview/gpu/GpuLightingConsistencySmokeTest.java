@@ -136,7 +136,8 @@ class GpuLightingConsistencySmokeTest {
             var terrain = new GpuTerrain();
             var batch = new ModelBatch(GpuUnitShader.provider());
             var environmentLight = new GpuEnvironmentLighting();
-            var spill = new GpuLavaLighting();
+            var assets = new GpuAssets();
+            var spill = new GpuLavaLighting(assets);
             var environment = new Environment();
             var direction = new DirectionalLight();
             environment.add(direction);
@@ -187,7 +188,8 @@ class GpuLightingConsistencySmokeTest {
                     }
                     environment.set(ColorAttribute.createAmbientLight(lighting.ambient()));
                     direction.set(lighting.direct(), lighting.direction());
-                    environmentLight.set(lighting);
+                    // A black visible palette is not a black lighting environment: zero analytic and image fill.
+                    environmentLight.set(zeroSource ? lighting.tuned(1, 0, 0, null) : lighting);
                     atmosphere.configureClouds(terrain, dry);
                     float[][] samples = new float[5][];
                     for (int pass = 0; pass < samples.length; pass++) {
@@ -198,14 +200,14 @@ class GpuLightingConsistencySmokeTest {
                         if (pass == 4) {
                             emission.set(0, 0, 0, 1);
                             spill.setFungus(List.of());
-                            spill.update(dry, camera);
+                            spill.update(dry);
                             batch.begin(camera); batch.render(instance, environment); batch.end();
                             opacity.opacity = .5f;
                         }
                         emission.set(emissive ? emitted[0] : 0, emissive ? emitted[1] : 0,
                               emissive ? emitted[2] : 0, 1);
                         spill.setFungus(local ? List.of(emitter) : List.of());
-                        spill.update(dry, camera);
+                        spill.update(dry);
                         batch.begin(camera); batch.render(instance, environment); batch.end();
                         samples[pass] = centerCanonical();
                         float depth = centerDepth();
@@ -281,7 +283,7 @@ class GpuLightingConsistencySmokeTest {
                 assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
             } finally {
                 source.dispose(); quad.dispose(); model.dispose(); batch.dispose();
-                environmentLight.dispose(); terrain.dispose(); atmosphere.dispose();
+                environmentLight.dispose(); assets.dispose(); terrain.dispose(); atmosphere.dispose();
             }
         });
     }

@@ -18,7 +18,7 @@ uniform float u_maxOpacity;
 uniform float u_rays;
 uniform vec3 u_sunColor;
 uniform vec3 u_sunDirection;
-uniform sampler2D u_geometryShadow;
+uniform sampler2DShadow u_geometryShadow;
 uniform mat4 u_geometryProjection;
 uniform float u_hasGeometryShadow;
 #define cloudShadowFlag
@@ -27,17 +27,13 @@ uniform float u_hasGeometryShadow;
 // SCATTERING_PHASE
 // GROUND_LAYER
 
-float depthAt(sampler2D map, vec2 uv) {
-    return dot(texture(map, uv), vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
-}
-
 float sunlight(vec3 position) {
     float light = cloudTransmission(position);
     if (u_hasGeometryShadow > 0.5) {
         vec4 projected = u_geometryProjection * vec4(position, 1.0);
         vec3 uv = projected.xyz / projected.w * 0.5 + 0.5;
         if (uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y < 1.0 && uv.z > 0.0 && uv.z < 1.0) {
-            light *= step(uv.z - 0.0005, depthAt(u_geometryShadow, uv.xy));
+            light *= texture(u_geometryShadow, vec3(uv.xy, uv.z - 0.0005));
         }
     }
     return light;

@@ -171,6 +171,10 @@ class GpuFrozenWaterfallSmokeTest {
                                     double changed = difference(ice, frozenOnly(pixels, terrain, camera, points));
                                     assertTrue(changed > .05, "Frozen fall normal detail must reach the shader: " + changed);
                                     terrain.setNormalMaps(true);
+                                    if (Boolean.getBoolean("megamek.gpu.iceCompositionReview")) {
+                                        GpuIceSmokeTest.verifyIceComposition(pixels, terrain, camera, frame, frozen,
+                                              6, NAMES.get(i) + suffix);
+                                    }
                                 }
                             } else {
                                 terrain.animate(.7f, List.of());

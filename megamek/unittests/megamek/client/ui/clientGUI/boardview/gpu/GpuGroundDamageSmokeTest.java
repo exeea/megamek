@@ -64,9 +64,10 @@ class GpuGroundDamageSmokeTest {
             Coords at = new Coords(13, 1);
             camera.camera.zoom = .065f;
             camera.center(BoardGeometry.center(at, scene.tile(at).elevation()));
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            settle(terrain, frame, scene, camera);
             // A displayed board has prepared its empty damage texture before combat starts.
             frame.render(terrain, camera, scene);
+            assertTrue(terrain.ready(scene), "The displayed terrain must remain ready before impact picking");
             var damage = terrain.groundDamage();
             assertEquals(0, damage.marks());
             var points = points(terrain, at);
@@ -81,27 +82,32 @@ class GpuGroundDamageSmokeTest {
             long stampStart = System.nanoTime();
             for (var impact : impacts) {
                 damage.impact(scene, impact, terrain::tacticalSurface);
-                int count = damage.marks();
+                int count = damage.marks(), queued = pending(damage);
                 damage.impact(scene, impact, terrain::tacticalSurface);
                 assertEquals(count, damage.marks(), "An attack replay cannot repaint its mark");
+                assertEquals(queued, pending(damage), "An attack replay cannot queue its mark twice");
             }
             report.append(impacts.size()).append(" CPU impact admissions ms=").append((System.nanoTime() - stampStart) / 1e6).append('\n');
+            assertEquals(impacts.size(), pending(damage), "Every ground impact must be admitted exactly once");
             Gdx.gl.glFinish();
             long uploadStart = System.nanoTime();
-            damage.upload();
+            int uploadFrames = uploadAll(damage);
             Gdx.gl.glFinish();
-            report.append("batch raster, upload and mip generation wall ms=").append((System.nanoTime() - uploadStart) / 1e6).append('\n');
+            report.append("batch raster, upload and mip generation frames=").append(uploadFrames)
+                  .append("; wall ms=").append((System.nanoTime() - uploadStart) / 1e6).append('\n');
             assertTrue(damage.marks() >= 6, "Markers must land on the actual installed ground");
+            assertEquals(impacts.size(), damage.marks(), "Every admitted unique ground impact must finish rasterizing");
             int marks = damage.marks();
             var above = GroundDamagePlaybackTest.shot("ISAC5", false, null);
             above.landscape = ray -> new BoardGeometry.Hit(at, BoardRelief.metres(.1f) * BoardRelief.metres(.1f));
             damage.impact(scene, new GpuGroundDamage.Impact(above, "floating", points.getFirst(),
                   points.getFirst().cpy().add(0, 0, 20), "bullet", null), terrain::tacticalSurface);
             assertEquals(marks, damage.marks(), "Props using the generic ground receiver cannot scar the soil below them");
+            assertEquals(0, pending(damage), "A floating prop contact must not queue a ground scar");
             for (boolean iso : new boolean[] { false, true }) {
                 camera.setIsometric(iso);
                 camera.center(BoardGeometry.center(at, scene.tile(at).elevation()));
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                settle(terrain, frame, scene, camera);
                 List<int[]> images = new ArrayList<>();
                 String prefix = iso ? "iso-" : "top-";
                 for (int pass = 0; pass < 4; pass++) {
@@ -129,7 +135,7 @@ class GpuGroundDamageSmokeTest {
                 camera.setIsometric(iso);
                 camera.camera.zoom = .045f;
                 camera.center(BoardGeometry.center(rock, scene.tile(rock).elevation()));
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                settle(terrain, frame, scene, camera);
                 for (boolean wear : new boolean[] { false, true }) {
                     terrain.setTerrainWear(wear ? 1 : 0);
                     frame.render(terrain, camera, scene);
@@ -158,10 +164,10 @@ class GpuGroundDamageSmokeTest {
                 damage.impact(scene, new GpuGroundDamage.Impact(burst, "burst", points.getFirst(), points.getFirst(), "bullet", null),
                       terrain::tacticalSurface);
             }
-            damage.upload();
-            assertEquals(beforeBurst + GpuGroundDamage.STAMPS_PER_FRAME, damage.marks(), "A salvo has bounded per-frame raster work");
-            damage.upload();
-            assertEquals(beforeBurst + 2 * GpuGroundDamage.STAMPS_PER_FRAME, damage.marks());
+            assertEquals(25, pending(damage), "The whole salvo must be admitted before raster work starts");
+            // Large gouges can reach the texel budget before the per-frame stamp count.
+            uploadAll(damage);
+            assertEquals(beforeBurst + 25, damage.marks(), "Bounded uploads must eventually finish the whole salvo");
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
             if (Boolean.getBoolean("megamek.gpu.measureAccumulatedScars")) {
                 measureAccumulatedScars(frame, terrain, camera, scene, report);
@@ -193,7 +199,7 @@ class GpuGroundDamageSmokeTest {
         camera.setIsometric(false);
         camera.camera.zoom = .055f;
         camera.center(center);
-        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        settle(terrain, frame, scene, camera);
         terrain.setTerrainWear(0);
         terrain.setCombatScars(true);
         var coverage = new java.util.HashMap<String, ScarCoverage>();
@@ -305,7 +311,7 @@ class GpuGroundDamageSmokeTest {
             var at = new Coords(1, 1);
             var center = BoardGeometry.center(at, 0);
             camera.center(center);
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            settle(terrain, frame, scene, camera);
             var surface = terrain.tacticalSurface(at);
             center.z = surface.top().stream().map(face -> face.height(center.x, center.y))
                   .filter(Float::isFinite).max(Float::compare).orElseThrow();
@@ -433,7 +439,7 @@ class GpuGroundDamageSmokeTest {
         for (boolean iso : new boolean[] { false, true }) {
             camera.setIsometric(iso);
             camera.center(BoardGeometry.center(at, scene.tile(at).elevation()));
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            settle(terrain, frame, scene, camera);
             for (int repeat = 0; repeat < 3; repeat++) {
                 for (int ordinal = 0; ordinal < 4; ordinal++) {
                     // Rotate the order between repeats to reduce clock/temperature/order bias.
@@ -453,6 +459,33 @@ class GpuGroundDamageSmokeTest {
         values.sort(Double::compare);
         report.append(String.format(Locale.ROOT, "%s,%d,%.4f,%.4f,%.4f%n", label, values.size(),
               values.get(values.size() / 2), values.get(Math.min(values.size() - 1, (int) (values.size() * .95))), values.getLast()));
+    }
+
+    private static int pending(GpuGroundDamage damage) throws Exception {
+        var field = GpuGroundDamage.class.getDeclaredField("pending");
+        field.setAccessible(true);
+        return ((java.util.Collection<?>) field.get(damage)).size();
+    }
+
+    private static int uploadAll(GpuGroundDamage damage) throws Exception {
+        int frames = 0;
+        while (pending(damage) > 0) {
+            int queued = pending(damage), completed = damage.marks();
+            damage.upload();
+            int stamped = damage.marks() - completed;
+            assertTrue(stamped > 0 && stamped <= GpuGroundDamage.STAMPS_PER_FRAME,
+                  "Each upload must make progress without exceeding the stamp limit");
+            assertEquals(queued - stamped, pending(damage), "Uploaded marks must leave the pending queue");
+            frames++;
+        }
+        return frames;
+    }
+
+    /** Prepare the displayed lighting before waiting for installed terrain and its material families. */
+    private static void settle(GpuTerrain terrain, GpuReviewFrame frame, BoardScene scene, BoardCamera camera)
+          throws Exception {
+        frame.prepare(terrain, camera, scene);
+        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
     }
 
     private static List<Vector3> points(GpuTerrain terrain, Coords at) {

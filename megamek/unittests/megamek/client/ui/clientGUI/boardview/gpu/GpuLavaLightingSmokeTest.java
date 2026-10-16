@@ -42,6 +42,7 @@ class GpuLavaLightingSmokeTest {
             @Override
             public void create() {
                 var terrain = new GpuTerrain();
+                var assets = new GpuAssets();
                 var batch = new ModelBatch(GpuUnitShader.provider());
                 var model = new ModelBuilder().createBox(14, 14, 24,
                       new Material(ColorAttribute.createDiffuse(.65f, .65f, .65f, 1)),
@@ -60,26 +61,26 @@ class GpuLavaLightingSmokeTest {
                     camera.center(position);
                     var object = new ModelInstance(model);
                     object.transform.setToTranslation(position);
-                    var lights = new GpuLavaLighting();
+                    var lights = new GpuLavaLighting(assets);
                     var environment = new Environment();
                     environment.set(ColorAttribute.createAmbientLight(.015f, .015f, .015f, 1));
                     environment.set(lights);
                     int[] unlit = draw(surface, batch, object, environment, camera);
                     GpuReviewFrame.save(new File(output, "object-no-spill.png"));
-                    lights.update(scene, camera.camera);
+                    lights.update(scene);
                     int[] lit = draw(surface, batch, object, environment, camera);
                     GpuReviewFrame.save(new File(output, "object-lava-spill.png"));
                     assertTrue(red(lit) > red(unlit) + .5, "Molten light must reach the standard object shader");
-                    lights.update(bank(BoardLiquid.Kind.MAGMA_CRUST, false), camera.camera);
+                    lights.update(bank(BoardLiquid.Kind.MAGMA_CRUST, false));
                     assertTrue(red(draw(surface, batch, object, environment, camera)) < red(lit) - .4,
                           "Cooling leaves much weaker residual heat");
-                    lights.update(bank(BoardLiquid.Kind.MAGMA, true), camera.camera);
+                    lights.update(bank(BoardLiquid.Kind.MAGMA, true));
                     assertArrayEquals(unlit, draw(surface, batch, object, environment, camera),
                           "Blocked sources cannot reveal heat");
-                    lights.update(bank(BoardLiquid.Kind.NONE, false), camera.camera);
+                    lights.update(bank(BoardLiquid.Kind.NONE, false));
                     assertArrayEquals(unlit, draw(surface, batch, object, environment, camera),
                           "Changing board clears old emitters");
-                    lights.update(scene, camera.camera);
+                    lights.update(scene);
                     assertArrayEquals(lit, draw(surface, batch, object, environment, camera),
                           "The same source restores the same light");
                     environment.remove(GpuLavaLighting.TYPE);
@@ -92,18 +93,18 @@ class GpuLavaLightingSmokeTest {
                     var fungus = GpuFungus.light(5, at, BoardFungus.CUPS.getFirst(),
                           new BoundingBox(root.cpy().add(-16, -16, 0), root.cpy().add(16, 16, 30)));
                     lights.setFungus(List.of(fungus));
-                    lights.update(bank(BoardLiquid.Kind.NONE, false), camera.camera);
+                    lights.update(bank(BoardLiquid.Kind.NONE, false));
                     double fungalRed = red(draw(surface, batch, object, environment, camera));
                     assertTrue(fungalRed > red(unlit) + .15,
                           "Mushrooms illuminate nearby objects: red increase " + (fungalRed - red(unlit)));
-                    lights.update(bank(BoardLiquid.Kind.NONE, true), camera.camera);
+                    lights.update(bank(BoardLiquid.Kind.NONE, true));
                     assertArrayEquals(unlit, draw(surface, batch, object, environment, camera),
                           "Hidden fungi do not leak light");
-                    lights.update(bank(BoardLiquid.Kind.NONE, false), camera.camera, false);
+                    lights.update(bank(BoardLiquid.Kind.NONE, false), false);
                     assertArrayEquals(unlit, draw(surface, batch, object, environment, camera),
                           "Tactical View excludes prop lights");
                     lights.setFungus(List.of());
-                    lights.update(bank(BoardLiquid.Kind.NONE, false), camera.camera);
+                    lights.update(bank(BoardLiquid.Kind.NONE, false));
                     assertArrayEquals(unlit, draw(surface, batch, object, environment, camera),
                           "Retiring props retires their lights");
                     surface.pixels().end();
@@ -116,7 +117,7 @@ class GpuLavaLightingSmokeTest {
                     GpuReviewFrame.save(new File(output, "lava-bank-day.png"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
-                finally { frame.dispose(); terrain.dispose(); batch.dispose(); model.dispose(); Gdx.app.exit(); }
+                finally { frame.dispose(); assets.dispose(); terrain.dispose(); batch.dispose(); model.dispose(); Gdx.app.exit(); }
             }
         }, configuration);
         if (failure.get() != null) throw new AssertionError("Lava illumination", failure.get());

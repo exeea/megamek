@@ -331,55 +331,6 @@ class GpuColorTextureSmokeTest {
         return depth.get(0);
     }
 
-
-    /** Known unit-normal distributions exercise actual compact upload/mips and the production distant-AA input. */
-    @Test
-    void compactNormalMipsPreservePhysicalSpreadAndMaterialOrder() {
-        nativeCheck(() -> {
-            var files = new java.util.ArrayList<FileHandle>();
-            // X endpoints, common Z: symmetric (+/-.8, 0, .6), flat, then (+/-.6, 0, .8).
-            // Deliberately non-monotonic material order catches old interleaved-array addressing.
-            int[][] normals = { { 26, 230, 204 }, { 128, 128, 255 }, { 51, 204, 230 } };
-            int[] colors = { 0xFF0000FF, 0x008000FF, 0x0000FFFF };
-            for (int material = 0; material < normals.length; material++) {
-                var color = new FileHandle(directory.resolve("spread-" + material + ".png").toFile());
-                var normal = new FileHandle(directory.resolve("spread-" + material + "-normal.png").toFile());
-                var pixels = new Pixmap(2, 2, Pixmap.Format.RGBA8888);
-                try {
-                    pixels.setBlending(Pixmap.Blending.None);
-                    pixels.setColor(colors[material]); pixels.fill(); PixmapIO.writePNG(color, pixels);
-                    for (int y = 0; y < 2; y++) {
-                        for (int x = 0; x < 2; x++) {
-                            int rgba = normals[material][x] << 24 | 128 << 16 | normals[material][2] << 8
-                                  | (17 + material * 102);
-                            pixels.drawPixel(x, y, rgba);
-                        }
-                    }
-                    PixmapIO.writePNG(normal, pixels);
-                } finally { pixels.dispose(); }
-                files.add(color); files.add(normal);
-            }
-            var factory = GpuAssets.class.getDeclaredMethod("repeatingArray", List.class, int.class);
-            factory.setAccessible(true);
-            var arrays = (GpuAssets.MaterialArrays) factory.invoke(null, files, 2);
-            try {
-                var probe = GpuAssets.class.getDeclaredMethod("normalSpread",
-                      com.badlogic.gdx.graphics.TextureArray.class, int.class);
-                probe.setAccessible(true);
-                float[] spread = (float[]) probe.invoke(null, arrays.data(), normals.length);
-                for (float value : spread) {
-                    assertTrue(Float.isFinite(value) && value >= 0, "Finite nonnegative distant normal spread");
-                }
-                // Independent analytic mean-normal lengths .6, 1 and .8 give these Toksvig references.
-                // Bounds include source and generated-mip UNORM8 rounding; they cannot hide wrong layers/decoding.
-                assertEquals(.6616667, spread[0], .025, "Strong symmetric slopes retain their unresolved spread");
-                assertEquals(0, spread[1], .000001, "A flat normal does not acquire artificial roughness");
-                assertEquals(.245, spread[2], .02, "Moderate symmetric slopes retain their smaller spread");
-                assertTrue(spread[0] > spread[2] && spread[2] > spread[1], "Material order survives compact storage");
-            } finally { arrays.dispose(); }
-        });
-    }
-
     @Test
     void filteringAndGeneratedMipsAverageLinearRgbWithoutTransformingAlphaOrData() {
         nativeCheck(() -> {

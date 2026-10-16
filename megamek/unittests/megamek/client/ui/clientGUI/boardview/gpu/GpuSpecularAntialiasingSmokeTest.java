@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -32,7 +33,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Specular anti-aliasing (light-model.glsl) on the terrain calibration board in rain and afternoon sun, from four
  * sides: wet rock and pavement with their cliffs, water and the other ground families. The off/on pairs go to
- * build/gpu-board-review/specular-aa.
+ * build/gpu-board-review/specular-aa. The setting is compiled in, so every switch here waits, as the loading stage
+ * does, until the terrain has rebuilt its programs.
  */
 @Tag("on-demand")
 class GpuSpecularAntialiasingSmokeTest {
@@ -54,6 +56,10 @@ class GpuSpecularAntialiasingSmokeTest {
      * ground. The board camera's nearest zoom, .05, still minifies the sculpt maps.
      */
     private static final float MAGNIFIED_ZOOM = .0125f;
+    /** A loading frame shorter than this keeps the loading stage moving. */
+    private static final long LOADING_FRAME_NANOS = TimeUnit.MILLISECONDS.toNanos(250);
+    /** Timed rounds per view, and frames per round; the first frames of a round are not measured. */
+    private static final int ROUNDS = 8, ROUND_FRAMES = 80, WARM_FRAMES = 20;
 
     /**
      * Fitted to the window and at a middle distance, a highlight narrower than a pixel sparkles as the view moves: over
@@ -69,50 +75,53 @@ class GpuSpecularAntialiasingSmokeTest {
         double[][] highlights = new double[ANGLES.length][2];
         StringBuilder report = new StringBuilder("angle,fittedOff,fittedOn,middleOff,middleOn,closeTopOff,closeTopOn\n");
         AtomicReference<Throwable> failure = new AtomicReference<>();
+        boolean saved = GpuEnvironmentLighting.specularAntialiasing;
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 800);
-        new Lwjgl3Application(new ApplicationAdapter() {
-            @Override
-            public void create() {
-                var terrain = new GpuTerrain();
-                var frame = new GpuReviewFrame(RAIN);
-                var units = new GpuUnitModels();
-                var batch = new ModelBatch(GpuUnitShader.provider());
-                try {
-                    load(terrain, frame, scene);
-                    var unit = standing(units.modular("units/modular/bodies/atlas.json").model(), scene, FOOT, 6);
-                    int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
-                    for (int index = 0; index < ANGLES.length; index++) {
-                        int angle = ANGLES[index];
-                        BoardCamera camera = view(terrain, frame, scene, angle);
-                        double[] fitted = pans(terrain, frame, camera, scene, angle + "-fitted");
-                        focus(terrain, frame, camera, scene, MIDDLE_ZOOM);
-                        double[] middle = pans(terrain, frame, camera, scene, angle + "-middle");
-                        for (int on = 0; on < 2; on++) { flicker[on] += fitted[on] + middle[on]; }
-                        focus(terrain, frame, camera, scene, MAGNIFIED_ZOOM);
-                        frame.render(terrain, camera, scene, List.of(unit), batch);
-                        for (int on = 0; on < 2; on++) {
-                            GpuEnvironmentLighting.specularAntialiasing = on == 1;
-                            frame.render(terrain, camera, scene, List.of(unit), batch);
-                            GpuReviewFrame.save(new File(OUTPUT, angle + "-close" + (on == 1 ? "-on.png" : "-off.png")));
-                            highlights[index][on] = brightest(luminance(width, height), .01);
+        try {
+            new Lwjgl3Application(new ApplicationAdapter() {
+                @Override
+                public void create() {
+                    var terrain = new GpuTerrain();
+                    var frame = new GpuReviewFrame(RAIN);
+                    var units = new GpuUnitModels();
+                    var batch = new ModelBatch(GpuUnitShader.provider());
+                    try {
+                        load(terrain, frame, scene);
+                        var unit = standing(units.modular("units/modular/bodies/atlas.json").model(), scene, FOOT, 6);
+                        int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
+                        for (int index = 0; index < ANGLES.length; index++) {
+                            int angle = ANGLES[index];
+                            BoardCamera camera = view(terrain, frame, scene, angle);
+                            double[] fitted = pans(terrain, frame, camera, scene, angle + "-fitted");
+                            focus(terrain, frame, camera, scene, MIDDLE_ZOOM);
+                            double[] middle = pans(terrain, frame, camera, scene, angle + "-middle");
+                            for (int on = 0; on < 2; on++) { flicker[on] += fitted[on] + middle[on]; }
+                            focus(terrain, frame, camera, scene, MAGNIFIED_ZOOM);
+                            for (int on = 0; on < 2; on++) {
+                                setting(terrain, frame, camera, scene, on == 1);
+                                frame.render(terrain, camera, scene, List.of(unit), batch);
+                                GpuReviewFrame.save(new File(OUTPUT, angle + "-close" + (on == 1 ? "-on.png" : "-off.png")));
+                                highlights[index][on] = brightest(luminance(width, height), .01);
+                            }
+                            report.append(String.format(Locale.ROOT, "%d,%.4f,%.4f,%.4f,%.4f,%.2f,%.2f%n", angle, fitted[0],
+                                  fitted[1], middle[0], middle[1], highlights[index][0], highlights[index][1]));
                         }
-                        report.append(String.format(Locale.ROOT, "%d,%.4f,%.4f,%.4f,%.4f,%.2f,%.2f%n", angle, fitted[0],
-                              fitted[1], middle[0], middle[1], highlights[index][0], highlights[index][1]));
+                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    } catch (Throwable error) {
+                        failure.set(error);
+                    } finally {
+                        batch.dispose();
+                        units.dispose();
+                        frame.dispose();
+                        terrain.dispose();
+                        Gdx.app.exit();
                     }
-                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-                } catch (Throwable error) {
-                    failure.set(error);
-                } finally {
-                    GpuEnvironmentLighting.specularAntialiasing = true;
-                    batch.dispose();
-                    units.dispose();
-                    frame.dispose();
-                    terrain.dispose();
-                    Gdx.app.exit();
                 }
-            }
-        }, config);
+            }, config);
+        } finally {
+            GpuEnvironmentLighting.specularAntialiasing = saved;
+        }
         if (failure.get() != null) { throw new AssertionError("Specular anti-aliasing review", failure.get()); }
         System.out.print("Flicker: mean squared luminance change per pan step; close-up: mean of the brightest 1% "
               + "(8-bit luminance)\n" + report);
@@ -123,46 +132,141 @@ class GpuSpecularAntialiasingSmokeTest {
         }
     }
 
-    /** GPU timestamps of every stage, fitted and at the middle distance, off and on alternated (ABBA rounds). */
+    /**
+     * A switch is a lighting change (GpuEnvironmentLighting.Antialiasing): the terrain stops being ready, so the view
+     * shows its loading stage while the terrain's material and family programs build, and the first frame after draws
+     * with the setting. Each lighting configuration builds its own family programs, within twice the capacity over
+     * all (GpuFamilyPrograms): the switched one has as many as the load. Switching back finds the first setting's
+     * programs, family programs included: no loading frame waits, and the frame is the first one again. The report
+     * gives each switch's rebuild, longest loading frame, first frame and family programs.
+     */
+    @Test
+    void aSwitchRebuildsBehindTheLoadingStage() throws Exception {
+        BoardScene scene = scene();
+        StringBuilder report = new StringBuilder("switch,rebuildMs,longestLoadingFrameMs,firstFrameMs,familyPrograms\n");
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        boolean saved = GpuEnvironmentLighting.specularAntialiasing;
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1280, 800);
+        GpuEnvironmentLighting.specularAntialiasing = false;
+        try {
+            new Lwjgl3Application(new ApplicationAdapter() {
+                @Override
+                public void create() {
+                    var terrain = new GpuTerrain();
+                    var frame = new GpuReviewFrame(RAIN);
+                    try {
+                        load(terrain, frame, scene);
+                        BoardCamera camera = view(terrain, frame, scene, 0);
+                        int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
+                        frame.render(terrain, camera, scene);
+                        float[] first = luminance(width, height);
+                        int loaded = terrain.familyPrograms().ready().size();
+                        report.append(String.format(Locale.ROOT, "load off,,,,%d%n", loaded));
+                        assertTrue(loaded > 0, "The board builds family programs");
+                        for (boolean enabled : new boolean[] { true, false }) {
+                            GpuEnvironmentLighting.specularAntialiasing = enabled;
+                            long start = System.nanoTime(), longest = 0;
+                            frame.prepare(terrain, camera, scene);
+                            assertFalse(terrain.ready(scene), "A switch must show the loading stage");
+                            // The loading stage's frames: the terrain refines and draws nothing until it is ready.
+                            while (!terrain.ready(scene)) {
+                                long loadingFrame = System.nanoTime();
+                                frame.prepare(terrain, camera, scene);
+                                terrain.refine(camera.camera);
+                                longest = Math.max(longest, System.nanoTime() - loadingFrame);
+                                assertTrue(System.nanoTime() - start < TimeUnit.MINUTES.toNanos(20),
+                                      () -> "The rebuild must finish: " + terrain.buildDetails());
+                            }
+                            long rebuilt = System.nanoTime();
+                            frame.render(terrain, camera, scene);
+                            Gdx.gl.glFinish();
+                            long drawn = System.nanoTime();
+                            float[] image = luminance(width, height);
+                            report.append(String.format(Locale.ROOT, "%s,%.0f,%.1f,%.1f,%d%n", enabled ? "on" : "off again",
+                                  (rebuilt - start) / 1e6, longest / 1e6, (drawn - rebuilt) / 1e6,
+                                  terrain.familyPrograms().ready().size()));
+                            assertEquals(loaded, terrain.familyPrograms().ready().size(), enabled
+                                  ? "The switched configuration builds its own family programs"
+                                  : "Switching back takes the first configuration's family programs back");
+                            if (enabled) {
+                                assertTrue(changed(first, image) > 0, "The switched frame must draw with the setting");
+                            } else {
+                                assertEquals(0, changed(first, image), "Switching back must draw the first frame again");
+                                assertTrue(longest < LOADING_FRAME_NANOS, "Switching back must find its programs");
+                            }
+                        }
+                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    } catch (Throwable error) {
+                        failure.set(error);
+                    } finally {
+                        frame.dispose();
+                        terrain.dispose();
+                        Gdx.app.exit();
+                    }
+                }
+            }, config);
+        } finally {
+            GpuEnvironmentLighting.specularAntialiasing = saved;
+        }
+        System.out.print("Specular anti-aliasing switches on the calibration board\n" + report);
+        if (failure.get() != null) { throw new AssertionError("Specular anti-aliasing switch\n" + report, failure.get()); }
+    }
+
+    /**
+     * GPU timestamps of every stage, fitted and at the middle distance, for this process's setting. The setting compiles
+     * different programs, so each setting runs in its own process, alternated across processes (ABBA):
+     * -Dmegamek.gpu.specularAa=on|off picks it (default off) and -Dmegamek.gpu.specularAaLabel names the run. Each view
+     * takes eight rounds of 80 frames, the first 20 of each unmeasured, each round reported on its own; then its capture.
+     */
     @Test
     @Tag("gpu-benchmark")
     void specularAntialiasingTimings() throws Exception {
+        boolean enabled = "on".equals(System.getProperty("megamek.gpu.specularAa", "off"));
+        String label = System.getProperty("megamek.gpu.specularAaLabel", enabled ? "on" : "off");
         Files.createDirectories(OUTPUT.toPath());
         BoardScene scene = scene();
         StringBuilder report = new StringBuilder();
         AtomicReference<Throwable> failure = new AtomicReference<>();
+        boolean saved = GpuEnvironmentLighting.specularAntialiasing;
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1920, 1080);
         config.useVsync(false);
         config.setForegroundFPS(0);
-        new Lwjgl3Application(new ApplicationAdapter() {
-            @Override
-            public void create() {
-                var terrain = new GpuTerrain();
-                var frame = new GpuReviewFrame(RAIN);
-                try {
-                    load(terrain, frame, scene);
-                    BoardCamera camera = view(terrain, frame, scene, 0);
-                    report.append("Renderer: ").append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append("; window ")
-                          .append(Gdx.graphics.getBackBufferWidth()).append(" x ")
-                          .append(Gdx.graphics.getBackBufferHeight()).append('\n');
-                    time(terrain, frame, camera, scene, "fitted", report);
-                    focus(terrain, frame, camera, scene, MIDDLE_ZOOM);
-                    time(terrain, frame, camera, scene, "middle distance", report);
-                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-                } catch (Throwable error) {
-                    failure.set(error);
-                } finally {
-                    GpuEnvironmentLighting.specularAntialiasing = true;
-                    frame.dispose();
-                    terrain.dispose();
-                    Gdx.app.exit();
+        GpuEnvironmentLighting.specularAntialiasing = enabled;
+        try {
+            new Lwjgl3Application(new ApplicationAdapter() {
+                @Override
+                public void create() {
+                    var terrain = new GpuTerrain();
+                    var frame = new GpuReviewFrame(RAIN);
+                    try {
+                        load(terrain, frame, scene);
+                        BoardCamera camera = view(terrain, frame, scene, 0);
+                        report.append("Renderer: ").append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append("; window ")
+                              .append(Gdx.graphics.getBackBufferWidth()).append(" x ")
+                              .append(Gdx.graphics.getBackBufferHeight()).append("; specular anti-aliasing ")
+                              .append(enabled ? "on" : "off").append("; family programs ")
+                              .append(terrain.familyPrograms().ready().size()).append('\n');
+                        time(terrain, frame, camera, scene, label, "fitted", report);
+                        focus(terrain, frame, camera, scene, MIDDLE_ZOOM);
+                        time(terrain, frame, camera, scene, label, "middle distance", report);
+                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    } catch (Throwable error) {
+                        failure.set(error);
+                    } finally {
+                        frame.dispose();
+                        terrain.dispose();
+                        Gdx.app.exit();
+                    }
                 }
-            }
-        }, config);
+            }, config);
+        } finally {
+            GpuEnvironmentLighting.specularAntialiasing = saved;
+        }
         if (failure.get() != null) { throw new AssertionError("Specular anti-aliasing timings", failure.get()); }
         System.out.println(report);
-        Files.writeString(new File(OUTPUT, "timings.txt").toPath(), report);
+        Files.writeString(new File(OUTPUT, "timings-" + label + ".txt").toPath(), report);
     }
 
     /** The board captured as a game loads it, artwork included. */
@@ -215,6 +319,18 @@ class GpuSpecularAntialiasingSmokeTest {
     }
 
     /**
+     * Switches the setting and waits, as the loading stage does, until the terrain has rebuilt its programs for it: the
+     * switch is a lighting change (GpuEnvironmentLighting.Antialiasing).
+     */
+    private static void setting(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene,
+          boolean enabled) throws InterruptedException {
+        GpuEnvironmentLighting.specularAntialiasing = enabled;
+        frame.prepare(terrain, camera, scene);
+        settle(terrain, camera);
+        draw(terrain, frame, camera, scene);
+    }
+
+    /**
      * Draws until no family program is waiting (GpuFamilyPrograms): timings and captures see the settled programs.
      * Like the view, it refines before each frame; family programs build there while the terrain loads.
      */
@@ -249,10 +365,10 @@ class GpuSpecularAntialiasingSmokeTest {
 
     /** The pan's flicker without and with the setting; each run's first frame is its capture. */
     private static double[] pans(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene,
-          String name) {
+          String name) throws InterruptedException {
         double[] result = new double[2];
         for (int on = 0; on < 2; on++) {
-            GpuEnvironmentLighting.specularAntialiasing = on == 1;
+            setting(terrain, frame, camera, scene, on == 1);
             result[on] = pan(terrain, frame, camera, scene, new File(OUTPUT, name + (on == 1 ? "-on.png" : "-off.png")));
         }
         return result;
@@ -287,30 +403,22 @@ class GpuSpecularAntialiasingSmokeTest {
         return sum / ((double) STEPS * width * height);
     }
 
-    /** Off and on alternated in four ABBA rounds of 80 frames, the first 20 of each unmeasured. */
+    /** The view's rounds, each reported with its own medians, then the view's capture for the pixel comparisons. */
     private static void time(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene,
-          String view, StringBuilder report) {
-        var off = new GpuStageTimings();
-        var on = new GpuStageTimings();
-        try {
-            for (int round = 0; round < 4; round++) {
-                for (int index = 0; index < 2; index++) {
-                    boolean enabled = (round + index) % 2 == 1;
-                    GpuEnvironmentLighting.specularAntialiasing = enabled;
-                    GpuStageTimings timings = enabled ? on : off;
-                    for (int frames = 0; frames < 80; frames++) {
-                        timings.beginFrame(frames >= 20);
-                        frame.render(terrain, camera, scene, timings);
-                        Gdx.gl.glFinish();
-                    }
+          String label, String view, StringBuilder report) {
+        try (var timings = new GpuStageTimings()) {
+            for (int round = 0; round < ROUNDS; round++) {
+                for (int frames = 0; frames < ROUND_FRAMES; frames++) {
+                    timings.beginFrame(frames >= WARM_FRAMES);
+                    frame.render(terrain, camera, scene, timings);
+                    Gdx.gl.glFinish();
                 }
+                timings.appendReport(report, "Specular anti-aliasing " + label + ", calibration board in rain, " + view
+                      + ", round " + round);
             }
-            off.appendReport(report, "Specular anti-aliasing off, calibration board in rain, " + view);
-            on.appendReport(report, "Specular anti-aliasing on, calibration board in rain, " + view);
-        } finally {
-            off.close();
-            on.close();
         }
+        frame.render(terrain, camera, scene);
+        GpuReviewFrame.save(new File(OUTPUT, label + "-" + view.replace(' ', '-') + ".png"));
     }
 
     /** The displayed frame's luminance, from its encoded 8-bit RGB. */
@@ -327,6 +435,13 @@ class GpuSpecularAntialiasingSmokeTest {
         } finally {
             image.dispose();
         }
+    }
+
+    /** Pixels whose 8-bit luminance differs by more than one. */
+    private static int changed(float[] a, float[] b) {
+        int count = 0;
+        for (int i = 0; i < a.length; i++) { if (Math.abs(a[i] - b[i]) > 1) { count++; } }
+        return count;
     }
 
     /** The mean of the brightest share of the values. */

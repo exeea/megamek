@@ -154,7 +154,6 @@ class GpuMapSourceTest {
             boolean dirty = editor != null && editor.dirty();
             try {
                 preferences.setValue(GUIPreferences.SHOW_COORDS, true);
-                preferences.setValue(GUIPreferences.GUI_SCALE, 1.0);
                 BoardScene.Command stale;
                 try (var source = new GpuMapSource(game, null, editor);
                       var other = new GpuMapSource(game, null, null)) {
@@ -177,10 +176,16 @@ class GpuMapSourceTest {
                     assertEquals(!editing, preferences.getCoordsEnabled(), "The editor keeps Ctrl+G for Group");
                     source.key(KeyCommandBind.LOS_SETTING.key, true, KeyCommandBind.LOS_SETTING.modifiers);
                     assertTrue(source.takeFrame().panels().los().open());
-                    viewCommand(source, ClientGUI.VIEW_INC_GUI_SCALE).action().run();
-                    assertEquals(1.1f, source.uiPreferences().scale(), .001f);
+                    // Swing's GUI scale is Swing's alone: the View menu has none, and its key changes no scale.
+                    for (String swing : List.of(ClientGUI.VIEW_INC_GUI_SCALE, ClientGUI.VIEW_DEC_GUI_SCALE)) {
+                        assertTrue(source.takeFrame().globalCommands().stream()
+                              .filter(command -> command.id().equals("view"))
+                              .flatMap(command -> command.children().stream())
+                              .noneMatch(command -> command.id().equals(swing)), swing);
+                    }
                     source.key(KeyCommandBind.DEC_GUI_SCALE.key, true, KeyCommandBind.DEC_GUI_SCALE.modifiers);
-                    assertEquals(1f, source.uiPreferences().scale(), .001f);
+                    assertEquals(scale, preferences.getGUIScale());
+                    assertEquals(preferences.getBoardUiScale(), source.uiPreferences().scale());
                     assertEquals(generation, source.takeFrame().boardGeneration());
                     if (editor != null) {
                         assertEquals(dirty, editor.dirty());
@@ -192,7 +197,6 @@ class GpuMapSourceTest {
                 assertEquals(before, preferences.getCoordsEnabled(), "A closed workspace cannot toggle shared preferences");
             } finally {
                 preferences.setValue(GUIPreferences.SHOW_COORDS, coordinates);
-                preferences.setValue(GUIPreferences.GUI_SCALE, scale);
             }
             return null;
         });

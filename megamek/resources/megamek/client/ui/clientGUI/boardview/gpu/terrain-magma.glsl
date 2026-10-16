@@ -4,7 +4,10 @@
 uniform sampler2DArray u_magmaColor, u_magmaMaps;
 const float MAGMA_NORMAL = 1.0;
 const float MAGMA_SURFACE = 2.0; // height, roughness, AO, relief UV / .1
-const float MAGMA_HEAT = 3.0;    // heat, signed flow XY, crack-wall glow
+const float MAGMA_HEAT = 3.0; // molten: linear emission RGB, original heat A; crust: heat R, crack glow A
+#ifdef magmaEmissionMapFlag
+uniform float u_magmaEmissionScale;
+#endif
 uniform sampler2D u_magmaField; // the lava's liquid field: R signed bank distance, BA world XY current
 uniform vec4 u_magmaFieldMap;   // world XY to field UV; zero without a field
 // Hex widths either side of a lava bank over which the melt chills into a skin and the cooled bank still glows.
@@ -18,7 +21,9 @@ struct Volcanic {
 };
 
 vec2 magmaRelief(vec2 uv, vec2 dx, vec2 dy, vec4 surface, vec2 parallax);
+#ifndef magmaEmissionMapFlag
 vec3 magmaEmission(vec2 heat, float strength);
+#endif
 float magmaRepeatMetres();
 float magmaDistantRoughness();
 
@@ -58,7 +63,15 @@ Volcanic magmaSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, bool relief) {
     }
     surface = mix(distantSurface, surface, terrainSurfaceDetail);
     vec4 heat = magmaTexel(MAGMA_HEAT, uv, dx, dy);
-    return Volcanic(textureGrad(u_magmaColor, vec3(uv, 0.0), dx, dy).rgb, normal, surface, heat.ra, vec3(0.0));
+#ifdef magmaEmissionMapFlag
+    // PTEX owns the emitted spectrum and its coverage; one raw filtered sample supplies canonical radiance.
+    vec2 coverage = vec2(heat.a, 0.0);
+    vec3 emission = heat.rgb * u_magmaEmissionScale;
+#else
+    vec2 coverage = heat.ra;
+    vec3 emission = vec3(0.0);
+#endif
+    return Volcanic(textureGrad(u_magmaColor, vec3(uv, 0.0), dx, dy).rgb, normal, surface, coverage, emission);
 }
 
 Volcanic magmaMix(Volcanic a, Volcanic b, float weight) {
@@ -151,6 +164,7 @@ Volcanic magmaSurface(vec3 world, vec3 face, vec3 eye, vec3 uphill, float bank, 
     return magmaSurface(magmaProjectionFor(world), face, eye, uphill, bank, waves);
 }
 
+#ifndef magmaEmissionMapFlag
 vec3 magmaEmission(vec2 heat, float strength) {
     // Emission is added AFTER sunlight, occlusion and cloud/geometry shadowing. Night never extinguishes heat.
     // Each material variant supplies its fixed source radiance; shared display exposure remains downstream.
@@ -159,3 +173,4 @@ vec3 magmaEmission(vec2 heat, float strength) {
     vec3 crackGlow = MAGMA_CRACK_RADIANCE * heat.y * strength * (1.0 - heat.x);
     return emission + crackGlow;
 }
+#endif

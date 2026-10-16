@@ -243,7 +243,6 @@ public class ClientGUI extends AbstractClientGUI
     public static final String VIEW_MINI_MAP = "viewMinimap";
     public static final String VIEW_UNIT_OVERVIEW = "viewUnitOverview";
     public static final String VIEW_ZOOM_IN = "viewZoomIn";
-    public static final String VIEW_GPU_BOARD = "viewGpuBoard";
     public static final String VIEW_LEGACY_2D = "viewLegacy2D";
     public static final String VIEW_GRAPHICS_CLASSIC = "viewGraphicsClassic";
     public static final String VIEW_GRAPHICS_ENHANCED = "viewGraphicsEnhanced";
@@ -1547,14 +1546,18 @@ public class ClientGUI extends AbstractClientGUI
                 if (GpuBoardWindow.isActiveFor(this)) { GpuBoardWindow.cameraCommand(this, KeyCommandBind.ZOOM_IN); }
                 else { getCurrentBoardView().ifPresent(IBoardView::zoomIn); }
                 break;
-            case VIEW_GPU_BOARD:
-                GUIP.setUse3DBoard(true);
-                openGpuBoard();
-                break;
+            // The Renderer menu has saved the choice (CommonMenuBar); the lobby keeps its own UI until a board shows.
             case VIEW_LEGACY_2D:
-                boardViewChosen = true;
-                GUIP.setUse3DBoard(false);
-                GpuBoardWindow.showLegacy2D(this);
+                if (!client.getGame().getPhase().isLounge()) {
+                    boardViewChosen = true;
+                    GpuBoardWindow.showLegacy2D(this);
+                }
+                break;
+            case VIEW_GRAPHICS_CLASSIC:
+            case VIEW_GRAPHICS_ENHANCED:
+                if (!client.getGame().getPhase().isLounge()) {
+                    openGpuBoard();
+                }
                 break;
             case VIEW_ZOOM_OUT:
                 if (GpuBoardWindow.isActiveFor(this)) { GpuBoardWindow.cameraCommand(this, KeyCommandBind.ZOOM_OUT); }

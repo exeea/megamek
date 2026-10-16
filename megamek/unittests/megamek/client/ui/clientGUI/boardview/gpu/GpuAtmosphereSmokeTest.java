@@ -51,6 +51,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
 import megamek.common.planetaryConditions.Atmosphere;
+import megamek.common.planetaryConditions.AtmosphericTaint;
 import megamek.common.planetaryConditions.Fog;
 import megamek.common.planetaryConditions.Light;
 import megamek.common.planetaryConditions.PlanetaryConditions;
@@ -67,12 +68,35 @@ class GpuAtmosphereSmokeTest {
 
     @Test
     void fogStopsAtGeometryAndTimeChangesLightingWithoutReallocatingShadows() {
+        runNative(false, false);
+    }
+
+    @Test
+    void authoredBackdropMatchesUiAcrossTaintTimeExposureAndCameras() {
+        runNative(true, false);
+    }
+
+    @Test
+    void geometryShadowsAttenuateFogWithoutAliasingMoonlessPasses() {
+        runNative(false, true);
+    }
+
+    private void runNative(boolean skyOnly, boolean fogShadowOnly) {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
                 try {
-                    checkRendering();
+                    if (skyOnly) {
+                        String renderer = Gdx.gl.glGetString(GL20.GL_RENDERER);
+                        String expected = System.getProperty("megamek.gpu.expectedRenderer");
+                        System.out.println("UI_BACKDROP renderer=" + renderer);
+                        if (expected != null) { assertTrue(renderer.contains(expected), renderer); }
+                        checkSkyDirections();
+                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    } else {
+                        checkRendering(fogShadowOnly);
+                    }
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
@@ -85,14 +109,16 @@ class GpuAtmosphereSmokeTest {
         }
     }
 
-    private void checkRendering() throws Exception {
+    private void checkRendering(boolean fogShadowOnly) throws Exception {
         // Measure render work independently of the live window's VSync preference.
         Gdx.graphics.setVSync(false);
         assertTrue(output.isDirectory() || output.mkdirs());
-        checkScatteringPhase();
-        checkFogCloudBounds();
-        checkSkyDirections();
-        checkForegroundWeather();
+        if (!fogShadowOnly) {
+            checkScatteringPhase();
+            checkFogCloudBounds();
+            checkSkyDirections();
+            checkForegroundWeather();
+        }
         BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
         var graphics = image.createGraphics();
         graphics.setColor(new java.awt.Color(155, 155, 155));
@@ -135,6 +161,10 @@ class GpuAtmosphereSmokeTest {
         camera.fit(scene);
         terrain.update(scene);
         try {
+            if (fogShadowOnly) {
+                checkFogGeometryShadows(atmosphere, terrain, batch, tower, camera, scene);
+                return;
+            }
             BoardAtmosphere.Settings clear = new BoardAtmosphere.Settings(12, 0, 0, 1.5f, 0, 0);
             draw(atmosphere, terrain, batch, tower, camera, scene, clear);
             checkCloudVariantReuse(atmosphere, terrain, batch, tower, camera, scene, clear);
@@ -184,7 +214,7 @@ class GpuAtmosphereSmokeTest {
             assertTrue(luminance(sample(camera, moonShadow)) < luminance(originalMoonShade) * 0.95f,
                   "The Full Moon contrast control must visibly deepen native cast shadows without a settings change");
             float nightToDay = linearLuminance(night) / linearLuminance(clearGround);
-            assertTrue(nightToDay > .5f && nightToDay < .7f,
+            assertTrue(nightToDay > .23f && nightToDay < .33f,
                   "Calibrated full moon stays below daylight on the matched gray receiver: " + nightToDay);
             // Retain a readable display-space floor after the night exposure and cool tint.
             float nightBrightnessFloor = 0.29f;
@@ -328,6 +358,97 @@ class GpuAtmosphereSmokeTest {
         batch.end();
         if (weather) { atmosphere.renderWeather(camera.camera, scene); }
         atmosphere.end(camera.camera, terrain, scene, 0);
+    }
+
+    /** Exercise the real fog pass independently of the broad fixture's unrelated twilight brightness floor. */
+    private void checkFogGeometryShadows(GpuAtmosphere atmosphere, GpuTerrain terrain, ModelBatch batch,
+          ModelInstance tower, BoardCamera camera, BoardScene scene) throws Exception {
+        String renderer = Gdx.gl.glGetString(GL20.GL_RENDERER);
+        String expected = System.getProperty("megamek.gpu.expectedRenderer");
+        System.out.println("HARDWARE_DEPTH_FOG renderer=" + renderer);
+        if (expected != null) { assertTrue(renderer.contains(expected), renderer); }
+        camera.setIsometric(true);
+        camera.fit(scene);
+        var cloudy = new BoardAtmosphere.Settings(13, .85f, .05f, 2.5f, 0, 0);
+        atmosphere.setOptions(GpuAtmosphere.Options.DEFAULTS);
+        draw(atmosphere, terrain, batch, List.of(tower), camera, scene, cloudy, null, 0);
+        // Settle the actual family mask selected by the configured frame before comparing retained scene depth.
+        terrain.update(scene);
+        draw(atmosphere, terrain, batch, List.of(tower), camera, scene, cloudy, null, 0);
+        var shadow = terrain.environment().shadowMap;
+        assertNotNull(shadow);
+        GpuShadowSmokeTest.assertDepthTexture(shadow.getDepthMap().texture);
+        var fogField = GpuAtmosphere.class.getDeclaredField("fog");
+        fogField.setAccessible(true);
+        FrameBuffer fog = (FrameBuffer) fogField.get(atmosphere);
+        var renderFog = GpuAtmosphere.class.getDeclaredMethod("renderFog", Camera.class, GpuTerrain.class, BoardScene.class);
+        renderFog.setAccessible(true);
+        float[] blocked = fogPixels(fog);
+        GpuBoardTestUi.capture(new File(output, "hardware-depth-fog-shadow.png"));
+        float[] unblocked;
+        try {
+            // Only the volume's geometry visibility changes; camera depth, cloud transmission and clock stay fixed.
+            terrain.environment().shadowMap = null;
+            renderFog.invoke(atmosphere, camera.camera, terrain, scene);
+            unblocked = fogPixels(fog);
+        } finally { terrain.environment().shadowMap = shadow; }
+        renderFog.invoke(atmosphere, camera.camera, terrain, scene);
+        assertArrayEquals(blocked, fogPixels(fog), "Restoring geometry shadows restores the exact fog output");
+        float maximumAttenuation = 0;
+        int attenuated = 0;
+        for (int i = 0; i < blocked.length; i++) {
+            if (i % 4 == 3) {
+                assertEquals(blocked[i], unblocked[i], "Visibility must not change physical fog transmission");
+            } else {
+                assertTrue(unblocked[i] >= blocked[i], "A geometry shadow can only attenuate scattered sunlight");
+                float attenuation = unblocked[i] - blocked[i];
+                maximumAttenuation = Math.max(maximumAttenuation, attenuation);
+                if (attenuation > 0) { attenuated++; }
+            }
+        }
+        assertTrue(attenuated > 0, "The actual caster must attenuate at least one fog RGB sample");
+        atmosphere.setOptions(new GpuAtmosphere.Options(0, false));
+        draw(atmosphere, terrain, batch, List.of(tower), camera, scene, cloudy, null, 0);
+        assertFalse(java.util.Arrays.equals(blocked, fogPixels(fog)), "The actual shaft contribution must be nonzero");
+        GpuBoardTestUi.capture(new File(output, "hardware-depth-fog-rays-off.png"));
+        var conditions = new PlanetaryConditions();
+        conditions.setLight(Light.MOONLESS);
+        conditions.setFog(Fog.FOG_LIGHT);
+        var moonless = BoardAtmosphere.fromScenario(conditions, false, .5);
+        atmosphere.setOptions(GpuAtmosphere.Options.DEFAULTS);
+        draw(atmosphere, terrain, batch, List.of(tower), camera, scene, moonless, null, 0);
+        terrain.update(scene);
+        draw(atmosphere, terrain, batch, List.of(tower), camera, scene, moonless, null, 0);
+        assertFalse(atmosphere.lighting().hasDirectLight());
+        assertNull(terrain.environment().shadowMap);
+        float[] noMoon = fogPixels(fog);
+        boolean nonemptyFog = false;
+        for (int i = 3; i < noMoon.length; i += 4) { nonemptyFog |= noMoon[i] < 1; }
+        assertTrue(nonemptyFog, "The no-moon branch must still execute an actual fog volume");
+        GpuBoardTestUi.capture(new File(output, "hardware-depth-fog-moonless.png"));
+        atmosphere.setOptions(new GpuAtmosphere.Options(0, false));
+        draw(atmosphere, terrain, batch, List.of(tower), camera, scene, moonless, null, 0);
+        assertArrayEquals(noMoon, fogPixels(fog), "Without a directional source the rays control is an exact no-op");
+        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        System.out.println("HARDWARE_DEPTH_FOG attenuatedChannels=" + attenuated
+              + " maximumAttenuation=" + maximumAttenuation);
+    }
+
+    private static float[] fogPixels(FrameBuffer fog) {
+        var viewport = BufferUtils.newIntBuffer(4);
+        Gdx.gl.glGetIntegerv(GL20.GL_VIEWPORT, viewport);
+        fog.begin();
+        try {
+            float[] result = new float[fog.getWidth() * fog.getHeight() * 4];
+            var pixels = BufferUtils.newFloatBuffer(result.length);
+            Gdx.gl.glReadPixels(0, 0, fog.getWidth(), fog.getHeight(), GL20.GL_RGBA, GL20.GL_FLOAT, pixels);
+            pixels.get(result);
+            for (float value : result) { assertTrue(Float.isFinite(value), "Finite actual fog output"); }
+            return result;
+        } finally {
+            fog.end();
+            Gdx.gl.glViewport(viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
+        }
     }
 
     private void checkFixedLightingAndMoonModes(GpuAtmosphere atmosphere, GpuTerrain terrain, ModelBatch batch,
@@ -1044,9 +1165,11 @@ class GpuAtmosphereSmokeTest {
         }
     }
 
-    /** Free flight follows world elevation; parallel board views retain a visible horizon-to-zenith backdrop. */
+    /** Incident-sky debug follows world rays; the authored UI backdrop keeps its screen gradient and EV response. */
     private void checkSkyDirections() {
-        record Palette(Color sky, Color horizon, String label) { }
+        record Palette(Color sky, Color horizon, String label, float exposure, float backdropExposure) {
+            Palette(Color sky, Color horizon, String label) { this(sky, horizon, label, 1, 0); }
+        }
         var palettes = new ArrayList<Palette>();
         palettes.add(new Palette(new Color(.4f, .3f, .2f, 1), new Color(.1f, .15f, .18f, 1), "known endpoints"));
         for (float hour : new float[] { 0, 6, 6.75f, 12, 17.25f, 18 }) {
@@ -1055,6 +1178,22 @@ class GpuAtmosphereSmokeTest {
                 palettes.add(new Palette(lighting.sky(), lighting.horizon(), "hour=" + hour + ", cover=" + cover));
             }
         }
+        // Actual palette owners, with independent reference-UI gamma/shoulder math below. Adaptation is
+        // deliberately far from one; the backdrop must follow user EV, not scene illumination normalization.
+        for (float hour : new float[] { 0, 6, 12, 18 }) {
+            for (var taint : AtmosphericTaint.values()) {
+                var settings = new BoardAtmosphere.Settings(hour, .6f, 0, 2.5f, 0, 0,
+                      BoardAtmosphere.Effects.NONE, Atmosphere.STANDARD, 25, true, taint);
+                var palette = BoardAtmosphere.skyPalette(settings, BoardAtmosphere.DEFAULT_TAINT_STRENGTH, false);
+                for (float ev : new float[] { .25f, 1, 4 }) {
+                    palettes.add(new Palette(palette.sky(), palette.horizon(),
+                          "UI hour=" + hour + ", taint=" + taint + ", EV gain=" + ev, ev * 17, ev));
+                }
+            }
+        }
+        var vacuum = BoardAtmosphere.skyPalette(new BoardAtmosphere.Settings(0, 0, 0, 2.5f, 0, 0,
+              BoardAtmosphere.Effects.NONE, Atmosphere.VACUUM), 1, false);
+        palettes.add(new Palette(vacuum.sky(), vacuum.horizon(), "UI vacuum", 17, 1));
         var shader = GpuAtmosphere.shader("atmosphere-composite.frag");
         var quad = GpuAtmosphere.screenQuad();
         var output = GpuHeatGlow.buffer(1, 3);
@@ -1073,6 +1212,8 @@ class GpuAtmosphereSmokeTest {
             shader.setUniformf("u_tint", 1, 1, 1);
             shader.setUniformf("u_saturation", 1);
             var sample = BufferUtils.newFloatBuffer(4);
+            double maximumError = 0;
+            int maximumCodeError = 0, authoredSamples = 0;
             for (Palette palette : palettes) {
                 float[] sky = { palette.sky().r, palette.sky().g, palette.sky().b };
                 float[] horizon = { palette.horizon().r, palette.horizon().g, palette.horizon().b };
@@ -1082,8 +1223,16 @@ class GpuAtmosphereSmokeTest {
                 var scene = GpuColorTexture.linear(clear, 1, 1, false);
                 try {
                     scene.bind(0); depth.bind(1);
-                    shader.setUniformf("u_sky", sky[0], sky[1], sky[2]);
+                    for (int channel = 0; channel < 3; channel++) {
+                        float stored = Float.float16ToFloat(Float.floatToFloat16(sky[channel] * GpuSceneRadiance.SCALE));
+                        clear.put(channel, stored / GpuSceneRadiance.SCALE);
+                    }
+                    shader.setUniformf("u_sky", clear.get(0), clear.get(1), clear.get(2));
                     shader.setUniformf("u_horizon", horizon[0], horizon[1], horizon[2]);
+                    shader.setUniformf("u_exposure", palette.exposure());
+                    shader.setUniformf("u_backdropExposure", palette.backdropExposure());
+                    shader.setUniformf("u_backdropSky", sky[0], sky[1], sky[2]);
+                    shader.setUniformf("u_backdropHorizon", horizon[0], horizon[1], horizon[2]);
                     for (Camera camera : new Camera[] { new OrthographicCamera(2, 2), new PerspectiveCamera(60, 2, 2) }) {
                         camera.near = .1f; camera.far = 100;
                         for (float elevation : new float[] { -1, 0, .25f, 1 }) {
@@ -1096,25 +1245,38 @@ class GpuAtmosphereSmokeTest {
                                   camera.projection.val[Matrix4.M33]);
                             quad.render(shader, GL20.GL_TRIANGLES);
                             boolean parallel = camera instanceof OrthographicCamera;
-                            // All three parallel-camera rows test the real normalized endpoints. The center
-                            // perspective ray has the explicit world elevation set above.
-                            for (int row = parallel ? 0 : 1; row <= (parallel ? 2 : 1); row++) {
+                            // The authored backdrop must match in all rows for both projection types. The
+                            // incident-sky center perspective ray has the explicit world elevation set above.
+                            boolean authored = palette.backdropExposure() > 0;
+                            boolean allRows = parallel || authored;
+                            for (int row = allRows ? 0 : 1; row <= (allRows ? 2 : 1); row++) {
                                 sample.clear();
                                 Gdx.gl.glReadPixels(0, row, 1, 1, GL20.GL_RGBA, GL20.GL_FLOAT, sample);
                                 double y = (row + .5) / 3;
-                                double weight = parallel ? y * y * (3 - 2 * y) : Math.sqrt(Math.max(0, elevation));
+                                double weight = allRows ? y * y * (3 - 2 * y) : Math.sqrt(Math.max(0, elevation));
                                 for (int channel = 0; channel < 3; channel++) {
                                     double radiance = horizon[channel] + (sky[channel] - horizon[channel]) * weight;
-                                    // Independent double-precision display reference, including the shoulder
-                                    // and vignette. Palette generation/normalization remains owned by Lighting.
+                                    if (authored) { radiance = Math.pow(radiance, 2.2) * palette.backdropExposure(); }
+                                    // Independent reference: the actual UI uses gamma 2.2 and EV alone. The
+                                    // incident-sky debug instead follows the current scene-linear display path.
                                     double shoulder = Math.min(radiance, .6)
                                           + .4 * (1 - Math.exp(-Math.max(0, radiance - .6) / .4));
-                                    double display = shoulder <= .0031308 ? shoulder * 12.92
+                                    double display = authored ? Math.pow(shoulder, 1 / 2.2)
+                                          : shoulder <= .0031308 ? shoulder * 12.92
                                           : 1.055 * Math.pow(shoulder, 1 / 2.4) - .055;
                                     double expected = display * (1 - .045 * Math.pow(2 * y - 1, 2));
-                                    assertEquals(expected, sample.get(channel), .0015,
-                                          palette.label() + ", " + camera.getClass().getSimpleName()
-                                                + ", ray=" + elevation + ", row=" + row + ", channel=" + channel);
+                                    String label = palette.label() + ", " + camera.getClass().getSimpleName()
+                                          + ", ray=" + elevation + ", row=" + row + ", channel=" + channel;
+                                    assertEquals(expected, sample.get(channel), .0015, label);
+                                    if (authored) {
+                                        double error = Math.abs(expected - sample.get(channel));
+                                        int codeError = (int) Math.abs(Math.round(expected * 255)
+                                              - Math.round(sample.get(channel) * 255));
+                                        maximumError = Math.max(maximumError, error);
+                                        maximumCodeError = Math.max(maximumCodeError, codeError);
+                                        authoredSamples++;
+                                        assertTrue(codeError <= 1, label + ", PNG8 code difference=" + codeError);
+                                    }
                                 }
                                 assertEquals(1, sample.get(3), 0, "The ordinary sky backdrop remains opaque");
                             }
@@ -1122,6 +1284,8 @@ class GpuAtmosphereSmokeTest {
                     }
                 } finally { scene.dispose(); }
             }
+            System.out.printf(Locale.ROOT, "UI_BACKDROP samples=%d maxError=%.9f maxPng8CodeError=%d%n",
+                  authoredSamples, maximumError, maximumCodeError);
         } finally {
             output.end(); output.dispose(); depth.dispose(); quad.dispose(); shader.dispose();
             Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
@@ -1135,7 +1299,7 @@ class GpuAtmosphereSmokeTest {
         var quad = GpuAtmosphere.screenQuad();
         var output = GpuHeatGlow.buffer(1, 1);
         float[][] texels = { { .2f, .1f, .05f, 1 }, { .5f, 0, 0, 1 },
-              { .03f, .04f, .05f, .25f }, { 2, .125f, .25f, .5f }, { .1f, .1f, .1f, 0 }, { 1, 0, 0, 1 } };
+              { .03f, .04f, .05f, .25f }, { 2, .125f, .25f, .5f }, { 0, 0, 0, 0 }, { 1, 0, 0, 1 } };
         Texture[] textures = new Texture[texels.length];
         try {
             for (int index = 0; index < textures.length; index++) {
@@ -1212,6 +1376,8 @@ class GpuAtmosphereSmokeTest {
             shader.bind();
             depth.bind(0);
             shader.setUniformi("u_depth", 0);
+            // This zero-ray probe still links both sampler types; they must use distinct units.
+            shader.setUniformi("u_geometryShadow", 2);
             var inverse = new Matrix4();
             inverse.val[Matrix4.M22] = -100;
             shader.setUniformMatrix("u_inverseView", inverse);

@@ -12,6 +12,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
+import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
@@ -29,8 +30,8 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     /** Physical apparent solar radius; the moon uses the same angular source footprint. */
     static final float SOURCE_RADIUS_SINE = (float) Math.sin(Math.toRadians(.266));
     /**
-     * Geometric specular anti-aliasing in every lit program that registers these uniforms (light-model.glsl); the
-     * tuning's Display page sets it for the window. A uniform, so switching it compiles no variant.
+     * Geometric specular anti-aliasing (light-model.glsl); the tuning's Display page sets it for the window. It is
+     * compiled in: an environment with this lighting carries {@link Antialiasing} while it is on.
      */
     static boolean specularAntialiasing = true;
     private final Color sky = new Color(), horizon = new Color();
@@ -39,6 +40,27 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     private float shadowStrength = 1, imageGain = 1;
 
     GpuEnvironmentLighting() { super(TYPE); }
+
+    /**
+     * Marks an environment whose lit programs compile specular anti-aliasing (specularAntialiasingFlag,
+     * GpuCloudShadow.prefix). It is part of the environment's mask, so a switch is a lighting change: shader selection
+     * (DefaultShader.canRender), the terrain's material readiness and its family programs follow it, and the terrain
+     * rebuilds behind its loading stage. It spends one of libGDX's 64 attribute types.
+     */
+    static final class Antialiasing extends Attribute {
+        static final long TYPE = register("boardSpecularAntialiasing");
+
+        Antialiasing() { super(TYPE); }
+
+        @Override public Attribute copy() { return new Antialiasing(); }
+        @Override public int compareTo(Attribute other) { return Long.compare(type, other.type); }
+    }
+
+    /** Brings the marker of an environment with this lighting in line with the setting. */
+    static void applyAntialiasing(Environment environment) {
+        if (!specularAntialiasing) { environment.remove(Antialiasing.TYPE); }
+        else if (!environment.has(Antialiasing.TYPE)) { environment.set(new Antialiasing()); }
+    }
 
     void set(BoardAtmosphere.Lighting lighting) {
         sky.set(lighting.environmentSky()); horizon.set(lighting.environmentHorizon());
@@ -84,7 +106,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0 + unit);
         texture().bind(unit);
         shader.setUniformi("u_environmentLut", unit);
-        shader.setUniformf("u_environmentImage", image != null ? 1 : 0, imageGain);
+        shader.setUniformf("u_environmentImage", image == null ? 0 : image.generated ? 2 : 1, imageGain);
     }
 
     static void register(DefaultShader shader) {
@@ -97,12 +119,8 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
         shader.register("u_environmentImage", new BaseShader.LocalSetter() {
             @Override public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
                 var light = attributes.get(GpuEnvironmentLighting.class, TYPE);
-                target.set(id, light != null && light.image != null ? 1f : 0f, light == null ? 1f : light.imageGain);
-            }
-        });
-        shader.register("u_specularAntialiasing", new BaseShader.GlobalSetter() {
-            @Override public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
-                target.set(id, specularAntialiasing ? 1f : 0f);
+                target.set(id, light == null || light.image == null ? 0f : light.image.generated ? 2f : 1f,
+                      light == null ? 1f : light.imageGain);
             }
         });
         shader.register("u_directionalRadiusSine", new BaseShader.GlobalSetter() {

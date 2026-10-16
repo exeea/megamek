@@ -361,8 +361,8 @@ class GpuTerrainGradeSmokeTest {
               + "vec3 reviewBefore = vec3(0.0), reviewAfter = vec3(0.0);\n");
         source = replace(source, "    albedo = materialReflectance(albedo);",
               "    albedo = materialReflectance(albedo);\n    reviewBefore = albedo;");
-        source = replace(source, "#ifdef lightingFlag\n    // Sky from above;",
-              "    reviewAfter = albedo;\n#ifdef lightingFlag\n    // Sky from above;");
+        source = replace(source, "#ifdef lightingFlag\n    vec3 view = -viewDirection();",
+              "    reviewAfter = albedo;\n#ifdef lightingFlag\n    vec3 view = -viewDirection();");
         return replace(source, "fragColor = vec4(result, 1.0);", """
               vec3 review = u_elevationReview == 0 ? reviewBefore : reviewAfter;
               if (u_elevationReview == 2) {

@@ -5,22 +5,32 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.RETURNS_DEFAULTS;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Field;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import javax.swing.JFrame;
 import javax.swing.JMenu;
 import javax.swing.JPanel;
+import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
+import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.common.board.Board;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
@@ -28,20 +38,17 @@ import org.junit.jupiter.api.Test;
 
 class BoardViewsContainerTest {
     @Test
-    void savedLegacy2DStyleStartsLegacy2DAndTheViewMenuOnlyOffersTheOtherBoard() throws Exception {
+    void savedLegacy2DStyleStartsLegacy2D() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         boolean style = preferences.getUse3DBoard();
         SwingUtilities.invokeAndWait(() -> {
-            CommonMenuBar menu = CommonMenuBar.getMenuBarForGame();
             try {
-                menu.setPhase(GamePhase.STARTING_SCENARIO);
                 ClientGUI gui = mock(ClientGUI.class);
                 Client client = mock(Client.class);
                 Game game = new Game();
                 game.setPhase(GamePhase.STARTING_SCENARIO);
                 when(gui.getClient()).thenReturn(client);
                 when(client.getGame()).thenReturn(game);
-                when(gui.getMenuBar()).thenReturn(menu);
                 JFrame frame = mock(JFrame.class);
                 when(gui.getFrame()).thenReturn(frame);
                 doCallRealMethod().when(gui).showDefaultBoard(ClientGUI.CG_STARTING_SCENARIO);
@@ -50,23 +57,102 @@ class BoardViewsContainerTest {
                 verify(frame).setVisible(true);
                 verify(gui).setLegacy2DViewEnabled(true);
                 assertFalse(preferences.getUse3DBoard());
-                JMenu view = java.util.Arrays.stream(menu.getComponents()).filter(JMenu.class::isInstance)
-                      .map(JMenu.class::cast).filter(group -> group.getItemCount() > 0 && group.getItem(0) != null
-                            && ClientGUI.VIEW_GPU_BOARD.equals(group.getItem(0).getActionCommand()))
-                      .findFirst().orElseThrow();
-                assertEquals("3D Board", view.getItem(0).getText());
-                menu.setBoardView3D(true);
-                assertEquals("Legacy 2D", view.getItem(0).getText());
-                assertEquals(ClientGUI.VIEW_LEGACY_2D, view.getItem(0).getActionCommand());
-                assertEquals(1, java.util.Arrays.stream(view.getMenuComponents())
-                      .filter(javax.swing.JMenuItem.class::isInstance).map(javax.swing.JMenuItem.class::cast)
-                      .filter(item -> java.util.Set.of(ClientGUI.VIEW_GPU_BOARD, ClientGUI.VIEW_LEGACY_2D)
-                            .contains(item.getActionCommand())).count());
             } finally {
-                menu.die();
                 preferences.setUse3DBoard(style);
             }
         });
+    }
+
+    /**
+     * View > Renderer is the menu's one entry for the board's renderers: Legacy 2D, Classic and Enhanced as one radio
+     * group that shows the renderer the preferences choose. During a game a choice switches the shown board through
+     * the client's board switch; in the lobby, which shows no board, it is saved for the game's board.
+     */
+    @Test
+    void theRendererMenuShowsTheRendererAndAChoiceSwitchesIt() throws Exception {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        boolean style = preferences.getUse3DBoard();
+        BoardGraphics graphics = preferences.getBoardGraphics();
+        SwingUtilities.invokeAndWait(() -> {
+            CommonMenuBar menu = CommonMenuBar.getMenuBarForGame();
+            try (var gpu = mockStatic(GpuBoardWindow.class)) {
+                preferences.setUse3DBoard(true);
+                preferences.setBoardGraphics(BoardGraphics.ENHANCED);
+                Game game = new Game();
+                game.setPhase(GamePhase.MOVEMENT);
+                menu.setPhase(GamePhase.MOVEMENT);
+                ClientGUI gui = clientGUI(game);
+                menu.addActionListener(gui);
+                JMenu view = Arrays.stream(menu.getComponents()).filter(JMenu.class::isInstance).map(JMenu.class::cast)
+                      .filter(group -> group.getText().equals(Messages.getString("CommonMenuBar.ViewMenu")))
+                      .findFirst().orElseThrow();
+                List<JMenu> renderers = Arrays.stream(view.getMenuComponents()).filter(JMenu.class::isInstance)
+                      .map(JMenu.class::cast).filter(group -> group.getText()
+                            .equals(Messages.getString("CommonMenuBar.viewRenderer"))).toList();
+                assertEquals(1, renderers.size());
+                JMenu renderer = renderers.getFirst();
+                assertEquals(List.of(ClientGUI.VIEW_LEGACY_2D, ClientGUI.VIEW_GRAPHICS_CLASSIC,
+                      ClientGUI.VIEW_GRAPHICS_ENHANCED), Arrays.stream(renderer.getMenuComponents())
+                      .map(item -> ((JRadioButtonMenuItem) item).getActionCommand()).toList());
+                assertEquals(List.of("Legacy 2D", "Classic", "Enhanced"), Arrays.stream(renderer.getMenuComponents())
+                      .map(item -> ((JRadioButtonMenuItem) item).getText()).toList());
+                assertEquals(ClientGUI.VIEW_GRAPHICS_ENHANCED, selected(renderer));
+
+                item(renderer, ClientGUI.VIEW_LEGACY_2D).doClick(0);
+                assertFalse(preferences.getUse3DBoard());
+                assertEquals(ClientGUI.VIEW_LEGACY_2D, selected(renderer));
+                gpu.verify(() -> GpuBoardWindow.showLegacy2D(gui));
+
+                item(renderer, ClientGUI.VIEW_GRAPHICS_CLASSIC).doClick(0);
+                assertTrue(preferences.getUse3DBoard());
+                assertEquals(BoardGraphics.CLASSIC, preferences.getBoardGraphics());
+                assertEquals(ClientGUI.VIEW_GRAPHICS_CLASSIC, selected(renderer));
+                gpu.verify(() -> GpuBoardWindow.open(eq(gui), any()));
+
+                preferences.setBoardGraphics(BoardGraphics.ENHANCED);
+                assertEquals(ClientGUI.VIEW_GRAPHICS_ENHANCED, selected(renderer), "Client Settings' choice shows too");
+
+                game.setPhase(GamePhase.LOUNGE);
+                menu.setPhase(GamePhase.LOUNGE);
+                assertTrue(item(renderer, ClientGUI.VIEW_LEGACY_2D).isEnabled());
+                item(renderer, ClientGUI.VIEW_LEGACY_2D).doClick(0);
+                assertFalse(preferences.getUse3DBoard(), "The lobby saves the choice for the game's board");
+                assertEquals(ClientGUI.VIEW_LEGACY_2D, selected(renderer));
+                // and shows no board: the game's switches are still the only ones
+                gpu.verify(() -> GpuBoardWindow.showLegacy2D(gui));
+                gpu.verify(() -> GpuBoardWindow.open(eq(gui), any()));
+            } catch (ReflectiveOperationException failure) {
+                throw new AssertionError(failure);
+            } finally {
+                menu.die();
+                preferences.setUse3DBoard(style);
+                preferences.setBoardGraphics(graphics);
+            }
+        });
+    }
+
+    /** A client of {@code game} that runs its real menu actions and nothing else. */
+    private static ClientGUI clientGUI(Game game) throws ReflectiveOperationException {
+        ClientGUI gui = mock(ClientGUI.class, invocation -> invocation.getMethod().getName().equals("actionPerformed")
+              ? invocation.callRealMethod() : RETURNS_DEFAULTS.answer(invocation));
+        Client client = mock(Client.class);
+        when(client.getGame()).thenReturn(game);
+        Field field = ClientGUI.class.getDeclaredField("client");
+        field.setAccessible(true);
+        field.set(gui, client);
+        return gui;
+    }
+
+    private static JRadioButtonMenuItem item(JMenu renderer, String command) {
+        return Arrays.stream(renderer.getMenuComponents()).map(JRadioButtonMenuItem.class::cast)
+              .filter(item -> item.getActionCommand().equals(command)).findFirst().orElseThrow();
+    }
+
+    /** The action command of the checked renderer. */
+    private static String selected(JMenu renderer) {
+        return Arrays.stream(renderer.getMenuComponents()).map(JRadioButtonMenuItem.class::cast)
+              .filter(JRadioButtonMenuItem::isSelected).map(JRadioButtonMenuItem::getActionCommand)
+              .reduce((first, second) -> first + "," + second).orElse("");
     }
 
     @Test

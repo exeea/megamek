@@ -11,7 +11,10 @@ in float v_waterCrest;
 // water-pool-functions
 
 void main() {
-    vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
+    // Capture before coverage rejection, shared by geometric facing and the reflected cloud-plane footprint.
+    waterPositionDx = dFdx(v_cloudPosition);
+    waterPositionDy = dFdy(v_cloudPosition);
+    vec3 geometric = visibleFace(waterPositionDx, waterPositionDy, -viewDirection());
     vec3 face = normalize(v_normal);
     surfaceVariance = normalVariance(dFdx(face), dFdy(face));
     if (waterHidden()) discard;

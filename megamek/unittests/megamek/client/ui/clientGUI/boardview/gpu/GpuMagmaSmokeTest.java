@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.FloatBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -20,6 +22,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -43,15 +46,106 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.common.Configuration;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /** Actual material pixels, shared-clock motion, normal maps, darkness, live edits and both camera projections. */
 @Tag("on-demand")
 class GpuMagmaSmokeTest {
+    @TempDir Path directory;
+
     private static final Coords CRUST = new Coords(2, 2), LAVA = new Coords(6, 2);
+
+    /** The actual molten/fall provider reads authored linear RGB and scale, without multiplying coverage twice. */
+    @Test
+    void authoredEmissionReachesBothMoltenProvidersOnceWithoutChangingDepth() throws Exception {
+        File data = Configuration.dataDir();
+        var roots = new ArrayList<Path>();
+        for (int index = 0; index < 4; index++) {
+            Path root = directory.resolve("source-" + index);
+            Path lava = Files.createDirectories(root.resolve("models/board/textures/terrain/lava"));
+            // The final repeat changes coverage to zero while retaining exactly the same emitted light.
+            int alpha = index == 3 ? 0 : 255;
+            for (var map : Map.of("", 0xff000000, "-normal", 0xff8080ff,
+                  "-surface", 0x0080ccff, "-heat", (alpha << 24) | 0x004080c0).entrySet()) {
+                var image = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
+                for (int y = 0; y < 2; y++) for (int x = 0; x < 2; x++) { image.setRGB(x, y, map.getValue()); }
+                assertTrue(ImageIO.write(image, "png", lava.resolve("lava" + map.getKey() + ".png").toFile()));
+            }
+            Files.writeString(lava.resolve("lava.json"), "{\"emissionScale\":" + (index == 3 ? 2 : index * 2) + "}");
+            roots.add(root);
+        }
+        var failure = new AtomicReference<Throwable>();
+        var configuration = GpuBoardWindow.configuration(false);
+        configuration.setWindowedMode(128, 128);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var terrain = new GpuTerrain();
+                Mesh mesh = paletteQuad(0, 100);
+                var owners = new ArrayList<GpuAssets>();
+                try (var output = new GpuSceneTestOutput(128, 128)) {
+                    for (Path root : roots) {
+                        Configuration.setDataDir(root.toFile());
+                        owners.add(new GpuAssets());
+                    }
+                    Configuration.setDataDir(data);
+                    var camera = new OrthographicCamera(100, 100);
+                    camera.position.set(0, 0, 100);
+                    camera.near = .01f;
+                    camera.far = 200;
+                    camera.update();
+                    var batch = (ModelBatch) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "batch");
+                    var part = new Renderable();
+                    part.meshPart.set("authored-emission", mesh, 0, mesh.getNumVertices(), GL20.GL_TRIANGLES);
+                    part.environment = terrain.environment();
+                    float firstDepth = -1;
+                    float[] firstTwo = null;
+                    for (int mode : new int[] { GpuMagmaShader.LAVA, GpuMagmaShader.FALL }) {
+                        for (int index = 0; index < owners.size(); index++) {
+                            part.material = GpuMagmaShader.material(owners.get(index), mode, null);
+                            // Camera/time/weather stay fixed; mode, maps and scale are actual per-draw setters.
+                            output.begin(0, 0, 0, 0);
+                            batch.begin(camera); batch.render(part); batch.end();
+                            var depth = BufferUtils.newFloatBuffer(1);
+                            Gdx.gl.glReadPixels(64, 64, 1, 1, GL20.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, depth);
+                            assertTrue(depth.get(0) > 0 && depth.get(0) < 1, "The actual surface writes hardware depth");
+                            if (firstDepth < 0) { firstDepth = depth.get(0); }
+                            else { assertEquals(firstDepth, depth.get(0), 0, "Source edits cannot move the surface"); }
+                            float[] pixels = output.linearPixels();
+                            int center = (64 * 128 + 64) * 4;
+                            float scale = index == 3 ? 2 : index * 2;
+                            for (int channel = 0; channel < 3; channel++) {
+                                float expected = (channel + 1) * 64 * scale / 255f;
+                                // One conservative RGBA16F ULP at the largest sample (3.012), not a display tolerance.
+                                assertEquals(expected, pixels[center + channel], scale == 0 ? 0 : .002f,
+                                      "Raw emission reaches mode " + mode + " channel " + channel + " once");
+                            }
+                            assertEquals(1, pixels[center + 3], 0, "Heat coverage is not surface transparency");
+                            if (mode == GpuMagmaShader.LAVA && index == 1) { firstTwo = pixels; }
+                            if (index == 1 || index == 3) {
+                                assertArrayEquals(firstTwo, pixels, "Provider/coverage changes retain the same constant source");
+                            }
+                            output.begin(0, 0, 0, 0);
+                            batch.begin(camera); batch.render(part); batch.end();
+                            assertArrayEquals(pixels, output.linearPixels(), "Drawing cannot advance the material clock");
+                        }
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally {
+                    Configuration.setDataDir(data);
+                    owners.forEach(GpuAssets::dispose);
+                    mesh.dispose(); terrain.dispose(); Gdx.app.exit();
+                }
+            }
+        }, configuration);
+        if (failure.get() != null) { throw new AssertionError("Authored molten emission", failure.get()); }
+    }
 
     /** Compare complete palette channels with the saved eager evaluator, holding all other shaders current. */
     @Test
@@ -1692,7 +1786,9 @@ class GpuMagmaSmokeTest {
 
     /** The original molten material remains finite, bounded and visibly emissive in canonical radiance. */
     private static void checkMoltenMaterial(GpuShaderManager manager, GpuSceneTestOutput surface,
-          GpuTerrain terrain, BoardCamera camera) {
+          GpuTerrain terrain, BoardCamera camera) throws Exception {
+        var assets = (GpuAssets) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "assets");
+        float sourceScale = assets.lavaEmission().scale();
         String fragment = GpuShaderSource.readDisk("terrain-magma-flow.frag");
         String output = "fragColor = magmaOutput(magmaChill(material, shore), geometric, bank, 1.0);";
         assertTrue(fragment.contains(output), "The material probe must read the completed molten material");
@@ -1732,10 +1828,10 @@ class GpuMagmaSmokeTest {
             // Original HEAD exposes glossier melt; the rejected later skin's coverage/roughness floors do not apply.
             assertTrue(minimumRoughness >= 0 && maximumRoughness <= 1,
                   "Perceptual roughness must remain in [0,1]: " + minimumRoughness + ".." + maximumRoughness);
-            // Independent Planck/CIE references at 100 klux noon: red .191818 at 1100 C and .597446 at
-            // 1200 C. The upper allowance includes one canonical half-float step (.0004883) and rounding.
-            assertTrue(peak > .19f && peak <= .598f,
-                  "Exposed rifts must retain the bounded thermal source radiance: " + peak);
+            // PNG RGB is bounded by one; filtering, phase mixing, shore and bank attenuation cannot amplify it.
+            // The separate constant-map provider test proves scale and channel values, including a zero source.
+            assertTrue((sourceScale == 0 ? peak == 0 : peak > 0) && peak <= sourceScale * 1.001f,
+                  "Exposed rifts must retain the authored source bound: " + peak + " / " + sourceScale);
         } finally {
             var restored = manager.apply(Map.of());
             assertTrue(restored.success(), restored.message());

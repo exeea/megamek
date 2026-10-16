@@ -14,7 +14,7 @@ import java.util.Set;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalShadowLight;
@@ -335,16 +335,24 @@ final class GpuFamilyAssemblyReview {
     }
 
     static long shadowChecksum(GpuTerrain terrain) {
+        var checksum = new java.util.zip.CRC32();
+        checksum.update(shadowDepth(terrain));
+        return checksum.getValue();
+    }
+
+    static byte[] shadowDepth(GpuTerrain terrain) {
         var buffer = ((DirectionalShadowLight) terrain.environment().shadowMap).getFrameBuffer();
         buffer.begin();
-        Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, buffer.getWidth(), buffer.getHeight());
-        try {
-            var checksum = new java.util.zip.CRC32();
-            checksum.update(pixels.getPixels());
-            return checksum.getValue();
-        } finally {
-            pixels.dispose();
-            buffer.end();
-        }
+        try { return depthPixels(buffer.getWidth(), buffer.getHeight()); }
+        finally { buffer.end(); }
+    }
+
+    /** Read the tested attachment itself, without color encoding or an extra sampling pass. */
+    static byte[] depthPixels(int width, int height) {
+        var pixels = com.badlogic.gdx.utils.BufferUtils.newByteBuffer(width * height * Integer.BYTES);
+        Gdx.gl.glReadPixels(0, 0, width, height, GL20.GL_DEPTH_COMPONENT, GL20.GL_UNSIGNED_INT, pixels);
+        byte[] bytes = new byte[pixels.capacity()];
+        pixels.get(bytes);
+        return bytes;
     }
 }

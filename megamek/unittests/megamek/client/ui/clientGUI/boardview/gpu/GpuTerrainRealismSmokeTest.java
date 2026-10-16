@@ -43,6 +43,7 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 @Tag("gpu-benchmark")
 class GpuTerrainRealismSmokeTest {
+    private static final boolean CAPTURE_ONLY = Boolean.getBoolean("megamek.gpu.realismCaptureOnly");
     private record Landscape(String name, String path) { }
     private record Conditions(String name, BoardAtmosphere.Settings settings) {
         Conditions(String name, float hour, float clouds, float fog) {
@@ -75,7 +76,7 @@ class GpuTerrainRealismSmokeTest {
         var selectedViews = Arrays.asList(System.getProperty("megamek.gpu.realismViews", "top,iso").split(","));
         var selectedConditions = Arrays.asList(System.getProperty("megamek.gpu.realismConditions", "morning,midday,overcast,night").split(","));
         boolean overlays = Boolean.getBoolean("megamek.gpu.realismOverlays");
-        boolean freezeAnimation = overlays || Boolean.getBoolean("megamek.gpu.realismFreezeAnimation");
+        boolean freezeAnimation = CAPTURE_ONLY || overlays || Boolean.getBoolean("megamek.gpu.realismFreezeAnimation");
         var views = new ArrayList<View>();
         for (Landscape landscape : LANDSCAPES) {
             if (!selected.contains(landscape.name)) { continue; }
@@ -140,8 +141,9 @@ class GpuTerrainRealismSmokeTest {
         config.setWindowedMode(1440, 900);
         config.useVsync(false);
         config.setForegroundFPS(0);
-        int warmup = 30;
-        int samples = 60;
+        int warmup = CAPTURE_ONLY ? 3 : 30;
+        int samples = CAPTURE_ONLY ? 0 : 60;
+        String reportName = CAPTURE_ONLY ? "visual-review.txt" : "timings.txt";
         new Lwjgl3Application(new ApplicationAdapter() {
             private final GpuShaderManager manager = new GpuShaderManager();
             private List<Variant> variants;
@@ -195,8 +197,10 @@ class GpuTerrainRealismSmokeTest {
                         variants = List.of(new Variant("", "current", Map.copyOf(sources)));
                         report.append("Initial source drafts: ").append(initialSources).append('\n');
                     }
-                    stages = new GpuStageTimings();
-                    total = new GpuStageTimings();
+                    if (!CAPTURE_ONLY) {
+                        stages = new GpuStageTimings();
+                        total = new GpuStageTimings();
+                    }
                     compositor = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
                     if (overlays) {
                         grid = new GpuHexGrid(); labels = new GpuHexText();
@@ -207,8 +211,12 @@ class GpuTerrainRealismSmokeTest {
                     }
                     report.append(renderer).append("; ")
                           .append(Gdx.graphics.getBackBufferWidth()).append('x')
-                          .append(Gdx.graphics.getBackBufferHeight())
-                          .append("; ").append(warmup).append(" warmup / ").append(samples)
+                          .append(Gdx.graphics.getBackBufferHeight());
+                    if (CAPTURE_ONLY) {
+                        report.append("; visual-only; ").append(warmup).append(" untimed settling frames; ")
+                              .append("no GPU, CPU, interval, preparation or source-replacement timings\n");
+                    } else {
+                        report.append("; ").append(warmup).append(" warmup / ").append(samples)
                           .append(" measured frames; terrain scene, no HUD or unit models\n")
                           .append("GL: ").append(Gdx.gl.glGetString(GL20.GL_VERSION))
                           .append("; Java: ").append(System.getProperty("java.home"))
@@ -217,6 +225,11 @@ class GpuTerrainRealismSmokeTest {
                           .append("Preparation wall times include asynchronous CPU/driver work and polling; ")
                           .append("they are not GPU rendering times or isolated shader-compile measurements.\n")
                           .append("Frame intervals include synchronization and presentation; not pipelined game frame rates.\n");
+                    }
+                    if (CAPTURE_ONLY) {
+                        report.append("GL: ").append(Gdx.gl.glGetString(GL20.GL_VERSION))
+                              .append("; GPU request: ").append(GpuGraphicsCard.applied().name()).append('\n');
+                    }
                     if (Boolean.getBoolean("megamek.gpu.realismCliffs")
                           && views.stream().anyMatch(view -> view.scene.landscape.name.equals("calibration"))) {
                         report.append("Calibration camera fits authored cliff rows 19–34 before close zoom; ")
@@ -250,21 +263,26 @@ class GpuTerrainRealismSmokeTest {
                     if (frame == 0) {
                         if (variantIndex == 0) { prepare(view); }
                         replaceSources(manager, variant.sources, label, report);
+                        if (CAPTURE_ONLY) { settleView(); }
                     }
-                    long now = System.nanoTime();
-                    if (frame >= warmup) { intervals[frame - warmup] = (now - previousFrame) / 1e6; }
-                    previousFrame = now;
-                    total.beginFrame(frame >= warmup);
-                    stages.beginFrame(frame >= warmup);
-                    total.stage("complete terrain scene");
-                    compositor.render(terrain, camera, installed.board, stages);
-                    total.stage(null);
-                    if (frame >= warmup) { cpu[frame - warmup] = (System.nanoTime() - now) / 1e6; }
-                    // Complete each frame outside both timestamp ranges and CPU submission timing. Otherwise this
-                    // unlimited CPU loop fills the query ring long before the GPU can retire its first four frames.
-                    Gdx.gl.glFinish();
-                    total.poll();
-                    stages.poll();
+                    if (CAPTURE_ONLY) {
+                        compositor.render(terrain, camera, installed.board);
+                    } else {
+                        long now = System.nanoTime();
+                        if (frame >= warmup) { intervals[frame - warmup] = (now - previousFrame) / 1e6; }
+                        previousFrame = now;
+                        total.beginFrame(frame >= warmup);
+                        stages.beginFrame(frame >= warmup);
+                        total.stage("complete terrain scene");
+                        compositor.render(terrain, camera, installed.board, stages);
+                        total.stage(null);
+                        if (frame >= warmup) { cpu[frame - warmup] = (System.nanoTime() - now) / 1e6; }
+                        // Complete each frame outside both timestamp ranges and CPU submission timing. Otherwise this
+                        // unlimited CPU loop fills the query ring long before the GPU can retire its first four frames.
+                        Gdx.gl.glFinish();
+                        total.poll();
+                        stages.poll();
+                    }
                     if (++frame == warmup + samples) {
                         if (overlays) { captureOverlays(view, label); }
                         if (freezeAnimation && !overlays) {
@@ -277,16 +295,23 @@ class GpuTerrainRealismSmokeTest {
                         }
                         GpuReviewFrame.save(new File(output, label + ".png"));
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), view.name());
+                        assertTrue(terrain.ready(installed.board),
+                              () -> view.name() + ": captured terrain must be ready: " + terrain.buildDetails());
                         var hit = terrain.hit(installed.board, pick);
                         assertNotNull(hit, view.name() + ": retain board picking");
                         assertEquals(picked, hit.coords(), view.name() + ": shared picking in every light and view");
-                        appendSamples(total, report, label, samples);
-                        appendSamples(stages, report, label + " stages", samples);
+                        if (!CAPTURE_ONLY) {
+                            appendSamples(total, report, label, samples);
+                            appendSamples(stages, report, label + " stages", samples);
+                        }
                         if (variants.size() > 1) {
                             byte[] pixels = ScreenUtils.getFrameBufferPixels(0, 0,
                                   Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight(), false);
                             if (firstPixels == null) { firstPixels = pixels; }
                             imageDifference(report, label, firstPixels, pixels);
+                            if (variant.name.equals("diagnostic-fixed-exposure")) {
+                                assertTrue(!Arrays.equals(firstPixels, pixels), "Fixed exposure must change the full-moon image");
+                            }
                             if (variant.repeat != null) {
                                 byte[] previous = repeats.putIfAbsent(variant.repeat, pixels);
                                 if (previous != null) {
@@ -300,13 +325,15 @@ class GpuTerrainRealismSmokeTest {
                               && List.of("box-canyon", "dome-vent").contains(view.scene.landscape.name)) {
                             captureInkPan(view, label);
                         }
-                        Arrays.sort(cpu);
-                        Arrays.sort(intervals);
-                        report.append(String.format(Locale.ROOT,
-                              "CPU submission median/p95 %.4f/%.4f ms; synchronized frame interval median/p95 %.4f/%.4f ms; plant buffers %d bytes%n",
-                              percentile(cpu, .5), percentile(cpu, .95), percentile(intervals, .5),
-                              percentile(intervals, .95), terrain.treeGeometryBytes()));
-                        Files.writeString(new File(output, "timings.txt").toPath(), report);
+                        if (!CAPTURE_ONLY) {
+                            Arrays.sort(cpu);
+                            Arrays.sort(intervals);
+                            report.append(String.format(Locale.ROOT,
+                                  "CPU submission median/p95 %.4f/%.4f ms; synchronized frame interval median/p95 %.4f/%.4f ms; plant buffers %d bytes%n",
+                                  percentile(cpu, .5), percentile(cpu, .95), percentile(intervals, .5),
+                                  percentile(intervals, .95), terrain.treeGeometryBytes()));
+                        }
+                        Files.writeString(new File(output, reportName).toPath(), report);
                         frame = 0;
                         if (++variantIndex == variants.size()) {
                             variantIndex = 0;
@@ -550,6 +577,24 @@ class GpuTerrainRealismSmokeTest {
                 return visible;
             }
 
+            private void settleView() throws Exception {
+                if (!CAPTURE_ONLY) {
+                    GpuTerrainLodSmokeTest.settle(terrain, null, installed.board, camera);
+                    return;
+                }
+                // A light-condition change can finish geometry while family programs still link. Pump the
+                // production loading path until the same readiness gate as drawing/picking is satisfied.
+                compositor.prepare(terrain, camera, installed.board);
+                long deadline = System.nanoTime() + 60_000_000_000L;
+                while (true) {
+                    boolean changed = terrain.refine(camera.camera);
+                    if (!changed && !terrain.busy() && terrain.ready(installed.board)) { return; }
+                    assertTrue(System.nanoTime() < deadline,
+                          () -> "Visual capture preparation must settle: " + terrain.buildDetails());
+                    Thread.sleep(5);
+                }
+            }
+
             private void prepare(View view) throws Exception {
                 compositor.configure(view.conditions.settings());
                 camera = new BoardCamera();
@@ -585,19 +630,19 @@ class GpuTerrainRealismSmokeTest {
                 if (variants.size() > 1) { replaceSources(manager, Map.of(), view.name() + "-prepare", report); }
                 compositor.prepare(terrain, camera, installed.board);
                 long overviewStart = preparationStart(view.name() + "-overview-settle");
-                GpuTerrainLodSmokeTest.settle(terrain, null, installed.board, camera);
+                settleView();
                 preparationEnd(view.name() + "-overview-settle", overviewStart, report);
                 terrain.animate(freezeAnimation && !newBoard ? 0 : .5f, List.of());
                 long overviewDraw = preparationStart(view.name() + "-overview-first-draw-submit");
                 compositor.render(terrain, camera, installed.board);
                 preparationEnd(view.name() + "-overview-first-draw-submit", overviewDraw, report);
-                if (view.conditions.name.equals("midday")) {
+                if (CAPTURE_ONLY || view.conditions.name.equals("midday")) {
                     GpuReviewFrame.save(new File(output, view.name() + "-overview.png"));
                 }
                 camera.camera.zoom = Math.min(.55f, camera.camera.zoom);
                 camera.update();
                 long closeStart = preparationStart(view.name() + "-close-settle");
-                GpuTerrainLodSmokeTest.settle(terrain, null, installed.board, camera);
+                settleView();
                 preparationEnd(view.name() + "-close-settle", closeStart, report);
                 if (Boolean.getBoolean("megamek.gpu.assertBlendedRoles")) {
                     int[] roles = GpuTerrainPreparationSmokeTest.checkBlendedRoles(terrain, view.name());
@@ -643,7 +688,7 @@ class GpuTerrainRealismSmokeTest {
                     if (total != null) { total.close(); }
                     manager.close();
                 });
-                Gdx.files.absolute(new File(output, "timings.txt").getAbsolutePath()).writeString(report.toString(), false);
+                Gdx.files.absolute(new File(output, reportName).getAbsolutePath()).writeString(report.toString(), false);
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Terrain realism review", failure.get()); }
@@ -652,12 +697,13 @@ class GpuTerrainRealismSmokeTest {
     private static long preparationStart(String label) {
         System.out.println(label + " preparation starting");
         System.out.flush();
-        return System.nanoTime();
+        return CAPTURE_ONLY ? 0 : System.nanoTime();
     }
 
     private static void preparationEnd(String label, long started, StringBuilder report) {
-        String completed = String.format(Locale.ROOT, "%s preparation wallMs=%.3f%n",
-              label, (System.nanoTime() - started) / 1e6);
+        String completed = CAPTURE_ONLY ? label + " preparation complete (visual-only)\n"
+              : String.format(Locale.ROOT, "%s preparation wallMs=%.3f%n",
+                    label, (System.nanoTime() - started) / 1e6);
         report.append(completed);
         System.out.print(completed);
         System.out.flush();
@@ -686,8 +732,17 @@ class GpuTerrainRealismSmokeTest {
         for (String choice : diagnostics) {
             assertTrue(List.of("", "true", "color", "materials", "shadows", "localLight", "all",
                         "materialDetail", "ordinaryMaterial", "ordinaryColors", "ordinaryNormals", "solidRelief", "solidMaterial",
-                        "lavaPhase", "contactNoise").contains(choice),
+                        "lavaPhase", "contactNoise", "fixedExposure").contains(choice),
                   "Unknown landscape diagnostic: " + choice);
+        }
+        if (diagnostics.contains("fixedExposure")) {
+            assertTrue(CAPTURE_ONLY && !Boolean.getBoolean("megamek.gpu.realismOverlays"),
+                  "Fixed exposure is a frozen visual-only diagnostic without overlays");
+            assertEquals("full_moon", System.getProperty("megamek.gpu.realismConditions"),
+                  "Fixed exposure retains only the full-moon lighting case");
+            assertEquals(List.of("fixedExposure"), diagnostics, "Isolate exposure from other source diagnostics");
+            assertTrue(baseline == null && System.getProperty("megamek.gpu.realismInitialSources") == null,
+                  "Fixed exposure compares the current source against itself");
         }
         boolean all = diagnostics.contains("all");
         if (!diagnostics.equals(List.of(""))) {
@@ -733,6 +788,28 @@ class GpuTerrainRealismSmokeTest {
             result.add(new Variant("diagnostic-no-local-light", null, Map.of("lava-lighting.glsl",
                   functionBody(GpuShaderSource.readDisk("lava-lighting.glsl"),
                         "vec3 lavaIrradiance(vec3 position, vec3 normal)", "return vec3(0.0);"))));
+        }
+        if (diagnostics.contains("fixedExposure")) {
+            float diagnosticExposure = Float.parseFloat(System.getProperty("megamek.gpu.realismFixedExposure", "1.02573"));
+            assertTrue(Float.isFinite(diagnosticExposure) && diagnosticExposure > 0,
+                  "The diagnostic exposure must be finite and positive");
+            String grade = GpuShaderSource.replaceOnce(GpuShaderSource.readDisk("atmosphere-grade.glsl"),
+                  "linear *= u_exposure *", "linear *= diagnosticExposure() *", "fixed scene exposure");
+            // Retain the actual uniform/upload contract. Only this shader-session control substitutes the
+            // requested exposure; source lighting, emission, animation and the shoulder are unchanged.
+            grade = GpuShaderSource.replaceOnce(grade, "uniform float u_exposure;", """
+                  uniform float u_exposure;
+                  float diagnosticExposure() { return u_exposure > 0.0 ? %s : u_exposure; }
+                  """.formatted(Float.toString(diagnosticExposure)), "fixed exposure uniform");
+            String composite = GpuShaderSource.readDisk("atmosphere-composite.frag")
+                  .replace("u_exposure", "diagnosticExposure()");
+            result.add(new Variant("diagnostic-fixed-exposure", null,
+                  Map.of("atmosphere-grade.glsl", grade, "atmosphere-composite.frag", composite)));
+            report.append("Fixed-exposure control: whole composite exposure=").append(diagnosticExposure)
+                  .append(", including heat/glow and ")
+                  .append("the authored backdrop's inverse mapping. Logged source adaptation remains unchanged. ")
+                  .append("Full-moon lighting, emitted radiance, frozen pose and tone mapping are unchanged; ")
+                  .append("production controls before/after must repeat byte-exactly.\n");
         }
         materialDiagnostics(result, diagnostics, report);
         if (!diagnostics.equals(List.of(""))) {
@@ -831,10 +908,11 @@ class GpuTerrainRealismSmokeTest {
         System.out.println(label + " source-replace starting");
         System.out.flush();
         Gdx.gl.glFinish();
-        long start = System.nanoTime();
+        long start = CAPTURE_ONLY ? 0 : System.nanoTime();
         var change = manager.apply(sources);
-        String completed = String.format(Locale.ROOT, "%s source-replace wallMs=%.3f programs=%d%n",
-              label, (System.nanoTime() - start) / 1e6, change.updated());
+        String completed = CAPTURE_ONLY ? label + " source-replace complete (visual-only), programs=" + change.updated() + "\n"
+              : String.format(Locale.ROOT, "%s source-replace wallMs=%.3f programs=%d%n",
+                    label, (System.nanoTime() - start) / 1e6, change.updated());
         report.append(completed);
         System.out.print(completed);
         System.out.flush();

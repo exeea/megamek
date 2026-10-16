@@ -8,7 +8,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttribute;
@@ -79,7 +81,13 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             mesh = new GpuInstancedMesh(model.meshes.first());
             stride = STRIDE;
             mesh.enableInstancedRendering(false, capacity, attributes(false));
-            for (Node node : model.nodes) { collect(node); }
+            forEachPart(model.nodes, part -> {
+                Renderable renderable = new Renderable();
+                renderable.meshPart.set(part.meshPart);
+                renderable.meshPart.mesh = mesh;
+                renderable.material = instancedMaterial(part.material);
+                parts.add(renderable);
+            });
         }
 
         /**
@@ -104,21 +112,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             part.meshPart.set(source.meshPart);
             part.meshPart.mesh = mesh;
             part.meshPart.offset = 0;
-            part.material = new Material(source.material);
-            part.material.set(new Instanced());
+            part.material = instancedMaterial(source.material);
             parts.add(part);
-        }
-
-        private void collect(Node node) {
-            for (NodePart part : node.parts) {
-                Renderable renderable = new Renderable();
-                renderable.meshPart.set(part.meshPart);
-                renderable.meshPart.mesh = mesh;
-                renderable.material = new Material(part.material);
-                renderable.material.set(new Instanced());
-                parts.add(renderable);
-            }
-            for (Node child : node.getChildren()) { collect(child); }
         }
 
         void upload() {
@@ -153,6 +148,40 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         VertexAttribute turn = new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_instance1");
         return colours ? new VertexAttribute[] { place, turn, new VertexAttribute(VertexAttributes.Usage.ColorUnpacked, 4, "a_instance2") }
               : new VertexAttribute[] { place, turn };
+    }
+
+    /** A part's material in a batch: its own copy, marked so the shader providers pick the instanced shaders. */
+    private static Material instancedMaterial(Material material) {
+        Material result = new Material(material);
+        result.set(new Instanced());
+        return result;
+    }
+
+    /** Each node part of these nodes and their children, in the order a batch draws them. */
+    private static void forEachPart(Iterable<Node> nodes, Consumer<NodePart> action) {
+        for (Node node : nodes) {
+            for (NodePart part : node.parts) { action.accept(part); }
+            forEachPart(node.getChildren(), action);
+        }
+    }
+
+    /**
+     * The parts a stand of this species draws at every detail level, each as its batch's material and vertex layout,
+     * for programs built before the stand first draws (GpuTerrain's warm-up, with the depth pre-pass).
+     */
+    void speciesParts(String species, BiConsumer<Material, VertexAttributes> action) {
+        for (int level = 0; level < TreeLod.LEVELS; level++) {
+            Model model = models.apply(species, level);
+            VertexAttributes layout = model.meshes.first().getVertexAttributes();
+            forEachPart(model.nodes, part -> action.accept(instancedMaterial(part.material), layout));
+        }
+    }
+
+    /** A layout-only mesh with a stand's instance attributes, for a tree part's warm-up sample. */
+    static Mesh sampleMesh(VertexAttributes layout) {
+        Mesh mesh = new Mesh(true, 0, 0, layout);
+        mesh.enableInstancedRendering(true, 1, attributes(false));
+        return mesh;
     }
 
     /** One chunk's trees, grouped by species; each tree as {@link #STRIDE} floats. */

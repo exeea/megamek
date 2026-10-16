@@ -10,15 +10,13 @@ struct DirectionalLight {
 uniform DirectionalLight u_dirLights[numDirectionalLights];
 #endif
 #ifdef shadowMapFlag
-uniform sampler2D u_shadowTexture;
+uniform sampler2DShadow u_shadowTexture;
 uniform float u_shadowPCFOffset;
 uniform mat4 u_shadowMapProjViewTrans;
 in vec3 v_shadowMapUv;
 
 float shadowSample(vec2 offset) {
-    vec4 depthChannels = textureLod(u_shadowTexture, v_shadowMapUv.xy + offset, 0.0);
-    float depth = dot(depthChannels, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
-    return step(v_shadowMapUv.z, depth);
+    return texture(u_shadowTexture, vec3(v_shadowMapUv.xy + offset, v_shadowMapUv.z));
 }
 #endif
 
@@ -86,7 +84,8 @@ float sculptShadow(vec3 normal, vec3 light) {
     vec4 lifted = u_shadowMapProjViewTrans * vec4(receiver, 1.0);
     vec3 shadowUv = lifted.xyz / lifted.w * .5 + .5;
     shadowUv.z = min(shadowUv.z, .998);
-    // Rotated 12-tap disk, fixed to world position so it does not crawl when the camera moves.
+    // Retain the world-fixed 12-tap disk. Each hardware lookup filters comparisons, not encoded depth.
+    // Its four neighboring texels share this tap's receiver depth; the outer disk retains plane correction.
     vec2 taps[12];
     taps[0] = vec2(-.326, -.406); taps[1] = vec2(-.840, -.074); taps[2] = vec2(-.696, .457);
     taps[3] = vec2(-.203, .621); taps[4] = vec2(.962, -.195); taps[5] = vec2(.473, -.480);
@@ -103,10 +102,8 @@ float sculptShadow(vec3 normal, vec3 light) {
     float lit = 0.0;
     for (int i = 0; i < 12; i++) {
         vec2 offset = rotation * taps[i] * radius;
-        vec4 depthChannels = texture(u_shadowTexture, shadowUv.xy + offset);
-        float depth = dot(depthChannels, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
         float receiver = shadowUv.z + clamp(dot(offset, slope), -.002, .002);
-        lit += step(receiver, depth);
+        lit += texture(u_shadowTexture, vec3(shadowUv.xy + offset, receiver));
     }
     return shadowVisibility(lit / 12.0);
 #else

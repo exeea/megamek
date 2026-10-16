@@ -118,6 +118,7 @@ final class GpuEditorModelPreviews implements Disposable {
             float backdropScale = GpuSceneRadiance.SCALE / exposure;
             environmentLighting.set(lighting);
             light.set(environmentLighting);
+            GpuEnvironmentLighting.applyAntialiasing(light);
             light.set(ColorAttribute.createAmbientLight(lighting.ambient()));
             light.add(new DirectionalLight().set(lighting.direct(), lighting.direction()));
             if (batch == null) { batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider)); }

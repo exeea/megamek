@@ -71,7 +71,7 @@ void main() {
     float coverage = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(.06711056, .00583715))));
     if (coverage < v_coverFade.x || coverage >= v_coverFade.y) discard;
 #endif
-    vec3 albedo = v_color.rgb * (1.0 - u_wetness * .16);
+    vec3 albedo = v_color.rgb;
 #if (defined(biomeVegetationFlag) || defined(bankTurfFlag)) && defined(diffuseTextureFlag)
     // Opaque depth ownership avoids ordering halos between intersecting clumps; mipmaps filter distant leaves.
     if (plant.a < .32) discard;
@@ -84,6 +84,7 @@ void main() {
 #ifndef biomeVegetationFlag
     albedo *= mix(.80, 1.06, v_coverData.y);
 #endif
+    albedo = wetAlbedo(albedo, u_wetness * .25);
     albedo = materialReflectance(albedo);
 #ifdef bankTurfFlag
     // The draped turf follows its supporting bank's continuous height after artwork/vertex pigment gains.
@@ -97,20 +98,15 @@ void main() {
     geometric = normal;
 #endif
     normal = shadingNormal(normal, geometric, -viewDirection());
-    vec3 ambient, direct, sheen;
-    // Dry blades have a broad, rough reflection; rain smooths the same dielectric response into brighter glints.
-    surfaceLighting(normal, .6 * u_wetness, roughness, ambient, direct, sheen);
+    // Dry blades have a broad, rough reflection; rain smooths the same dielectric response into brighter glints. The
+    // blade's own normal decides its lit side.
+    Surface blade = opaqueSurface(albedo, normal, normal, roughness, .6 * u_wetness, surfaceVisibility());
     // Thin leaves transmit part of their diffuse budget instead of adding another light source.
-    ambient += (skyLight(-normal, GROUND_ALBEDO) - skyLight(normal, GROUND_ALBEDO))
-          * (.15 * dielectricBudget(normal, -viewDirection(), .6 * u_wetness, roughness));
-#if numDirectionalLights > 0
-    vec3 light = -u_dirLights[0].direction;
-    direct = direct * .85 + u_dirLights[0].color * surfaceVisibility()
-          * (.15 * dielectricDiffuse(-normal, light, viewDirection(), .6 * u_wetness, roughness));
-#endif
-    albedo *= ambient + direct;
-    albedo += sheen;
-    albedo += surfaceEnvironment(normal, .6 * u_wetness, roughness, GROUND_ALBEDO);
+    blade.front = vec3(.85);
+    blade.back = vec3(.15);
+    // Reflected sky reaches a blade only above the sward around it.
+    blade.specularOcclusion = v_coverData.y;
+    albedo = shadeSurface(blade);
 #endif
     fragColor = vec4(albedo * terrainGrid(v_coverRoot * .2), 1.0);
 }

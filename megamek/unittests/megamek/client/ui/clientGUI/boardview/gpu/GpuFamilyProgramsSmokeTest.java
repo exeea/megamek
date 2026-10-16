@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -12,9 +13,15 @@ import java.nio.FloatBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
@@ -24,6 +31,11 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.g3d.Renderable;
+import com.badlogic.gdx.graphics.g3d.Shader;
+import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
+import com.badlogic.gdx.graphics.g3d.utils.DefaultShaderProvider;
+import com.badlogic.gdx.graphics.g3d.utils.ShaderProvider;
 import com.badlogic.gdx.utils.BufferUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -44,9 +56,10 @@ import org.junit.jupiter.api.io.TempDir;
  * second calibration load takes every program from the program cache. On the small board a newly painted combination
  * draws at once with its generic program, never waits and links nothing: family programs build only behind the
  * loading stage. A lighting change while a family link is pending, and back, draws no stale program, leaks no link and
- * keeps the provider's family programs within the capacity. The tests share one program cache; in
- * this order the small board loads most programs the calibration board compiled. Reports go to
- * build/gpu-board-review/family-programs.
+ * keeps the provider's family programs within the capacity. A shader edit's swap releases the draw-order groups of the
+ * programs it replaced, a rejected edit keeps them and the frame, and a program its provider does not keep has none.
+ * The tests share one program cache; in this order the small board loads most programs the calibration board
+ * compiled. Reports go to build/gpu-board-review/family-programs.
  */
 @Tag("on-demand")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -190,13 +203,17 @@ class GpuFamilyProgramsSmokeTest {
             SwingUtilities.invokeAndWait(fixture.source::refresh);
             BoardScene scene = fixture.source.takeFrame().scene();
             run("lifecycle", report, () -> {
-                GpuGlsl.programCache = GpuProgramCache.open(directory.resolve("cache"));
+                // A family link must be pending when the lighting changes. The earlier tests stored this board's family
+                // programs, which would load at once: its own cold cache. A driver's program cache can finish a parallel
+                // link within its first step: the shared-context path, where a link finishes on another thread.
+                GpuGlsl.programCache = GpuProgramCache.open(directory.resolve("lifecycle-cache"));
                 System.setProperty(GpuFamilyPrograms.PROPERTY, "false");
                 Frame generic = load(scene, "lifecycle-generic", report);
                 System.setProperty(GpuFamilyPrograms.PROPERTY, "true");
                 // A capacity the small board exceeds, so the toggles below reach it.
                 int capacity = GpuFamilyPrograms.capacity;
                 GpuFamilyPrograms.capacity = 3;
+                GpuGlsl.Preparation.sharedContext = true;
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
                 try {
@@ -219,6 +236,9 @@ class GpuFamilyProgramsSmokeTest {
                     assertTrue(night, "A family link was pending when the lighting changed");
                     assertTrue(terrain.environment().shadowMap == null, "The night has no shadow map");
                     int afterNight = terrain.familyPrograms().programs();
+                    // Each configuration has its own capacity: the night builds its own family programs.
+                    assertEquals(3, terrain.familyPrograms().ready().size(),
+                          "After its rebuild the night has its own family programs");
                     frame.configure(BoardAtmosphere.DEFAULTS);
                     frame.prepare(terrain, camera, scene);
                     while (terrain.refine(camera.camera) | terrain.busy() || terrain.familyPrograms().pending() > 0) {
@@ -231,7 +251,7 @@ class GpuFamilyProgramsSmokeTest {
                           terrain.familyPrograms().ready().size()));
                     compare("Day again against generic", generic, capture(terrain, frame, camera, scene,
                           "lifecycle-day"), report);
-                    assertTrue(terrain.familyPrograms().programs() <= 3, "The capacity bounds the programs built");
+                    assertTrue(terrain.familyPrograms().programs() <= 2 * 3, "Twice the capacity bounds the programs built");
                     assertEquals(terrain.familyPrograms().programs(), familyProgramsIn(terrain),
                           "and the provider holds exactly those");
                     assertEquals(0, unfinishedLinks(terrain), "No link is left behind");
@@ -256,8 +276,139 @@ class GpuFamilyProgramsSmokeTest {
                     }
                     report.append(String.format(Locale.ROOT, "After edits and changes: %d family programs, %d in the"
                           + " provider%n", terrain.familyPrograms().programs(), familyProgramsIn(terrain)));
-                    assertTrue(familyProgramsIn(terrain) <= 3, "Edits and changes keep the capacity");
+                    assertTrue(familyProgramsIn(terrain) <= 2 * 3, "Edits and changes keep the capacity");
                     assertEquals(0, unfinishedLinks(terrain), "and leave no link behind");
+                } finally {
+                    GpuFamilyPrograms.capacity = capacity;
+                    GpuGlsl.Preparation.sharedContext = false;
+                    frame.dispose();
+                    terrain.dispose();
+                }
+            });
+        }
+    }
+
+    @Test
+    @Order(4)
+    void shaderEditsReleaseReplacedDrawOrderGroupsAndRejectedOnesKeepThem() throws Exception {
+        Board board = Board.createEmptyBoard(16, 17);
+        board.setHex(new Coords(4, 4), new Hex(0, "", "dirt"));
+        StringBuilder report = new StringBuilder();
+        try (var fixture = GpuBoardFixture.create(board)) {
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            BoardScene scene = fixture.source.takeFrame().scene();
+            run("shader-edits", report, () -> {
+                GpuGlsl.programCache = GpuProgramCache.open(directory.resolve("cache"));
+                // A shader-editor session owns the terrain's providers, as in the board window.
+                var session = new GpuShaderManager();
+                AtomicReference<Exception> thrown = new AtomicReference<>();
+                session.run(() -> {
+                    try { shaderEdits(session, scene, report); }
+                    catch (Exception failure) { thrown.set(failure); }
+                });
+                if (thrown.get() != null) { throw thrown.get(); }
+            });
+        }
+    }
+
+    /**
+     * Inside the session: an edit of a file the board does not draw swaps every terrain program for a copy from the
+     * program cache; an edit that a later program fails to compile is rejected after the terrain prepared its
+     * replacements; and a family program built as its provider builds one but not initialized, as when its init fails
+     * before the provider keeps it, has no group.
+     */
+    private static void shaderEdits(GpuShaderManager session, BoardScene scene, StringBuilder report) throws Exception {
+        var terrain = new GpuTerrain();
+        var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
+        try {
+            BoardCamera camera = camera(scene);
+            settle(terrain, frame, camera, scene);
+            finish(terrain, frame, camera, scene, "shader-edits", report);
+            Map<Shader, Shader> groups = shaderGroups(terrain);
+            Map<Shader, Shader> before = new IdentityHashMap<>(groups);
+            Frame first = capture(terrain, frame, camera, scene, "shader-edits-before");
+            String spray = GpuShaderSource.readDisk("water-spray.frag");
+            assertTrue(session.apply(Map.of("water-spray.frag", spray + "\n// draw-order groups\n")).success(),
+                  "The edit swaps the terrain's programs");
+            Map<Shader, Shader> swapped = new IdentityHashMap<>(groups);
+            int family = familyProgramsIn(terrain);
+            Frame afterSwap = capture(terrain, frame, camera, scene, "shader-edits-swapped");
+            assertFalse(session.apply(Map.of("water-spray.frag", spray + "\n// rejected\n",
+                  "atmosphere-composite.frag", "#version 330 core\nthis does not compile")).success(),
+                  "A program that fails rejects the edit");
+            Map<Shader, Shader> rejected = new IdentityHashMap<>(groups);
+            Frame afterRejection = capture(terrain, frame, camera, scene, "shader-edits-rejected");
+
+            var create = DefaultShaderProvider.class.getDeclaredMethod("createShader", Renderable.class);
+            create.setAccessible(true);
+            Shader built = (Shader) create.invoke(((GpuShaderProvider) provider(terrain)).active(), familySample(terrain));
+            boolean uninitialized = groups.containsKey(built), initialized;
+            try {
+                built.init();
+                initialized = groups.containsKey(built);
+            } finally {
+                built.dispose();
+            }
+            report.append(String.format(Locale.ROOT, "Draw-order groups: %d before the edits, %d after the swap (%d family"
+                  + " programs), %d after the rejected edit; a family program built aside has one: not initialized %b,"
+                  + " initialized %b, disposed %b%n", before.size(), swapped.size(), family, rejected.size(), uninitialized,
+                  initialized, groups.containsKey(built)));
+            compare("Swapped against before", first, afterSwap, report);
+            compare("Rejected against swapped", afterSwap, afterRejection, report);
+            assertFalse(before.isEmpty(), "Family programs have draw-order groups");
+            assertTrue(Collections.disjoint(before.keySet(), swapped.keySet()), "The swap releases the replaced programs");
+            assertTrue(identities(providerShaders(terrain)).containsAll(swapped.keySet()),
+                  "Every group belongs to an installed program");
+            assertEquals(family, swapped.size(), "one for each family program");
+            assertEquals(swapped, rejected, "A rejected edit keeps the groups");
+            assertFalse(uninitialized, "A program its provider does not keep has no group");
+            assertTrue(initialized, "An initialized family program sorts with its generic program");
+            assertFalse(groups.containsKey(built), "and a disposed one has no group");
+        } finally {
+            frame.dispose();
+            terrain.dispose();
+        }
+    }
+
+    @Test
+    @Order(5)
+    void returningFromALightingConfigurationWithoutFamilyProgramsTakesBackTheEarlierOnes() throws Exception {
+        Board board = Board.createEmptyBoard(16, 17);
+        board.setHex(new Coords(4, 4), new Hex(0, "", "dirt"));
+        board.setHex(new Coords(5, 4), new Hex(0, "magma:1", ""));
+        StringBuilder report = new StringBuilder();
+        try (var fixture = GpuBoardFixture.create(board)) {
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            BoardScene scene = fixture.source.takeFrame().scene();
+            run("return", report, () -> {
+                GpuGlsl.programCache = GpuProgramCache.open(directory.resolve("cache"));
+                int capacity = GpuFamilyPrograms.capacity;
+                GpuFamilyPrograms.capacity = 3;
+                var terrain = new GpuTerrain();
+                var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
+                try {
+                    BoardCamera camera = camera(scene);
+                    settle(terrain, frame, camera, scene);
+                    int day = terrain.familyPrograms().ready().size();
+                    // The night may build none, so none of its materials is marked when the day returns.
+                    GpuFamilyPrograms.capacity = 0;
+                    frame.configure(NIGHT);
+                    settle(terrain, frame, camera, scene);
+                    int night = terrain.familyPrograms().ready().size();
+                    GpuFamilyPrograms.capacity = 3;
+                    frame.configure(BoardAtmosphere.DEFAULTS);
+                    frame.prepare(terrain, camera, scene);
+                    // The day's programs are in the provider: taking them back links nothing.
+                    long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(1);
+                    while (terrain.refine(camera.camera) | terrain.busy() || terrain.familyPrograms().pending() > 0) {
+                        assertTrue(System.nanoTime() < deadline, "The day's family programs must come back");
+                        Thread.sleep(5);
+                    }
+                    report.append(String.format(Locale.ROOT, "Return: %d family programs by day, %d at night, %d by day"
+                          + " again%n", day, night, terrain.familyPrograms().ready().size()));
+                    assertTrue(day > 0, "The day builds family programs");
+                    assertEquals(0, night, "The night builds none");
+                    assertEquals(day, terrain.familyPrograms().ready().size(), "The day takes its programs back");
                 } finally {
                     GpuFamilyPrograms.capacity = capacity;
                     frame.dispose();
@@ -267,19 +418,113 @@ class GpuFamilyProgramsSmokeTest {
         }
     }
 
+    /**
+     * Specular anti-aliasing and day and night toggled until the terrain holds twice the capacity: each configuration
+     * builds its own programs until then, and later ones stay generic; returning finds the built ones. The report lists
+     * each configuration's programs, the total, and what the provider and the draw-order groups hold.
+     */
+    @Test
+    @Order(6)
+    void lightingToggleChurnStopsAtTwiceTheCapacityWithoutLeaks() throws Exception {
+        Board board = Board.createEmptyBoard(16, 17);
+        board.setHex(new Coords(4, 4), new Hex(0, "", "dirt"));
+        board.setHex(new Coords(5, 4), new Hex(0, "magma:1", ""));
+        StringBuilder report = new StringBuilder("configuration,ready,built,provider,groups,unfinishedLinks\n");
+        try (var fixture = GpuBoardFixture.create(board)) {
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            BoardScene scene = fixture.source.takeFrame().scene();
+            run("churn", report, () -> {
+                GpuGlsl.programCache = GpuProgramCache.open(directory.resolve("cache"));
+                int capacity = GpuFamilyPrograms.capacity;
+                boolean antialiasing = GpuEnvironmentLighting.specularAntialiasing;
+                GpuFamilyPrograms.capacity = 3;
+                var terrain = new GpuTerrain();
+                var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
+                try {
+                    BoardCamera camera = camera(scene);
+                    // Four configurations; the first two fill the total, the next two stay generic, then the first two
+                    // come back.
+                    int[] expected = { 3, 3, 0, 0, 3, 3 };
+                    for (int step = 0; step < expected.length; step++) {
+                        boolean on = step < 2 || step > 3, night = step % 2 == 1;
+                        GpuEnvironmentLighting.specularAntialiasing = on;
+                        frame.configure(night ? NIGHT : BoardAtmosphere.DEFAULTS);
+                        settle(terrain, frame, camera, scene);
+                        int ready = terrain.familyPrograms().ready().size(), built = terrain.familyPrograms().programs();
+                        int provider = familyProgramsIn(terrain), groups = shaderGroups(terrain).size();
+                        int links = unfinishedLinks(terrain);
+                        report.append(String.format(Locale.ROOT, "%s %s,%d,%d,%d,%d,%d%n", night ? "night" : "day",
+                              on ? "AA on" : "AA off", ready, built, provider, groups, links));
+                        assertEquals(expected[step], ready, "Configuration " + step + " family programs");
+                        assertTrue(built <= 2 * 3, "Twice the capacity bounds the programs built");
+                        assertEquals(built, provider, "The provider holds exactly the programs built");
+                        assertEquals(provider, groups, "each with its draw-order group");
+                        assertEquals(0, links, "No link is left behind");
+                    }
+                } finally {
+                    GpuFamilyPrograms.capacity = capacity;
+                    GpuEnvironmentLighting.specularAntialiasing = antialiasing;
+                    frame.dispose();
+                    terrain.dispose();
+                }
+            });
+        }
+    }
+
     /** The family programs the terrain's shader provider holds, counted from their sources. */
     private static int familyProgramsIn(GpuTerrain terrain) throws ReflectiveOperationException {
+        int count = 0;
+        for (Shader shader : providerShaders(terrain)) { if (family(shader)) { count++; } }
+        return count;
+    }
+
+    private static boolean family(Shader shader) {
+        return shader instanceof BaseShader base && base.program.getFragmentShaderSource().contains("#define SCULPT_FAMILY");
+    }
+
+    private static ShaderProvider provider(GpuTerrain terrain) throws ReflectiveOperationException {
         var batch = GpuTerrain.class.getDeclaredField("batch");
         batch.setAccessible(true);
-        var provider = ((com.badlogic.gdx.graphics.g3d.ModelBatch) batch.get(terrain)).getShaderProvider();
+        return ((com.badlogic.gdx.graphics.g3d.ModelBatch) batch.get(terrain)).getShaderProvider();
+    }
+
+    /** The programs the terrain's shader provider holds; in a shader-editor session, its installed provider's. */
+    private static List<Shader> providerShaders(GpuTerrain terrain) throws ReflectiveOperationException {
+        ShaderProvider provider = provider(terrain);
+        if (provider instanceof GpuShaderProvider edited) { provider = edited.active(); }
         var shaders = com.badlogic.gdx.graphics.g3d.utils.BaseShaderProvider.class.getDeclaredField("shaders");
         shaders.setAccessible(true);
-        int count = 0;
-        for (var shader : (com.badlogic.gdx.utils.Array<?>) shaders.get(provider)) {
-            if (shader instanceof com.badlogic.gdx.graphics.g3d.shaders.BaseShader base
-                  && base.program.getFragmentShaderSource().contains("#define SCULPT_FAMILY")) { count++; }
+        List<Shader> result = new ArrayList<>();
+        for (var shader : (com.badlogic.gdx.utils.Array<?>) shaders.get(provider)) { result.add((Shader) shader); }
+        return result;
+    }
+
+    /** The sample a shader-editor session keeps for one of the terrain's family programs: what it rebuilds it from. */
+    private static Renderable familySample(GpuTerrain terrain) throws ReflectiveOperationException {
+        var handles = GpuShaderProvider.class.getDeclaredField("handles");
+        handles.setAccessible(true);
+        for (Object handle : (List<?>) handles.get(provider(terrain))) {
+            var shader = handle.getClass().getDeclaredField("shader");
+            var sample = handle.getClass().getDeclaredField("sample");
+            shader.setAccessible(true);
+            sample.setAccessible(true);
+            if (family((Shader) shader.get(handle))) { return (Renderable) sample.get(handle); }
         }
-        return count;
+        throw new AssertionError("The terrain has a family program");
+    }
+
+    /** The terrain's draw-order groups (GpuTerrain.shaderGroups): each family program's generic program. */
+    @SuppressWarnings("unchecked")
+    private static Map<Shader, Shader> shaderGroups(GpuTerrain terrain) throws ReflectiveOperationException {
+        var field = GpuTerrain.class.getDeclaredField("shaderGroups");
+        field.setAccessible(true);
+        return (Map<Shader, Shader>) field.get(terrain);
+    }
+
+    private static Set<Shader> identities(Collection<Shader> shaders) {
+        Set<Shader> result = Collections.newSetFromMap(new IdentityHashMap<>());
+        result.addAll(shaders);
+        return result;
     }
 
     /** Links the terrain's compiler queue still holds: started and never adopted. */
@@ -352,9 +597,21 @@ class GpuFamilyProgramsSmokeTest {
         }
     }
 
-    /** One more frame: colour and alpha, and the depth the composite wrote. */
+    /**
+     * The settled scene's colour and alpha, and the depth the composite wrote. Frames are drawn until nothing builds and
+     * refinement twice has nothing left, since detail, tree levels and scatter visibility settle with drawn frames; then
+     * the shadow map is drawn afresh, since it keeps what it showed when it was drawn. Two terrains with different
+     * histories then capture the same scene.
+     */
     private static Frame capture(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene,
           String name) {
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(5);
+        for (int quiet = 0; quiet < 2; ) {
+            frame.render(terrain, camera, scene);
+            quiet = terrain.refine(camera.camera) | terrain.busy() ? 0 : quiet + 1;
+            assertTrue(System.nanoTime() < deadline, () -> "Terrain must settle: " + terrain.buildDetails());
+        }
+        terrain.refreshShadows();
         frame.render(terrain, camera, scene);
         int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
         Pixmap image = Pixmap.createFromFrameBuffer(0, 0, width, height);
