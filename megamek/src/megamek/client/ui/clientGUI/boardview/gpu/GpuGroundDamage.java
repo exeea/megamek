@@ -44,8 +44,8 @@ final class GpuGroundDamage implements Disposable {
     static final float TILE_METRES = 8;
     static final int STAMPS_PER_FRAME = 8;
     /**
-     * Texels the marks one frame paints may cover, at least one mark's worth: a few craters fit in a frame, while a
-     * fuel-air round's charring of every hex in its radius is spread over many frames instead of stalling one.
+     * Texels the marks one frame paints may cover, at least one tile's worth: a few craters fit in a frame, while a
+     * large mark (a fuel-air round's charring, any area effect's) resumes tile by tile over the next frames.
      */
     static final int STAMP_TEXELS_PER_FRAME = 120_000;
     /** A frame whose mark painting takes longer than this is logged. */
@@ -178,10 +178,12 @@ final class GpuGroundDamage implements Disposable {
 
     private final Map<UUID, Set<String>> seen = new LinkedHashMap<>();
     /** Texture storage may be square; the trimmed artwork keeps its physical canvas proportions. */
-    private record BrushArt(List<Pixmap> levels, float aspect) { }
+    private record BrushArt(List<Pixmap> levels, List<int[]> texels, float aspect) { }
     private final Map<Style, BrushArt> brushes = new EnumMap<>(Style.class);
     private record Stamp(int level, Vector3 point, float radius, float angle, Style style, int seed, float strength) { }
     private final ArrayDeque<Stamp> pending = new ArrayDeque<>();
+    /** The tile of the oldest waiting mark that painting resumes from: 0 until a mark spans frames. */
+    private int resumeTile;
     private BoardScene groundScene;
     private final Map<Integer, Tile> tiles = new HashMap<>();
     private final List<Pixmap> directory = new ArrayList<>();
@@ -206,6 +208,12 @@ final class GpuGroundDamage implements Disposable {
 
     private static IntBuffer texels(Pixmap pixels) {
         return pixels.getPixels().duplicate().order(ByteOrder.BIG_ENDIAN).asIntBuffer();
+    }
+
+    private static int[] array(Pixmap pixels) {
+        int[] values = new int[pixels.getWidth() * pixels.getHeight()];
+        texels(pixels).get(values);
+        return values;
     }
 
     TextureArray texture() { return texture; }
@@ -297,7 +305,10 @@ final class GpuGroundDamage implements Disposable {
         float dx = incoming.x, dy = incoming.y;
         float length = (float) Math.hypot(dx, dy);
         float angle = length < .001f ? UnitAttack.noise(seed) * MathUtils.PI2 : MathUtils.atan2(dy, dx);
-        if (pending.size() >= MAX_PENDING_STAMPS) { pending.removeFirst(); }
+        if (pending.size() >= MAX_PENDING_STAMPS) {
+            pending.removeFirst();
+            resumeTile = 0;
+        }
         pending.addLast(new Stamp(tile.elevation(), stampAt.cpy(), impact.radius(style), angle, style, seed,
               impact.strength()));
     }
@@ -372,7 +383,7 @@ final class GpuGroundDamage implements Disposable {
         marks++;
     }
 
-    record Brush(Pixmap image, IntBuffer texels, float aspect, float mirror, float strength) {
+    record Brush(Pixmap image, int[] texels, float aspect, float mirror, float strength) {
         int sample(float u, float v) {
             if (Math.abs(u) > 1 || Math.abs(v) > 1) { return 0; }
             return filtered(texels, image.getWidth(), image.getHeight(), (u * .5f + .5f) * image.getWidth() - .5f,
@@ -387,7 +398,7 @@ final class GpuGroundDamage implements Disposable {
         int lod = 0;
         float diameter = 2 * radius * TILE_INTERIOR / tileWorldSize;
         while (lod + 1 < levels.size() && levels.get(lod).getWidth() > diameter * 2) { lod++; }
-        return new Brush(levels.get(lod), texels(levels.get(lod)), art.aspect(),
+        return new Brush(levels.get(lod), art.texels().get(lod), art.aspect(),
               (seed & 1) == 0 ? 1 : -1, strength);
     }
 
@@ -401,24 +412,39 @@ final class GpuGroundDamage implements Disposable {
         tile.texels().put(index, combined);
     }
 
-    private void stamp(Stamp mark) {
+    /**
+     * Paints a mark's tiles from {@link #resumeTile} on until {@code budget} texels are spent, and returns the texels
+     * spent. It leaves {@link #resumeTile} at the next tile, or at 0 once the mark is finished, so a frame costs at most
+     * about one budget and one tile however large an area effect's marks grow.
+     */
+    private int stamp(Stamp mark, int budget) {
         float density = TILE_INTERIOR / tileWorldSize;
         float cos = MathUtils.cos(mark.angle()), sin = MathUtils.sin(mark.angle());
         float radius = mark.radius();
         var brush = brush(mark.style(), radius, mark.strength(), mark.seed());
-        if (brush == null) { return; }
+        if (brush == null) {
+            resumeTile = 0;
+            return 0;
+        }
+        int spent = 0;
         // Brush dimensions describe the visible art, after empty authoring margins are removed at load.
         float halfHeight = radius * brush.aspect();
         float extentX = Math.abs(cos) * radius + Math.abs(sin) * halfHeight;
         float extentY = Math.abs(sin) * radius + Math.abs(cos) * halfHeight;
         var point = mark.point();
-        float border = TILE_BORDER / density;
-        int firstX = Math.max(0, (int) Math.floor((point.x - extentX - border) / tileWorldSize));
-        int lastX = Math.min(tileColumns - 1, (int) Math.floor((point.x + extentX + border) / tileWorldSize));
-        int firstY = Math.max(0, (int) Math.floor((-point.y - extentY - border) / tileWorldSize));
-        int lastY = Math.min(tileRows - 1, (int) Math.floor((-point.y + extentY + border) / tileWorldSize));
-        for (int ty = firstY; ty <= lastY; ty++) {
-            for (int tx = firstX; tx <= lastX; tx++) {
+        // A brush magnified over the mask is sampled once per block of texels it spans: no detail is lost, and a
+        // fuel-air char's work drops by the square of its magnification.
+        int step = Math.max(1, (int) (2 * radius * density / brush.image().getWidth()));
+        BoardScene.Tile receiver = null;
+        int[] range = tileRange(point, extentX, extentY);
+        int index = 0;
+        for (int ty = range[2]; ty <= range[3]; ty++) {
+            for (int tx = range[0]; tx <= range[1]; tx++, index++) {
+                if (index < resumeTile) { continue; }
+                if (spent > 0 && spent >= budget) {
+                    resumeTile = index;
+                    return spent;
+                }
                 int key = ty * tileColumns + tx;
                 Tile tile = tiles.get(key);
                 float ox = tx * tileWorldSize, oy = ty * tileWorldSize;
@@ -426,22 +452,27 @@ final class GpuGroundDamage implements Disposable {
                 int x1 = Math.min(TILE_SIZE - 1, (int) Math.ceil((point.x + extentX - ox) * density) + TILE_BORDER);
                 int y0 = Math.max(0, (int) Math.floor((-point.y - extentY - oy) * density) + TILE_BORDER);
                 int y1 = Math.min(TILE_SIZE - 1, (int) Math.ceil((-point.y + extentY - oy) * density) + TILE_BORDER);
-                for (int y = y0; y <= y1; y++) {
-                    for (int x = x0; x <= x1; x++) {
-                        // Use global integer texel positions so adjoining tiles have identical border samples.
-                        float wx = (tx * TILE_INTERIOR + x - TILE_BORDER + .5f) / density;
-                        float wy = -(ty * TILE_INTERIOR + y - TILE_BORDER + .5f) / density;
+                spent += Math.max(0, x1 - x0 + 1) * Math.max(0, y1 - y0 + 1);
+                // Blocks start on global texel positions so adjoining tiles have identical border samples.
+                int originX = tx * TILE_INTERIOR - TILE_BORDER, originY = ty * TILE_INTERIOR - TILE_BORDER;
+                for (int by = y0 - Math.floorMod(originY + y0, step); by <= y1; by += step) {
+                    for (int bx = x0 - Math.floorMod(originX + x0, step); bx <= x1; bx += step) {
+                        float wx = (originX + bx + step * .5f) / density;
+                        float wy = -(originY + by + step * .5f) / density;
                         float px = wx - point.x, py = wy - point.y;
                         float u = (px * cos + py * sin) / radius, v = (-px * sin + py * cos) / halfHeight;
                         int sample = brush.sample(u, v);
                         float alpha = (sample >>> 24) / 255f * mark.strength();
                         if (alpha < 1 / 255f) { continue; }
-                        var receiver = BoardGeometry.tile(groundScene, wx, wy);
+                        if (receiver == null || !BoardGeometry.contains(receiver.coords(), wx, wy)) {
+                            receiver = BoardGeometry.tile(groundScene, wx, wy);
+                        }
                         if (receiver == null || receiver.elevation() != mark.level() || receiver.liquid().present() || receiver.frozen()) { continue; }
                         if (tile == null) {
                             if (directory.size() + tiles.size() >= maxLayers) {
                                 LOGGER.warn("Ground scars exhausted the GPU's {} texture-array layers", maxLayers);
-                                return;
+                                resumeTile = 0;
+                                return spent;
                             }
                             tile = new Tile(directory.size() + tiles.size(), blank());
                             tiles.put(key, tile);
@@ -452,12 +483,48 @@ final class GpuGroundDamage implements Disposable {
                             directoryDirty = true;
                         }
                         // Premultiplied coverage, authored luminance, gloss and relief; newer art blends over older art.
-                        blend(tile, x, y, sample, mark.strength());
+                        for (int y = Math.max(by, y0); y < Math.min(by + step, y1 + 1); y++) {
+                            for (int x = Math.max(bx, x0); x < Math.min(bx + step, x1 + 1); x++) {
+                                blend(tile, x, y, sample, mark.strength());
+                            }
+                        }
                     }
                 }
                 if (tile != null) { dirty.add(tile); }
             }
         }
+        resumeTile = 0;
+        return spent;
+    }
+
+    /** The first and last tile columns and rows a mark of these extents about {@code point} reaches, borders included. */
+    private int[] tileRange(Vector3 point, float extentX, float extentY) {
+        float border = TILE_BORDER * tileWorldSize / TILE_INTERIOR;
+        return new int[] {
+              Math.max(0, (int) Math.floor((point.x - extentX - border) / tileWorldSize)),
+              Math.min(tileColumns - 1, (int) Math.floor((point.x + extentX + border) / tileWorldSize)),
+              Math.max(0, (int) Math.floor((-point.y - extentY - border) / tileWorldSize)),
+              Math.min(tileRows - 1, (int) Math.floor((-point.y + extentY + border) / tileWorldSize)) };
+    }
+
+    /**
+     * The tiles the waiting marks may still add, at most: so a volley grows the texture once rather than doubling it
+     * frame after frame, each time uploading every tile again.
+     */
+    private int waitingTiles() {
+        Set<Integer> keys = new HashSet<>();
+        for (Stamp mark : pending) {
+            var art = brushes.get(mark.style());
+            float extent = mark.radius() * Math.max(1, art == null ? 1 : art.aspect());
+            int[] range = tileRange(mark.point(), extent, extent);
+            for (int ty = range[2]; ty <= range[3]; ty++) {
+                for (int tx = range[0]; tx <= range[1]; tx++) {
+                    int key = ty * tileColumns + tx;
+                    if (!tiles.containsKey(key)) { keys.add(key); }
+                }
+            }
+        }
+        return keys.size();
     }
 
     /** Editable RGBA artwork: alpha is coverage; dark values are char/melt, light values disturbed debris. */
@@ -508,7 +575,7 @@ final class GpuGroundDamage implements Disposable {
                 var next = new Pixmap(Math.max(1, mask.getWidth() / 2), Math.max(1, mask.getHeight() / 2), Pixmap.Format.RGBA8888);
                 next.setBlending(Pixmap.Blending.None);
                 levels.add(next);
-                var sourceTexels = texels(mask);
+                var sourceTexels = array(mask);
                 for (int y = 0; y < next.getHeight(); y++) {
                     for (int x = 0; x < next.getWidth(); x++) {
                         next.drawPixel(x, y, filtered(sourceTexels, mask.getWidth(), mask.getHeight(), (x + .5f) * mask.getWidth() / next.getWidth() - .5f,
@@ -521,22 +588,22 @@ final class GpuGroundDamage implements Disposable {
                 levels.removeFirst().dispose();
             }
             if (!style.cut()) { aspect = (float) levels.getFirst().getHeight() / levels.getFirst().getWidth(); }
-            return new BrushArt(List.copyOf(levels), aspect);
+            return new BrushArt(List.copyOf(levels), levels.stream().map(GpuGroundDamage::array).toList(), aspect);
         } catch (RuntimeException error) {
             levels.forEach(Pixmap::dispose);
             LOGGER.warn("Could not load ground scar {}: {}", file, error.getMessage());
-            return new BrushArt(List.of(), 1);
+            return new BrushArt(List.of(), List.of(), 1);
         } finally {
             if (source != null) { source.dispose(); }
         }
     }
 
-    private static int filtered(IntBuffer image, int width, int height, float x, float y) {
+    private static int filtered(int[] image, int width, int height, float x, float y) {
         x = MathUtils.clamp(x, 0, width - 1);
         y = MathUtils.clamp(y, 0, height - 1);
         int x0 = (int) x, y0 = (int) y;
         int x1 = Math.min(x0 + 1, width - 1), y1 = Math.min(y0 + 1, height - 1);
-        int a = image.get(y0 * width + x0), b = image.get(y0 * width + x1), c = image.get(y1 * width + x0), d = image.get(y1 * width + x1);
+        int a = image[y0 * width + x0], b = image[y0 * width + x1], c = image[y1 * width + x0], d = image[y1 * width + x1];
         int result = 0;
         for (int shift = 0; shift <= 24; shift += 8) {
             result |= Math.round(MathUtils.lerp(MathUtils.lerp(a >>> shift & 255, b >>> shift & 255, x - x0),
@@ -552,20 +619,15 @@ final class GpuGroundDamage implements Disposable {
         // Large salvos/instant playback must not rasterize every scar in one render frame. Retain newest arrivals
         // on overload; only compact stamp data waits here, never the attack's unit/model snapshots.
         long start = System.nanoTime();
-        int budget = STAMP_TEXELS_PER_FRAME;
         int stamped = 0;
         int painted = 0;
-        for (int count = 0; count < STAMPS_PER_FRAME && !pending.isEmpty(); count++) {
-            int texels = texels(pending.peekFirst());
-            if ((stamped > 0) && (texels > budget)) {
-                break;
+        while (stamped < STAMPS_PER_FRAME && !pending.isEmpty() && painted < STAMP_TEXELS_PER_FRAME) {
+            painted += stamp(pending.peekFirst(), STAMP_TEXELS_PER_FRAME - painted);
+            if (resumeTile == 0) {
+                pending.removeFirst();
+                marks++;
+                stamped++;
             }
-            budget -= texels;
-            painted += texels;
-            var mark = pending.removeFirst();
-            stamp(mark);
-            marks++;
-            stamped++;
         }
         long millis = (System.nanoTime() - start) / 1_000_000;
         if (millis > SLOW_STAMPING_MILLIS) {
@@ -576,6 +638,7 @@ final class GpuGroundDamage implements Disposable {
         int required = directory.size() + tiles.size();
         if (texture == null || required > capacity) {
             // Geometric growth avoids reallocation on every impact. Empty board area consumes no image layers.
+            required += waitingTiles();
             capacity = Math.min(maxLayers, Math.max(required, Math.max(directory.size(), capacity * 2)));
             var previous = texture;
             texture = new TextureArray(new TileData(capacity));
@@ -591,12 +654,6 @@ final class GpuGroundDamage implements Disposable {
         }
         directoryDirty = false;
         dirty.clear();
-    }
-
-    /** About how many texels a mark paints: the square it spans at the scars' resolution. */
-    private int texels(Stamp mark) {
-        float side = 2 * mark.radius() * TILE_INTERIOR / Math.max(tileWorldSize, 1e-6f);
-        return (int) Math.min(Integer.MAX_VALUE, side * side);
     }
 
     private static void uploadTile(int layer, int level, Pixmap pixels) {
@@ -673,7 +730,7 @@ final class GpuGroundDamage implements Disposable {
         brushes.clear();
         texture = null; capacity = 0; seen.clear(); marks = 0;
         nextSurfaceKey = -1;
-        pending.clear(); groundScene = null;
+        pending.clear(); resumeTile = 0; groundScene = null;
         worldWidth = 0; worldHeight = 0; columns = 0; rows = 0;
     }
 }

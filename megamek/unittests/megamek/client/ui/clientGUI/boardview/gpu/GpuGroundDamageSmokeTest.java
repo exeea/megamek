@@ -224,8 +224,7 @@ class GpuGroundDamageSmokeTest {
             var origin = center.cpy().add(-BoardRelief.metres(10), 0, BoardRelief.metres(5));
             damage.impact(scene, new GpuGroundDamage.Impact(mark.attack(), mark.key(), origin, center,
                   mark.effect(), mark.shot()), terrain::tacticalSurface);
-            frame.render(terrain, camera, scene);
-            assertEquals(1, damage.marks(), sample[0] + " must reach the installed ground");
+            renderUntilPainted(frame, terrain, camera, scene, 1, sample[0] + " must reach the installed ground");
             long soot = 0, chips = 0, glass = 0, relief = 0;
             int peak = 0;
             for (var tile : tiles(damage).values()) {
@@ -330,9 +329,10 @@ class GpuGroundDamageSmokeTest {
             terrain.setGrass(true);
             var mark = GroundDamagePlaybackTest.impact("ISLongTom", null);
             mark.attack().landscape = ray -> terrain.hit(scene, ray);
+            int painted = terrain.groundDamage().marks();
             terrain.groundDamage().impact(scene, new GpuGroundDamage.Impact(mark.attack(), mark.key(), center, center,
                   mark.effect(), mark.shot()), terrain::tacticalSurface);
-            frame.render(terrain, camera, scene);
+            renderUntilPainted(frame, terrain, camera, scene, painted + 1, "The Long Tom's scar is painted");
             int[] scarGrass = pixels();
             GpuReviewFrame.save(new File(output, "scar-grass-after.png"));
             terrain.setGrass(false);
@@ -482,6 +482,15 @@ class GpuGroundDamageSmokeTest {
     }
 
     /** Prepare the displayed lighting before waiting for installed terrain and its material families. */
+    /** Renders until the ground damage has painted {@code marks} marks: a large mark resumes over a few frames. */
+    private static void renderUntilPainted(GpuReviewFrame frame, GpuTerrain terrain, BoardCamera camera,
+          BoardScene scene, int marks, String message) {
+        for (int i = 0; i < 16 && terrain.groundDamage().marks() < marks; i++) {
+            frame.render(terrain, camera, scene);
+        }
+        assertEquals(marks, terrain.groundDamage().marks(), message);
+    }
+
     private static void settle(GpuTerrain terrain, GpuReviewFrame frame, BoardScene scene, BoardCamera camera)
           throws Exception {
         frame.prepare(terrain, camera, scene);
