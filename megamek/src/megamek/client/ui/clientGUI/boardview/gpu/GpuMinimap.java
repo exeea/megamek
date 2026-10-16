@@ -1,12 +1,9 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.io.File;
-import java.util.HashMap;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
@@ -29,21 +26,51 @@ import megamek.client.ui.gdx.UiCursorCapture;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.board.Coords;
-import megamek.logging.MMLogger;
 
 /**
- * Minimap under the utilities (C.1 G4): the board in the average colours of its tileset art, the presented units, the
+ * Minimap under the utilities (C.1 G4): the board in fixed colours of its terrain, the presented units, the
  * planned route and the ground the camera shows. The map fills the panel inside its rails, with the close button over
  * its top-right corner (the user's decision of 2026-10-02: no caption, no north mark). A left press or drag on it
  * centres the camera there, a middle drag orbits the camera and the wheel zooms it as the board's do, about the view's
  * centre (the user's decision of 2026-10-03), and none changes an order.
  */
 final class GpuMinimap implements GpuHud.Component {
-    private static final MMLogger LOGGER = MMLogger.create(GpuMinimap.class);
     private static final Color BACKGROUND = Color.valueOf("141B1B");
     private static final Color ROUTE = Color.valueOf("D4FFF0");
     private static final Color FRUSTUM = new Color(1, 1, 1, .85f);
     private static final Color DESTROYED = Color.valueOf("555555");
+    /** The terrain palette: muted map colours, one per terrain, independent of the tileset's art. */
+    private static final Map<BoardScene.Surface, Color> SURFACES = new EnumMap<>(Map.ofEntries(
+          Map.entry(BoardScene.Surface.GRASS, Color.valueOf("7E8D41")),
+          Map.entry(BoardScene.Surface.TROPICAL, Color.valueOf("5E8A3A")),
+          Map.entry(BoardScene.Surface.DIRT, Color.valueOf("8A7350")),
+          Map.entry(BoardScene.Surface.SAND, Color.valueOf("C2AE7A")),
+          Map.entry(BoardScene.Surface.DESERT, Color.valueOf("CDB27A")),
+          Map.entry(BoardScene.Surface.ROCK, Color.valueOf("8A867C")),
+          Map.entry(BoardScene.Surface.CONCRETE, Color.valueOf("9C9C98")),
+          Map.entry(BoardScene.Surface.SNOW, Color.valueOf("E2E7EC")),
+          Map.entry(BoardScene.Surface.LUNAR, Color.valueOf("8E8E8C")),
+          Map.entry(BoardScene.Surface.FUNGUS, Color.valueOf("7E6A8E")),
+          Map.entry(BoardScene.Surface.MARS, Color.valueOf("A0583A")),
+          Map.entry(BoardScene.Surface.VOLCANO, Color.valueOf("4A4440"))));
+    /** Light, heavy and ultra-heavy woods. */
+    private static final Color[] WOODS = { Color.valueOf("4E7A34"), Color.valueOf("3C6428"), Color.valueOf("2C4E1E") };
+    private static final Color JUNGLE = Color.valueOf("3E7A3A");
+    private static final Color FIELD = Color.valueOf("A8A050");
+    private static final Color MARSH = Color.valueOf("4E6B45");
+    private static final Color MUD = Color.valueOf("6E5A3E");
+    private static final Color TUNDRA = Color.valueOf("9AA08A");
+    private static final Color ROUGH = Color.valueOf("8F8160");
+    private static final Color BUILDING = Color.valueOf("B0ADA6");
+    private static final Color WATER = Color.valueOf("4A8CA6");
+    private static final Color DEEP_WATER = Color.valueOf("33688F");
+    private static final Color ICE = Color.valueOf("C8DCEB");
+    private static final Color MAGMA = Color.valueOf("E0581E");
+    private static final Color MAGMA_CRUST = Color.valueOf("5A2A1C");
+    private static final Color ROAD = Color.valueOf("5A5A5E");
+    private static final Color BRIDGE = Color.valueOf("7A5A3C");
+    /** Each elevation level lightens (below 0, darkens) a hex by this share. */
+    private static final float ELEVATION_SHADE = .05f;
     /** The map's height: the panel keeps the prototype's 210 units (#minimap, y 90-300) with its 2-unit rails. */
     private static final float CANVAS_HEIGHT = 206;
     /** The map's height when the window is 800 or less tall: the prototype's 180-unit panel. */
@@ -68,16 +95,10 @@ final class GpuMinimap implements GpuHud.Component {
     private static final float CONTACT_MINIMUM = 9;
 
     /**
-     * The art of one hex seen from above, as the Tactical View draws it: its open liquid or its tileset art, then its
-     * bridge (either may be null), and the tint the board's liquid material gives the hex (white for none).
+     * What the board image shows: each hex's colour in the order of the scene's tiles, the board's size in hexes and
+     * the image's size in texels.
      */
-    private record Art(BoardScene.Pixels base, BoardScene.Pixels bridge, Color tint) { }
-
-    /**
-     * What the board image shows: each hex's art in the order of the scene's tiles, the board's size in hexes and the
-     * image's size in texels.
-     */
-    private record Baked(List<Art> art, int columns, int rows, int width, int height) { }
+    private record Baked(List<Integer> colours, int columns, int rows, int width, int height) { }
 
     private final UiKit ui;
     private final GpuHudState state;
@@ -88,13 +109,6 @@ final class GpuMinimap implements GpuHud.Component {
     private final TextureRegion pixel;
     private final Label contact;
     private final float contactScale;
-    /** Each hex art's average colour, kept for the art on the current board. */
-    private final Map<Art, Integer> colours = new HashMap<>();
-    /**
-     * The first frame of each liquid animation file a board has shown, by its tileset path; empty if unreadable. Shared
-     * with the editor's preview tint ({@link #colour}), which the EDT computes.
-     */
-    private static final Map<String, Optional<BoardScene.Pixels>> LIQUIDS = new java.util.concurrent.ConcurrentHashMap<>();
     private GpuHud.Inputs inputs;
 
     GpuMinimap(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera) {
@@ -144,84 +158,67 @@ final class GpuMinimap implements GpuHud.Component {
     }
 
     /**
-     * A hex's art from above. Open water, hazardous liquid or magma covers the tileset art with its animated art
-     * (BoardLiquid), whose first frame stands for it, a hazardous liquid's in the board's tint; frozen water shows the
-     * ice of its tileset art.
+     * A hex's colour on the minimap (rgba8888), from its terrain alone, so every tileset and texture set draws the
+     * same map: its liquid or ice, else its buildings, woods, biome, rough ground or surface; a road or bridge over
+     * it; lighter the higher it stands.
      */
-    private static Art art(BoardScene.Tile tile) {
-        BoardScene.Pixels base = GpuTilesetTerrain.art(tile);
-        Color tint = Color.WHITE;
-        if (tile.liquid().present() && !tile.frozen()) {
-            Optional<BoardScene.Pixels> liquid = LIQUIDS.computeIfAbsent(
-                  tile.liquid().textures(tile.waterDepth(), tile.elevation()).base(), GpuMinimap::firstFrame);
-            if (liquid.isPresent()) {
-                base = liquid.get();
-                tint = tile.liquid().kind() == BoardLiquid.Kind.HAZARDOUS ? BoardLiquid.HAZARDOUS_TINT : Color.WHITE;
+    static int colour(BoardScene.Tile tile) {
+        Color colour = new Color(ground(tile));
+        if (tile.road() != BoardRoad.Kind.NONE) {
+            colour.lerp(ROAD, .4f);
+        }
+        if (tile.bridge() != null) {
+            colour.lerp(BRIDGE, .6f);
+        }
+        colour.mul(MathUtils.clamp(1 + ELEVATION_SHADE * tile.elevation(), .7f, 1.3f));
+        colour.a = 1;
+        return Color.rgba8888(colour);
+    }
+
+    private static Color ground(BoardScene.Tile tile) {
+        BoardLiquid liquid = tile.liquid();
+        if (tile.frozen()) {
+            return ICE;
+        }
+        if (liquid.kind() == BoardLiquid.Kind.MAGMA) {
+            return MAGMA;
+        }
+        if (liquid.kind() == BoardLiquid.Kind.MAGMA_CRUST) {
+            return MAGMA_CRUST;
+        }
+        if (liquid.present()) {
+            Color water = tile.waterDepth() > 1 ? DEEP_WATER : WATER;
+            return liquid.kind() == BoardLiquid.Kind.HAZARDOUS ? water.cpy().mul(BoardLiquid.HAZARDOUS_TINT) : water;
+        }
+        if (tile.building()) {
+            return BUILDING;
+        }
+        BoardScene.Cover cover = tile.cover();
+        if (cover.woods() > 0) {
+            return cover.jungle() ? JUNGLE : WOODS[Math.min(cover.woods(), WOODS.length) - 1];
+        }
+        switch (tile.biome()) {
+            case FIELD -> {
+                return FIELD;
+            }
+            case MARSH -> {
+                return MARSH;
+            }
+            case QUICKSAND, MUD -> {
+                return MUD;
+            }
+            case TUNDRA -> {
+                return TUNDRA;
+            }
+            default -> {
             }
         }
-        return new Art(base, tile.bridge(), tint);
-    }
-
-    /**
-     * The first frame of a liquid animation of the board tileset, decoded as GpuAssets decodes it for the board, or
-     * empty when it cannot be read: the hex then shows its tileset art, and the failure is logged once.
-     */
-    private static Optional<BoardScene.Pixels> firstFrame(String path) {
-        File file = GpuAssets.tilesetFile(path);
-        try {
-            return Optional.of(GpuAssets.readWater(file).frames().getFirst());
-        } catch (IllegalStateException exception) {
-            LOGGER.warn(exception, "The minimap cannot read the liquid art {}", file);
-            return Optional.empty();
+        if (tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.ROUGH
+              || feature.kind() == BoardScene.FeatureKind.BOULDER)) {
+            return ROUGH;
         }
+        return SURFACES.get(tile.surface());
     }
-
-    /**
-     * The mean colour of a hex's art as the board shows it from above: the base, then the bridge over it, weighted by
-     * coverage, in the art's tint. Both layers are sampled on the first one's grid.
-     */
-    private static int average(Art art) {
-        BoardScene.Pixels[] layers = { art.base(), art.bridge() };
-        BoardScene.Pixels grid = art.base() != null ? art.base() : art.bridge();
-        if (grid == null) {
-            return 0;
-        }
-        double red = 0;
-        double green = 0;
-        double blue = 0;
-        double weight = 0;
-        for (int row = 0; row < grid.height(); row++) {
-            for (int column = 0; column < grid.width(); column++) {
-                // Premultiplied colour of the stacked layers at this texel.
-                float r = 0;
-                float g = 0;
-                float b = 0;
-                float a = 0;
-                for (BoardScene.Pixels layer : layers) {
-                    if (layer == null) {
-                        continue;
-                    }
-                    int rgba = layer.rgba(row * layer.height() / grid.height() * layer.width()
-                          + column * layer.width() / grid.width());
-                    float alpha = (rgba & 255) / 255f;
-                    r = (rgba >>> 24) / 255f * alpha + r * (1 - alpha);
-                    g = (rgba >>> 16 & 255) / 255f * alpha + g * (1 - alpha);
-                    b = (rgba >>> 8 & 255) / 255f * alpha + b * (1 - alpha);
-                    a = alpha + a * (1 - alpha);
-                }
-                red += r;
-                green += g;
-                blue += b;
-                weight += a;
-            }
-        }
-        Color tint = art.tint();
-        return weight == 0 ? 0 : Color.rgba8888((float) (red / weight) * tint.r, (float) (green / weight) * tint.g,
-              (float) (blue / weight) * tint.b, 1);
-    }
-
-    /** A hex's colour on the minimap: its art's mean colour from above (rgba8888), as the board image paints it. */
-    static int colour(BoardScene.Tile tile) { return average(art(tile)); }
 
     @Override
     public void dispose() {
@@ -428,8 +425,8 @@ final class GpuMinimap implements GpuHud.Component {
         }
 
         /**
-         * Paints the hexes into the board image, each in its art's average colour, at {@link #HEX_FILL} of its size
-         * so the background shows between them. The image is painted again only when the hexes' art, the board or
+         * Paints the hexes into the board image, each in its terrain's colour, at {@link #HEX_FILL} of its size
+         * so the background shows between them. The image is painted again only when the hexes' colours, the board or
          * the drawn size changes: the source also replaces the tiles list for tactical markings and hex texts, which
          * the minimap does not show.
          */
@@ -440,13 +437,12 @@ final class GpuMinimap implements GpuHud.Component {
                 return;
             }
             bakedTiles = scene.tiles();
-            Baked next = new Baked(bakedTiles.stream().map(GpuMinimap::art).toList(), scene.width(),
+            Baked next = new Baked(bakedTiles.stream().map(GpuMinimap::colour).toList(), scene.width(),
                   scene.height(), width, height);
             if (board != null && next.equals(baked)) {
                 return;
             }
             baked = next;
-            colours.keySet().retainAll(Set.copyOf(next.art()));
             float texelsX = width / BoardCamera.boardWidth(scene);
             float texelsY = height / BoardCamera.boardHeight(scene);
             Pixmap image = new Pixmap(width, height, Pixmap.Format.RGBA8888);
@@ -456,7 +452,7 @@ final class GpuMinimap implements GpuHud.Component {
             Vector3 corner = new Vector3();
             for (int hex = 0; hex < bakedTiles.size(); hex++) {
                 BoardScene.Tile tile = bakedTiles.get(hex);
-                image.setColor(colours.computeIfAbsent(next.art().get(hex), GpuMinimap::average));
+                image.setColor(next.colours().get(hex));
                 float centreX = BoardGeometry.centerX(tile.coords());
                 float centreY = BoardGeometry.centerY(tile.coords());
                 for (int index = 0; index < 6; index++) {
