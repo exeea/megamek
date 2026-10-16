@@ -452,14 +452,16 @@ class GpuFamilyProgramsSmokeTest {
                 var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
                 try {
                     BoardCamera camera = camera(scene);
-                    // Only AA changes the configuration; a moonless preset never spends another compile slot.
+                    // Only AA changes the configuration; no night preset spends another compile slot.
                     int[] expected = { 3, 3, 3, 3, 3, 3 };
                     int[] expectedBuilt = { 3, 3, 6, 6, 6, 6 };
+                    List<BoardAtmosphere.Settings> nights = List.of(AtmospherePreset.MOONLESS.settings(0.5),
+                          AtmospherePreset.PITCH_BLACK.settings(0.5), NIGHT);
                     Set<Shader> dayPrograms = Set.of();
                     for (int step = 0; step < expected.length; step++) {
                         boolean on = step < 2 || step > 3, night = step % 2 == 1;
                         GpuEnvironmentLighting.specularAntialiasing = on;
-                        frame.configure(night ? NIGHT : BoardAtmosphere.DEFAULTS);
+                        frame.configure(night ? nights.get(step / 2) : BoardAtmosphere.DEFAULTS);
                         settle(terrain, frame, camera, scene);
                         int ready = terrain.familyPrograms().ready().size(), built = terrain.familyPrograms().programs();
                         int provider = familyProgramsIn(terrain), groups = shaderGroups(terrain).size();

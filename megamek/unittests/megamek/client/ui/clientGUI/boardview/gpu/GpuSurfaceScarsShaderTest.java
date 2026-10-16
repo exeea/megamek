@@ -15,7 +15,8 @@ class GpuSurfaceScarsShaderTest {
 
     @Test
     void aSculptedTerrainShaderTakesTheScar() {
-        String source = GpuSurfaceScars.fragment(GpuSurfaceScars.SCULPT_HELPERS + "\n" + MAIN, true);
+        String sculpted = MAIN.replace("{\n", "{\n    " + GpuSurfaceScars.FRAME_READY + "\n");
+        String source = GpuSurfaceScars.fragment(GpuSurfaceScars.SCULPT_HELPERS + "\n" + sculpted, true);
         assertTrue(source.contains("surfaceScarMask = surfaceScar();"));
     }
 
