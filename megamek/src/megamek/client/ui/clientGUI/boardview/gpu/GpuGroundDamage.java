@@ -52,7 +52,8 @@ final class GpuGroundDamage implements Disposable {
     private static final long SLOW_STAMPING_MILLIS = 20;
     private static final int MAX_PENDING_STAMPS = 256;
     private static final int MAX_EVENTS = UnitPlayback.MAX_PENDING_EVENTS * 2;
-    private static final int MAX_MARKS_PER_EVENT = 64;
+    /** An area effect marks every hex in its radius: one attack may leave as many marks as can wait. */
+    private static final int MAX_MARKS_PER_EVENT = MAX_PENDING_STAMPS;
     private static final int MAX_BRUSH_SIZE = 256;
 
     enum Style {

@@ -224,8 +224,8 @@ final class GpuArtilleryBlast {
         /** How strongly it draws: 1, or less for a fuel-air round in thin air. */
         final float intensity;
         float seconds;
-        /** One bit per piece of debris that has landed, whether or not it left a mark. */
-        long landed;
+        /** One bit per piece of debris that has landed, whether or not it left a mark; any radius has room. */
+        final java.util.BitSet landed = new java.util.BitSet();
         int marks;
         boolean marksReported;
 
@@ -1176,11 +1176,10 @@ final class GpuArtilleryBlast {
         for (Blast blast : blasts) {
             if (!leavesRingMarks(blast)) { continue; }
             for (int index = 0; index < blast.pieces.size(); index++) {
-                long bit = 1L << index;
                 Piece piece = blast.pieces.get(index);
-                boolean handled = (blast.landed & bit) != 0;
+                boolean handled = blast.landed.get(index);
                 if (handled || blast.seconds < piece.landing()) { continue; }
-                blast.landed |= bit;
+                blast.landed.set(index);
                 // One fragment per ring hex marks it, and a high-explosive shell's own crater marks its target hex.
                 // A cluster round has no crater, so every bomblet marks, the target hex's included.
                 if (!piece.marksGround() || !blast.onTerrain[index]) { continue; }
@@ -1192,7 +1191,7 @@ final class GpuArtilleryBlast {
                 receiver.accept(new GpuGroundDamage.Impact(blast.attack, "artillery-debris-" + index,
                       blast.ground.cpy(), blast.landings.get(index).cpy(), "bomb", markShot));
             }
-            boolean allLanded = blast.landed == (1L << blast.pieces.size()) - 1;
+            boolean allLanded = blast.landed.cardinality() == blast.pieces.size();
             if (allLanded && !blast.marksReported) {
                 blast.marksReported = true;
                 LOGGER.debug("[ArtilleryBlast] {} debris marks over R{} around {}", blast.marks,
