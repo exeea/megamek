@@ -126,7 +126,10 @@ class GpuUtilityMinimapSmokeTest {
             map.setPosition(width - metrics.gap() - metrics.right(), bar.getY() - metrics.gap() - map.getHeight());
             Table chip = (Table) utilities.chip();
             chip.pack();
-            chip.setPosition(Math.round((width - chip.getWidth()) / 2), height - 20 - chip.getHeight());
+            // As GpuHud places it: centred in the top row's room left of the utility bar.
+            float chipLeft = metrics.gap() + metrics.left();
+            float chipRight = bar.getX() - metrics.gap();
+            chip.setPosition(Math.round((chipLeft + chipRight - chip.getWidth()) / 2), height - 20 - chip.getHeight());
             var north = (com.badlogic.gdx.scenes.scene2d.ui.Container<?>) utilities.north();
             north.pack();
             north.setPosition(Math.round((width - north.getWidth()) / 2),
@@ -538,8 +541,7 @@ class GpuUtilityMinimapSmokeTest {
               text("GpuBoard.hud.mouse.ctrlClick"), text("GpuBoard.hud.hint.waypoint"),
               text("GpuBoard.hud.mouse.shiftClick"), text("GpuBoard.hud.hint.orientation"),
               text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.pan"),
-              text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit"), "WASD QE",
-              text("GpuBoard.hud.hint.camera")),
+              text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit")),
               GpuHintLine.items(planning));
         GpuHud.Inputs waiting = parts.update(scene, status(fixture, GamePhase.MOVEMENT, false, 6), move(),
               GpuReportLog.Snapshot.EMPTY, false, 1920, 1080);
