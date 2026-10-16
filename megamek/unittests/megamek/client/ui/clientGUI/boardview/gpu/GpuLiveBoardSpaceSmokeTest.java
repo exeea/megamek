@@ -77,6 +77,8 @@ import org.junit.jupiter.api.Test;
 class GpuLiveBoardSpaceSmokeTest {
     /** The movement fixture's Sagittaire (walk 3, run 5) pins a waypoint north of it and runs on to the road. */
     private static final Coords WAYPOINT = new Coords(11, 10);
+    /** The minimap's planned-route colour. */
+    private static final Color ROUTE = Color.valueOf("D4FFF0");
     private static final Coords DESTINATION = new Coords(11, 7);
     private static final int ATLAS = 1;
     private static final int SAGITTAIRE = 2;
@@ -292,6 +294,10 @@ class GpuLiveBoardSpaceSmokeTest {
         }
         assertNotNull(shown, "The Archer walks between its hexes");
         Minimap minimap = live.minimap();
+        Vector3 from = BoardGeometry.center(live.unit(SAGITTAIRE).location().coords(), 0);
+        Vector3 to = BoardGeometry.center(WAYPOINT, 0);
+        float routeX = (from.x + to.x) / 2;
+        float routeY = (from.y + to.y) / 2;
         Pixmap window = live.window();
         try {
             assertEquals(shown, live.hudView().unitPositions().get(ARCHER), "No time passed");
@@ -302,17 +308,23 @@ class GpuLiveBoardSpaceSmokeTest {
                 int left = minimap.pixel(window, hex.x, hex.y);
                 assertFalse(shows(left, UiTheme.CORAL, 32), "No square at its hexes: " + Integer.toHexString(left));
             }
-            // The planned route's line starts at the planning unit, whose own hex the route leaves out (E2b).
-            Vector3 from = BoardGeometry.center(live.unit(SAGITTAIRE).location().coords(), 0);
-            Vector3 to = BoardGeometry.center(WAYPOINT, 0);
-            int route = minimap.pixel(window, (from.x + to.x) / 2, (from.y + to.y) / 2);
-            assertTrue(shows(route, Color.valueOf("D4FFF0"), 40), () -> "The route's first leg, was "
-                  + Integer.toHexString(route));
+            // While a move plays, the HUD holds the played unit's state and hides the plan (GpuHudState.presented).
+            int hidden = minimap.pixel(window, routeX, routeY);
+            assertFalse(shows(hidden, ROUTE, 40), () -> "No route while a move plays, was " + Integer.toHexString(hidden));
         } finally {
             window.dispose();
         }
         live.publish();
         live.draw(60, .1f);
+        // Once it has played, the planned route's line starts at the planning unit, whose own hex the route leaves out
+        // (E2b).
+        Pixmap settled = live.window();
+        try {
+            int route = minimap.pixel(settled, routeX, routeY);
+            assertTrue(shows(route, ROUTE, 40), () -> "The route's first leg, was " + Integer.toHexString(route));
+        } finally {
+            settled.dispose();
+        }
     }
 
     /** {@code preferences} at {@code factor} times their HUD scale. */
