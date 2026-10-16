@@ -38,9 +38,11 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
+import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
+import megamek.logging.MMLogger;
 
 /**
  * The board overlay: the route and its ghost, the front arc or the displayed weapon's arc and the
@@ -81,6 +83,16 @@ final class GpuBoardOverlay implements Disposable {
     private static final List<Band> WRECKED = List.of(new Band(.1f, .03f, alpha(WRECK, .6f)));
     private static final List<Band> TARGETED = List.of(new Band(.04f, .05f, alpha(CORAL, .95f)));
     private static final List<Band> HOVERED = List.of(new Band(.05f, .06f, alpha(Color.WHITE, .85f)));
+    private static final MMLogger LOGGER = MMLogger.create(GpuBoardOverlay.class);
+    /** An incoming artillery round's target mark: a red ring and centre, pulsing once in this many seconds. */
+    private static final Color INCOMING_RED = new Color(1, .12f, .08f, 1);
+    private static final float INCOMING_PULSE_SECONDS = .7f;
+    /** A missed round's drift line: amber, as the flat board draws it, dashed, ending in an arrowhead. */
+    private static final Color DRIFT_AMBER = new Color(1, .75f, 0, .85f);
+    private static final float DRIFT_HALF_WIDTH_HEXES = .022f;
+    private static final float DRIFT_DASH_HEXES = .16f;
+    private static final float DRIFT_GAP_HEXES = .1f;
+    private static final float DRIFT_HEAD_HEXES = .24f;
 
     private final ModelBatch batch = new ModelBatch((camera, renderables) -> { });
     private final ModelBatch ghostBatch = new ModelBatch(GpuShaderManager.provider("Movement ghosts", GpuUnitShader::linearDisplayProvider),
@@ -97,6 +109,9 @@ final class GpuBoardOverlay implements Disposable {
     /** The marks' bands by unit and by hex, in drawing order. */
     private Map<Integer, List<Band>> unitMarks = Map.of();
     private Map<Coords, List<Band>> hexMarks = Map.of();
+    /** The hexes artillery rounds in the air are coming down on, marked until each lands. */
+    private List<Coords> incomingTargets = List.of();
+    private float incomingClock;
     /**
      * The strongest bands of the acting unit's, the focused target's and the hovered unit's marks once more, drawn only
      * where the terrain or a model hides them, so that a unit behind a building keeps its mark (3D only).
@@ -248,7 +263,8 @@ final class GpuBoardOverlay implements Disposable {
      * them, then every band depth-tested; in the Tactical View flat over the board and the units' bases.
      */
     void renderMarks(Camera camera, Function<BoardScene.Unit, UnitFootprint.Pose> poses) {
-        if (scene == null || unitMarks.isEmpty() && hexMarks.isEmpty()) {
+        if (scene == null || unitMarks.isEmpty() && hexMarks.isEmpty() && incomingTargets.isEmpty()
+              && driftLines().isEmpty()) {
             return;
         }
         Gdx.gl.glEnable(GL20.GL_BLEND);
@@ -298,7 +314,103 @@ final class GpuBoardOverlay implements Disposable {
                       .add(0, 0, z), band, opacity);
             }
         }
+        List<Band> incoming = incomingBands();
+        for (Coords hex : incomingTargets) {
+            Vector3 center = BoardGeometry.center(hex, 0);
+            float planeHeight = BoardTacticalGeometry.floatingZ(scene, hex);
+            for (Band band : incoming) {
+                band((corner, inset) -> BoardGeometry.inset(BoardGeometry.corner(hex, 0, corner), center, inset)
+                      .add(0, 0, planeHeight), band, opacity);
+            }
+        }
+        // The Tactical View draws its own drift arrows, with the rest of the flat board's art.
+        if (!tactical) {
+            for (BoardMarker drift : driftLines()) {
+                driftArrow(drift.coords(), drift.driftTo(), opacity);
+            }
+        }
         shapes.end();
+    }
+
+    /** The scene's artillery drift markers: each a missed round's aimed hex and where it came down. */
+    private List<BoardMarker> driftLines() {
+        List<BoardMarker> lines = new ArrayList<>();
+        for (BoardMarker marker : scene.markers()) {
+            if ((marker.kind() == BoardMarker.Kind.ARTILLERY_DRIFT) && (marker.driftTo() != null)) {
+                lines.add(marker);
+            }
+        }
+        return lines;
+    }
+
+    /** A dashed amber line from the hex a round was aimed at to where it came down, ending in an arrowhead. */
+    private void driftArrow(Coords aimed, Coords landing, float opacity) {
+        Vector3 from = BoardGeometry.center(aimed, 0).add(0, 0, BoardTacticalGeometry.floatingZ(scene, aimed));
+        Vector3 to = BoardGeometry.center(landing, 0).add(0, 0, BoardTacticalGeometry.floatingZ(scene, landing));
+        float hex = BoardGeometry.height();
+        float length = Vector3.len(to.x - from.x, to.y - from.y, 0);
+        if (length < hex * .5f) {
+            return;
+        }
+        Vector3 along = new Vector3(to).sub(from).scl(1 / length);
+        Vector3 side = new Vector3(-along.y, along.x, 0).nor();
+        float color = Color.toFloatBits(DRIFT_AMBER.r, DRIFT_AMBER.g, DRIFT_AMBER.b, DRIFT_AMBER.a * opacity);
+        float headLength = hex * DRIFT_HEAD_HEXES;
+        float lineEnd = length - headLength;
+        float halfWidth = hex * DRIFT_HALF_WIDTH_HEXES;
+        for (float start = 0; start < lineEnd; start += hex * (DRIFT_DASH_HEXES + DRIFT_GAP_HEXES)) {
+            float end = Math.min(lineEnd, start + hex * DRIFT_DASH_HEXES);
+            Vector3 dashStart = new Vector3(from).mulAdd(along, start);
+            Vector3 dashEnd = new Vector3(from).mulAdd(along, end);
+            Vector3 startLeft = new Vector3(dashStart).mulAdd(side, halfWidth);
+            Vector3 startRight = new Vector3(dashStart).mulAdd(side, -halfWidth);
+            Vector3 endLeft = new Vector3(dashEnd).mulAdd(side, halfWidth);
+            Vector3 endRight = new Vector3(dashEnd).mulAdd(side, -halfWidth);
+            triangle(startLeft, startRight, endRight, color);
+            triangle(startLeft, endRight, endLeft, color);
+        }
+        Vector3 headBase = new Vector3(from).mulAdd(along, lineEnd);
+        Vector3 headLeft = new Vector3(headBase).mulAdd(side, headLength * .5f);
+        Vector3 headRight = new Vector3(headBase).mulAdd(side, -headLength * .5f);
+        triangle(headLeft, headRight, to, color);
+    }
+
+    /**
+     * Marks the hexes the artillery rounds now in the air are coming down on, until each lands, and moves their pulse
+     * on. Called once a frame, before {@link #renderMarks}.
+     *
+     * @param attacks the attacks playing now
+     * @param seconds the frame's time
+     */
+    void setIncomingTargets(List<UnitAttack> attacks, float seconds) {
+        List<Coords> targets = incomingTargets(attacks);
+        if (!targets.equals(incomingTargets)) {
+            LOGGER.debug("[ArtilleryTarget] marking {} incoming target hexes: {}", targets.size(), targets);
+            if (incomingTargets.isEmpty()) {
+                incomingClock = 0;
+            }
+        }
+        incomingTargets = targets;
+        incomingClock += seconds;
+    }
+
+    /** The hexes the artillery rounds among {@code attacks} are coming down on, each once, while they are in the air. */
+    static List<Coords> incomingTargets(List<UnitAttack> attacks) {
+        List<Coords> targets = new ArrayList<>();
+        for (UnitAttack attack : attacks) {
+            Coords target = attack.event.destination().coords();
+            if (attack.artilleryIncoming() && !targets.contains(target)) {
+                targets.add(target);
+            }
+        }
+        return targets;
+    }
+
+    /** The red ring and centre of an incoming round's mark, at this moment of its pulse: brighter and wider, then not. */
+    private List<Band> incomingBands() {
+        float pulse = .5f + .5f * MathUtils.sin(incomingClock * MathUtils.PI2 / INCOMING_PULSE_SECONDS);
+        return List.of(new Band(.03f, .08f + .05f * pulse, alpha(INCOMING_RED, .55f + .4f * pulse)),
+              new Band(.74f, .26f, alpha(INCOMING_RED, .35f + .45f * pulse)));
     }
 
     /** A point of a mark's outline: the hex corner {@code corner} moved {@code inset} hex radii toward the centre. */

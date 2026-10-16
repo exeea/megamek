@@ -471,7 +471,8 @@ public class ArtilleryBayWeaponDistantFireHandler extends AmmoBayWeaponHandler {
                     int landingHeight = isFlak ? asfFlak ? target.getAltitude()
                           : (landingHex == null ? 0 : landingHex.getLevel()) + target.getElevation()
                           : landingHex == null ? 0 : landingHex.getLevel();
-                    reportArtilleryAnimation(targetPos, landingHeight, fired.get(firedIndex++));
+                    reportArtilleryAnimation(shownLanding(originalPosition, targetPos), landingHeight,
+                          fired.get(firedIndex++));
                 }
             }
             // If we managed to land everything off the board, stop
@@ -665,5 +666,17 @@ public class ArtilleryBayWeaponDistantFireHandler extends AmmoBayWeaponHandler {
         toReturn = applyGlancingBlowModifier(toReturn, false);
 
         return (int) Math.ceil(toReturn);
+    }
+
+    /**
+     * Where a round's explosion is shown: where it came down, or for one that scattered off the board, just past the
+     * edge it crossed rather than wherever far off the map it landed.
+     */
+    private Coords shownLanding(Coords aimedHex, Coords landing) {
+        if (game.getBoard().contains(landing)) {
+            return landing;
+        }
+        Coords pastTheEdge = ArtilleryHandlerHelper.firstOffBoardHexToward(game.getBoard(), aimedHex, landing);
+        return (pastTheEdge == null) ? landing : pastTheEdge;
     }
 }

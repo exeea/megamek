@@ -2087,6 +2087,31 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
               || sprite instanceof RubbleClearSprite || sprite instanceof DugInSprite;
     }
 
+    /**
+     * The 3D board's lines from each hex an artillery round missed to where it came down, under the same conditions
+     * the flat board draws them: the drift arrows option is on and the miss is one this player sees now.
+     */
+    public List<BoardMarker> artilleryDriftMarkers() {
+        Board board = game.getBoard(boardId);
+        if (!GUIP.getShowArtilleryDriftArrows() || (board == null)) {
+            return List.of();
+        }
+        List<BoardMarker> result = new ArrayList<>();
+        board.getSpecialHexDisplayTable().forEach((aimed, displays) -> {
+            for (SpecialHexDisplay display : displays) {
+                Coords landing = display.getDriftHex();
+                boolean isArtilleryMiss = display.getType() == SpecialHexDisplay.Type.ARTILLERY_MISS;
+                boolean isShownNow = display.drawNow(game.getPhase(), game.getRoundCount(), getLocalPlayer(), GUIP);
+                if (isArtilleryMiss && (landing != null) && isShownNow) {
+                    Hex hex = board.getHex(aimed);
+                    result.add(new BoardMarker(BoardMarker.Kind.ARTILLERY_DRIFT, aimed, hex == null ? 0 : hex.ceiling(),
+                          BoardMarker.Kind.ARTILLERY_DRIFT.rgb(), "", 0, landing));
+                }
+            }
+        });
+        return result;
+    }
+
     public BoardMarker boardMarker(BoardMarker.Kind kind, Coords coords, String label) {
         return boardMarker(kind, coords, kind.rgb(), label);
     }
@@ -2104,6 +2129,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         result.addAll(demolitionMarkers());
         result.addAll(artilleryMarkers());
         result.addAll(tagMarkers());
+        result.addAll(artilleryDriftMarkers());
         for (Enumeration<OrbitalBombardment> attacks = game.getOrbitalBombardmentAttacks(); attacks.hasMoreElements();) {
             OrbitalBombardment attack = attacks.nextElement();
             result.add(boardMarker(BoardMarker.Kind.ORBITAL_INCOMING, new Coords(attack.getX(), attack.getY()), ""));
@@ -2123,13 +2149,17 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
 
     /**
-     * Whether the 3D terrain already shows this display as the crater the shell left, so painting its flat icon onto
-     * the ground would only cover the crater. The Tactical View draws no craters and keeps the icon.
+     * Whether the 3D terrain already shows this display in its own way, so painting its flat icon onto the ground would
+     * only cover it: a hit as the crater the shell left, a miss as the explosion where the round came down and a line
+     * to it from the hex it was aimed at. The Tactical View draws no craters and keeps the icons.
      */
-    private boolean isShownAsGpuCrater(SpecialHexDisplay display, Graphics2D graphics) {
+    private boolean isShownByGpuTerrain(SpecialHexDisplay display, Graphics2D graphics) {
         boolean isTerrainCapture = gpuCapture && !(graphics instanceof BoardTacticalGraphics);
-        boolean isArtilleryHit = display.getType() == SpecialHexDisplay.Type.ARTILLERY_HIT;
-        return isTerrainCapture && isArtilleryHit;
+        boolean isArtilleryLanding = switch (display.getType()) {
+            case ARTILLERY_HIT, ARTILLERY_MISS, ARTILLERY_DRIFT -> true;
+            default -> false;
+        };
+        return isTerrainCapture && isArtilleryLanding;
     }
 
     public BoardMarker.Kind pointMarkerKind(SpecialHexDisplay display) {
@@ -2777,7 +2807,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                     if (gpuCapture && pointMarkerKind(shd) != null) {
                         continue;
                     }
-                    if (isShownAsGpuCrater(shd, graphics2D)) {
+                    if (isShownByGpuTerrain(shd, graphics2D)) {
                         continue;
                     }
                     if (shd.drawNow(game.getPhase(), game.getRoundCount(), getLocalPlayer(), GUIP)) {

@@ -15,6 +15,7 @@ import javax.imageio.ImageIO;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -38,6 +39,8 @@ import org.junit.jupiter.api.Test;
  */
 @Tag("on-demand")
 class GpuArrowIVSmokeTest {
+    private static final Color DAY = new Color(.62f, .66f, .72f, 1);
+    private static final Color NIGHT = new Color(.03f, .04f, .07f, 1);
     private static final int SIZE = 320;
 
     @Test
@@ -76,6 +79,12 @@ class GpuArrowIVSmokeTest {
                     long drawn = different(sideOn, empty);
                     assertTrue(drawn > 2000, "The round fills the close-up, changed pixels " + drawn);
                     ImageIO.write(sideOn, "png", new File(folder, "arrow-iv-side.png"));
+                    // Its rocket motor, against a night sky where the fire's glow shows: red behind the tail.
+                    var motorView = camera(base.cpy().mulAdd(side, 6 * metre).add(0, 0, metre), base);
+                    var night = frame(buffer, effects, shot, motorView, atMidFlight, NIGHT);
+                    ImageIO.write(night, "png", new File(folder, "arrow-iv-motor.png"));
+                    long fiery = redPixels(night);
+                    assertTrue(fiery > 400, "The rocket motor's flame shows behind the round, red pixels " + fiery);
                     var ahead = camera(middle.cpy().mulAdd(forward, 5 * metre).mulAdd(side, 2.5f * metre)
                           .add(0, 0, 1.5f * metre), middle);
                     ImageIO.write(frame(buffer, effects, shot, ahead, atMidFlight), "png",
@@ -187,7 +196,27 @@ class GpuArrowIVSmokeTest {
 
     private static BufferedImage frame(GpuSceneTestOutput buffer, GpuAttackEffects effects, UnitAttack shot,
           PerspectiveCamera camera, float seconds) {
-        buffer.begin(.62f, .66f, .72f, 1);
+        return frame(buffer, effects, shot, camera, seconds, DAY);
+    }
+
+    /** Pixels much redder than they are green or blue: fire. */
+    private static long redPixels(BufferedImage image) {
+        long count = 0;
+        for (int row = 0; row < image.getHeight(); row++) {
+            for (int column = 0; column < image.getWidth(); column++) {
+                int rgb = image.getRGB(column, row);
+                int red = rgb >> 16 & 255, green = rgb >> 8 & 255, blue = rgb & 255;
+                if (red > 120 && red > green + 50 && red > blue + 50) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    private static BufferedImage frame(GpuSceneTestOutput buffer, GpuAttackEffects effects, UnitAttack shot,
+          PerspectiveCamera camera, float seconds, Color sky) {
+        buffer.begin(sky.r, sky.g, sky.b, sky.a);
         try {
             shot.seconds = seconds;
             effects.update(List.of(shot), null, Map.of());

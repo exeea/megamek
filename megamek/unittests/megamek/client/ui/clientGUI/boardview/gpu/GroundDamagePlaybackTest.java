@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,7 +18,9 @@ import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.Mounted;
+import megamek.common.units.Entity;
 import megamek.common.units.Tank;
+import megamek.common.units.UnitLocation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -285,6 +288,73 @@ class GroundDamagePlaybackTest {
 
     static UnitAttack shot(String weapon, boolean hit, ResolvedAttack.Shot profile) {
         return shot(UUID.randomUUID(), weapon, hit, profile);
+    }
+
+    /**
+     * The server places a round that drifted by hex and whole level; the terrain there is sculpted higher. Its ground
+     * mark sits on the terrain, where it can be painted, not at the flat level, where it would be dropped.
+     */
+    @Test
+    void aDriftedArtilleryRoundMarksTheTerrainItCameDownOn() {
+        Coords drifted = new Coords(3, 7);
+        var landing = new UnitLocation(Entity.NONE, drifted, 0, 0, 0);
+        var profile = new ResolvedAttack.Shot("", Set.of(), true, false, 1, 0, true, null, null, landing, true, 20,
+              false, false, false, null, 20);
+        UnitAttack round = shot("ISLongTom", false, profile);
+        float groundHeight = 7;
+        round.landscape = ray -> {
+            if (ray.direction.z >= 0) {
+                return null;
+            }
+            float distance = (groundHeight - ray.origin.z) / ray.direction.z;
+            return distance < 0 ? null : new BoardGeometry.Hit(drifted, distance * distance);
+        };
+        round.seconds = round.duration;
+        var effects = new GpuAttackEffects();
+        effects.update(List.of(round), null, Map.of());
+        var marks = new ArrayList<GpuGroundDamage.Impact>();
+        effects.groundImpacts(List.of(), marks::add);
+
+        assertEquals(1, marks.size());
+        Vector3 point = marks.getFirst().point();
+        Vector3 hexCentre = BoardGeometry.center(drifted, 0);
+        assertEquals(hexCentre.x, point.x, .01f, "Over the hex it drifted to");
+        assertEquals(hexCentre.y, point.y, .01f);
+        assertEquals(groundHeight, point.z, .01f, "On the terrain, not the flat level");
+    }
+
+    /**
+     * A round landing in woods is placed on the canopy, where its point matches no ground face. Its crater goes on the
+     * ground directly beneath: the face under the point, at that face's own height, and none for a point beside them.
+     */
+    @Test
+    void aCraterInWoodsGoesOnTheGroundBeneathTheCanopy() {
+        var low = new BoardSurface.Face(new Vector3(0, 0, 2), new Vector3(10, 0, 2), new Vector3(0, 10, 2),
+              BoardSurface.Finish.TOP);
+        var high = new BoardSurface.Face(new Vector3(10, 0, 4), new Vector3(10, 10, 4), new Vector3(0, 10, 4),
+              BoardSurface.Finish.TOP);
+        List<BoardSurface.Face> ground = List.of(low, high);
+
+        assertSame(low, GpuGroundDamage.groundBeneath(ground, 2, 2), "The face under the point, not its neighbour");
+        assertEquals(2, GpuGroundDamage.groundBeneath(ground, 2, 2).height(2, 2), .001f);
+        assertSame(high, GpuGroundDamage.groundBeneath(ground, 8, 8));
+        assertNull(GpuGroundDamage.groundBeneath(ground, 20, 20), "No ground beneath a point beside every face");
+    }
+
+    /** An Arrow IV round flies in slower than a shell from the same range, so its missile is seen coming. */
+    @Test
+    void anArrowIVRoundArrivesSlowerThanAShell() {
+        EquipmentType.initializeTypes();
+        var profile = new ResolvedAttack.Shot("", Set.of(), true, false, 1, 0, true, null, null, null, true, 20,
+              false, false, false, null, 20);
+        UnitAttack arrowIV = shot("ISArrowIV", true, profile);
+        UnitAttack shell = shot("ISLongTom", true, profile);
+
+        assertTrue(UnitAttack.firesArrowIV(arrowIV.event.result()));
+        assertFalse(UnitAttack.firesArrowIV(shell.event.result()));
+        assertTrue(shell.flightSeconds <= .7f, "A shell: " + shell.flightSeconds);
+        assertTrue(arrowIV.flightSeconds >= UnitAttack.ARROW_IV_MIN_FLIGHT_SECONDS, "An Arrow IV: " + arrowIV.flightSeconds);
+        assertTrue(arrowIV.contactSeconds > shell.contactSeconds, "It lands later");
     }
 
     @Test

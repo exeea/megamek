@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -25,6 +26,20 @@ class GpuMarkersTest {
     @BeforeAll
     static void loadMathNatives() {
         GdxNativesLoader.load();
+    }
+
+    /**
+     * The board prepares a coin for every marker kind that stands as one when it loads, so each must have artwork: a
+     * kind without it stops the 3D board from opening at all.
+     */
+    @Test
+    void everyMarkerKindThatStandsAsACoinHasArtwork() {
+        for (BoardMarker.Kind kind : BoardMarker.Kind.values()) {
+            if (GpuMarkers.hasCoin(kind)) {
+                assertDoesNotThrow(() -> GpuMarkers.artwork(kind), kind.name());
+            }
+        }
+        assertFalse(GpuMarkers.hasCoin(BoardMarker.Kind.ARTILLERY_DRIFT), "A drift is drawn as a line, not a coin");
     }
 
     @Test
