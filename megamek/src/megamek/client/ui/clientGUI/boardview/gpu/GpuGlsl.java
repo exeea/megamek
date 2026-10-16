@@ -15,7 +15,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 import com.badlogic.gdx.Gdx;
@@ -34,6 +33,7 @@ import megamek.logging.MMLogger;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.opengl.ARBParallelShaderCompile;
 import org.lwjgl.opengl.GL;
+import org.lwjgl.opengl.GLCapabilities;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.opengl.GL30;
@@ -216,11 +216,22 @@ final class GpuGlsl {
         }
     }
 
-    /** One private context/GL adapter per compiler thread; never use or replace Gdx globals on that thread. */
+    /**
+     * One private context per compiler, all on one thread that never ends; never use or replace Gdx globals there. On
+     * Windows an exiting thread that had a context current enters NVIDIA's driver under the loader lock, while
+     * glfwDestroyWindow holds that driver's lock and waits for driver threads that need the loader lock: a compiler
+     * thread ending at teardown hung the process (RTX 4070, driver 617.42).
+     */
     private static final class SharedCompiler implements Disposable {
+        private static final ExecutorService THREAD = Executors.newSingleThreadExecutor(action -> {
+            Thread thread = new Thread(action, "terrain-shader-compiler");
+            thread.setDaemon(true);
+            return thread;
+        });
+        private static final GL20 CALLS = compilerCalls();
         private final long window;
-        private final ExecutorService executor;
-        private final CompletableFuture<GL20> context;
+        /** Its context's functions, created on first use; only the compiler thread reads or writes them. */
+        private GLCapabilities capabilities;
 
         SharedCompiler() {
             long owner = GLFW.glfwGetCurrentContext();
@@ -233,21 +244,11 @@ final class GpuGlsl {
             try { window = GLFW.glfwCreateWindow(1, 1, "Terrain shader compiler", 0, owner); }
             finally { GLFW.glfwDefaultWindowHints(); }
             if (window == 0) { throw new GdxRuntimeException("Cannot create a shared terrain shader compiler context"); }
-            executor = Executors.newSingleThreadExecutor(action -> {
-                Thread thread = new Thread(action, "terrain-shader-compiler");
-                thread.setDaemon(true);
-                return thread;
-            });
-            context = CompletableFuture.supplyAsync(() -> {
-                GLFW.glfwMakeContextCurrent(window);
-                GL.createCapabilities();
-                return compilerCalls();
-            }, executor);
         }
 
         CompletableFuture<Void> compile(Linked linked, GpuShaderManager.Sources source) {
             return CompletableFuture.runAsync(() -> {
-                GL20 gl = context.join();
+                GL20 gl = current();
                 try {
                     linked.link(source, gl);
                     linked.validate(source, gl); // Intentionally blocking only this worker.
@@ -257,26 +258,31 @@ final class GpuGlsl {
                     gl.glFinish();
                     linked.timing("producer-finished");
                 }
-            }, executor);
+            }, THREAD);
+        }
+
+        /** Makes this compiler's context current on the compiler thread, which another compiler may have used last. */
+        private GL20 current() {
+            if (GLFW.glfwGetCurrentContext() != window) {
+                GLFW.glfwMakeContextCurrent(window);
+                if (capabilities == null) { capabilities = GL.createCapabilities(); }
+                else { GL.setCapabilities(capabilities); }
+            }
+            return CALLS;
         }
 
         @Override
         public void dispose() {
-            var detached = new AtomicBoolean();
-            try {
-                CompletableFuture.runAsync(() -> {
-                    GLFW.glfwMakeContextCurrent(0);
-                    if (GLFW.glfwGetCurrentContext() != 0) {
-                        throw new GdxRuntimeException("Cannot release terrain shader compiler context: " + glfwError());
-                    }
-                    detached.set(true);
-                    GL.setCapabilities(null);
-                }, executor).join();
-            } finally {
-                // Always stop the executor, but never destroy a window whose context may still be current.
-                executor.shutdown();
-                if (detached.get()) { GLFW.glfwDestroyWindow(window); }
-            }
+            // Release on the compiler thread first: a failed release keeps a window whose context may still be current.
+            CompletableFuture.runAsync(() -> {
+                if (GLFW.glfwGetCurrentContext() != window) { return; }
+                GLFW.glfwMakeContextCurrent(0);
+                if (GLFW.glfwGetCurrentContext() != 0) {
+                    throw new GdxRuntimeException("Cannot release terrain shader compiler context: " + glfwError());
+                }
+                GL.setCapabilities(null);
+            }, THREAD).join();
+            GLFW.glfwDestroyWindow(window);
         }
 
         /** libGDX's backend adapter is package-private and owns scratch buffers used by the render thread. */

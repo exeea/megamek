@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -75,6 +76,7 @@ class GpuShaderCompileSmokeTest {
                         checkPreparation(calls);
                     }
                     checkSharedContext();
+                    checkCompilerThread();
                     calls.assertReleased();
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     stage("all shader ownership assertions passed");
@@ -153,6 +155,51 @@ class GpuShaderCompileSmokeTest {
             cancelledPrograms.forEach(ShaderProgram::dispose);
         }
         assertEquals(window, org.lwjgl.glfw.GLFW.glfwGetCurrentContext());
+    }
+
+    /**
+     * Shared-context compilers take turns on one thread that their teardown never ends: an ending thread that had a
+     * context current deadlocked NVIDIA's glfwDestroyWindow under the Windows loader lock.
+     */
+    private static void checkCompilerThread() {
+        stage("alternating two shared compiler contexts");
+        var first = new GpuGlsl.Preparation(true);
+        var second = new GpuGlsl.Preparation(true);
+        var programs = new ArrayList<ShaderProgram>();
+        try {
+            int round = 0;
+            for (var preparation : List.of(first, second, first)) { programs.add(link(preparation, round++)); }
+        } finally {
+            first.dispose();
+            second.dispose();
+            programs.forEach(ShaderProgram::dispose);
+        }
+        Thread compiler = compilerThread();
+        stage("reusing the compiler thread after teardown");
+        var third = new GpuGlsl.Preparation(true);
+        try { link(third, 3).dispose(); }
+        finally { third.dispose(); }
+        assertSame(compiler, compilerThread(), "Every shared compiler runs on the same thread");
+    }
+
+    /** A program the preparation links on its shared context; a distinct source each round so none is reused. */
+    private static ShaderProgram link(GpuGlsl.Preparation preparation, int round) {
+        var program = new AtomicReference<ShaderProgram>();
+        String fragment = FRAGMENT + "\n// round " + round;
+        long deadline = System.nanoTime() + 20_000_000_000L;
+        while (!preparation.run(() -> program.set(GpuGlsl.compile("compiler thread " + round, VERTEX, fragment)))) {
+            assertTrue(System.nanoTime() < deadline, "The worker must finish a trivial shader");
+            java.util.concurrent.locks.LockSupport.parkNanos(1_000_000);
+        }
+        assertTrue(program.get().isCompiled());
+        return program.get();
+    }
+
+    private static Thread compilerThread() {
+        var threads = Thread.getAllStackTraces().keySet().stream()
+              .filter(thread -> thread.getName().equals("terrain-shader-compiler")).toList();
+        assertEquals(1, threads.size(), () -> "One compiler thread must outlive every teardown: " + threads);
+        return threads.getFirst();
     }
 
     private static void checkPreparation(Calls calls) {
