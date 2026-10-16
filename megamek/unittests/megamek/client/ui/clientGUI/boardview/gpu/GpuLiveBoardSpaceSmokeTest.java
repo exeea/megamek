@@ -240,7 +240,7 @@ class GpuLiveBoardSpaceSmokeTest {
         verifyPlate(live, view, "nameplate-" + SAGITTAIRE, SAGITTAIRE);
         assertSame(live.model(SAGITTAIRE), field(live.overlay, "ghostSource"),
               "The Tactical View's ghost copies the unit's meeple");
-        assertNotNull(field(live.overlay, "dropEdges"), "The Tactical View's elevation-drop edges");
+        // The terrain's top artwork draws the elevation-drop edges; the overlay adds none (GpuBoardOverlaySmokeTest).
         live.show(live.overlayOnly(live.frame.get().panels().move()));
         Pixmap planned = live.board();
         live.show(live.overlayOnly(GpuMovePlan.Snapshot.EMPTY));

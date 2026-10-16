@@ -1,32 +1,31 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-// Imported glTF surfaces share the terrain's energy-conserving direct and prefiltered environment response.
-#if defined(normalFlag) && defined(lightingFlag)
+// Imported glTF surfaces fill a Surface from their material maps and are lit by shadeSurface, as the terrain is.
+#ifdef lightingFlag
 #ifdef modelSurfaceFlag
 uniform vec3 u_modelSurface; // roughness, metalness, packed map present
 uniform sampler2D u_modelSurfaceMap;
 in vec2 v_modelUV;
 #endif
-uniform vec4 u_modelView; // camera direction, perspective flag
-uniform vec4 u_cameraPosition;
-uniform vec3 u_ambientCubemap[6];
 #if defined(modelSurfaceFlag) && defined(normalTextureFlag)
 uniform float u_normalMaps;
 #endif
 #if defined(modelSurfaceFlag) && defined(ambientTextureFlag)
 uniform sampler2D u_ambientTexture;
 #endif
-#if numDirectionalLights > 0
-struct DirectionalLight {
-    vec3 color;
-    vec3 direction;
-};
-uniform DirectionalLight u_dirLights[numDirectionalLights];
+
+// The interpolated vertex normal; a model without normals shades its visible faces.
+vec3 modelVertexNormal(vec3 geometric) {
+#ifdef normalFlag
+    return normalize(v_normal);
+#else
+    return geometric;
 #endif
+}
 
 vec3 modelNormal(vec3 view, out vec3 geometric) {
     vec3 dx = dFdx(v_cloudPosition), dy = dFdy(v_cloudPosition);
     geometric = visibleFace(dx, dy, view);
-    vec3 normal = normalize(v_normal);
+    vec3 normal = modelVertexNormal(geometric);
 #if defined(modelSurfaceFlag) && defined(normalTextureFlag)
     // Derive the glTF tangent frame from the original mesh UVs, independent of projected unit camouflage.
     // Degenerate UVs keep the geometric normal; mirrored UVs preserve their handedness.
@@ -47,7 +46,11 @@ vec3 modelNormal(vec3 view, out vec3 geometric) {
 #endif
     // main() calls this before any discard, and every branch above has joined again.
     surfaceVariance += normalVariance(dFdx(normal), dFdy(normal));
+#ifdef normalFlag
     return gl_FrontFacing ? normal : -normal;
+#else
+    return normal;
+#endif
 }
 
 vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 view) {
@@ -65,38 +68,14 @@ vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 
     metallic = clamp(metallic, 0.0, 1.0);
     // Finish any scar normal before repairing the shared reflection frame.
     normal = shadingNormal(normal, geometric, view);
-    roughness = antialiasedRoughness(roughness, surfaceVariance);
-    float clouds = 1.0;
-#ifdef cloudShadowFlag
-    clouds = cloudTransmission(v_cloudPosition);
-#endif
-    vec3 ground = vec3(0.0);
-#if numDirectionalLights > 0
-    ground = u_dirLights[0].color * max(0.0, -u_dirLights[0].direction.z) * clouds;
-#endif
-    vec3 sky = u_ambientCubemap[5];
-    vec3 diffuse = albedo * (1.0 - metallic);
-    vec3 f0 = mix(vec3(.04), albedo, metallic);
-    vec3 remaining = 1.0 - specularAlbedo(max(0.0, dot(normal, view)), roughness, f0);
-    vec3 groundRadiance = GROUND_ALBEDO * (sky + ground);
-    vec3 ambient = environmentRadiance(normal, 1.0, groundRadiance, sky) * diffuse * remaining;
-    ambient += environmentSpecular(normal, view, roughness, f0, groundRadiance, sky);
+    // The metallic share reflects its own colour and diffuses none.
+    Surface surface = opaqueSurface(albedo * (1.0 - metallic), normal, geometric, roughness, 0.0, surfaceVisibility());
+    surface.f0 = albedo;
+    surface.metallic = metallic;
 #if defined(modelSurfaceFlag) && defined(ambientTextureFlag)
-    ambient *= texture(u_ambientTexture, v_modelUV).r;
+    surface.occlusion = surface.specularOcclusion = texture(u_ambientTexture, v_modelUV).r;
 #endif
-    vec3 direct = vec3(0.0);
-#if numDirectionalLights > 0
-    for (int i = 0; i < numDirectionalLights; i++) {
-        vec3 light = -u_dirLights[i].direction;
-        if (dot(geometric, light) > 0.0) {
-            direct += u_dirLights[i].color * (diffuse * diffuseReflectance(normal, light, view, roughness, f0)
-                  + surfaceReflectance(normal, light, view, roughness, f0));
-        }
-    }
-#endif
-#ifdef shadowMapFlag
-    direct *= shadowVisibility(getShadow());
-#endif
-    return ambient + direct * clouds + diffuse * remaining * lavaIrradiance(v_cloudPosition, normal) + emission;
+    surface.emission = emission;
+    return shadeSurface(surface);
 }
 #endif

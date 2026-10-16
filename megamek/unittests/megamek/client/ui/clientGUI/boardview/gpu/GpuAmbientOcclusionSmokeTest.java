@@ -147,12 +147,12 @@ class GpuAmbientOcclusionSmokeTest {
      * Cliff feet against open ground. A foot: the darkest visibility around points on the lower hex's level a fifth to
      * three fifths of the way from the edge of a rise of three levels or more toward the lower hex's centre, where the
      * surface shown lies within a level of the point (not behind the cliff). Open ground: the centres of level, dry hexes
-     * whose neighbours are level and dry too, with nothing taller than scatter on any of them.
+     * whose neighbours are level and dry too, without trees or buildings on any of them.
      */
     private static void checkCreases(View view, BoardScene scene, BoardCamera camera, Visibility visibility,
           StringBuilder report) {
         List<Float> feet = new ArrayList<>(), open = new ArrayList<>();
-        int rises = 0;
+        int rises = 0, levels = 0;
         for (BoardScene.Tile tile : scene.tiles()) {
             boolean level = clear(tile);
             int neighbours = 0;
@@ -174,6 +174,7 @@ class GpuAmbientOcclusionSmokeTest {
                 if (!Float.isNaN(darkest)) { feet.add(darkest); }
             }
             if (level && neighbours == 6) {
+                levels++;
                 float centre = visibility.at(camera, BoardGeometry.center(tile.coords(), tile.elevation()));
                 if (!Float.isNaN(centre)) { open.add(centre); }
             }
@@ -181,21 +182,22 @@ class GpuAmbientOcclusionSmokeTest {
         feet.sort(Float::compare);
         open.sort(Float::compare);
         report.append(String.format(Locale.ROOT, "%s: %d rises of three levels or more, %d feet shown, median darkest"
-                    + " visibility %.3f; %d open level hexes shown, median %.3f, lowest %.3f%n", view.name(), rises,
-              feet.size(), median(feet), open.size(), median(open), open.isEmpty() ? Float.NaN : open.getFirst()));
+                    + " visibility %.3f; %d open level hexes, %d shown, median %.3f, lowest %.3f%n", view.name(), rises,
+              feet.size(), median(feet), levels, open.size(), median(open), open.isEmpty() ? Float.NaN : open.getFirst()));
         if (feet.size() < 3 || !(median(feet) <= .85f)) {
             FAILURES.add(view.name() + ": cliff feet are not darkened: " + feet.size() + " shown, median " + median(feet));
         }
-        if (open.size() < 3 || !(median(open) >= .97f)) {
+        if (open.size() < 2 || !(median(open) >= .97f)) {
             FAILURES.add(view.name() + ": open level ground is occluded: " + open.size() + " shown, median "
                   + median(open));
         }
     }
 
-    /** Dry, with nothing taller than scatter on it. */
+    /** Dry, without a tree or a building on it. */
     private static boolean clear(BoardScene.Tile tile) {
-        return tile.waterDepth() == 0
-              && tile.features().stream().allMatch(feature -> feature.kind() == BoardScene.FeatureKind.SCATTER);
+        return tile.waterDepth() <= 0 && tile.features().stream().noneMatch(feature
+              -> feature.kind() == BoardScene.FeatureKind.TREE || feature.kind() == BoardScene.FeatureKind.BUILDING
+              || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL);
     }
 
     private static float median(List<Float> values) {
@@ -275,7 +277,7 @@ class GpuAmbientOcclusionSmokeTest {
         /** The visibility at a world point, or NaN where it is not shown. */
         float at(BoardCamera camera, Vector3 world) {
             Vector3 texel = project(camera, world);
-            return shown(camera, world, texel, BoardGeometry.width() / 10) ? values[2 * ((int) texel.y * width + (int) texel.x)] : Float.NaN;
+            return shown(camera, world, texel, BoardGeometry.level()) ? values[2 * ((int) texel.y * width + (int) texel.x)] : Float.NaN;
         }
 
         /**

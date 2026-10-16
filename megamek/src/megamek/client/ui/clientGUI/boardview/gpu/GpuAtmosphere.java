@@ -954,6 +954,7 @@ final class GpuAtmosphere implements Disposable {
         // A comparison sampler must never alias the ordinary depth sampler, even while rays are disabled.
         fogShader.setUniformi("u_geometryShadow", 2);
         fogShader.setUniformf("u_hasGeometryShadow", 0);
+        fogShader.setUniformf("u_shadowStrength", lighting.shadowStrength());
         if (hasRays()) {
             clouds.bindShadow(fogShader, 1);
             var geometryShadow = terrain.environment().shadowMap;

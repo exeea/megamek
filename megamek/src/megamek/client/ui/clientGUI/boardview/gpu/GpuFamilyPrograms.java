@@ -41,10 +41,9 @@ final class GpuFamilyPrograms {
     static final String PROPERTY = "megamek.gpu.familyPrograms";
     /**
      * Family programs a terrain builds for each lighting configuration, and twice that in all; libGDX frees them with
-     * the terrain. A board without clouds has four configurations, specular anti-aliasing on or off with or without a
-     * directional light (libGDX 1.14.2 removes an empty directional-light attribute), and the cloud marker's states
-     * make up to eight: the total gives two of them all their programs, and a third configuration draws with the
-     * generic programs, as slow as before family programs.
+     * the terrain. Day/night and cloud cover keep stable bindings and therefore share programs. Actual flag changes
+     * such as specular anti-aliasing still select configurations: the total gives two of them all their programs, and
+     * a third configuration draws with the generic programs, as before family programs.
      */
     static final int CAPACITY = 32;
     /** The capacity in force; native checks lower it to reach it on a small board. */

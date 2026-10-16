@@ -25,11 +25,13 @@ vec3 sunDirection() {
 }
 
 struct Surface {
-    vec3 albedo;             // bounded linear reflectance (materialReflectance), graded
+    vec3 albedo;             // bounded linear diffuse reflectance (materialReflectance), graded
     vec3 normal;             // shading normal: mapped detail, after shadingNormal
     vec3 geometric;          // never mapped: its side decides whether direct light reaches the front
     float roughness;         // perceptual, dry; negative selects the matte fallback
     float film;              // water coat, 0 dry to 1 standing water: smooths the lobe, sets f0 and the diffuse budget
+    vec3 f0;                 // reflectance of the metallic share at normal incidence: the metal's colour
+    float metallic;          // share of the surface that is metal; the rest is a dielectric (f0 .04, or water's)
     float occlusion;         // ambient occlusion of the diffuse sky
     float specularOcclusion; // occlusion of the reflected environment
     float cavity;            // micro-occlusion of every light: sky, local lights, reflections and half the sun
@@ -41,10 +43,10 @@ struct Surface {
     vec3 emission;           // radiance the light does not scale
 };
 
-// An opaque surface over GROUND_ALBEDO, without occlusion, transmission, heat or emission; callers set what they have.
+// An opaque dielectric over GROUND_ALBEDO, without occlusion, transmission, heat or emission; callers set what they have.
 Surface opaqueSurface(vec3 albedo, vec3 normal, vec3 geometric, float roughness, float film, float visibility) {
-    return Surface(albedo, normal, geometric, roughness, film, 1.0, 1.0, 1.0, visibility, vec3(1.0), vec3(0.0), 0.0,
-          GROUND_ALBEDO, vec3(0.0));
+    return Surface(albedo, normal, geometric, roughness, film, vec3(.04), 0.0, 1.0, 1.0, 1.0, visibility, vec3(1.0),
+          vec3(0.0), 0.0, GROUND_ALBEDO, vec3(0.0));
 }
 
 // Thin tissue, per channel: of the colour R it reflects from the front it passes T = min(share * R, 1 - R) from the
@@ -58,10 +60,11 @@ vec3 thinTransmission(vec3 albedo, float share) {
 vec3 shadeSurface(Surface s, float caustic, float submerged) {
     vec3 view = -viewDirection();
     vec3 normal = s.normal;
-    // The water coat and specular antialiasing (surfaceVariance) set every lobe's roughness and f0, once.
+    // The water coat, the metallic share and specular antialiasing (surfaceVariance) set every lobe's roughness and
+    // f0, once.
     float roughness = dielectricRoughness(s.film, s.roughness);
-    vec3 f0 = dielectricF0(s.film);
-    float diffuseBudget = 1.0 - specularAlbedo(max(0.0, dot(normal, view)), roughness, f0).r;
+    vec3 f0 = mix(dielectricF0(s.film), s.f0, s.metallic);
+    vec3 diffuseBudget = 1.0 - specularAlbedo(max(0.0, dot(normal, view)), roughness, f0);
     // The sky's ambient occlusion, with the screen-space occlusion of the opaque scene (ambient-occlusion.glsl): once,
     // for every surface, on the sky alone. Local lights and the sun keep their own visibility.
     float occlusion = s.occlusion * screenAmbientOcclusion();
@@ -74,17 +77,17 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     vec3 light = sunDirection();
     vec3 sun = sunColor() * s.visibility;
     bool lit = dot(s.geometric, light) > 0.0;
-    float incidence = lit ? diffuseReflectance(normal, light, view, roughness, f0).r : 0.0;
+    vec3 incidence = lit ? diffuseReflectance(normal, light, view, roughness, f0) : vec3(0.0);
     vec3 incident = incidence * s.front;
     if (tissue) {
-        float through = dot(s.geometric, light) < 0.0
-              ? diffuseReflectance(-normal, light, -view, roughness, f0).r : 0.0;
+        vec3 through = dot(s.geometric, light) < 0.0
+              ? diffuseReflectance(-normal, light, -view, roughness, f0) : vec3(0.0);
         incident += through * s.back;
     }
     vec3 direct = sun * incident * mix(1.0, s.cavity, .5) * (1.0 + caustic);
     vec3 sheen = vec3(0.0);
-    if (s.heat < 1.0 && lit && incidence > 0.0) {
-        sheen = sun * surfaceReflectance(normal, light, view, roughness, f0).r * s.cavity;
+    if (s.heat < 1.0 && lit && any(greaterThan(incidence, vec3(0.0)))) {
+        sheen = sun * surfaceReflectance(normal, light, view, roughness, f0) * s.cavity;
     }
     if (s.heat > 0.0) {
         // The material response and spill light are identical on both sides of the blend. Only the sky bounce,

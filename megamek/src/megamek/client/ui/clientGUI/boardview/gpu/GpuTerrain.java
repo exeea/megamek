@@ -164,7 +164,7 @@ final class GpuTerrain implements Disposable {
 
         TerrainShaders(boolean depthOnly) {
             super(invariantPosition(GpuCloudShadow.vertex(GpuUnitShader.linearVertex(DefaultShader.getDefaultVertexShader()))),
-                  GpuCloudShadow.fragment(GpuUnitShader.linearFragment(DefaultShader.getDefaultFragmentShader()), false));
+                  GpuCloudShadow.fragment(GpuUnitShader.fragment()));
             this.depthOnly = depthOnly;
             depthFragment = depthOnly ? GpuShaderSource.read("terrain-depth.frag") : null;
         }
@@ -184,7 +184,7 @@ final class GpuTerrain implements Disposable {
         private final DefaultShader.Config instancedPropShader = new DefaultShader.Config(
               GpuTreeInstances.vertex(config.vertexShader), config.fragmentShader);
         private final DefaultShader.Config vegetationShader = new DefaultShader.Config(GpuGroundCover.vertex(config.vertexShader),
-              GpuCloudShadow.fragment(GpuShaderSource.terrainLighting(GpuShaderSource.read("terrain-vegetation.frag")), true));
+              GpuCloudShadow.fragment(GpuShaderSource.terrainLighting(GpuShaderSource.read("terrain-vegetation.frag"))));
         private final DefaultShader.Config biomeVegetationShader = new DefaultShader.Config(
               GpuBiomeVegetation.vertex(config.vertexShader), vegetationShader.fragmentShader);
         private final DefaultShader.Config bankTurfShader = new DefaultShader.Config(
@@ -242,7 +242,7 @@ final class GpuTerrain implements Disposable {
                       case SPRAY -> sprayShader;
                       case CUT -> waterCutShader;
                   } : animated ? liquidShader : config;
-            // Only these programs use linearFragment; custom surfaces own their factor color contracts.
+            // Only these programs use model.frag (GpuUnitShader.fragment); custom surfaces own their factor colours.
             boolean modelColors = chosen == config || chosen == instancedPropShader || chosen == liquidShader;
             if (renderable.material.has(GpuSurfaceScars.Marking.TYPE)) {
                 chosen = new DefaultShader.Config(GpuSurfaceScars.vertex(chosen.vertexShader),
@@ -954,6 +954,8 @@ final class GpuTerrain implements Disposable {
     private final BoundingBox shadowBounds = new BoundingBox();
     private final Matrix4 shadowView = new Matrix4();
     private boolean shadowProjectionValid;
+    /** The retained map is clear while its directional source is zero; cleared once per such interval. */
+    private boolean shadowEmpty;
     private final OrthographicCamera shadowFit = new OrthographicCamera();
     private final UnitBounds.Frame frameBounds;
     private boolean shadowViewPresent;
@@ -1083,7 +1085,7 @@ final class GpuTerrain implements Disposable {
     static String litFragment(String file) {
         String source = GpuShaderSource.read(file);
         // Compose shared lighting first so cloud modulation reaches the actual lighting function, not just main.
-        return GpuIceShader.fragment(GpuCloudShadow.fragment(GpuShaderSource.terrainLighting(source), true));
+        return GpuIceShader.fragment(GpuCloudShadow.fragment(GpuShaderSource.terrainLighting(source)));
     }
 
     private static boolean linearDiffuse(Material material) {
@@ -6864,6 +6866,7 @@ final class GpuTerrain implements Disposable {
                 environment.remove(shadow);
                 shadow.dispose();
                 shadow = null;
+                shadowEmpty = false;
                 staticShadowValid = false;
             }
             environment.shadowMap = null;
@@ -6873,14 +6876,9 @@ final class GpuTerrain implements Disposable {
             environmentLighting.set(ambient.color);
             return;
         }
+        // A zero-color source retains the same shader inputs in moonless/pitch-black presets. Removing the light
+        // or shadow binding would rebuild every generic/family surface program despite changing no material.
         // Without an atmosphere, the scene's light direction takes the default atmosphere's light.
-        if (!lighting.hasDirectLight()) {
-            // Moonless and pitch-black nights retain ambient readability, but have no directional source.
-            if (shadow != null) { environment.remove(shadow); }
-            environment.shadowMap = null;
-            environment.set(ColorAttribute.createAmbientLight(lighting.ambient()));
-            return;
-        }
         if (shadow == null) {
             shadow = new GpuShadowLight(SHADOW_RESOLUTION, SHADOW_RESOLUTION, 1, 1, 1, 2);
             shadowProjectionValid = false;
@@ -6978,6 +6976,19 @@ final class GpuTerrain implements Disposable {
         if (shadow == null || environment.shadowMap == null) {
             return;
         }
+        if (atmosphere != null && !atmosphere.hasDirectLight()) {
+            if (!shadowEmpty) {
+                shadow.begin();
+                shadow.end();
+                shadowEmpty = true;
+                shadowProjectionValid = false;
+                staticShadowValid = false;
+                boardShadowValid = false;
+                shadowDirty = true;
+            }
+            return;
+        }
+        shadowEmpty = false;
         boolean changed = shadowDirty || !shadowProjectionValid || units.size() != shadowModels.size();
         for (int index = 0; !changed && index < units.size(); index++) {
             changed = units.get(index).model != shadowModels.get(index)

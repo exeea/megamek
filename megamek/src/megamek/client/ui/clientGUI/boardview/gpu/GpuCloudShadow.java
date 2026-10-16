@@ -38,8 +38,7 @@ final class GpuCloudShadow extends Attribute {
               + (renderable.environment != null && renderable.environment.has(TYPE) ? "#define cloudShadowFlag\n" : "")
               + (renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.Antialiasing.TYPE)
                     ? "#define specularAntialiasingFlag\n" : "")
-              + (renderable.environment != null && renderable.environment.has(GpuAmbientOcclusion.TYPE)
-                    ? "#define ambientOcclusionFlag\n" : "");
+              + GpuAmbientOcclusion.prefix(renderable);
     }
 
     static void register(DefaultShader shader) {
@@ -79,22 +78,15 @@ final class GpuCloudShadow extends Attribute {
         return insert(source, position, position + "\nv_cloudPosition = pos.xyz;\n");
     }
 
-    static String fragment(String source, boolean ground) {
+    /** A lit surface's fragment stage: its one lighting function attenuates direct light under clouds. */
+    static String fragment(String source) {
         String declarations = GpuShaderSource.read("cloud-shadow.glsl");
-        // The libGDX shaders also dim the sunlit ground's share of their ambient (GpuUnitShader.linearVertex).
-        // Shared terrain functions can sample clouds before main; declare their inputs before those helpers.
-        String anchor = ground && source.contains("// terrain-lighting-functions") ? "// terrain-lighting-functions"
+        // Shared lighting functions can sample clouds before main; declare their inputs before those helpers.
+        String anchor = source.contains("// terrain-lighting-functions") ? "// terrain-lighting-functions"
               : source.contains("// model-lighting-functions") ? "// model-lighting-functions" : MAIN;
-        source = insert(source, anchor, declarations + "\n" + (ground ? "" : "in vec3 v_groundBounce;\n") + anchor);
-        if (ground) {
-            return insert(source, "albedo *= ambient + direct;",
-                  GpuShaderSource.read("cloud-surface.glsl") + "\nalbedo *= ambient + direct;");
-        }
-        int start = source.indexOf(MAIN) + MAIN.length();
-        String body = source.substring(start).replace("v_lightDiffuse", "cloudDiffuse")
-              .replace("v_lightSpecular", "cloudSpecular").replace("v_ambientLight", "cloudAmbient");
-        // Ambient remains separate in libGDX's shadow-enabled scene shaders. Emissive materials are unaffected.
-        return source.substring(0, start) + "\n" + GpuShaderSource.read("cloud-lighting.glsl") + "\n" + body;
+        source = insert(source, anchor, declarations + "\n" + anchor);
+        return insert(source, "albedo *= ambient + direct;",
+              GpuShaderSource.read("cloud-surface.glsl") + "\nalbedo *= ambient + direct;");
     }
 
     private static String insert(String source, String anchor, String replacement) {

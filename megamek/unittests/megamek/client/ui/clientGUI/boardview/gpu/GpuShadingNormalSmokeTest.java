@@ -228,10 +228,11 @@ class GpuShadingNormalSmokeTest {
     }
 
     private static void mappedModel(GpuShaderManager manager) {
-        String material = GpuShaderSource.readDisk("model-surface.glsl");
-        String result = "return ambient + direct * clouds + diffuse * remaining * lavaIrradiance(v_cloudPosition, normal) + emission;";
+        // Models light through shadeSurface (surface-shading.glsl): keep the cloud-shaded direct light alone.
+        String material = GpuShaderSource.readDisk("surface-shading.glsl");
+        String result = "return albedo + s.emission;";
         assertEquals(1, material.split(java.util.regex.Pattern.quote(result), -1).length - 1);
-        applySources(manager, Map.of("model-surface.glsl", material.replace(result, "return direct * clouds;")),
+        applySources(manager, Map.of("surface-shading.glsl", material.replace(result, "return s.albedo * direct + sheen;")),
               "controlled-model");
         Texture normal = normalTexture();
         var builder = new ModelBuilder();

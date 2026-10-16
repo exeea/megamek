@@ -121,9 +121,18 @@ final class GpuShaderSource {
               Map.of("MAGMA_CONDITION", flowing ? "magma-flow.glsl" : "magma-solid.glsl"));
     }
 
-    static String modelLighting() {
-        return read("light-model.glsl") + read("environment-lighting.glsl")
-              + read("lava-lighting.glsl") + read("ambient-occlusion.glsl") + read("model-surface.glsl");
+    /** The light model, rain field, local lights, ambient occlusion and geometry shadows of every lit surface. */
+    private static String sharedLighting() {
+        return read("light-model.glsl") + read("environment-lighting.glsl") + read("rain-surface.glsl")
+              + read("lava-lighting.glsl") + read("ambient-occlusion.glsl") + read("surface-lighting.glsl");
+    }
+
+    /** Imported models (model.frag) share the terrain's lighting and its one entry, without its material libraries. */
+    static String modelLighting(String source) {
+        String functions = sharedLighting() + read("water-optics.glsl") + read("surface-shading.glsl")
+              + read("model-surface.glsl");
+        return replaceOnce(source, "void main() {", "// model-lighting-functions\n" + functions + "\nvoid main() {",
+              "model");
     }
 
     /** Grass and biome templates share these already-computed vertex outputs. */
@@ -145,12 +154,7 @@ final class GpuShaderSource {
 
     /** Every custom surface shares the light model, rain field, lighting, geometry shadows and water optics. */
     static String terrainLighting(String source) {
-        String functions = read("light-model.glsl");
-        functions += read("environment-lighting.glsl");
-        functions += read("rain-surface.glsl");
-        functions += read("lava-lighting.glsl");
-        functions += read("ambient-occlusion.glsl");
-        functions += read("surface-lighting.glsl");
+        String functions = sharedLighting();
         functions += read("terrain-meadow.glsl");
         functions += read("terrain-patterns.glsl");
         functions += read("water-optics.glsl");

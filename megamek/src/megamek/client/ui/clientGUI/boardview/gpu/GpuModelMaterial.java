@@ -7,7 +7,6 @@ import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
-import com.badlogic.gdx.math.Matrix4;
 
 /** Authored glTF surface parameters. The model library owns the optional linear G-roughness/B-metalness map. */
 final class GpuModelMaterial extends Attribute {
@@ -59,14 +58,6 @@ final class GpuModelMaterial extends Attribute {
                     }
                 }
                 target.program.setUniform3fv(target.loc(id), linear, 0, linear.length);
-            }
-        });
-        shader.register("u_modelView", new BaseShader.GlobalSetter() {
-            @Override
-            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                var camera = target.camera;
-                target.set(id, camera.direction.x, camera.direction.y, camera.direction.z,
-                      camera.projection.val[Matrix4.M33] == 0 ? 1f : 0f);
             }
         });
     }

@@ -407,20 +407,67 @@ class GpuAtmosphereSmokeTest {
             }
         }
         assertTrue(attenuated > 0, "The actual caster must attenuate at least one fog RGB sample");
+        try {
+            for (float strength : new float[] { 0, .5f, 1 }) {
+                atmosphere.setOptions(shadowStrength(strength));
+                atmosphere.updateLight(camera);
+                renderFog.invoke(atmosphere, camera.camera, terrain, scene);
+                float[] scaled = fogPixels(fog);
+                if (strength == 0) {
+                    assertArrayEquals(unblocked, scaled, "Zero shadow strength equals removing only the geometry map");
+                } else if (strength == 1) {
+                    assertArrayEquals(blocked, scaled, "Restoring shadow strength restores the exact fog output");
+                } else {
+                    for (int i = 0; i < scaled.length; i++) {
+                        if (i % 4 == 3) {
+                            assertEquals(blocked[i], scaled[i], "Shadow strength cannot change volume transmission");
+                        } else {
+                            float midpoint = (blocked[i] + unblocked[i]) * .5f;
+                            // The raw fog target is half float; allow two half-ULPs for the stored endpoints/midpoint.
+                            float tolerance = Math.scalb(2f, Math.max(-14, Math.getExponent(midpoint)) - 10);
+                            assertEquals(midpoint, scaled[i], tolerance, "Half-strength shadow is the visibility midpoint");
+                        }
+                    }
+                }
+            }
+        } finally { atmosphere.setOptions(GpuAtmosphere.Options.DEFAULTS); }
         atmosphere.setOptions(new GpuAtmosphere.Options(0, false));
         draw(atmosphere, terrain, batch, List.of(tower), camera, scene, cloudy, null, 0);
         assertFalse(java.util.Arrays.equals(blocked, fogPixels(fog)), "The actual shaft contribution must be nonzero");
         GpuBoardTestUi.capture(new File(output, "hardware-depth-fog-rays-off.png"));
-        var conditions = new PlanetaryConditions();
-        conditions.setLight(Light.MOONLESS);
-        conditions.setFog(Fog.FOG_LIGHT);
-        var moonless = BoardAtmosphere.fromScenario(conditions, false, .5);
         atmosphere.setOptions(GpuAtmosphere.Options.DEFAULTS);
+        draw(atmosphere, terrain, batch, List.of(tower), camera, scene, cloudy, null, 0);
+        byte[] daylightDepth = GpuFamilyAssemblyReview.shadowDepth(terrain);
+        long mask = terrain.environment().getMask();
+        int programs = ShaderProgram.getNumManagedShaderPrograms();
+        int families = terrain.familyPrograms().programs();
+        var conditions = new PlanetaryConditions();
+        conditions.setFog(Fog.FOG_LIGHT);
+        for (Light preset : new Light[] { Light.MOONLESS, Light.PITCH_BLACK }) {
+            conditions.setLight(preset);
+            draw(atmosphere, terrain, batch, List.of(tower), camera, scene,
+                  BoardAtmosphere.fromScenario(conditions, false, .5), null, 0);
+            assertFalse(atmosphere.lighting().hasDirectLight());
+            assertZeroDirectionalLight(terrain);
+            assertSame(shadow, terrain.environment().shadowMap, "Dark presets retain the same shadow sampler binding");
+            assertEquals(mask, terrain.environment().getMask(), "A preset does not change the surface shader mask");
+            assertFalse(terrain.busy(), "A preset must not restart terrain material preparation");
+            assertEquals(programs, ShaderProgram.getNumManagedShaderPrograms(), "A preset links no new shader program");
+            assertEquals(families, terrain.familyPrograms().programs(), "A preset retains its compiled families");
+            int occupied = 0;
+            for (byte depth : GpuFamilyAssemblyReview.shadowDepth(terrain)) { occupied |= depth ^ -1; }
+            assertEquals(0, occupied, "The retained D24 attachment must be entirely clear, not stale daytime shadows");
+            GLProfiler profiler = new GLProfiler(Gdx.graphics);
+            profiler.enable();
+            try {
+                profiler.reset();
+                terrain.renderShadows(List.of(tower));
+                assertEquals(0, profiler.getCalls(), "An already clear no-source map performs no GL work");
+            } finally { profiler.disable(); }
+        }
+        conditions.setLight(Light.MOONLESS);
+        var moonless = BoardAtmosphere.fromScenario(conditions, false, .5);
         draw(atmosphere, terrain, batch, List.of(tower), camera, scene, moonless, null, 0);
-        terrain.update(scene);
-        draw(atmosphere, terrain, batch, List.of(tower), camera, scene, moonless, null, 0);
-        assertFalse(atmosphere.lighting().hasDirectLight());
-        assertNull(terrain.environment().shadowMap);
         float[] noMoon = fogPixels(fog);
         boolean nonemptyFog = false;
         for (int i = 3; i < noMoon.length; i += 4) { nonemptyFog |= noMoon[i] < 1; }
@@ -429,9 +476,36 @@ class GpuAtmosphereSmokeTest {
         atmosphere.setOptions(new GpuAtmosphere.Options(0, false));
         draw(atmosphere, terrain, batch, List.of(tower), camera, scene, moonless, null, 0);
         assertArrayEquals(noMoon, fogPixels(fog), "Without a directional source the rays control is an exact no-op");
+        atmosphere.setOptions(GpuAtmosphere.Options.DEFAULTS);
+        draw(atmosphere, terrain, batch, List.of(tower), camera, scene, cloudy, null, 0);
+        assertSame(shadow, terrain.environment().shadowMap);
+        assertArrayEquals(daylightDepth, GpuFamilyAssemblyReview.shadowDepth(terrain),
+              "Returning to daylight refits and restores the actual shadow attachment");
+        assertArrayEquals(blocked, fogPixels(fog), "Returning to daylight restores the actual shadowed fog");
+        assertEquals(programs, ShaderProgram.getNumManagedShaderPrograms(), "Daylight reuses the original programs");
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         System.out.println("HARDWARE_DEPTH_FOG attenuatedChannels=" + attenuated
               + " maximumAttenuation=" + maximumAttenuation);
+    }
+
+    private static void assertZeroDirectionalLight(GpuTerrain terrain) {
+        var lights = terrain.environment().get(DirectionalLightsAttribute.class, DirectionalLightsAttribute.Type);
+        assertNotNull(lights, "Dark presets retain the directional-light attribute");
+        assertEquals(1, lights.lights.size);
+        Color color = lights.lights.first().color;
+        assertEquals(0, color.r);
+        assertEquals(0, color.g);
+        assertEquals(0, color.b, "A stable binding must never invent moonlight");
+        assertNotNull(terrain.environment().shadowMap);
+    }
+
+    private static GpuAtmosphere.Options shadowStrength(float strength) {
+        var source = GpuAtmosphere.Options.DEFAULTS;
+        return new GpuAtmosphere.Options(source.rays(), source.fixedSun(), source.minCloudShadow(),
+              source.maxCloudShadow(), source.sunGlare(), source.fogHeightVariation(), source.fogDensityVariation(),
+              source.moonShadowContrast(), source.taintStrength(), source.fogCalmDrift(), source.whiteBalance(),
+              source.tint(), source.saturation(), source.contrast(), strength, source.ambientShare(),
+              source.skyContribution(), source.environmentImage(), source.lightingSky());
     }
 
     private static float[] fogPixels(FrameBuffer fog) {
@@ -560,9 +634,10 @@ class GpuAtmosphereSmokeTest {
             boolean moon = night == Light.FULL_MOON;
             assertEquals(moon, atmosphere.lighting().hasDirectLight());
             var lights = terrain.environment().get(DirectionalLightsAttribute.class, DirectionalLightsAttribute.Type);
-            assertEquals(moon ? 1 : 0, lights == null ? 0 : lights.lights.size,
-                  "Moonless/pitch black must detach the directional source");
-            assertEquals(moon, terrain.environment().shadowMap != null);
+            assertNotNull(lights);
+            assertEquals(1, lights.lights.size, "Presets keep a stable directional-light binding");
+            if (!moon) { assertZeroDirectionalLight(terrain); }
+            assertSame(originalShadow, terrain.environment().shadowMap);
             var cloud = terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE);
             assertNotNull(cloud, "Cloud sampler ownership remains stable without a direct light");
             assertEquals(moon, cloud.enabled);
@@ -649,7 +724,7 @@ class GpuAtmosphereSmokeTest {
                 Files.writeString(new File(output, "pressure-darkness.csv").toPath(), report);
                 GpuBoardTestUi.capture(new File(output, "atmosphere-" + preset + "-" + pressure + ".png"));
                 assertFalse(atmosphere.lighting().hasDirectLight());
-                assertNull(terrain.environment().shadowMap, "Readable darkness must not invent a casting light");
+                assertZeroDirectionalLight(terrain);
                 assertTrue(brightness > .04f, "Actual airless gray terrain remains navigable");
                 assertTrue(brightness > previous, "Vacuum < trace < thin < standard readable terrain");
                 previous = brightness;

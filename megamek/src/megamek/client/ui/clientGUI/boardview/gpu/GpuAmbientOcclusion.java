@@ -37,8 +37,11 @@ import com.badlogic.gdx.utils.Disposable;
  */
 final class GpuAmbientOcclusion extends Attribute implements Disposable {
     static final long TYPE = register("boardAmbientOcclusion");
-    /** The world radius in metres: about the foot of a one-level cliff, a building's base, the ground around a trunk. */
-    static final float RADIUS_METRES = 4;
+    /**
+     * The world radius in metres, about a level and a quarter: wide enough to show the foot of a cliff at hex scale, while
+     * the occlusion near a contact (a trunk's foot, a rock) still darkens most.
+     */
+    static final float RADIUS_METRES = 8;
     /** The largest screen radius in scene pixels: a close view searches a smaller world radius instead of more pixels. */
     static final float MAX_RADIUS_PIXELS = 160;
     private final IntBuffer query = BufferUtils.newIntBuffer(16);
@@ -91,8 +94,6 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
             disposeTargets();
             horizons = createTarget(width, height);
             blurred = createTarget(width, height);
-            // Creating a texture binds it on the active unit, behind the binder's back: it forgets what it had bound.
-            context.textureBinder.begin();
         }
         query.clear();
         Gdx.gl.glGetIntegerv(GL20.GL_FRAMEBUFFER_BINDING, query);
@@ -126,6 +127,11 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
         blur(horizons, blurred, 0, 1, strength, context);
         Gdx.gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, previous);
         Gdx.gl.glViewport(viewportX, viewportY, viewportWidth, viewportHeight);
+        // Leave the texture units as a batch starts them: the colour draws rebind what they sample, and a texture created
+        // or uploaded later binds on unit 0, outside the binder, never over a unit a draw samples. Without this the
+        // forest's colour draws read a wrong texture and hung the GPU (a driver reset on NVIDIA).
+        context.textureBinder.begin();
+        Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
         revision++;
         current = true;
     }
@@ -146,6 +152,17 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
     FrameBuffer target() { return horizons; }
 
     private Texture texture() { return current ? horizons.getColorBufferTexture() : fallback; }
+
+    /**
+     * The define that compiles the occlusion into a lit program (ambient-occlusion.glsl) while this attribute is in its
+     * environment. Its sampler would take a 17th texture unit, which macOS does not give a stage
+     * (GpuSamplerBudgetSmokeTest), from sculpted ground with both ice and volcanic crust: that draws without it.
+     */
+    static String prefix(Renderable renderable) {
+        return renderable.environment != null && renderable.environment.has(TYPE)
+              && !(renderable.material.has(GpuMagmaShader.TYPE) && GpuIceShader.mode(renderable.material) != 0)
+              ? "#define ambientOcclusionFlag\n" : "";
+    }
 
     /** The colour programs' inputs (ambient-occlusion.glsl); a program without ambientOcclusionFlag has none of them. */
     static void register(DefaultShader shader) {

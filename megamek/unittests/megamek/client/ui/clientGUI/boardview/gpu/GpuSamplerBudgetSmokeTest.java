@@ -25,6 +25,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.ObjectMap;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -66,6 +67,7 @@ class GpuSamplerBudgetSmokeTest {
         var used = new TreeMap<String, Integer>();
         BoardScene ice = GpuIceSmokeTest.scene(2), volcanicIce = volcanicIceScene();
         var failure = new AtomicReference<Throwable>();
+        boolean savedOcclusion = GUIPreferences.getInstance().getBoardAmbientOcclusion();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
@@ -79,12 +81,17 @@ class GpuSamplerBudgetSmokeTest {
                         Gdx.gl.glGetIntegerv(name, limit);
                         System.out.println("Texture limit 0x" + Integer.toHexString(name) + "=" + limit.get(0));
                     }
-                    for (Scene scene : SCENES) { review(scene, used, over); }
-                    reviewTerrain(ice, "GpuIceSmokeTest.scene(2)", used, over);
-                    reviewTerrain(volcanicIce, "cooled crust / rock / frozen land", used, over);
+                    // Ambient occlusion off, then on: its sampler must fit too (GpuAmbientOcclusion.prefix).
+                    for (boolean occlusion : new boolean[] { false, true }) {
+                        GUIPreferences.getInstance().setBoardAmbientOcclusion(occlusion);
+                        for (Scene scene : SCENES) { review(scene, used, over); }
+                        reviewTerrain(ice, "GpuIceSmokeTest.scene(2)", occlusion, used, over);
+                        reviewTerrain(volcanicIce, "cooled crust / rock / frozen land", occlusion, used, over);
+                    }
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
+                    GUIPreferences.getInstance().setBoardAmbientOcclusion(savedOcclusion);
                     Gdx.app.exit();
                 }
             }
@@ -95,6 +102,8 @@ class GpuSamplerBudgetSmokeTest {
               .forEach(program -> System.out.println(program.getValue() + " " + program.getKey()));
         assertTrue(used.keySet().stream().anyMatch(program -> program.contains("volcanicFlag")),
               "Reach the volcanic terrain programs: " + used.keySet());
+        assertTrue(used.keySet().stream().anyMatch(program -> program.contains("ambientOcclusionFlag")),
+              "Reach the programs with ambient occlusion: " + used.keySet());
         for (String feature : List.of("iceFlag", "roadCoatFlag", "u_roughnessLayers", "u_magmaMaps", "u_terrainData", "u_roadData", "u_environmentLut")) {
             assertTrue(used.keySet().stream().anyMatch(program -> program.contains(feature)),
                   "Reach the material-array consumer: " + feature);
@@ -157,7 +166,7 @@ class GpuSamplerBudgetSmokeTest {
     }
 
     /** Render the actual captured material combinations, rather than manufacturing shader defines. */
-    private static void reviewTerrain(BoardScene scene, String name, Map<String, Integer> used,
+    private static void reviewTerrain(BoardScene scene, String name, boolean occlusion, Map<String, Integer> used,
           Map<String, Integer> over) throws Exception {
         var terrain = new GpuTerrain();
         var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, .5f, 0,
@@ -166,6 +175,7 @@ class GpuSamplerBudgetSmokeTest {
             var camera = new BoardCamera();
             camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             camera.fit(scene);
+            frame.setAmbientOcclusion(occlusion, 1);
             frame.prepare(terrain, camera, scene);
             terrain.update(scene);
             long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(10);

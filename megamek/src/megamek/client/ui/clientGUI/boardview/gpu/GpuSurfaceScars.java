@@ -108,7 +108,7 @@ final class GpuSurfaceScars implements Disposable {
                   + GpuShaderSource.read("scar-material.glsl");
             source = source.replace(MODEL_SURFACE, helpers + "\n" + MODEL_SURFACE)
                   .replace("normal = shadingNormal(normal, geometric, view);", "float scarCavity = 1.0;\n"
-                        + "scarMaterial(surfaceScarMask, normalize(v_normal), albedo, 1.0, albedo, normal, scarCavity, roughness);\n"
+                        + "scarMaterial(surfaceScarMask, modelVertexNormal(geometric), albedo, 1.0, albedo, normal, scarCavity, roughness);\n"
                         + "normal = shadingNormal(normal, geometric, view);");
         }
         return source.replace(FRAME_READY, FRAME_READY

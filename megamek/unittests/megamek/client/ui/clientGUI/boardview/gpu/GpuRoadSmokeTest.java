@@ -51,6 +51,7 @@ class GpuRoadSmokeTest {
                     camera.setIsometric(false);
                     camera.camera.zoom = 1;
                     camera.center(BoardGeometry.center(new Coords(7, 8), 0));
+                    frame.prepare(terrain, camera, scene);
                     terrain.update(scene, camera.camera);
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     terrain.animate(.5f, List.of());
@@ -226,7 +227,9 @@ class GpuRoadSmokeTest {
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     var scene = roads(false);
+                    frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
+                    assertTrue(terrain.ready(scene), "Road materials settle with the visible lighting flags");
                     terrain.animate(.5f, List.of());
                     for (boolean oblique : new boolean[] { false, true }) {
                         camera.setIsometric(oblique);
@@ -250,7 +253,9 @@ class GpuRoadSmokeTest {
                     byte[] changed = screen();
                     var fresh = new GpuTerrain();
                     try {
+                        frame.prepare(fresh, camera, edited);
                         fresh.update(edited);
+                        assertTrue(fresh.ready(edited), "The clean-rebuild control uses the same prepared lighting");
                         fresh.animate(.5f, List.of());
                         frame.render(fresh, camera, edited);
                         byte[] rebuilt = screen();

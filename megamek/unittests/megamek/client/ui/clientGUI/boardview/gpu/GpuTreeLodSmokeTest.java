@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
@@ -652,9 +653,16 @@ class GpuTreeLodSmokeTest {
             }
             // Inspect the corrected attachment and the newly converted desert plants in the production shader.
             // The default ModelBatch above only verifies silhouettes; it does not shade the cactus normal map.
-            for (String name : List.of("pine-tall", "pine-broad", "pine-tall-snow", "palm", "palm-bent", "cactus", "cactus-flowers",
+            var materialPlants = new ArrayList<>(List.of("pine-tall", "pine-broad", "pine-tall-snow", "palm", "palm-bent", "cactus", "cactus-flowers",
                   "tree-forked", "tree-layered", "birch-tall", "birch-spreading", "birch-young", "willow-broad",
-                  "pine-slender", "pine-layered")) {
+                  "pine-slender", "pine-layered"));
+            if (Boolean.getBoolean("megamek.gpu.materialMigrationReview")) {
+                materialPlants.addAll(List.of("foliage-barren", "foliage-desert", "foliage-highland", "foliage-rocky",
+                      "foliage-snow", "foliage-temperate", "foliage-wetland", "foliage-jungle", "tree-volcano-crown",
+                      "orchard-leaning", "orchard-round", "orchard-spreading", "orchard-upright", "orchard-vase",
+                      "orchard-young"));
+            }
+            for (String name : materialPlants) {
                 var stand = new GpuTreeInstances.Stand();
                 stand.add(name, new Matrix4().setToScaling(1, 1, 36 / 30f));
                 var bounds = assets.model(name).calculateBoundingBox(new BoundingBox());

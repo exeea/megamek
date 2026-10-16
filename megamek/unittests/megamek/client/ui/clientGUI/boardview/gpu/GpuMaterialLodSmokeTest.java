@@ -283,7 +283,7 @@ class GpuMaterialLodSmokeTest {
                         if (!material.equals("crust") && !material.equals("lava")) {
                             String lighting = GpuShaderSource.readDisk("surface-shading.glsl");
                             changed = manager.apply(Map.of("surface-shading.glsl", lighting.replace(
-                                  "sheen = sun * surfaceReflectance(normal, light, view, roughness, f0).r * s.cavity;",
+                                  "sheen = sun * surfaceReflectance(normal, light, view, roughness, f0) * s.cavity;",
                                   "sheen = vec3(0.0);")));
                             assertTrue(changed.success(), changed.message());
                             assertTrue(difference(original, render(surface, terrain, camera)) > .001,

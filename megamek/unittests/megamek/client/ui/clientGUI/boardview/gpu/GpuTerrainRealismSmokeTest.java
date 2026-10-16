@@ -780,9 +780,8 @@ class GpuTerrainRealismSmokeTest {
             String surface = functionBody(GpuShaderSource.readDisk("surface-lighting.glsl"),
                   "float surfaceVisibility()", "return 1.0;");
             surface = functionBody(surface, "float sculptShadow(vec3 normal, vec3 light)", "return 1.0;");
-            result.add(new Variant("diagnostic-no-shadows", null, Map.of("surface-lighting.glsl", surface,
-                  "model-surface.glsl", GpuShaderSource.replaceOnce(GpuShaderSource.readDisk("model-surface.glsl"),
-                        "direct *= getShadow();", "direct *= 1.0;", "model shadow diagnostic"))));
+            // Models read the same geometry shadow (surfaceVisibility) through shadeSurface.
+            result.add(new Variant("diagnostic-no-shadows", null, Map.of("surface-lighting.glsl", surface)));
         }
         if (all || diagnostics.contains("localLight")) {
             result.add(new Variant("diagnostic-no-local-light", null, Map.of("lava-lighting.glsl",

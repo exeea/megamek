@@ -76,7 +76,7 @@ class GpuFamilyProgramsSmokeTest {
     private static final double SLOW_FRAME_MS = 200;
     /** Pixel comparisons that failed in the running test; run() fails the test after its other checks. */
     private static final List<String> PIXEL_FAILURES = new java.util.ArrayList<>();
-    /** A moonless night: no direct light, so the terrain draws without a shadow map, a lighting change. */
+    /** A moonless night: zero direct light with the same directional/shadow bindings as daylight. */
     private static final BoardAtmosphere.Settings NIGHT = new BoardAtmosphere.Settings(0, 0, 0,
           BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0, BoardAtmosphere.Effects.NONE, Atmosphere.STANDARD, 25, false);
     @TempDir static Path directory;
@@ -214,6 +214,7 @@ class GpuFamilyProgramsSmokeTest {
                 int capacity = GpuFamilyPrograms.capacity;
                 GpuFamilyPrograms.capacity = 3;
                 GpuGlsl.Preparation.sharedContext = true;
+                boolean antialiasing = GpuEnvironmentLighting.specularAntialiasing;
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
                 try {
@@ -221,11 +222,12 @@ class GpuFamilyProgramsSmokeTest {
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene, camera.camera);
                     terrain.animate(.5f, List.of());
-                    // Day, then night as soon as a family link is pending, then day again.
+                    // Toggle AA while a family link is pending; day/night alone must keep the configuration.
                     boolean night = false;
                     long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(10);
                     while (terrain.refine(camera.camera) | terrain.busy() || terrain.familyPrograms().pending() > 0) {
                         if (!night && terrain.familyPrograms().building()) {
+                            GpuEnvironmentLighting.specularAntialiasing = !antialiasing;
                             frame.configure(NIGHT);
                             frame.prepare(terrain, camera, scene);
                             night = true;
@@ -234,11 +236,13 @@ class GpuFamilyProgramsSmokeTest {
                         Thread.sleep(5);
                     }
                     assertTrue(night, "A family link was pending when the lighting changed");
-                    assertTrue(terrain.environment().shadowMap == null, "The night has no shadow map");
+                    assertFalse(frame.lighting().hasDirectLight(), "The retained binding does not create moonlight");
+                    assertTrue(terrain.environment().shadowMap != null, "Night retains the shadow binding");
                     int afterNight = terrain.familyPrograms().programs();
-                    // Each configuration has its own capacity: the night builds its own family programs.
+                    // AA really changes the program configuration, retaining the in-flight/capacity regression.
                     assertEquals(3, terrain.familyPrograms().ready().size(),
-                          "After its rebuild the night has its own family programs");
+                          "The changed AA configuration has its own family programs");
+                    GpuEnvironmentLighting.specularAntialiasing = antialiasing;
                     frame.configure(BoardAtmosphere.DEFAULTS);
                     frame.prepare(terrain, camera, scene);
                     while (terrain.refine(camera.camera) | terrain.busy() || terrain.familyPrograms().pending() > 0) {
@@ -265,6 +269,7 @@ class GpuFamilyProgramsSmokeTest {
                         });
                         terrain.update(fixture.source.takeFrame().scene(), camera.camera);
                         for (var settings : List.of(NIGHT, BoardAtmosphere.DEFAULTS)) {
+                            GpuEnvironmentLighting.specularAntialiasing = settings == NIGHT ? !antialiasing : antialiasing;
                             frame.configure(settings);
                             frame.prepare(terrain, camera, scene);
                             while (terrain.refine(camera.camera) | terrain.busy()
@@ -280,6 +285,7 @@ class GpuFamilyProgramsSmokeTest {
                     assertEquals(0, unfinishedLinks(terrain), "and leave no link behind");
                 } finally {
                     GpuFamilyPrograms.capacity = capacity;
+                    GpuEnvironmentLighting.specularAntialiasing = antialiasing;
                     GpuGlsl.Preparation.sharedContext = false;
                     frame.dispose();
                     terrain.dispose();
@@ -383,6 +389,7 @@ class GpuFamilyProgramsSmokeTest {
             run("return", report, () -> {
                 GpuGlsl.programCache = GpuProgramCache.open(directory.resolve("cache"));
                 int capacity = GpuFamilyPrograms.capacity;
+                boolean antialiasing = GpuEnvironmentLighting.specularAntialiasing;
                 GpuFamilyPrograms.capacity = 3;
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
@@ -390,12 +397,14 @@ class GpuFamilyProgramsSmokeTest {
                     BoardCamera camera = camera(scene);
                     settle(terrain, frame, camera, scene);
                     int day = terrain.familyPrograms().ready().size();
-                    // The night may build none, so none of its materials is marked when the day returns.
+                    // The opposite AA configuration builds none, so returning must recover the earlier markers.
                     GpuFamilyPrograms.capacity = 0;
+                    GpuEnvironmentLighting.specularAntialiasing = !antialiasing;
                     frame.configure(NIGHT);
                     settle(terrain, frame, camera, scene);
                     int night = terrain.familyPrograms().ready().size();
                     GpuFamilyPrograms.capacity = 3;
+                    GpuEnvironmentLighting.specularAntialiasing = antialiasing;
                     frame.configure(BoardAtmosphere.DEFAULTS);
                     frame.prepare(terrain, camera, scene);
                     // The day's programs are in the provider: taking them back links nothing.
@@ -407,10 +416,11 @@ class GpuFamilyProgramsSmokeTest {
                     report.append(String.format(Locale.ROOT, "Return: %d family programs by day, %d at night, %d by day"
                           + " again%n", day, night, terrain.familyPrograms().ready().size()));
                     assertTrue(day > 0, "The day builds family programs");
-                    assertEquals(0, night, "The night builds none");
+                    assertEquals(0, night, "The other AA configuration builds none at zero capacity");
                     assertEquals(day, terrain.familyPrograms().ready().size(), "The day takes its programs back");
                 } finally {
                     GpuFamilyPrograms.capacity = capacity;
+                    GpuEnvironmentLighting.specularAntialiasing = antialiasing;
                     frame.dispose();
                     terrain.dispose();
                 }
@@ -419,9 +429,9 @@ class GpuFamilyProgramsSmokeTest {
     }
 
     /**
-     * Specular anti-aliasing and day and night toggled until the terrain holds twice the capacity: each configuration
-     * builds its own programs until then, and later ones stay generic; returning finds the built ones. The report lists
-     * each configuration's programs, the total, and what the provider and the draw-order groups hold.
+     * Specular anti-aliasing uses two configurations, each up to capacity. Day/night transitions within either reuse
+     * the exact programs. Returning to the earlier AA choice also reuses its programs. The report lists the totals
+     * and what the provider and the draw-order groups hold.
      */
     @Test
     @Order(6)
@@ -442,9 +452,10 @@ class GpuFamilyProgramsSmokeTest {
                 var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
                 try {
                     BoardCamera camera = camera(scene);
-                    // Four configurations; the first two fill the total, the next two stay generic, then the first two
-                    // come back.
-                    int[] expected = { 3, 3, 0, 0, 3, 3 };
+                    // Only AA changes the configuration; a moonless preset never spends another compile slot.
+                    int[] expected = { 3, 3, 3, 3, 3, 3 };
+                    int[] expectedBuilt = { 3, 3, 6, 6, 6, 6 };
+                    Set<Shader> dayPrograms = Set.of();
                     for (int step = 0; step < expected.length; step++) {
                         boolean on = step < 2 || step > 3, night = step % 2 == 1;
                         GpuEnvironmentLighting.specularAntialiasing = on;
@@ -456,6 +467,12 @@ class GpuFamilyProgramsSmokeTest {
                         report.append(String.format(Locale.ROOT, "%s %s,%d,%d,%d,%d,%d%n", night ? "night" : "day",
                               on ? "AA on" : "AA off", ready, built, provider, groups, links));
                         assertEquals(expected[step], ready, "Configuration " + step + " family programs");
+                        assertEquals(expectedBuilt[step], built, "Day/night changes no compiled family configuration");
+                        if (!night) { dayPrograms = identities(providerShaders(terrain)); }
+                        else {
+                            assertEquals(dayPrograms, identities(providerShaders(terrain)),
+                                  "The first moonless frame retains the exact generic and family programs");
+                        }
                         assertTrue(built <= 2 * 3, "Twice the capacity bounds the programs built");
                         assertEquals(built, provider, "The provider holds exactly the programs built");
                         assertEquals(provider, groups, "each with its draw-order group");
