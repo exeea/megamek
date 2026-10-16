@@ -13,7 +13,7 @@ import com.badlogic.gdx.utils.Disposable;
 
 /** Shared bounded quad batching; particle and beam shaders own their distinct appearances. At most two draws. */
 final class GpuEffectBatch implements Disposable {
-    private static final int STRIDE = 7;
+    private static final int STRIDE = 8;
     private final int capacity;
     private final String fragment;
     private final Color smokeLight = new Color(Color.WHITE);
@@ -41,6 +41,11 @@ final class GpuEffectBatch implements Disposable {
 
     /** A camera-facing streak; an end-on view retains a small head instead of collapsing to zero area. */
     void ribbon(Camera camera, Vector3 start, Vector3 finish, float width, float kind, float alpha) {
+        ribbon(camera, start, finish, width, kind, alpha, Color.WHITE_FLOAT_BITS);
+    }
+
+    /** The same streak in {@code tint} (packed; its program decides what the colour means). */
+    void ribbon(Camera camera, Vector3 start, Vector3 finish, float width, float kind, float alpha, float tint) {
         quadLength.set(finish).sub(start);
         if (quadLength.isZero(.001f)) { return; }
         quadWidth.set(quadLength).crs(camera.direction);
@@ -50,10 +55,14 @@ final class GpuEffectBatch implements Disposable {
             quadOrigin.set(finish).mulAdd(quadLength, -.5f);
         } else { quadOrigin.set(start); }
         quadWidth.nor().scl(width);
-        quad(quadOrigin, quadWidth, quadLength, 0, kind, alpha);
+        quad(quadOrigin, quadWidth, quadLength, 0, kind, alpha, tint);
     }
 
     void quad(Vector3 origin, Vector3 width, Vector3 length, float from, float kind, float alpha) {
+        quad(origin, width, length, from, kind, alpha, Color.WHITE_FLOAT_BITS);
+    }
+
+    private void quad(Vector3 origin, Vector3 width, Vector3 length, float from, float kind, float alpha, float tint) {
         if (alpha <= 0 || offset == capacity * 4 * STRIDE) { return; }
         if (mesh == null) { create(); }
         for (int corner = 0; corner < 4; corner++) {
@@ -66,6 +75,7 @@ final class GpuEffectBatch implements Disposable {
             vertices[offset++] = y;
             vertices[offset++] = kind;
             vertices[offset++] = alpha;
+            vertices[offset++] = tint;
         }
     }
 
@@ -112,7 +122,8 @@ final class GpuEffectBatch implements Disposable {
         for (int quad = 0; quad < capacity; quad++) {
             for (int index = 0; index < corners.length; index++) { indices[quad * 6 + index] = (short) (quad * 4 + corners[index]); }
         }
-        mesh = new Mesh(false, capacity * 4, indices.length, VertexAttribute.Position(), VertexAttribute.TexCoords(0), VertexAttribute.TexCoords(1));
+        mesh = new Mesh(false, capacity * 4, indices.length, VertexAttribute.Position(), VertexAttribute.TexCoords(0), VertexAttribute.TexCoords(1),
+              VertexAttribute.ColorPacked());
         mesh.setIndices(indices);
     }
 

@@ -3,6 +3,8 @@ layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 in vec2 v_uv;
 in vec2 v_effect;
+// A laser's colour (display RGB) and, in alpha, how white its hot core burns (GpuAttackEffects.laserTint).
+in vec4 v_color;
 // LIGHT_MODEL
 // Kind: 0 laser, 1 PPC beam/arc, 2 PPC charge/impact glow, 3 TAG designator line, 4 TAG designator spot. Alpha is
 // driven by the shared attack clock.
@@ -35,6 +37,8 @@ void main() {
     } else {
         float edge = 1.0 - smoothstep(0.25, 1.0, abs(v_uv.x));
         float core = 1.0 - smoothstep(0.0, 0.4, abs(v_uv.x));
-        fragColor = vec4(mix(toLinear(vec3(1.0, 0.015, 0.005)), toLinear(vec3(1.0, 0.65, 0.45)), core), edge * v_effect.y);
+        vec3 outer = toLinear(v_color.rgb);
+        vec3 hot = mix(toLinear(mix(v_color.rgb, vec3(1.0), .55)), vec3(1.0), v_color.a);
+        fragColor = vec4(mix(outer, hot, core), edge * v_effect.y);
     }
 }

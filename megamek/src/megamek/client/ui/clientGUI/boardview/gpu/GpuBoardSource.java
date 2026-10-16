@@ -506,7 +506,7 @@ final class GpuBoardSource implements BoardSource {
         synchronized (this) {
             publishScene(before, true);
             queueAnimation(new BoardScene.Combat(result, firing, receiving, destination,
-                  target != null && target.isConventionalInfantry(), attacker.isOffBoard()));
+                  target != null && target.isConventionalInfantry(), attacker.isOffBoard(), attacker.isClan()));
         }
     }
 

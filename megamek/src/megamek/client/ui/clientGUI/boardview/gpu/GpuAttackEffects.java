@@ -18,6 +18,8 @@ import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
+import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.WeaponType;
 import megamek.common.weapons.handlers.AreaEffectHelper;
 import megamek.logging.MMLogger;
 
@@ -61,7 +63,23 @@ final class GpuAttackEffects implements Disposable {
     /** The brightest effect lights a frame hands the terrain: binning stays cheap under the heaviest barrage. */
     static final int MAX_LIGHTS = 64;
     private static final Vector3 MUZZLE_FIRE = new Vector3(2.4f, 1.4f, .6f);
-    private final List<GpuLavaLighting.Source> muzzleLights = new ArrayList<>();
+    private static final Vector3 PPC_LIGHT = new Vector3(.6f, 1.1f, 2.6f);
+    private static final Vector3 FLAMER_LIGHT = new Vector3(2.4f, 1f, .3f);
+    /**
+     * Laser colours by weapon (the BattleTech convention): IS small red, medium green, large blue, their ER versions
+     * with a white-hot core; Clan ER small orange, medium green, large violet, white cores; Clan heavy small yellow,
+     * medium cyan, large magenta. Alpha is the core's whiteness.
+     */
+    private static final Color[][] LASERS = {
+        { new Color(.9f, .08f, .06f, .2f), new Color(.15f, .8f, .15f, .2f), new Color(.15f, .2f, .9f, .2f) },
+        { new Color(.9f, .1f, .08f, .85f), new Color(.15f, .8f, .2f, .85f), new Color(.3f, .3f, .95f, .85f) },
+        { new Color(1, .4f, .1f, .8f), new Color(.25f, .85f, .35f, .85f), new Color(.5f, .3f, 1, .85f) },
+        { new Color(1, .85f, .15f, .4f), new Color(.1f, .85f, .8f, .4f), new Color(.85f, .2f, .85f, .4f) } };
+    private Color laser = LASERS[0][0];
+    /** The current laser's light: its colour in linear light, as bright as a muzzle flash. */
+    private final Vector3 laserLight = new Vector3();
+    /** This frame's weapon lights: muzzle blasts, laser and PPC light, flamer streams. */
+    private final List<GpuLavaLighting.Source> weaponLights = new ArrayList<>();
     private final GpuArtilleryBlast artilleryBlasts = new GpuArtilleryBlast();
     private Map<Coords, Integer> minefields = Map.of();
     private Function<Ray, BoardGeometry.Hit> minedLandscape = ray -> null;
@@ -124,6 +142,10 @@ final class GpuAttackEffects implements Disposable {
     private void prepare(UnitAttack next) {
         attack = next;
         muzzleCount = 0;
+        laser = laserTint(EquipmentType.get(attack.event.result().equipmentName()) instanceof WeaponType weapon
+              ? weapon : null, attack.event.attackerClan());
+        laserLight.set((float) Math.pow(laser.r, 2.2), (float) Math.pow(laser.g, 2.2), (float) Math.pow(laser.b, 2.2))
+              .scl(2.6f);
         if (attack.event.attacker().sensorContact()) { return; }
         var event = attack.event;
         var unit = event.attacker();
@@ -360,11 +382,11 @@ final class GpuAttackEffects implements Disposable {
 
     /** Scorch marks where artillery debris has just landed in the rings around its target hex. */
     /**
-     * The last drawn frame's fireballs and cannon muzzle blasts as local lights, the brightest {@link #MAX_LIGHTS}: the
+     * The last drawn frame's fireballs and weapon lights as local lights, the brightest {@link #MAX_LIGHTS}: the
      * terrain draws before the effects, so its light trails the effects by one frame.
      */
     List<GpuLavaLighting.Source> lights() {
-        List<GpuLavaLighting.Source> lights = new ArrayList<>(muzzleLights);
+        List<GpuLavaLighting.Source> lights = new ArrayList<>(weaponLights);
         explosions.lights(lights);
         if (lights.size() > MAX_LIGHTS) {
             lights.sort(Comparator.comparingDouble((GpuLavaLighting.Source light) -> light.power() * light.size()
@@ -413,7 +435,7 @@ final class GpuAttackEffects implements Disposable {
         interceptionBeams.clear();
         airbursts = 0;
         explosions.begin();
-        muzzleLights.clear();
+        weaponLights.clear();
         missiles.begin();
         flames.begin();
         beams.begin();
@@ -641,8 +663,7 @@ final class GpuAttackEffects implements Disposable {
         if (flameSide.isZero()) { flameSide.set(Vector3.X); }
         flameUp.set(flameSide).crs(forward).nor();
         time = age / MUZZLE_BLAST_SECONDS;
-        muzzleLights.add(new GpuLavaLighting.Source(-1, muzzle.cpy().mulAdd(forward, size), 1.2f * (1 - time * time),
-              MUZZLE_FIRE, size * 8));
+        light(muzzle.cpy().mulAdd(forward, size), 1.2f * (1 - time * time), MUZZLE_FIRE, size * 8);
         for (int puff = 0; puff < 7; puff++) {
             float angle = seed + puff * 2.399963f;
             point.set(muzzle).mulAdd(forward, size * (.5f + time * (3 + puff * .6f)))
@@ -683,6 +704,25 @@ final class GpuAttackEffects implements Disposable {
 
     private void electricGlow(Vector3 center, float radius, float alpha) {
         beams.billboard(camera, center, radius, PPC_GLOW, alpha);
+        light(center.cpy(), alpha, PPC_LIGHT, radius * 3);
+    }
+
+    /**
+     * A laser's colour from its weapon: its tech base (a mixed-tech laser takes the firing unit's), its class from its
+     * name (ER, heavy; pulse lasers take the standard colour) and its size (small and micro, medium, large). Anything
+     * else draws the standard small laser's red.
+     */
+    static Color laserTint(WeaponType weapon, boolean unitClan) {
+        if (weapon == null || !weapon.hasFlag(WeaponType.F_LASER)) { return LASERS[0][0]; }
+        boolean clan = weapon.isClan() || (weapon.isMixedTech() && unitClan);
+        List<String> words = List.of(weapon.getName().split("[^A-Za-z]+"));
+        int size = words.contains("Small") || words.contains("Micro") ? 0 : words.contains("Large") ? 2 : 1;
+        int family = words.contains("Heavy") ? 3 : words.contains("ER") ? (clan ? 2 : 1) : 0;
+        return LASERS[family][size];
+    }
+
+    private void light(Vector3 position, float power, Vector3 color, float size) {
+        if (power > .02f) { weaponLights.add(new GpuLavaLighting.Source(-1, position, power, color, size)); }
     }
 
     /** Fixed segment count and the shared attack clock keep electrical flicker bounded and deterministic. */
@@ -726,7 +766,12 @@ final class GpuAttackEffects implements Disposable {
 
     /** Constant width even when a missed beam continues far off-board. */
     private void beam(Vector3 start, Vector3 finish, float width, float kind, float alpha) {
-        beams.ribbon(camera, start, finish, width, kind, alpha);
+        beams.ribbon(camera, start, finish, width, kind, alpha, kind == LASER ? laser.toFloatBits() : Color.WHITE_FLOAT_BITS);
+        // A beam lights most where it ends and where it leaves the weapon.
+        Vector3 color = kind == LASER ? laserLight : PPC_LIGHT;
+        float size = BoardGeometry.width() * .35f;
+        light(finish.cpy(), .8f * alpha, color, size);
+        light(start.cpy(), .35f * alpha, color, size * .6f);
     }
 
     /** A short stream of growing, rolling flame packets; all positions come from the shared attack clock. */
@@ -740,6 +785,8 @@ final class GpuAttackEffects implements Disposable {
         flameSide.set(direction).crs(Vector3.Z).nor();
         if (flameSide.isZero()) { flameSide.set(Vector3.X); }
         flameUp.set(flameSide).crs(direction).nor();
+        float burning = MathUtils.clamp(time, 0, 1) * fade;
+        light(start.cpy().mulAdd(direction, .7f * Math.min(1, time)), .9f * burning, FLAMER_LIGHT, size * 10);
         // These wisps are transient exhaust; the game alone decides whether terrain actually catches fire.
         for (int puff = 0; puff < 6; puff++) {
             float age = time - .7f - puff * .12f;

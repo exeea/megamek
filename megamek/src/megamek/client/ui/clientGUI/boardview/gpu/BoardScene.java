@@ -925,10 +925,16 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
      * Target type is captured with the visible event, independently of its chosen model or sprite. An attacker off the
      * map (off-board artillery) has no place on the board to show, so the camera frames only its target.
      */
+    /** {@code attackerClan}: the attacker's tech base, which decides a mixed-tech weapon's look (laser colour). */
     record Combat(megamek.common.ResolvedAttack result, Unit attacker, Unit target, Waypoint destination,
-          boolean conventionalInfantryTarget, boolean attackerOffBoard) implements Animation {
+          boolean conventionalInfantryTarget, boolean attackerOffBoard, boolean attackerClan) implements Animation {
         Combat(megamek.common.ResolvedAttack result, Unit attacker, Unit target, Waypoint destination) {
             this(result, attacker, target, destination, false, false);
+        }
+
+        Combat(megamek.common.ResolvedAttack result, Unit attacker, Unit target, Waypoint destination,
+              boolean conventionalInfantryTarget, boolean attackerOffBoard) {
+            this(result, attacker, target, destination, conventionalInfantryTarget, attackerOffBoard, false);
         }
 
         Combat(megamek.common.ResolvedAttack result, Unit attacker, Unit target, Waypoint destination,

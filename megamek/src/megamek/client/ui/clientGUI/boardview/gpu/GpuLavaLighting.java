@@ -20,7 +20,7 @@ import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
 
 /**
- * Shared local light: installed lava, burning hexes and luminous fungi, and each frame's fireballs and muzzle blasts.
+ * Shared local light: installed lava, burning hexes and luminous fungi, and each frame's fireballs and weapon fire.
  * Every visible emitter is binned on the board plane: each grid cell lists the emitters whose reach overlaps it, so a
  * lit pixel evaluates only those (lava-lighting.glsl).
  */
@@ -61,7 +61,7 @@ final class GpuLavaLighting extends Attribute implements Disposable {
     /** Chunk installation replaces the whole derived prop-light snapshot together with its rendered meshes. */
     void setFungus(List<Source> sources) { fungus = List.copyOf(sources); }
 
-    /** Each frame's fireballs and muzzle blasts (GpuAttackEffects.lights); empty when nothing burns. */
+    /** Each frame's fireballs and weapon fire (GpuAttackEffects.lights); empty when nothing burns. */
     void setEffects(List<Source> sources) { effects = sources; }
 
     /** Derive emitters from the installed snapshot; visibility comes from the same client's captured FoV. */

@@ -2264,7 +2264,7 @@ final class GpuTerrain implements Disposable {
         }
         if (changedFlow) {
             progress.begin("currents", 1);
-            Map<Coords, BoardFlow.Current> next = BoardFlow.calculate(scene);
+            Map<Coords, BoardFlow.Current> next = GpuWaterShader.surfaceCurrents(scene, BoardFlow.calculate(scene));
             // An outlet edit can reverse a distant flat reach, beyond the edited hex's immediate neighbors.
             Set<Coords> affected = new HashSet<>(previousCurrents.keySet());
             affected.addAll(next.keySet());
@@ -6857,7 +6857,7 @@ final class GpuTerrain implements Disposable {
 
     private GpuAssets.MaterialArrays terrainLayers() { return assets.sculptArray(SCULPT_LAYERS); }
 
-    /** This frame's fireballs and muzzle blasts as local lights, binned with the board's own emitters. */
+    /** This frame's fireballs and weapon fire as local lights, binned with the board's own emitters. */
     void setEffectLights(List<GpuLavaLighting.Source> lights) { lavaLighting.setEffects(lights); }
 
     private void applyLight() {

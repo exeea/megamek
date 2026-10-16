@@ -1,5 +1,5 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-// Finite emitters: lava, burning hexes and fungi of the installed board, and each frame's fireballs and muzzle blasts.
+// Finite emitters: lava, burning hexes and fungi of the installed board, and each frame's fireballs and weapon fire.
 // They approximate area illumination, not obstacle shadows. GpuLavaLighting bins them on the board plane; a pixel
 // evaluates only the emitters listed for its grid cell.
 uniform sampler2D u_lavaLights; // RGBA32F, 1024 texels a row: per cell (first entry texel, count), then per entry
