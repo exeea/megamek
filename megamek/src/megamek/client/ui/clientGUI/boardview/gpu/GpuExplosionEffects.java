@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
@@ -21,6 +22,8 @@ final class GpuExplosionEffects implements Disposable {
     static final int CAPACITY = 512;
     private static final Comparator<Volume> BACK_TO_FRONT = Comparator.comparingDouble((Volume v) -> v.depth).reversed();
     private final Volume[] volumes = new Volume[CAPACITY];
+    /** A fireball's light: hotter than a burning hex's. */
+    private static final Vector3 FIRE = new Vector3(2.6f, 1.15f, .35f);
     private final Vector3 burstCenter = new Vector3();
     private final Vector3 axisScratch = new Vector3();
     private final Color light = new Color(Color.WHITE);
@@ -56,6 +59,19 @@ final class GpuExplosionEffects implements Disposable {
     }
 
     void begin() { count = 0; }
+
+    /**
+     * This frame's burning volumes as local lights (GpuLavaLighting): a fireball lights the ground around it, up to
+     * four of its radii away, as long as its fire lasts and fades.
+     */
+    void lights(List<GpuLavaLighting.Source> into) {
+        for (int i = 0; i < count; i++) {
+            Volume volume = volumes[i];
+            float glow = volume.fire * volume.alpha * (1 - volume.age);
+            if (glow < .05f) { continue; }
+            into.add(new GpuLavaLighting.Source(-1, volume.center.cpy(), .8f * glow, FIRE, 2 * volume.radius));
+        }
+    }
     int size() { return count; }
     void setSmokeLight(Color color) { light.set(color); }
     void setLightDirection(Vector3 direction) { sun.set(direction).scl(-1).nor(); }

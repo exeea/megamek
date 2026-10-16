@@ -20,8 +20,9 @@ import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
 
 /**
- * Shared spill light from installed lava and luminous fungi. Every visible emitter is binned on the board plane: each
- * grid cell lists the emitters whose reach overlaps it, so a lit pixel evaluates only those (lava-lighting.glsl).
+ * Shared local light: installed lava, burning hexes and luminous fungi, and each frame's fireballs and muzzle blasts.
+ * Every visible emitter is binned on the board plane: each grid cell lists the emitters whose reach overlaps it, so a
+ * lit pixel evaluates only those (lava-lighting.glsl).
  */
 final class GpuLavaLighting extends Attribute implements Disposable {
     static final long TYPE = register("boardLavaLighting");
@@ -29,11 +30,16 @@ final class GpuLavaLighting extends Attribute implements Disposable {
     private static final int ROW = 1024;
     /** Integers stored as floats stay exact below 2^24, which is also 16384 rows, the common maximum texture height. */
     private static final int MAX_TEXELS = 1 << 24;
+    /** An emitter; {@code tile} indexes the scene's tiles for the field-of-view mask, or is negative for an effect. */
     record Source(int tile, Vector3 position, float power, Vector3 color, float size) { }
+    /** A burning hex's flames: warmer and dimmer than molten lava, reaching about two hexes. */
+    private static final Vector3 FIRE = new Vector3(2f, .8f, .22f);
     private final GpuAssets assets; // Borrowed from the same owner as the rendered material.
     private List<BoardScene.Tile> tiles;
     private List<Source> sources = List.of();
     private List<Source> fungus = List.of();
+    /** This frame's effect lights, replaced whole by the render thread; shown wherever the effect is drawn. */
+    private List<Source> effects = List.of();
     private float width;
     private float level;
     // The binned snapshot: replaced whole on the render thread when the visible emitters change, never mutated.
@@ -55,6 +61,9 @@ final class GpuLavaLighting extends Attribute implements Disposable {
     /** Chunk installation replaces the whole derived prop-light snapshot together with its rendered meshes. */
     void setFungus(List<Source> sources) { fungus = List.copyOf(sources); }
 
+    /** Each frame's fireballs and muzzle blasts (GpuAttackEffects.lights); empty when nothing burns. */
+    void setEffects(List<Source> sources) { effects = sources; }
+
     /** Derive emitters from the installed snapshot; visibility comes from the same client's captured FoV. */
     void update(BoardScene scene) {
         update(scene, true);
@@ -69,6 +78,11 @@ final class GpuLavaLighting extends Attribute implements Disposable {
             var next = new ArrayList<Source>();
             for (int i = 0; i < tiles.size(); i++) {
                 var tile = tiles.get(i);
+                if (tile.fireSmoke().fire() > 0) {
+                    var flames = BoardGeometry.center(tile.coords(), tile.elevation());
+                    flames.z += BoardRelief.metres(4);
+                    next.add(new Source(i, flames, .2f + .08f * tile.fireSmoke().fire(), FIRE, width * .9f));
+                }
                 if (!tile.liquid().volcanic()) continue;
                 var point = BoardGeometry.center(tile.coords(), tile.elevation());
                 boolean molten = tile.liquid().molten();
@@ -87,9 +101,11 @@ final class GpuLavaLighting extends Attribute implements Disposable {
         var visible = new ArrayList<Source>();
         var fov = scene.fieldOfView();
         boolean masked = fov.width() == scene.width() && fov.height() == scene.height() && fov.active();
-        for (List<Source> group : List.of(sources, showFungus ? fungus : List.<Source>of())) {
+        for (List<Source> group : List.of(sources, showFungus ? fungus : List.<Source>of(), effects)) {
             for (Source source : group) {
-                if (!masked || fov.hexes().get(source.tile()).hasLineOfSight()) { visible.add(source); }
+                if (!masked || source.tile() < 0 || fov.hexes().get(source.tile()).hasLineOfSight()) {
+                    visible.add(source);
+                }
             }
         }
         bin(visible);
@@ -249,6 +265,7 @@ final class GpuLavaLighting extends Attribute implements Disposable {
         copy.tiles = tiles;
         copy.sources = sources;
         copy.fungus = fungus;
+        copy.effects = effects;
         copy.width = width;
         copy.level = level;
         copy.binned = binned;

@@ -866,6 +866,7 @@ class GpuBattleView extends ApplicationAdapter {
             renderStage("opaque terrain");
             wireframe.fill(boardCamera.camera, terrain);
         } else {
+            terrain.setEffectLights(attackEffects.lights());
             terrain.render(boardCamera.camera, () -> renderStage("depth pre-pass"), () -> {
                 renderStage("ambient occlusion");
                 ambientOcclusion.render(boardCamera.camera, terrain, atmosphere.depthTexture());

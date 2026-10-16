@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +58,10 @@ final class GpuAttackEffects implements Disposable {
     private Map<String, ModelInstance> instances = Map.of();
     private final GpuMissileEffects missiles = new GpuMissileEffects();
     private final GpuExplosionEffects explosions = new GpuExplosionEffects();
+    /** The brightest effect lights a frame hands the terrain: binning stays cheap under the heaviest barrage. */
+    static final int MAX_LIGHTS = 64;
+    private static final Vector3 MUZZLE_FIRE = new Vector3(2.4f, 1.4f, .6f);
+    private final List<GpuLavaLighting.Source> muzzleLights = new ArrayList<>();
     private final GpuArtilleryBlast artilleryBlasts = new GpuArtilleryBlast();
     private Map<Coords, Integer> minefields = Map.of();
     private Function<Ray, BoardGeometry.Hit> minedLandscape = ray -> null;
@@ -353,6 +359,21 @@ final class GpuAttackEffects implements Disposable {
     Map<Coords, Vector3> starShellOpenings() { return artilleryBlasts.starShellOpenings(); }
 
     /** Scorch marks where artillery debris has just landed in the rings around its target hex. */
+    /**
+     * The last drawn frame's fireballs and cannon muzzle blasts as local lights, the brightest {@link #MAX_LIGHTS}: the
+     * terrain draws before the effects, so its light trails the effects by one frame.
+     */
+    List<GpuLavaLighting.Source> lights() {
+        List<GpuLavaLighting.Source> lights = new ArrayList<>(muzzleLights);
+        explosions.lights(lights);
+        if (lights.size() > MAX_LIGHTS) {
+            lights.sort(Comparator.comparingDouble((GpuLavaLighting.Source light) -> light.power() * light.size()
+                  * light.size()).reversed());
+            lights = lights.subList(0, MAX_LIGHTS);
+        }
+        return List.copyOf(lights);
+    }
+
     void artilleryGroundMarks(Consumer<GpuGroundDamage.Impact> receiver) {
         artilleryBlasts.groundMarks(receiver);
     }
@@ -392,6 +413,7 @@ final class GpuAttackEffects implements Disposable {
         interceptionBeams.clear();
         airbursts = 0;
         explosions.begin();
+        muzzleLights.clear();
         missiles.begin();
         flames.begin();
         beams.begin();
@@ -619,6 +641,8 @@ final class GpuAttackEffects implements Disposable {
         if (flameSide.isZero()) { flameSide.set(Vector3.X); }
         flameUp.set(flameSide).crs(forward).nor();
         time = age / MUZZLE_BLAST_SECONDS;
+        muzzleLights.add(new GpuLavaLighting.Source(-1, muzzle.cpy().mulAdd(forward, size), 1.2f * (1 - time * time),
+              MUZZLE_FIRE, size * 8));
         for (int puff = 0; puff < 7; puff++) {
             float angle = seed + puff * 2.399963f;
             point.set(muzzle).mulAdd(forward, size * (.5f + time * (3 + puff * .6f)))

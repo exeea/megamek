@@ -6857,6 +6857,9 @@ final class GpuTerrain implements Disposable {
 
     private GpuAssets.MaterialArrays terrainLayers() { return assets.sculptArray(SCULPT_LAYERS); }
 
+    /** This frame's fireballs and muzzle blasts as local lights, binned with the board's own emitters. */
+    void setEffectLights(List<GpuLavaLighting.Source> lights) { lavaLighting.setEffects(lights); }
+
     private void applyLight() {
         // Specular anti-aliasing is compiled in: a switch reaches the programs as a lighting change.
         GpuEnvironmentLighting.applyAntialiasing(environment);

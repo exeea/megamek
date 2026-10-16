@@ -69,7 +69,8 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     // The sky's ambient occlusion, with the screen-space occlusion of the opaque scene (ambient-occlusion.glsl): once,
     // for every surface, on the sky alone. Local lights and the sun keep their own visibility.
     float occlusion = s.occlusion * screenAmbientOcclusion();
-    vec3 localLight = lavaIrradiance(v_cloudPosition, normal);
+    vec3 localSpecular;
+    vec3 localLight = lavaIrradiance(v_cloudPosition, normal, view, roughness, f0, localSpecular);
     // Sky from above; from below, light reflected by the sunlit ground: warm in the desert, white on snow.
     vec3 sky = skyLight(normal, s.bounce) * s.front;
     bool tissue = s.back != vec3(0.0);
@@ -104,6 +105,7 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     albedo *= ambient + direct;
     albedo += sheen;
     // The hot share is matte, matching the dedicated crust and lava programs.
+    albedo += localSpecular * multiscatter * s.cavity * (1.0 - s.heat);
     albedo += environmentSpecular(normal, view, roughness, f0, environmentGround(s.bounce),
           surfaceAmbient(vec3(0.0, 0.0, 1.0))) * multiscatter * s.specularOcclusion * s.cavity * (1.0 - s.heat);
     if (submerged > 0.0) {
