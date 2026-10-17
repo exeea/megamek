@@ -25,6 +25,7 @@ import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponType;
 import megamek.common.weapons.handlers.AreaEffectHelper;
 import megamek.common.weapons.handlers.DamageFalloff;
+import megamek.common.weapons.handlers.NukeStats;
 import megamek.logging.MMLogger;
 
 /**
@@ -50,10 +51,16 @@ final class GpuArtilleryBlast {
      * without going off, a homing round with no TAG to follow; FUEL_AIR for a fuel-air round; STAR_SHELL for an
      * illumination round, bursting high over its target to hang its flare.
      */
-    enum Style { CROWN, MUSHROOM, FIREBALL, CLUSTER, MINES, DUD, FUEL_AIR, STAR_SHELL }
+    enum Style { CROWN, MUSHROOM, FIREBALL, CLUSTER, MINES, DUD, FUEL_AIR, STAR_SHELL, NUCLEAR }
 
     /** How long the slowest layer of a blast (its smoke) lasts. */
     static final float SECONDS = 5.5f;
+    /** A nuclear round's blast lasts longer: its mushroom keeps rising after the shock front has crossed the board. */
+    static final float NUCLEAR_SECONDS = 18;
+    /** The shock front crosses the blast area in this time, slowing as it spreads. */
+    static final float SHOCK_SECONDS = 2.4f;
+    /** The nuclear type an artillery round's Davy Crockett-M warhead detonates as (doNuclearExplosion). */
+    static final int DAVY_CROCKETT_TYPE = 1;
     /** At most this many blasts draw at once. A heavier barrage reuses the oldest blast's slot. */
     static final int MAX_BLASTS = 6;
     /** At most this many pieces of debris per blast: every hex of four rings, a Cruise Missile/120's R4. */
@@ -228,6 +235,10 @@ final class GpuArtilleryBlast {
         final java.util.BitSet landed = new java.util.BitSet();
         int marks;
         boolean marksReported;
+        /** A nuclear round's stats (its blast area, crater), null for every other round. */
+        NukeStats nuke;
+        /** Its scorch has been handed to the terrain (scorches). */
+        boolean scorched;
 
         Blast(Vector3 ground, @Nullable Vector3 opening, @Nullable ResolvedAttack.Shot profile,
               @Nullable UnitAttack attack, int key, AreaEffectHelper.FuelAirStrength fuelAirStrength) {
@@ -250,10 +261,11 @@ final class GpuArtilleryBlast {
             pieces = switch (style) {
                 case MINES -> mines(drawSeed, minesFor(minefieldDensity(weaponName(attack), profile)));
                 case CLUSTER -> bomblets(area, key);
-                case DUD, STAR_SHELL -> List.of();
+                case DUD, STAR_SHELL, NUCLEAR -> List.of();
                 case FUEL_AIR -> fuelAirHexes(targetHex, area.hexRadius());
                 default -> debrisPieces(area.hexRadius(), key);
             };
+            nuke = style == Style.NUCLEAR ? AreaEffectHelper.getNukeStats(DAVY_CROCKETT_TYPE) : null;
             Vector3 hexCentre = targetHex == null ? ground : BoardGeometry.center(targetHex, 0);
             heading = attack == null ? DEFAULT_HEADING
                   : heading(BoardGeometry.center(attack.event.attacker().location().coords(), 0), hexCentre);
@@ -357,7 +369,7 @@ final class GpuArtilleryBlast {
     /** The shape of the blast: a nuclear round always mushrooms and fuel-air or anti-air rounds burn as a fireball. */
     static Style style(@Nullable ResolvedAttack.Shot profile, int seed) {
         Set<String> munitions = profile == null ? Set.of() : profile.munitions();
-        if (munitions.contains("M_DAVY_CROCKETT_M")) { return Style.MUSHROOM; }
+        if (munitions.contains("M_DAVY_CROCKETT_M")) { return Style.NUCLEAR; }
         if (munitions.contains("M_FAE")) { return Style.FUEL_AIR; }
         if (munitions.contains("M_ADA")) { return Style.FIREBALL; }
         // Crowns are what a shell landing in earth mostly throws up; the other two keep a barrage varied.
@@ -662,7 +674,54 @@ final class GpuArtilleryBlast {
     /** Ages every blast and retires those whose smoke has cleared. */
     void advance(float seconds) {
         for (Blast blast : blasts) { blast.seconds += seconds; }
-        blasts.removeIf(blast -> blast.seconds >= SECONDS);
+        blasts.removeIf(blast -> blast.seconds >= (blast.nuke != null ? NUCLEAR_SECONDS : SECONDS));
+    }
+
+    /**
+     * Hands each nuclear blast's scorch to the terrain once, as it goes off: its blast area is the round's Base Damage
+     * over its Degradation in hexes, where the damage reaches nothing, and its crater twice its Crater Depth (the rules'
+     * one level less every two hexes).
+     */
+    void scorches(Consumer<GpuGroundDamage.Scorch> receiver) {
+        for (Blast blast : blasts) {
+            if (blast.nuke == null || blast.scorched || blast.seconds < 0) { continue; }
+            blast.scorched = true;
+            receiver.accept(new GpuGroundDamage.Scorch(blast.ground.cpy(), nuclearRadius(blast.nuke),
+                  2 * blast.nuke.craterDepth * BoardGeometry.height()));
+        }
+    }
+
+    /**
+     * A nuclear blast's flash on the whole view (GpuAtmosphere.setFlash): {@code intensity} in display-linear light,
+     * {@code warmth} from the white-hot instant (0) to the orange fireball (1), centred on the fireball.
+     */
+    record Flash(float intensity, float warmth, Vector3 centre) {
+        static final Flash NONE = new Flash(0, 0, Vector3.Zero);
+    }
+
+    /**
+     * The brightest nuclear flash now: blinding within a twentieth of a second, most of it gone in a second as the
+     * fireball takes over, a warm afterglow fading over the next few.
+     */
+    Flash flash() {
+        Flash brightest = Flash.NONE;
+        for (Blast blast : blasts) {
+            float seconds = blast.seconds;
+            if (blast.nuke == null || seconds < 0 || seconds > 6) { continue; }
+            float rise = Math.min(1, seconds / .05f), after = Math.max(0, seconds - .05f);
+            float intensity = 6 * rise * (.8f * (float) Math.exp(-after / .18f) + .2f * (float) Math.exp(-after / 1.2f));
+            if (intensity > brightest.intensity()) {
+                float radius = nuclearRadius(blast.nuke);
+                brightest = new Flash(intensity, MathUtils.clamp(seconds / 1.2f, 0, 1),
+                      blast.ground.cpy().add(0, 0, radius * .1f));
+            }
+        }
+        return brightest;
+    }
+
+    /** A nuclear blast area's radius in world units: where its damage, falling by the Degradation per hex, ends. */
+    static float nuclearRadius(NukeStats nuke) {
+        return (float) nuke.baseDamage / Math.max(1, nuke.degradation) * BoardGeometry.height();
     }
 
     int size() { return blasts.size(); }
@@ -672,6 +731,10 @@ final class GpuArtilleryBlast {
     /** Queues the volumes of every live blast. */
     void emit(GpuExplosionEffects explosions) {
         for (Blast blast : blasts) {
+            if (blast.nuke != null) {
+                nuclear(explosions, blast.ground, nuclearRadius(blast.nuke), blast.seconds, blast.drawSeed);
+                continue;
+            }
             var scatter = new Scatter(blast.pieces, blast.landings, blast.heading, blast.opening, blast.intensity);
             emit(explosions, blast.ground, blast.size, scatter, blast.style, blast.seconds, blast.drawSeed);
         }
@@ -716,6 +779,10 @@ final class GpuArtilleryBlast {
 
     private void emit(GpuExplosionEffects explosions, Vector3 ground, float size, Scatter scatter, Style style,
           float seconds, int seed) {
+        if (style == Style.NUCLEAR) {
+            nuclear(explosions, ground, nuclearRadius(AreaEffectHelper.getNukeStats(DAVY_CROCKETT_TYPE)), seconds, seed);
+            return;
+        }
         if (seconds < 0 || seconds >= SECONDS) { return; }
         if (style == Style.MINES) {
             minefield(explosions, ground, scatter, seconds, seed);
@@ -1107,6 +1174,48 @@ final class GpuArtilleryBlast {
             explosions.add(point, size * .24f, footAge, 1, fadeOut(footAge, .6f), seed + 7, BRIGHT_FIRE, Vector3.Zero);
         }
         skirt(explosions, ground, size * .75f, seconds, seed);
+    }
+
+    /**
+     * A nuclear blast, every size of it scaled to its blast area's {@code radius}: a blinding fireball that swells and
+     * rises into the mushroom (the artillery's own, its clock slowed to the long rise), the shock front racing out over
+     * the whole blast area in its first seconds with a ring of thrown dust, a condensation ring hanging around the stem
+     * as the front passes, and the base surge rolling out beneath. The fireball lights the ground as it burns
+     * (GpuExplosionEffects.lights).
+     */
+    private void nuclear(GpuExplosionEffects explosions, Vector3 ground, float radius, float seconds, int seed) {
+        if (seconds < 0 || seconds >= NUCLEAR_SECONDS) { return; }
+        float flash = seconds / 1.8f;
+        if (flash < 1) {
+            float swell = 1 - (float) Math.exp(-seconds * 5);
+            point.set(ground).add(0, 0, radius * (.06f + .1f * flash));
+            explosions.add(point, radius * (.05f + .13f * swell), flash * .5f, 1, fadeOut(flash, .5f), seed,
+                  BRIGHT_FIRE, Vector3.Zero);
+            // Its white-hot core, the blinding first instant.
+            explosions.add(point, radius * (.03f + .07f * swell), flash * .2f, 1, fadeOut(flash, .25f), seed + 3,
+                  BRIGHT_FIRE, Vector3.Zero);
+        }
+        mushroom(explosions, ground, radius * .42f, seconds * SECONDS / NUCLEAR_SECONDS, seed);
+        float front = seconds / SHOCK_SECONDS;
+        if (front < 1) {
+            // The front slows as it spreads; its dust thins toward the edge of the blast area.
+            float reach = radius * (1 - (1 - front) * (1 - front));
+            int puffs = 96;
+            for (int puff = 0; puff < puffs; puff++) {
+                float bearing = (puff + random(seed, puff + 300)) * MathUtils.PI2 / puffs;
+                // The dust it throws up rolls into a wall that rises behind it.
+                point.set(ground).add(MathUtils.cos(bearing) * reach, MathUtils.sin(bearing) * reach,
+                      radius * .02f * front);
+                explosions.addFlat(point, radius * (.045f + .05f * front), front, 0, .5f * fadeOut(front, .35f),
+                      seed + puff * 7, EARTH, .5f);
+            }
+        }
+        float ring = (seconds - .3f) / 2.6f;
+        if (ring > 0 && ring < 1) {
+            point.set(ground).add(0, 0, radius * .3f);
+            explosions.addFlat(point, radius * (.15f + .2f * ring), ring, 0, .5f * MathUtils.sin(ring * MathUtils.PI),
+                  seed + 41, FUEL_HAZE, .1f);
+        }
     }
 
     /** A bright, billowing fireball that lingers before going dark, over a base of black smoke. */

@@ -133,6 +133,9 @@ final class GpuAtmosphere implements Disposable {
     private final Mesh quad;
     private ShaderProgram fogShader;
     private ShaderProgram compositeShader;
+    /** A nuclear flash for the next composite (setFlash); NONE without one. */
+    private GpuArtilleryBlast.Flash flash = GpuArtilleryBlast.Flash.NONE;
+    private final Vector3 flashScreen = new Vector3();
     private FrameBuffer sceneColor;
     /** Disposable presentation history: R is binary ink, G says an in-viewport sample initialized it. */
     private FrameBuffer contrastRead;
@@ -543,6 +546,9 @@ final class GpuAtmosphere implements Disposable {
     }
 
     /** Composite color and opaque depth together; the scene's geometry is submitted only once. */
+    /** A nuclear flash over the next composited view: a whiteout that glares most around its fireball. */
+    void setFlash(GpuArtilleryBlast.Flash next) { flash = next; }
+
     void end(Camera camera, GpuTerrain terrain, BoardScene board, int bottom) {
         end(camera, terrain, board, bottom, null);
     }
@@ -593,6 +599,15 @@ final class GpuAtmosphere implements Disposable {
             fieldOfView.bind(compositeShader, camera);
         }
         compositeShader.setUniformi("u_scene", 0);
+        // White-hot at once, warming to the fireball's orange; its glare stays round whatever the view's shape.
+        float warmth = flash.warmth();
+        compositeShader.setUniformf("u_flash", flash.intensity(), flash.intensity() * (.97f - .37f * warmth),
+              flash.intensity() * (.9f - .62f * warmth), 7);
+        camera.project(flashScreen.set(flash.centre()), 0, 0, camera.viewportWidth, camera.viewportHeight);
+        boolean ahead = camera.direction.dot(flash.centre().x - camera.position.x, flash.centre().y - camera.position.y,
+              flash.centre().z - camera.position.z) > 0;
+        compositeShader.setUniformf("u_flashCentre", ahead ? flashScreen.x / camera.viewportWidth : -10,
+              ahead ? flashScreen.y / camera.viewportHeight : -10, camera.viewportWidth / camera.viewportHeight);
         compositeShader.setUniformi("u_depth", 1);
         compositeShader.setUniformf("u_sceneScaled", resampled ? 1 : 0);
         Texture water = hasScattering() || settings.effects().sand() > 0 ? terrain.waterDepth() : null;

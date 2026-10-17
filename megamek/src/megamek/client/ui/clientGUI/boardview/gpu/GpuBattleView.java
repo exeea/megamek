@@ -825,6 +825,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (!terrain.columns() && !boardCamera.tactical()) {
             attackEffects.groundImpacts(completedAttacks, impact -> terrain.impact(scene, impact));
             attackEffects.artilleryGroundMarks(impact -> terrain.impact(scene, impact));
+            attackEffects.artilleryScorches(scorch -> terrain.scorch(scene, scorch));
         }
         unitBounds.begin();
         List<ModelInstance> units = new ArrayList<>(unitInstances.values());
@@ -916,6 +917,7 @@ class GpuBattleView extends ApplicationAdapter {
         renderStage("weather particles");
         atmosphere.renderWeather(boardCamera.camera, scene);
         renderStage("atmosphere composite");
+        atmosphere.setFlash(attackEffects.nuclearFlash());
         atmosphere.end(boardCamera.camera, terrain, scene, 0, fieldOfView, !wireframeView);
         if (!boardCamera.tactical()) { atmosphere.prepareContrast(boardCamera.camera, scene, 0); }
         if (wireframeView) { wireframe.lines(boardCamera.camera, terrain); }

@@ -331,6 +331,7 @@ final class GpuTerrain implements Disposable {
                 private final int groundDamageUniform = register("u_groundDamage");
                 private final int groundDamageSizeUniform = register("u_groundDamageSize");
                 private final int groundDamageGridUniform = register("u_groundDamageGrid");
+                private final int groundScorchUniform = register("u_groundScorch");
                 private final int rainScaleUniform = register("u_rainScale");
                 private final int rainTimeUniform = register("u_rainTime");
                 private final int rippleDetailUniform = register("u_rippleDetail");
@@ -444,10 +445,12 @@ final class GpuTerrain implements Disposable {
                     set(terrainWearUniform, clay ? 0f : terrainWear);
                     set(elevationGradingUniform, !clay && elevationGrading ? 1f : 0f);
                     // The Tactical View shows no craters or ground damage (setFluffHidden).
-                    boolean damaged = combatScars && !clay && !fluffHidden && groundDamage.marks() > 0
-                          && groundDamage.texture() != null;
+                    boolean damaged = combatScars && !clay && !fluffHidden
+                          && (groundDamage.marks() > 0 || groundDamage.scorched()) && groundDamage.texture() != null;
                     set(groundDamageSizeUniform, damaged ? groundDamage.width() : 0, damaged ? groundDamage.height() : 0);
                     set(groundDamageGridUniform, groundDamage.tileWorldSize(), (float) groundDamage.tileColumns(), (float) groundDamage.tileRows());
+                    boolean scorched = damaged && groundDamage.scorched();
+                    set(groundScorchUniform, scorched ? 1f : 0f, scorched ? groundDamage.scorchHeat() : 0f);
                     set(sculptMetreUniform, BoardRelief.metres(1));
                     set(waterLineUniform, BoardGeometry.hexScale());
                     set(waterExposureMapUniform, waterExposure.mapping[0], waterExposure.mapping[1],
@@ -2155,6 +2158,12 @@ final class GpuTerrain implements Disposable {
     static boolean batchableSculpt(Material material) {
         return material.getMask() == (TextureAttribute.Diffuse | IntAttribute.CullFace | Sculpt.TYPE
               | Ground.TYPE | SculptTiles.TYPE | SculptLayers.TYPE);
+    }
+
+    /** A nuclear blast's scorch over its blast area (GpuGroundDamage.scorch). */
+    void scorch(BoardScene scene, GpuGroundDamage.Scorch scorch) {
+        groundDamage.update(scene);
+        groundDamage.scorch(scorch);
     }
 
     void impact(BoardScene scene, GpuGroundDamage.Impact impact) {

@@ -400,6 +400,14 @@ final class GpuAttackEffects implements Disposable {
         artilleryBlasts.groundMarks(receiver);
     }
 
+    /** The brightest nuclear flash now, for the whole view. */
+    GpuArtilleryBlast.Flash nuclearFlash() { return artilleryBlasts.flash(); }
+
+    /** Each nuclear blast's scorch over its blast area, once, as it goes off. */
+    void artilleryScorches(Consumer<GpuGroundDamage.Scorch> receiver) {
+        artilleryBlasts.scorches(receiver);
+    }
+
     void setSmokeLight(Color light) {
         flames.setSmokeLight(light);
         missiles.setSmokeLight(light);

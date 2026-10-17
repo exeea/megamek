@@ -52,7 +52,7 @@ class GpuArtilleryBlastTest {
 
     @Test
     void specialWarheadsChooseTheirShape() {
-        assertEquals(GpuArtilleryBlast.Style.MUSHROOM, GpuArtilleryBlast.style(shot(true, "M_DAVY_CROCKETT_M"), 1));
+        assertEquals(GpuArtilleryBlast.Style.NUCLEAR, GpuArtilleryBlast.style(shot(true, "M_DAVY_CROCKETT_M"), 1));
         assertEquals(GpuArtilleryBlast.Style.FUEL_AIR, GpuArtilleryBlast.style(shot(true, "M_FAE"), 1));
         assertEquals(GpuArtilleryBlast.Style.FIREBALL, GpuArtilleryBlast.style(shot(true, "M_ADA"), 1));
     }

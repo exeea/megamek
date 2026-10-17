@@ -58,6 +58,15 @@ vec3 thinTransmission(vec3 albedo, float share) {
 // Reflected and emitted radiance. caustic and submerged describe water above the surface: the light its waves focus
 // onto it and how many levels of water lie over it (water-optics.glsl).
 vec3 shadeSurface(Surface s, float caustic, float submerged) {
+#ifdef GROUND_DAMAGE_TILE
+    // A nuclear blast's scorch (terrain-damage-mask.glsl), on every terrain surface lit here; models never read it.
+    float scorch = groundScorchAt(v_cloudPosition.xy) * (1.0 - submerged);
+    if (scorch > 0.0) {
+        scorchGround(scorch, s.albedo, s.roughness);
+        // The fused crust still glows after the blast, dimming as it cools.
+        s.emission += vec3(1.1, .28, .06) * scorchGlow(v_cloudPosition.xy, scorch, u_groundScorch.y);
+    }
+#endif
     vec3 view = -viewDirection();
     vec3 normal = s.normal;
     // The water coat, the metallic share and specular antialiasing (surfaceVariance) set every lobe's roughness and

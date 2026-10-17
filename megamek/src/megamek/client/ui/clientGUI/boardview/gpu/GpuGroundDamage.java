@@ -25,6 +25,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.TextureArrayData;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
@@ -197,6 +198,10 @@ final class GpuGroundDamage implements Disposable {
     private float tileWorldSize;
     private boolean directoryDirty;
     private int marks;
+    private boolean scorched;
+    private long scorchedAt;
+    /** The fused crust at Ground Zero cools over about this many seconds. */
+    static final float HEAT_SECONDS = 25;
     private int nextSurfaceKey = -1;
 
     /** CPU tiles are allocated only around impacts; their GPU layers have the same fixed ground scale. */
@@ -236,6 +241,53 @@ final class GpuGroundDamage implements Disposable {
     float width() { return worldWidth; }
     float height() { return worldHeight; }
     int marks() { return marks; }
+
+    /** Whether a nuclear blast has scorched this board: the terrain then reads the scorch even without a mark. */
+    boolean scorched() { return scorched; }
+
+    /** Ground Zero's glow after the last blast: 1 as it goes off, a third left after {@link #HEAT_SECONDS}. */
+    float scorchHeat() {
+        return scorched ? (float) Math.exp(-(System.nanoTime() - scorchedAt) / 1e9 / HEAT_SECONDS) : 0;
+    }
+
+    /**
+     * A nuclear blast's scorch (GpuArtilleryBlast): Ground Zero at {@code centre}, the blast area's radius and the
+     * crater's, in world units.
+     */
+    record Scorch(Vector3 centre, float radius, float crater) { }
+
+    /**
+     * Scorches every 8 m tile within the blast area: each takes the blast's damage there as a share of Ground Zero's,
+     * which falls off linearly to nothing at the edge as the rules' damage does, and the crater takes all of it. The
+     * share lives in the directory texels' blue byte, which the terrain reads with the scars (terrain-damage-mask.glsl);
+     * a later blast keeps the stronger scorch. It is written once, so even the largest blast costs one pass over its
+     * tiles and one directory upload, and nothing per frame.
+     */
+    void scorch(Scorch blast) {
+        if (directory.isEmpty() || blast.radius() <= 0) { return; }
+        float radius = blast.radius(), centreX = blast.centre().x, centreY = -blast.centre().y;
+        int firstX = Math.max(0, (int) Math.floor((centreX - radius) / tileWorldSize));
+        int lastX = Math.min(tileColumns - 1, (int) Math.floor((centreX + radius) / tileWorldSize));
+        int firstY = Math.max(0, (int) Math.floor((centreY - radius) / tileWorldSize));
+        int lastY = Math.min(tileRows - 1, (int) Math.floor((centreY + radius) / tileWorldSize));
+        int pageSize = TILE_SIZE * TILE_SIZE;
+        for (int y = firstY; y <= lastY; y++) {
+            for (int x = firstX; x <= lastX; x++) {
+                float distance = Vector2.len((x + .5f) * tileWorldSize - centreX, (y + .5f) * tileWorldSize - centreY);
+                if (distance >= radius) { continue; }
+                int value = Math.round((distance <= blast.crater() ? 1 : 1 - distance / radius) * 255);
+                int key = y * tileColumns + x;
+                Pixmap page = directory.get(key / pageSize);
+                int address = key % pageSize;
+                int pixel = page.getPixel(address % TILE_SIZE, address / TILE_SIZE);
+                if ((pixel >>> 8 & 255) >= value) { continue; }
+                page.drawPixel(address % TILE_SIZE, address / TILE_SIZE, pixel & 0xFFFF00FF | value << 8);
+            }
+        }
+        scorched = true;
+        scorchedAt = System.nanoTime();
+        directoryDirty = true;
+    }
 
     /** New boards clear history; camera changes, chunk rebuilds and detail changes do not. */
     void update(BoardScene scene) {
@@ -479,8 +531,11 @@ final class GpuGroundDamage implements Disposable {
                             tiles.put(key, tile);
                             int address = key % (TILE_SIZE * TILE_SIZE);
                             int layer = tile.layer();
-                            directory.get(key / (TILE_SIZE * TILE_SIZE)).drawPixel(address % TILE_SIZE, address / TILE_SIZE,
-                                  (layer & 255) << 24 | (layer >>> 8) << 16);
+                            // The layer takes the red and green bytes; a nuclear scorch keeps its blue byte.
+                            Pixmap page = directory.get(key / (TILE_SIZE * TILE_SIZE));
+                            int kept = page.getPixel(address % TILE_SIZE, address / TILE_SIZE) & 0xFFFF;
+                            page.drawPixel(address % TILE_SIZE, address / TILE_SIZE,
+                                  (layer & 255) << 24 | (layer >>> 8) << 16 | kept);
                             directoryDirty = true;
                         }
                         // Premultiplied coverage, authored luminance, gloss and relief; newer art blends over older art.
@@ -729,7 +784,7 @@ final class GpuGroundDamage implements Disposable {
         dirty.clear();
         brushes.values().forEach(art -> art.levels().forEach(Pixmap::dispose));
         brushes.clear();
-        texture = null; capacity = 0; seen.clear(); marks = 0;
+        texture = null; capacity = 0; seen.clear(); marks = 0; scorched = false;
         nextSurfaceKey = -1;
         pending.clear(); resumeTile = 0; groundScene = null;
         worldWidth = 0; worldHeight = 0; columns = 0; rows = 0;

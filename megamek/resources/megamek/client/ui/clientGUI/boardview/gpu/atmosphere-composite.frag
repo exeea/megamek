@@ -30,6 +30,8 @@ uniform vec3 u_backdropHorizon;
 uniform float u_backdropExposure; // Positive: UI-authored backdrop with user EV only. Zero: incident lighting sky.
 uniform float u_transparentBackground;
 uniform float u_sceneScaled; // 1 at a render resolution below 100%: scale the scene up; 0 reads it 1:1.
+uniform vec4 u_flash; // a nuclear flash (GpuAtmosphere.setFlash): display-linear RGB; a, its glare's falloff
+uniform vec3 u_flashCentre; // the fireball on screen (uv, far off-screen when behind the camera), the view's aspect
 // SCENE_RADIANCE
 // GROUND_LAYER
 // WEATHER_SAND
@@ -168,6 +170,11 @@ void main() {
     }
     // Lens glare borrows the active sun's color, after terrain grading and before display conversion/FoV.
     linear += sunGlare() * u_exposure * lensCoverage;
+    if (u_flash.r > 0.0) {
+        // A nuclear flash whitens the whole view and glares around its fireball, beyond what any exposure holds.
+        vec2 offset = (v_uv - u_flashCentre.xy) * vec2(u_flashCentre.z, 1.0);
+        linear += u_flash.rgb * (.4 + 3.0 * exp(-dot(offset, offset) * u_flash.a)) * lensCoverage;
+    }
     if (u_transparentBackground > 0.5) linear = coverage > 0.0 ? linear / coverage : vec3(0.0);
     color = displayScene(linear);
     // Board camera presentation; isolated material previews share only the color conversion.

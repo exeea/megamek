@@ -160,8 +160,10 @@ final class GpuShaderSource {
         functions += read("water-optics.glsl");
         functions += read("terrain-hexes.glsl");
         String ground = source.contains("// ground-surface-functions") ? read("ground-surface.glsl") : "";
-        // The one lighting entry, wherever a surface is lit through it.
+        // The one lighting entry, wherever a surface is lit through it. It reads a nuclear scorch from the ground
+        // damage's directory, so every terrain surface lit there shows it.
         if (source.contains("shadeSurface(") || ground.contains("shadeSurface(")) {
+            functions += "#define GROUND_DAMAGE_FRAGMENT\n" + GpuGroundDamage.shaderSource();
             functions += read("surface-shading.glsl");
         }
         if (source.contains("// sculpt-material-functions")) {
@@ -181,7 +183,6 @@ final class GpuShaderSource {
             functions += read("terrain-concrete.glsl");
             functions += "\n#ifdef volcanicFlag\n" + magma(false) + "\n#endif\n";
             functions += read("terrain-materials.glsl");
-            functions += "#define GROUND_DAMAGE_FRAGMENT\n" + GpuGroundDamage.shaderSource();
             functions += read("scar-material.glsl");
             functions += read("terrain-damage.glsl");
             functions += read("terrain-tundra.glsl");
