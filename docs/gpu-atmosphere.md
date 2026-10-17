@@ -63,9 +63,27 @@ Manual lighting changes keep the scenario's exposure adaptation, so it cannot
 immediately cancel the chosen strength. The optional panorama is decoded and GGX
 filtered on a background CPU task; a failed load keeps the previous lighting.
 PNG/JPEG RGB is decoded from sRGB once; HDR keeps linear radiance above one.
-Six 128×64 roughness levels share the existing RGBA16F environment allocation and
-terrain-array layer, adding no sampler or per-frame filtering pass. The directional
-sun remains separate. The background sky, fog palette and game conditions are unchanged.
+Six 128×64 roughness levels share the existing standalone RGBA16F environment atlas,
+adding no material sampler or per-frame filtering pass. The directional sun remains
+separate. Imported panoramas replace the generated environment only when selected.
+
+Generated lighting uses a 128×64 linear panorama based on the current light direction,
+time, pressure, haze/clouds and taint type/strength. It is independent of the illustrated
+background. Clear-air diffuse illumination retains the calibrated lighting budget;
+taint changes its chroma and directional distribution through an approximate optical
+medium. Moonless readability uses the same medium without a directional source,
+relative to its uniform clear-air fill; its integrated luminance stays unchanged.
+Vacuum readability remains explicit uniform gameplay fill. The panorama
+contains no sun/moon disk, and receiving materials retain their local ground bounce.
+Generation and compact filtering run synchronously when relevant settings change;
+camera movement, exposure and fog-only changes reuse the result. This is a calibrated
+approximation, not measured atmospheric radiometry or a per-frame sky simulation.
+
+The normal visible background retains the UI palette. Tainted/toxic horizon colors
+remain visible at night, sunrise and sunset without increasing that palette's luminance.
+**Show lighting sky** displays the environment used for lighting instead. The toggle
+does not change the board's illumination. The old whole-scene taint and automatic night
+desaturation are removed; light colors and the user's explicit display controls remain.
 
 Ground wetness follows liquid rain automatically. Freezing temperature and very
 thin/airless conditions suppress it. `rain-surface.glsl` uses the same wetness for
@@ -79,18 +97,21 @@ VACUUM and disables incompatible weather controls; pressure is locked while grav
 ## Light and color contract
 
 `BoardAtmosphere.lighting()` supplies canonical linear direct and ambient
-colors. Its adaptation is derived from the final ground illumination, after
-vacuum sources and the daylight white point are established. Composition applies
+colors. Its adaptation meters ambient plus direct light weighted by
+`max(0.5, -direction.z)`, so grazing light on slopes contributes alongside level
+ground. The meter includes vacuum readability and the daylight white point,
+before camera-relative light placement or manual light controls. Composition applies
 that one gain with user EV compensation to the complete scene, including emission,
 local spill and selected heat. Scene material evaluation, interpolation and blending stay
 linear. Exact piecewise sRGB conversion is shared by `GpuColor` and
 `color-space.glsl`; the final composite encodes display RGB once.
 
 Color-only images use `GL_SRGB8_ALPHA8`: hardware decodes RGB before filtering,
-while alpha remains numerical. Mixed color/height/normal/AO arrays decode only
-their color layers once at upload into RGBA16F. CPU image preparation uses
-`GpuLinearImage` and uploads its linear result directly. These arrays preserve
-the existing layer layout and sampler budget. Normal, roughness, metallic,
+while alpha remains numerical. Repeating materials use separate compact arrays:
+`GL_SRGB8_ALPHA8` for color/height and `GL_RGBA8` for numerical maps. The separate
+authored sculpt roughness array uses `GL_R8`. Required CPU resizing uses `GpuLinearImage` to filter
+color RGB in linear light, then re-encodes it for sRGB storage. Numerical channels
+remain linear throughout preparation. Normal, roughness, metallic,
 height, mask and coordinate channels never pass through a color transfer curve.
 An image used for both color and data has a separate cached texture for each role.
 File decoding also resolves grayscale channel layout before upload: libGDX's
@@ -101,47 +122,50 @@ Imported glTF factors and vertex colors are already linear; `GpuLinearColors`
 marks that contract. Procedural display-authored vertex colors decode before
 interpolation. Packed vertex metadata is explicitly excluded.
 
-Sky palette stops decode once in `BoardAtmosphere`; time, cloud cover and taint
-blend linear radiance. Above the world horizon, radiance is
-`horizon + (sky - horizon) * sqrt(direction.z)`. Its upward cosine integral,
-divided by pi, is `.2*horizon + .8*sky`. One scalar preserves the established
-canonical ambient luminance; the visible sky, diffuse lighting and reflections
-share these normalized colors. Airless skies provide almost no atmospheric
-fill. Perspective views sample the sky along their world-space camera rays;
-below-horizon rays retain the horizon color. Parallel board views instead use
-a smooth vertical horizon-to-zenith backdrop around the finite board, because
-their downward rays otherwise collapse the background to a single color.
-Both paths interpolate the same linear endpoints before the final display
-conversion. This presentation choice does not change the lighting environment,
-whose lower hemisphere approximates local ground reflection.
+The illustrated background retains UI-authored color interpolation in
+`BoardAtmosphere.skyPalette`. Its display mapping is confined to the background;
+it is decoded for linear scene composition and encoded with the final frame.
+Both camera modes use the screen-height gradient around the finite board.
+Time and clouds change its endpoints; taint keeps its lower band at night and
+twilight while preserving endpoint luminance. These colors do not illuminate
+materials. The native compositor checks the authored palette in both cameras.
 
-Cloud cover changes both the authored endpoint mixture and its energy
-normalization. A stronger cloud mixture at the zenith therefore does not imply
-a larger displayed RGB change there than at the horizon. The native compositor
-check covers actual time/cloud palettes numerically, as well as independent
-synthetic endpoints and both projection modes.
+The generated incident environment instead uses world directions and linear
+radiance. Its upper hemisphere supplies diffuse and roughness-filtered specular
+lighting. Its lower hemisphere is zero; the receiving material contributes the
+existing local ground reflection once. Imported panoramas retain their own
+lower hemisphere. Vacuum has no atmospheric scattering, but retains the explicit
+readability allowance.
 
 The clear-noon sun plus sky is calibrated to a neutral unit white on level
 ground. A single RGB gain, derived from that reference, transforms direct light,
-diffuse fill and both sky endpoints together. Its strength follows daylight;
+diffuse fill together. Its strength follows daylight;
 full night keeps its existing palette. This corrects the overly blue illumination
 introduced when the visible gradient began lighting materials, including terrain
-at level zero. Cloud and pressure changes do not renormalize the sun. Sky energy
-normalization precedes this fixed white-point transform, so different cloud hues
-can have slightly different final luminance. No terrain saturation multiplier,
+at level zero. Cloud and pressure changes do not renormalize the sun. The generated
+sky receives this white-point-adjusted diffuse budget: clear air retains its RGB,
+and optical taint changes chroma while preserving its luminance. No terrain saturation multiplier,
 extra color-space conversion or framebuffer format change is involved.
 
 Direct reflection uses correlated Smith GGX and Schlick Fresnel. Directional
 colors are irradiance divided by pi, so the specular helper includes the matching
 pi factor. The matte lobe uses reciprocal directional-albedo energy coupling.
-`GpuEnvironmentLighting` integrates the GGX sky/ground basis and split-sum BRDF
-into one 256×129 RGBA16F table. Its right half integrates the finite directional
-source's energy correction. Sculpt/bank programs store that table in an extra
-layer of their existing array, sampled at mip zero, rather than adding a sampler.
+`GpuEnvironmentLighting` loads a precomputed 256×129 GGX sky/ground basis and
+split-sum BRDF table; its right half contains the finite directional source's
+energy correction. This table occupies the top-left of one standalone 512×512
+RGBA16F atlas. `GpuLightingEnvironment` places six filtered 128×64 environment
+tiles with seam/pole gutters below it, starting at row 130. Both share
+`u_environmentLut` and are sampled at mip zero; neither occupies a material-array layer.
 The directional sun/moon is excluded from the environment, avoiding double light.
 Specular anti-aliasing (`light-model.glsl`, Display tab, on by default) adds the pixel's normal variance to GGX
-alpha², at most .18: geometric-normal derivatives, Toksvig shortening of filtered normal maps above a .005 noise
-floor, a sculpt material's coarse-mip spread as distance fades its detail, and water's footprint term.
+alpha², at most .18: once per pixel, from the screen derivatives of the final shading normal (sculpted ground and
+models include their mapped detail; foliage, roads and water use their base normal before any discard), plus
+water's footprint term. It is
+compiled in (`specularAntialiasingFlag`); off, its helpers are constants. An environment with the board's lighting
+carries `GpuEnvironmentLighting.Antialiasing` while it is on, so a switch is a lighting change: terrain materials
+and family programs rebuild behind the loading stage, while water, plant, prop and unit programs compile at their
+first draw, from the program cache after the first time. Movement and editor ghosts, lit without the board's
+environment lighting, never compile it.
 See [Filament's image-based lighting](https://google.github.io/filament/Filament.html#lighting/imagebasedlights)
 and the [energy-coupled matte model](https://diglib.eg.org/bitstream/handle/10.2312/egs20011003/short16.pdf).
 
@@ -149,15 +173,16 @@ Sun/moon handover uses one directional shadow source. Direct illumination and
 shadow contrast fade with its visibility. Full Moon enables directional night
 lighting; Moonless and Pitch Black use ambient light without a geometry shadow
 pass. Fixed sun/moon must be resolved before both shadow and color draws.
-When free flight looks above the horizon, the screen-fixed light keeps at least
-.05 downward incidence; this avoids a zero/negative denominator while preserving
-level-ground illumination. Ordinary orbit poses retain their screen bearing.
+Free flight ignores Fixed sun/moon and keeps the world-space light. Ordinary
+orbit poses retain the optional screen bearing. The generated environment stays
+world-oriented, as imported panoramas do; fixing the direct light is a presentation
+override, not a rotation of the environment.
 
-Taint changes the sky/horizon, existing fog and the display grade while preserving
-luminance. It does not create emission or weather. Pressure and time of day scale
-the palette. Tactical labels and UI are drawn after composition and retain their
-own colors. Palette constants and mapping belong in `BoardAtmosphere`, rather
-than separate copies in each shader.
+Taint changes the incident environment, illustrated horizon and existing fog.
+It does not add a whole-scene display tint, emission or weather. Pressure controls
+scattering; time changes illumination and background brightness. Tactical labels
+and UI retain their own contrast controls. Palette mapping belongs in
+`BoardAtmosphere`; optical-medium coefficients belong in `BoardLightingSky`.
 
 ## Scene depth, fog and composition
 
@@ -274,21 +299,21 @@ altering the source scene. These checks bound the supported renderer inputs;
 they are not permission for arbitrary unbounded user emission values.
 
 R11G11B10F lacks the alpha required by this compositor. Fog, weather, terrain
-fire/smoke, mixed material arrays and the environment lookup table also use
-RGBA16F. The material arrays and lookup table store canonical material data,
-not scaled scene radiance. Color-only assets retain compact sRGB storage.
+fire/smoke and the standalone environment atlas also use RGBA16F. The atlas
+stores canonical lighting radiance and BRDF coefficients, not scaled scene
+radiance. Material arrays retain compact sRGB or raw numerical storage.
 See [Unity's HDR precision tradeoff](https://docs.unity3d.com/Packages/com.unity.render-pipelines.universal@14.0/api/UnityEngine.Rendering.Universal.HDRColorBufferPrecision.html).
 
 The scene uses eight bytes per pixel, and the two quarter-size
-heat targets use the same format. Mixed arrays use eight bytes per texel rather
-than four. The new environment
-layer also uses that storage, including material-array mips, though its lookups
-use only mip zero. Fog and terrain fire/smoke each use eight bytes per reduced-resolution
+heat targets use the same format. Each color or numerical RGBA material-array
+texel uses four bytes; scalar roughness uses one. The standalone environment
+atlas uses eight bytes per texel and has no mip chain; its roughness levels are
+explicit tiles. Fog and terrain fire/smoke each use eight bytes per reduced-resolution
 pixel, four more than their former RGBA8 targets. Active weather adds one eight-byte-per-pixel color layer, with no extra
 depth allocation; isolated previews own a scene and display target. No performance gain or
 cross-platform result is implied by the format choice.
 
-The environment is an analytic distant-light approximation, not nearby-object
+The environment is a generated or imported distant-light approximation, not nearby-object
 reflection probes or global illumination. GGX uses single scattering (rough
 metals can lose energy); split-sum reflection assumes N=V=R during prefiltering.
 Diffuse environment coupling is exact for a constant environment and approximates

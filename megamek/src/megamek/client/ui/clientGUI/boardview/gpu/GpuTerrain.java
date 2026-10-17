@@ -30,11 +30,11 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.GLTexture;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.GLTexture;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.Attribute;
@@ -815,14 +815,18 @@ final class GpuTerrain implements Disposable {
 
     /**
      * The pre-pass category of an opaque, depth-writing draw whose twin repeats its coverage exactly; null for any other
-     * draw. Blended, decal, scar, cut-away, tileset, water, liquid, vegetation and road-mask draws, alpha-tested ground,
-     * props, buildings and units stay out.
+     * draw. Blended, decal, scar, cut-away, tileset, water, liquid, vegetation and road-mask draws, alpha-tested ground
+     * and objects stay out: a building's faded floors blend and its cut-away is flagged, so it joins only while whole.
      */
     private static Prepass prepass(Attributes material) {
         var blend = material.get(BlendingAttribute.class, BlendingAttribute.Type);
         if (blend != null && blend.blended || material.has(DepthTestAttribute.Type)
               || material.has(GpuSurfaceScars.Marking.TYPE) || material.has(GpuBuildingCutaway.TYPE)
               || material.has(GpuTilesetTerrain.Grading.TYPE)) { return null; }
+        // model.frag discards only under an alpha test: an opaque object's empty twin repeats its coverage.
+        if (material.has(GpuModelMaterial.TYPE)) {
+            return material.has(FloatAttribute.AlphaTest) ? null : Prepass.OBJECTS;
+        }
         // terrain-foliage.frag discards by the alpha test alone, which a cutout's twin repeats.
         if (material.has(Foliage.TYPE)) { return material.has(Impostor.TYPE) ? Prepass.IMPOSTORS : Prepass.FOLIAGE; }
         // The relief's fragment stages never discard; these materials' stages do, or are not relief.
@@ -1017,17 +1021,19 @@ final class GpuTerrain implements Disposable {
      * What the depth pre-pass draws (renderPrepass): ground relief and solid plant parts with an empty fragment stage,
      * cutout leaves and impostor cards with their own alpha test. Native measurements take one category at a time.
      */
-    enum Prepass { RELIEF, FOLIAGE, IMPOSTORS }
+    /** OBJECTS: placed buildings and props, opaque model surfaces (model.frag) whose draw order leaves overdraw. */
+    enum Prepass { RELIEF, FOLIAGE, IMPOSTORS, OBJECTS }
 
     /**
      * The categories the depth pre-pass draws: the trees' leaves and impostor cards, whose cutouts hide the most shading.
-     * {@code -Dmegamek.gpu.depthPrepass=false} turns it off; {@code =all} adds the relief, for measurements only (on an
-     * Iris Xe its twins cost what they save). Twins build behind the loading stage for the categories set then; native
-     * checks also switch it between frames.
+     * {@code -Dmegamek.gpu.depthPrepass=false} turns it off; {@code =objects} adds buildings and props; {@code =all} adds
+     * them and the relief, for measurements only (on an Iris Xe the relief's twins cost what they save). Twins build
+     * behind the loading stage for the categories set then; native checks also switch it between frames.
      */
     static Set<Prepass> depthPrepass = switch (System.getProperty("megamek.gpu.depthPrepass", "trees")) {
         case "false" -> EnumSet.noneOf(Prepass.class);
         case "all" -> EnumSet.allOf(Prepass.class);
+        case "objects" -> EnumSet.of(Prepass.FOLIAGE, Prepass.IMPOSTORS, Prepass.OBJECTS);
         default -> EnumSet.of(Prepass.FOLIAGE, Prepass.IMPOSTORS);
     };
     /** The colour pass's depth test for a draw the pre-pass drew; native measurements compare GL_LEQUAL. */

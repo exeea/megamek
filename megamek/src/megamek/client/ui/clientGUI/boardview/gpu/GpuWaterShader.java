@@ -46,6 +46,8 @@ final class GpuWaterShader extends Attribute {
     private static final float CURRENT_RANGE = 1;
     /** Radius of the kernel that blends neighbouring currents and rapids, in hex widths. */
     private static final float BLEND_RADIUS = 0.9f;
+    /** A river's surface disturbance fades through connected still water over this many hexes. */
+    private static final int RIPPLE_REACH = 4;
     private static final int DETAIL_SIZE = 256;
 
     /**
@@ -410,6 +412,52 @@ final class GpuWaterShader extends Attribute {
 
     private static byte unit(float value) {
         return (byte) Math.round(Math.clamp(value, 0, 1) * 255);
+    }
+
+    /**
+     * Derived once per terrain update, before fields or meshes are built. Continue a river's small surface motion
+     * into connected still water, then dissipate it; do not give the whole lake a current. The existing field kernel
+     * blends these samples between hex centres. Routed currents and agitation stay intact, and no motion passes
+     * through land, ice, lava or a different surface elevation. This map belongs only to the renderer.
+     */
+    static Map<Coords, BoardFlow.Current> surfaceCurrents(BoardScene scene, Map<Coords, BoardFlow.Current> routed) {
+        var result = new HashMap<>(routed);
+        Map<Coords, BoardFlow.Current> frontier = new HashMap<>();
+        for (var entry : routed.entrySet()) {
+            var tile = scene.tile(entry.getKey());
+            if (tile == null || !tile.liquid().present() || tile.liquid().molten() || tile.frozen()) { continue; }
+            var current = entry.getValue();
+            float speed = (float) Math.hypot(current.u(), current.v() * BoardGeometry.height() / BoardGeometry.width());
+            if (speed == 0) { continue; }
+            // A falling approach may be fast, but it must not paint several lake tiles with rapids agitation.
+            float scale = Math.min(1, .1f / speed);
+            frontier.put(entry.getKey(), new BoardFlow.Current(current.u() * scale, current.v() * scale));
+        }
+        for (int distance = 1; distance < RIPPLE_REACH && !frontier.isEmpty(); distance++) {
+            var incoming = new HashMap<Coords, Vector3>();
+            for (var entry : frontier.entrySet()) {
+                var from = scene.tile(entry.getKey());
+                for (int direction = 0; direction < 6; direction++) {
+                    Coords at = entry.getKey().translated(direction);
+                    if (result.containsKey(at)) { continue; }
+                    var to = scene.tile(at);
+                    if (to == null || to.frozen() || to.elevation() != from.elevation()
+                          || !from.liquid().connects(to.liquid())) { continue; }
+                    var current = entry.getValue();
+                    incoming.computeIfAbsent(at, unused -> new Vector3()).add(current.u(), current.v(), 1);
+                }
+            }
+            frontier = new HashMap<>();
+            float t = distance / (float) RIPPLE_REACH;
+            float fade = (1 - t) * (1 - t) * (1 + 2 * t);
+            for (var entry : incoming.entrySet()) {
+                Vector3 sum = entry.getValue();
+                var carrier = new BoardFlow.Current(sum.x / sum.z, sum.y / sum.z);
+                frontier.put(entry.getKey(), carrier);
+                result.put(entry.getKey(), new BoardFlow.Current(carrier.u() * fade, carrier.v() * fade));
+            }
+        }
+        return Map.copyOf(result);
     }
 
     /**

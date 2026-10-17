@@ -220,6 +220,31 @@ class GpuWaterWavesSmokeTest {
     }
 
     @Test
+    void calmWaterRetainsSwellWithoutDirectionalShortChop() {
+        run(ocean -> {
+            var calm = new Vector3(.8f, .6f, 0);
+            float time = run(ocean, 0, calm, 1);
+            float[] calmSurface = read(ocean.waves(0));
+            double swell = variance(calmSurface, 2);
+            double quiet = slopeVariance(read(ocean.waves(2)));
+            time = run(ocean, time, calm, 60);
+            assertFalse(Arrays.equals(calmSurface, read(ocean.waves(0))), "Residual swell keeps moving in still air");
+            time = settle(ocean, time, new Vector3(.8f, .6f, .25f));
+            double breeze = slopeVariance(read(ocean.waves(2)));
+            assertTrue(swell > .001, "Open water keeps gentle residual swell");
+            assertTrue(quiet < breeze * .02, "Calm short-wave power must be small: " + quiet + " vs " + breeze);
+            time = settle(ocean, time, calm);
+            double settled = slopeVariance(read(ocean.waves(2)));
+            assertTrue(settled < breeze * .02, "Short chop must also subside after the wind stops: " + settled);
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        });
+    }
+
+    private static double slopeVariance(float[] pixels) {
+        return variance(pixels, 0) + variance(pixels, 1);
+    }
+
+    @Test
     void cascadesDescribeOneMovingSeaWithSharpCrestsAndFoamOnThem() {
         run(ocean -> {
             float time = run(ocean, 0, new Vector3(.8f, .6f, 0), 1);

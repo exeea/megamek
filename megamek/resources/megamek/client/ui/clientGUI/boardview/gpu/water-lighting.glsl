@@ -11,10 +11,26 @@ struct WaterLighting {
 // Capture full position derivatives before coverage rejection: a fall's height also moves its reflected cloud ray.
 vec3 waterPositionDx = vec3(0.0), waterPositionDy = vec3(0.0);
 
-// Still water keeps direct reflection, using the existing point-source lobe instead of the finite-source filter.
+// Orthographic rays all share a view direction, so a whole level lake can hit the sun's mirror angle at once.
+// Limit that highlight to this share of sunlight on white level ground, keeping water readable at default exposure.
+// This is a presentation choice, not a physical limit on water reflectance; perspective keeps the physical lobe.
+const float WATER_ORTHOGRAPHIC_GLARE = .45;
 vec3 waterDirectReflection(vec3 normal, vec3 light, vec3 view, float roughness) {
-    return u_waterEffects > 0.0 ? surfaceReflectance(normal, light, view, roughness, vec3(.02037))
+    // Still water keeps direct reflection, using the point-source lobe instead of the finite-source filter.
+    vec3 reflected = u_waterEffects > 0.0 ? surfaceReflectance(normal, light, view, roughness, vec3(.02037))
           : pointReflectance(normal, light, view, roughness, vec3(.02037));
+    if (u_perspective < .5) {
+        float ceiling = WATER_ORTHOGRAPHIC_GLARE * max(light.z, 0.0);
+        float knee = ceiling * .5;
+        float peak = max(reflected.r, max(reflected.g, reflected.b));
+        if (peak > knee) {
+            // Identity below the knee, matching its slope at the join and approaching the ceiling smoothly.
+            // Scale the whole colour together; per-channel clipping would bleach warm highlights.
+            float excess = peak - knee, headroom = ceiling - knee;
+            reflected *= (knee + headroom * excess / (headroom + excess)) / peak;
+        }
+    }
+    return reflected;
 }
 
 vec3 waterEnvironmentReflection(vec3 normal, vec3 view, float roughness, WaterLighting illumination) {

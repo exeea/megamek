@@ -150,17 +150,21 @@ class BoardScatterTest {
     }
 
     @Test
-    void tundraUsesDryTuftsInsteadOfLushPlants() {
-        Hex hex = new Hex(0);
-        hex.addTerrain(new Terrain(Terrains.TUNDRA, 1));
-        Set<String> shapes = new HashSet<>();
+    void tundraReplacesOnlyPlantsAndPreservesLooseStonePlacement() {
+        Hex plain = new Hex(0);
+        Hex tundra = new Hex(0);
+        tundra.addTerrain(new Terrain(Terrains.TUNDRA, 1));
+        int stones = 0;
         for (int x = 0; x < 16; x++) {
             for (int y = 0; y < 16; y++) {
-                scatter(hex, new Coords(x, y)).forEach(feature -> shapes.add(feature.asset()));
+                var coords = new Coords(x, y);
+                var expected = scatter(plain, coords).stream().filter(f -> BoardScatter.stone(f.asset())).toList();
+                var actual = scatter(tundra, coords);
+                assertEquals(expected, actual, "Keep loose stone positions, scales and rotations; replace only plants");
+                stones += actual.size();
             }
         }
-        assertEquals(BoardScatter.DENSITY_MULTIPLIER <= 0 ? Set.of()
-              : Set.of("scatter-dry-grass", "scatter-rock", "scatter-slab"), shapes);
+        assertTrue(stones > 0, "Retain the existing sparse rock and slab clusters");
     }
 
     @Test

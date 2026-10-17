@@ -41,6 +41,129 @@ import org.junit.jupiter.api.Test;
 class GpuWaterShaderSmokeTest {
     private static final Color BACKDROP = new Color(.04f, .06f, .08f, 1);
 
+    /** Exercise Field.prepare, its filtered RGBA8 texture and the actual surface provider together. */
+    @Test
+    void packedCurrentsKeepStillPoolsStillAndPreserveBothFlowDirections() {
+        var failure = new AtomicReference<Throwable>();
+        var configuration = GpuBoardWindow.configuration(false);
+        configuration.setWindowedMode(128, 128);
+        configuration.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var manager = new GpuShaderManager();
+                try {
+                    manager.run(() -> checkPackedCurrents(manager));
+                } catch (Throwable error) { failure.set(error); }
+                finally { manager.close(); Gdx.app.exit(); }
+            }
+        }, configuration);
+        if (failure.get() != null) { throw new AssertionError("Packed water current", failure.get()); }
+    }
+
+    private static void checkPackedCurrents(GpuShaderManager manager) {
+        var terrain = new GpuTerrain(true, true);
+        var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
+        String source = GpuShaderSource.readDisk("water-pool.glsl");
+        String point = "float flowing = waterFlowShare(current);";
+        assertEquals(1, source.split(java.util.regex.Pattern.quote(point), -1).length - 1);
+        // Report the real decoded current and branch selector before optics, preserving the provider and field.
+        String probe = source.replace(point, point + "\n    return vec4(current, flowing, 1.0);");
+        // The normal board configuration enforces a 900 x 600 minimum window. Own this probe's pixel size.
+        try (var output = new GpuSceneTestOutput(128, 128)) {
+            assertTrue(manager.apply(Map.of("water-pool.glsl", probe)).success());
+            var camera = new BoardCamera();
+            camera.resize(128, 128);
+            Coords at = new Coords(4, 2);
+            for (int drop : new int[] { 0, 2, -2 }) {
+                BoardScene scene = scene(drop != 0, drop);
+                Vector3 center = BoardGeometry.center(at, scene.tile(at).elevation());
+                center.z = BoardGeometry.waterZ(scene.tile(at));
+                camera.fit(scene);
+                camera.camera.zoom = BoardGeometry.width() * 2 / 128;
+                camera.center(center);
+                frame.prepare(terrain, camera, scene);
+                terrain.update(scene);
+                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                terrain.setWaterEffects(true);
+                // The independent physical current is sampled before byte packing, not reconstructed by a test decoder.
+                var pools = new GpuWaterShader.Pools(scene, BoardFlow.calculate(scene), Map.of());
+                float[] expected = new float[4];
+                pools.sample(center.x, center.y, expected);
+                if (drop == 0) { assertEquals(0, expected[1]); assertEquals(0, expected[2]); }
+                else { assertTrue(expected[2] * drop < -.01f, "The two real descents must drive opposite currents"); }
+                // Only water is drawn into transparent black: alpha proves the sampled surface actually rendered.
+                // Its production nearest-water pass is retained; opaque bed pixels cannot make the zero case pass.
+                for (int warmup = 0; warmup < 3; warmup++) {
+                    output.begin(0, 0, 0, 0);
+                    terrain.renderTransparent(camera.camera);
+                }
+                float[] pixels = output.linearPixels();
+                assertEquals(128 * 128 * 4, pixels.length, "Readback stride belongs to the explicit probe target");
+                Vector3 projected = camera.camera.project(center.cpy(), 0, 0, 128, 128);
+                assertEquals(64, projected.x, .001f, "Probe is centered on the real river");
+                assertEquals(64, projected.y, .001f, "Probe is centered on the real river");
+                int covered = 0;
+                for (int index = 3; index < pixels.length; index += 4) { if (pixels[index] > 0) { covered++; } }
+                System.out.printf("Packed current drop=%d backbuffer=%dx%d target=128x128 covered=%d center=%s physical=(%.6f,%.6f)%n",
+                      drop, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight(), covered, projected,
+                      expected[1], expected[2]);
+                int compared = 0;
+                for (int y = 62; y <= 65; y++) {
+                    for (int x = 62; x <= 65; x++) {
+                        int index = (y * 128 + x) * 4;
+                        assertEquals(1, pixels[index + 3], 0, "The actual water surface covers every probe pixel");
+                        for (int channel = 0; channel < 2; channel++) {
+                            assertEquals(expected[channel + 1], pixels[index + channel], drop == 0 ? .00002f : .012f,
+                                  "Filtered field current retains the physical sign and magnitude");
+                        }
+                        if (drop == 0) {
+                            assertEquals(0, pixels[index + 2], 0, "Still water never enters the two-phase flow branch");
+                        } else {
+                            assertTrue(pixels[index + 1] * drop < -.01f, "Directed flow survives byte packing and filtering");
+                            assertEquals(1, pixels[index + 2], .03f,
+                                  "A full current retains its river surface through field filtering and byte rounding");
+                        }
+                        compared++;
+                    }
+                }
+                System.out.printf("Packed water current drop=%d samples=%d physical=(%.6f,%.6f)%n",
+                      drop, compared, expected[1], expected[2]);
+                if (drop != 0) {
+                    // A mouth slows gradually: a half-speed current must show a mixture, not switch completely
+                    // to either surface. Keep the real packed field, provider and rendering path for this probe.
+                    String slower = probe.replace(point, "current *= .5;\n    " + point);
+                    assertTrue(manager.apply(Map.of("water-pool.glsl", slower)).success());
+                    output.begin(0, 0, 0, 0);
+                    terrain.renderTransparent(camera.camera);
+                    float[] mouth = output.linearPixels();
+                    int centerIndex = (64 * 128 + 64) * 4;
+                    assertEquals(1, mouth[centerIndex + 3], 0, "The slower-current probe must draw water");
+                    assertTrue(mouth[centerIndex + 2] > .35f && mouth[centerIndex + 2] < .65f,
+                          "A half-speed mouth blends the river and open-water surfaces");
+                    String depthPoint = "float depth = field.g * WATER_DEPTH_RANGE;";
+                    assertTrue(probe.contains(depthPoint));
+                    String shallow = probe.replace(depthPoint, "field.g = .1 / WATER_DEPTH_RANGE;\n    " + depthPoint);
+                    assertTrue(manager.apply(Map.of("water-pool.glsl", shallow)).success());
+                    output.begin(0, 0, 0, 0);
+                    terrain.renderTransparent(camera.camera);
+                    float[] shelf = output.linearPixels();
+                    assertEquals(1, shelf[centerIndex + 3], 0, "The shallow probe must draw water");
+                    float drag = shelf[centerIndex + 1] / pixels[centerIndex + 1];
+                    assertTrue(drag > .2f && drag < .5f, "A shallow column slows visible motion without reversing it");
+                    assertTrue(shelf[centerIndex + 2] > 0 && shelf[centerIndex + 2] < .35f,
+                          "Slower shallow motion also damps the river ripples");
+                    assertTrue(manager.apply(Map.of("water-pool.glsl", probe)).success());
+                }
+            }
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        } catch (Exception error) { throw new AssertionError(error); }
+        finally {
+            try { assertTrue(manager.apply(Map.of()).success()); }
+            finally { frame.dispose(); terrain.dispose(); }
+        }
+    }
+
     @Test
     void reflectedCloudsUseTheirOwnCoverageAndStillWaterKeepsSunlight() {
         var failure = new AtomicReference<Throwable>();

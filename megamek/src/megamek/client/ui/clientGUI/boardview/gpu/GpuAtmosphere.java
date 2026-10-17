@@ -43,7 +43,7 @@ final class GpuAtmosphere implements Disposable {
     private static final BoardAtmosphere.SkyPalette TACTICAL_BACKDROP = BoardAtmosphere.skyPalette(
           BoardAtmosphere.DEFAULTS, BoardAtmosphere.DEFAULT_TAINT_STRENGTH, false);
     /** Below this display brightness each hex uses white neutral ink; otherwise black. Zero disables adaptation. */
-    static final float OVERLAY_BRIGHTNESS_THRESHOLD = 0.1f;
+    static final float OVERLAY_BRIGHTNESS_THRESHOLD = 0.0f;
     /** A learned hex changes ink only beyond this small display-brightness band around the threshold. */
     private static final float OVERLAY_BRIGHTNESS_HYSTERESIS = .02f;
 

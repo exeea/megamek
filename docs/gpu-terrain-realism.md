@@ -106,6 +106,13 @@ The user set these boundaries:
 
 ## Controls
 
+Printable board PNGs are straight-alpha cutouts. Their scene is composed in linear
+premultiplied form, then unassociated once for display encoding; material coverage,
+including translucent ice, is preserved. Emission on the board remains visible;
+lens halos and glare are clipped to physical coverage, and additive light outside
+that coverage is omitted. A single ordinary RGBA PNG cannot retain additive light over arbitrary replacement
+backgrounds. This does not change emission or lens effects in the live board view.
+
 | Control | Default | Effect |
 | --- | --- | --- |
 | **GPU Tuning → Terrain → Surface appearance → Elevation grading** | On (`GpuTerrain.DEFAULT_ELEVATION_GRADING`) | Optional elevation styling; changes apply through a shared uniform without a terrain rebuild or shader recompile. |

@@ -26,6 +26,7 @@ import com.badlogic.gdx.graphics.g3d.utils.BaseShaderProvider;
 import com.badlogic.gdx.graphics.g3d.utils.ShaderProvider;
 import com.badlogic.gdx.utils.Array;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuDepthPrepassBaselineSmokeTest.View;
+import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.lwjgl.opengl.GL;
@@ -49,12 +50,15 @@ import org.lwjgl.opengl.GL41C;
 class GpuDepthPrepassBenchmarkSmokeTest {
     static final Set<GpuTerrain.Prepass> ALL = EnumSet.allOf(GpuTerrain.Prepass.class);
     static final Set<GpuTerrain.Prepass> NONE = EnumSet.noneOf(GpuTerrain.Prepass.class);
+    private static final File CITY = new File("data/boards/unofficial/VictorMorson/48x48.board");
     private static final int ROUNDS = Integer.getInteger("megamek.gpu.prepassRounds", 4), SLOT_FRAMES = 30,
           WARM_FRAMES = 8;
     private static final List<Setting> SETTINGS = chosen("megamek.gpu.prepassSettings", List.of(
           new Setting("off", NONE, GL20.GL_EQUAL), new Setting("all", ALL, GL20.GL_EQUAL),
           new Setting("all-lequal", ALL, GL20.GL_LEQUAL),
           new Setting("trees", EnumSet.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
+          new Setting("objects", EnumSet.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS,
+                GpuTerrain.Prepass.OBJECTS), GL20.GL_EQUAL),
           without(GpuTerrain.Prepass.FOLIAGE), without(GpuTerrain.Prepass.IMPOSTORS)), Setting::name);
 
     /** A measured setting: the categories the pre-pass draws (none: off) and the colour pass's test for their draws. */
@@ -78,6 +82,9 @@ class GpuDepthPrepassBenchmarkSmokeTest {
         BoardScene calibration = GpuDepthPrepassBaselineSmokeTest.scene(GpuDepthPrepassBaselineSmokeTest.CALIBRATION);
         BoardScene dome = GpuDepthPrepassBaselineSmokeTest.scene(GpuDepthPrepassBaselineSmokeTest.DOME_VENT);
         BoardScene forest = GpuForestBenchmarkSmokeTest.forest();
+        List<String> boards = List.of(System.getProperty("megamek.gpu.prepassBoards", "calibration,forest,dome vent,city")
+              .split("\s*,\s*"));
+        BoardScene city = boards.contains("city") ? GpuDepthPrepassBaselineSmokeTest.scene(CITY) : null;
         StringBuilder report = new StringBuilder();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
@@ -94,15 +101,27 @@ class GpuDepthPrepassBenchmarkSmokeTest {
                           .append(Gdx.graphics.getBackBufferHeight()).append("; ").append(ROUNDS)
                           .append(" rounds, each setting twice a round for ").append(SLOT_FRAMES)
                           .append(" frames after ").append(WARM_FRAMES).append(" unmeasured; glFinish every frame\n");
-                    measure("calibration", calibration, GpuDepthPrepassBaselineSmokeTest.RAIN, report,
-                          chosen("megamek.gpu.prepassViews", GpuDepthPrepassBaselineSmokeTest.calibrationViews(),
-                                View::name));
-                    measure("forest", forest, GpuDepthPrepassBaselineSmokeTest.NOON, report,
-                          chosen("megamek.gpu.prepassViews", GpuDepthPrepassBaselineSmokeTest.forestViews(forest),
-                                View::name));
-                    measure("dome vent", dome, GpuDepthPrepassBaselineSmokeTest.NOON, report,
-                          chosen("megamek.gpu.prepassViews", GpuDepthPrepassBaselineSmokeTest.domeViews(dome),
-                                View::name));
+                    if (boards.contains("calibration")) {
+                        measure("calibration", calibration, GpuDepthPrepassBaselineSmokeTest.RAIN, report,
+                              chosen("megamek.gpu.prepassViews", GpuDepthPrepassBaselineSmokeTest.calibrationViews(),
+                                    View::name));
+                    }
+                    if (boards.contains("forest")) {
+                        measure("forest", forest, GpuDepthPrepassBaselineSmokeTest.NOON, report,
+                              chosen("megamek.gpu.prepassViews", GpuDepthPrepassBaselineSmokeTest.forestViews(forest),
+                                    View::name));
+                    }
+                    if (boards.contains("dome vent")) {
+                        measure("dome vent", dome, GpuDepthPrepassBaselineSmokeTest.NOON, report,
+                              chosen("megamek.gpu.prepassViews", GpuDepthPrepassBaselineSmokeTest.domeViews(dome),
+                                    View::name));
+                    }
+                    if (city != null) {
+                        // The 48 by 48 city, where buildings shade most of the frame (step 5's census).
+                        measure("city", city, GpuDepthPrepassBaselineSmokeTest.NOON, report, chosen(
+                              "megamek.gpu.prepassViews", List.of(View.fitted("city fitted"),
+                                    View.at("city middle", .5f, new Coords(24, 24))), View::name));
+                    }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);

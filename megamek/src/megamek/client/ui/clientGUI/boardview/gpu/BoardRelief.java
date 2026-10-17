@@ -2828,13 +2828,21 @@ final class BoardRelief {
      */
     private void field(List<BoardSurface.Face> destination, Vector3 anchor) {
         // Cosmetic stones and shrubs share the full-detail tier; they never contribute gameplay cover.
-        if (detail != TerrainLod.FULL || !self.detailed() || !BoardScatter.allowed(tile) || !tile.features().isEmpty()
+        boolean tundra = BoardBiome.kind(tile) == BoardScene.Biome.TUNDRA;
+        if (detail != TerrainLod.FULL || !self.detailed() || !BoardScatter.allowed(tile)
               || tile.surface() == BoardScene.Surface.FUNGUS
-              || tile.biome() != BoardScene.Biome.NONE) { return; }
+              || tile.biome() != BoardScene.Biome.NONE && !tundra) { return; }
+        if (!tile.features().isEmpty() && (!tundra || tile.features().stream().anyMatch(feature ->
+              feature.kind() != BoardScene.FeatureKind.SCATTER || !BoardScatter.stone(feature.asset())))) { return; }
+        // The crust can cover pavement; woody roots cannot. Keep painted and airless ground clear too.
+        if (tundra && (tile.barren() || tile.surface() == BoardScene.Surface.CONCRETE
+              || BoardDecals.legacyPaint(tile) != null)) { return; }
         Random random = new Random(tile.coords().getX() * 73_856_093L ^ tile.coords().getY() * 19_349_663L ^ 0x5f1e1dL);
         float m = metres(1);
-        int stones = Math.round(BoardRelief.geology().get(self.family()).stones() * (.3f + 1.4f * random.nextFloat()));
-        int shrubs = Math.round(BoardRelief.geology().get(self.family()).shrubs() * (.3f + 1.4f * random.nextFloat()));
+        int stones = tundra ? 0 : Math.round(BoardRelief.geology().get(self.family()).stones() * (.3f + 1.4f * random.nextFloat()));
+        // At most three low woody clumps; moss and lichen stay entirely in the ground material.
+        int shrubs = tundra ? random.nextInt(4)
+              : Math.round(BoardRelief.geology().get(self.family()).shrubs() * (.3f + 1.4f * random.nextFloat()));
         // Nothing grows on airless ground (BoardScene.Tile.lunar): the same stones lie there alone.
         if (tile.barren()) { shrubs = 0; }
         for (int i = 0; i < stones + shrubs; i++) {
@@ -2845,9 +2853,11 @@ final class BoardRelief {
             float r = random.nextFloat();
             float size = m * (shrub ? .7f + .5f * r : .35f + 1.1f * r * r);
             float turn = random.nextFloat() * (float) Math.PI * 2;
-            BoardShape rock = shrub ? BoardScatter.bush(tile.surface(), random.nextInt(64))
+            // The dry kit preserves its authored olive leaves, ochre tips and brown woody stems.
+            BoardShape rock = shrub ? BoardScatter.bush(tundra ? BoardScene.Surface.DIRT : tile.surface(), random.nextInt(64))
                   : BoardScatter.rock(tile.surface(), random.nextInt(64), false);
-            float scale = shrub ? BoardScatter.bushScale(rock, .7f + .5f * r) : size * .8f;
+            float scale = tundra ? m * (.35f + .4f * r) / rock.height()
+                  : shrub ? BoardScatter.bushScale(rock, .7f + .5f * r) : size * .8f;
             // Wholly inside this hex and on its own top, so no neighbour's ground or picking ever meets half of it and
             // nothing hangs over a receding rim.
             float keep = shrub ? BoardScatter.BUSH_RADIUS * scale : size * .8f;
@@ -2858,6 +2868,7 @@ final class BoardRelief {
             float variation = random.nextFloat();
             float height = shrub ? scale * rock.height() : size * .8f * (.35f + .5f * variation);
             Vector3 base = new Vector3(x, y, topHeight(destination, x, y) - (shrub ? .02f * scale : height * .35f));
+            if (tundra && BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, x, y, base.z) < .6f) { continue; }
             float widthVariation = .7f + .3f * random.nextFloat();
             place(destination, rock, base, turn, scale, shrub ? scale : scale * widthVariation,
                   height / rock.height(), shrub ? Kind.PLANT : Kind.ROCK);

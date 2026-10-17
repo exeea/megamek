@@ -44,9 +44,9 @@ own color. This includes scatter and all mesh LODs. A restrained pulse follows t
 terrain's shared animation clock; the surfaces remain visible at night.
 
 All installed fungal models also contribute colored spill through the existing
-`GpuLavaLighting` pass. Its shared 32-source budget uses the captured field of view
-and ranks projected proximity against source size/power, so tiny scatter does not
-crowd out mature colonies. Emission color and reach follow the actual placed model:
+`GpuLavaLighting` light list, filtered by the captured field of view. Each lit pixel
+evaluates only the emitters whose reach covers its grid cell, so every colony and
+scatter light counts. Emission color and reach follow the actual placed model:
 warm lips/gills and cyan hanging mycelium light the nearby terrain and ordinary
 objects. The existing diffuse-area approximation does not cast obstacle shadows;
 it retains lava's response. Lights install and retire with their terrain chunks,

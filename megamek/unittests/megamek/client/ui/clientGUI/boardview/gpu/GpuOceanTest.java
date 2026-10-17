@@ -17,14 +17,17 @@ class GpuOceanTest {
             assertTrue(length > previous, "Stronger wind builds longer waves: " + length);
             previous = length;
         }
-        // Deep water: λ = 2πg/ω². Calm air only ripples; Beaufort 8 over the open-sea fetch peaks near 70 m.
-        assertTrue(peakWavelength(0) < 5, "Calm: " + peakWavelength(0));
+        // Deep water: λ = 2πg/ω². The wind band's peak remains finite even when its power is zero in calm air.
+        assertTrue(peakWavelength(0) < 5, "Dormant wind band: " + peakWavelength(0));
         assertTrue(peakWavelength(1) > 55 && peakWavelength(1) < 85, "Gale: " + peakWavelength(1));
         assertTrue(GpuOcean.sea(1, 9.81f)[2] > GpuOcean.sea(0, 9.81f)[2], "The swell grows a little under wind");
         // JONSWAP's closed form for the unscaled sea: about 3 m in a gale over this fetch, a 0.3 m swell in calm.
         assertEquals(3, GpuOcean.significantHeight(1, 9.81f), .3);
         assertEquals(.3, GpuOcean.significantHeight(0, 9.81f), .05);
         assertEquals(1, GpuOcean.storm(0), 1e-6, "Calm water is never exaggerated");
+        assertEquals(0, GpuOcean.sea(0, 9.81f)[1], "Still air must not generate a wind sea");
+        assertTrue(GpuOcean.sea(.01f, 9.81f)[1] < GpuOcean.sea(.15f, 9.81f)[1] * .02,
+              "The first trace of wind grows gently instead of restoring full ripple power");
     }
 
     @Test

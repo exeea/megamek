@@ -31,7 +31,8 @@ This normalization happens after filtering. Pre-normalizing the PNG would change
 mip and repeat blending and is not an equivalent optimization. The generator's
 separate mean subtraction centers the engineered height field; it does not
 normalize color brightness. `sheet-surface.png` stores height, roughness, cracks
-and cloudiness in RGBA, and `sheet-normal.png` supplies the aligned normal. These
+and cloudiness in RGBA, and `sheet-normal.png` supplies the aligned normal; the
+renderer uploads those two as the layers of one array (`u_iceMaps`). These
 are artistic control maps, not measured ice samples. Rebuilding from a changed
 source can also change those numeric maps; a color-only revision must explicitly
 preserve and verify them.

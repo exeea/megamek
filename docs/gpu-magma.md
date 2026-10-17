@@ -13,7 +13,7 @@
 | `liquid-flow.glsl` | Shared water/lava advection phases, weights and material coordinates. |
 | `magma-solid.glsl / magma-flow.glsl / magma-lighting.glsl` | Own crust relief, molten advection and heat/lighting; terrain boundaries reuse these evaluations. |
 | `GpuAtmosphere / GpuHeatGlow` | Preserve molten HDR energy, select visible hot highlights and composite a reduced-resolution camera halo. |
-| `GpuLavaLighting / lava-lighting.glsl` | Derive bounded local diffuse emitters from installed volcanic tiles for terrain, units and props. |
+| `GpuLavaLighting / lava-lighting.glsl` | The binned local lights for terrain, units and props: volcanic tiles, burning hexes, luminous fungi, and each frame's fireballs and cannon muzzle blasts (`GpuAttackEffects.lights`, the 64 brightest). Diffuse light, plus a GGX highlight widened by the source's size on glossy pixels. |
 
 MAGMA level 1 is solid basalt crust with incandescent fissures. Level 2 is opaque
 flowing lava, including falling sheets and exposed board-edge cuts. The captured
@@ -145,16 +145,21 @@ Scene alpha blending and heat extraction operate on linear radiance; see the
 [scene color contract](gpu-atmosphere.md#scene-depth-fog-and-composition).
 
 Local illumination is a separate diffuse contribution in the existing lit shaders.
-`GpuLavaLighting` derives up to 32 disk-like emitters from the installed terrain
-snapshot each frame, culling by camera and the captured client LOS. Molten tiles
-emit strongly; cooling crust retains 3.5% source power. The camera-centred budget
-fades its outer sources by distance when full. The same environment attribute reaches
-terrain, units, buildings and props without extra textures, render passes or game state.
-Changing terrain or board scale refreshes positions; removing lava clears the count.
-This is a short-range, bounded lighting approximation, with no obstacle shadow rays
-or global illumination. Light can leak through nearby geometry, and a very large
-lava field exceeds the local emitter budget. The camera halo and local lighting
-both respect captured visibility, through their own existing render paths.
+`GpuLavaLighting` derives disk-like emitters from the installed terrain snapshot and
+keeps those the captured client LOS shows. Molten tiles emit strongly; cooling crust
+retains 3.5% source power. Every visible emitter, lava and fungal alike, is binned on
+a board-plane grid of one hex width per cell, into each cell its reach overlaps. The
+falloff reaches exactly zero at twice the source size, so the binning drops only
+zero contributions. One RGBA32F texture holds each cell's first entry and count,
+then the entries; `lavaIrradiance` reads its pixel's cell with `texelFetch` and
+evaluates only those emitters, in the same per-light maths. The list has no fixed
+size and is rebuilt and uploaded only when the visible emitters change. The same
+environment attribute reaches terrain, units, buildings and props without extra
+render passes or game state. Changing terrain or board scale refreshes positions;
+removing lava empties the list. This is a short-range lighting approximation, with
+no obstacle shadow rays or global illumination; light can leak through nearby
+geometry. The camera halo and local lighting both respect captured visibility,
+through their own existing render paths.
 
 Relief uses normals and bounded parallax, not geometric displacement, so silhouettes
 and picking remain the existing board geometry. Crust traces two to twelve depth

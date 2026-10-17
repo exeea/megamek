@@ -114,7 +114,9 @@ roof's structure line. The same rule moves the lines down where a view drops one
 HEIGHT, and the zero-gravity bed's DEPTH and the words of what it lost with the liquid: its vegetation (`FOLIAGE`, the
 cover, `FIELDS`, `TUNDRA`), its ice and snow (`ICE`, `BLACK ICE`, `SNOW`, `DEEP SNOW`) and its liquids (`SWAMP`,
 `QUICKSAND`, magma, `RAPIDS`, `TORRENT`, `HAZ. LIQUID`); there a bridge's `HEIGHT n` and `BRIDGE▲n` (on the deck) are
-raised by the depth, as its deck keeps its level.
+raised by the depth, as its deck keeps its level. In vacuum with gravity the frozen water keeps its DEPTH, `ICE`,
+`RAPIDS`, `TORRENT`, magma and `HAZ. LIQUID` lines; only the vegetation, `SNOW`, `DEEP SNOW`, `BLACK ICE`, `SWAMP` and
+`QUICKSAND` lines go.
 Every label is drawn on an outline in every view (`BoardHexText.outline`: white around dark text, black around light
 text): Legacy 2D and the saved image (`BoardHexText.draw`) draw the text eight times in the outline
 colour in a ring around it (`BoardHexText.outlineOffsets`), then the text. `GpuHexText` draws a bordered font under

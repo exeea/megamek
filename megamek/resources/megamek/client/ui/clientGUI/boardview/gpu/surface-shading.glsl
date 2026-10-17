@@ -68,7 +68,8 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     vec3 multiscatter = specularMultiscatter(max(0.0, dot(normal, view)), roughness, f0);
     // The sky's ambient occlusion, with the screen-space occlusion of the opaque scene (ambient-occlusion.glsl): once,
     // for every surface, on the sky alone. Local lights and the sun keep their own visibility.
-    float occlusion = s.occlusion * screenAmbientOcclusion();
+    vec2 screen = screenOcclusion();
+    float occlusion = s.occlusion * screen.x;
     vec3 localSpecular;
     vec3 localLight = lavaIrradiance(v_cloudPosition, normal, view, roughness, f0, localSpecular);
     // Sky from above; from below, light reflected by the sunlit ground: warm in the desert, white on snow.
@@ -77,7 +78,8 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     if (tissue) sky += skyLight(-normal, s.bounce) * s.back;
     vec3 ambient = (sky * occlusion * s.cavity + localLight * s.cavity) * diffuseBudget;
     vec3 light = sunDirection();
-    vec3 sun = sunColor() * s.visibility;
+    // Contact shadows (ambient-occlusion.glsl) add the small occluders the shadow map is too coarse for.
+    vec3 sun = sunColor() * s.visibility * screen.y;
     bool lit = dot(s.geometric, light) > 0.0;
     vec3 incidence = lit ? diffuseReflectance(normal, light, view, roughness, f0) : vec3(0.0);
     vec3 incident = incidence * s.front;

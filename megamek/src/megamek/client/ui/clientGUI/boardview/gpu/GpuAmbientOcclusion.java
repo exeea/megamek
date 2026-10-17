@@ -9,6 +9,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g3d.attributes.DirectionalLightsAttribute;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Environment;
@@ -21,6 +22,7 @@ import com.badlogic.gdx.graphics.glutils.GLFrameBuffer;
 import com.badlogic.gdx.graphics.glutils.GLOnlyTextureData;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
 
@@ -28,7 +30,8 @@ import com.badlogic.gdx.utils.Disposable;
  * Ground-truth ambient occlusion of the opaque scene (ambient-occlusion-horizon.frag), which the lit surfaces apply to
  * their ambient term (ambient-occlusion.glsl). It runs between the depth pre-pass and the opaque colour draws, in the
  * colour stage of {@link GpuTerrain#render(Camera, Runnable, Runnable)}: half-resolution horizons from the pre-pass
- * depth, then two depth-aware blur passes. While this attribute is in the terrain's environment the pre-pass also draws
+ * depth with contact shadows toward the sun (CONTACT_METRES), then two depth-aware blur passes. While this attribute is
+ * in the terrain's environment the pre-pass also draws
  * the relief, so the occlusion sees the ground and the trees; buildings, props and units neither cast nor receive it.
  * Its presence compiles ambientOcclusionFlag into the lit programs (GpuCloudShadow.prefix), so a switch is a lighting
  * change behind the terrain's loading stage, as specular anti-aliasing is. The occlusion is current from {@link #render}
@@ -44,11 +47,15 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
     static final float RADIUS_METRES = 8;
     /** The largest screen radius in scene pixels: a close view searches a smaller world radius instead of more pixels. */
     static final float MAX_RADIUS_PIXELS = 160;
+    /** Contact shadows march this far toward the sun, and take an occluder this deep behind its surface (metres). */
+    static final float CONTACT_METRES = 2;
+    static final float CONTACT_THICKNESS_METRES = 1;
+    private final Vector3 toSun = new Vector3();
     private final IntBuffer query = BufferUtils.newIntBuffer(16);
     private Mesh quad;
     private ShaderProgram horizon;
     private ShaderProgram blur;
-    /** Visibility 1 at camera distance 0, which no fragment has: what the colour programs read without an occlusion. */
+    /** Visibility 1 at camera distance 0, which no fragment has, and no contact shadow: what the programs read without one. */
     private Texture fallback;
     /** The half-resolution horizons, where the second blur pass leaves the final occlusion, and the first's output. */
     private FrameBuffer horizons;
@@ -122,6 +129,13 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
               projectionDepth[3]);
         horizon.setUniformf("u_projectionScale", projection[Matrix4.M00], projection[Matrix4.M11]);
         horizon.setUniformf("u_radius", BoardRelief.metres(RADIUS_METRES), MAX_RADIUS_PIXELS);
+        // The direction to the sun or moon in view space; no march without a direct light.
+        var lights = terrain.environment().get(DirectionalLightsAttribute.class, DirectionalLightsAttribute.Type);
+        var light = lights == null || lights.lights.isEmpty() ? null : lights.lights.first();
+        boolean lit = light != null && (light.color.r > 0 || light.color.g > 0 || light.color.b > 0);
+        if (lit) { toSun.set(light.direction).scl(-1).rot(camera.view).nor(); }
+        horizon.setUniformf("u_contact", toSun.x, toSun.y, toSun.z, lit ? BoardRelief.metres(CONTACT_METRES) : 0);
+        horizon.setUniformf("u_contactThickness", BoardRelief.metres(CONTACT_THICKNESS_METRES));
         quad.render(horizon, GL20.GL_TRIANGLES);
         blur(blurred, horizons, 1, 0, 1, context);
         blur(horizons, blurred, 0, 1, strength, context);
@@ -148,7 +162,7 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
     /** The draws that read this frame's occlusion are done: the opaque scene and the units. Later draws read 1. */
     void end() { current = false; }
 
-    /** Native checks: the target holding the last occlusion (visibility, camera distance), or null. */
+    /** Native checks: the target holding the last occlusion (visibility, camera distance, contact visibility), or null. */
     FrameBuffer target() { return horizons; }
 
     private Texture texture() { return current ? horizons.getColorBufferTexture() : fallback; }
@@ -207,11 +221,11 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
     private void createPrograms() {
         try {
             quad = GpuAtmosphere.screenQuad();
-            fallback = new Texture(new GLOnlyTextureData(1, 1, 0, GL30.GL_RG32F, GL30.GL_RG, GL20.GL_FLOAT));
+            fallback = new Texture(new GLOnlyTextureData(1, 1, 0, GL30.GL_RGBA32F, GL20.GL_RGBA, GL20.GL_FLOAT));
             fallback.bind();
-            var pixel = BufferUtils.newFloatBuffer(2);
-            pixel.put(1).put(0).flip();
-            Gdx.gl.glTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL30.GL_RG, GL20.GL_FLOAT, pixel);
+            var pixel = BufferUtils.newFloatBuffer(4);
+            pixel.put(1).put(0).put(1).put(0).flip();
+            Gdx.gl.glTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL20.GL_RGBA, GL20.GL_FLOAT, pixel);
             horizon = GpuShaderManager.program(() -> GpuAtmosphere.shader("ambient-occlusion-horizon.frag"),
                   next -> horizon = next);
             blur = GpuShaderManager.program(() -> GpuAtmosphere.shader("ambient-occlusion-blur.frag"), next -> blur = next);
@@ -223,7 +237,7 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
 
     private static FrameBuffer createTarget(int width, int height) {
         var builder = new GLFrameBuffer.FrameBufferBuilder(width, height);
-        builder.addFloatAttachment(GL30.GL_RG32F, GL30.GL_RG, GL20.GL_FLOAT, true);
+        builder.addFloatAttachment(GL30.GL_RGBA32F, GL20.GL_RGBA, GL20.GL_FLOAT, true);
         FrameBuffer result = builder.build();
         result.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
         result.getColorBufferTexture().setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);

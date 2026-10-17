@@ -4,15 +4,20 @@
 // Occlusion") at half resolution, from the depth pre-pass. Each pixel searches the horizon on both sides of SLICES
 // screen directions, a few steps each within a world radius, and integrates the cosine-weighted visible arc around its
 // normal, which is reconstructed from depth. The slice rotation and step offsets follow a 4 by 4 pattern that
-// ambient-occlusion-blur.frag averages out. Output: R visibility, G camera distance (ambient-occlusion.glsl).
+// ambient-occlusion-blur.frag averages out. Contact shadows march a short way toward the sun through the same depth:
+// the small occluders the shadow map is too coarse for (a foot, a rock, a trunk's root). Output: R visibility,
+// G camera distance, B the sun's contact visibility (ambient-occlusion.glsl).
 layout(location = 0) out vec4 fragColor;
 uniform sampler2D u_depth; // the scene's hardware depth, full resolution
 // CAMERA_DEPTH
 uniform vec2 u_projectionScale; // projection M00, M11
 uniform vec2 u_radius; // world radius, the largest screen radius in scene pixels
+uniform vec4 u_contact; // the direction to the sun in view space; the march length in world units, 0 without a sun
+uniform float u_contactThickness; // world depth an occluder is taken to have behind its surface
 
 const int SLICES = 2;
 const int STEPS = 4;
+const int CONTACT_STEPS = 8;
 const float PI = 3.14159265;
 const float HALF_PI = 1.57079633;
 // Bayer order: any 4 by 4 block holds every slice rotation once.
@@ -30,6 +35,28 @@ vec3 viewPosition(ivec2 texel) {
     return vec3(ndc * w / u_projectionScale, -range);
 }
 
+// The depth texel a view-space point projects to.
+ivec2 depthTexel(vec3 point) {
+    float w = u_projectionDepth.w + u_projectionDepth.z * point.z;
+    return ivec2(floor((point.xy * u_projectionScale / w * .5 + .5) * vec2(last + 1)));
+}
+
+// Whether the sun reaches this surface past the nearby depth: 0 when a march step falls behind a surface by less than
+// an occluder's thickness, 1 when it leaves the screen or nothing stands in the way.
+float contactShadow(vec3 position, vec3 normal, float pixelSize, float jitter) {
+    if (u_contact.w < pixelSize) return 1.0;
+    // Off the surface by a couple of pixels, so its own depth does not shadow it.
+    vec3 start = position + normal * (2.0 * pixelSize);
+    for (int index = 0; index < CONTACT_STEPS; index++) {
+        vec3 point = start + u_contact.xyz * (u_contact.w * (float(index) + jitter) / float(CONTACT_STEPS));
+        ivec2 texel = depthTexel(point);
+        if (any(lessThan(texel, ivec2(0))) || any(greaterThan(texel, last))) return 1.0;
+        float behind = -point.z - cameraDepth(texelFetch(u_depth, texel, 0).r);
+        if (behind > pixelSize && behind < u_contactThickness) return 0.0;
+    }
+    return 1.0;
+}
+
 void main() {
     last = textureSize(u_depth, 0) - 1;
     ivec2 centre = min(ivec2(gl_FragCoord.xy) * 2, last);
@@ -37,7 +64,7 @@ void main() {
     vec3 position = viewPosition(centre);
     float range = -position.z;
     if (depth >= SKY) {
-        fragColor = vec4(1.0, range, 0.0, 0.0);
+        fragColor = vec4(1.0, range, 1.0, 0.0);
         return;
     }
     // The normal from the nearer neighbour on each axis, so a depth edge does not bend it.
@@ -98,5 +125,9 @@ void main() {
         }
         visibility = clamp(sum / float(SLICES), 0.0, 1.0);
     }
-    fragColor = vec4(visibility, range, 0.0, 0.0);
+    // A scene pixel's world size here; the contact march never goes below it.
+    float pixelSize = 2.0 * w / (u_projectionScale.y * float(last.y + 1));
+    ivec2 phase = ivec2(gl_FragCoord.xy) & 3;
+    float contact = contactShadow(position, normal, pixelSize, (PATTERN[phase.y * 4 + phase.x] + .5) / 16.0);
+    fragColor = vec4(visibility, range, contact, 0.0);
 }

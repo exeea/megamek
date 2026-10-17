@@ -494,7 +494,7 @@ pass on the tested machine; no frame-time or cross-platform performance claim fo
 
 `BoardAtmosphere` supplies linear light. Lit shaders decode albedo, apply the common
 sky/direct/ground-bounce model and encode display color once.
-`light-model.glsl` and `surface-lighting.glsl` are shared by terrain and other lit
+`light-model.glsl`, `surface-lighting.glsl` and `surface-shading.glsl` are shared by terrain and other lit
 surfaces; introducing a terrain-only light multiplier would make those surfaces disagree.
 
 Per-level grading belongs to the terrain material path and changes continuously down

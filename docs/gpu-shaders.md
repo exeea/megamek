@@ -16,6 +16,7 @@ inserted into a larger program, so editing a helper can affect several materials
 | `terrain-foliage.frag`, `terrain-vegetation.frag` | Tree/plant surface shading; programs configured by `GpuTerrain`. |
 | `terrain-grass.glsl`, `terrain-biome-vegetation.glsl`, `terrain-vegetation-wind.glsl` | Instanced blade/crop shapes and shared wind; `GpuGroundCover` and `GpuBiomeVegetation` inject the vertex helpers. |
 | `light-model.glsl`, `surface-lighting.glsl`, `rain-surface.glsl` | Shared light response, shadow/specular terms and wet surfaces. |
+| `surface-shading.glsl` | One `Surface` description and its lighting entry `shadeSurface`: sun or moon with the caller's shadow, sky and environment reflection, local lights, with both specular lobes scaled for GGX multiple scattering (`specularMultiscatter`, so rough metals keep their brightness); sculpted ground, ground and roads, trees and plants, and imported models (`model.frag`, `model-surface.glsl`). |
 | `color-space.glsl`, `environment-lighting.glsl` | Exact sRGB boundaries and shared integrated BRDF/environment reflection; `GpuEnvironmentLighting` owns the lookup table. |
 | `water-surface.frag`, `water-fall.frag`, `water-spray.frag`, `water-cut.frag` | Separate water draw modes; assembled by `GpuTerrain`, with attributes/uniforms from `GpuWaterShader`. |
 | `water-optics.glsl`, `water-lighting.glsl`, `water-interactions.glsl`, `water-pool.glsl` | Water color/transmission, illumination and local motion/contacts. |
@@ -29,11 +30,10 @@ inserted into a larger program, so editing a helper can affect several materials
 | `terrain-effects.vert`, `terrain-effects.frag`, `terrain-effects-composite.frag` | Persistent terrain fire/smoke volumes and their reduced-resolution composite; `GpuTerrainEffects`. |
 | `shadow-depth.frag` | Shadow depth/cutout behavior; `GpuTerrain` configures the provider and `GpuTreeInstances` supplies instanced transforms. |
 
-Unit materials are configured by `GpuUnitShader`, including the linear-light
-adaptation of libGDX's base shader, normal maps and per-unit material inputs.
-Imported model materials use `model-surface.glsl`, with factors/maps carried by
-`GpuModelMaterial`; terrain and foliage share its GGX and diffuse energy coupling
-in `light-model.glsl` / `environment-lighting.glsl`. Roughness/metalness and normal/AO channels are linear data.
+Unit materials are configured by `GpuUnitShader`: libGDX's vertex stage with linear colours, our
+`model.frag` fragment stage, normal maps and per-unit material inputs. Imported model materials fill a
+`Surface` in `model-surface.glsl`, with factors/maps carried by `GpuModelMaterial`, and are lit by
+`shadeSurface` like the terrain. Roughness/metalness and normal/AO channels are linear data.
 Normal/AO/surface maps use mesh UVs rather than the projected unit camouflage
 coordinates. The same model path is used for ordinary imported buildings and
 props. Custom terrain, foliage and water programs retain their own surface
@@ -69,8 +69,11 @@ save will change.
 ## Terrain startup
 
 Terrain startup prepares the material variants found in actual chunks while CPU
-geometry is being built. The loading display reports **Preparing terrain materials**
-until their links are ready. `GpuGlsl.Preparation` polls the driver's parallel shader
+geometry is being built. The loading display's **Compiling shaders** bar counts the
+programs linked of those the load needs so far: these generic programs and their depth
+twins, then the family programs below once they start (`GpuTerrain.shaderProgress`). It
+shows only while a program is left to link; the total grows as chunks find new variants.
+`GpuGlsl.Preparation` polls the driver's parallel shader
 compiler when available; otherwise a worker compiles in a private hidden shared
 context. The render thread adopts each completed program into libGDX without a
 second compilation and retains resource ownership. Lighting and shadow changes
@@ -101,9 +104,48 @@ the same worker. Variants that appear later, such as a newly painted combination
 generic program until the next load. Crust and bank draws and volcanic palettes with at most
 one ordinary family keep the generic program, which already compiles one family's path; so
 do scarred surfaces, scatter, water, editor previews and board prints. A terrain keeps at
-most 32 family programs over all lighting configurations. A shader-editor change recompiles
+most 32 family programs for each lighting configuration and 64 in all. A board without clouds has four
+configurations (specular anti-aliasing with and without a directional light), up to eight across the cloud marker's
+states; once a terrain holds 64, a third configuration draws with the generic programs: on the calibration board at
+1080p on Iris Xe that is about 6.5 ms slower fitted and 16 ms at the middle distance (step 4's
+family-program timings). A shader-editor change recompiles
 the family programs with the other variants, on the render thread.
 `-Dmegamek.gpu.familyPrograms=false` draws with the generic programs only.
+
+The depth pre-pass (`GpuTerrain.renderPrepass`) draws the trees' depth before the opaque colour pass: leaves and
+impostor cards with their own alpha test, after which `terrain-foliage.frag` returns under `depthPrepassFlag`, trunks
+and other solid tree parts with an empty fragment stage (`terrain-depth.frag`). Their colour draws then test
+`GL_EQUAL` without writing depth, so hidden leaves are not shaded. Each pre-passed generic program has a depth twin
+with the same prefix and vertex stage, which its family programs share. Twins are programs beside the colour programs,
+outside the family programs' capacity, and link behind the loading stage with the generic programs, every tree detail
+level included. Every terrain vertex stage declares `gl_Position` invariant, and a cutout's vertex stage also the alpha
+test's inputs (`foliage-coverage.glsl`); below GLSL 4.20, `terrain-foliage.frag` declares those inputs invariant too
+(`coverageIn`). The frame's single gather, draw order and flushes do not change. A draw without a twin, a variant that
+appears later and a shader edit's replacements draw as before until the warm-up pairs them. The Tactical View, the
+Classic columns and the wireframe draw without it. `-Dmegamek.gpu.depthPrepass=false` turns it off; `=all` adds the
+ground relief, for measurements only, since on an Iris Xe its twins cost about what they save. On NVIDIA the frames
+are bit-identical with and without the pre-pass; on an Iris Xe, `GL_EQUAL` drops a few isolated pixels on leaf edges
+and tufts (5 to 2133 of a 1080p view's 2.07 million). On an Iris Xe at 1080p the 40 by 40 forest's middle view draws
+in 32 ms instead of 53.5 ms. `GpuDepthPrepassSmokeTest` checks the parity and shader edits;
+`GpuDepthPrepassBenchmarkSmokeTest` times it.
+
+Ambient occlusion (`GpuAmbientOcclusion`; the Display page's Ambient occlusion, off until switched on, and its
+strength) darkens the sky light where the relief and the trees hide the sky. It runs between the depth pre-pass, which
+also draws the relief while it is on, and the opaque colour draws: ground-truth ambient occlusion (Jimenez et al. 2016,
+`ambient-occlusion-horizon.frag`) at half resolution from the pre-pass depth, with normals from that depth, two
+directions of four steps on each side within 8 m (at most 160 scene pixels on screen), then two depth-aware blur
+passes (`ambient-occlusion-blur.frag`) that remove its 4 by 4 rotation pattern and apply the strength. The same pass
+marches contact shadows: eight jittered steps toward the sun or moon over 2 m of the pre-pass depth, an occluder taken
+as 1 m deep, for the small occluders the shadow map is too coarse for; none without a direct light. Lit programs read
+both with `screenOcclusion()` (`ambient-occlusion.glsl`; `shadeSurface` multiplies the sky's occlusion by the first and
+the sun's visibility by the second), which upsamples them against the fragment's own depth: surfaces the pre-pass does
+not draw (units; buildings and props unless the pre-pass's objects category is on)
+read 1, as does every draw after the units (water, transparent effects). Its environment attribute compiles
+`ambientOcclusionFlag` into the lit programs, so a switch rebuilds them behind the loading stage; without it the accessor
+is the constant 1 and the frames are bit-identical to those without the feature. Sculpted ground with both ice and
+volcanic crust draws without it: its sampler would be the program's 17th texture unit (`GpuSamplerBudgetSmokeTest`).
+Its two RGBA32F targets (visibility, camera distance, contact visibility) follow the scene's size. `GpuAmbientOcclusionSmokeTest` checks it and, with
+`-Dmegamek.gpu.measureAmbientOcclusion=true`, times it.
 
 ## Uniforms, inputs and previews
 
@@ -143,7 +185,8 @@ Wetness must affect the intended receiving materials. Decode authored albedo and
 emission, add emission to reflected light in linear space, and keep the scene
 output linear through alpha/additive blending. Retain values above one until the
 atmosphere's shared exposure, highlight shoulder and final display conversion.
-Changes to alpha/cutouts may also require the shadow/depth path. Weather and
+Changes to alpha/cutouts may also require the shadow/depth path and the depth
+pre-pass's twin (`depthPrepassFlag` in `terrain-foliage.frag`). Weather and
 tactical/UI draws after the composite still supply display colors. Isolated
 shader and section previews use `GpuSceneDisplay` for the same final conversion.
 
@@ -151,11 +194,12 @@ macOS's OpenGL gives each shader stage only 16 texture units, and a program that
 samples more fails to link there, so the board does not draw on a Mac although
 Windows and Linux drivers (32 units) accept it. Add maps as layers of an existing
 array where they are aligned repeats of one set, as the sculpt maps
-(`u_terrainLayers`) and each magma set (`u_magmaMaps`) are. The on-demand
+(`u_terrainLayers`), each magma set (`u_magmaMaps`) and the ice normal and surface maps
+(`u_iceMaps`) are. The on-demand
 `GpuSamplerBudgetSmokeTest` renders the battle view over volcanic, rain, snow, fog,
 river, highway and hazardous-liquid boards, fails on any program over 16, and
-prints every variant's count. On 2026-09-30 the fullest was the cloud-shadowed water
-surface at 13; sculpted terrain used at most 10 and magma at most 5.
+prints every variant's count. On 2026-10-16 the combined ice and volcanic sculpt
+material used all 16, including the local light list (`u_lavaLights`).
 
 A shader edit normally replaces programs and invalidates affected render caches;
 it does not change game state, terrain support or picking. Change Java geometry

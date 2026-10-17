@@ -310,13 +310,17 @@ final class GpuOcean implements Disposable {
     /**
      * The wind sea's JONSWAP peak angular frequency, its alpha, and the swell's alpha, for a strength from 0 to 1
      * and positive gravity in metres per second squared:
-     * fetch-limited (Hasselmann et al. 1973), never beyond a fully developed sea. Calm air still ripples; a full gale
+     * fetch-limited (Hasselmann et al. 1973), never beyond a fully developed sea. Calm air retains only swell; a full gale
      * (Beaufort 8) raises a steep, breaking sea with ~70 m peak waves at 1 g.
      */
     static float[] sea(float strength, float gravity) {
         float speed = 1.5f + 18.5f * strength;
         double peak = Math.max(22 * Math.cbrt(gravity * gravity / (speed * FETCH_METRES)), .855 * gravity / speed);
         double alpha = Math.max(.076 * Math.pow(speed * speed / (FETCH_METRES * gravity), .22), .0081);
+        // The minimum speed keeps the peak finite, but must not generate a wind sea in still air. Fade its power
+        // through light air; the shared spectrum transition lets existing chop die away when the wind stops.
+        float breeze = Math.clamp(strength / .15f, 0, 1);
+        alpha *= breeze * breeze * (3 - 2 * breeze);
         // The swell is 0.3 m high in calm and 0.45 m in a gale.
         return new float[] { (float) peak, (float) alpha, 5.6e-5f + 7e-5f * strength };
     }
