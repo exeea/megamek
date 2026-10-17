@@ -1,13 +1,11 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Reference-authored lichen/tussocks, fungal colonies and barren mineral crust in the shared texture array.
 // Preserve actual image pigments and internal detail instead of thresholding them into flat coloured spots.
-uniform vec4 u_tundraLayers, u_tundraTiles; // earth, fungus, mineral, lichen; normal/AO at colour layer + 1
+uniform vec4 u_tundraLayers, u_tundraTiles; // earth, fungus, mineral, earth variant; normal/AO at colour layer + 1
 
-float tundraLichen(vec2 world) {
-    // Communities span several hexes; the finer field only breaks up their boundaries.
-    float patches = .8 * biomeNoise(world / 120.0 + vec2(17.0, 43.0))
-          + .2 * biomeNoise(world / 33.0 + vec2(71.0, 11.0));
-    return smoothstep(.43, .57, patches);
+float tundraVariant(vec2 world) {
+    // Both sources contain the same tundra mixture; local variation breaks repetition, not terrain identity.
+    return smoothstep(.46, .54, biomeNoise(world / 16.0 + vec2(17.0, 43.0)));
 }
 
 vec3 tundraFamily(float f) {
@@ -40,7 +38,7 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
     }
 #endif
     if (kinds.x > .0001) {
-        kinds.w = kinds.x * tundraLichen(world.xy);
+        kinds.w = kinds.x * tundraVariant(world.xy);
         kinds.x -= kinds.w;
     }
     // Keep source colonies intact over broad regions; colour and relief use the same slow translation field.

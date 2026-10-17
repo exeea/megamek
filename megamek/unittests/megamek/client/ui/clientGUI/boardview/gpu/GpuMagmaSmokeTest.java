@@ -179,6 +179,10 @@ class GpuMagmaSmokeTest {
               new byte[] { 121, 0, (byte) 128, (byte) 128 }, null).upload(false);
         try (var output = new GpuSceneTestOutput(128, 128)) {
             terrain.setAtmosphere(null);
+            // This isolated provider has no board pass; initialize its owned inactive biome sentinel.
+            var biomesField = GpuTerrain.class.getDeclaredField("biomes");
+            biomesField.setAccessible(true);
+            ((GpuBiomeSurface) biomesField.get(terrain)).update(null);
             float span = BoardRelief.metres(30);
             var camera = new OrthographicCamera(span, span);
             camera.position.set(0, 0, span * 2);
@@ -239,8 +243,22 @@ class GpuMagmaSmokeTest {
                 part.environment = terrain.environment();
                 parts.add(part);
             }
+            // The same tuple with and without B's override must select different family programs; C also aliases.
+            var familyParts = new HashMap<Integer, Renderable>();
+            for (int index : new int[] { 4, 7, 8 }) {
+                var part = new Renderable().set(parts.get(index));
+                part.material = new Material(part.material);
+                part.material.set(new GpuFamilyPrograms.Constants());
+                part.shader = null;
+                familyParts.put(index, part);
+            }
+            // Compile each actual variant first: apply must report a broken probe instead of a cold fallback.
+            for (var part : parts) { batch.getShaderProvider().getShader(part); }
+            for (int index : new int[] { 4, 7, 8 }) { batch.getShaderProvider().getShader(familyParts.get(index)); }
             String source = GpuShaderSource.readDisk("terrain-sculpt.frag");
-            String probe = source.substring(0, source.indexOf("void main()")) + """
+            // Keep the original body as an unused helper so the composer retains its shared damage/lighting
+            // declarations. The diagnostic main alone executes, with the normal provider and storage boundary.
+            String probe = GpuShaderSource.replaceOnce(source, "void main() {", """
                   void main() {
                       vec3 world = v_cloudPosition / u_metre, face = normalize(v_normal);
                       terrainMaterialLod(world, face);
@@ -256,9 +274,6 @@ class GpuMagmaSmokeTest {
                       blendCovers(world, face, v_diffuseUV.x, v_diffuseUV.y, .6, .5, sediment, .4, .6, .5,
                             color, normal, cavity, height, grass, sand, bounce, response, rainCover,
                             emission, roughness, volcanic, weights);
-                      // Retain the composer's cloud insertion anchor; constant terms leave probe channels unchanged.
-                      vec3 albedo = vec3(0.0), ambient = vec3(0.0), direct = vec3(0.0), sheen = vec3(0.0);
-                      albedo *= ambient + direct;
                       int channel = int(gl_FragCoord.y) % 5;
                       if (channel == 0) fragColor = vec4(color, height);
                       else if (channel == 1) fragColor = vec4(normal * .5 + .5, cavity);
@@ -266,7 +281,8 @@ class GpuMagmaSmokeTest {
                       else if (channel == 3) fragColor = weights;
                       else fragColor = vec4(volcanic, grass, sand, rainCover);
                   }
-                  """;
+                  void paletteOriginalSurface() {
+                  """, "palette diagnostic");
             int[] ordinaryFamilies = { rock, rock, sand, rock, -1, -1, -1, -1, -1, -1, -1, -1, grass, -2 };
             List<float[]> expected = new ArrayList<>();
             String previous = Gdx.files.absolute(oracle.getAbsolutePath()).readString("UTF-8");
@@ -275,8 +291,16 @@ class GpuMagmaSmokeTest {
                 sources.put("terrain-sculpt.frag", probe);
                 if (saved) { sources.put("terrain-materials.glsl", previous); }
                 var change = manager.apply(sources);
-                assertTrue(change.success(), change.message());
+                assertTrue(change.success(), "saved=" + saved + ": " + change.message());
+                assertTrue(change.updated() > 0, "The palette programs must adopt the diagnostic sources");
                 for (int index = 0; index < parts.size(); index++) {
+                    String label = "palette " + index + " saved=" + saved;
+                    var shader = batch.getShaderProvider().getShader(parts.get(index));
+                    var program = ((BaseShader) GpuShaderProvider.unwrap(shader)).program;
+                    String fragment = program.getFragmentShaderSource();
+                    assertTrue(fragment.contains("int channel = int(gl_FragCoord.y) % 5;")
+                                && fragment.contains("else if (channel == 3) fragColor = weights;"),
+                          label + ": the linked program must execute the material diagnostic, never fallback shading");
                     boolean bank = index == 4 || index == 6 || index == 7 || index == 11 || index == 12;
                     camera.position.set(0, bank ? -.8f : 0, bank ? .6f : 1).scl(span * 2);
                     camera.up.set(0, bank ? .6f : 1, bank ? .8f : 0);
@@ -288,9 +312,6 @@ class GpuMagmaSmokeTest {
                     batch.end();
                     // Mixed palettes with one ordinary material share its program regardless of slot order.
                     // An actual map override needs generic dispatch; all-volcanic palettes need no ordinary maps.
-                    var shader = batch.getShaderProvider().getShader(parts.get(index));
-                    var program = ((BaseShader) GpuShaderProvider.unwrap(shader)).program;
-                    String fragment = program.getFragmentShaderSource();
                     int family = ordinaryFamilies[index];
                     if (family != -1) {
                         assertTrue(fragment.contains("#define VOLCANIC_ORDINARY_FAMILY " + family + "\n"),
@@ -310,24 +331,14 @@ class GpuMagmaSmokeTest {
                                   "Palette slot order must not create another specialized shader");
                         }
                     }
-                    FloatBuffer pixels = readFiniteScene(output, "palette " + index);
+                    FloatBuffer pixels = readFiniteScene(output, label);
                     float[] actual = new float[pixels.capacity()];
                     for (int i = 0; i < actual.length; i++) {
                         actual[i] = pixels.get(i) / (i % 4 == 3 ? 1 : GpuSceneRadiance.SCALE);
                     }
                     if (saved) { expected.add(actual); }
                     else {
-                        float[] reference = expected.get(index);
-                        double maximum = 0;
-                        for (int i = 0; i < actual.length; i++) {
-                            // The two float computations each pass through half storage once. Permit one adjacent half.
-                            float minimum = i % 4 == 3 ? 0x1p-24f : 0x1p-19f;
-                            float step = Math.max(minimum, Math.scalb(1f, Math.getExponent(reference[i]) - 10));
-                            maximum = Math.max(maximum, Math.abs(actual[i] - reference[i]) / step);
-                        }
-                        System.out.println("Palette case " + index + " maximum half steps=" + maximum);
-                        assertTrue(maximum <= 1.01, "Complete material channels must match the eager oracle: case "
-                              + index + ", half steps=" + maximum);
+                        comparePalettePixels(expected.get(index), actual, "Palette case " + index);
                     }
                     float minimum = 1, maximum = 0;
                     // Ordinary cases read the first non-base slot's actual final weight; volcanic cases its marker.
@@ -336,12 +347,13 @@ class GpuMagmaSmokeTest {
                         minimum = Math.min(minimum, contribution);
                         maximum = Math.max(maximum, contribution);
                     }
-                    assertTrue(maximum > .1, "The probe must activate the tested material: case " + index);
+                    System.out.println(label + " tested contribution range=" + minimum + ".." + maximum);
+                    assertTrue(maximum > .1, "The probe must activate the tested material: " + label);
                     if (index == 13) {
                         assertEquals(1, minimum, 0x1p-10f, "The all-volcanic palette must contain no ordinary contribution");
                         assertEquals(1, maximum, 0x1p-10f, "Every covered sample must remain fully volcanic");
                     } else if (index == 0 || index == 2 || index >= 4 && index < 8 || index == 11 || index == 12) {
-                        assertEquals(0, minimum, 0, "The same image must include truly zero tested weights");
+                        assertEquals(0, minimum, 0, "The same image must include truly zero tested weights: " + label);
                     } else if (index == 1) {
                         assertTrue(minimum > .5, "The shoreline must activate an initially zero bank slot");
                     } else if (index == 3) {
@@ -385,6 +397,9 @@ class GpuMagmaSmokeTest {
                         }
                         assertTrue(difference > 1, "The grass bank must visibly exercise its map/scale override: " + difference);
                     }
+                    if (!saved && familyParts.containsKey(index)) {
+                        checkFamilyPalette(batch, camera, output, parts, familyParts, index, actual);
+                    }
                 }
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -395,6 +410,62 @@ class GpuMagmaSmokeTest {
             shore.dispose();
             assets.dispose();
         }
+    }
+
+    /** Marked actual providers retain the generic material, including per-slot map and scale overrides. */
+    private static void checkFamilyPalette(ModelBatch batch, OrthographicCamera camera, GpuSceneTestOutput output,
+          List<Renderable> genericParts, Map<Integer, Renderable> familyParts, int index, float[] expected) {
+        var genericPart = genericParts.get(index);
+        var familyPart = familyParts.get(index);
+        var provider = batch.getShaderProvider();
+        var generic = provider.getShader(genericPart);
+        var family = provider.getShader(familyPart);
+        String fragment = ((BaseShader) GpuShaderProvider.unwrap(family)).program.getFragmentShaderSource();
+        String label = "Family palette " + index;
+        assertTrue(fragment.contains("#define SCULPT_FAMILY ") && fragment.contains("#define COVER_FAMILIES ")
+                    && fragment.contains("int channel = int(gl_FragCoord.y) % 5;")
+                    && fragment.contains("else if (channel == 3) fragColor = weights;"),
+              label + ": linked actual family diagnostic, never a generic or cold fallback");
+        assertEquals(index == 7, fragment.contains("#define COVER_B_IS_BASE\n"),
+              "Only the unchanged B maps and scale may remove its evaluator");
+        assertEquals(index == 8, fragment.contains("#define COVER_C_IS_BASE\n"),
+              "The unchanged C maps and scale remove its evaluator");
+        assertFalse(generic.canRender(familyPart), "The generic program must reject the family marker");
+        assertFalse(family.canRender(genericPart), "The family program must reject the unmarked material");
+        assertTrue(family.canRender(familyPart), "The actual family program accepts its own material");
+        if (index == 4 || index == 7) {
+            int other = index == 4 ? 7 : 4;
+            assertArrayEquals(familyPart.material.get(GpuSurfaceBlend.class, GpuSurfaceBlend.TYPE).families,
+                  familyParts.get(other).material.get(GpuSurfaceBlend.class, GpuSurfaceBlend.TYPE).families);
+            assertFalse(family.canRender(familyParts.get(other)),
+                  "The same family tuple with different B map/scale identity needs another program");
+        }
+        float[] depth = grazingDepth(output);
+        long covered = 0;
+        for (float value : depth) { if (value > 0 && value < 1) { covered++; } }
+        assertTrue(covered > 1000, label + ": generic control must draw the actual patch");
+        output.begin(0, 0, 0, 0);
+        batch.begin(camera); batch.render(familyPart); batch.end();
+        FloatBuffer pixels = readFiniteScene(output, label);
+        float[] actual = new float[pixels.capacity()];
+        for (int i = 0; i < actual.length; i++) {
+            actual[i] = pixels.get(i) / (i % 4 == 3 ? 1 : GpuSceneRadiance.SCALE);
+        }
+        comparePalettePixels(expected, actual, label);
+        assertArrayEquals(depth, grazingDepth(output), "Family specialization preserves every hardware depth sample");
+    }
+
+    private static void comparePalettePixels(float[] expected, float[] actual, String label) {
+        assertEquals(expected.length, actual.length);
+        double maximum = 0;
+        for (int i = 0; i < actual.length; i++) {
+            // Both computations pass through half storage once. Permit the existing one-adjacent-half bound.
+            float minimum = i % 4 == 3 ? 0x1p-24f : 0x1p-19f;
+            float step = Math.max(minimum, Math.scalb(1f, Math.getExponent(expected[i]) - 10));
+            maximum = Math.max(maximum, Math.abs(actual[i] - expected[i]) / step);
+        }
+        System.out.println(label + " maximum half steps=" + maximum);
+        assertTrue(maximum <= 1.01, label + ": complete material channels must match, half steps=" + maximum);
     }
 
     /** A zero-weight plateau meets positive coverage inside a derivative quad, not on its even-pixel edge. */
@@ -634,10 +705,13 @@ class GpuMagmaSmokeTest {
             if (file != null) {
                 String source = GpuShaderSource.readDisk(file);
                 if (family.equals("spill")) {
-                    sources = Map.of(file, GpuShaderSource.replaceOnce(source,
-                          "vec3 lavaIrradiance(vec3 position, vec3 normal)",
-                          "vec3 unusedLavaIrradiance(vec3 position, vec3 normal)", file)
-                          + "\nvec3 lavaIrradiance(vec3 position, vec3 normal) { return vec3(0.0); }\n");
+                    // Every reader walks the list through lavaLighting: a stub that lights nothing takes its name, and
+                    // the real function, renamed, stays unused.
+                    String signature = "vec3 lavaLighting(vec3 position, vec3 normal, vec3 view, vec3 f0, int facets, vec3 facet,"
+                          + " float roughness,\n      out vec3 specular, vec3 facet2, float roughness2, out vec3 specular2) {";
+                    sources = Map.of(file, GpuShaderSource.replaceOnce(source.replace("\r\n", "\n"), signature, signature
+                          + "\n    specular = vec3(0.0); specular2 = vec3(0.0); return vec3(0.0);\n}\n"
+                          + signature.replace("lavaLighting", "unusedLavaLighting"), file));
                 } else {
                     assertTrue(!source.contains("gl_FragDepth") && !source.contains("discard;"),
                           "An output-only ablation must retain the source's opaque depth coverage: " + file);

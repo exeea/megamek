@@ -85,6 +85,18 @@ final class GpuSurfaceBlend extends Attribute {
         return ordinary < 0 ? -2 : (int) blend.families[ordinary];
     }
 
+    /** Bits 0/1 prove that slots B/C reuse the base's complete material; concrete's base is constructed separately. */
+    int baseAliases() {
+        if (Math.abs(families[0] - BoardScene.Surface.CONCRETE.ordinal()) < .5f) { return 0; }
+        int aliases = 0;
+        for (int slot = 1; slot <= 2; slot++) {
+            if (families[slot] == families[0] && sameVector(tiles[slot], tiles[0]) && sameVector(layers[slot], layers[0])) {
+                aliases |= 1 << (slot - 1);
+            }
+        }
+        return aliases;
+    }
+
     /** GLSL vector equality, including signed zero, for the four map/scale uniforms. */
     private static boolean sameVector(float[] a, float[] b) {
         return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3];

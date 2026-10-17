@@ -28,7 +28,7 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuTundraSmokeTest {
     @Test
-    void terrestrialCommunitiesUseBothMaterialsWithoutChangingOtherTundraFamilies() throws Exception {
+    void terrestrialVariantsUseBothMaterialsWithoutChangingOtherTundraFamilies() throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "tundra");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
@@ -39,19 +39,19 @@ class GpuTundraSmokeTest {
                 var manager = new GpuShaderManager();
                 try {
                     manager.run(() -> {
-                        try { checkCommunities(manager, output); }
+                        try { checkVariants(manager, output); }
                         catch (Throwable error) { failure.set(error); }
                     });
                 } finally { manager.close(); Gdx.app.exit(); }
             }
         }, config);
-        if (failure.get() != null) { throw new AssertionError("Tundra communities", failure.get()); }
+        if (failure.get() != null) { throw new AssertionError("Tundra variants", failure.get()); }
     }
 
-    private static void checkCommunities(GpuShaderManager manager, File output) throws Exception {
+    private static void checkVariants(GpuShaderManager manager, File output) throws Exception {
         String source = GpuShaderSource.readDisk("terrain-tundra.glsl");
-        String boundary = "float tundraLichen(vec2 world) {";
-        assertTrue(source.contains(boundary), "The diagnostic must change only the community selection");
+        String boundary = "float tundraVariant(vec2 world) {";
+        assertTrue(source.contains(boundary), "The diagnostic must change only the variant selection");
         var terrain = new GpuTerrain();
         var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
               BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
@@ -73,7 +73,7 @@ class GpuTundraSmokeTest {
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     endpoints[endpoint] = pixels(camera);
-                    GpuReviewFrame.save(new File(output, theme + "-community-" + endpoint + ".png"));
+                    GpuReviewFrame.save(new File(output, theme + "-variant-" + endpoint + ".png"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), theme + " endpoint " + endpoint);
                 }
                 if (theme.equals("grass")) {
@@ -82,7 +82,7 @@ class GpuTundraSmokeTest {
                         difference += Math.abs((endpoints[0][i] & 255) - (endpoints[1][i] & 255));
                     }
                     assertTrue(difference > endpoints[0].length,
-                          "The actual earth and lichen material branches must visibly differ");
+                          "The actual earth material variants must visibly differ");
                 } else {
                     assertArrayEquals(baseline, endpoints[0], theme + " must ignore the terrestrial mask");
                     assertArrayEquals(baseline, endpoints[1], theme + " must ignore the terrestrial mask");
@@ -91,7 +91,7 @@ class GpuTundraSmokeTest {
                 assertTrue(restored.success(), restored.message());
                 GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                 frame.render(terrain, camera, scene);
-                assertArrayEquals(baseline, pixels(camera), theme + " must restore the world-space communities");
+                assertArrayEquals(baseline, pixels(camera), theme + " must restore the world-space variation");
             }
         } finally {
             try { frame.dispose(); terrain.dispose(); }

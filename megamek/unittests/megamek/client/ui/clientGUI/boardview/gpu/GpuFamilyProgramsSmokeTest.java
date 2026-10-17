@@ -12,16 +12,19 @@ import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
@@ -30,7 +33,9 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
@@ -141,8 +146,9 @@ class GpuFamilyProgramsSmokeTest {
                     BoardCamera camera = camera(before);
                     settle(terrain, frame, camera, before);
                     finish(terrain, frame, camera, before, "small-family", report);
-                    compare("Generic against family", generic, capture(terrain, frame, camera, before, "small-family"),
-                          report);
+                    Frame family = capture(terrain, frame, camera, before, "small-family");
+                    compare("Generic against family", generic, family, report);
+                    sameInstalledPrograms(terrain, frame, camera, before, family, report);
                     List<float[]> built = terrain.familyPrograms().ready();
                     report.append("Small board family programs: ")
                           .append(built.stream().map(Arrays::toString).toList()).append('\n');
@@ -490,6 +496,37 @@ class GpuFamilyProgramsSmokeTest {
         }
     }
 
+    /** Change only routing on the already installed meshes; keep the independent-build comparison above too. */
+    private static void sameInstalledPrograms(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera,
+          BoardScene scene, Frame family, StringBuilder report) throws Exception {
+        Set<Material> marked = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
+            for (Object value : (com.badlogic.gdx.utils.Array<?>)
+                  GpuMixedUnitBenchmarkSmokeTest.field(chunk, "terrainRenderables")) {
+                Material material = ((Renderable) value).material;
+                if (material.has(GpuFamilyPrograms.Constants.TYPE)) { marked.add(material); }
+            }
+        }
+        assertFalse(marked.isEmpty(), "The installed terrain has actual marked family materials");
+        var routing = (GpuTerrainBatch) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "terrainBatch");
+        report.append("Same installed meshes: toggling ").append(marked.size()).append(" material markers\n");
+        try {
+            marked.forEach(material -> material.remove(GpuFamilyPrograms.Constants.TYPE));
+            routing.clear(); // Same invalidation as GpuTerrain.refine when family adoption changes these markers.
+            Frame generic = capture(terrain, frame, camera, scene, "small-same-mesh-generic");
+            assertTrue(marked.stream().noneMatch(material -> material.has(GpuFamilyPrograms.Constants.TYPE)),
+                  "The generic capture must not have silently re-adopted family markers");
+            compare("Same installed meshes generic against family", generic, family, report);
+            assertEquals(family.geometry(), generic.geometry(), "Routing must not change installed vertex/index bytes");
+        } finally {
+            marked.forEach(material -> material.set(new GpuFamilyPrograms.Constants()));
+            routing.clear();
+        }
+        Frame restored = capture(terrain, frame, camera, scene, "small-same-mesh-restored");
+        compare("Same installed meshes restored family", family, restored, report);
+        assertEquals(family.geometry(), restored.geometry(), "Restoration must keep installed vertex/index bytes");
+    }
+
     /** The family programs the terrain's shader provider holds, counted from their sources. */
     private static int familyProgramsIn(GpuTerrain terrain) throws ReflectiveOperationException {
         int count = 0;
@@ -593,7 +630,7 @@ class GpuFamilyProgramsSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Family programs", failure.get()); }
     }
 
-    private record Frame(byte[] pixels, float[] depth, int ready) { }
+    private record Frame(byte[] pixels, float[] depth, int ready, Map<String, String> geometry) { }
 
     /** A fresh terrain settled on the board, drawn until no family program is waiting, then captured. */
     private static Frame load(BoardScene scene, String name, StringBuilder report) throws InterruptedException {
@@ -647,10 +684,66 @@ class GpuFamilyProgramsSmokeTest {
         float[] depth = new float[width * height];
         depths.get(depth);
         GpuReviewFrame.save(new File(OUTPUT, name + ".png"));
-        return new Frame(pixels, depth, terrain.familyPrograms().ready().size());
+        // Only this small-board diagnostic hashes CPU mesh bytes; calibration/timing paths retain their old cost.
+        Map<String, String> geometry = name.startsWith("small-") ? geometry(terrain) : Map.of();
+        return new Frame(pixels, depth, terrain.familyPrograms().ready().size(), geometry);
+    }
+
+    /** Canonical indexed triangles: independent of source part order/packing, retaining winding and transforms. */
+    private static Map<String, String> geometry(GpuTerrain terrain) {
+        var result = new TreeMap<String, String>();
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            int chunkIndex = 0;
+            for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
+                for (String layer : List.of("terrainRenderables", "scatterRenderables")) {
+                    var triangles = new ArrayList<String>();
+                    var vertices = new IdentityHashMap<Mesh, float[]>();
+                    var indices = new IdentityHashMap<Mesh, short[]>();
+                    for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, layer)) {
+                        Renderable part = (Renderable) value;
+                        Mesh mesh = part.meshPart.mesh;
+                        int stride = mesh.getVertexSize() / Float.BYTES;
+                        float[] points = vertices.computeIfAbsent(mesh, key -> key.getVertices(new float[key.getNumVertices() * stride]));
+                        short[] elements = indices.computeIfAbsent(mesh, key -> {
+                            short[] values = new short[key.getNumIndices()];
+                            if (values.length > 0) { key.getIndices(values); }
+                            return values;
+                        });
+                        assertEquals(GL20.GL_TRIANGLES, part.meshPart.primitiveType, "These installed layers are triangles");
+                        assertEquals(0, part.meshPart.size % 3, "Every indexed triangle is complete");
+                        ByteBuffer triangle = ByteBuffer.allocate(Long.BYTES + (16 + 3 * stride) * Float.BYTES);
+                        for (int i = part.meshPart.offset; i < part.meshPart.offset + part.meshPart.size; i += 3) {
+                            triangle.clear();
+                            triangle.putLong(mesh.getVertexAttributes().getMask());
+                            for (float component : part.worldTransform.val) { triangle.putInt(Float.floatToRawIntBits(component)); }
+                            for (int corner = 0; corner < 3; corner++) {
+                                int vertex = elements.length == 0 ? i + corner : Short.toUnsignedInt(elements[i + corner]);
+                                for (int field = 0; field < stride; field++) {
+                                    triangle.putInt(Float.floatToRawIntBits(points[vertex * stride + field]));
+                                }
+                            }
+                            triangles.add(HexFormat.of().formatHex(digest.digest(triangle.array())));
+                        }
+                    }
+                    Collections.sort(triangles);
+                    for (String triangle : triangles) { digest.update(HexFormat.of().parseHex(triangle)); }
+                    result.put(chunkIndex + ":" + layer, triangles.size() + ":" + HexFormat.of().formatHex(digest.digest()));
+                }
+                chunkIndex++;
+            }
+        } catch (Exception error) { throw new AssertionError(error); }
+        return result;
     }
 
     private static void compare(String label, Frame generic, Frame family, StringBuilder report) {
+        for (var entry : generic.geometry().entrySet()) {
+            String other = family.geometry().get(entry.getKey());
+            if (!entry.getValue().equals(other)) {
+                report.append(label).append(" mesh ").append(entry.getKey()).append(": ")
+                      .append(entry.getValue()).append(" -> ").append(other).append('\n');
+            }
+        }
         report.append(String.format(Locale.ROOT, "%s: colour/alpha largest difference %d, %d values over 1;"
                     + " depth largest difference %.1f steps%n", label,
               difference(generic.pixels(), family.pixels()), over(generic.pixels(), family.pixels()),

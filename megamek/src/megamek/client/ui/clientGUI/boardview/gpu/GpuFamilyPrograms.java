@@ -67,8 +67,8 @@ final class GpuFamilyPrograms {
         public int compareTo(Attribute other) { return Long.compare(type, other.type); }
     }
 
-    /** The families, vertex layout and generic variant (mask and the other program choices) a program is for. */
-    private record Key(List<Float> families, VertexAttributes attributes, Object variant) { }
+    /** The families, proven base aliases, vertex layout and generic variant a program is for. */
+    private record Key(List<Float> families, int aliases, VertexAttributes attributes, Object variant) { }
 
     /** A material installed by a chunk and the indices it draws; the chunk owns it, so it is held weakly. */
     private record Use(WeakReference<Material> material, int indices) { }
@@ -155,7 +155,7 @@ final class GpuFamilyPrograms {
         if (families == null) { return; }
         List<Float> boxed = new ArrayList<>(families.length);
         for (float family : families) { boxed.add(family); }
-        Variant variant = variants.computeIfAbsent(new Key(boxed, attributes, variantOf.apply(material)),
+        Variant variant = variants.computeIfAbsent(new Key(boxed, baseAliases(material), attributes, variantOf.apply(material)),
               key -> new Variant(key, families));
         variant.uses.removeIf(use -> use.material().get() == null);
         variant.uses.add(new Use(new WeakReference<>(material), indices));
@@ -305,6 +305,12 @@ final class GpuFamilyPrograms {
         return new float[] { sculpt.value, slots[0], slots[1], slots[2], slots[3] };
     }
 
+    /** Reuse proven from this material's owned uniform values, never family identity alone. */
+    static int baseAliases(Material material) {
+        var blend = material.get(GpuSurfaceBlend.class, GpuSurfaceBlend.TYPE);
+        return blend == null ? 0 : blend.baseAliases();
+    }
+
     /** The families a program for this material is compiled with: a marked material's, none for a generic program. */
     static float[] constants(Material material, long sculptType) {
         return material.has(Constants.TYPE) ? families(material, sculptType) : null;
@@ -312,10 +318,10 @@ final class GpuFamilyPrograms {
 
     /**
      * Whether a program compiled with these families (null: a generic program) may draw the material: a generic program
-     * no marked material, a family program only marked materials with its families. Cheap, so the shader provider's
+     * no marked material, a family program only marked materials with its families and aliases. The shader provider's
      * scan rejects other programs first.
      */
-    static boolean draws(float[] families, Material material, long sculptType) {
+    static boolean draws(float[] families, int aliases, Material material, long sculptType) {
         boolean marked = material.has(Constants.TYPE);
         if (families == null || !marked) { return families == null && !marked; }
         var sculpt = (FloatAttribute) material.get(sculptType);
@@ -326,7 +332,7 @@ final class GpuFamilyPrograms {
         for (int i = 1; i < families.length; i++) {
             if (blend.families[i - 1] != families[i]) { return false; }
         }
-        return true;
+        return aliases == baseAliases(material);
     }
 
     /** The defines that make a family program's families constant; none for a generic program. */
@@ -334,13 +340,16 @@ final class GpuFamilyPrograms {
         float[] families = constants(material, sculptType);
         if (families == null) { return ""; }
         String sculpt = "#define SCULPT_FAMILY " + families[0] + "\n";
+        int aliases = baseAliases(material);
+        String reuse = ((aliases & 1) != 0 ? "#define COVER_B_IS_BASE\n" : "")
+              + ((aliases & 2) != 0 ? "#define COVER_C_IS_BASE\n" : "");
         return families.length == 1 ? sculpt : sculpt + "#define COVER_FAMILIES vec4(" + families[1] + ", "
-              + families[2] + ", " + families[3] + ", " + families[4] + ")\n";
+              + families[2] + ", " + families[3] + ", " + families[4] + ")\n" + reuse;
     }
 
     /** The program name's suffix, as the shader editor and the compile log show it. */
     static String name(Material material, long sculptType) {
         float[] families = constants(material, sculptType);
-        return families == null ? "" : " families " + Arrays.toString(families);
+        return families == null ? "" : " families " + Arrays.toString(families) + " aliases " + baseAliases(material);
     }
 }

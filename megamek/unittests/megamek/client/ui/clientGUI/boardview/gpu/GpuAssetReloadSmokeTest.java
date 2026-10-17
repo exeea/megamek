@@ -403,7 +403,8 @@ class GpuAssetReloadSmokeTest {
         var arrays = assets.sculptArray(layers);
         var authored = assets.sculptRoughness(layers);
         var mapper = new ObjectMapper();
-        assertEquals(33, layers.size(), "Current main terrain roles; granite scatter and sand verge are separate");
+        assertEquals(34, layers.size(), "Current main terrain roles; granite scatter and sand verge are separate");
+        assertTrue(layers.contains("tundra-earth-variant"), "The current array includes the second terrestrial tundra material");
         for (int index = 0; index < layers.size(); index++) {
             String name = layers.get(index);
             for (boolean color : new boolean[] { true, false }) {
@@ -457,8 +458,8 @@ class GpuAssetReloadSmokeTest {
               new float[] { emission.red(), emission.green(), emission.blue() }, .000001f,
               "The restored spill source comes from the same authored linear RGB image");
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Actual native batch after Reload");
-        System.out.println("Native batch Reload: 113 projects, 237 files; 33 actual color/data array layers; "
-              + "35 physical metadata entries and 4 square vegetation images verified; roughness remains opt-in.");
+        System.out.println("Fixed native batch Reload: 113 projects, 237 files; 34 current color/data array layers; "
+              + "36 physical metadata entries and 4 square vegetation images verified; roughness remains opt-in.");
     }
 
 

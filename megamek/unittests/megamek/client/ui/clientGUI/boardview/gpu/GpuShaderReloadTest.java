@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -138,6 +139,56 @@ class GpuShaderReloadTest {
                 assertEquals(particle, GpuShaderSource.read("particles.frag"), "A failed expansion must not poison retry");
             });
         } finally { session.close(); Gdx.files = previousFiles; Configuration.setDataDir(data); }
+    }
+
+    @Test
+    void materialCountChangesOnlyDependentProgramKeysIncludingLiveDrafts() {
+        var previousFiles = Gdx.files;
+        File data = Configuration.dataDir();
+        Configuration.setDataDir(directory.toFile());
+        Gdx.files = new Lwjgl3Files();
+        var session = new GpuShaderManager();
+        try {
+            String vertex = unitVertex();
+            String model = GpuCloudShadow.fragment(GpuUnitShader.fragment());
+            assertEquals(materialKey(35, vertex, model), materialKey(36, vertex, model), "Imported models keep their key");
+            for (String name : new String[] { "water-surface.frag", "terrain-foliage.frag", "terrain-normal.frag" }) {
+                String fragment = GpuTerrain.litFragment(name);
+                assertEquals(materialKey(35, vertex, fragment), materialKey(36, vertex, fragment), name);
+            }
+            String depth = GpuShaderSource.read("terrain-depth.frag");
+            assertEquals(materialKey(35, vertex, depth), materialKey(36, vertex, depth),
+                  "A final empty depth stage no longer depends on its replaced surface fragment");
+            for (String name : new String[] { "terrain-sculpt.frag", "terrain-road.frag", "terrain-vegetation.frag" }) {
+                String fragment = name.equals("terrain-vegetation.frag")
+                      ? GpuCloudShadow.fragment(GpuShaderSource.terrainLighting(GpuShaderSource.read(name)))
+                      : GpuTerrain.litFragment(name);
+                assertTrue(fragment.contains("u_sculptRoughness[SCULPT_MATERIAL_COUNT]"), name);
+                assertNotEquals(materialKey(35, vertex, fragment), materialKey(36, vertex, fragment),
+                      "Keep conditional roughness dependencies conservatively: " + name);
+            }
+            String water = GpuShaderSource.readDisk("water-surface.frag");
+            session.run(() -> {
+                var original = session.capture(() -> GpuTerrain.litFragment("water-surface.frag"));
+                String draft = water.replace("void main() {",
+                      "uniform float reviewMaterials[SCULPT_MATERIAL_COUNT];\nvoid main() {");
+                assertNotEquals(water, draft, "Exercise a real editor source change");
+                assertTrue(session.apply(Map.of("water-surface.frag", draft)).success());
+                var changed = session.capture(() -> GpuTerrain.litFragment("water-surface.frag"));
+                assertEquals(original.files(), changed.files(), "Count scoping must not change dependency ownership");
+                assertNotEquals(materialKey(35, vertex, changed.value()), materialKey(36, vertex, changed.value()),
+                      "A live draft can introduce a metadata dependency into any surface");
+                assertTrue(session.apply(Map.of()).success());
+                assertEquals(original.value(), GpuTerrain.litFragment("water-surface.frag"), "Restore exact assembly");
+            });
+            assertNotEquals(materialKey(35, "float values[SCULPT_MATERIAL_COUNT];", depth),
+                  materialKey(36, "float values[SCULPT_MATERIAL_COUNT];", depth), "Either stage may need the count");
+        } finally { session.close(); Gdx.files = previousFiles; Configuration.setDataDir(data); }
+    }
+
+    private static String materialKey(int count, String vertex, String fragment) {
+        String prefix = GpuShaderSource.sculptMaterialPrefix(count, vertex, fragment);
+        return GpuProgramCache.key("fixed driver", GpuGlsl.source(prefix, vertex, 330), GpuGlsl.source(prefix, fragment, 330));
     }
 
     @Test

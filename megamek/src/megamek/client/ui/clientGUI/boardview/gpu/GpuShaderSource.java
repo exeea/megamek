@@ -142,6 +142,12 @@ final class GpuShaderSource {
               .replace("v_color = a_color;", "v_color = coverColor;");
     }
 
+    /** Size only programs whose assembled stages reference the authored material metadata array. */
+    static String sculptMaterialPrefix(int count, String vertex, String fragment) {
+        return vertex.contains("SCULPT_MATERIAL_COUNT") || fragment.contains("SCULPT_MATERIAL_COUNT")
+              ? "#define SCULPT_MATERIAL_COUNT " + count + "\n" : "";
+    }
+
     /** Structural edits retain their caller's ordering, with one shared exact-anchor check. */
     static String replaceOnce(String source, String anchor, String replacement, String stage) {
         int index = source.indexOf(anchor);

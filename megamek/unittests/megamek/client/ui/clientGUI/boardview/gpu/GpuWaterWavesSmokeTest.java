@@ -3,6 +3,11 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.io.BufferedOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReference;
@@ -96,6 +101,10 @@ class GpuWaterWavesSmokeTest {
     @Test
     void lowGravityCrestPrecisionSeparatesTransformAndFinishError() {
         run(ocean -> {
+            String renderer = Gdx.gl.glGetString(GL20.GL_RENDERER);
+            System.out.println("FFT precision renderer: " + renderer);
+            String expectedRenderer = System.getProperty("megamek.gpu.expectedRenderer");
+            if (expectedRenderer != null) { assertEquals(expectedRenderer, renderer); }
             double[][] trigonometry = GpuOceanTest.trigonometry();
             var checks = new ArrayList<Executable>();
             for (float strength : new float[] { .5f, 1 }) {
@@ -105,10 +114,13 @@ class GpuWaterWavesSmokeTest {
                 assertNotNull(ocean.spectrum());
                 double choppiness = 1 + .8f * strength;
                 // The actual stored h0 is common to both paths: initial seed-generation/half-storage error is excluded.
-                double[][] fields = GpuOceanTest.referenceFields(read(ocean.spectrum()), 0, time, gravity, trigonometry);
+                float[] spectrum = read(ocean.spectrum());
+                double[][] fields = GpuOceanTest.referenceFields(spectrum, 0, time, gravity, trigonometry);
                 var reference = GpuOceanTest.finishSurface(fields, 0, choppiness);
-                var reconstructed = GpuOceanTest.finishSurface(finalWorkFields(ocean, 0), 0, choppiness);
+                double[][] work = finalWorkFields(ocean, 0);
+                var reconstructed = GpuOceanTest.finishSurface(work, 0, choppiness);
                 float[] actual = read(ocean.waves(0)), shape = read(ocean.displacement());
+                savePrecisionFields(strength, time, gravity, (float) choppiness, spectrum, work, actual, shape);
                 String label = "low-gravity wind " + strength;
                 checks.add(() -> {
                     // Stage errors are diagnostic, not new acceptance budgets. The complete path retains every limit.
@@ -128,6 +140,35 @@ class GpuWaterWavesSmokeTest {
             checks.add(() -> assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError()));
             assertAll("Both compressed low-gravity crest cases", checks);
         });
+    }
+
+    /** Retain the existing readbacks before assertions, so later numerical isolation needs no repeat GPU run. */
+    private static void savePrecisionFields(float strength, float time, float gravity, float choppiness,
+          float[] spectrum, double[][] work, float[] actual, float[] shape) {
+        Path path = Path.of(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
+              "ocean-precision", "low-gravity-wind-" + strength + ".bin");
+        try {
+            Files.createDirectories(path.getParent());
+            try (var out = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(path)))) {
+                // OCN1, big endian: size/cascades, patch/time/gravity/wind/choppiness, then length-prefixed arrays.
+                out.writeInt(0x4f434e31);
+                out.writeInt(SIZE);
+                out.writeInt(GpuOcean.PATCHES.length);
+                for (float value : new float[] { GpuOcean.PATCHES[0], time, gravity, strength, choppiness }) {
+                    out.writeFloat(value);
+                }
+                for (float[] values : new float[][] { spectrum, actual, shape }) {
+                    out.writeInt(values.length);
+                    for (float value : values) { out.writeFloat(value); }
+                }
+                // Centered fields: every value came from binary16 and remains exact in float32.
+                for (double[] values : work) {
+                    out.writeInt(values.length);
+                    for (double value : values) { out.writeFloat((float) value); }
+                }
+            }
+            System.out.println("FFT native fields: " + path.toAbsolutePath());
+        } catch (IOException error) { throw new AssertionError("Save actual FFT precision inputs", error); }
     }
 
     /** Borrow only the existing final RGBA16F work texture; the ocean retains all resource ownership. */

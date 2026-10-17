@@ -47,6 +47,35 @@ class GpuWaterCoverageTest {
         assertTrue(exposed > 0, "The fixture must exercise the exposed cliff above the receiving pool");
     }
 
+    @Test
+    void rockPigmentStaysSeparateFromOcclusionAndWaterOptics() {
+        var scene = raisedPool();
+        var surface = new BoardSurface(scene, scene.tile(new Coords(4, 4)));
+        Vector3 point = BoardGeometry.center(surface.tile.coords(), surface.tile.elevation());
+        Color water = null;
+        for (float tint : new float[] { 0, .5f, 1 }) {
+            var shade = new BoardRelief.Shade(Vector3.Z, BoardRelief.Kind.ROCK, .6f, 5, 2.25f, 7.5f, tint);
+            var dry = GpuTerrain.sculptVertex(point, shade, Float.NaN, surface);
+            var wet = GpuTerrain.sculptVertex(point, shade, GpuWaterShader.palette(surface.tile.liquid()), surface);
+            assertEquals(shade.occlusion(), dry.color.r, 0);
+            assertEquals(shade.occlusion(), wet.color.r, 0, "Wet rock pigment must not attenuate geometric occlusion");
+            assertEquals(tint, dry.color.a, 0);
+            assertEquals(shade.rim(), dry.uv.x, 0);
+            assertEquals(shade.rim(), wet.uv.x, 0, "Snow caps retain their height above the root");
+            assertEquals(shade.foot(), dry.uv.y, 0, "Dry zero-gravity bedrock still needs its depth below the top");
+            assertEquals(tint, wet.uv.y, 0, "Only wet rocks move pigment variation into the spare UV channel");
+            assertEquals(1, dry.color.b, 0);
+            assertTrue(wet.color.b >= .875f && wet.color.b < .999f);
+            assertTrue(wet.color.a < .25f);
+            if (water == null) { water = new Color(wet.color); }
+            else {
+                assertEquals(water.g, wet.color.g, 0, "Pigment must not change the water level");
+                assertEquals(water.b, wet.color.b, 0, "Pigment must not change the fractional water level");
+                assertEquals(water.a, wet.color.a, 0, "Pigment must not change the water palette");
+            }
+        }
+    }
+
     /** The raised depth-one pool and lower receiving pool at 0505/0504 in test_board2.board. */
     private static BoardScene raisedPool() {
         List<BoardScene.Tile> tiles = new ArrayList<>();
@@ -120,7 +149,7 @@ class GpuWaterCoverageTest {
             BoardSurface upper = new BoardSurface(scene, scene.tile(new Coords(8, 9)));
             BoardSurface land = new BoardSurface(scene, scene.tile(new Coords(8, 10)));
             List<BoardSurface> waters = List.of(water, upper);
-            int wetCount = 0, dryCount = 0;
+            int wetCount = 0, dryCount = 0, wetRocks = 0, wetCliffs = 0;
             for (BoardSurface surface : List.of(land, water)) {
                 List<BoardSurface.Face> faces = new ArrayList<>(surface.walls(scene, -100));
                 faces.addAll(surface.faces);
@@ -135,6 +164,9 @@ class GpuWaterCoverageTest {
                     short[] indices = new short[mesh.getNumIndices()];
                     mesh.getVertices(vertices, 0);
                     mesh.getIndices(indices, 0);
+                    int[] channels = clippedRockChannels(surface, face, mesh, vertices, stride, colorOffset);
+                    wetRocks += channels[0];
+                    wetCliffs += channels[1];
                     float area = 0, tintedOutside = 0, dryUnderwater = 0;
                     for (int i = 0; i < indices.length; i += 3) {
                         int a = Short.toUnsignedInt(indices[i]) * stride;
@@ -181,7 +213,9 @@ class GpuWaterCoverageTest {
                 }
             }
             assertTrue(wetCount > 0 && dryCount > 0);
+            assertTrue(wetRocks > 0, "The clipped geometry must exercise real rock pigment");
             if (cliffs) {
+                assertTrue(wetCliffs > 0, "Converted cliff faces must keep neutral rock pigment");
                 assertFalse(water.cliffWater.isEmpty());
                 var pools = new GpuWaterShader.Pools(scene, Map.of(), Map.of(water.tile.coords(), water));
                 for (var face : water.cliffWater) {
@@ -193,6 +227,49 @@ class GpuWaterCoverageTest {
         } finally {
             BoardRelief.tune(original);
         }
+    }
+
+    /** Check the actual clipped vertex channels against the original triangle's affine data. */
+    private static int[] clippedRockChannels(BoardSurface surface, BoardSurface.Face face, MeshBuilder mesh,
+          float[] vertices, int stride, int colorOffset) {
+        var a = surface.relief.shade(face.a());
+        var b = surface.relief.shade(face.b());
+        var c = surface.relief.shade(face.c());
+        if (a == null || b == null || c == null || a.kind() != b.kind() || a.kind() != c.kind()
+              || area(face.a(), face.b(), face.c()) < .001f) { return new int[2]; }
+        boolean rock = a.kind() == BoardRelief.Kind.ROCK;
+        if (!rock && a.kind() != BoardRelief.Kind.CLIFF) { return new int[2]; }
+        int uvOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.TextureCoordinates).offset / Float.BYTES;
+        int wet = 0;
+        for (int i = 0; i < vertices.length; i += stride) {
+            Color color = new Color();
+            Color.abgr8888ToColor(color, vertices[i + colorOffset]);
+            boolean covered = color.b >= .875f && color.b < .999f;
+            Vector3 weights = barycentric(face, point(vertices, i));
+            float occlusion = weights.dot(a.occlusion(), b.occlusion(), c.occlusion());
+            assertEquals(occlusion, color.r, 1.1f / 255, "Clipping preserves geometric occlusion independently of pigment");
+            float rim = weights.dot(a.rim(), b.rim(), c.rim());
+            assertEquals(rim, vertices[i + uvOffset], .001f, "Clipping retains the actual height above the root");
+            if (covered) {
+                float tint = rock ? weights.dot(a.tint(), b.tint(), c.tint()) : 1;
+                assertEquals(tint, vertices[i + uvOffset + 1], .001f,
+                      "Wet rock keeps its pigment; a converted cliff has no extra population tint");
+                wet++;
+            } else {
+                float foot = weights.dot(a.foot(), b.foot(), c.foot());
+                assertEquals(foot, vertices[i + uvOffset + 1], .001f,
+                      "Dry pieces retain the below-top coordinate used by bedrock and cliffs");
+            }
+        }
+        return rock ? new int[] { wet, 0 } : new int[] { 0, wet };
+    }
+
+    private static Vector3 barycentric(BoardSurface.Face face, Vector3 point) {
+        Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+        float denominator = normal.len2();
+        float a = new Vector3(face.b()).sub(point).crs(new Vector3(face.c()).sub(point)).dot(normal) / denominator;
+        float b = new Vector3(face.c()).sub(point).crs(new Vector3(face.a()).sub(point)).dot(normal) / denominator;
+        return new Vector3(a, b, 1 - a - b);
     }
 
     private static boolean bedBoundary(BoardSurface surface, BoardSurface.Face face) {

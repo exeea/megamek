@@ -90,6 +90,169 @@ class GpuShadingNormalSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Shading-normal boundary", failure.get()); }
     }
 
+    @Test
+    void bladeRootShelterPreservesPigmentAndSeparateVisibility() {
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(128, 128);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override public void create() {
+                var manager = new GpuShaderManager();
+                try {
+                    manager.run(() -> {
+                        try {
+                            String renderer = Gdx.gl.glGetString(GL20.GL_RENDERER);
+                            System.out.println("Blade-root GL_RENDERER=" + renderer);
+                            String expected = System.getProperty("megamek.gpu.expectedRenderer");
+                            if (expected != null) { assertEquals(expected, renderer, "Requested native adapter"); }
+                            bladeRootShelter(manager);
+                        } catch (Throwable error) { failure.set(error); }
+                    });
+                } finally { manager.close(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Blade-root material visibility", failure.get()); }
+    }
+
+    /** Observe the real material fields; root controls do not replace pigment, geometry, or either lighting equation. */
+    private static void bladeRootShelter(GpuShaderManager manager) throws Exception {
+        String source = GpuShaderSource.readDisk("terrain-vegetation.frag");
+        source = source.replace("v_coverData.y", "reviewRoot").replace("void main() {", """
+              uniform int u_grazingReview;
+              void main() {
+                  int reviewControl = u_grazingReview / 10;
+                  float reviewRoot = reviewControl == 0 ? v_coverData.y : float(reviewControl - 1) * .5;
+              """);
+        int end = source.lastIndexOf('}');
+        // Tens select original/zero/half/full root input; units select production/albedo/visibility/incoming pigment.
+        source = source.substring(0, end) + """
+              #ifdef lightingFlag
+                  float reviewRole = .25;
+              #ifdef bankTurfFlag
+                  reviewRole = .5;
+              #elif defined(biomeVegetationFlag)
+                  reviewRole = .75;
+              #endif
+                  int reviewChannel = u_grazingReview % 10;
+                  if (reviewChannel == 1) fragColor = vec4(blade.albedo, reviewRole);
+                  if (reviewChannel == 2) fragColor = vec4(blade.occlusion, blade.specularOcclusion, reviewRoot, reviewRole);
+                  if (reviewChannel == 3) fragColor = vec4(v_color.rgb, reviewRole);
+              #endif
+              """ + source.substring(end);
+        applySources(manager, Map.of("terrain-vegetation.frag", source), "blade-root-fields");
+        var originalGeometry = BoardGeometry.tuning();
+        boolean originalLod = TerrainLod.enabled();
+        var terrain = new GpuTerrain();
+        try (var output = new GpuSceneTestOutput(128, 128)) {
+            GpuRiverTerrainSmokeTest.tune(.94f, true);
+            TerrainLod.setEnabled(false);
+            terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0,
+                  BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
+            terrain.setGrass(true);
+            terrain.setWetness(0);
+            var field = GpuTerrain.class.getDeclaredField("batch"); field.setAccessible(true);
+            ModelBatch batch = (ModelBatch) field.get(terrain);
+            float dpi = Gdx.graphics.getBackBufferHeight() / (float) Gdx.graphics.getHeight();
+            var camera = new BoardCamera(); camera.resize(Math.round(128 / dpi), Math.round(128 / dpi));
+            camera.camera.viewportWidth = 128 / dpi; camera.camera.viewportHeight = 128 / dpi;
+            camera.setIsometric(true);
+            for (String kind : new String[] { "grass", "bank", "crop", "reed" }) {
+                boolean bank = kind.equals("bank"), grass = kind.equals("grass");
+                BoardScene scene;
+                camera.camera.zoom = BoardGeometry.width() * dpi / 560;
+                camera.center(BoardGeometry.center(new megamek.common.board.Coords(4, 4), 0));
+                if (grass || bank) {
+                    scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+                          BoardScene.Surface.GRASS, bank ? (c.getX() < 4 ? 3 : 1) : 0, -1, 0));
+                    if (bank) {
+                        var center = BoardGeometry.center(new megamek.common.board.Coords(3, 4), 3);
+                        var outward = BoardGeometry.center(new megamek.common.board.Coords(4, 4), 3).sub(center).nor();
+                        var focus = center.cpy().mulAdd(outward, BoardGeometry.width() * .38f);
+                        focus.z -= BoardGeometry.level();
+                        camera.camera.position.set(focus).mulAdd(outward.rotate(Vector3.Z, -50), 650).add(0, 0, 350);
+                        camera.camera.up.set(Vector3.Z); camera.camera.lookAt(focus); camera.camera.update();
+                    }
+                } else {
+                    var biome = kind.equals("crop") ? BoardScene.Biome.FIELD : BoardScene.Biome.MARSH;
+                    scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+                          c.getX() >= 3 && c.getX() <= 5 && c.getY() >= 3 && c.getY() <= 5
+                                ? biome : BoardScene.Biome.MUD, 0));
+                }
+                terrain.update(scene, camera.camera);
+                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                terrain.animate(0, java.util.List.of());
+                terrain.renderShadows(camera.camera, java.util.List.of());
+                Runnable draw = () -> terrain.render(camera.camera, false);
+                setProxyMode(batch, 0);
+                specimenFrame(output, terrain, camera.camera, draw); // Install lazy production programs before uniforms.
+                ProxyFrame full = specimenFrame(output, terrain, camera.camera, draw);
+                setProxyMode(batch, 1);
+                ProxyFrame pigment = specimenFrame(output, terrain, camera.camera, draw);
+                setProxyMode(batch, 3);
+                ProxyFrame incoming = specimenFrame(output, terrain, camera.camera, draw);
+                setProxyMode(batch, 2);
+                ProxyFrame original = specimenFrame(output, terrain, camera.camera, draw);
+                for (ProxyFrame probe : new ProxyFrame[] { pigment, incoming, original }) {
+                    org.junit.jupiter.api.Assertions.assertArrayEquals(full.depth(), probe.depth(), "Field probes preserve depth");
+                }
+                float role = grass ? .25f : bank ? .5f : .75f;
+                int covered = 0;
+                float low = 1, high = 0;
+                for (int pixel = 0; pixel < full.depth().length; pixel++) {
+                    int at = pixel * 4;
+                    if (pigment.rgba()[at + 3] != role) { continue; }
+                    covered++;
+                    assertTrue(full.depth()[pixel] < 1, "Actual " + kind + " owns the tested depth");
+                    float root = original.rgba()[at + 2];
+                    low = Math.min(low, root); high = Math.max(high, root);
+                    assertEquals(root, original.rgba()[at + 1], 0, "Existing root reflection visibility");
+                    if (grass) {
+                        for (int c = 0; c < 3; c++) {
+                            assertEquals(incoming.rgba()[at + c], pigment.rgba()[at + c], 0,
+                                  "Dry actual blade retains its incoming linear pigment along its full height");
+                        }
+                    } else { assertEquals(1, original.rgba()[at], 0, "Clump diffuse visibility has no blade-root shelter"); }
+                }
+                assertTrue(covered > 0, "Requested actual provider must cover pixels: " + kind);
+                if (grass) { assertTrue(high - low > .25f, "Real blades exercise distinct root and tip coordinates"); }
+                float[] diffuseVisibility = { .8f, .9f, 1 };
+                for (int control = 1; control <= 3; control++) {
+                    float root = (control - 1) * .5f;
+                    setProxyMode(batch, control * 10 + 1);
+                    ProxyFrame controlledPigment = specimenFrame(output, terrain, camera.camera, draw);
+                    org.junit.jupiter.api.Assertions.assertArrayEquals(pigment.rgba(), controlledPigment.rgba(),
+                          "Root shelter cannot recolor any actual vegetation material: " + kind);
+                    setProxyMode(batch, control * 10 + 2);
+                    ProxyFrame visibility = specimenFrame(output, terrain, camera.camera, draw);
+                    org.junit.jupiter.api.Assertions.assertArrayEquals(full.depth(), visibility.depth(), "Visibility preserves depth");
+                    org.junit.jupiter.api.Assertions.assertArrayEquals(full.depth(), controlledPigment.depth(), "Pigment preserves depth");
+                    for (int pixel = 0; pixel < full.depth().length; pixel++) {
+                        int at = pixel * 4;
+                        if (pigment.rgba()[at + 3] != role) { continue; }
+                        assertEquals(role, visibility.rgba()[at + 3], 0, "The same actual provider owns every control");
+                        assertEquals(grass ? diffuseVisibility[control - 1] : 1,
+                              visibility.rgba()[at], .0005f, "Diffuse shelter belongs only to real blades");
+                        assertEquals(root, visibility.rgba()[at + 1], 0, "Separate reflected-environment visibility is retained");
+                        assertEquals(root, visibility.rgba()[at + 2], 0, "The requested root input reached the actual material");
+                    }
+                }
+                setProxyMode(batch, 0);
+                ProxyFrame restored = specimenFrame(output, terrain, camera.camera, draw);
+                org.junit.jupiter.api.Assertions.assertArrayEquals(full.rgba(), restored.rgba(), "Restore exact production color");
+                org.junit.jupiter.api.Assertions.assertArrayEquals(full.depth(), restored.depth(), "Restore exact production depth");
+                System.out.printf("Blade-root %s covered=%d rootRange=%s..%s pigment/visibility/depth PASS%n",
+                      kind, covered, low, high);
+            }
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        } finally {
+            try { terrain.dispose(); }
+            finally {
+                BoardGeometry.tune(originalGeometry); TerrainLod.setEnabled(originalLod);
+                applySources(manager, Map.of(), "restore-blade-root");
+            }
+        }
+    }
+
     private static void mathematicalBoundary(boolean baseline) {
         var table = new GpuEnvironmentLighting();
         FrameBuffer target = GpuHeatGlow.buffer(1, 1, false);

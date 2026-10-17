@@ -81,9 +81,6 @@ void main() {
     albedo *= plant.rgb;
 #endif
 #endif
-#ifndef biomeVegetationFlag
-    albedo *= mix(.80, 1.06, v_coverData.y);
-#endif
     albedo = wetAlbedo(albedo, u_wetness * .25);
     albedo = materialReflectance(albedo);
 #ifdef bankTurfFlag
@@ -104,6 +101,10 @@ void main() {
     // Thin leaves transmit part of their diffuse budget instead of adding another light source.
     blade.front = vec3(.85);
     blade.back = vec3(.15);
+#if !defined(biomeVegetationFlag) && !defined(bankTurfFlag)
+    // Root shelter reduces diffuse sky visibility, not authored pigment or direct light.
+    blade.occlusion = mix(.80, 1.0, clamp(v_coverData.y, 0.0, 1.0));
+#endif
     // Reflected sky reaches a blade only above the sward around it.
     blade.specularOcclusion = v_coverData.y;
     albedo = shadeSurface(blade);

@@ -126,9 +126,10 @@ void main() {
     vec4 roadColor = v_color;
 #ifdef roadMaskFlag
     vec2 maskUV = v_roadMaskUV;
-    if (any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0)))) { discard; }
     roadColor = texture(u_roadMask, v_roadMaskRegion.xy + maskUV * v_roadMaskRegion.zw);
-    if (roadColor.a < .002) { discard; }
+    // Keep neighboring lanes through material filtering, edge fwidth and shadow receiver derivatives.
+    bool roadHidden = any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0)))
+          || roadColor.a < .002;
 #endif
     vec3 tint = roadColor.rgb;
     if (m.mapped && (m.transition > .5 || m.transition < -1.5)) { tint = vec3(1.0); }
@@ -249,5 +250,8 @@ void main() {
     fragColor = vec4(albedo, alpha);
 #else
     fragColor = vec4(albedo, 1.0);
+#endif
+#ifdef roadMaskFlag
+    if (roadHidden) discard;
 #endif
 }

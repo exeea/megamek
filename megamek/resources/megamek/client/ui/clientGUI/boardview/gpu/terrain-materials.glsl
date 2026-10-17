@@ -550,9 +550,12 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     }
     float bankHeat = magmaBankHeat(shore);
     // Crust and bank use this draw's same relief, maps and normal; only their emission strength differs.
-    // Preserve the base evaluation and zero-weight substrate needed by the later sand transfer.
-    vec4 volcanicNeeded = max(raw, vec4(lessThan(abs(coverFamilies - sculptFamily), vec4(.5))));
+    // Without sand transfer, zero coverage cannot become visible; skip its shared material entirely.
+    vec4 volcanicNeeded = raw;
+#if !defined(VOLCANIC_ORDINARY_FAMILY) || VOLCANIC_ORDINARY_FAMILY == 2
+    volcanicNeeded = max(raw, vec4(lessThan(abs(coverFamilies - sculptFamily), vec4(.5))));
     volcanicNeeded.x = 1.0;
+#endif
     Volcanic magmaMaterial = Volcanic(vec3(0.0), face, vec4(0.0), vec2(0.0), vec3(0.0));
     if (dot(volcanicNeeded, vec4(greaterThan(coverFamilies, vec4(VOLCANIC_CRUST_FAMILY - .5)))) > 0.0) {
         magmaMaterial = magmaSurface(magmaCoordinates, face, -viewDirection(), vec3(0.0), 1.0, vec4(0.0));
@@ -571,10 +574,13 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
             ordinaryTiles = u_coverTiles3; ordinaryLayers = u_coverLayers3;
         }
     }
-    // The base was unconditional; other slots were evaluated only for coverage or a sand substrate.
     // Projection gradients and noise were captured above, before this varying coverage guard.
-    vec4 ordinaryNeeded = max(raw, vec4(lessThan(abs(coverFamilies - sculptFamily), vec4(.5))));
+    vec4 ordinaryNeeded = raw;
+#if VOLCANIC_ORDINARY_FAMILY == 2
+    // Sand can expose a zero-weight substrate after height blending; retain the original base too.
+    ordinaryNeeded = max(raw, vec4(lessThan(abs(coverFamilies - sculptFamily), vec4(.5))));
     ordinaryNeeded.x = 1.0;
+#endif
     TerrainMaterial ordinary = TerrainMaterial(vec3(0.0), face, 1.0, 0.0, vec3(0.0), 1.0, 0.0);
     if (dot(ordinaryNeeded, vec4(equal(coverFamilies, vec4(float(VOLCANIC_ORDINARY_FAMILY))))) > 0.0) {
         ordinary = naturalMaterialFor(projection, noise, world, face, foot, rim, rock, hardness, broad, fine,
@@ -604,6 +610,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     // textures and volcanic relief again. Constructed concrete differs from transported aggregate; keep that
     // distinction, and retain any explicit per-slot texture/scale overrides. These branches are draw-uniform.
     TerrainMaterial b = a;
+#ifndef COVER_B_IS_BASE
     if (coverFamilies.y != coverFamilies.x || abs(coverFamilies.x - 4.0) < .5
           || any(notEqual(u_coverTiles1, u_coverTiles0)) || any(notEqual(u_coverLayers1, u_coverLayers0))) {
 #ifdef volcanicFlag
@@ -629,7 +636,9 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
         }
 #endif
     }
+#endif
     TerrainMaterial c = a;
+#ifndef COVER_C_IS_BASE
     if (coverFamilies.z != coverFamilies.x || abs(coverFamilies.x - 4.0) < .5
           || any(notEqual(u_coverTiles2, u_coverTiles0)) || any(notEqual(u_coverLayers2, u_coverLayers0))) {
 #ifdef volcanicFlag
@@ -655,6 +664,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
         }
 #endif
     }
+#endif
     TerrainMaterial d = a;
     if (coverFamilies.w != coverFamilies.x) {
 #ifdef volcanicFlag

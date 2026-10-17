@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -10,6 +11,10 @@ import java.util.List;
 import java.util.Map;
 
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.VertexAttribute;
+import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
@@ -337,6 +342,83 @@ class GpuSurfaceBlendTest {
             }
             assertTrue(maxError < .125f, "The material boundary must retain its sampled shape: " + maxError);
         }
+    }
+
+    @Test
+    void baseAliasesRequireMatchingFamiliesAndEveryMapAndScale() {
+        assertEquals(3, repeatedBlend(BoardScene.Surface.GRASS.ordinal()).baseAliases());
+        assertEquals(0, repeatedBlend(BoardScene.Surface.CONCRETE.ordinal()).baseAliases(),
+              "Constructed concrete is not its transported aggregate even when the maps agree");
+        for (int slot = 1; slot <= 2; slot++) {
+            int remaining = 3 ^ (1 << (slot - 1));
+            var family = repeatedBlend(BoardScene.Surface.GRASS.ordinal());
+            family.families[slot] = BoardScene.Surface.DIRT.ordinal();
+            assertEquals(remaining, family.baseAliases());
+            for (int component = 0; component < 4; component++) {
+                var scale = repeatedBlend(BoardScene.Surface.GRASS.ordinal());
+                scale.tiles[slot][component] += 1;
+                assertEquals(remaining, scale.baseAliases(), "Every authored repeat must agree");
+                var map = repeatedBlend(BoardScene.Surface.GRASS.ordinal());
+                map.layers[slot][component] += 2;
+                assertEquals(remaining, map.baseAliases(), "Every semantic material map must agree");
+            }
+        }
+        var numeric = repeatedBlend(BoardScene.Surface.GRASS.ordinal());
+        numeric.tiles[0][0] = 0; numeric.tiles[1][0] = -0f; numeric.tiles[2][0] = 0;
+        assertEquals(3, numeric.baseAliases(), "GLSL vector equality treats signed zero alike");
+        numeric.layers[0][1] = Float.NaN; numeric.layers[1][1] = Float.NaN; numeric.layers[2][1] = Float.NaN;
+        assertEquals(0, numeric.baseAliases(), "Matching NaN storage cannot prove GLSL equality");
+        var fourth = repeatedBlend(BoardScene.Surface.GRASS.ordinal());
+        fourth.layers[3][0] += 2; fourth.tiles[3][0] += 1;
+        assertEquals(3, fourth.baseAliases(), "This optimization must not change the fourth slot's existing rule");
+    }
+
+    @Test
+    void familyRequestsAndDrawCompatibilitySeparateProvenAliasesFromOverrides() {
+        String previous = System.getProperty(GpuFamilyPrograms.PROPERTY);
+        System.setProperty(GpuFamilyPrograms.PROPERTY, "true");
+        var programs = new GpuFamilyPrograms(true, FloatAttribute.Shininess, material -> 0);
+        try {
+            var base = new Material(new FloatAttribute(FloatAttribute.Shininess, BoardScene.Surface.GRASS.ordinal()),
+                  repeatedBlend(BoardScene.Surface.GRASS.ordinal()));
+            var override = new Material(base);
+            override.get(GpuSurfaceBlend.class, GpuSurfaceBlend.TYPE).tiles[1][0] += 1;
+            var anotherOverride = new Material(override);
+            anotherOverride.get(GpuSurfaceBlend.class, GpuSurfaceBlend.TYPE).tiles[1][0] += 1;
+            var vertices = new VertexAttributes(VertexAttribute.Position());
+            programs.request(base, 3, vertices);
+            programs.request(new Material(base), 3, vertices);
+            assertEquals(1, programs.requested(), "Equal material proofs share a requested program");
+            programs.request(override, 3, vertices);
+            programs.request(anotherOverride, 3, vertices);
+            assertEquals(2, programs.requested(), "An override needs a different proof, not a program for each uniform value");
+            assertTrue(GpuFamilyPrograms.draws(null, 0, base, FloatAttribute.Shininess));
+            assertTrue(GpuFamilyPrograms.draws(null, 0, override, FloatAttribute.Shininess));
+            assertEquals("", GpuFamilyPrograms.defines(base, FloatAttribute.Shininess), "Generic programs keep runtime dispatch");
+            base.set(new GpuFamilyPrograms.Constants()); override.set(new GpuFamilyPrograms.Constants());
+            float[] families = GpuFamilyPrograms.constants(base, FloatAttribute.Shininess);
+            assertTrue(GpuFamilyPrograms.draws(families, 3, base, FloatAttribute.Shininess));
+            assertFalse(GpuFamilyPrograms.draws(families, 3, override, FloatAttribute.Shininess),
+                  "A program that eliminated slot B must reject its actual map/scale override");
+            assertTrue(GpuFamilyPrograms.draws(families, 2, override, FloatAttribute.Shininess));
+            assertFalse(GpuFamilyPrograms.draws(families, 2, base, FloatAttribute.Shininess));
+            assertFalse(GpuFamilyPrograms.draws(null, 0, base, FloatAttribute.Shininess));
+            String reused = GpuFamilyPrograms.defines(base, FloatAttribute.Shininess);
+            String changed = GpuFamilyPrograms.defines(override, FloatAttribute.Shininess);
+            assertTrue(reused.contains("#define COVER_B_IS_BASE") && reused.contains("#define COVER_C_IS_BASE"));
+            assertFalse(changed.contains("#define COVER_B_IS_BASE"));
+            assertTrue(changed.contains("#define COVER_C_IS_BASE"));
+        } finally {
+            programs.dispose();
+            if (previous == null) { System.clearProperty(GpuFamilyPrograms.PROPERTY); }
+            else { System.setProperty(GpuFamilyPrograms.PROPERTY, previous); }
+        }
+    }
+
+    private static GpuSurfaceBlend repeatedBlend(float family) {
+        float[] tiles = { 8, 4, 8, 16 }, layers = { 0, 2, 4, 6 };
+        return new GpuSurfaceBlend(null, new float[] { family, family, family, family }, new float[4],
+              new float[][] { tiles, tiles, tiles, tiles }, new float[][] { layers, layers, layers, layers });
     }
 
     private static float interpolatedCover(List<GpuSurfaceBlend.Triangle> triangles, Vector3 p, BoardScene.Surface family) {

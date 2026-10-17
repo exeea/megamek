@@ -7,7 +7,8 @@ layout(location = 0) out vec4 fragColor;
 // through blending and atmosphere; the final composite tones and encodes the whole frame once.
 in vec2 v_diffuseUV;   // ground: rim / foot distance (drowned cliff: height above bed / foot distance);
                             // cliff: height above foot / depth below rim; rock: above root
-                            // / below top. All in metres. Plants: authored red / green.
+                            // / below top. All in metres. Wet rock: above root / pigment variation.
+                            // Plants: authored red / green.
 in vec3 v_normal;
 in vec4 v_color;       // r: occlusion. g: game level (+64)/255, or for cliffs how much rock the face is (0
                             // bank, 1 cliff). b: kind (0 ground, .3 plant, .45 panel, .5 cliff, .6 abyss wall, .75 tree pit, 1 rock). a: bed
@@ -21,6 +22,7 @@ uniform sampler2DArray u_terrainLayers;
 uniform sampler2DArray u_terrainData;
 uniform vec4 u_sculptLayers; // this family's colour/height layers: ground, debris, wall, mantle; normal/AO one up
 uniform vec4 u_sculptTiles; // metres per repeat: ground, debris, wall, mantle
+uniform vec2 u_treePitMaterial; // authored mulch colour layer and metres per repeat
 uniform float u_metre;      // world units per metre
 uniform float u_normalMaps;
 uniform float u_groundResponse;
@@ -294,30 +296,33 @@ void main() {
                   : family(0.0) ? toLinear(vec3(.27, .35, .12)) : toLinear(vec3(.40, .42, .26));
             albedo = pigment * mix(.92, 1.06, leaf);
         } else if (pit) {
-            // A tree pit in the pavement: earth and bark mulch inside a kerb of paler, cleaner stone.
+            // A tree pit in the pavement: authored bark mulch inside a concrete kerb.
             if (v_color.a > .5) {
-                albedo = planar(u_sculptLayers.x, p, u_sculptTiles.x, broad).rgb * 1.1;
+                albedo = planar(u_sculptLayers.x, p, u_sculptTiles.x, broad).rgb;
                 roughness = planarRoughness(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad, roughness);
             } else {
-                vec4 grit = planar(u_sculptLayers.y, p, u_sculptTiles.y * .6, fine);
-                roughness = planarRoughness(u_sculptLayers.y, p, groundGradient, u_sculptTiles.y * .6, fine, roughness);
-                float mulch = texture(u_rainNoise, world.xy / 9.0 + v_color.a).r;
-                albedo = mix(toLinear(vec3(.27, .19, .13)), toLinear(vec3(.42, .30, .19)), mulch) * mix(.8, 1.2, grit.a);
-                if (u_normalMaps > .5 && terrainNormalDetail > 0.0) normal = upNormal(planarNormal(u_sculptLayers.y + 1.0, p, u_sculptTiles.y * .6, fine).rgb, face);
+                vec4 mulch = planar(u_treePitMaterial.x, p, u_treePitMaterial.y, fine);
+                albedo = mulch.rgb;
+                materialHeight = mulch.a;
+                roughness = planarRoughness(u_treePitMaterial.x, p, groundGradient, u_treePitMaterial.y, fine, roughness);
+                if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+                    vec4 detail = planarNormal(u_treePitMaterial.x + 1.0, p, u_treePitMaterial.y, fine);
+                    normal = upNormal(detail.rgb, face);
+                    cavity = detail.a;
+                }
             }
         } else if (cliff && family(4.0)) {
             concreteSlab(world, worldDx, worldDy, face, projection, v_diffuseUV.x, v_diffuseUV.y,
                   albedo, normal, occlusion, cavity, roughness);
         } else {
-            // Walls and rocks: the two vertical projections, V running down the face, never mirrored from outside.
+            // Rocks: the two vertical projections, V running down the face, never mirrored from outside.
             // Where a rounded corner turns between them, the projection whose relief stands higher shows through.
-            vec3 axes = pow(abs(face), vec3(4.0));
             vec2 uvx, uvy;
             float side;
             vec4 wall = wallSample(world, projection, uvx, uvy, side);
             // A boulder's crown needs a horizontal stone projection: the two wall projections collapse on a
             // flat top, otherwise leaving a single colour or stretched stripes under the moss/snow treatment.
-            float crown = cliff ? 0.0 : smoothstep(.45, .85, face.z);
+            float crown = smoothstep(.45, .85, face.z);
             if (crown > 0.0) wall = mix(wall, planar(u_sculptLayers.z, p, u_sculptTiles.z, fine), crown);
             albedo = wall.rgb;
             if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
@@ -336,51 +341,15 @@ void main() {
                 roughness = crown > 0.0 ? mix(stone,
                       planarRoughness(u_sculptLayers.z, p, groundGradient, u_sculptTiles.z, fine, roughness), crown) : stone;
             }
-            float h = v_diffuseUV.x, d = v_diffuseUV.y;
-            if (cliff) {
-                float drop = h + d;
-                // Caprock: the hard top bed of a cliff weathers paler; varnish streaks run down from under it.
-                float cap = 1.0 - smoothstep(.8, 2.2, d);
-                albedo = mix(albedo, albedo * vec3(1.08, 1.06, 1.03), cap * .6);
-                float streak = smoothstep(.55, .85, texture(u_rainNoise, vec2((world.x + world.y) / 7.0, world.z / 90.0)).r)
-                      * (1.0 - smoothstep(2.0, 14.0, d)) * smoothstep(.5, 1.5, d);
-                if (family(2.0) || family(3.0) || family(LUNAR_FAMILY)) albedo = mix(albedo, albedo * toLinear(vec3(.52, .45, .42)), streak * .6);
-
-                // Talus: fallen rock on the apron at the foot, where the face lies back. A mantle's banks slump into
-                // soil and turf instead.
-                float talus = min(.3 * drop, 6.0) * mix(.6, 1.0, fine);
-                float apron = (1.0 - smoothstep(talus * .55, talus, h)) * smoothstep(.2, .5, face.z);
-                apron = max(apron, 1.0 - smoothstep(.2, .6, h));
-                if (apron > 0.0) {
-                    float lying = smoothstep(.45, .8, face.z);
-                    vec2 dx = vec2(world.y * sign(projection.x), -world.z), dy = vec2(-world.x * sign(projection.y), -world.z) + 3.1;
-                    vec4 rubble = draped(u_sculptLayers.y, p, dx, dy, side, u_sculptTiles.y, fine, lying);
-                    // A desert talus is the cliff's own sandstone, broken: redder and darker than the drifted sand.
-                    if (family(2.0)) rubble.rgb = mix(rubble.rgb, wall.rgb * .92, .5);
-                    float w = heightBlend(wall.a, rubble.a, apron);
-                    albedo = mix(albedo, rubble.rgb, w);
-                    if (hasAuthoredRoughness(u_sculptLayers.y)) {
-                        float rubbleRoughness = wallRoughness(u_sculptLayers.y, dx / u_sculptTiles.y, dy / u_sculptTiles.y,
-                              wallXGradient / u_sculptTiles.y, wallYGradient / u_sculptTiles.y, side, roughness);
-                        if (lying > 0.0) rubbleRoughness = mix(rubbleRoughness,
-                              planarRoughness(u_sculptLayers.y, p, groundGradient, u_sculptTiles.y, fine, roughness), lying);
-                        roughness = mix(roughness, rubbleRoughness, w);
-                    }
-                    if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
-                        vec3 rubbleNormal = drapedNormal(u_sculptLayers.y + 1.0, p, dx, dy, face, side, u_sculptTiles.y, fine, lying);
-                        normal = normalize(mix(normal, rubbleNormal, w));
-                    }
-                }
-            }
+            float h = v_diffuseUV.x;
             // Broad ledges collect the ground cover (sand, snow, moss on alpine rock); on the rock kit only snow and
             // sand dust lie.
             float ledge = smoothstep(.8, .95, face.z) * smoothstep(.3, .6, fine) * (family(0.0) ? .7 : 1.0);
             // Snow caps the upper facets of a boulder, leaving its stone sides legible against the snowfield.
             if (family(5.0)) {
-                ledge = cliff ? smoothstep(.5, .72, face.z) : smoothstep(.72, .92, face.z);
-                if (!cliff) albedo *= .66;
+                ledge = smoothstep(.72, .92, face.z);
             }
-            if (!cliff) ledge *= family(5.0) ? smoothstep(.2, .9, h) : family(2.0) ? .45 : 0.0;
+            ledge *= family(5.0) ? smoothstep(.2, .9, h) : family(2.0) ? .45 : 0.0;
             if (ledge > 0.0 && !family(4.0)) {
                 vec4 top = planar(u_sculptLayers.x, p, u_sculptTiles.x, broad);
                 float w = heightBlend(wall.a, top.a, ledge);
@@ -391,13 +360,11 @@ void main() {
                     normal = normalize(mix(normal, upNormal(planarNormal(u_sculptLayers.x + 1.0, p, u_sculptTiles.x, broad).rgb, face), w));
                 }
             }
-            if (!cliff) {
-                // Each block its own shade; on alpine meadows a thin moss stain keeps the stone texture visible.
-                if (!wetRock) albedo *= mix(.78, 1.0, v_color.a);
-                if (family(0.0)) {
-                    float moss = smoothstep(.7, .94, face.z) * smoothstep(.6, .8, fine);
-                    albedo *= mix(vec3(1.0), toLinear(vec3(.9, .97, .82)), moss * .22);
-                }
+            // Stable per-block pigment variation, independent of water optics and root occlusion.
+            albedo *= mix(.78, 1.0, wetRock ? v_diffuseUV.y : v_color.a);
+            if (family(0.0)) {
+                float moss = smoothstep(.7, .94, face.z) * smoothstep(.6, .8, fine);
+                albedo *= mix(vec3(1.0), toLinear(vec3(.9, .97, .82)), moss * .22);
             }
         }
         if (ground && !natural && u_normalMaps > .5 && terrainNormalDetail > 0.0) {

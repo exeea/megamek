@@ -44,7 +44,10 @@ class GpuWaterBasinSmokeTest {
             @Override
             public void create() {
                 var shaders = new GpuShaderManager();
-                try { shaders.run(() -> checkGlare(scene, shaders)); }
+                try { shaders.run(() -> {
+                    try { checkGlare(scene, shaders); }
+                    catch (Throwable error) { failure.set(error); }
+                }); }
                 catch (Throwable error) { failure.set(error); }
                 finally { shaders.close(); Gdx.app.exit(); }
             }
@@ -52,7 +55,7 @@ class GpuWaterBasinSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Water sun glare", failure.get()); }
     }
 
-    private static void checkGlare(BoardScene scene, GpuShaderManager shaders) {
+    private static void checkGlare(BoardScene scene, GpuShaderManager shaders) throws Exception {
         var terrain = new GpuTerrain();
         var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(12.3f, 0, 0,
               BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0, BoardAtmosphere.Effects.NONE));

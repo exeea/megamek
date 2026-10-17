@@ -256,7 +256,6 @@ final class GpuTerrain implements Disposable {
                         || renderable.material.has(Impostor.TYPE)
                         || renderable.material.has(GpuRoads.Coats.TYPE) ? "#define vertexDataFlag\n" : "")
                   + (renderable.material.has(GpuSurfaceScars.Marking.TYPE) ? "#define surfaceScarFlag\n" : "")
-                  + "#define SCULPT_MATERIAL_COUNT " + SCULPT_LAYERS.size() + "\n"
                   + "#define SURFACE_FAMILIES " + BoardScene.Surface.values().length + "\n"
                   + "#define LUNAR_FAMILY " + BoardScene.Surface.LUNAR.ordinal() + ".0\n"
                   + "#define FUNGUS_FAMILY " + BoardScene.Surface.FUNGUS.ordinal() + ".0\n"
@@ -309,12 +308,14 @@ final class GpuTerrain implements Disposable {
                       : depthFragment;
                 shaderName += " depth twin";
             }
+            prefix += GpuShaderSource.sculptMaterialPrefix(SCULPT_LAYERS.size(), chosen.vertexShader, fragment);
             // The pre-pass draws twin by twin (renderPrepass): a twin sorts with no program.
             Shader group = depthOnly ? null : familyGroup(renderable, shaders);
             DefaultShader result = new DefaultShader(renderable, chosen,
                   GpuGlsl.compile(shaderName, prefix + GpuFamilyPrograms.defines(renderable.material, Sculpt.TYPE),
                         chosen.vertexShader, fragment)) {
                 private final float[] families = GpuFamilyPrograms.constants(renderable.material, Sculpt.TYPE);
+                private final int baseAliases = families == null ? 0 : GpuFamilyPrograms.baseAliases(renderable.material);
                 private final int normalMapsUniform = register("u_normalMaps");
                 private final int iceNormalsUniform = register("u_iceNormals");
                 private final int magmaTimeUniform = register("u_magmaTime");
@@ -378,6 +379,7 @@ final class GpuTerrain implements Disposable {
                 private int roughnessLayersUnit = -1;
                 private final int tundraLayersUniform = register("u_tundraLayers");
                 private final int tundraTilesUniform = register("u_tundraTiles");
+                private final int treePitMaterialUniform = register("u_treePitMaterial");
                 private final Vector3 detailPosition = new Vector3();
                 private int rainNoiseUnit = -1, waterDetailUnit = -1, biomeUnit = -1;
                 private int groundDamageUnit = -1;
@@ -398,7 +400,7 @@ final class GpuTerrain implements Disposable {
                     // libGDX binds only the instance attributes of the renderable a shader was created for: crop rows
                     // must not reuse a reed shader, which never binds a_coverRow and would draw rows as clumps.
                     // Family programs (GpuFamilyPrograms) first: the provider's scan rejects them cheaply.
-                    return GpuFamilyPrograms.draws(families, other.material, Sculpt.TYPE)
+                    return GpuFamilyPrograms.draws(families, baseAliases, other.material, Sculpt.TYPE)
                           && waterMode == (otherWater == null ? null : otherWater.mode)
                           && sameMaterialVariant(other.material, iceMode, linearTexture, ordinaryFamily)
                           && flowingMagma == (otherMagma != null && otherMagma.flowing())
@@ -475,9 +477,13 @@ final class GpuTerrain implements Disposable {
                         set(tundraLayersUniform, (float) SCULPT_LAYERS.indexOf("tundra-earth") * 2,
                               (float) SCULPT_LAYERS.indexOf("tundra-fungus") * 2,
                               (float) SCULPT_LAYERS.indexOf("tundra-crust") * 2,
-                              (float) SCULPT_LAYERS.indexOf("tundra-lichen") * 2);
+                              (float) SCULPT_LAYERS.indexOf("tundra-earth-variant") * 2);
                         set(tundraTilesUniform, assets.sculptTile("tundra-earth"), assets.sculptTile("tundra-fungus"),
-                              assets.sculptTile("tundra-crust"), assets.sculptTile("tundra-lichen"));
+                              assets.sculptTile("tundra-crust"), assets.sculptTile("tundra-earth-variant"));
+                    }
+                    if (has(treePitMaterialUniform)) {
+                        set(treePitMaterialUniform, 2f * SCULPT_LAYERS.indexOf("tree-pit-mulch"),
+                              assets.sculptTile("tree-pit-mulch"));
                     }
                     // BaseShader skips uniforms absent from a program. All lit surfaces share the same rain clock.
                     set(rainScaleUniform, 1f / BoardGeometry.width());
@@ -1463,7 +1469,8 @@ final class GpuTerrain implements Disposable {
     };
     private static final List<String> SCULPT_LAYERS = java.util.stream.Stream.concat(
           Arrays.stream(SCULPT_MATERIALS).flatMap(Arrays::stream),
-          java.util.stream.Stream.of("tundra-crust", "tundra-earth", "tundra-fungus", "earth", "tundra-lichen"))
+          java.util.stream.Stream.of("tundra-crust", "tundra-earth", "tundra-fungus", "earth", "tundra-earth-variant",
+                "tree-pit-mulch"))
           .distinct().toList();
 
     /**
@@ -5190,8 +5197,14 @@ final class GpuTerrain implements Disposable {
                         boolean ground = kind < .125f;
                         Color data = waterColor(vertex.color.r, height, shoreTint(GpuWaterShader.palette(water.water().tile.liquid()),
                               ground ? (vertex.color.a - .3f) / .1f : 0));
-                        if (!ground) { data.b = (224 + 240 * data.b) / 255f; }
-                        tinted.add(new MeshPartBuilder.VertexInfo().set(vertex).setCol(data));
+                        var shaded = new MeshPartBuilder.VertexInfo().set(vertex).setCol(data);
+                        if (!ground) {
+                            shaded.color.b = (224 + 240 * data.b) / 255f;
+                            // Wet rock uses alpha for the water palette. Preserve its pigment variation in the
+                            // unused second UV; a submerged cliff has no per-rock tint.
+                            shaded.uv.y = kind >= .875f ? vertex.color.a : 1;
+                        }
+                        tinted.add(shaded);
                     }
                     polygonConsumer.accept(tinted);
                 } else if (remaining != null) { remaining.add(polygon); }
@@ -5254,11 +5267,11 @@ final class GpuTerrain implements Disposable {
         }
         if (shade.kind() == BoardRelief.Kind.ROCK && openWater(surface.tile) != null && !Float.isNaN(shore)) {
             // Keep the rock projection and pack water optics in its spare kind range (blue bytes 224..254).
-            // Its variation moves into occlusion; alpha now carries the same water palette as the bed.
-            Color data = waterColor(shade.occlusion() * (.78f + .22f * shade.tint()),
+            // Alpha carries the water palette; the unused second UV retains pigment variation separately from AO.
+            Color data = waterColor(shade.occlusion(),
                   surface.waterHeight(p.x, p.y), shoreTint(shore, 0));
             data.b = (224 + 240 * data.b) / 255f;
-            return vertex(p, shade.normal(), shade.rim(), shade.foot(), data);
+            return vertex(p, shade.normal(), shade.rim(), shade.tint(), data);
         }
         float kind = switch (shade.kind()) {
             case GROUND, SUBMERGED_CLIFF -> 0;
