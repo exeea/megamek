@@ -60,8 +60,12 @@ final class GpuBoardTuning {
           new Knob("Base level height", 4, 40, 1, "%.0f"),
           // A value of one hides the grid.
           new Knob("Hex frame shade", 0f, 1f, 0.05f, "%.2f"),
-          new Knob("Multi-hex unit scale", 0.25f, 1.5f, 0.05f, "%.2f"),
-          new Knob("Hex padding (m)", 0, BoardGeometry.MAX_PADDING, 0.5f, "%.1f"));
+          new Knob("Multi-hex unit scale", 0.25f, 1.5f, 0.05f, "%.2f"));
+    /** The Terrain page's hex padding, beside Hex transitions, which it replaces while on. */
+    private static final Knob PADDING = new Knob("Hex padding (m)", 0, BoardGeometry.MAX_PADDING, 0.5f, "%.1f",
+          "Gap the board opens between neighbouring hexes, in metres; each hex keeps its size. Where levels match the ground "
+          + "runs on through the gap; where they differ the gap holds a slope up to two levels and a cliff above its talus "
+          + "from three. Replaces hex transitions while on. Visual only; the game's levels and hexes are unchanged.");
 
     private static final List<Knob> LIGHTING_KNOBS = List.of(
           // One-minute steps, the same grid scenario times are chosen on (BoardAtmosphere.hourInWindow).
@@ -127,6 +131,8 @@ final class GpuBoardTuning {
     private Label cardInUse;
     private Label cardPending;
     private final List<Control> geometry;
+    /** The hex padding slider on the Terrain page; null while the panel builds the pages before it. */
+    private List<Control> padding;
     private final CheckBox transitions;
     private final List<Control> relief;
     private final List<Control> water;
@@ -227,20 +233,6 @@ final class GpuBoardTuning {
         rows.top().defaults().pad(0, 3, 0, 3);
         section(skin, "Geometry");
         geometry = controls(skin, KNOBS, this::applyGeometry, 0);
-        geometry.get(6).slider().addListener(new TextTooltip("Gap the board opens between neighbouring hexes, in metres; "
-              + "each hex keeps its size. Where levels match the ground runs on through the gap; where they differ the gap "
-              + "holds a slope up to two levels and a cliff above its talus from three. Replaces hex transitions while on. "
-              + "Visual only; the game's levels and hexes are unchanged.", skin, "menu"));
-        transitions = checkbox(skin, "Hex transitions", "tuning-transitions");
-        transitions.addListener(new TextTooltip("Steps between hexes take room on both sides of their edge: slopes up to "
-              + "two levels, deep cliffs above a talus from three. Visual only; the game's levels and hexes are unchanged.",
-              skin, "menu"));
-        transitions.addListener(new ChangeListener() {
-            @Override
-            public void changed(ChangeEvent event, Actor actor) {
-                if (!syncing) { applyGeometry(); }
-            }
-        });
         normalMaps = checkbox(skin, "Normal maps", "tuning-normal-maps");
         unitDisplayMode = choice(skin, "Unit display", "tuning-unit-display", UnitDisplayMode.values(), () -> { });
         unitDisplayMode.addListener(new TextTooltip("All Meeples: every unit uses an extruded artwork token. "
@@ -618,6 +610,18 @@ final class GpuBoardTuning {
         terrainProgress = new Label("", skin, "small");
         terrainProgress.setName("terrain-build-progress");
         rows.add(terrainProgress).colspan(3).left().row();
+        section(skin, "Hex joins");
+        transitions = checkbox(skin, "Hex transitions", "tuning-transitions");
+        transitions.addListener(new TextTooltip("Steps between hexes take room on both sides of their edge: slopes up to "
+              + "two levels, deep cliffs above a talus from three. Visual only; the game's levels and hexes are unchanged.",
+              skin, "menu"));
+        transitions.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (!syncing) { applyGeometry(); }
+            }
+        });
+        padding = controls(skin, List.of(PADDING), this::applyGeometry, 0);
         section(skin, "Surface appearance");
         elevationGrading = checkbox(skin, "Elevation grading", "tuning-elevation-grading");
         elevationGrading.addListener(new TextTooltip(
@@ -1049,8 +1053,9 @@ final class GpuBoardTuning {
         boolean fixedSunKept = fixedSun.isChecked();
         BoardGeometry.Tuning defaults = BoardGeometry.DEFAULTS;
         float[] values = { defaults.hexScale(), defaults.unitScale(), defaults.unitHeightScale(),
-              defaults.levelHeight(), defaults.gridShade(), defaults.multiHexUnitScale(), defaults.padding() };
+              defaults.levelHeight(), defaults.gridShade(), defaults.multiHexUnitScale() };
         setValues(geometry, values);
+        setValues(padding, new float[] { defaults.padding() });
         syncing = true;
         transitions.setChecked(defaults.transitions());
         syncing = false;
@@ -1439,14 +1444,15 @@ final class GpuBoardTuning {
     }
 
     private void applyGeometry() {
-        // The sliders apply while the panel is still being built, before the transitions box exists.
+        // The Geometry sliders apply while the panel is still being built, before the Terrain page's controls exist.
         boolean steps = transitions != null ? transitions.isChecked() : BoardGeometry.DEFAULT_TRANSITIONS;
-        float padding = value(geometry, 6);
+        float gap = padding != null ? value(padding, 0) : BoardGeometry.DEFAULTS.padding();
         BoardGeometry.tune(new BoardGeometry.Tuning(value(geometry, 0), value(geometry, 1), value(geometry, 2),
-              Math.round(value(geometry, 3)), value(geometry, 4), value(geometry, 5), steps, padding));
+              Math.round(value(geometry, 3)), value(geometry, 4), value(geometry, 5), steps, gap));
         // Padding replaces transitions while it is on.
-        if (transitions != null) { transitions.setDisabled(padding > 0); }
+        if (transitions != null) { transitions.setDisabled(gap > 0); }
         updateReadings(geometry);
+        if (padding != null) { updateReadings(padding); }
     }
 
     private void applyRelief() {
