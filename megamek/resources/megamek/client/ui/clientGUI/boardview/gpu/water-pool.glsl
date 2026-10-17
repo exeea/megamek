@@ -267,6 +267,8 @@ vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 ti
     glow = waterShallows(mixture) * (illumination.sunlight * (0.15 + 0.85 * behind * behind) * 0.6
           + illumination.light * 0.25) * crest * effects;
 #endif
+    // Fires, lava, fungi and weapon fire glint on the same facets.
+    glint += waterLocalReflection(normal, view, roughness);
     // The brighter side of the sky lights the faces tilted toward it, even overcast or seen from straight above.
     facets *= clamp(1.0 - dot(broadSlope, key) * 1.1, 0.6, 1.4);
     vec3 body;

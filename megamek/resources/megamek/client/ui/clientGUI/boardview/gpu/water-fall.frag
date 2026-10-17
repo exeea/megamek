@@ -70,6 +70,8 @@ void main() {
     vec3 glass = materialReflectance(glassPigment * (0.85 + 0.35 * ribbons))
           * illumination.light * (1.0 - sheetFresnel) + sheetReflection;
     vec3 fallLight = illumination.whiteLight;
+    // Only water still smooth mirrors a light: bubbles scatter the glint away as the sheet aerates.
+    float glassy = (1.0 - aerate) * (1.0 - aerate);
 #if defined(lightingFlag) && numDirectionalLights > 0
     vec3 sun = -u_dirLights[0].direction;
     float facingSun = dot(surfaceNormal, sun);
@@ -77,11 +79,10 @@ void main() {
     // lifts the shaded side. The glassy crest mirrors the sun in a bright line.
     fallLight = max(illumination.whiteLight, illumination.ambient + illumination.sunlight * (0.3 * max(sun.z, 0.0)
           + 0.7 * max(facingSun, 0.0) + 0.3 * max(-facingSun, 0.0)));
-    // Only water still smooth mirrors the sun: bubbles scatter the glint away as the sheet aerates.
-    float glassy = (1.0 - aerate) * (1.0 - aerate);
     glass += illumination.sunlight * float(dot(geometric, sun) > 0.0)
           * waterDirectReflection(reflectionNormal, sun, view, sheetRoughness) * glassy;
 #endif
+    glass += waterLocalReflection(reflectionNormal, view, sheetRoughness) * glassy;
     // Between the streaks the water itself turns milky and opaque as bubbles fill it.
     glass = mix(glass, froth * fallLight * 0.8, aerate * 0.5);
     vec3 sheet = mix(glass, materialReflectance(froth * mix(0.85, 1.35, foamy)) * fallLight, white);

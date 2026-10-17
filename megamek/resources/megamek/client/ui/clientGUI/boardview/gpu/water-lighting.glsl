@@ -33,6 +33,17 @@ vec3 waterDirectReflection(vec3 normal, vec3 light, vec3 view, float roughness) 
     return reflected;
 }
 
+// The local lights (lava-lighting.glsl) mirrored as the sun is, each through its own size-widened lobe. Their diffuse
+// light already enters waterLighting() through incidentLighting. The orthographic glare ceiling stays the sun's: no
+// local light meets a whole lake at its mirror angle at once.
+vec3 waterLocalReflection(vec3 normal, vec3 view, float roughness) {
+    vec3 specular = vec3(0.0);
+#ifdef lightingFlag
+    lavaIrradiance(v_cloudPosition, normal, view, roughness, vec3(.02037), specular);
+#endif
+    return specular;
+}
+
 vec3 waterEnvironmentReflection(vec3 normal, vec3 view, float roughness, WaterLighting illumination) {
     if (dot(normal, view) <= 0.0) return vec3(0.0);
     roughness = clamp(roughness, MIN_ROUGHNESS, 1.0);
