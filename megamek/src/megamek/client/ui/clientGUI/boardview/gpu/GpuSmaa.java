@@ -142,7 +142,8 @@ final class GpuSmaa implements Disposable {
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
     }
 
-    private void disposeTargets() {
+    /** Releases the display-sized targets; the programs and tables stay for the next time SMAA is on. */
+    void disposeTargets() {
         if (input != null) { input.dispose(); input = null; }
         if (edgeTarget != null) { edgeTarget.dispose(); edgeTarget = null; }
         if (weightTarget != null) { weightTarget.dispose(); weightTarget = null; }

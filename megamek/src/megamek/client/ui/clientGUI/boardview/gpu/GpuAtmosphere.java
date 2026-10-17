@@ -399,13 +399,13 @@ final class GpuAtmosphere implements Disposable {
         return Float.float16ToFloat(Float.floatToFloat16(radiance * GpuSceneRadiance.SCALE)) / GpuSceneRadiance.SCALE;
     }
 
-    /** SMAA on the window's composite (not on offscreen targets); turning it off releases its targets. */
+    /**
+     * SMAA on the window's composite (not on offscreen targets); turning it off releases its targets and keeps its
+     * programs, which the warm-up's thermal frame links (GpuBattleView).
+     */
     void setAntiAliasing(boolean enabled) {
         antiAliasing = enabled;
-        if (!enabled && smaa != null) {
-            smaa.dispose();
-            smaa = null;
-        }
+        if (!enabled && smaa != null) { smaa.disposeTargets(); }
     }
 
     /** Publish material flags before warmup, without advancing wind or rendering with an unfinished camera. */

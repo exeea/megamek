@@ -139,6 +139,8 @@ final class GpuBoardSource implements BoardSource {
     private volatile HoverPoint hoverPoint = new HoverPoint(null, Float.NaN);
     private long boardGeneration;
     private volatile Rectangle visibleArea = new Rectangle(0, 0, 16, 16);
+    /** The game's units the last capture did not show on this board (reserveUnits). */
+    private volatile List<BoardScene.Unit> reserve = List.of();
     private Rectangle capturedArea;
     private long capturedRevision = -1;
     private GamePhase capturedPhase;
@@ -876,6 +878,12 @@ final class GpuBoardSource implements BoardSource {
                   .filter(entity -> !live.contains(entity.getId()) && visible(entity) && !sensorContact(entity))
                   .forEach(entity -> units.add(wreck(entity, usedImages)));
         }
+        if (GpuUnitModels.ENABLED) {
+            var shown = units.stream().map(BoardScene.Unit::id).collect(Collectors.toSet());
+            reserve = view.game.getEntitiesVector().stream()
+                  .filter(entity -> !shown.contains(entity.getId()) && !entity.isDestroyed() && !entity.isDoomed())
+                  .map(entity -> unit(entity, -1, new Coords(0, 0), false, usedImages)).toList();
+        }
         JComponent panel = phasePanel.get();
         MovePath path = panel instanceof MovementDisplay movement ? movement.getPlannedMovement() : null;
         int actorId = actions.actorId();
@@ -1537,6 +1545,9 @@ final class GpuBoardSource implements BoardSource {
     public GpuAtmosphereControls atmosphere() { return atmosphere; }
 
     public boolean isGameplay() { return true; }
+
+    @Override
+    public List<BoardScene.Unit> reserveUnits() { return reserve; }
 
     public boolean isClosed() {
         return closed;

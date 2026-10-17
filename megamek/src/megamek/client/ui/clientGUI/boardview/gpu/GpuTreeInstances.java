@@ -151,7 +151,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     /** A part's material in a batch: its own copy, marked so the shader providers pick the instanced shaders. */
-    private static Material instancedMaterial(Material material) {
+    static Material instancedMaterial(Material material) {
         Material result = new Material(material);
         result.set(new Instanced());
         return result;
@@ -177,10 +177,10 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         }
     }
 
-    /** A layout-only mesh with a stand's instance attributes, for a tree part's warm-up sample. */
+    /** A layout-only mesh with a batch's instance attributes, for an instanced part's warm-up sample. */
     static Mesh sampleMesh(VertexAttributes layout) {
         Mesh mesh = new Mesh(true, 0, 0, layout);
-        mesh.enableInstancedRendering(true, 1, attributes(false));
+        mesh.enableInstancedRendering(true, 1, attributes(RigidGlb.colourSlotted(layout)));
         return mesh;
     }
 

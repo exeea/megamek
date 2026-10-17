@@ -41,9 +41,15 @@ final class GpuEditorModelPreviews implements Disposable {
     private final Map<Image, FrameBuffer> images = new HashMap<>();
     private Future<ModelData> pending;
     private Request current;
+    /** The current request's model and its textures while a program it draws with still links (GpuShaderProvider). */
+    private Model model;
+    private final Map<String, Texture> textures = new HashMap<>();
     private ModelBatch batch;
     private GpuSceneDisplay display;
     private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
+
+    /** Its display program links with the editor, behind the loading stage, for framebuffer objects. */
+    GpuEditorModelPreviews() { GpuGlsl.offscreen(() -> display = new GpuSceneDisplay()); }
 
     void add(String asset, Image target) { add(asset, megamek.common.board.BoardDecoration.Colours.NONE, target); }
 
@@ -64,16 +70,27 @@ final class GpuEditorModelPreviews implements Disposable {
             if (entry.getKey().getStage() != null) { return false; }
             entry.getValue().dispose(); return true;
         });
-        if (pending != null && current.target().getStage() == null) {
-            pending.cancel(true); pending = null; current = null;
+        if (current != null && current.target().getStage() == null) {
+            if (pending != null) { pending.cancel(true); }
+            pending = null; current = null; release();
         }
-        if (pending != null && pending.isDone()) {
-            try { render(pending.get(), current.top(), current.target()); }
-            catch (Exception failure) {
+        if (pending != null && pending.isDone() || model != null) {
+            try {
+                if (model == null) {
+                    model = ModelTextures.create(pending.get(), textures,
+                          (key, color) -> textures.computeIfAbsent((color ? "color:" : "data:") + key, ignored -> color
+                                ? GpuColorTexture.create(new FileHandle(key), true)
+                                : GpuColorTexture.createData(new FileHandle(key), true)));
+                    pending = null;
+                }
+                // A program it draws with still links: the same model draws again next frame.
+                if (render(model, current.top(), current.target())) { current = null; release(); }
+            } catch (Exception failure) {
                 current.target().setUserObject(megamek.client.ui.gdx.UiKit.text("BoardEditor.noPreview"));
-            } finally { pending = null; current = null; }
+                pending = null; current = null; release();
+            }
         }
-        if (pending == null && !queue.isEmpty()) {
+        if (pending == null && current == null && !queue.isEmpty()) {
             current = queue.removeFirst(); String asset = current.asset(); var colours = current.colours();
             int sides = current.sides(), tracks = current.tracks();
             pending = worker.submit(() -> {
@@ -94,15 +111,11 @@ final class GpuEditorModelPreviews implements Disposable {
         }
     }
 
-    private void render(ModelData data, boolean top, Image target) {
-        Map<String, Texture> textures = new HashMap<>();
-        Model model = null;
+    /** Draws the model's preview into the target; false while a program it draws with still links (GpuShaderProvider). */
+    private boolean render(Model model, boolean top, Image target) {
         FrameBuffer image = null;
         FrameBuffer scene = null;
         try {
-            model = ModelTextures.create(data, textures,
-                  (key, color) -> textures.computeIfAbsent((color ? "color:" : "data:") + key,
-                        ignored -> color ? GpuColorTexture.create(new FileHandle(key), true) : GpuColorTexture.createData(new FileHandle(key), true)));
             ModelInstance instance = new ModelInstance(model);
             BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox());
             Vector3 center = bounds.getCenter(new Vector3());
@@ -122,9 +135,9 @@ final class GpuEditorModelPreviews implements Disposable {
             light.set(ColorAttribute.createAmbientLight(lighting.ambient()));
             light.add(new DirectionalLight().set(lighting.direct(), lighting.direction()));
             if (batch == null) { batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider)); }
-            if (display == null) { display = new GpuSceneDisplay(); }
             scene = GpuHeatGlow.buffer(128, 96, true);
             image = GpuAtmosphere.buffer(128, 96, true);
+            int skipped = GpuShaderProvider.unlinkedDraws();
             scene.begin();
             try {
                 Gdx.gl.glDepthMask(true);
@@ -134,20 +147,28 @@ final class GpuEditorModelPreviews implements Disposable {
                 batch.begin(camera);
                 try { batch.render(instance, light); } finally { batch.end(); }
             } finally { scene.end(); }
+            if (GpuShaderProvider.unlinkedDraws() != skipped) { return false; }
             try { display.render(scene, image, exposure); } finally { image.end(); }
             TextureRegion region = new TextureRegion(image.getColorBufferTexture()); region.flip(false, true);
             target.setDrawable(new TextureRegionDrawable(region)); target.setUserObject("Ready"); images.put(target, image); image = null;
+            return true;
         } finally {
             if (scene != null) { scene.dispose(); }
             if (image != null) { image.dispose(); }
-            if (model != null) { model.dispose(); }
-            textures.values().forEach(Texture::dispose);
         }
+    }
+
+    /** Releases the current request's model and textures. */
+    private void release() {
+        if (model != null) { model.dispose(); model = null; }
+        textures.values().forEach(Texture::dispose);
+        textures.clear();
     }
 
     void clear() {
         queue.clear();
-        if (pending != null) { pending.cancel(true); pending = null; current = null; }
+        if (pending != null) { pending.cancel(true); pending = null; }
+        current = null; release();
         images.values().forEach(FrameBuffer::dispose); images.clear();
     }
     @Override public void dispose() {

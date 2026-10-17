@@ -200,16 +200,35 @@ final class GpuOcean implements Disposable {
         }
     }
 
-    private void create() {
-        spectrum = GpuShaderManager.program(() -> program("ocean-spectrum.frag"), next -> spectrum = next);
-        butterfly = GpuShaderManager.program(() -> program("ocean-fft.frag"), next -> butterfly = next);
-        finish = GpuShaderManager.program(() -> program(lava ? "ocean-lava-finish.frag" : "ocean-water-finish.frag"),
-              next -> finish = next);
-        // A live edit of the generator regenerates the spectrum, so the change shows at once.
-        if (!lava) {
-            seed = GpuShaderManager.program(() -> program("ocean-initial.frag"), next -> { seed = next; seeded = false; });
-            cover = GpuShaderManager.program(() -> program("ocean-foam.frag"), next -> cover = next);
+    /**
+     * Links the simulation's programs now, as the editor's warm-up does for liquids its board may not have yet (inside
+     * GpuGlsl.offscreen: they draw into framebuffer objects); the first update keeps them.
+     */
+    void prepare() {
+        if (!supported() || failed) { return; }
+        try { programs(); } catch (GdxRuntimeException error) {
+            failed = true;
+            Gdx.app.error("GpuOcean", "Wave simulation disabled", error);
+            dispose();
         }
+    }
+
+    private void programs() {
+        if (spectrum == null) { spectrum = GpuShaderManager.program(() -> program("ocean-spectrum.frag"), next -> spectrum = next); }
+        if (butterfly == null) { butterfly = GpuShaderManager.program(() -> program("ocean-fft.frag"), next -> butterfly = next); }
+        if (finish == null) {
+            finish = GpuShaderManager.program(() -> program(lava ? "ocean-lava-finish.frag" : "ocean-water-finish.frag"),
+                  next -> finish = next);
+        }
+        // A live edit of the generator regenerates the spectrum, so the change shows at once.
+        if (!lava && seed == null) {
+            seed = GpuShaderManager.program(() -> program("ocean-initial.frag"), next -> { seed = next; seeded = false; });
+        }
+        if (!lava && cover == null) { cover = GpuShaderManager.program(() -> program("ocean-foam.frag"), next -> cover = next); }
+    }
+
+    private void create() {
+        programs();
         quad = new Mesh(true, 4, 0, new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position"));
         quad.setVertices(new float[] { -1, -1, 1, -1, -1, 1, 1, 1 });
         for (int i = 0; i < (lava ? 1 : spectra.length); i++) { spectra[i] = floatTarget(SIZE * cascades, SIZE); }

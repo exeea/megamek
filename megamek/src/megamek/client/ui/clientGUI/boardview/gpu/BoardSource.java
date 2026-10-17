@@ -157,6 +157,12 @@ interface BoardSource extends AutoCloseable {
     default void stopKeys() { }
     /** Full play needs its tactical artwork prepared before interactive frames; map-only views do not. */
     default boolean isGameplay() { return false; }
+    /**
+     * The game's units the last frame does not show on this board (not deployed, elsewhere or hidden), captured on
+     * Swing like its units: the view draws them behind its loading stage, so their models and programs are ready when
+     * they appear. None for map-only views.
+     */
+    default List<BoardScene.Unit> reserveUnits() { return List.of(); }
     /** Render-thread report about the timeline consumed with this frame; never a second animation clock. */
     default void playbackState(Frame frame, boolean busy) { }
     default boolean isEditor() { return false; }

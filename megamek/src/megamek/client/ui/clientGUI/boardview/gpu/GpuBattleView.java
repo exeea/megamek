@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Application;
@@ -209,13 +210,14 @@ class GpuBattleView extends ApplicationAdapter {
     private boolean entranceStarting;
     /**
      * The frames after a loading stage that still draw under it, so that the programs they need link before the board
-     * shows: the board as it will show and, on a board's first load, its Tactical View and a close view of its centre,
-     * whose ground cover and nearest details have programs of their own. Effects that first appear in play link with
-     * the first of them (warmUp).
+     * shows: the board as it will show and, unless the board makes its entrance, its Tactical View and a close view of
+     * its centre, whose ground cover and nearest details have programs of their own; last the thermal view with SMAA.
+     * Effects that first appear in play link with the first of them, and the game's units not on the board stand in
+     * the middle of each (warmUp, withReserve).
      */
-    private enum WarmUp { BOARD, TACTICAL, CLOSE, DONE }
+    private enum WarmUp { BOARD, TACTICAL, CLOSE, THERMAL, DONE }
     private WarmUp warmUp = WarmUp.DONE;
-    /** Whether this board's Tactical View and close view were drawn under a loading stage. */
+    /** Whether the Tactical View and close view were drawn under this loading stage. */
     private boolean probed;
     private int quietFrames, closeFrames;
     /** The close view's zoom, as the close benchmark view's, and the most frames its detail may take to settle. */
@@ -670,17 +672,19 @@ class GpuBattleView extends ApplicationAdapter {
             unitFrame = hud.state.presented(unitFrame);
             scene = unitFrame.scene();
         }
+        if (warmUp != WarmUp.DONE) { scene = withReserve(scene); }
         camouflage.retain(scene.units());
         if (unitModels != null) {
-            unitModels.retainAssemblies(scene.units().stream().filter(unit -> !unit.sensorContact())
-                  .map(BoardScene.Unit::id).collect(Collectors.toSet()));
+            // The units not on the board keep the models their warm-up assembled, for the moment they appear.
+            unitModels.retainAssemblies(Stream.concat(scene.units().stream(), source.reserveUnits().stream())
+                  .filter(unit -> !unit.sensorContact()).map(BoardScene.Unit::id).collect(Collectors.toSet()));
         }
         boardGeneration = frame.boardGeneration();
         var atmosphereSettings = tuning.atmosphere();
         // The Tactical View has clear air and its one fixed light: no clouds, fog, haze or weather.
         atmosphere.configure(boardCamera.tactical() ? BoardAtmosphere.DEFAULTS : atmosphereSettings);
         atmosphere.setOptions(tuning.atmosphereOptions());
-        atmosphere.setAntiAliasing(tuning.antiAliasing());
+        atmosphere.setAntiAliasing(tuning.antiAliasing() || warmUp == WarmUp.THERMAL);
         // Material readiness includes live lighting/cloud flags, before any visible terrain is submitted.
         atmosphere.updateLight(boardCamera);
         terrain.setAtmosphere(atmosphere.lighting());
@@ -712,7 +716,9 @@ class GpuBattleView extends ApplicationAdapter {
                   .collect(Collectors.joining("\n")));
             drawLoadingStage();
             renderStage(null);
+            // Each loading stage readies what may change programs, a lighting switch included: probe again.
             warmUp = WarmUp.BOARD;
+            probed = false;
             return;
         }
         boolean hidden = warmUp != WarmUp.DONE;
@@ -864,7 +870,7 @@ class GpuBattleView extends ApplicationAdapter {
         outlined.addAll(markers.outlinedInstances());
         outlined.removeIf(instance -> instance == null || !boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance)));
         float seeThrough = tuning.seeThrough();
-        boolean wireframeView = tuning.wireframe() && GpuWireframe.supported();
+        boolean wireframeView = (tuning.wireframe() || warmUp == WarmUp.THERMAL) && GpuWireframe.supported();
         // The units' poses and anchors and the camera are final for this frame. The tuning model follows the camera,
         // which can leave Free Flight by itself (its keys, the Tactical View).
         renderStage("board-space HUD");
@@ -1013,7 +1019,7 @@ class GpuBattleView extends ApplicationAdapter {
                 tactical.prepare();
                 // Probing moves the camera: not while the board makes its entrance.
                 if (probed || entrancePending || boardCamera.isFraming() || boardCamera.tactical()) {
-                    warmUp = WarmUp.DONE;
+                    warmUp = WarmUp.THERMAL;
                 } else {
                     setTacticalView(true);
                     warmUp = WarmUp.TACTICAL;
@@ -1034,11 +1040,26 @@ class GpuBattleView extends ApplicationAdapter {
                     warmUp = WarmUp.BOARD;
                 }
             }
+            case THERMAL -> warmUp = WarmUp.DONE;
             default -> { }
         }
         ScreenUtils.clear(.045f, .065f, .075f, 1, true);
         createLoadingStage();
         drawLoadingStage();
+    }
+
+    /** The scene with the game's units not on the board (BoardSource.reserveUnits) on the hex in the middle of the view. */
+    private BoardScene withReserve(BoardScene shown) {
+        List<BoardScene.Unit> reserve = source.reserveUnits();
+        if (reserve.isEmpty()) { return shown; }
+        Coords middle = BoardGeometry.pick(shown, boardCamera.camera.getPickRay(boardCamera.camera.viewportWidth / 2,
+              boardCamera.camera.viewportHeight / 2, 0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight));
+        BoardScene.Tile tile = shown.tile(middle == null ? new Coords(shown.width() / 2, shown.height() / 2) : middle);
+        if (tile == null) { return shown; }
+        var place = new BoardScene.Waypoint(tile.coords(), tile.elevation(), 0);
+        List<BoardScene.Unit> units = new ArrayList<>(shown.units());
+        reserve.forEach(unit -> units.add(unit.at(place)));
+        return shown.withUnits(units);
     }
 
     /**

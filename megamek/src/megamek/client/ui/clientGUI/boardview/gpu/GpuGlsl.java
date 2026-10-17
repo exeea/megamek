@@ -92,8 +92,13 @@ final class GpuGlsl {
     static GpuProgramCache programCache;
     /** Whether a board view shows its board rather than its loading stage (GpuBattleView). */
     private static volatile boolean presenting;
-    /** Programs compiled from source that were requested while a board showed: none should be. */
+    /** Programs compiled from source while a board showed that held the render thread: none should. */
     private static final AtomicInteger AFTER_LOADING = new AtomicInteger();
+    /** Programs compiled from source while a board showed that linked off the render thread ({@link #deferral}). */
+    private static final AtomicInteger DEFERRED = new AtomicInteger();
+    /** Render-thread time a presented frame may spend starting deferred links (binary loads, link submissions). */
+    private static final long DEFERRAL_BUDGET = 6_000_000;
+    private static long deferralSpent;
     /** See {@link #linkOffscreen}; render thread only. */
     private static Preparation offscreenLinks;
     private static final ThreadLocal<Boolean> OFFSCREEN = ThreadLocal.withInitial(() -> false);
@@ -102,23 +107,45 @@ final class GpuGlsl {
     private GpuGlsl() { }
 
     /**
-     * A board view shows its board ({@code true}) or its loading stage. A program requested while the board shows and
-     * compiled from source is counted ({@link #compilesAfterLoading()}) and, with {@link #TIMING_PROPERTY}, logged as
-     * "after-loading"; one an offscreen renderer such as the editor's palette samples requests inside
-     * {@link #offscreen} is logged as "after-loading-offscreen" only. One flag serves every view on the render thread.
+     * A board view shows its board ({@code true}, once per presented frame) or its loading stage. A program compiled
+     * from source while the board shows is counted: {@link #compilesAfterLoading()} when it held the render thread,
+     * logged "after-loading" ("after-loading-offscreen" inside {@link #offscreen}) with {@link #TIMING_PROPERTY}; else
+     * {@link #deferredAfterLoading()}, logged "after-loading-deferred". One flag serves every view on the render thread.
      */
-    static void presenting(boolean shown) { presenting = shown; }
+    static void presenting(boolean shown) {
+        presenting = shown;
+        deferralSpent = 0;
+    }
 
     static int compilesAfterLoading() { return AFTER_LOADING.get(); }
+
+    static int deferredAfterLoading() { return DEFERRED.get(); }
 
     /**
      * Intel compiles a program again at its first draw to the other kind of framebuffer than its linking context last
      * drew to, and its binaries keep the first kind. Without the parallel compiler, a program requested outside a
      * preparation for a framebuffer object (one is bound, or {@link #offscreen} runs) therefore links on this
      * preparation's worker, which never draws, and the render thread waits; a program for the window links on the
-     * render thread. Null leaves every such link on the render thread, as tests without a board view do.
+     * render thread. Null leaves every such link on the render thread, as tests without a board view do. Once the board
+     * shows, the same preparation links material programs that are still missing ({@link #deferral}).
      */
     static void linkOffscreen(Preparation preparation) { offscreenLinks = preparation; }
+
+    /**
+     * While a board shows: the preparation that links a material program a draw finds missing, off the render thread,
+     * while its draws wait (GpuShaderProvider); null behind the loading stage, inside another preparation or without a
+     * board view.
+     */
+    static Preparation deferral() { return presenting && PREPARING.get() == null ? offscreenLinks : null; }
+
+    /** Adds render-thread time spent starting or checking a deferred link to this frame's budget. */
+    static void spent(long nanos) { deferralSpent += nanos; }
+
+    /**
+     * Whether this presented frame spent its budget for links (GpuShaderProvider's, a terrain's warm-up): programs not
+     * yet requested wait for the next frame.
+     */
+    static boolean overBudget() { return presenting && deferralSpent >= DEFERRAL_BUDGET; }
 
     /** Runs code that creates programs drawing into framebuffer objects only, such as effects warmed up in advance. */
     static void offscreen(Runnable creation) {
@@ -407,8 +434,11 @@ final class GpuGlsl {
         private final String cacheKey;
         /** Loaded from the cache: its stages were never compiled. Cached: loaded or stored, nothing left to keep. */
         private boolean binary, cached;
-        /** Requested while a board showed (presenting): by the board's own frames, or by an offscreen renderer. */
-        private final boolean afterLoading = presenting, offscreenRequest = OFFSCREEN.get();
+        /**
+         * Requested while a board showed (presenting): by the board's own frames, or by an offscreen renderer; and
+         * whether the render thread waits for it, outside any preparation.
+         */
+        private final boolean afterLoading = presenting, offscreenRequest = OFFSCREEN.get(), stalls = PREPARING.get() == null;
 
         Linked(GpuShaderManager.Sources source) { this(source, false); }
 
@@ -442,11 +472,12 @@ final class GpuGlsl {
                 timing("binary-loaded");
                 return;
             }
-            if (afterLoading && offscreenRequest) {
-                timing("after-loading-offscreen");
+            if (afterLoading && !stalls) {
+                DEFERRED.incrementAndGet();
+                timing("after-loading-deferred");
             } else if (afterLoading) {
                 AFTER_LOADING.incrementAndGet();
-                timing("after-loading");
+                timing(offscreenRequest ? "after-loading-offscreen" : "after-loading");
             }
             timing("source-upload-start");
             gl.glShaderSource(vertex, source.vertex());

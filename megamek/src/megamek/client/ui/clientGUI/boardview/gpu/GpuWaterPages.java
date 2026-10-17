@@ -147,23 +147,28 @@ final class GpuWaterPages implements Disposable {
 
     private void submit(ModelBatch batch, Environment environment, Renderable part, boolean depth) {
         if (depth) {
-            GpuWaterShader water = water(part);
-            // The surface and the board-edge section bound the water: the nearest of them hides the rest.
-            if (water == null || water.mode != GpuWaterShader.Mode.SURFACE && water.mode != GpuWaterShader.Mode.CUT) {
-                return;
-            }
+            Material material = depthMaterials.computeIfAbsent(part.material, GpuWaterPages::depthMaterial);
+            if (material == null) { return; }
             if (depthCount == depthParts.size) { depthParts.add(new Renderable()); }
             var copy = depthParts.get(depthCount++).set(part);
-            copy.material = depthMaterials.computeIfAbsent(part.material, original -> {
-                Material material = new Material(original);
-                material.set(water.depth());
-                material.remove(BlendingAttribute.Type);
-                material.set(new DepthTestAttribute(GL20.GL_LEQUAL, true));
-                return material;
-            });
+            copy.material = material;
             part = copy;
         }
         part.shader = null; part.environment = environment; batch.render(part);
+    }
+
+    /**
+     * The depth pass's material for a water surface's or board-edge section's, which bound the water: the nearest of them
+     * hides the rest. Null for any other material, which the pass leaves out.
+     */
+    static Material depthMaterial(Material original) {
+        GpuWaterShader water = original.get(GpuWaterShader.class, GpuWaterShader.TYPE);
+        if (water == null || water.mode != GpuWaterShader.Mode.SURFACE && water.mode != GpuWaterShader.Mode.CUT) { return null; }
+        Material material = new Material(original);
+        material.set(water.depth());
+        material.remove(BlendingAttribute.Type);
+        material.set(new DepthTestAttribute(GL20.GL_LEQUAL, true));
+        return material;
     }
 
     private static GpuWaterShader water(Renderable part) { return part.material.get(GpuWaterShader.class, GpuWaterShader.TYPE); }
