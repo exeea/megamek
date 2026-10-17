@@ -152,7 +152,7 @@ final class GpuHexMasks implements Disposable {
 
     void submit(ModelBatch batch, Camera camera) {
         if (layer == null) { return; }
-        if (shader == null) { shader = new MaskShader(); }
+        prepare();
         carriers.submit(batch, camera, shader, material, layer, layer.chunks());
     }
 
@@ -213,6 +213,10 @@ final class GpuHexMasks implements Disposable {
         carriers.clear();
         previous = List.of();
         scene = null;
+    }
+
+    void prepare() {
+        if (shader == null) { shader = new MaskShader(); }
     }
 
     @Override

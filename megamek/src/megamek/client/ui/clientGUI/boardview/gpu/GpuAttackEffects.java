@@ -964,6 +964,15 @@ final class GpuAttackEffects implements Disposable {
         projectiles.billboard(camera, center, radius, kind + MathUtils.clamp(phase, 0, .99f), alpha);
     }
 
+    /** Links the programs of every weapon effect now (GpuBattleView's warm-up), not at the first shot in play. */
+    void prepare() {
+        flames.prepare();
+        beams.prepare();
+        projectiles.prepare();
+        missiles.prepare();
+        explosions.prepare();
+    }
+
     @Override
     public void dispose() {
         attack = null;

@@ -69,6 +69,11 @@ final class GpuEditorTerrainPreviews implements Disposable {
      * renderer they wait, and a new one (an asset reload) replaces the sample renderer.
      */
     void update(GpuTerrain board) {
+        // The samples draw into their own framebuffers only (GpuGlsl.offscreen).
+        GpuGlsl.offscreen(() -> updateSamples(board));
+    }
+
+    private void updateSamples(GpuTerrain board) {
         if (board != lender) {
             disposeRenderer();
             lender = board;
@@ -128,6 +133,11 @@ final class GpuEditorTerrainPreviews implements Disposable {
         } else { camera.fit(scene); }
         atmosphere.updateLight(camera.camera); terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
+        // The board's lighting configuration, so the samples draw with its programs. Outside the board's opaque pass
+        // its occlusion reads visibility 1 (GpuAmbientOcclusion.texture).
+        var occlusion = lender.environment().get(GpuAmbientOcclusion.TYPE);
+        if (occlusion == null) { terrain.environment().remove(GpuAmbientOcclusion.TYPE); }
+        else { terrain.environment().set(occlusion); }
         terrain.update(scene, camera.camera);
     }
 

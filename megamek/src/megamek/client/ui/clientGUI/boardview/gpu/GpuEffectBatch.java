@@ -113,6 +113,11 @@ final class GpuEffectBatch implements Disposable {
         }
     }
 
+    /** Links its program now (GpuBattleView's warm-up), not at its first quad in play. */
+    void prepare() {
+        if (mesh == null) { create(); }
+    }
+
     private void create() {
         shader = GpuShaderManager.program(() -> GpuGlsl.compile(fragment,
               GpuShaderSource.read("effects.vert"), fragment(fragment + ".frag")), next -> shader = next);

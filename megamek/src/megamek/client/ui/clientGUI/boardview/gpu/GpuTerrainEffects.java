@@ -133,7 +133,7 @@ final class GpuTerrainEffects implements Disposable {
         }
         if (visible.isEmpty()) { return; }
         visible.sort(BACK_TO_FRONT);
-        initialize();
+        prepare();
         Texture opaqueDepth = depth.capture();
         int width = Math.max(1, (depth.width + 1) / 2), height = Math.max(1, (depth.height + 1) / 2);
         if (buffer == null || buffer.getWidth() != width || buffer.getHeight() != height) {
@@ -219,7 +219,8 @@ final class GpuTerrainEffects implements Disposable {
         mesh.setVertices(vertices, 0, offset);
     }
 
-    private void initialize() {
+    /** Links its programs now (GpuBattleView's warm-up), not at the first fire or smoke in play. */
+    void prepare() {
         if (shader != null) { return; }
         try {
             shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU terrain fire/smoke",

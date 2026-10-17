@@ -812,6 +812,8 @@ test {
     // save-game path, which reflects over java.util.concurrent collections such as CopyOnWriteArrayList.
     jvmArgs '--add-opens', 'java.base/java.util=ALL-UNNAMED',
             '--add-opens', 'java.base/java.util.concurrent=ALL-UNNAMED'
+    // Linked GL programs stay under build/, so test runs never evict the player's (mmconf/gpu-program-cache).
+    systemProperty 'megamek.gpu.programCacheDir', layout.buildDirectory.dir('gpu-program-cache').get().asFile.absolutePath
 
     finalizedBy jacocoTestReport
 }
@@ -833,6 +835,7 @@ tasks.register('gpuBoardLargeMapTest', Test) {
     jacoco.enabled = false
     systemProperty 'java.awt.headless', 'false'
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
+    systemProperty 'megamek.gpu.programCacheDir', layout.buildDirectory.dir('gpu-program-cache').get().asFile.absolutePath
 }
 
 // Explicit opt-in: requires an actual desktop OpenGL context, unlike the regular geometry/source tests.
@@ -856,6 +859,7 @@ tasks.register('gpuBoardSmoke', Test) {
     jacoco.enabled = false
     systemProperty 'java.awt.headless', 'false'
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
+    systemProperty 'megamek.gpu.programCacheDir', layout.buildDirectory.dir('gpu-program-cache').get().asFile.absolutePath
     systemProperties System.properties.findAll { it.key.toString().startsWith('megamek.gpu.') }
     outputs.upToDateWhen { false }
 }
@@ -876,6 +880,7 @@ tasks.register('gpuBoardBenchmark', Test) {
     jacoco.enabled = false
     systemProperty 'java.awt.headless', 'false'
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
+    systemProperty 'megamek.gpu.programCacheDir', layout.buildDirectory.dir('gpu-program-cache').get().asFile.absolutePath
     systemProperties System.properties.findAll { it.key.toString().startsWith('megamek.gpu.') }
     testLogging { showStandardStreams = true }
     outputs.upToDateWhen { false }

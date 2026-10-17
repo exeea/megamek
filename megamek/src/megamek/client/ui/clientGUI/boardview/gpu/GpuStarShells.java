@@ -192,6 +192,28 @@ final class GpuStarShells implements Disposable {
         return flicker * sputter;
     }
 
+    /** Links its programs now (GpuBattleView's warm-up), not at the first star shell in play. */
+    void prepare() {
+        quads.prepare();
+        canopies.prepare();
+        prepareLight();
+    }
+
+    private void prepareLight() {
+        if (lightShader != null) { return; }
+        lightShader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU flare light",
+              GpuShaderSource.read("flare-light.vert"), GpuShaderSource.read("flare-light.frag")),
+              next -> lightShader = next);
+        box = new Mesh(true, 8, 36, VertexAttribute.Position());
+        box.setVertices(new float[] {
+              -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1,
+              -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1 });
+        box.setIndices(new short[] {
+              0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7,
+              0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5,
+              2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7 });
+    }
+
     /**
      * The light pools over the finished opaque scene, before smoke and fire are drawn over it.
      *
@@ -201,19 +223,7 @@ final class GpuStarShells implements Disposable {
         if (shown.isEmpty()) {
             return;
         }
-        if (lightShader == null) {
-            lightShader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU flare light",
-                  GpuShaderSource.read("flare-light.vert"), GpuShaderSource.read("flare-light.frag")),
-                  next -> lightShader = next);
-            box = new Mesh(true, 8, 36, VertexAttribute.Position());
-            box.setVertices(new float[] {
-                  -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1,
-                  -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1 });
-            box.setIndices(new short[] {
-                  0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7,
-                  0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5,
-                  2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7 });
-        }
+        prepareLight();
         float gain = MathUtils.lerp(NIGHT_GAIN, DAY_GAIN, MathUtils.clamp(daylight, 0, 1));
         Texture scene = depth.capture();
         scene.bind(0);

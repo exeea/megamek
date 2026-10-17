@@ -207,6 +207,22 @@ class GpuBattleView extends ApplicationAdapter {
     private long centerSequence = -1;
     private boolean entrancePending;
     private boolean entranceStarting;
+    /**
+     * The frames after a loading stage that still draw under it, so that the programs they need link before the board
+     * shows: the board as it will show and, on a board's first load, its Tactical View and a close view of its centre,
+     * whose ground cover and nearest details have programs of their own. Effects that first appear in play link with
+     * the first of them (warmUp).
+     */
+    private enum WarmUp { BOARD, TACTICAL, CLOSE, DONE }
+    private WarmUp warmUp = WarmUp.DONE;
+    /** Whether this board's Tactical View and close view were drawn under a loading stage. */
+    private boolean probed;
+    private int quietFrames, closeFrames;
+    /** The close view's zoom, as the close benchmark view's, and the most frames its detail may take to settle. */
+    private static final float CLOSE_ZOOM = .5f;
+    private static final int CLOSE_FRAMES = 300;
+    /** Without the parallel compiler, links what draws into framebuffer objects where nothing draws (GpuGlsl). */
+    private GpuGlsl.Preparation offscreenLinks;
     private int cameraSelection = -1;
     private boolean cameraFollowingPlayback;
     private int layoutWidth;
@@ -274,6 +290,7 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     private void createLoadingStage() {
+        GpuGlsl.presenting(false);
         if (loadingStage != null) { return; }
         if (theme == null && loadingTheme == null) { loadingTheme = new GpuBoardSkin(); }
         var skin = theme != null ? theme.skin : loadingTheme.skin;
@@ -405,9 +422,14 @@ class GpuBattleView extends ApplicationAdapter {
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
     }
 
-    /** Recreate every board shader owner; lazy effect programs compile again when their effects are drawn. */
+    /** Recreate every board shader owner; their programs link again behind the next loading stage (warmUp). */
     private void createSceneRenderers() {
+        probed = false;
         terrain = new GpuTerrain(unitModels, unitBounds);
+        terrain.setCombatScars(source.isGameplay());
+        terrain.setEditable(source.isEditor());
+        offscreenLinks = new GpuGlsl.Preparation();
+        GpuGlsl.linkOffscreen(offscreenLinks);
         fireControl = new GpuFireControl();
         tactical = new GpuTactical(terrain::tacticalSurface);
         atmosphere = new GpuAtmosphere();
@@ -430,6 +452,8 @@ class GpuBattleView extends ApplicationAdapter {
     /** Render-thread only. Null released owners so a failed shader compile can be retried safely. */
     private void disposeSceneRenderers() {
         if (boardPrint != null) { boardPrint.dispose(); boardPrint = null; }
+        GpuGlsl.linkOffscreen(null);
+        if (offscreenLinks != null) { offscreenLinks.dispose(); offscreenLinks = null; }
         // Join the terrain worker before releasing the model buffers it borrows.
         if (terrain != null) { terrain.dispose(); terrain = null; }
         if (fireControl != null) { fireControl.dispose(); fireControl = null; }
@@ -621,6 +645,7 @@ class GpuBattleView extends ApplicationAdapter {
             hovered = null;
             boardInput.reset();
             fitted = false;
+            probed = false;
             boardCamera.boardChanged();
         }
         tuning.useScenario(frame.scenarioAtmosphere(), scene == null || boardGeneration != frame.boardGeneration()
@@ -687,14 +712,17 @@ class GpuBattleView extends ApplicationAdapter {
                   .collect(Collectors.joining("\n")));
             drawLoadingStage();
             renderStage(null);
+            warmUp = WarmUp.BOARD;
             return;
         }
-        if (loadingStage != null) {
+        boolean hidden = warmUp != WarmUp.DONE;
+        if (!hidden && loadingStage != null) {
             loadingStage.dispose();
             loadingStage = null;
             if (loadingTheme != null) { loadingTheme.dispose(); }
             loadingTheme = null;
         }
+        if (!hidden) { GpuGlsl.presenting(true); }
         if (source.isEditor()) { terrain.previewEditorObjects(scene); }
         if (boardPrint == null) {
             var request = source.takePrintRequest();
@@ -953,6 +981,11 @@ class GpuBattleView extends ApplicationAdapter {
         renderAnnotations();
         renderMarquee();
         renderEntrance();
+        if (hidden) {
+            warmUp(detailChanged);
+            renderStage(null);
+            return;
+        }
         try (TerrainSettings.Scope ignored = TerrainSettings.use(null)) { ui.draw(); }
         renderStage(null);
         if (reloadingAssets) {
@@ -960,6 +993,52 @@ class GpuBattleView extends ApplicationAdapter {
             tuning.assetReloadFinished(true);
         }
         frames++;
+    }
+
+    /** Covers this frame, drawn for its programs alone, with the loading stage and readies the next one (WarmUp). */
+    private void warmUp(boolean detailChanged) {
+        switch (warmUp) {
+            case BOARD -> {
+                // Effects draw into the scene's targets; hex masks and ECM fields over the finished frame.
+                GpuGlsl.offscreen(() -> {
+                    attackEffects.prepare();
+                    designators.prepare();
+                    starShells.prepare();
+                    terrainEffects.prepare();
+                    waterImpacts.prepare();
+                    jumpJets.prepare();
+                    atmosphere.prepare();
+                    terrain.prepareEffects();
+                });
+                tactical.prepare();
+                // Probing moves the camera: not while the board makes its entrance.
+                if (probed || entrancePending || boardCamera.isFraming() || boardCamera.tactical()) {
+                    warmUp = WarmUp.DONE;
+                } else {
+                    setTacticalView(true);
+                    warmUp = WarmUp.TACTICAL;
+                }
+            }
+            case TACTICAL -> {
+                setTacticalView(false);
+                boardCamera.look(BoardGeometry.center(new Coords(scene.width() / 2, scene.height() / 2), 0), CLOSE_ZOOM);
+                quietFrames = closeFrames = 0;
+                warmUp = WarmUp.CLOSE;
+            }
+            case CLOSE -> {
+                quietFrames = terrain.busy() || detailChanged ? 0 : quietFrames + 1;
+                if (quietFrames >= 3 || ++closeFrames >= CLOSE_FRAMES) {
+                    probed = true;
+                    // Back to the pose the probes replaced, drawn once more under the stage.
+                    boardCamera.endLook(scene);
+                    warmUp = WarmUp.BOARD;
+                }
+            }
+            default -> { }
+        }
+        ScreenUtils.clear(.045f, .065f, .075f, 1, true);
+        createLoadingStage();
+        drawLoadingStage();
     }
 
     /**
@@ -3048,6 +3127,7 @@ class GpuBattleView extends ApplicationAdapter {
 
     private void disposeView() {
         disposed = true;
+        GpuGlsl.presenting(false);
         if (loadingStage != null) {
             loadingStage.dispose();
             if (loadingTheme != null) { loadingTheme.dispose(); }

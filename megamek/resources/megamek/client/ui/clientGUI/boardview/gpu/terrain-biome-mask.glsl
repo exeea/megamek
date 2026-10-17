@@ -147,7 +147,12 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
 }
 
 vec4 liquidCoverage(vec3 world, float level) {
+#ifdef biomeMaskFlag
     vec4 cover, fringe, liquids;
     terrainCoverage(world, .01, level, cover, fringe, liquids);
     return liquids;
+#else
+    // Without biomes or a second palette (GpuBiomeSurface) the stencil finds no liquid.
+    return vec4(0.0);
+#endif
 }

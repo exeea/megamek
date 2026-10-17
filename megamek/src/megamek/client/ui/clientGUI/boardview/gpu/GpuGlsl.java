@@ -15,6 +15,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 import com.badlogic.gdx.Gdx;
@@ -89,8 +90,50 @@ final class GpuGlsl {
     private static final ThreadLocal<Preparation> PREPARING = new ThreadLocal<>();
     /** The render thread's program binaries, opened by {@link #detect()}; null caches nothing. Tests replace it. */
     static GpuProgramCache programCache;
+    /** Whether a board view shows its board rather than its loading stage (GpuBattleView). */
+    private static volatile boolean presenting;
+    /** Programs compiled from source that were requested while a board showed: none should be. */
+    private static final AtomicInteger AFTER_LOADING = new AtomicInteger();
+    /** See {@link #linkOffscreen}; render thread only. */
+    private static Preparation offscreenLinks;
+    private static final ThreadLocal<Boolean> OFFSCREEN = ThreadLocal.withInitial(() -> false);
+    private static final IntBuffer FRAMEBUFFER = BufferUtils.newIntBuffer(16);
 
     private GpuGlsl() { }
+
+    /**
+     * A board view shows its board ({@code true}) or its loading stage. A program requested while the board shows and
+     * compiled from source is counted ({@link #compilesAfterLoading()}) and, with {@link #TIMING_PROPERTY}, logged as
+     * "after-loading"; one an offscreen renderer such as the editor's palette samples requests inside
+     * {@link #offscreen} is logged as "after-loading-offscreen" only. One flag serves every view on the render thread.
+     */
+    static void presenting(boolean shown) { presenting = shown; }
+
+    static int compilesAfterLoading() { return AFTER_LOADING.get(); }
+
+    /**
+     * Intel compiles a program again at its first draw to the other kind of framebuffer than its linking context last
+     * drew to, and its binaries keep the first kind. Without the parallel compiler, a program requested outside a
+     * preparation for a framebuffer object (one is bound, or {@link #offscreen} runs) therefore links on this
+     * preparation's worker, which never draws, and the render thread waits; a program for the window links on the
+     * render thread. Null leaves every such link on the render thread, as tests without a board view do.
+     */
+    static void linkOffscreen(Preparation preparation) { offscreenLinks = preparation; }
+
+    /** Runs code that creates programs drawing into framebuffer objects only, such as effects warmed up in advance. */
+    static void offscreen(Runnable creation) {
+        boolean previous = OFFSCREEN.get();
+        OFFSCREEN.set(true);
+        try { creation.run(); }
+        finally { OFFSCREEN.set(previous); }
+    }
+
+    private static boolean offscreen() {
+        if (OFFSCREEN.get()) { return true; }
+        FRAMEBUFFER.clear();
+        Gdx.gl.glGetIntegerv(GL30.GL_DRAW_FRAMEBUFFER_BINDING, FRAMEBUFFER);
+        return FRAMEBUFFER.get(0) != 0;
+    }
 
     static ShaderProgram compile(String name, String prefix, String vertex, String fragment) {
         return compilePrepared(name, source(prefix, vertex, version), source(prefix, fragment, version));
@@ -115,12 +158,45 @@ final class GpuGlsl {
         return compile(name, "", vertex, fragment);
     }
 
+    /**
+     * The source without its comments, as the GLSL preprocessor removes them, keeping every line break so that compiler
+     * messages keep their line numbers. A block comment within a line becomes a space.
+     */
+    static String withoutComments(String source) {
+        StringBuilder result = new StringBuilder(source.length());
+        int length = source.length();
+        for (int i = 0; i < length; i++) {
+            char c = source.charAt(i);
+            if (c == '/' && i + 1 < length && source.charAt(i + 1) == '/') {
+                while (i + 1 < length && source.charAt(i + 1) != '\n' && source.charAt(i + 1) != '\r') { i++; }
+            } else if (c == '/' && i + 1 < length && source.charAt(i + 1) == '*') {
+                int end = source.indexOf("*/", i + 2);
+                if (end < 0) { end = length - 2; }
+                int lines = result.length();
+                for (int j = i + 2; j < end; j++) {
+                    char inside = source.charAt(j);
+                    if (inside == '\n' || inside == '\r') { result.append(inside); }
+                }
+                if (result.length() == lines) { result.append(' '); }
+                i = end + 1;
+            } else {
+                result.append(c);
+            }
+        }
+        return result.toString();
+    }
+
     /** Own every handle through failure, then transfer the successful link to libGDX without recompiling it. */
     private static ShaderProgram compilePrepared(String name, String vertex, String fragment) {
+        // A comment-only edit of a shared file then changes neither the cache key nor the program.
+        vertex = withoutComments(vertex);
+        fragment = withoutComments(fragment);
         GpuShaderManager.compiling(name, vertex, fragment);
         var source = new GpuShaderManager.Sources(name, vertex, fragment);
         Preparation preparation = PREPARING.get();
-        Linked linked = preparation == null ? new Linked(source) : preparation.take(source);
+        Linked linked = preparation != null ? preparation.take(source)
+              : offscreenLinks != null && offscreenLinks.worker != null && offscreen()
+                    ? offscreenLinks.submit(source).await(source) : new Linked(source);
         try { return linked.adopt(source); }
         finally { linked.dispose(); }
     }
@@ -137,7 +213,21 @@ final class GpuGlsl {
      */
     static final class Preparation implements Disposable {
         private final Map<GpuShaderManager.Sources, Linked> pending = new HashMap<>();
-        private record Job(Linked linked, CompletableFuture<Void> done) { }
+        private record Job(Linked linked, CompletableFuture<Void> done) {
+            /** The finished link; a failed one is released and rethrown under the program's name. */
+            Linked await(GpuShaderManager.Sources source) {
+                try {
+                    done.join();
+                    return linked;
+                } catch (RuntimeException failure) {
+                    linked.dispose();
+                    if (failure instanceof CompletionException) {
+                        throw new GdxRuntimeException(source.name(), failure.getCause());
+                    }
+                    throw failure;
+                }
+            }
+        }
         private final Map<GpuShaderManager.Sources, Job> working = new HashMap<>();
         private final SharedCompiler worker;
         /**
@@ -171,6 +261,16 @@ final class GpuGlsl {
             }
         }
 
+        /** Whether the driver links in parallel off this thread; else one shared-context worker links one at a time. */
+        boolean parallel() { return worker == null; }
+
+        private Job submit(GpuShaderManager.Sources source) {
+            Linked linked = new Linked(source, true);
+            Gdx.gl20.glFlush(); // Publish the newly allocated shared objects before the worker uses them.
+            linked.timing("queued-shared");
+            return new Job(linked, worker.compile(linked, source));
+        }
+
         /** Whether a link it started is still running: running its action again would only find it unfinished. */
         boolean linking() {
             for (Job job : working.values()) { if (!job.done().isDone()) { return true; } }
@@ -180,25 +280,10 @@ final class GpuGlsl {
 
         private Linked take(GpuShaderManager.Sources source) {
             if (worker != null) {
-                Job job = working.computeIfAbsent(source, key -> {
-                    Linked linked = new Linked(key, true);
-                    Gdx.gl20.glFlush(); // Publish the newly allocated shared objects before the worker uses them.
-                    linked.timing("queued-shared");
-                    return new Job(linked, worker.compile(linked, key));
-                });
+                Job job = working.computeIfAbsent(source, this::submit);
                 if (!job.done().isDone()) { throw new Pending(); }
                 working.remove(source);
-                try {
-                    job.done().join();
-                    return job.linked();
-                }
-                catch (RuntimeException failure) {
-                    job.linked().dispose();
-                    if (failure instanceof CompletionException) {
-                        throw new GdxRuntimeException(source.name(), failure.getCause());
-                    }
-                    throw failure;
-                }
+                return job.await(source);
             }
             Linked linked = pending.computeIfAbsent(source, Linked::new);
             if (!linked.complete()) { throw new Pending(); }
@@ -322,6 +407,8 @@ final class GpuGlsl {
         private final String cacheKey;
         /** Loaded from the cache: its stages were never compiled. Cached: loaded or stored, nothing left to keep. */
         private boolean binary, cached;
+        /** Requested while a board showed (presenting): by the board's own frames, or by an offscreen renderer. */
+        private final boolean afterLoading = presenting, offscreenRequest = OFFSCREEN.get();
 
         Linked(GpuShaderManager.Sources source) { this(source, false); }
 
@@ -354,6 +441,12 @@ final class GpuGlsl {
                 binary = cached = true;
                 timing("binary-loaded");
                 return;
+            }
+            if (afterLoading && offscreenRequest) {
+                timing("after-loading-offscreen");
+            } else if (afterLoading) {
+                AFTER_LOADING.incrementAndGet();
+                timing("after-loading");
             }
             timing("source-upload-start");
             gl.glShaderSource(vertex, source.vertex());
@@ -573,7 +666,8 @@ final class GpuGlsl {
         LOGGER.info("3D board: {} on {}, shaders compiled as GLSL {}", GL11.glGetString(GL11.GL_VERSION), renderer,
               chosen);
         // Machine-specific state belongs with MegaMek's other written settings.
-        programCache = GpuProgramCache.open(new File(Configuration.configDir(), "gpu-program-cache").toPath());
+        programCache = GpuProgramCache.open(
+              GpuProgramCache.directory(new File(Configuration.configDir(), "gpu-program-cache").toPath()));
     }
 
     /** The GLSL version for an OpenGL context version: the same version, capped, never below {@link #MINIMUM}. */

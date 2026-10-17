@@ -214,6 +214,11 @@ final class GpuFlareCanopies implements Disposable {
         return TRIANGLES_PER_CANOPY;
     }
 
+    /** Links its program now (GpuBattleView's warm-up), not at the first flare in play. */
+    void prepare() {
+        if (vertices == null) { create(); }
+    }
+
     private void create() {
         // The missile shader draws coloured triangles as they come, which is all a canopy needs.
         shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU flare canopy",

@@ -143,6 +143,22 @@ final class GpuExplosionEffects implements Disposable {
         count++;
     }
 
+    /** Links its program now (GpuBattleView's warm-up), not at the first blast in play. */
+    void prepare() {
+        if (shader != null) { return; }
+        shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU explosion",
+              GpuShaderSource.read("explosion.vert"), GpuEffectBatch.fragment("explosion.frag")), next -> shader = next);
+        // The same unit cube bounds every analytic volume. Allocate/upload once, then move it with uniforms.
+        proxy = new Mesh(true, 8, 36, VertexAttribute.Position());
+        proxy.setVertices(new float[] {
+              -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1,
+              -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1 });
+        proxy.setIndices(new short[] {
+              0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7,
+              0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5,
+              2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7 });
+    }
+
     void render(Camera camera) {
         ownDepth.begin();
         render(camera, ownDepth);
@@ -150,19 +166,7 @@ final class GpuExplosionEffects implements Disposable {
 
     void render(Camera camera, GpuEffectDepth snapshot) {
         if (count == 0) { return; }
-        if (shader == null) {
-            shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU explosion",
-                  GpuShaderSource.read("explosion.vert"), GpuEffectBatch.fragment("explosion.frag")), next -> shader = next);
-            // The same unit cube bounds every analytic volume. Allocate/upload once, then move it with uniforms.
-            proxy = new Mesh(true, 8, 36, VertexAttribute.Position());
-            proxy.setVertices(new float[] {
-                  -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1,
-                  -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1 });
-            proxy.setIndices(new short[] {
-                  0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7,
-                  0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5,
-                  2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7 });
-        }
+        prepare();
         Texture depth = snapshot.capture();
         depth.bind(0);
         for (int i = 0; i < count; i++) { volumes[i].depth = volumes[i].center.dot(camera.direction); }

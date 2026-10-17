@@ -372,6 +372,12 @@ final class GpuMissileEffects implements Disposable {
         offset = 0;
     }
 
+    /** Links its programs now (GpuBattleView's warm-up), not at the first launch in play. */
+    void prepare() {
+        exhaust.prepare();
+        if (mesh == null) { create(); }
+    }
+
     private void create() {
         body = template(MISSILE_MODEL);
         if (body.length == 0) { throw new IllegalArgumentException("Empty missile body"); }

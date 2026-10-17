@@ -418,11 +418,15 @@ void main() {
                   emission, roughness, volcanic, materialCoverage);
         }
 #endif
+        // biomeMaskFlag: the board has biomes or liquids of two palettes (GpuBiomeSurface); without them this stage
+        // finds no cover and leaves everything as it is.
+#ifdef biomeMaskFlag
         if (ground || cliff || bedrock) {
             biomeSurface(world, face, shore, above, cliff || bedrock ? v_diffuseUV.x : 0.0,
                   cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x, materialHeight, sand,
                   albedo, normal, cavity, roughness, grass, bounce, biomePool, biomeDamp);
         }
+#endif
         if (ground && grass > 0.0 && !shore && u_wind.z > 0.0) {
             // Gusts roll across a meadow: the grass leans with them and catches the light differently.
             vec2 gust = length(u_wind.xy) > .01 ? normalize(u_wind.xy) : vec2(1.0, 0.0);

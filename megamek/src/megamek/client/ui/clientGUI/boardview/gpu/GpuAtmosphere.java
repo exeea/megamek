@@ -1008,6 +1008,12 @@ final class GpuAtmosphere implements Disposable {
         if (heatGlow != null) { heatGlow.disposeBuffers(); }
     }
 
+    /** Links the weather and heat programs now (GpuBattleView's warm-up), not at the first rain or lava shown. */
+    void prepare() {
+        if (particles == null) { particles = new GpuWeatherParticles(); }
+        if (heatGlow == null) { heatGlow = new GpuHeatGlow(quad); }
+    }
+
     @Override
     public void dispose() {
         resetContrast();

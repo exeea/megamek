@@ -6,6 +6,9 @@ import java.util.List;
 
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g3d.Attribute;
+import com.badlogic.gdx.graphics.g3d.Environment;
+import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.board.Coords;
 
@@ -20,6 +23,23 @@ final class GpuBiomeSurface implements Disposable {
      * a position the noise moves up to 3 m along each axis. The margin covers float rounding at quarter edges.
      */
     private static final float COVER_REACH = 14, LIQUID_REACH = 5, LIQUID_WANDER = 3, MARGIN = .05f;
+    /**
+     * In a terrain's environment while its sculpted ground compiles the biome stage (biomeMaskFlag): the board is
+     * {@link #active}, or the editor changes it. Without biomes the stage changes nothing. It is part of the
+     * environment's mask, so a board without biomes never shares their programs, and a change is a lighting change
+     * behind the loading stage.
+     */
+    static final class Present extends Attribute {
+        static final long TYPE = register("boardBiomes");
+        private static final Present INSTANCE = new Present();
+
+        private Present() { super(TYPE); }
+
+        @Override public Attribute copy() { return this; }
+
+        @Override public int compareTo(Attribute other) { return Long.compare(type, other.type); }
+    }
+
     private List<BoardScene.Tile> previous;
     private int[] pixels;
     private Texture texture;
@@ -33,12 +53,34 @@ final class GpuBiomeSurface implements Disposable {
     int iceWidth() { return iced ? width : 0; }
     int iceHeight() { return iced ? height : 0; }
 
+    /** Whether a biome hex or liquids of two palettes are on the board: only then can the stencil change a fragment. */
+    static boolean active(BoardScene scene) {
+        int palettes = 0;
+        for (var tile : scene.tiles()) {
+            if (BoardBiome.kind(tile) != BoardScene.Biome.NONE) { return true; }
+            if (tile.liquid().present() && !tile.liquid().molten() && !tile.frozen()) {
+                palettes |= 1 << GpuWaterShader.palette(tile.liquid());
+            }
+        }
+        return Integer.bitCount(palettes) > 1;
+    }
+
+    /** Marks {@code environment} for programs with the biome stage, or without it (Present). */
+    static void mark(Environment environment, boolean present) {
+        if (present) { environment.set(Present.INSTANCE); }
+        else { environment.remove(Present.TYPE); }
+    }
+
+    static String prefix(Renderable renderable) {
+        boolean present = renderable.environment != null && renderable.environment.has(Present.TYPE);
+        return present ? "#define biomeMaskFlag\n" : "";
+    }
+
     void update(BoardScene scene) {
         if (texture != null && (scene == null || previous == scene.tiles())) { return; }
         int w = scene == null ? 1 : scene.width(), h = scene == null ? 1 : scene.height();
         int[] next = new int[w * h];
-        boolean any = false, anyIce = false;
-        int palettes = 0;
+        boolean anyIce = false;
         if (scene != null) {
             for (var tile : scene.tiles()) {
                 var kind = BoardBiome.kind(tile);
@@ -47,13 +89,10 @@ final class GpuBiomeSurface implements Disposable {
                 // A is elevation + 64.
                 int color = kind.ordinal() << 24;
                 if (tile.liquid().present() && !tile.liquid().molten() && !tile.frozen()) {
-                    int palette = GpuWaterShader.palette(tile.liquid());
-                    color |= (palette + 1) << 16;
-                    palettes |= 1 << palette;
+                    color |= (GpuWaterShader.palette(tile.liquid()) + 1) << 16;
                 }
                 boolean ice = tile.frozen() || tile.blackIce();
                 color |= (!tile.frozen() ? tile.blackIce() ? 3 : 0 : tile.liquid().present() ? 2 : 1) << 8;
-                any |= kind != BoardScene.Biome.NONE;
                 anyIce |= ice;
                 next[tile.coords().getY() * w + tile.coords().getX()] = color | Math.clamp(tile.elevation() + 64, 0, 255);
             }
@@ -89,7 +128,7 @@ final class GpuBiomeSurface implements Disposable {
             }
         }
         previous = scene == null ? null : scene.tiles();
-        active = any || Integer.bitCount(palettes) > 1;
+        active = scene != null && active(scene);
         iced = anyIce;
         if (texture != null && w == width && h == height && Arrays.equals(next, pixels)) { return; }
         var map = new Pixmap(w, h, Pixmap.Format.RGBA8888);

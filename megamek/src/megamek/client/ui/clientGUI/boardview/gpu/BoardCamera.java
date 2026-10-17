@@ -94,6 +94,9 @@ final class BoardCamera {
     /** The 3D pose the Tactical View replaced; null while the 3D view is active. Render-thread state, never saved. */
     private Pose tacticalReturn;
     private boolean tacticalReturnFit;
+    /** The pose a look ({@link #look}) replaced; null otherwise. */
+    private Pose lookReturn;
+    private boolean lookReturnFit;
     private Pose framingStart;
     private Pose framingTarget;
     private float framingElapsed;
@@ -387,11 +390,7 @@ final class BoardCamera {
             azimuth = 0;
             tilt = 0;
         } else {
-            focus.set(tacticalReturn.focus());
-            camera.zoom = tacticalReturn.zoom();
-            azimuth = tacticalReturn.azimuth();
-            tilt = tacticalReturn.tilt();
-            fitToWindow = tacticalReturnFit;
+            restore(tacticalReturn, tacticalReturnFit);
             tacticalReturn = null;
         }
         stopFraming();
@@ -402,6 +401,33 @@ final class BoardCamera {
         } else {
             update();
         }
+    }
+
+    /** A look at {@code position} at {@code zoom}, which {@link #endLook} undoes exactly (GpuBattleView's warm-up). */
+    void look(Vector3 position, float zoom) {
+        lookReturn = new Pose(focus.cpy(), camera.zoom, azimuth, tilt);
+        lookReturnFit = fitToWindow;
+        center(position);
+        camera.zoom = zoom;
+        update();
+    }
+
+    void endLook(BoardScene scene) {
+        restore(lookReturn, lookReturnFit);
+        lookReturn = null;
+        if (fitToWindow && scene != null) {
+            fit(scene);
+        } else {
+            update();
+        }
+    }
+
+    private void restore(Pose pose, boolean fit) {
+        focus.set(pose.focus());
+        camera.zoom = pose.zoom();
+        azimuth = pose.azimuth();
+        tilt = pose.tilt();
+        fitToWindow = fit;
     }
 
     /** A new board makes the saved 3D position meaningless: leaving the Tactical View then fits the new board. */

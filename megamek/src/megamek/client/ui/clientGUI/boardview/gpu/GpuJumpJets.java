@@ -253,6 +253,9 @@ final class GpuJumpJets implements Disposable {
         return (value & 0xFFFFFF) / 16777216f;
     }
 
+    /** Links its program now (GpuBattleView's warm-up), not at the first jump in play. */
+    void prepare() { batch.prepare(); }
+
     @Override
     public void dispose() {
         clear();

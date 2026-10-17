@@ -40,14 +40,23 @@ import org.lwjgl.system.MemoryUtil;
  * SHA-256 of the driver (vendor, renderer and version string, which carries the build) and both complete stages, and
  * holds the driver's binary format, a CRC-32C and the binary. A damaged entry, or one the driver rejects, is deleted
  * and the program compiles from source. A driver without binary formats (macOS may report none) caches nothing.
- * Opening the cache, and every 64 MB it writes, deletes entries unused for 30 days, then the least recently used
- * beyond 256 MB.
+ * Opening the cache, and every 256 MB it writes, deletes entries unused for 30 days, then the least recently used
+ * beyond 1 GB, the size of NVIDIA's and Mesa's own caches: one board takes about 55 MB per lighting configuration on
+ * NVIDIA.
  */
 final class GpuProgramCache {
     private static final MMLogger LOGGER = MMLogger.create(GpuProgramCache.class);
     /** {@code -Dmegamek.gpu.programCache=false} compiles every program from source, for timing the compiler. */
     static final String PROPERTY = "megamek.gpu.programCache";
-    static final long CAPACITY = 256L << 20;
+    /** {@code -Dmegamek.gpu.programCacheDir=...} keeps the entries elsewhere, so test runs never evict the player's. */
+    static final String DIRECTORY_PROPERTY = "megamek.gpu.programCacheDir";
+    static final long CAPACITY = 1L << 30;
+    /**
+     * Part of every key. Without the parallel compiler, programs used to link on the render thread after it drew to the
+     * window, and Intel's binaries keep that variant, which compiles again at its first scene draw. Programs now link
+     * on a context that never draws (GpuGlsl), so those entries miss once.
+     */
+    private static final String KEY_SALT = "linked where nothing draws";
     static final Duration UNUSED = Duration.ofDays(30);
     /** A partial write this old belongs to no running MegaMek. */
     private static final Duration ABANDONED = Duration.ofDays(1);
@@ -88,9 +97,15 @@ final class GpuProgramCache {
             return null;
         }
         var cache = new GpuProgramCache(directory, GL11.glGetString(GL11.GL_VENDOR) + '\n'
-              + GL11.glGetString(GL11.GL_RENDERER) + '\n' + GL11.glGetString(GL11.GL_VERSION), formats);
+              + GL11.glGetString(GL11.GL_RENDERER) + '\n' + GL11.glGetString(GL11.GL_VERSION) + '\n' + KEY_SALT, formats);
         cache.prune();
         return cache;
+    }
+
+    /** The directory the property names, else {@code standard}. */
+    static Path directory(Path standard) {
+        String directory = System.getProperty(DIRECTORY_PROPERTY, "");
+        return directory.isBlank() ? standard : Path.of(directory);
     }
 
     private void prune() {

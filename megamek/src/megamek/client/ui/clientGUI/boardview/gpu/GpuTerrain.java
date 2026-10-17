@@ -215,10 +215,9 @@ final class GpuTerrain implements Disposable {
         protected Shader createShader(Renderable renderable) {
             boolean linearTexture = linearDiffuse(renderable.material);
             int ordinaryFamily = GpuSurfaceBlend.ordinaryFamily(renderable.material);
-            var water = renderable.material.get(GpuWaterShader.class, GpuWaterShader.TYPE);
-            var waterMode = water == null ? null : water.mode;
+            var waterMode = waterMode(renderable.material);
             var magma = renderable.material.get(GpuMagmaShader.class, GpuMagmaShader.TYPE);
-            boolean flowingMagma = magma != null && magma.flowing();
+            boolean flowingMagma = flowingMagma(renderable.material);
             boolean animated = renderable.material.has(GpuLiquidShader.Frame.TYPE);
             // The plain and foliage shaders, the only ones with instanced variants, first: instancedShader decides them.
             DefaultShader.Config chosen = instancedShader(renderable.material)
@@ -278,7 +277,10 @@ final class GpuTerrain implements Disposable {
                   + (renderable.material.has(BridgeDeck.TYPE) ? "#define bridgeDeckFlag\n" : "")
                   + (renderable.material.has(GpuRoads.Maps.TYPE) ? "#define roadMapsFlag\n" : "")
                   + (renderable.material.has(Impostor.TYPE) && GpuTreeInstances.instanced(renderable)
-                        ? "#define impostorFlag\n" : "");
+                        ? "#define impostorFlag\n" : "")
+                  // Only sculpted ground has the biome stage; the marker still keeps the environments' programs apart.
+                  + (!renderable.material.has(Sculpt.TYPE) ? "" : pruning ? GpuBiomeSurface.prefix(renderable)
+                        : "#define biomeMaskFlag\n");
             String fragment = renderable.material.has(GpuBuildingCutaway.TYPE)
                   ? GpuBuildingCutaway.fragment(chosen.fragmentShader, "v_cloudPosition.z") : chosen.fragmentShader;
             if (renderable.material.has(GpuTilesetTerrain.Grading.TYPE)) {
@@ -394,16 +396,12 @@ final class GpuTerrain implements Disposable {
 
                 @Override
                 public boolean canRender(Renderable other) {
-                    var otherWater = other.material.get(GpuWaterShader.class, GpuWaterShader.TYPE);
-                    var otherMagma = other.material.get(GpuMagmaShader.class, GpuMagmaShader.TYPE);
-                    // The modes share an attribute mask but use different programs, including on shader reload.
                     // libGDX binds only the instance attributes of the renderable a shader was created for: crop rows
                     // must not reuse a reed shader, which never binds a_coverRow and would draw rows as clumps.
                     // Family programs (GpuFamilyPrograms) first: the provider's scan rejects them cheaply.
                     return GpuFamilyPrograms.draws(families, baseAliases, other.material, Sculpt.TYPE)
-                          && waterMode == (otherWater == null ? null : otherWater.mode)
-                          && sameMaterialVariant(other.material, iceMode, linearTexture, ordinaryFamily)
-                          && flowingMagma == (otherMagma != null && otherMagma.flowing())
+                          && sameMaterialVariant(other.material, iceMode, linearTexture, ordinaryFamily, waterMode,
+                                flowingMagma)
                           // A shadow map changes the compiled samplers without changing the environment's mask.
                           && shadowMap == (other.environment != null && other.environment.shadowMap != null)
                           && instances == instanceMask(other) && super.canRender(other);
@@ -954,6 +952,8 @@ final class GpuTerrain implements Disposable {
     private float terrainWear = DEFAULT_TERRAIN_WEAR;
     private boolean elevationGrading = DEFAULT_ELEVATION_GRADING;
     private boolean combatScars = GpuGroundDamage.COMBAT_SCARS;
+    /** A board the editor changes, and its samples: any surface may appear, so programs keep the biome stage. */
+    private boolean editable;
     private final GpuPropBatch propBatch = new GpuPropBatch();
     private final GpuFungus fungus = new GpuFungus();
     private final GpuGeysers geysers = new GpuGeysers();
@@ -1049,6 +1049,11 @@ final class GpuTerrain implements Disposable {
     /** The colour pass's depth test for a draw the pre-pass drew; native measurements compare GL_LEQUAL. */
     static int prepassDepthFunction = GL20.GL_EQUAL;
     /**
+     * Sculpted ground leaves out the biome stage on a board without biomes that the editor does not change
+     * (GpuBiomeSurface.Present). Native checks turn it off to compare frames of the complete programs.
+     */
+    static boolean pruning = true;
+    /**
      * Each generic colour program's depth twin (both libGDX shaders, never shader-manager handles), paired with its warm-up
      * sample behind the loading stage (prepareTerrainMaterials); its family programs use it (shaderGroup). A pair lives
      * until its program or its twin is disposed, as a shader edit replaces them; the warm-up then pairs the replacements.
@@ -1111,11 +1116,25 @@ final class GpuTerrain implements Disposable {
         return diffuse != null && GpuColorTexture.isColor(diffuse.textureDescription.texture);
     }
 
-    /** Non-mask distinctions shared by live shaders and their sculpt/scar warmup samples. */
+    /**
+     * Non-mask distinctions shared by live shaders and their warm-up samples. Water modes and magma flow share an
+     * attribute mask but use different programs, including on shader reload.
+     */
     private static boolean sameMaterialVariant(Material material, int iceMode, boolean linearTexture,
-          int ordinaryFamily) {
+          int ordinaryFamily, GpuWaterShader.Mode waterMode, boolean flowingMagma) {
         return GpuIceShader.mode(material) == iceMode && linearDiffuse(material) == linearTexture
-              && GpuSurfaceBlend.ordinaryFamily(material) == ordinaryFamily;
+              && GpuSurfaceBlend.ordinaryFamily(material) == ordinaryFamily && waterMode(material) == waterMode
+              && flowingMagma(material) == flowingMagma;
+    }
+
+    private static GpuWaterShader.Mode waterMode(Material material) {
+        var water = material.get(GpuWaterShader.class, GpuWaterShader.TYPE);
+        return water == null ? null : water.mode;
+    }
+
+    private static boolean flowingMagma(Material material) {
+        var magma = material.get(GpuMagmaShader.class, GpuMagmaShader.TYPE);
+        return magma != null && magma.flowing();
     }
 
     /** The per-instance attribute layout, which DefaultShader.canRender does not compare; 0 when not instanced. */
@@ -1155,6 +1174,9 @@ final class GpuTerrain implements Disposable {
      */
     GpuTerrain(GpuTerrain lender) {
         this(null, null, GpuLiquidShader.USE_SHADER_ANIMATION, GpuWaterShader.USE_PROCEDURAL_WATER, lender.assets);
+        // Samples and prints take no combat; an editor's samples show any surface.
+        combatScars = false;
+        editable = lender.editable;
     }
 
     private GpuTerrain(GpuUnitModels unitModels, UnitBounds.Frame frameBounds, boolean liquidShaderAnimation, boolean proceduralWater) {
@@ -2041,6 +2063,8 @@ final class GpuTerrain implements Disposable {
             if (target == null || !sameBoard(target, scene) || !sameSettings(targetSettings, settings)
                   || targetColumns != columns) { startFamilySession(); }
             requested = new Request(meshGeneration, scene, settings, columns);
+            // Before anything prepares for it: whether its programs compile the biome stage.
+            GpuBiomeSurface.mark(environment, editable || GpuBiomeSurface.active(scene));
             retiredChunks.addAll(detailCache.values());
             detailCache.clear();
         } else if (requested == null) {
@@ -2054,6 +2078,7 @@ final class GpuTerrain implements Disposable {
                 }
                 tiles = scene.tiles();
                 coverScene = scene;
+                GpuBiomeSurface.mark(environment, editable || GpuBiomeSurface.active(scene));
                 installedSettings = settings;
                 if (!Objects.equals(light, scene.light())) { updateLight(scene.light()); }
             }
@@ -2185,7 +2210,14 @@ final class GpuTerrain implements Disposable {
 
     void setElevationGrading(boolean enabled) { elevationGrading = enabled; }
 
+    /**
+     * Whether combat scars show. Off before the board builds (the editor, previews), it also prepares no scar programs:
+     * where combat cannot happen they are never drawn.
+     */
     void setCombatScars(boolean scars) { combatScars = scars; }
+
+    /** Before the board builds: whether the editor changes it (editable). */
+    void setEditable(boolean editing) { editable = editing; }
 
     private static boolean sameBoard(BoardScene a, BoardScene b) {
         return a.boardId() == b.boardId() && a.width() == b.width() && a.height() == b.height();
@@ -2972,17 +3004,18 @@ final class GpuTerrain implements Disposable {
         });
     }
 
-    /** Retain one layout per sculpt or ice variant discovered in actual chunk materials. */
+    /** Retain one layout per program variant discovered in actual chunk materials. */
     private void prepareTerrainMaterial(Material material, VertexAttributes attributes) {
         // Terrain scar receivers are sculpted; transparent ice and plain ground do not acquire scar variants.
-        if (GpuGroundDamage.COMBAT_SCARS && material.has(Sculpt.TYPE)
+        if (combatScars && material.has(Sculpt.TYPE)
               && !material.has(GpuSurfaceScars.Marking.TYPE)) {
             prepareTerrainMaterial(GpuSurfaceScars.material(material), GpuSurfaceScars.attributes(attributes));
         }
         for (Renderable sample : terrainMaterialSamples) {
             if (sample.material.getMask() == material.getMask()
                   && sameMaterialVariant(material, GpuIceShader.mode(sample.material), linearDiffuse(sample.material),
-                        GpuSurfaceBlend.ordinaryFamily(sample.material))
+                        GpuSurfaceBlend.ordinaryFamily(sample.material), waterMode(sample.material),
+                        flowingMagma(sample.material))
                   && sample.meshPart.mesh.getVertexAttributes().equals(attributes)) { return; }
         }
         Renderable sample = new Renderable();
@@ -4331,9 +4364,12 @@ final class GpuTerrain implements Disposable {
             chunk.terrainRenderables = GpuTerrainDepth.snapshot(chunk.opaque);
             chunk.scatterRenderables = GpuTerrainDepth.snapshot(chunk.scatter);
             chunk.waterRenderables = GpuTerrainDepth.snapshot(chunk.water);
+            // Ground, water and magma draw these materials as they are: their programs link behind the loading stage too,
+            // so the first water or lava an edit paints never compiles on a frame of the board.
             for (Array<Renderable> layer : List.of(chunk.terrainRenderables, chunk.scatterRenderables, chunk.waterRenderables)) {
                 for (Renderable part : layer) {
-                    if (part.material.has(Sculpt.TYPE) || part.material.has(GpuIceShader.TYPE)) {
+                    if (part.material.has(Sculpt.TYPE) || part.material.has(GpuIceShader.TYPE) || part.material.has(Ground.TYPE)
+                          || part.material.has(GpuWaterShader.TYPE) || part.material.has(GpuMagmaShader.TYPE)) {
                         prepareTerrainMaterial(part.material, part.meshPart.mesh.getVertexAttributes());
                     }
                 }
@@ -4401,7 +4437,7 @@ final class GpuTerrain implements Disposable {
             }
             chunk.cacheProps();
             // Combat scars mark the 3D relief and what stands on it; the Classic columns show none.
-            if (GpuGroundDamage.COMBAT_SCARS && !chunk.columns) {
+            if (combatScars && !chunk.columns) {
                 for (var layer : List.of(chunk.sharedProps, chunk.propRenderables, chunk.decorationRenderables)) {
                     for (Renderable part : layer) {
                         if (instancedShader(part.material) && scarReceiver(part)) {
@@ -7285,6 +7321,12 @@ final class GpuTerrain implements Disposable {
             if (Math.abs(point.x) > 1 || Math.abs(point.y) > 1 || Math.abs(point.z) > 1.00001f) { return false; }
         }
         return true;
+    }
+
+    /** Links the spore and geyser programs now (GpuBattleView's warm-up), not when the first comes into view. */
+    void prepareEffects() {
+        fungus.prepare();
+        geysers.prepare();
     }
 
     @Override

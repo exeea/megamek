@@ -1,0 +1,40 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.badlogic.gdx.graphics.g3d.Environment;
+import com.badlogic.gdx.graphics.g3d.Renderable;
+import org.junit.jupiter.api.Test;
+
+/**
+ * A board without biomes compiles its terrain programs without the biome stage; a board with them keeps it. The
+ * presence is part of the terrain environment's mask, which DefaultShader.canRender and the family programs'
+ * lighting configuration compare, so the two boards never share a program.
+ */
+class GpuTerrainProgramKeyTest {
+    @Test
+    void boardsWithAndWithoutBiomesNeverShareAProgram() {
+        var dry = BoardSurfaceBlendTest.scene(coords -> BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.DIRT, 0, 0, 0));
+        var marsh = BoardSurfaceBlendTest.scene(coords -> coords.getX() < 4
+              ? BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.DIRT, 0, 0, 0)
+              : BoardBiomeTest.tile(coords, BoardScene.Biome.MARSH, 0));
+        assertFalse(GpuBiomeSurface.active(dry));
+        assertTrue(GpuBiomeSurface.active(marsh));
+
+        var environment = new Environment();
+        var sample = new Renderable();
+        sample.environment = environment;
+        GpuBiomeSurface.mark(environment, GpuBiomeSurface.active(dry));
+        long dryMask = environment.getMask();
+        assertEquals("", GpuBiomeSurface.prefix(sample), "The dry board's programs leave the biome stage out");
+        GpuBiomeSurface.mark(environment, GpuBiomeSurface.active(marsh));
+        assertNotEquals(dryMask, environment.getMask(), "so the marsh board's programs never draw it");
+        assertEquals("#define biomeMaskFlag\n", GpuBiomeSurface.prefix(sample));
+        GpuBiomeSurface.mark(environment, GpuBiomeSurface.active(dry));
+        assertEquals(dryMask, environment.getMask(), "A board that loses its biomes returns to the dry programs");
+    }
+}

@@ -143,4 +143,7 @@ final class GpuWaterImpacts implements Disposable {
 
     @Override
     public void dispose() { clear(); spray.dispose(); }
+
+    /** Links its program now (GpuBattleView's warm-up), not at the first splash in play. */
+    void prepare() { spray.prepare(); }
 }

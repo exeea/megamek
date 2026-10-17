@@ -27,8 +27,9 @@ import megamek.logging.MMLogger;
  * Terrain programs with a draw's surface families as compile-time constants (SCULPT_FAMILY and COVER_FAMILIES in
  * terrain-sculpt.frag), so the compiler keeps only those families' paths. The generic program of the same flags reads
  * the same values from uniforms and draws the same pixels; it stays every draw's fallback. Family programs build only
- * while the terrain loads, behind the loading stage and after the generic programs: the most-drawn variants, one at a
- * time on the terrain compiler queue (GpuTerrain decides when). When one is ready, every live material of its variant
+ * while the terrain loads, behind the loading stage and after the generic programs: the most-drawn variants, several
+ * at once with the driver's parallel compiler, else one at a time (GpuTerrain decides when). When one is ready, every
+ * live material of its variant
  * gains the {@link Constants} marker, and the shader provider, through the shader manager's handles, resolves those
  * draws to it; a chunk installed later is marked as it is installed. Variants that appear after the load keep the
  * generic program until the next load. A terrain builds at most {@link #CAPACITY} family programs for each lighting
@@ -46,6 +47,8 @@ final class GpuFamilyPrograms {
      * a third configuration draws with the generic programs, as before family programs.
      */
     static final int CAPACITY = 32;
+    /** Links in flight with the driver's parallel compiler: NVIDIA's runs six at once (4.4 times one at a time). */
+    static final int IN_FLIGHT = 6;
     /** The capacity in force; native checks lower it to reach it on a small board. */
     static int capacity = CAPACITY;
 
@@ -129,7 +132,8 @@ final class GpuFamilyPrograms {
     private final Map<Key, Variant> variants = new LinkedHashMap<>();
     /** Every program built, by variant and lighting configuration: what the provider holds. */
     private final Set<List<Object>> built = new HashSet<>();
-    private Variant compiling;
+    /** Variants whose links run, oldest first. */
+    private final List<Variant> compiling = new ArrayList<>();
     /** A request or a reset since the last search for the next program. */
     private boolean waiting;
     private long environmentMask = -1;
@@ -184,20 +188,40 @@ final class GpuFamilyPrograms {
     }
 
     /**
-     * One step while the terrain loads and no link is running: adopts the finished program, or starts the most-drawn
-     * variant without one. Returns whether any material changed program.
+     * One step while the terrain loads: adopts a finished program, and starts the most-drawn variants without one.
+     * The shared-context compiler links one program at a time and, on Intel, holds the render thread meanwhile, so it
+     * starts one only while no link runs; the driver's parallel compiler keeps {@link #IN_FLIGHT} running. Returns
+     * whether any material changed program.
      */
     boolean prepare(GpuGlsl.Preparation preparation, ShaderProvider provider, Environment environment) {
-        if (!enabled || preparation == null || preparation.linking()) { return false; }
-        if (compiling == null && waiting) {
-            compiling = next(environment);
-            waiting = compiling != null;
+        if (!enabled || preparation == null) { return false; }
+        int limit = preparation.parallel() ? IN_FLIGHT : 1;
+        if (limit == 1 && preparation.linking()) { return false; }
+        boolean changed = false;
+        // One running link is checked per step, since a check assembles its program's sources again.
+        if (!compiling.isEmpty()) {
+            Variant variant = compiling.removeFirst();
+            Boolean marked = finish(variant, preparation, provider);
+            if (marked == null) { compiling.addLast(variant); } else { changed = marked; }
         }
-        Variant variant = compiling;
-        if (variant == null) { return false; }
+        while (compiling.size() < limit && waiting) {
+            Variant variant = next(environment);
+            waiting = variant != null;
+            if (variant == null) { break; }
+            Boolean marked = finish(variant, preparation, provider);
+            if (marked == null) { compiling.addLast(variant); } else { changed |= marked; }
+        }
+        return changed;
+    }
+
+    /**
+     * Requests the variant's program: null while its link runs; otherwise the variant is released, and the result is
+     * whether any material changed program.
+     */
+    private Boolean finish(Variant variant, GpuGlsl.Preparation preparation, ShaderProvider provider) {
         boolean current = variant.sampleConfiguration.equals(configuration()), changed = false;
         try {
-            if (!preparation.run(() -> variant.sample.shader = provider.getShader(variant.sample))) { return false; }
+            if (!preparation.run(() -> variant.sample.shader = provider.getShader(variant.sample))) { return null; }
             // A program of an earlier configuration stays in the provider for a return to it; it marks nothing.
             if (current) {
                 variant.ready = true;
@@ -210,7 +234,6 @@ final class GpuFamilyPrograms {
                   Arrays.toString(variant.families));
         }
         variant.release();
-        compiling = null;
         return changed;
     }
 
@@ -224,7 +247,8 @@ final class GpuFamilyPrograms {
         // Variants whose chunks all went before their turn were stale edits.
         variants.values().removeIf(variant -> !variant.ready && !variant.failed && variant.live() == null);
         List<Variant> candidates = new ArrayList<>(variants.values().stream()
-              .filter(variant -> !variant.ready && !variant.failed && variant.weight() > 0).toList());
+              .filter(variant -> !variant.ready && !variant.failed && !compiling.contains(variant) && variant.weight() > 0)
+              .toList());
         // Equal weights fall back to the variant's description: the choice must not follow chunk install order.
         candidates.sort(Comparator.comparingInt(Variant::weight).reversed()
               .thenComparing(variant -> variant.key.toString()));
@@ -255,10 +279,10 @@ final class GpuFamilyPrograms {
     int pending() {
         int free = 0, others = 0;
         for (Variant variant : variants.values()) {
-            if (variant.ready || variant.failed || variant == compiling || variant.live() == null) { continue; }
+            if (variant.ready || variant.failed || compiling.contains(variant) || variant.live() == null) { continue; }
             if (built.contains(List.of(variant.key, environmentMask, shadows))) { free++; } else { others++; }
         }
-        return (compiling != null ? 1 : 0) + free + Math.min(others, Math.max(0, room()));
+        return compiling.size() + free + Math.min(others, Math.max(0, room()));
     }
 
     /** Programs this configuration may still build: its own capacity, within twice the capacity over all of them. */
@@ -277,16 +301,16 @@ final class GpuFamilyPrograms {
     int programs() { return built.size(); }
 
     /** Whether a family link is running or waits for adoption. */
-    boolean building() { return compiling != null; }
+    boolean building() { return !compiling.isEmpty(); }
 
     /** Distinct variants installed chunks asked for, built or not. */
     int requested() { return variants.size(); }
 
     void dispose() {
         variants.values().forEach(Variant::release);
-        if (compiling != null) { compiling.release(); }
+        compiling.forEach(Variant::release);
         variants.clear();
-        compiling = null;
+        compiling.clear();
     }
 
     /**
