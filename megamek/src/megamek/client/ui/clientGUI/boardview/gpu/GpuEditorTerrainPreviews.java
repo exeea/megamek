@@ -190,6 +190,8 @@ final class GpuEditorTerrainPreviews implements Disposable {
                 }
                 if (!sample.variant().isEmpty() && !sample.variant().startsWith("preset:")) {
                     var variant = blueprint.variant(sample.variant());
+                    // A skin shows the cover its card paints (BoardEditorSession's brush).
+                    if (variant.skin() != null) { hex = new Hex(component.previewLevel(), variant.skin().terrain(), sample.theme()); }
                     hex.setAppearance(Map.of(variant.owner(), variant.material().isEmpty()
                           ? new HexAppearance(variant.id(), null, null, variant.blend() ? .5 : null)
                           : new HexAppearance(null, null, variant.material(), null)));

@@ -33,8 +33,8 @@ import megamek.common.units.Terrains;
  * Plain authored compositions of shared meshes ({@code data/models/board/scenery/layouts.json}); terrain rules and
  * artwork selection remain with their owners. The rows are the legacy conversion ({@link #convert}) and the editor's
  * stamps; the 3D board draws rows only for terrain-owned art (geysers, rubble, fortified, cleared-rubble paths and
- * gravel, elevator plates), which the conversion never takes. Image-free and thread-safe: the rows are read once and
- * only read after.
+ * gravel, elevator plates), which the conversion never takes, and for a vegetation skin ({@link #skin}: a container
+ * yard). Image-free and thread-safe: the rows are read once and only read after.
  */
 public final class BoardSceneryLayouts {
     /** The pillar mesh of the legacy pillar art (pillars1-6); on a bridge hex that art is the bridge's Pillars toggle. */
@@ -171,6 +171,18 @@ public final class BoardSceneryLayouts {
         }
 
         /**
+         * The rows turned {@code degrees} clockwise about the hex centre, as a skin's rotation turns its look
+         * ({@link HexAppearance#rotation}): each row's place, and its heading, which turns counter-clockwise.
+         */
+        public Layout turned(int degrees) {
+            if (degrees == 0) { return this; }
+            double turn = Math.toRadians(degrees), cos = Math.cos(turn), sin = Math.sin(turn);
+            return new Layout(components.stream().map(row -> new Component(row.asset(), row.tree(),
+                  (float) (row.x() * cos + row.y() * sin), (float) (row.y() * cos - row.x() * sin), row.z(),
+                  row.rotation() - degrees, row.scale(), row.connections(), row.stretch(), row.colours(), row.seat())).toList());
+        }
+
+        /**
          * The rows with each broad park tree's species and heading drawn, in row order, from the hex's seed. The
          * conversion draws them, so a converted tree is the species the legacy render showed.
          */
@@ -188,6 +200,22 @@ public final class BoardSceneryLayouts {
     }
 
     public static Layout layout(String asset) { return LAYOUTS.get(asset); }
+
+    /**
+     * The rows the hex's vegetation design draws as a skin ({@link BoardEditorBlueprint.Skin}, a container yard): its
+     * layout for the hex's cover level, turned by the design's rotation; null without a skin design, or without woods
+     * or jungle (cleared or burnt down). The one rule of the 3D views, which draw the rows as objects the terrain owns,
+     * and of the conversion's crane tips ({@link #reachedTips}).
+     */
+    public static Layout skin(Hex hex) { return skin(hex, hex.getAppearance().get("vegetation")); }
+
+    /** {@link #skin(Hex)} for the vegetation design {@code design} (or null). */
+    private static Layout skin(Hex hex, HexAppearance design) {
+        var variant = design == null || design.variant() == null ? null : BoardEditorBlueprint.get().variant(design.variant());
+        String cover = variant == null || variant.skin() == null ? null : BoardEditorBlueprint.Skin.cover(hex);
+        return cover == null ? null
+              : LAYOUTS.get(variant.skin().layouts().get(cover)).turned(design.rotation() == null ? 0 : design.rotation());
+    }
 
     /** A composed artwork selection needs no baked per-layout mesh. */
     public static boolean hasLayout(String asset) { return LAYOUTS.containsKey(asset); }
@@ -248,7 +276,7 @@ public final class BoardSceneryLayouts {
             if (tokens(hex).isEmpty()) { continue; }
             var appearance = designed(hex.getAppearance(), designs(hex, layers(hex)));
             if (appearance.equals(hex.getAppearance())) { continue; }
-            Hex next = hex.duplicate();
+            Hex next = replacement(hex);
             next.setAppearance(appearance);
             designed.put(BoardLocation.of(coords, board.getBoardId()), next);
         }
@@ -355,8 +383,10 @@ public final class BoardSceneryLayouts {
      * edge gets the full emblem and an issue. Legacy rail art becomes a rail route marker with the art's sides, on the
      * ground or its bridge's deck ({@link #railPlacement}); art without sides joins the rails beside it ({@link #railJoins})
      * or places nothing. On a legacy (not native) board only, converted maglevs a level up or beside a row of pillar art
-     * stand on Pillars ({@link #maglevPillars}) and a rail bridge carries its rail across its span ({@link #carryRails}). A token
-     * that a hex design draws gets that design ({@link #design}). A hex that already holds a twin of every object its art
+     * stand on Pillars ({@link #maglevPillars}) and a rail bridge carries its rail across its span ({@link #carryRails}),
+     * and a crane tip that a converted crane's boom reaches places nothing ({@link #reachedTips}). A token that a hex
+     * design draws gets that design ({@link #design}): seaport container yards and cranes on woods become the woods'
+     * container yard look at their rotation (a skin, {@link #skin}). A hex that already holds a twin of every object its art
      * decodes to ({@link BoardDecoration#twin}: a token typed again in the editor) gets none of them. A legacy board's
      * terrain aliases become their values first ({@link #aliases}). Every
      * bridge hex gets its type, decoded on the board as given ({@link #bridgeTypes}). Returns those issues. Thread-safe:
@@ -399,6 +429,8 @@ public final class BoardSceneryLayouts {
                 lanes.put(coords, artwork.cosmeticRoadExits());
             }
         });
+        // The crane tips the converted cranes' booms reach (legacy boards only), known before a hex changes.
+        Set<Coords> reachedTips = nativeBoard ? Set.of() : reachedTips(board, scanned);
         // Emblem sets: owner hex -> emblem -> the piece directions found (-1 the centre piece). The owner is the set's
         // centre; a centre beyond the board edge (a cut set) is owned by its first piece's hex, at the centre's offset.
         Map<Coords, Map<String, Set<Integer>>> sets = new HashMap<>();
@@ -460,7 +492,7 @@ public final class BoardSceneryLayouts {
                     return id;
                 };
                 int keys = 0;
-                boolean overWoods = false, pillared = false;
+                boolean pillared = false;
                 // A car park's rows stand beside the road along its lane (its own, or the lane the conversion gives it),
                 // else back to back: no lane (2b/3b), off the ground, on a liquid, or a road level that is not drawn.
                 boolean road = lanes.containsKey(coords) || artwork.cosmeticRoadExits() != 0 && roadside(hex);
@@ -468,6 +500,8 @@ public final class BoardSceneryLayouts {
                     if (!imported(model.terrains(), hex)) { continue; }
                     decoded |= model.terrains().contains(Terrains.FLUFF)
                           || model.terrains().contains(Terrains.ROAD_FLUFF) && hex.terrainLevel(Terrains.ROAD_FLUFF) == 3;
+                    // A crane tip a converted crane's boom reaches places nothing: the crane's skin draws its boom.
+                    if (reachedTips.contains(coords) && model.terrains().contains(Terrains.FLUFF)) { continue; }
                     // Pillar art on a bridge turns on the bridge's Pillars toggle (below) and places no objects.
                     if (bridgePillars(hex, model.key())) { pillared = true; continue; }
                     // A row of pillar art along a legacy maglev is that maglev's Pillars (maglevPillars), no objects either.
@@ -478,8 +512,6 @@ public final class BoardSceneryLayouts {
                     String group = rows.pieces() > 1 ? prefix + "g" + keys : null;
                     keys++;
                     added.addAll(rows.decorations(coords, hex, ids, group, road));
-                    // Artwork drawn over woods replaced the woods' trees in the legacy render (seaport yards).
-                    overWoods |= model.terrains().contains(Terrains.WOODS);
                 }
                 for (int i = added.size() - 1; i >= 0; i--) {
                     var rail = added.get(i);
@@ -531,12 +563,6 @@ public final class BoardSceneryLayouts {
                 List<BoardDecoration> objects = new ArrayList<>(hex.getDecorations());
                 objects.addAll(added);
                 result.setDecorations(objects);
-                if (overWoods && !result.getAppearance().containsKey("vegetation")) {
-                    // The woods stay for the rules; their design draws no trees, as the legacy art showed none.
-                    Map<String, HexAppearance> appearance = new HashMap<>(result.getAppearance());
-                    appearance.put("vegetation", new HexAppearance(BoardTreeDistribution.NO_TREES, null, null, null));
-                    result.setAppearance(appearance);
-                }
                 if (pillared) { result.setAppearance(appearance(result, artwork)); }
                 laneRoad(board, coords, result, lanes);
                 board.setHex(coords, result);
@@ -551,6 +577,35 @@ public final class BoardSceneryLayouts {
         typeBridges(board, bridges);
         board.setNativeFormat(true);
         return List.copyOf(issues);
+    }
+
+    /**
+     * The crane tips ({@code fluff:82}, the legacy art of a crane's boom end) that a converted crane's boom reaches: a
+     * hex whose FLUFF converts to a skin ({@link BoardEditorBlueprint#reproducing}) reaches the neighbour whose centre a
+     * row of that skin ({@link #skin}) lies nearer than its own hex's centre, a quay crane's boom. The skin draws the
+     * whole crane, so such a tip's token is taken and places nothing; any other tip stays an object. Of {@code hexes}.
+     */
+    private static Set<Coords> reachedTips(Board board, List<Coords> hexes) {
+        Set<Coords> result = new HashSet<>();
+        for (Coords at : hexes) {
+            Hex hex = board.getHex(at);
+            Terrain fluff = hex.getTerrain(Terrains.FLUFF);
+            Layout skin = fluff == null ? null : skin(hex, BoardEditorBlueprint.get().reproducing(hex, fluff));
+            if (skin == null) { continue; }
+            for (Component row : skin.components()) {
+                Coords nearest = null;
+                double distance = Math.hypot(row.x(), row.y());
+                for (int direction = 0; direction < 6; direction++) {
+                    Coords next = at.translated(direction);
+                    double apart = Math.hypot(row.x() - offsetX(at, next) * TILE_WIDTH, row.y() - offsetY(at, next) * TILE_HEIGHT);
+                    if (apart < distance) { nearest = next; distance = apart; }
+                }
+                if (nearest != null && board.contains(nearest) && board.getHex(nearest).terrainLevel(Terrains.FLUFF) == CRANE_TIP) {
+                    result.add(nearest);
+                }
+            }
+        }
+        return result;
     }
 
     /**
@@ -787,7 +842,10 @@ public final class BoardSceneryLayouts {
 
     /** What the conversion does with a legacy art token it takes ({@link #takenTokens}). */
     public enum Taken {
-        /** Its artwork became objects ({@link #imported}): rows, a legacy decal, pillar art's toggle. */
+        /**
+         * Its artwork became objects ({@link #imported}): rows, a legacy decal, pillar art's toggle; or nothing, for a
+         * crane tip a converted crane's boom reaches ({@link #reachedTips}).
+         */
         OBJECTS,
         /** A hex design draws it ({@link #designs}). */
         DESIGN,
@@ -800,6 +858,8 @@ public final class BoardSceneryLayouts {
           Terrains.WATER_FLUFF, Terrains.BLDG_FLUFF };
     /** FLUFF and GROUND_FLUFF from here up are game state written in play (cleared rubble), never legacy art. */
     private static final int SERVER = 2000;
+    /** The FLUFF level of the legacy crane tips, the end of a crane's boom over the next hex ({@link #reachedTips}). */
+    private static final int CRANE_TIP = 82;
 
     /** The hex's legacy art tokens, in {@link #ART_TERRAINS} order: every art terrain but a server value. */
     private static List<Integer> tokens(Hex hex) {
@@ -864,8 +924,8 @@ public final class BoardSceneryLayouts {
     /**
      * The hex designs that draw what the hex's legacy art tokens draw, by token and design owner: the blueprint variant
      * whose selector is the token ({@link BoardEditorBlueprint#reproducing}: transitions, kerbs and road pieces,
-     * orchards, rough, building art), and for building art beside which the building's structure model was chosen
-     * ({@link TilesetScenery.Kind#SKIPPED}), that model's design. Quay art maps to its quay design (a ground design), which
+     * orchards, container yards with their rotation, rough, building art), and for building art beside which the
+     * building's structure model was chosen ({@link TilesetScenery.Kind#SKIPPED}), that model's design. Quay art maps to its quay design (a ground design), which
      * only the 2D board of a {@code .board2} draws: the 3D views derive the fitted quay wall. A token absent from the
      * result has no design. {@code layers} are the hex's ({@link #layers}).
      */

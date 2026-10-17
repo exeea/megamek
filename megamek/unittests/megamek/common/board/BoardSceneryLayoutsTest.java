@@ -199,7 +199,8 @@ class BoardSceneryLayoutsTest {
                 if (any) { taken++; }
             }
         }
-        assertEquals(10, taken);
+        // The container yard (5,0) is no taken layer: its look, a hex design, draws it.
+        assertEquals(9, taken);
     }
 
     /**

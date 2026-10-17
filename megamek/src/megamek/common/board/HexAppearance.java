@@ -8,9 +8,11 @@ import java.util.Set;
 /**
  * Immutable authored appearance for one terrain owner. Asset data stays in the shared content catalog. {@code colours}
  * replace a truss bridge's colour slot (its Body, as a placed object's colours do); only a truss stores them.
+ * {@code rotation} turns a vegetation design clockwise, in 30-degree steps from 30 to 330 (a container yard's look,
+ * {@link BoardEditorBlueprint.Skin}); 0 is no rotation and is stored as none.
  */
 public record HexAppearance(String variant, String asset, String material, Double strength,
-      BoardDecoration.Colours colours) implements Serializable {
+      BoardDecoration.Colours colours, Integer rotation) implements Serializable {
     public static final Set<String> OWNERS = Set.of("ground", "road", "building", "pavement", "fuelTank",
           "vegetation", "rough", "bridge");
     /**
@@ -32,6 +34,11 @@ public record HexAppearance(String variant, String asset, String material, Doubl
     /** An appearance without colours. */
     public HexAppearance(String variant, String asset, String material, Double strength) {
         this(variant, asset, material, strength, BoardDecoration.Colours.NONE);
+    }
+
+    /** An appearance without rotation. */
+    public HexAppearance(String variant, String asset, String material, Double strength, BoardDecoration.Colours colours) {
+        this(variant, asset, material, strength, colours, null);
     }
 
     /** Whether a hex's appearance turns its bridge's piers ({@link #PILLARS}, {@link #TRUSS_PILLARS}) on. */
@@ -86,12 +93,16 @@ public record HexAppearance(String variant, String asset, String material, Doubl
               || strength <= 0 || strength >= 1 || Math.abs(strength * 6 - Math.rint(strength * 6)) > 0.000001)) {
             throw new IllegalArgumentException("Blend strength must be one to five sixths");
         }
+        rotation = rotation != null && rotation == 0 ? null : rotation;
+        if (rotation != null && (variant == null || rotation < 0 || rotation >= 360 || rotation % 30 != 0)) {
+            throw new IllegalArgumentException("A design's rotation is 30 to 330 degrees in 30-degree steps");
+        }
     }
 
     public void validateOwner(String owner) {
         if (!OWNERS.contains(owner) || asset != null && !owner.equals("building")
               || material != null && !owner.equals("road") || strength != null && !owner.equals("ground")
-              || !colours.slots().isEmpty() && !owner.equals("bridge")) {
+              || !colours.slots().isEmpty() && !owner.equals("bridge") || rotation != null && !owner.equals("vegetation")) {
             throw new IllegalArgumentException("Appearance fields do not belong to " + owner);
         }
     }

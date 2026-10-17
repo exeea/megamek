@@ -475,8 +475,8 @@ public final class BoardArtwork implements AutoCloseable {
      * separate overlay, so both views can put it on roofs and lakebeds instead of baking it into the column top.
      * Pavement uses its full variant: the shared concrete geometry supplies its outline in both GPU views.
      * Water also fills its footprint: a painted shore on the lakebed would duplicate the column's bank wall.
-     * Where the woods design draws no trees ({@link BoardTreeDistribution#noTrees}, the 3D woods' rule) there is no woods
-     * sprite either, as the old tileset's seaport supers replaced it.
+     * Where the woods design draws no trees ({@link BoardTreeDistribution#noTrees}, the 3D woods' rule: No trees or a
+     * container yard's skin) there is no woods sprite either.
      */
     private BufferedImage drawTileset(Hex source, Map<Integer, String> structures, Set<String> placedSources) {
         Hex hex = source.duplicate();

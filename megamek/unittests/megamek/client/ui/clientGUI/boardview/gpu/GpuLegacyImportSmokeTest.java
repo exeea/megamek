@@ -77,13 +77,14 @@ class GpuLegacyImportSmokeTest {
         FIXTURE.put(new Coords(5, 5), new Sample("building:2;bldg_elev:1;bldg_cf:50;fluff:6:8", 0));
         FIXTURE.put(new Coords(7, 5), new Sample("fluff:4:0", 0));
         FIXTURE.put(new Coords(9, 5), new Sample("fluff:13:0", 0));
-        // A seaport container yard, a gantry crane and a crane tip are one object each; the yard's woods grow no trees.
+        // A seaport container yard and a quay crane are the woods' container yard look, whose rows the woods own (no
+        // trees); a crane tip no crane's boom reaches is a boom segment object.
         FIXTURE.put(new Coords(1, 7), new Sample("woods:1;foliage_elev:2;fluff:80:01", 0));
         FIXTURE.put(new Coords(3, 7), new Sample("woods:1;foliage_elev:2;fluff:81:01", 0));
         FIXTURE.put(new Coords(5, 7), new Sample("fluff:82:1", 0));
         // Trees on snow take their winter form.
         FIXTURE.put(new Coords(9, 7), new Sample("snow:1;fluff:93:8", 0));
-        // Merged duplicates: the narrow glass roof is the wide one stretched, an SE crane tip the diagonal tip turned.
+        // Merged duplicates: the narrow glass roof is the wide one stretched, an SE crane tip the boom segment turned.
         FIXTURE.put(NARROW_ROOF, new Sample("building:2;bldg_elev:1;bldg_cf:50;fluff:90:2", 0));
         FIXTURE.put(new Coords(10, 5), new Sample("fluff:82:3", 0));
     }
@@ -576,7 +577,7 @@ class GpuLegacyImportSmokeTest {
             for (int frame = 0; frame < 30 || terrain.busy(); frame++) { view.render(); }
             GpuBoardTestUi.capture(new File(OUTPUT, "legacy-import-piers-side.png"));
 
-            // The reduced palette: one entry per real object or stamp; seaport pieces and one animal card per species.
+            // The reduced palette: one entry per real object or stamp; seaport props and one animal card per species.
             var root = GpuBoardTestUi.stage().getRoot();
             GpuBoardTestUi.category("industry"); settle(view, source);
             assertNotNull(root.findActor("editor-section-industry/seaport"));

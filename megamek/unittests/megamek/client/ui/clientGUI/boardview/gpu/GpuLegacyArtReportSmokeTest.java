@@ -603,7 +603,7 @@ class GpuLegacyArtReportSmokeTest {
      * A tileset image, decoded: its file read again (the toolkit loads an animated GIF, as the landing pads are, lazily,
      * and draws nothing without an observer), else the image once loaded.
      */
-    private static Image loaded(HexTileset tileset, Image image) {
+    static Image loaded(HexTileset tileset, Image image) {
         String source = tileset.imageSource(image);
         if (!source.isEmpty()) {
             try {

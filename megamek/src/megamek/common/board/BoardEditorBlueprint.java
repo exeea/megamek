@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,9 +43,12 @@ public final class BoardEditorBlueprint {
      */
     public record Preset(String id, String label, String terrain, List<String> sections, List<String> settings,
           Map<Integer, String> hexes) { }
-    /** {@code pieces}: a model per building weight and exits ({@link #model}) for a look that names no single asset. */
+    /**
+     * {@code pieces}: a model per building weight and exits ({@link #model}) for a look that names no single asset;
+     * {@code skin}: the scenery a vegetation look draws in place of its trees, or null.
+     */
     public record Variant(String id, String label, String owner, String selectors, String asset, String thumbnail,
-          String material, boolean blend, List<String> sections, String family, String pieces) {
+          String material, boolean blend, List<String> sections, String family, String pieces, Skin skin) {
         /** The model this design shows on {@code hex}: its asset, else its pieces for the hex's building weight and exits ("" if none). */
         public String model(Hex hex) {
             Terrain building = hex.getTerrain(Terrains.BUILDING);
@@ -53,6 +57,61 @@ public final class BoardEditorBlueprint {
             }
             return pieces.replace("{weight}", WEIGHTS.get(building.getLevel() - 1))
                   .replace("{nn}", String.format(Locale.ROOT, "%02d", building.getExits()));
+        }
+    }
+    /**
+     * A vegetation look that draws its own scenery inside its cover instead of trees (a container yard): per cover level
+     * of the hex ({@link #cover(Hex)}) one {@code layouts.json} composition ({@code layouts}), turned by the design's
+     * rotation ({@link HexAppearance#rotation}). {@code legacy}: by rotation, in data order, the legacy art tokens the
+     * look stands for (the conversion's {@link #reproducing} and the 2D board's {@link #artwork(Hex, String)});
+     * {@code sprites}: the skin whose legacy tokens the 2D board draws for a look without any. {@code mirror}: the skin
+     * that is this one's mirror image across its east-west axis (the quay crane's other hand), which a board flipped
+     * along one axis shows ({@link #flipped}); empty for a skin that stands for its own mirror image (rows). {@code cover}:
+     * the cover level the look's card shows and its brush paints ({@link #terrain()}).
+     */
+    public record Skin(String cover, Map<String, String> layouts, Map<Integer, List<Terrain>> legacy, String sprites,
+          String mirror) {
+        /** The cover levels, lowest first; each skin names a layout for all four. */
+        public static final List<String> COVERS = List.of("foliage", "light", "heavy", "ultra");
+        private static final List<String> TERRAIN = List.of("woods:1;foliage_elev:1", "woods:1;foliage_elev:2",
+              "woods:2;foliage_elev:2", "woods:3;foliage_elev:3");
+
+        /**
+         * The hex's cover level: none without woods or jungle (cleared or burnt down), foliage for a canopy one level
+         * high, else light, heavy or ultra by the denser of woods and jungle.
+         */
+        public static String cover(Hex hex) {
+            int density = Math.max(hex.terrainLevel(Terrains.WOODS), hex.terrainLevel(Terrains.JUNGLE));
+            if (density < 1) { return null; }
+            return hex.terrainLevel(Terrains.FOLIAGE_ELEV) == 1 ? COVERS.getFirst() : COVERS.get(Math.min(density, 3));
+        }
+
+        /** The woods of this look's {@code cover}, as its card shows and its brush paints them. */
+        public String terrain() { return TERRAIN.get(COVERS.indexOf(cover)); }
+
+        /** The rotation whose legacy tokens hold {@code token}, or null. */
+        private Integer rotation(Terrain token) {
+            for (var group : legacy.entrySet()) {
+                if (group.getValue().stream().anyMatch(art -> selects(art, token))) { return group.getKey(); }
+            }
+            return null;
+        }
+
+        /**
+         * The legacy tokens the 2D board draws for this look turned {@code rotation} degrees: those of the nearest legacy
+         * rotation, a half turn counting as the same (rows read alike turned round), then the exact one (a crane's
+         * boom), then data order.
+         */
+        private List<Terrain> sprites(int rotation) {
+            Comparator<Integer> halfTurns = Comparator.comparingInt(turn -> apart(turn, rotation, 180));
+            return legacy.get(legacy.keySet().stream().min(halfTurns.thenComparingInt(turn -> apart(turn, rotation, 360)))
+                  .orElseThrow());
+        }
+
+        /** How many degrees apart two rotations lie, counting turns of {@code period} as none. */
+        private static int apart(int a, int b, int period) {
+            int difference = Math.floorMod(a - b, period);
+            return Math.min(difference, period - difference);
         }
     }
     /** Local X/Y use hex width/height; Z uses board levels. Heading is the connector's outward XY direction. */
@@ -105,10 +164,11 @@ public final class BoardEditorBlueprint {
     private final List<Component> components;
     private final Map<String, Variant> variants;
     /**
-     * The variants with one selector, by its terrain type: the designs a legacy token can stand for. An asset design
-     * (a building model) is not among them: its selector is the art its model's tileset image draws beside that model,
-     * which only the model decides ({@link BoardSceneryLayouts}'s conversion); the 2D board of a {@code .board2} still
-     * draws it through the selector ({@link #artwork(Hex)}).
+     * The variants with one selector, and the skins, by the terrain type of their selector or legacy tokens
+     * ({@link #tokens}): the designs a legacy token can stand for. An asset design (a building model) is not among them:
+     * its selector is the art its model's tileset image draws beside that model, which only the model decides
+     * ({@link BoardSceneryLayouts}'s conversion); the 2D board of a {@code .board2} still draws it through the selector
+     * ({@link #artwork(Hex)}).
      */
     private final Map<Integer, List<Variant>> selecting = new HashMap<>();
     private final Map<String, Asset> assets;
@@ -140,8 +200,8 @@ public final class BoardEditorBlueprint {
         this.entries = Collections.unmodifiableMap(entries);
         this.cards = Map.copyOf(cards);
         for (Variant variant : variants.values()) {
-            if (!variant.selectors().isBlank() && !variant.selectors().contains(";") && variant.asset().isBlank()) {
-                selecting.computeIfAbsent(new Terrain(variant.selectors()).getType(), type -> new ArrayList<>()).add(variant);
+            for (int type : tokens(variant).stream().map(Terrain::getType).distinct().toList()) {
+                selecting.computeIfAbsent(type, key -> new ArrayList<>()).add(variant);
             }
         }
     }
@@ -220,12 +280,15 @@ public final class BoardEditorBlueprint {
             Variant variant = new Variant(required(entry, "id"), required(entry, "label"), required(entry, "owner"),
                   entry.path("selectors").asText(), entry.path("asset").asText(), entry.path("thumbnail").asText(),
                   entry.path("material").asText(), entry.path("blend").asBoolean(), sections(entry, sections),
-                  entry.path("family").asText(null), entry.path("pieces").asText());
-            if (!HexAppearance.OWNERS.contains(variant.owner()) || variants.putIfAbsent(variant.id(), variant) != null) {
+                  entry.path("family").asText(null), entry.path("pieces").asText(), skin(entry));
+            if (!HexAppearance.OWNERS.contains(variant.owner()) || variants.putIfAbsent(variant.id(), variant) != null
+                  || variant.skin() != null && (!variant.owner().equals("vegetation") || !variant.selectors().isBlank()
+                        || !variant.asset().isBlank())) {
                 throw new IOException("Invalid or duplicate variant " + variant.id());
             }
             add(entries, new Entry(variant.id(), variant.owner(), variant.label(), null, variant, null));
         }
+        checkSkins(variants);
         for (JsonNode entry : root.withArray("assets")) {
             Asset asset;
             // Reuse the document's key, transform and colour validation; the catalog cannot escape the asset root.
@@ -315,6 +378,74 @@ public final class BoardEditorBlueprint {
         }
     }
 
+    /** A variant's {@code skin}, or null: a layout for all four covers, rotations in 30-degree steps, tokens that parse. */
+    private static Skin skin(JsonNode variant) throws IOException {
+        if (!variant.has("skin")) { return null; }
+        JsonNode skin = variant.get("skin");
+        String id = variant.path("id").asText();
+        Map<String, String> layouts = new LinkedHashMap<>();
+        for (String cover : Skin.COVERS) { layouts.put(cover, required(skin.path("layouts"), cover)); }
+        Map<Integer, List<Terrain>> legacy = new LinkedHashMap<>();
+        for (var group : skin.path("legacy").properties()) {
+            List<Terrain> tokens = new ArrayList<>();
+            int rotation;
+            try {
+                rotation = Integer.parseInt(group.getKey());
+                for (String token : strings(group.getValue())) { tokens.add(new Terrain(token)); }
+            } catch (RuntimeException failure) { throw new IOException("Invalid legacy tokens of " + id, failure); }
+            if (rotation < 0 || rotation >= 360 || rotation % 30 != 0 || tokens.isEmpty()) {
+                throw new IOException("Invalid skin rotation " + rotation + " of " + id);
+            }
+            legacy.put(rotation, List.copyOf(tokens));
+        }
+        String cover = skin.path("cover").asText("light");
+        if (!Skin.COVERS.contains(cover)) { throw new IOException("Unknown cover " + cover + " of " + id); }
+        return new Skin(cover, Collections.unmodifiableMap(layouts), Collections.unmodifiableMap(legacy),
+              skin.path("sprites").asText(), skin.path("mirror").asText());
+    }
+
+    /** The legacy tokens a variant stands for: its one selector, or its skin's legacy tokens; none for an asset design. */
+    private static List<Terrain> tokens(Variant variant) {
+        if (variant.skin() != null) { return variant.skin().legacy().values().stream().flatMap(List::stream).toList(); }
+        return variant.selectors().isBlank() || variant.selectors().contains(";") || !variant.asset().isBlank()
+              ? List.of() : List.of(new Terrain(variant.selectors()));
+    }
+
+    /**
+     * Each skin's legacy tokens stand for that one design: no other token of any variant selects one or is selected by
+     * one; a skin's {@code sprites} names a skin with legacy tokens, its {@code mirror} a skin whose mirror it is.
+     */
+    private static void checkSkins(Map<String, Variant> variants) throws IOException {
+        for (Variant variant : variants.values()) {
+            if (variant.skin() == null) { continue; }
+            Variant sprites = variants.get(variant.skin().sprites());
+            if (variant.skin().legacy().isEmpty() && (sprites == null || sprites.skin() == null || sprites.skin().legacy().isEmpty())) {
+                throw new IOException("Skin " + variant.id() + " has no legacy tokens and draws no other skin's sprites");
+            }
+            Variant mirror = variants.get(variant.skin().mirror());
+            if (!variant.skin().mirror().isEmpty() && (mirror == null || mirror.skin() == null || !mirror.skin().mirror().equals(variant.id()))) {
+                throw new IOException("Skin " + variant.id() + " names a mirror that does not name it back");
+            }
+            List<Terrain> own = tokens(variant);
+            for (Variant other : variants.values()) {
+                List<Terrain> theirs = tokens(other);
+                for (int i = 0; i < own.size(); i++) {
+                    for (int j = 0; j < theirs.size(); j++) {
+                        if ((other != variant || i != j) && (selects(own.get(i), theirs.get(j)) || selects(theirs.get(j), own.get(i)))) {
+                            throw new IOException("Legacy token " + own.get(i) + " of " + variant.id() + " also stands for " + other.id());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Whether a design's {@code selector} stands for {@code token}: its type and level, and its exits where it names them. */
+    private static boolean selects(Terrain selector, Terrain token) {
+        return selector.getType() == token.getType() && selector.getLevel() == token.getLevel()
+              && (!selector.hasExitsSpecified() || token.hasExitsSpecified() && selector.getExits() == token.getExits());
+    }
+
     private static Snap snap(JsonNode asset) throws IOException {
         if (!asset.has("snap")) { return null; }
         JsonNode definition = asset.path("snap");
@@ -370,23 +501,33 @@ public final class BoardEditorBlueprint {
 
     /**
      * The design that stands for a legacy art token: the variant whose one selector is {@code token}'s type and level
-     * (and its exits, where the selector names them), owned by a component present on {@code hex}; a blend variant
-     * only where the token's exits are a strength of one to five sixths ({@link #artwork(Hex, String)} adds them back).
-     * Null when no variant reproduces it.
+     * (and its exits, where the selector names them), or the skin, at its rotation, whose legacy tokens hold it; owned
+     * by a component present on {@code hex}; a blend variant only where the token's exits are a strength of one to five
+     * sixths ({@link #artwork(Hex, String)} adds them back). Null when no variant reproduces it.
      */
     public HexAppearance reproducing(Hex hex, Terrain token) {
         for (Variant variant : selecting.getOrDefault(token.getType(), List.of())) {
-            Terrain selector = new Terrain(variant.selectors());
             int exits = token.hasExitsSpecified() ? token.getExits() : 0;
-            if (selector.getLevel() != token.getLevel()
-                  || selector.hasExitsSpecified() && (!token.hasExitsSpecified() || selector.getExits() != exits)
+            Integer rotation = variant.skin() == null ? null : variant.skin().rotation(token);
+            if ((variant.skin() == null ? !selects(new Terrain(variant.selectors()), token) : rotation == null)
                   || variant.blend() && (!token.hasExitsSpecified() || exits < 1 || exits > 5)
                   || !component(variant.owner()).isPresent(name -> hex.containsTerrain(Terrains.getType(name)))) {
                 continue;
             }
-            return new HexAppearance(variant.id(), null, null, variant.blend() ? exits / 6.0 : null);
+            return new HexAppearance(variant.id(), null, null, variant.blend() ? exits / 6.0 : null,
+                  BoardDecoration.Colours.NONE, rotation);
         }
         return null;
+    }
+
+    /**
+     * Whether the hex's FLUFF token is woods art that a vegetation design stands for ({@link #reproducing}: an orchard,
+     * a container yard), which that design draws in the 3D views instead of the token's tileset image.
+     */
+    public boolean vegetationArt(Hex hex) {
+        Terrain fluff = hex.getTerrain(Terrains.FLUFF);
+        HexAppearance design = fluff == null ? null : reproducing(hex, fluff);
+        return design != null && variants.get(design.variant()).owner().equals("vegetation");
     }
 
     /** {@code source} with every owner's design selectors ({@link #artwork(Hex, String)}): what its tokens would draw. */
@@ -396,10 +537,41 @@ public final class BoardEditorBlueprint {
         return result;
     }
 
-    /** Temporary, owner-scoped artwork query. Gameplay terrain and other owners' selectors are never rewritten. */
+    /**
+     * The vegetation design {@code design} on a board that {@code BoardUtilities.flip} flips ({@code horizontal}: east
+     * for west, {@code vertical}: north for south): a skin turns with the board, a half turn when both flip; one axis
+     * mirrors it, which its {@code mirror} skin turned shows (a skin without one stands for its own mirror image, as
+     * rows read alike mirrored). Any other design stays as it is.
+     */
+    public HexAppearance flipped(HexAppearance design, boolean horizontal, boolean vertical) {
+        Variant variant = variants.get(design.variant());
+        if (variant == null || variant.skin() == null || !horizontal && !vertical) { return design; }
+        int rotation = design.rotation() == null ? 0 : design.rotation();
+        boolean mirrored = horizontal != vertical;
+        String look = mirrored && !variant.skin().mirror().isEmpty() ? variant.skin().mirror() : variant.id();
+        // Mirrored east for west, a look turned r is its east-west mirror image turned 180 - r; north for south, -r.
+        int turned = !mirrored ? rotation + 180 : horizontal ? 180 - rotation : -rotation;
+        return new HexAppearance(look, null, null, null, BoardDecoration.Colours.NONE, Math.floorMod(turned, 360));
+    }
+
+    /**
+     * Temporary, owner-scoped artwork query. Gameplay terrain and other owners' selectors are never rewritten. A skin
+     * adds the first legacy token of its rotation ({@link Skin#sprites}; its {@code sprites} skin's for a look without
+     * any), which the tileset draws where the hex's woods match that sprite's; a hex already holding one of those tokens
+     * (a game of a loaded {@code .board}: its own colours) keeps its own.
+     */
     public Hex artwork(Hex source, String owner) {
         HexAppearance appearance = source.getAppearance().get(owner);
         Variant variant = appearance == null ? null : variants.get(appearance.variant());
+        if (variant != null && variant.owner().equals(owner) && variant.skin() != null) {
+            Skin skin = variant.skin().legacy().isEmpty() ? variants.get(variant.skin().sprites()).skin() : variant.skin();
+            List<Terrain> sprites = skin.sprites(appearance.rotation() == null ? 0 : appearance.rotation());
+            Terrain own = source.getTerrain(Terrains.FLUFF);
+            if (own != null && sprites.stream().anyMatch(art -> selects(art, own))) { return source; }
+            Hex result = source.duplicate();
+            result.addTerrain(new Terrain(sprites.getFirst()));
+            return result;
+        }
         if (variant == null || !variant.owner().equals(owner) || variant.selectors().isBlank()) { return source; }
         Hex result = source.duplicate();
         for (String selector : variant.selectors().split(";")) { result.addTerrain(new Terrain(selector)); }

@@ -127,8 +127,14 @@ class GpuScenerySmokeTest {
         };
         herd.apply(scenes.get(3), "horses1");
         herd.apply(scenes.get(3), "horses2");
-        assertEquals(48, scenes.get(4).tiles().stream().flatMap(t -> t.features().stream())
-              .map(BoardScene.Feature::asset).filter(a -> a.contains("scenery/seaport/gantry-crane-")).distinct().count());
+        // Each crane is its yard look's quay crane, its boom over the tip hex, which holds no object: the look draws the tip.
+        for (int i = 0; i < 48; i++) {
+            Coords base = new Coords(2 + i % 6 * 3, 2 + i / 6 * 3), tip = base.translated(headings[i / 12][i % 12 / 3]);
+            var crane = scenes.get(4).tile(base).features();
+            assertTrue(crane.stream().anyMatch(f -> f.asset().equals("scenery/seaport/yard/quay-crane")), "81:" + (i + 1));
+            assertTrue(crane.stream().anyMatch(f -> f.asset().equals("scenery/seaport/yard/crane-boom")), "81:" + (i + 1));
+            assertTrue(port.getHex(tip).getDecorations().isEmpty(), "The tip of 81:" + (i + 1));
+        }
         // ledge1 (fluff:8:0) decodes to the unrotated row of the canonical ledge.
         Predicate<BoardScene.Feature> ledge1 = f -> f.asset().equals("scenery/roofs/ledge") && f.rotation() == 0;
         assertEquals(11, scenes.get(7).tiles().stream().flatMap(t -> t.features().stream()).filter(ledge1).count());

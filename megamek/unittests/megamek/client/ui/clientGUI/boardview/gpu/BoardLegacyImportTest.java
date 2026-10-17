@@ -164,15 +164,17 @@ class BoardLegacyImportTest {
         assertEquals(6, road.getDecorations().size());
         assertTrue(road.getDecorations().stream().allMatch(o -> BoardTreeDistribution.PARK.contains(o.asset())));
 
-        // A seaport yard is one object; its woods stay for the rules, drawn without trees as the legacy art showed.
+        // A seaport yard is the woods' container yard look, no object; its woods stay for the rules and draw the yard
+        // instead of trees, as the legacy art showed.
         Hex seaport = board.getHex(SEAPORT);
         assertTrue(seaport.containsTerrain(Terrains.FLUFF));
         assertEquals(1, seaport.terrainLevel(Terrains.WOODS));
-        assertEquals(List.of("scenery/seaport/containers-n-s-01"), seaport.getDecorations().stream().map(BoardDecoration::asset).toList());
-        assertNull(seaport.getDecorations().getFirst().group());
-        assertEquals(BoardTreeDistribution.NO_TREES, seaport.getAppearance().get("vegetation").variant());
-        assertTrue(BoardFeatures.capture(seaport, SEAPORT, Map.of(), Set.of(), board::getHex).stream()
-              .noneMatch(f -> f.kind() == BoardScene.FeatureKind.TREE), "No woods trees grow in the container yard");
+        assertTrue(seaport.getDecorations().isEmpty());
+        assertEquals(new HexAppearance("woods/container-yard/rows", null, null, null), seaport.getAppearance().get("vegetation"));
+        var yard = BoardFeatures.capture(seaport, SEAPORT, Map.of(), Set.of(), board::getHex);
+        assertTrue(yard.stream().noneMatch(f -> f.kind() == BoardScene.FeatureKind.TREE), "No woods trees grow in the container yard");
+        assertTrue(yard.stream().anyMatch(f -> f.asset().equals("scenery/seaport/yard/light-rows")
+              && BoardFeatures.terrainOwned(f.decoration())));
 
         // Ice and fuel tanks carry what stands on them.
         assertEquals(BoardDecoration.Placement.surface("ice", "top", 0), board.getHex(ICE).getDecorations().getFirst().placement());

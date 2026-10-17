@@ -270,10 +270,10 @@ public final class BoardFile {
             Map<String, HexAppearance> values = new LinkedHashMap<>();
             appearances.fields().forEachRemaining(field -> {
                 JsonNode style = field.getValue();
-                only(style, "variant", "asset", "material", "strength", "colours");
+                only(style, "variant", "asset", "material", "strength", "colours", "rotation");
                 HexAppearance value = new HexAppearance(string(style, "variant", null), string(style, "asset", null),
                       string(style, "material", null), style.has("strength") ? number(style, "strength", 0) : null,
-                      colours(style));
+                      colours(style), style.has("rotation") ? integer(style, "rotation", 0) : null);
                 value.validateOwner(field.getKey());
                 values.put(field.getKey(), value);
             });
@@ -406,6 +406,7 @@ public final class BoardFile {
                 ObjectNode style = styles.putObject(entry.getKey()); HexAppearance value = entry.getValue();
                 put(style, "variant", value.variant()); put(style, "asset", value.asset()); put(style, "material", value.material());
                 if (value.strength() != null) { style.put("strength", value.strength()); }
+                if (value.rotation() != null) { style.put("rotation", value.rotation()); }
                 putColours(style, value.colours());
             });
         }

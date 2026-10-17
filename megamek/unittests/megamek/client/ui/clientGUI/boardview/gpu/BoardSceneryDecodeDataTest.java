@@ -33,8 +33,9 @@ class BoardSceneryDecodeDataTest {
         return RailRoute.Kind.of(asset) != null;
     }
 
+    /** Terrain-owned rows: rubble, gravel and plates, and a vegetation skin's composition ({@code yard/}). */
     private static boolean undecoded(String key) {
-        return key.matches("scenery/saxarba/(misc/|rubble_|cleared_rubble_gravel).*");
+        return key.matches("scenery/saxarba/(misc/|rubble_|cleared_rubble_gravel).*") || key.startsWith("yard/");
     }
 
     @Test
@@ -78,6 +79,11 @@ class BoardSceneryDecodeDataTest {
                 }
             }
         }
+        // Every cover of every skin names a terrain-owned composition (its rows' art exists, above).
+        for (var variant : blueprint.variants("vegetation")) {
+            if (variant.skin() == null) { continue; }
+            variant.skin().layouts().forEach((cover, key) -> assertTrue(undecoded(key) && layouts.has(key), variant.id() + " " + cover));
+        }
         // A legacy decal id decodes to a decal with an image; a one-hex variant shrinks it, a set piece shows it whole.
         for (var ids = decals.get("legacy").fieldNames(); ids.hasNext(); ) {
             var legacy = BoardDecalArt.legacy(ids.next());
@@ -120,9 +126,9 @@ class BoardSceneryDecodeDataTest {
         }
         // One real object or one stamp per entry, counted by the category of its first palette section; colour, rotation
         // and decode-only variants stay out of the palette, and so do the -snow trees (a tree takes its winter form on
-        // snow). Turned crane tips and the narrow glass roof are rows. Industry holds the 78 seaport pieces, Parks the
-        // 12 animal poses, Transportation the routes, rolling stock and train stamps.
-        assertEquals(Map.of("buildings", 7, "industry", 85, "parks", 29, "transportation", 39, "vegetation", 73), visible);
+        // snow). Crane tips and the narrow glass roof are rows. Industry holds the 10 seaport props, Parks the 12 animal
+        // poses, Transportation the routes, rolling stock and train stamps.
+        assertEquals(Map.of("buildings", 7, "industry", 17, "parks", 29, "transportation", 39, "vegetation", 73), visible);
         // Layers type icons name components by id and objects by palette section or category: a renamed one loses its icon.
         var icons = GpuBoardEditor.class.getDeclaredField("LAYER_ICONS");
         icons.setAccessible(true);

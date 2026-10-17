@@ -311,7 +311,11 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         librarySearch = ui.search(UiKit.text("BoardEditor.searchAll")); searchField = librarySearch.field; searchField.setName("editor-search");
         onChange(searchField, () -> {
             String next = searchField.getText().trim().toLowerCase(Locale.ROOT);
-            if (!next.equals(query)) { query = next; showGrid(false); }
+            if (next.equals(query)) { return; }
+            boolean header = next.isEmpty() != query.isEmpty();
+            query = next;
+            if (header) { showHead(); }
+            showGrid(false);
         });
         // A focused field takes every key: Esc clears its text, and a second Esc leaves the field.
         searchField.addListener(new InputListener() {
@@ -772,8 +776,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         boolean visible = inspecting();
         if (!visible && inspector.isVisible()) { stage.unfocus(inspector); }
         inspector.setVisible(visible);
-        // Cards preview in the brush's theme; the shown page keeps its place.
-        if (!libraryTheme.equals(next.activeBrush().theme())) { libraryTheme = next.activeBrush().theme(); showGrid(true); }
+        // Cards preview in the theme the brush paints; the shown page keeps its place. A brush that does not apply its
+        // theme (Water after a Theme card keeps that card's) leaves each hex its own, so its cards show the default.
+        String theme = next.activeBrush().themeEnabled() ? next.activeBrush().theme() : "";
+        if (!libraryTheme.equals(theme)) { libraryTheme = theme; showGrid(true); }
         nextBrush = new BrushState(next.tool(), next.brush(), next.activeBrush());
         for (int i = 0; i < tools.size(); i++) { tools.get(i).pressed(i == next.tool().ordinal()); }
         undo.setDisabled(!next.canUndo()); redo.setDisabled(!next.canRedo());
@@ -843,19 +849,31 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (page.category() != null && (category(page.category()) == null || page.gallery() != null && gallery() == null)) {
             page = lastPage = START;
         }
+        showHead();
+        showGrid(false);
+    }
+
+    /**
+     * The Assets header: the title on the start page; while the search holds text, back (which clears it) and "Search
+     * results", since the results span every category; else back and the category's drop-down, or the gallery's name.
+     */
+    private void showHead() {
         libraryHead.clearChildren(); categoryFace = null;
-        if (page.category() == null) {
+        boolean searching = !query.isEmpty();
+        if (page.category() == null && !searching) {
             libraryHead.add(ui.header(UiKit.text("BoardEditor.assets"), null)).growX();
         } else {
             Table head = new Table(); head.pad(8, 8, 8, 14); head.left();
             UiButton previous = ui.button("hud-mini", "chevron-left", "", null); previous.setName("editor-back");
             previous.clearChildren(); previous.pad(0); previous.icons.forEach(icon -> previous.add(icon).size(18));
-            onChange(previous, () -> { stage.setKeyboardFocus(null); back(); });
+            onChange(previous, () -> { stage.setKeyboardFocus(null); escapeAssets(); });
             ui.tip(previous).getActor().setText(UiKit.text("BoardEditor.back"));
             head.add(previous).size(28);
-            Label title = new Label(UiTheme.upper(page.gallery() != null ? page.gallery() : categoryName(page.category())), ui.skin, "hud-title");
-            title.setEllipsis(true);
-            if (page.gallery() != null) { head.add(title).minWidth(0).padLeft(10); }
+            String name = searching ? UiKit.text("BoardEditor.searchResults")
+                  : page.gallery() != null ? page.gallery() : categoryName(page.category());
+            Label title = new Label(UiTheme.upper(name), ui.skin, "hud-title");
+            title.setEllipsis(true); title.setName("editor-library-title");
+            if (searching || page.gallery() != null) { head.add(title).minWidth(0).padLeft(10); }
             else {
                 // The category's name is a drop-down for a jump to another category.
                 categoryFace = new UiButton(ui, "hud-icon"); categoryFace.setName("editor-category");
@@ -868,7 +886,6 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             head.add().expandX();
             libraryHead.add(head).growX();
         }
-        showGrid(false);
     }
 
     private BoardEditorBlueprint.Category category(String id) {
@@ -1172,6 +1189,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                   .map(BoardEditorBlueprint.Choice::label).findFirst().orElse(UiKit.text("BoardEditor.value", Integer.toString(value.value())));
             Table row = choice(field.label(), current, options, chosen -> send(Action.BRUSH_VALUE, target, chosen));
             row.setName("editor-brush-" + target); controls.add(row);
+        }
+        // A skin look turns as one: every hex of a stroke gets the brush's rotation.
+        var style = brush.sampledHex() != null ? null : brush.appearance().get(definition.id());
+        var design = style == null || style.variant() == null ? null : blueprint.variant(style.variant());
+        if (design != null && design.skin() != null) {
+            controls.add(brushNumber(UiKit.text("BoardEditor.designRotation"), style.rotation() == null ? 0 : style.rotation(),
+                  0, 330, 30, Action.BRUSH_VALUE, "rotation:" + definition.id()));
         }
         var zone = zoneBrush(brush);
         if (zone != null) { controls.add(zoneNumber(zone)); }
@@ -1557,6 +1581,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             detail.add(appearance).row();
             if (variant != null && variant.blend()) {
                 number(UiKit.text("BoardEditor.blendStrength"), style.strength() == null ? .5 : style.strength(), 0, 1, .05, Action.BLEND, "");
+            }
+            if (variant != null && variant.skin() != null) {
+                number(UiKit.text("BoardEditor.designRotation"), style.rotation() == null ? 0 : style.rotation(), 0, 330, 30,
+                      Action.DESIGN_ROTATION, definition.id());
             }
         } else if (appearance.hasChildren()) { detail.add(appearance).row(); }
         for (var field : definition.fields()) { if (!field.optional() || snapshot.property(field.terrain()) != null) { field(field); } }
@@ -2402,7 +2430,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
      * category, a category to the start page.
      */
     boolean escapeAssets() {
-        if (!query.isEmpty()) { query = ""; searchField.setText(""); showGrid(false); return true; }
+        if (!query.isEmpty()) { query = ""; searchField.setText(""); showHead(); showGrid(false); return true; }
         return back();
     }
     private void heading(String text) { Label label = ui.caption(text); label.setWrap(true); detail.add(label).growX().minWidth(0).padTop(12).row(); }

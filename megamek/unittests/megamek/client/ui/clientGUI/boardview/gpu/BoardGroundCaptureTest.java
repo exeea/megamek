@@ -213,6 +213,11 @@ class BoardGroundCaptureTest {
                     if (decoration.equals("fluff:50:1")) {
                         assertNotNull(tile.decals(), "Surface markings remain visible");
                         assertNotNull(tile.tilesetDecals());
+                    } else if (decoration.startsWith("woods:")) {
+                        // A container yard's art is its woods' look (b12), never tileset scenery or paint.
+                        assertNull(tile.decals());
+                        assertTrue(image.scenery().models().isEmpty());
+                        assertNull(tile.tilesetScenery());
                     } else {
                         assertNull(tile.decals(), "Modeled scenery must not retain a painted pavement duplicate");
                         assertFalse(image.scenery().models().isEmpty(), "Keep models selected by composite tileset rules");

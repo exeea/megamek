@@ -1790,6 +1790,54 @@ class BoardEditorSessionTest {
         assertEquals("Copy a hex first", fresh.snapshot().message());
     }
 
+    /**
+     * A container yard card paints one look and one rotation on every hex of a stroke, its cover included (Scattered:
+     * foliage); the Brush's and the Edit panel's Rotation each turn it in one undo step; switching between yards keeps the
+     * rotation, another look drops it, and removing the vegetation drops the look.
+     */
+    @Test void aContainerYardStrokePaintsOneLookAndRotationAndItsRotationRowsTurnIt() {
+        var session = session();
+        String rows = "woods/container-yard/rows", crane = "woods/container-yard/quay-crane";
+        send(session, Action.CHOOSE_BRUSH, "vegetation", rows);
+        send(session, Action.BRUSH_VALUE, "rotation:vegetation", "60");
+        send(session, Action.BRUSH, "", "2");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        var turned = new megamek.common.board.HexAppearance(rows, null, null, null, BoardDecoration.Colours.NONE, 60);
+        List<Coords> painted = session.brush(at);
+        assertEquals(7, painted.size());
+        for (Coords hex : painted) {
+            assertEquals(turned, session.board().getHex(hex).getAppearance().get("vegetation"), hex.toString());
+            assertEquals(1, session.board().getHex(hex).terrainLevel(Terrains.WOODS));
+            assertEquals(2, session.board().getHex(hex).terrainLevel(Terrains.FOLIAGE_ELEV));
+        }
+        send(session, Action.UNDO, "", "");
+        assertTrue(painted.stream().allMatch(hex -> session.board().getHex(hex).getAppearance().isEmpty()), "One undo step");
+        send(session, Action.REDO, "", "");
+        // The Edit panel's Rotation (typed values snap to the 30-degree steps), one undo step.
+        send(session, Action.TOOL, "", "SELECT"); session.pointer(at, 0, 0, false); session.finishStroke();
+        send(session, Action.DESIGN_ROTATION, "vegetation", "100");
+        assertEquals(90, session.board().getHex(at).getAppearance().get("vegetation").rotation());
+        send(session, Action.UNDO, "", "");
+        assertEquals(60, session.board().getHex(at).getAppearance().get("vegetation").rotation());
+        // Another yard keeps the rotation; another look has none.
+        send(session, Action.VARIANT, "vegetation", crane);
+        assertEquals(new megamek.common.board.HexAppearance(crane, null, null, null, BoardDecoration.Colours.NONE, 60),
+              session.board().getHex(at).getAppearance().get("vegetation"));
+        send(session, Action.VARIANT, "vegetation", "woods/orchard");
+        assertNull(session.board().getHex(at).getAppearance().get("vegetation").rotation());
+        send(session, Action.DESIGN_ROTATION, "vegetation", "30");
+        assertEquals(Messages.getString("BoardEditor.skinFirst"), session.snapshot().message());
+        send(session, Action.VARIANT, "vegetation", crane);
+        send(session, Action.REMOVE_COMPONENT, "", "vegetation");
+        assertTrue(session.board().getHex(at).getAppearance().isEmpty(), "The look leaves with its woods");
+        // The Scattered card paints the foliage cover its look shows.
+        send(session, Action.CHOOSE_BRUSH, "vegetation", "woods/container-yard/scattered");
+        send(session, Action.BRUSH, "", "1");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        assertEquals(1, session.board().getHex(at).terrainLevel(Terrains.FOLIAGE_ELEV));
+        assertEquals("woods/container-yard/scattered", session.board().getHex(at).getAppearance().get("vegetation").variant());
+    }
+
     private static String text(java.awt.datatransfer.Clipboard clipboard) throws Exception {
         return (String) clipboard.getData(java.awt.datatransfer.DataFlavor.stringFlavor);
     }

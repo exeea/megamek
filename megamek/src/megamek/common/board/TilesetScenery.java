@@ -64,7 +64,10 @@ public final class TilesetScenery {
         ROAD_SURFACE,
         /** Painted on the surface; a legacy decal id when {@link Layer#key} is set. */
         PAINT,
-        /** Neither drawn nor converted: a structure's model, a road-fluff kerb, rough or orchard art covers it. */
+        /**
+         * Neither drawn nor converted: a structure's model, a road-fluff kerb, rough or a vegetation design's woods art
+         * (orchard, container yard) covers it.
+         */
         SKIPPED,
         /** The old perspective quay sprite, which the fitted quay wall replaces. */
         QUAY
@@ -241,7 +244,8 @@ public final class TilesetScenery {
                 }
             }
         }
-        // The kerb and orchard art a design stands for is skipped as its token's is (rough reads its design itself).
+        // The kerb and woods art (orchard, container yard) a design stands for is skipped as its token's is: the design
+        // draws it (rough reads its design itself).
         Hex road = hex, vegetation = hex;
         if (!hex.getAppearance().isEmpty()) {
             road = BoardEditorBlueprint.get().artwork(hex, "road");
@@ -262,7 +266,7 @@ public final class TilesetScenery {
                   || types.contains(Terrains.ROAD_FLUFF) && road.terrainLevel(Terrains.ROAD_FLUFF) == 1
                         && types.contains(Terrains.ROAD)
                   || types.contains(Terrains.FLUFF) && (HexTile.roughVariant(hex) != 0
-                        || vegetation.terrainLevel(Terrains.FLUFF) == 12 && types.contains(Terrains.WOODS))) {
+                        || types.contains(Terrains.WOODS) && BoardEditorBlueprint.get().vegetationArt(vegetation))) {
                 result.add(new Layer(layer, types, Kind.SKIPPED, null, false));
                 continue;
             }

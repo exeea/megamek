@@ -17,6 +17,10 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -24,6 +28,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiTheme;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardEditorBlueprint;
@@ -34,9 +39,10 @@ import org.junit.jupiter.api.Test;
 /**
  * The Assets palette in the real panel: the start page's nine category tiles fit without scrolling and show their
  * rendered icons; a tile opens its category, [<] goes back and the category's name jumps to another; the search covers
- * every category and the designs behind a gallery card; Esc clears the search, then leaves a gallery, then a category;
- * a Theme card arms Clear ground with its theme and stays highlighted; the Water card's Brush offers Depth and Current;
- * a picker family's Type changes the brush's asset; the DropShip blueprint paints its seven hexes and erases as its
+ * every category and the designs behind a gallery card, under a "Search results" header; Esc clears the search, then
+ * leaves a gallery, then a category; a Theme card arms Clear ground with its theme and stays highlighted; the Water
+ * card's Brush offers Depth and Current, and the cards then preview clear water, since Water does not paint the Volcano
+ * theme it keeps; a picker family's Type changes the brush's asset; the DropShip blueprint paints its seven hexes and erases as its
  * component, over a radius; and a new editor window opens on the page the last one showed. Captures under b12-palette at 1366x768 and 1280x800.
  */
 @Tag("on-demand")
@@ -45,7 +51,7 @@ class GpuEditorPaletteSmokeTest {
     private static final Coords DROPSHIP = new Coords(5, 5);
 
     /** One step of a run: false while it waits for something (previews, the board) and runs again next frame. */
-    private interface Step { boolean run(GpuBattleView view, GpuMapSource source, Group root) throws Exception; }
+    interface Step { boolean run(GpuBattleView view, GpuMapSource source, Group root) throws Exception; }
 
     @Test void paletteNavigatesSearchesAndArmsItsCards() throws Exception {
         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
@@ -99,6 +105,8 @@ class GpuEditorPaletteSmokeTest {
                   }
                   assertNull(root.findActor("editor-section-buildings"));
                   assertNotNull(root.findActor("editor-library-rough/felled-trees"));
+                  assertEquals(UiTheme.upper(UiKit.text("BoardEditor.searchResults")),
+                        ((Label) root.findActor("editor-library-title")).getText().toString(), "The results span every category");
                   if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))) { return false; }
                   GpuBoardTestUi.capture(new File(OUTPUT, "search-tree.png"));
                   escape();
@@ -107,6 +115,7 @@ class GpuEditorPaletteSmokeTest {
               (view, source, root) -> {
                   assertEquals("", ((TextField) root.findActor("editor-search")).getText(), "Esc clears the search first");
                   assertNotNull(root.findActor("editor-section-buildings/looks"));
+                  assertNotNull(root.findActor("editor-category"), "The category's drop-down is back");
                   GpuBoardTestUi.click("editor-gallery-Modular buildings");
                   return true;
               },
@@ -163,6 +172,9 @@ class GpuEditorPaletteSmokeTest {
                   assertNotNull(brush.findActor("editor-brush-terrain:rapids"), "Current");
                   assertTrue(root.findActor("editor-category-mark-ground-water").isVisible());
                   if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))) { return false; }
+                  // The Water brush keeps the Volcano card's theme but does not paint it: its card shows clear water.
+                  Color water = hexTop(root.findActor("editor-library-water/shallow"));
+                  assertTrue(water.b > water.r, "Clear blue water, not the volcano theme's: " + water);
                   GpuBoardTestUi.capture(new File(OUTPUT, "water-brush.png"));
                   search(root, "landing beacon");
                   return true;
@@ -220,6 +232,27 @@ class GpuEditorPaletteSmokeTest {
         return ((GpuTerrain) field.get(view)).busy();
     }
 
+    /** The mean colour on screen of a card preview's hex top: a small square in the middle of the card's upper part. */
+    private static Color hexTop(Actor card) {
+        Vector2 middle = GpuBoardTestUi.stage().stageToScreenCoordinates(
+              card.localToStageCoordinates(new Vector2(card.getWidth() / 2, card.getHeight() * .65f)));
+        float scale = Gdx.graphics.getBackBufferWidth() / (float) Gdx.graphics.getWidth();
+        int size = Math.round(card.getWidth() * .1f * scale);
+        Pixmap pixels = Pixmap.createFromFrameBuffer(Math.round(middle.x * scale) - size / 2,
+              Math.round(Gdx.graphics.getBackBufferHeight() - middle.y * scale) - size / 2, size, size);
+        try {
+            float r = 0, g = 0, b = 0;
+            Color pixel = new Color();
+            for (int x = 0; x < size; x++) {
+                for (int y = 0; y < size; y++) {
+                    Color.rgba8888ToColor(pixel, pixels.getPixel(x, y)); r += pixel.r; g += pixel.g; b += pixel.b;
+                }
+            }
+            float count = size * size;
+            return new Color(r / count, g / count, b / count, 1);
+        } finally { pixels.dispose(); }
+    }
+
     private static void search(Group root, String text) { ((TextField) root.findActor("editor-search")).setText(text); }
 
     private static void escape() {
@@ -228,7 +261,7 @@ class GpuEditorPaletteSmokeTest {
     }
 
     /** Opens an editor window of {@code width} x {@code height} on a pavement board and runs {@code steps} in order. */
-    private static void run(int width, int height, List<Step> steps) throws Exception {
+    static void run(int width, int height, List<Step> steps) throws Exception {
         var setup = new FutureTask<GpuMapSource>(() -> {
             var editor = new BoardEditorSession();
             Board board = Board.createEmptyBoard(12, 12);

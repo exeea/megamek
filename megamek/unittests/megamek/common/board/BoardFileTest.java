@@ -167,6 +167,31 @@ class BoardFileTest {
         assertTrue(loaded.isNativeFormat());
     }
 
+    /** A vegetation look's rotation is stored with it in 30-degree steps; no rotation (0) is not written. */
+    @Test void aLooksRotationRoundTripsInItsStepsOnVegetationOnly() throws Exception {
+        Board yard = Board.createEmptyBoard(1, 1);
+        Hex hex = new Hex(0, "woods:1;foliage_elev:2", "");
+        var turned = new HexAppearance("woods/container-yard/quay-crane", null, null, null, BoardDecoration.Colours.NONE, 240);
+        hex.setAppearance(Map.of("vegetation", turned));
+        yard.setHex(0, 0, hex);
+        String text = encode(yard);
+        assertTrue(text.contains("\"vegetation\":{\"variant\":\"woods/container-yard/quay-crane\",\"rotation\":240}"), text);
+        assertEquals(turned, BoardFile.readNative(text).getHex(0, 0).getAppearance().get("vegetation"));
+        assertEquals(turned, BoardFile.fromClipboard(BoardFile.clipboard(hex)).getAppearance().get("vegetation"));
+        var straight = new HexAppearance(turned.variant(), null, null, null, BoardDecoration.Colours.NONE, 0);
+        assertEquals(new HexAppearance(turned.variant(), null, null, null), straight, "0 is no rotation");
+        hex.setAppearance(Map.of("vegetation", straight));
+        assertFalse(encode(yard).contains("rotation"));
+        assertNull(BoardFile.readNative(text.replace("240", "0")).getHex(0, 0).getAppearance().get("vegetation").rotation());
+        for (String refused : new String[] { "45", "360", "-30", "60.5" }) {
+            assertThrows(java.io.IOException.class, () -> BoardFile.readNative(text.replace("240", refused)), refused);
+        }
+        assertThrows(java.io.IOException.class, () -> BoardFile.readNative(text.replace("\"vegetation\":", "\"rough\":")),
+              "Only a vegetation look turns");
+        assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, "asphalt", null, BoardDecoration.Colours.NONE, 60),
+              "A rotation turns a design");
+    }
+
     @Test void importKeepsLegacySelectorsAndNeverOverwritesTheOldFile() throws Exception {
         String legacy = "# Attribution\nsize 1 1\noption exit_roads_to_pavement false\n"
               + "description \"Old description\"\ntag \"Old tag\"\nnote 0101 \"Legacy note\"\n"

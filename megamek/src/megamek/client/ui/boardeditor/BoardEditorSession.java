@@ -112,7 +112,12 @@ public final class BoardEditorSession {
          * Removes every identical copy ({@link BoardDecoration#twin}) the issues list reports, keeping the first object
          * of each hex and its group. One undo step.
          */
-        REMOVE_COPIES
+        REMOVE_COPIES,
+        /**
+         * Turns the inspected hex's skin design ({@link BoardEditorBlueprint.Skin}, a container yard) of an owner (target)
+         * to a clockwise rotation (value, degrees, snapped to 30-degree steps). One undo step.
+         */
+        DESIGN_ROTATION
     }
     /** Text values are parsed and validated here, never by a view that also owns game state. */
     public record Command(Action action, String target, String value) {
@@ -667,6 +672,7 @@ public final class BoardEditorSession {
                     styles.put("ground", new HexAppearance(current.variant(), null, null, Double.parseDouble(command.value())));
                     hex.setAppearance(styles);
                 });
+                case DESIGN_ROTATION -> edit(hex -> rotate(hex, command.target(), command.value()));
                 case ASSET -> {
                     var design = blueprint.asset(command.value()); require(design != null, "Unknown object design");
                     paintTemplate = new Hex(0); sampledHex = null;
@@ -2575,10 +2581,27 @@ public final class BoardEditorSession {
                 styles.put(owner, new HexAppearance(current == null ? null : current.variant(),
                       null, variant.material(), null));
             } else {
-                styles.put(owner, new HexAppearance(variant.id(), null,
-                      current == null ? null : current.material(), variant.blend() ? .5 : null));
+                // Switching between skins keeps the look's rotation; any other design has none.
+                var was = current == null || current.variant() == null ? null : blueprint.variant(current.variant());
+                boolean skins = variant.skin() != null && was != null && was.skin() != null;
+                styles.put(owner, new HexAppearance(variant.id(), null, current == null ? null : current.material(),
+                      variant.blend() ? .5 : null, BoardDecoration.Colours.NONE, skins ? current.rotation() : null));
             }
         }
+        hex.setAppearance(styles);
+    }
+
+    /**
+     * Turns {@code hex}'s skin design of {@code owner} ({@link BoardEditorBlueprint.Skin}) to {@code degrees} clockwise,
+     * snapped to a 30-degree step: the Edit panel's and the Brush's Rotation row.
+     */
+    private void rotate(Hex hex, String owner, String degrees) {
+        HexAppearance current = hex.getAppearance().get(owner);
+        var variant = current == null || current.variant() == null ? null : blueprint.variant(current.variant());
+        require(variant != null && variant.skin() != null, Messages.getString("BoardEditor.skinFirst"));
+        int rotation = Math.floorMod((int) Math.round(Double.parseDouble(degrees) / 30) * 30, 360);
+        Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
+        styles.put(owner, new HexAppearance(current.variant(), null, null, null, BoardDecoration.Colours.NONE, rotation));
         hex.setAppearance(styles);
     }
 
@@ -2587,7 +2610,9 @@ public final class BoardEditorSession {
         var preset = definition.presets().stream().filter(p -> p.id().equals(key)).findFirst().orElse(null);
         var variant = blueprint.variant(key);
         require(preset != null || variant != null && variant.owner().equals(owner) || key.isEmpty(), "Unknown brush choice");
-        Hex next = new Hex(0, preset == null ? definition.defaults() : preset.terrain(), paintTemplate.getTheme());
+        // A skin card paints the cover its look shows (Scattered containers: foliage).
+        Hex next = new Hex(0, preset != null ? preset.terrain() : variant != null && variant.skin() != null
+              ? variant.skin().terrain() : definition.defaults(), paintTemplate.getTheme());
         if (variant != null) { setVariant(next, owner, key); }
         applyChoiceMaterials(next, definition);
         paintTemplate = next; sampledHex = null; brushComponent = owner; brushElevation = false; brushTheme = false;
@@ -2602,6 +2627,7 @@ public final class BoardEditorSession {
         if (target.startsWith("terrain:") && value.isEmpty()) { next.removeTerrain(Terrains.getType(target.substring(8))); }
         else if (target.startsWith("terrain:")) { setTerrain(next, target.substring(8), Integer.parseInt(value)); }
         else if (target.startsWith("variant:")) { setVariant(next, target.substring(8), value); }
+        else if (target.startsWith("rotation:")) { rotate(next, target.substring(9), value); }
         else if (target.startsWith("object:")) {
             require(!next.getDecorations().isEmpty(), Messages.getString("BoardEditor.chooseObjectBrush"));
             next.setDecorations(List.of(objectValue(next.getDecorations().getFirst(), target.substring(7), value)));

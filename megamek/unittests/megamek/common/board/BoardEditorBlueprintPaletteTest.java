@@ -121,6 +121,30 @@ class BoardEditorBlueprintPaletteTest {
         }
     }
 
+    /**
+     * The container yard (b12): one gallery of five looks, first in Industry > Seaport and third in Vegetation > Looks,
+     * beside the quay art and seven prop cards; the legacy seaport pieces leave the palette but keep their labels for old
+     * objects.
+     */
+    @Test
+    void theContainerYardIsOneGalleryInSeaportAndLooksBesideTheSeaportProps() {
+        var seaport = section("industry/seaport").cards();
+        assertEquals(List.of("Container yard", "Legacy quay art", "Container", "Quay crane", "Crane boom segment", "Yard gantry",
+              "Straddle carrier", "Reach stacker", "Yard truck"), seaport.stream().map(BoardEditorBlueprint.Card::label).toList());
+        var yard = seaport.getFirst();
+        assertTrue(yard.gallery());
+        assertEquals(5, yard.members().size());
+        assertTrue(yard.members().stream().allMatch(member -> member.variant().skin() != null && member.owner().equals("vegetation")));
+        assertEquals(yard, section("vegetation/looks").cards().get(2));
+        assertTrue(seaport.get(2).picker() && seaport.get(5).picker());
+        var old = BLUEPRINT.asset("scenery/seaport/containers-n-s-01");
+        assertTrue(old != null && old.sections().isEmpty() && old.family() == null, "Old objects keep their label off the palette");
+        // The Industry tile shows the gantry yard look turned across the view.
+        assertEquals(new HexAppearance("woods/container-yard/yard-gantry", null, null, null, BoardDecoration.Colours.NONE, 90),
+              BLUEPRINT.categories().stream().filter(c -> c.id().equals("industry")).findFirst().orElseThrow().icon()
+                    .getAppearance().get("vegetation"));
+    }
+
     @Test
     void theSealedDomeAndTankFarmLooksHaveAPieceForEveryWeightAndExits() {
         assertEquals("buildings/saxarba/bsealed_medium/bsealed_medium_12",

@@ -330,12 +330,15 @@ final class BoardFeatures {
     }
 
     /**
-     * The id prefix of the decals terrain-owned rows paint ({@link #features}) and of the buffer stops a rail owns
-     * ({@link #decorations}): no stored object has it.
+     * The id prefix of the decals terrain-owned rows paint ({@link #features}), of the buffer stops a rail owns and of a
+     * vegetation skin's rows ({@link #decorations}): no stored object has it.
      */
     private static final String TERRAIN_OWNED = "terrain:";
 
-    /** An object its terrain or its rail owns ({@link #features}, {@link #decorations}), which no hex stores: never selected. */
+    /**
+     * An object its terrain, its rail or its woods' skin owns ({@link #features}, {@link #decorations}), which no hex
+     * stores: never selected.
+     */
     static boolean terrainOwned(megamek.common.board.BoardDecoration object) { return object.id().startsWith(TERRAIN_OWNED); }
 
     /** Whether a placed tree of this species turns to its {@code -snow} form on snow. */
@@ -384,9 +387,10 @@ final class BoardFeatures {
     }
 
     /**
-     * The hex's objects as features, each rail's buffer stops after it ({@link RailRoute#stops} of its drawn sides): the
-     * rail owns them, so the hex never stores them, they come and go with its sides and are never picked as objects
-     * ({@link #terrainOwned}). They ride the rail ({@link RailRoute#ride}).
+     * The hex's objects as features, each rail's buffer stops after it ({@link RailRoute#stops} of its drawn sides), then
+     * the rows of its vegetation skin ({@link BoardSceneryLayouts#skin}, a container yard): the rail or the woods own
+     * them, so the hex never stores them, they come and go with the rail's sides or the woods' cover and are never picked
+     * as objects ({@link #terrainOwned}). The stops ride the rail ({@link RailRoute#ride}).
      */
     static List<BoardScene.Feature> decorations(Hex hex, Coords coords) {
         List<BoardScene.Feature> result = new ArrayList<>();
@@ -401,6 +405,12 @@ final class BoardFeatures {
                       RailRoute.BUFFER_STOP, null, object.x() + stop.x() / HexTile.WIDTH, object.y() + stop.y() / HexTile.HEIGHT,
                       stop.rotation(), false, 1, RailRoute.ride(object), 0, false)));
             }
+        }
+        var skin = BoardSceneryLayouts.skin(hex);
+        if (skin != null) {
+            int[] next = { 0 };
+            String prefix = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":skin#";
+            skin.decorations(coords, hex, () -> prefix + next[0]++, null, false).forEach(object -> result.add(feature(hex, object)));
         }
         return List.copyOf(result);
     }

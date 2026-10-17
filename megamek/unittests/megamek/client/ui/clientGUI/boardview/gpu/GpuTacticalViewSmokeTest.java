@@ -299,7 +299,7 @@ class GpuTacticalViewSmokeTest {
     }
 
     /** The view under test, created and presented on a hidden 1920 x 1080 window at one HUD unit per pixel. */
-    private interface Check {
+    interface Check {
         void run(GpuBattleView view) throws Exception;
     }
 
@@ -308,7 +308,7 @@ class GpuTacticalViewSmokeTest {
     }
 
     /** As {@link #run(GpuBoardFixture, AtomicReference, Check)} on a window of the given size. */
-    private static void run(GpuBoardFixture fixture, AtomicReference<Throwable> failure, int width, int height,
+    static void run(GpuBoardFixture fixture, AtomicReference<Throwable> failure, int width, int height,
           Check check) {
         var configuration = GpuBoardWindow.configuration(false);
         configuration.setWindowedMode(width, height);
@@ -335,7 +335,7 @@ class GpuTacticalViewSmokeTest {
         }, configuration);
     }
 
-    /** Woods, jungle, buildings, a fuel tank, industry, a bridged river, a cliff, a step, smoke and fire. */
+    /** Woods, a container yard, jungle, buildings, a fuel tank, industry, a bridged river, a cliff, a step, smoke and fire. */
     private static Board board() {
         Hex[] hexes = new Hex[WIDTH * HEIGHT];
         for (int y = 0; y < HEIGHT; y++) {
@@ -351,6 +351,9 @@ class GpuTacticalViewSmokeTest {
         forest(hexes, 2, 2, Terrains.WOODS, 1);
         forest(hexes, 6, 8, Terrains.WOODS, 2);
         forest(hexes, 10, 8, Terrains.JUNGLE, 2);
+        // A light container yard (b12): placed objects its woods own, which the Tactical View hides (verifyFluffHidden).
+        forest(hexes, 3, 0, Terrains.WOODS, 1);
+        hexes[3].setAppearance(Map.of("vegetation", new megamek.common.board.HexAppearance("woods/container-yard/rows", null, null, null)));
         building(hexes, BUILDING, 2, 2, 40);
         building(hexes, new Coords(6, 5), 1, 1, 15);
         building(hexes, new Coords(9, 2), 3, 3, 90);
@@ -584,7 +587,7 @@ class GpuTacticalViewSmokeTest {
         return point;
     }
 
-    private static void render(GpuBattleView view) {
+    static void render(GpuBattleView view) {
         for (int frame = 0; frame < 3; frame++) {
             view.render();
         }
@@ -594,7 +597,7 @@ class GpuTacticalViewSmokeTest {
      * Chooses the graphics on the Swing thread, as the menus do, and renders until the rebuild the choice starts behind
      * the loading stage commits.
      */
-    private static void graphics(GpuBattleView view, BoardGraphics graphics) throws Exception {
+    static void graphics(GpuBattleView view, BoardGraphics graphics) throws Exception {
         SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().setBoardGraphics(graphics));
         render(view);
         var terrain = (GpuTerrain) field(view, "terrain");

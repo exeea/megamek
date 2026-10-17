@@ -68,8 +68,9 @@ class BoardSceneryTest {
                 assertFalse(Files.exists(root.resolve(entry.name + ".glb")), "Compositions need no duplicate mesh");
             }
         }
-        // Batch 10: heli pads, elevator plates, cleared-rubble gravel, legacy rails and crossings, train stamps.
-        assertEquals(381, catalog.size);
+        // Batch 10: heli pads, elevator plates, cleared-rubble gravel, legacy rails and crossings, train stamps. Batch 12:
+        // the ten container yard compositions replace the 76 legacy yard and crane keys.
+        assertEquals(315, catalog.size);
         assertEquals(422, trees);
         assertTrue(picnicTables > 10, "The same picnic-table mesh is reused by picnic and courtyard layouts");
     }
@@ -222,10 +223,15 @@ class BoardSceneryTest {
     void compositePortArtReplacesVisualTreesButRetainsTheGamesWoodsTerrain() {
         var drawn = drawn("pavement:1;woods:1;fluff:80:1");
         assertEquals(1, drawn.hex().terrainLevel(Terrains.WOODS));
-        assertEquals(BoardTreeDistribution.NO_TREES, drawn.hex().getAppearance().get("vegetation").variant());
+        assertEquals("woods/container-yard/rows", drawn.hex().getAppearance().get("vegetation").variant());
+        assertTrue(BoardTreeDistribution.noTrees(drawn.hex()));
         assertFalse(drawn.tile().features().stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.TREE));
-        assertTrue(drawn.tile().features().stream().anyMatch(f -> f.decoration() != null
-              && f.decoration().asset().startsWith("scenery/seaport/")));
+        // The yard is the skin's rows, which the woods own: drawn as objects, never stored, never picked.
+        assertTrue(drawn.hex().getDecorations().isEmpty());
+        assertEquals(List.of("scenery/seaport/yard/light-rows", "scenery/seaport/yard/yard-truck"), drawn.tile().features().stream()
+              .filter(f -> f.decoration() != null).map(f -> f.decoration().asset()).toList());
+        assertTrue(drawn.tile().features().stream().filter(f -> f.decoration() != null)
+              .allMatch(f -> BoardFeatures.terrainOwned(f.decoration())));
         // The Tactical View's base tile follows the same design (b9-decisions T): no woods sprite under the yard, as the
         // old tileset's seaport super replaced it; plain woods keep theirs.
         assertEquals(drawn("pavement:1").tile().tileset(), drawn.tile().tileset());

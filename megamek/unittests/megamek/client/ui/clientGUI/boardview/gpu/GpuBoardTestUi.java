@@ -62,7 +62,8 @@ final class GpuBoardTestUi {
         } while (loading(view) || busy(view));
     }
 
-    private static boolean busy(GpuBattleView view) {
+    /** Whether the view's terrain still has work: a rebuild, a requested build, detail or materials. */
+    static boolean busy(GpuBattleView view) {
         GpuTerrain terrain = field(view, "terrain");
         return terrain != null && terrain.busy();
     }
