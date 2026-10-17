@@ -356,7 +356,9 @@ public final class BoardSceneryLayouts {
      * ground or its bridge's deck ({@link #railPlacement}); art without sides joins the rails beside it ({@link #railJoins})
      * or places nothing. On a legacy (not native) board only, converted maglevs a level up or beside a row of pillar art
      * stand on Pillars ({@link #maglevPillars}) and a rail bridge carries its rail across its span ({@link #carryRails}). A token
-     * that a hex design draws gets that design ({@link #design}). Every
+     * that a hex design draws gets that design ({@link #design}). A hex that already holds a twin of every object its art
+     * decodes to ({@link BoardDecoration#twin}: a token typed again in the editor) gets none of them. A legacy board's
+     * terrain aliases become their values first ({@link #aliases}). Every
      * bridge hex gets its type, decoded on the board as given ({@link #bridgeTypes}). Returns those issues. Thread-safe:
      * it changes only {@code board}.
      */
@@ -364,6 +366,7 @@ public final class BoardSceneryLayouts {
         boolean nativeBoard = board.isNativeFormat();
         List<Coords> scanned = hexes.stream().filter(board::contains).distinct()
               .sorted(Comparator.comparingInt(Coords::getY).thenComparingInt(Coords::getX)).toList();
+        if (!nativeBoard) { aliases(board, scanned); }
         // Resolve every hex first: a set piece names its centre, which may come later in the scan or have no piece.
         Map<Coords, TilesetScenery.Scenery> scenery = new LinkedHashMap<>();
         for (Coords coords : scanned) {
@@ -446,7 +449,16 @@ public final class BoardSceneryLayouts {
                 // Whether a decodable token was taken, even when its artwork leaves no object (pillar art on a bridge).
                 boolean decoded = false;
                 String prefix = "L" + x + "_" + y + "_";
+                // Ids and groups fresh in the hex: art typed again beside a moved piece of its first conversion takes the
+                // next free ones.
+                Set<String> used = new HashSet<>();
+                hex.getDecorations().forEach(object -> { used.add(object.id()); used.add(object.group()); });
                 int[] next = { 0 };
+                Supplier<String> ids = () -> {
+                    String id;
+                    do { id = prefix + next[0]++; } while (used.contains(id));
+                    return id;
+                };
                 int keys = 0;
                 boolean overWoods = false, pillared = false;
                 // A car park's rows stand beside the road along its lane (its own, or the lane the conversion gives it),
@@ -462,9 +474,10 @@ public final class BoardSceneryLayouts {
                     if (pillarRows.contains(coords) && LAYOUTS.get(model.key()).pillars()) { continue; }
                     // Every model key has rows: TilesetScenery counts only layouts.json keys as models.
                     Layout rows = LAYOUTS.get(model.key());
+                    while (used.contains(prefix + "g" + keys)) { keys++; }
                     String group = rows.pieces() > 1 ? prefix + "g" + keys : null;
                     keys++;
-                    added.addAll(rows.decorations(coords, hex, () -> prefix + next[0]++, group, road));
+                    added.addAll(rows.decorations(coords, hex, ids, group, road));
                     // Artwork drawn over woods replaced the woods' trees in the legacy render (seaport yards).
                     overWoods |= model.terrains().contains(Terrains.WOODS);
                 }
@@ -483,13 +496,14 @@ public final class BoardSceneryLayouts {
                     decoded = true;
                     var legacy = BoardDecalArt.legacy(decal.key());
                     if (legacy.set()) { continue; }
-                    var paint = new BoardDecoration(prefix + next[0]++, "decal", legacy.decal(), null, 0, 0, legacy.rotation(),
+                    var paint = new BoardDecoration(ids.get(), "decal", legacy.decal(), null, 0, 0, legacy.rotation(),
                           false, legacy.scale(), receiver(hex, true), 0, true);
                     added.add(legacy.colour() == null ? paint : paint.withColours(BoardDecoration.Colours.of(legacy.colour())));
                 }
+                int found = issues.size();
                 for (var set : sets.getOrDefault(coords, Map.of()).entrySet()) {
                     Coords centre = centreOf.getOrDefault(coords, coords);
-                    String id = prefix + next[0]++;
+                    String id = ids.get();
                     // One emblem over the centre and its six neighbours, unclipped, on the owner's support.
                     added.add(new BoardDecoration(id, "decal", set.getKey(), null, offsetX(coords, centre),
                           offsetY(coords, centre), 0, false, 1, receiver(hex, true), 0, false));
@@ -499,9 +513,15 @@ public final class BoardSceneryLayouts {
                     }
                 }
                 for (Piece piece : pieces.getOrDefault(coords, List.of())) {
-                    added.add(new BoardDecoration(prefix + next[0]++, "decal", piece.emblem(), null,
+                    added.add(new BoardDecoration(ids.get(), "decal", piece.emblem(), null,
                           offsetX(coords, piece.centre()), offsetY(coords, piece.centre()), 0, false, 1, receiver(hex, true),
                           0, true, 0, 0, piece.group()));
+                }
+                // All or nothing: art whose every piece the hex holds already (a token typed again) adds no hidden copies,
+                // nor the issues of its emblems again.
+                if (added.stream().allMatch(object -> hex.getDecorations().stream().anyMatch(object::twin))) {
+                    added.clear();
+                    issues.subList(found, issues.size()).clear();
                 }
                 if (added.isEmpty() && !decoded) { continue; }
                 added.stream().filter(object -> RailRoute.kind(object) == RailRoute.Kind.MAGLEV)
@@ -531,6 +551,27 @@ public final class BoardSceneryLayouts {
         typeBridges(board, bridges);
         board.setNativeFormat(true);
         return List.copyOf(issues);
+    }
+
+    /**
+     * A legacy board's terrain aliases, which the rules read only as present: pavement 4 (the old Runway, its corner
+     * designs with their typed exits included) is pavement 1, every pavement level from 5 up is the plaza, 3, and mud 2 is
+     * mud 1. Pavement's exits are derived again; mud keeps its own.
+     */
+    private static void aliases(Board board, List<Coords> hexes) {
+        Map<BoardLocation, Hex> fixed = new HashMap<>();
+        for (Coords at : hexes) {
+            Hex hex = board.getHex(at);
+            int pavement = hex.terrainLevel(Terrains.PAVEMENT);
+            Terrain mud = hex.getTerrain(Terrains.MUD);
+            boolean muddy = mud != null && mud.getLevel() == 2;
+            if (pavement < 4 && !muddy) { continue; }
+            Hex next = replacement(hex);
+            if (pavement >= 4) { next.addTerrain(new Terrain(Terrains.PAVEMENT, pavement == 4 ? 1 : 3)); }
+            if (muddy) { next.addTerrain(new Terrain(Terrains.MUD, 1, mud.hasExitsSpecified(), mud.getExits())); }
+            fixed.put(BoardLocation.of(at, board.getBoardId()), next);
+        }
+        if (!fixed.isEmpty()) { board.setHexes(fixed); }
     }
 
     /**
@@ -675,8 +716,8 @@ public final class BoardSceneryLayouts {
      * <ul>
      *     <li>a bridge span ({@link BridgeSpan#of}) with a built hex makes its other hexes built, since the decode is an
      *     OR over a span's hexes ({@link BridgeSpan#decode}); a hex with piers keeps them, one without gets none;</li>
-     *     <li>set emblems that coincide (the same emblem at the same world centre, turn, mirror and scale: each half of a
-     *     set cut by a seam placed the full emblem on the set's centre) become one, the first in scan order.</li>
+     *     <li>set emblems that are twins at their world centre on one support ({@link BoardDecoration#twin}: each half
+     *     of a set cut by a seam placed the full emblem on the set's centre) become one, the first in scan order.</li>
      * </ul>
      * Halves on a flipped sheet do not coincide and stay as they are.
      */
@@ -703,8 +744,9 @@ public final class BoardSceneryLayouts {
             }
         }
         if (!built.isEmpty()) { board.setHexes(built); }
-        // Each emblem kept so far: its object and its world centre, in hex widths and heights.
-        List<Map.Entry<BoardDecoration, double[]>> emblems = new ArrayList<>();
+        // Each emblem kept so far, at its world centre in hex widths and heights, on one support: the halves of a set take
+        // their owner hex's support, and two owner hexes may differ (a roof against the ground).
+        List<BoardDecoration> emblems = new ArrayList<>();
         Map<BoardLocation, Hex> merged = new HashMap<>();
         for (int y = 0; y < board.getHeight(); y++) {
             for (int x = 0; x < board.getWidth(); x++) {
@@ -714,12 +756,10 @@ public final class BoardSceneryLayouts {
                     if (!object.kind().equals("decal") || object.clipToHex() || !BoardDecalArt.setEmblem(object.asset())) {
                         return true;
                     }
-                    double[] centre = { HexTile.centerX(at, 1) + object.x(), HexTile.centerY(at, 1) + object.y() };
-                    boolean twin = emblems.stream().anyMatch(other -> other.getKey().asset().equals(object.asset())
-                          && other.getKey().rotation() == object.rotation() && other.getKey().scale() == object.scale()
-                          && other.getKey().mirror() == object.mirror() && Math.abs(other.getValue()[0] - centre[0]) < 1e-3
-                          && Math.abs(other.getValue()[1] - centre[1]) < 1e-3);
-                    if (!twin) { emblems.add(Map.entry(object, centre)); }
+                    var world = object.transform(HexTile.centerX(at, 1) + object.x(), HexTile.centerY(at, 1) + object.y(),
+                          object.rotation(), object.mirror(), object.scale(), BoardDecoration.Placement.ground());
+                    boolean twin = emblems.stream().anyMatch(world::twin);
+                    if (!twin) { emblems.add(world); }
                     return !twin;
                 }).toList();
                 if (kept.size() < hex.getDecorations().size()) {

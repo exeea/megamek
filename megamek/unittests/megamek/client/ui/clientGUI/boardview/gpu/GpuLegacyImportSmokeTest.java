@@ -576,12 +576,12 @@ class GpuLegacyImportSmokeTest {
             for (int frame = 0; frame < 30 || terrain.busy(); frame++) { view.render(); }
             GpuBoardTestUi.capture(new File(OUTPUT, "legacy-import-piers-side.png"));
 
-            // The reduced palette: one entry per real object or stamp; seaport pieces and one animal per species.
+            // The reduced palette: one entry per real object or stamp; seaport pieces and one animal card per species.
             var root = GpuBoardTestUi.stage().getRoot();
-            GpuBoardTestUi.click("editor-category");
-            assertNotNull(root.findActor("editor-library-Seaport"));
-            assertNotNull(root.findActor("editor-library-Animals"));
-            GpuBoardTestUi.click("editor-library-Parks and furniture"); settle(view, source);
+            GpuBoardTestUi.category("industry"); settle(view, source);
+            assertNotNull(root.findActor("editor-section-industry/seaport"));
+            GpuBoardTestUi.category("parks"); settle(view, source);
+            assertNotNull(root.findActor("editor-section-parks/animals"));
             assertNull(BoardEditorBlueprint.get().asset("scenery/saxarba/SMV_Fluff/FluffSystem-07-Garden-02-Table-1-03"),
                   "No baked picnic-table composite");
             var search = (com.badlogic.gdx.scenes.scene2d.ui.TextField) root.findActor("editor-search");
@@ -596,9 +596,11 @@ class GpuLegacyImportSmokeTest {
             for (int frame = 0; frame < 60; frame++) { view.render(); }
             GpuBoardTestUi.capture(new File(OUTPUT, "legacy-import-palette.png"));
 
-            // Structures · Bridge: a "Bridge" (built), a "Natural bridge" and a "Truss bridge" card, each with its own sample;
-            // no plain preset.
-            GpuBoardTestUi.category("bridge"); settle(view, source);
+            // Transportation · Bridges: a "Bridge" (built), a "Natural bridge" and a "Truss bridge" card, each with its own
+            // sample; no plain preset.
+            GpuBoardTestUi.category("transportation"); settle(view, source);
+            search.setText("bridge");
+            settle(view, source);
             assertNull(root.findActor("editor-library-bridge/default"), "The single Bridge preset is gone");
             List<com.badlogic.gdx.scenes.scene2d.ui.Image> samples = new ArrayList<>();
             for (String key : List.of("bridge/built", "bridge/natural", "bridge/truss")) {

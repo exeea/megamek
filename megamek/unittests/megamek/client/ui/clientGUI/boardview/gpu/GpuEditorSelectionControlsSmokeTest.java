@@ -116,7 +116,7 @@ class GpuEditorSelectionControlsSmokeTest {
                                       "The inspector starts hidden without a selection");
                                 assertNull(GpuBoardTestUi.stage().getRoot().findActor("editor-section-panel"),
                                       "At 1280x800 the board area is too narrow for both corner panels: the side view starts collapsed");
-                                GpuBoardTestUi.category("Vehicles");
+                                GpuBoardTestUi.category("transportation");
                                 source.editorPointer(owner, 0, 0, false, source.takeFrame().boardGeneration()); source.endEditorStroke();
                             }
                             case 1 -> {

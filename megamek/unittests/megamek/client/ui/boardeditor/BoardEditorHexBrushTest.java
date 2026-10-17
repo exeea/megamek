@@ -122,6 +122,8 @@ class BoardEditorHexBrushTest {
         select(session, source); send(session, Action.SAMPLE, "", "");
         send(session, Action.ASSET, "", "scenery/vehicles/car");
         assertNull(session.snapshot().activeBrush().sampledHex());
+        // Turned, so it is no twin of the stamped car on the hex centre.
+        send(session, Action.BRUSH_VALUE, "object:rotation", "45");
         session.pointer(first, 0, 0, false); session.finishStroke();
         assertEquals(2, session.board().getHex(first).getDecorations().size());
         select(session, source); send(session, Action.SAMPLE, "", "");

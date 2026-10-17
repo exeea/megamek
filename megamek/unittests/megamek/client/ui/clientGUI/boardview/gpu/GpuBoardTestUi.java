@@ -160,10 +160,35 @@ final class GpuBoardTestUi {
         clickActor(stage().getRoot().findActor(name));
     }
 
-    /** Chooses an editor library category: opens the Assets drop-down and clicks the category's item in its list. */
+    /**
+     * Opens an Assets palette category: its tile on the start page (cleared of a search first), else the item of the
+     * category name's drop-down on a category page.
+     */
     static void category(String id) {
+        Group root = stage().getRoot();
+        if (!shown(root.findActor("editor-category-" + id)) && root.findActor("editor-category") == null) {
+            ((com.badlogic.gdx.scenes.scene2d.ui.TextField) root.findActor("editor-search")).setText("");
+        }
+        if (shown(root.findActor("editor-category-" + id))) { click("editor-category-" + id); return; }
         click("editor-category");
-        click("editor-library-" + id);
+        click("editor-category-item-" + id);
+    }
+
+    /**
+     * Scrolls the scroll pane holding the actor named {@code name}, such as a palette section's header, until the actor
+     * stands at its top; the grid creates the cards that come into view on the next frame.
+     */
+    static void reveal(String name) {
+        Actor actor = stage().getRoot().findActor(name);
+        assertTrue(actor != null, "Missing " + name);
+        for (Actor parent = actor.getParent(); parent != null; parent = parent.getParent()) {
+            if (parent instanceof ScrollPane scroll) {
+                Vector2 position = actor.localToAscendantCoordinates(scroll.getWidget(), new Vector2());
+                scroll.setScrollY(scroll.getWidget().getHeight() - position.y - actor.getHeight());
+                scroll.updateVisualScroll();
+                return;
+            }
+        }
     }
 
     /** Whether the actor is on a stage and shown: it and every group above it are visible. */

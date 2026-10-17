@@ -117,6 +117,23 @@ class BoardSceneryLayoutsTest {
     }
 
     @Test
+    void joinedSheetsKeepOneEmblemOfASetCutBetweenARoofAndTheGround() {
+        // Each sheet's half placed the full emblem on the set's centre, on its owner hex's support.
+        Board board = Board.createEmptyBoard(2, 1);
+        Coords ground = new Coords(0, 0), roof = new Coords(1, 0);
+        put(board, roof, "building:2;bldg_elev:2;bldg_cf:50");
+        String emblem = "decal/emblems/red-cross";
+        board.getHex(ground).setDecorations(List.of(new BoardDecoration("a", "decal", emblem, null, 0, 0, 0, false, 1,
+              BoardSceneryLayouts.receiver(board.getHex(ground), true), 0, false)));
+        board.getHex(roof).setDecorations(List.of(new BoardDecoration("b", "decal", emblem, null,
+              HexTile.centerX(ground, 1) - HexTile.centerX(roof, 1), HexTile.centerY(ground, 1) - HexTile.centerY(roof, 1), 0,
+              false, 1, BoardSceneryLayouts.receiver(board.getHex(roof), true), 0, false)));
+        BoardSceneryLayouts.joinSheets(board);
+        assertEquals(List.of("a"), List.of(board.getHex(ground), board.getHex(roof)).stream()
+              .flatMap(hex -> hex.getDecorations().stream()).map(BoardDecoration::id).toList());
+    }
+
+    @Test
     void theHexSetFormDecodesTheGivenHexesOfAConvertedBoard() {
         Board board = fixture();
         board.setNativeFormat(true);
@@ -128,6 +145,39 @@ class BoardSceneryLayoutsTest {
         assertTrue(board.getHex(SECOND_PICNIC).containsTerrain(Terrains.FLUFF), "The token stays");
         assertTrue(board.getHex(PICNIC).getDecorations().isEmpty(), "Other hexes are left alone");
         assertEquals(HexAppearance.NATURAL_BRIDGE, board.getHex(PLAIN_BRIDGE).getAppearance().get("bridge"));
+    }
+
+    /**
+     * A legacy board's aliases become the values they draw as: pavement 4 (here a runway corner design with typed exits)
+     * plain pavement with its exits derived again, a stray pavement level the plaza, mud 2 mud 1 keeping its exits. A
+     * native board is taken as it is.
+     */
+    @Test
+    void aLegacyBoardsPavementAndMudAliasesBecomeTheirValues() {
+        Coords runway = new Coords(0, 0), apron = new Coords(1, 0), slip = new Coords(3, 0), mud = new Coords(5, 0);
+        for (boolean nativeBoard : new boolean[] { false, true }) {
+            Board board = Board.createEmptyBoard(7, 3);
+            put(board, runway, "pavement:4:65");
+            put(board, apron, "pavement:1");
+            put(board, slip, "pavement:30");
+            put(board, mud, "mud:2:5");
+            board.setNativeFormat(nativeBoard);
+            BoardSceneryLayouts.convert(board, List.of(runway, apron, slip, mud));
+            Terrain pavement = board.getHex(runway).getTerrain(Terrains.PAVEMENT), muddy = board.getHex(mud).getTerrain(Terrains.MUD);
+            if (nativeBoard) {
+                assertEquals("pavement:4:65", pavement.toString(), "A .board2 is taken as it is");
+                assertEquals(30, board.getHex(slip).terrainLevel(Terrains.PAVEMENT));
+                assertEquals(2, muddy.getLevel());
+                continue;
+            }
+            assertEquals(1, pavement.getLevel());
+            assertFalse(pavement.hasExitsSpecified());
+            assertEquals(1 << runway.direction(apron), pavement.getExits(), "Its exits are derived: towards the apron");
+            assertEquals(3, board.getHex(slip).terrainLevel(Terrains.PAVEMENT));
+            assertEquals(1, muddy.getLevel());
+            assertTrue(muddy.hasExitsSpecified());
+            assertEquals(5, muddy.getExits());
+        }
     }
 
     /**

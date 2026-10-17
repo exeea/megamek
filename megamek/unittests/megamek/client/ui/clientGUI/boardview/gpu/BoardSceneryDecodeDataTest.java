@@ -112,32 +112,34 @@ class BoardSceneryDecodeDataTest {
                 assertTrue(model.isFile(), asset.id() + " places " + asset.model());
                 assertTrue(asset.colours().slots().size() <= RigidGlb.colourSlots(model).size(), asset.id());
             }
-            if (asset.palette() && asset.kind().equals("prop")) { visible.merge(asset.group(), 1, Integer::sum); }
+            if (!asset.sections().isEmpty() && asset.kind().equals("prop")) { visible.merge(category(asset), 1, Integer::sum); }
             if (asset.kind().equals("decal")) {
                 assertTrue(BoardDecalArt.image(asset.id()).isFile() && decals.get("decals").has(asset.id()), asset.id());
-                if (asset.palette()) { visibleDecals.merge(asset.group(), 1, Integer::sum); }
+                if (!asset.sections().isEmpty()) { visibleDecals.merge(category(asset), 1, Integer::sum); }
             }
         }
-        // One real object or one stamp per entry; colour, rotation and decode-only variants stay out of the palette, and so
-        // do the -snow trees (a tree takes its winter form on snow). Turned crane tips and the narrow glass roof are rows.
-        // Batch 10: the landing light (Airfield), the rail route and crossing signal (Transport), the rail and maglev
-        // rolling stock and train stamps (Maglev and wagons).
-        assertEquals(new TreeMap<>(Map.ofEntries(Map.entry("Airfield", 1), Map.entry("Alien plants", 27),
-              Map.entry("Animals", 5), Map.entry("Construction and details", 16), Map.entry("Maglev and wagons", 28),
-              Map.entry("Military", 3), Map.entry("Parks and furniture", 16), Map.entry("Rocks and debris", 4),
-              Map.entry("Seaport", 78), Map.entry("Sport and pools", 5), Map.entry("Transport", 4),
-              Map.entry("Trees and plants", 38), Map.entry("Vehicles", 1))), visible);
-        // Layers type icons name components by id and objects by palette group label: a renamed group loses its icon.
+        // One real object or one stamp per entry, counted by the category of its first palette section; colour, rotation
+        // and decode-only variants stay out of the palette, and so do the -snow trees (a tree takes its winter form on
+        // snow). Turned crane tips and the narrow glass roof are rows. Industry holds the 78 seaport pieces, Parks the
+        // 12 animal poses, Transportation the routes, rolling stock and train stamps.
+        assertEquals(Map.of("buildings", 7, "industry", 85, "parks", 29, "transportation", 39, "vegetation", 73), visible);
+        // Layers type icons name components by id and objects by palette section or category: a renamed one loses its icon.
         var icons = GpuBoardEditor.class.getDeclaredField("LAYER_ICONS");
         icons.setAccessible(true);
         for (Object key : ((Map<?, ?>) icons.get(null)).keySet()) {
-            assertTrue(visible.containsKey(key) || blueprint.components().stream().anyMatch(c -> c.id().equals(key)),
-                  "Layers icon key " + key + " is a component id or a palette group");
+            assertTrue(blueprint.components().stream().anyMatch(c -> c.id().equals(key))
+                  || blueprint.categories().stream().anyMatch(c -> c.id().equals(key)
+                        || c.sections().stream().anyMatch(section -> section.path().equals(key))),
+                  "Layers icon key " + key + " is a component id, a palette category or a section path");
         }
-        // One full image per emblem, the 8 standard car parks and the rubble path; emblem pieces are decode-only. Batch 10:
-        // runway markings and landing pads (Airfield), letters and digits, courts, the level crossing; elevator plates and
-        // cleared-rubble gravel belong to their rule terrain and have no palette entry.
-        assertEquals(Map.of("Airfield", 39, "Lettering", 36, "Emblems", 13, "Ground details", 16, "Sport and pools", 4,
-              "Transport", 1, "Damage and debris", 7, "Industrial markings", 8, "Spaceport markings", 4), visibleDecals);
+        // One full image per emblem, the standard car parks, runway markings, landing pads, letters and digits, courts,
+        // the level crossing and the damage decals; emblem pieces are decode-only, elevator plates and cleared-rubble
+        // gravel belong to their rule terrain. A decal with a purpose counts in its purpose category (it is under Decals too).
+        assertEquals(Map.of("decals", 56, "industry", 8, "parks", 4, "transportation", 60), visibleDecals);
+    }
+
+    /** The category of the asset's first palette section. */
+    private static String category(BoardEditorBlueprint.Asset asset) {
+        return BoardEditorBlueprint.categoryOf(asset.sections().getFirst());
     }
 }

@@ -106,7 +106,7 @@ class GpuEditorDecalLatencySmokeTest {
                         GpuTerrain terrain = terrain();
                         if (GpuBoardTestUi.loading(this) || terrain.busy()) { return; }
                         if (warmUntil == 0) {
-                            GpuBoardTestUi.category("Damage and debris");
+                            GpuBoardTestUi.category("decals");
                             boardCamera.zoom(.45f); warmUntil = frames() + 90; return;
                         }
                         if (frames() < warmUntil) { return; }

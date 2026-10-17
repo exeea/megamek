@@ -355,7 +355,7 @@ final class GpuMapHud implements GpuBoardHud {
         // Bare tool keys win inside the editor only; a map preview keeps Z for its overview.
         if (editor != null && modifiers == 0 && editor.toolKey(key)) { return true; }
         if (state.dialog == Dialog.NONE) {
-            return key == Input.Keys.ESCAPE && losPanel.cancel();
+            return key == Input.Keys.ESCAPE && (losPanel.cancel() || editor != null && editor.escapeAssets());
         }
         if (key == Input.Keys.ESCAPE) {
             state.dialog = Dialog.NONE;

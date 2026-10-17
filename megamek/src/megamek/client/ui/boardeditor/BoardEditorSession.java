@@ -107,7 +107,12 @@ public final class BoardEditorSession {
         /** Saves the board as a PNG image of its 2D tileset art, as the old editor's Save As Image did. */
         SAVE_IMAGE,
         /** Opens the document's saved file in the system's program for it (the old Open Board Source File). */
-        SOURCE_FILE
+        SOURCE_FILE,
+        /**
+         * Removes every identical copy ({@link BoardDecoration#twin}) the issues list reports, keeping the first object
+         * of each hex and its group. One undo step.
+         */
+        REMOVE_COPIES
     }
     /** Text values are parsed and validated here, never by a view that also owns game state. */
     public record Command(Action action, String target, String value) {
@@ -149,14 +154,16 @@ public final class BoardEditorSession {
      * selected hex's heights, bottom to top. {@code tags} are the board's tags, sorted, and {@code roadsAutoExit} its
      * "exit roads to pavement" option; {@code boardComponents} are the blueprint components that the whole-board Remove
      * offers, those some hex holds ({@link #boardComponents()}). {@code drawsRoutes}: a Paint drag with the active brush
-     * draws a route by hand, built on its release ({@link #pointer}).
+     * draws a route by hand, built on its release ({@link #pointer}). {@code copies}: the identical copies the issues
+     * list reports, which {@link Action#REMOVE_COPIES} removes.
      */
     public record Snapshot(long revision, String title, boolean dirty, boolean canUndo, boolean canRedo,
           Tool tool, String component, String asset, int brush, Coords selected, int elevation, String theme,
           List<Property> properties, Map<String, HexAppearance> appearance, List<BoardDecoration> objects,
           String object, String message, int width, int height, Brush activeBrush, List<Selection> selection,
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<BoardIssue> issues,
-          List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents, boolean drawsRoutes) {
+          List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents, boolean drawsRoutes,
+          int copies) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
         public boolean arena() { return tags.contains(BoardClassifier.ARENA_TAG); }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -325,6 +332,8 @@ public final class BoardEditorSession {
     private Map<Selection, BoardDecoration> groupBase = Map.of();
     /** Problems per hex, re-validated for the hexes of every committed edit, undo and redo; never during a stroke. */
     private final Map<Coords, List<BoardIssue>> issues = new java.util.HashMap<>();
+    /** The identical copies ({@link #stacks}) per hex that holds any, validated with {@link #issues}. */
+    private final Map<Coords, Integer> copies = new java.util.HashMap<>();
     private List<BoardIssue> issueList = List.of();
     /**
      * What the document's conversions (at open and at each edit's commit) could not decode exactly; each stays listed
@@ -384,7 +393,8 @@ public final class BoardEditorSession {
               properties(hex), hex == null ? Map.of() : hex.getAppearance(), hex == null ? List.of() : contentsOrder(hex),
               selectedObject, message, board().getWidth(), board().getHeight(), active, List.copyOf(selection), movePreview(),
               selectionGroups(), groupSizes(hex), issueList, levels(hex), board().getTags().stream().sorted().toList(),
-              board().getRoadsAutoExit(), boardComponents(), drawsRoutes());
+              board().getRoadsAutoExit(), boardComponents(), drawsRoutes(),
+              copies.values().stream().mapToInt(Integer::intValue).sum());
     }
 
     /**
@@ -458,6 +468,16 @@ public final class BoardEditorSession {
         hex.getDecorations().stream().map(BoardDecoration::group).filter(java.util.Objects::nonNull)
               .forEach(group -> sizes.put(group, index.getOrDefault(group, List.of()).size()));
         return Map.copyOf(sizes);
+    }
+
+    /**
+     * A hex stamp of {@code hex} named {@code key}, as Use as brush makes one with level and theme: the Assets panel's
+     * category icons render through it.
+     */
+    public static Brush hexStamp(String key, Hex hex) {
+        return new Brush(key, key, "ground", hex.getLevel(), hex.getTheme() == null ? "" : hex.getTheme(), properties(hex),
+              hex.getAppearance(), hex.getDecorations(), new Coords(0, 0), true, true, false, false, LevelSculpt.Mode.RAISE,
+              true, false);
     }
 
     private static List<Property> properties(Hex hex) {
@@ -765,6 +785,7 @@ public final class BoardEditorSession {
                 case SAVE, SAVE_AS -> chooseSave(owner, command.action() == Action.SAVE_AS);
                 case SAVE_IMAGE -> chooseSaveImage(owner);
                 case SOURCE_FILE -> openSourceFile();
+                case REMOVE_COPIES -> removeCopies();
                 case NEW -> {
                     String[] size = command.value().split("[,x ]+");
                     require(size.length == 2, Messages.getString("BoardEditor.newSizeFormat"));
@@ -1228,33 +1249,58 @@ public final class BoardEditorSession {
                               .filter(d -> !d.asset().equals(prototype.asset())).toList())); }
                     }
                 } else if (!placed) {
-                    selected = at;
                     BoardDecoration object = brushCopy(prototype, precision ? x : 0, precision ? y : 0, onSupport(board().getHex(at), receiver, prototype));
                     if (precision && magnetic) { object = BoardEditorSnapping.snap(board(), blueprint, at, object, Set.of()); }
                     object = ride(at, object);
-                    addObject(at, object); placed = true;
+                    Selection twin = addObject(at, object);
+                    // One object per press. A click where its twin stands selects that instead; a drag skips it silently.
+                    if (twin == null || !drag) { placed = true; }
+                    if (twin != null && !drag) { notice = selectPlaced(List.of(twin)); }
                 }
             } else if (stampLayout() != null) {
                 require(tool == Tool.PAINT, Messages.getString("BoardEditor.stampGroup"));
                 if (!placed) {
-                    List<Selection> members = new ArrayList<>();
                     var stamped = BoardSceneryLayouts.stamp(stampLayout(), board().getHex(at), at);
                     var riding = ride(at, stamped);
-                    // A train on a track places only the vehicles that fit; the notice says how many.
-                    long vehicles = stamped.stream().filter(member -> RailRoute.vehicle(member.asset())).count();
-                    long fitting = riding.stream().filter(member -> RailRoute.vehicle(member.getValue().asset())).count();
-                    if (fitting < vehicles) { notice = Messages.getString("BoardEditor.vehiclesPlaced", fitting, vehicles); }
-                    // Each member belongs to the stamp's hex, a vehicle that rides a route to the hex of the track it stands on.
-                    for (var member : riding) {
-                        change(member.getKey(), hex -> { var objects = new ArrayList<>(hex.getDecorations()); objects.add(member.getValue()); hex.setDecorations(objects); });
-                        members.add(new Selection(member.getKey(), member.getValue().id()));
+                    // All or nothing: a stamp whose every member has its twin in its hex is there already; a click selects
+                    // those twins, a drag skips them silently. Any other stamp is placed whole.
+                    var twins = riding.stream().map(member -> twin(member.getKey(), member.getValue())).toList();
+                    if (!twins.isEmpty() && twins.stream().allMatch(Objects::nonNull)) {
+                        if (!drag) { notice = selectPlaced(twins); placed = true; }
+                    } else {
+                        List<Selection> members = new ArrayList<>();
+                        // A train on a track places only the vehicles that fit; the notice says how many.
+                        long vehicles = stamped.stream().filter(member -> RailRoute.vehicle(member.asset())).count();
+                        long fitting = riding.stream().filter(member -> RailRoute.vehicle(member.getValue().asset())).count();
+                        if (fitting < vehicles) { notice = Messages.getString("BoardEditor.vehiclesPlaced", fitting, vehicles); }
+                        // Each member belongs to the stamp's hex, a vehicle that rides a route to the hex of the track it stands on.
+                        for (var member : riding) {
+                            change(member.getKey(), hex -> { var objects = new ArrayList<>(hex.getDecorations()); objects.add(member.getValue()); hex.setDecorations(objects); });
+                            members.add(new Selection(member.getKey(), member.getValue().id()));
+                        }
+                        selected = members.isEmpty() ? at : members.getFirst().coords();
+                        selectedObject = members.isEmpty() ? "" : members.getFirst().object(); placed = true;
+                        // The new stamp is selected as its whole group, so a later Select click and drag moves all of it.
+                        selection.clear();
+                        if (members.isEmpty()) { selection.add(new Selection(at, "")); }
+                        selection.addAll(members);
                     }
-                    selected = members.isEmpty() ? at : members.getFirst().coords();
-                    selectedObject = members.isEmpty() ? "" : members.getFirst().object(); placed = true;
-                    // The new stamp is selected as its whole group, so a later Select click and drag moves all of it.
-                    selection.clear();
-                    if (members.isEmpty()) { selection.add(new Selection(at, "")); }
-                    selection.addAll(members);
+                }
+            } else if (tool == Tool.PAINT && !brushHexes().isEmpty()) {
+                // A multi-hex blueprint (the DropShip), once per press: the clicked hex and its six neighbours each get the
+                // component's fields of their terrain, without its design; they keep their level, theme, ground and objects.
+                if (!placed) {
+                    placed = true; selected = at; selectedObject = ""; component = brushComponent;
+                    var definition = blueprint.component(brushComponent);
+                    Map<Coords, Hex> targets = new LinkedHashMap<>();
+                    targets.put(at, paintTemplate);
+                    brushHexes().forEach((direction, terrain) -> targets.put(at.translated(direction), new Hex(0, terrain, "")));
+                    require(targets.keySet().stream().allMatch(board()::contains), Messages.getString("BoardEditor.blueprintOffBoard"));
+                    targets.forEach((spot, template) -> change(spot, hex -> {
+                        paintFields(hex, template, definition);
+                        var styles = new LinkedHashMap<>(hex.getAppearance()); styles.remove(brushComponent); hex.setAppearance(styles);
+                    }));
+                    selection.clear(); selection.add(new Selection(at, ""));
                 }
             } else {
                 selected = at; selectedObject = ""; component = brushComponent;
@@ -1264,15 +1310,7 @@ public final class BoardEditorSession {
                     if (!painted.add(spot)) { continue; }
                     spots.add(spot);
                     change(spot, hex -> {
-                        for (var field : definition.fields()) {
-                            int type = Terrains.getType(field.terrain());
-                            Terrain value = paintTemplate.getTerrain(type);
-                            if (!definition.replaceExisting() && value == null) { continue; }
-                            // The Deployment zone card adds its zone, and Erase removes it; the hex keeps its other zones.
-                            if (type == Terrains.DEPLOYMENT_ZONE && value != null) { zones(hex, value.getExits(), tool != Tool.ERASE); }
-                            else if (tool == Tool.ERASE || value == null) { hex.removeTerrain(type); }
-                            else { hex.addTerrain(new Terrain(value)); }
-                        }
+                        paintFields(hex, paintTemplate, definition);
                         var styles = new LinkedHashMap<>(hex.getAppearance());
                         if (tool != Tool.ERASE && paintTemplate.getAppearance().containsKey(brushComponent)) {
                             // A Built or Truss bridge card keeps the hex's piers.
@@ -1299,8 +1337,8 @@ public final class BoardEditorSession {
                     }
                 }
             }
-            // A stamp keeps the whole group it selected above.
-            if (tool != Tool.SELECT && (tool == Tool.SCULPT || stampLayout() == null)) {
+            // What a press placed or found placed stays selected for its stroke: an object, a stamp's or a twin's group.
+            if (tool != Tool.SELECT && !placed) {
                 selection.clear();
                 if (selected != null) { selection.add(new Selection(selected, selectedObject)); }
             }
@@ -1769,19 +1807,44 @@ public final class BoardEditorSession {
         return prototype.duplicate().transform(x, y, prototype.rotation(), prototype.mirror(), prototype.scale(), placement);
     }
 
-    /** Adds a new object to the hex its anchor lies in, seen from {@code owner}, and makes it the selected object. */
-    private void addObject(Coords owner, BoardDecoration object) {
+    /**
+     * Adds a new object to the hex its anchor lies in, seen from {@code owner}, and makes it the selection; unless that hex
+     * holds its twin ({@link #twin}), a hidden copy: then it adds nothing and returns the twin.
+     */
+    private Selection addObject(Coords owner, BoardDecoration object) {
         var destination = positioned(owner, object);
-        selected = destination.getKey().coords();
+        Coords at = destination.getKey().coords();
         BoardDecoration placedObject = destination.getValue();
+        Selection twin = twin(at, placedObject);
+        if (twin != null) { return twin; }
+        selected = at;
         change(selected, hex -> { var objects = new ArrayList<>(hex.getDecorations()); objects.add(placedObject); hex.setDecorations(objects); });
         selectedObject = object.id();
+        selection.clear(); selection.add(new Selection(selected, selectedObject));
+        return null;
+    }
+
+    /** The object of the hex at {@code at} that {@code object} would be a twin of ({@link BoardDecoration#twin}), or null. */
+    private Selection twin(Coords at, BoardDecoration object) {
+        return board().getHex(at).getDecorations().stream().filter(object::twin).findFirst()
+              .map(found -> new Selection(at, found.id())).orElse(null);
+    }
+
+    /**
+     * Selects {@code twins}, the objects a placement found already placed, with their groups, as a Select click would;
+     * the tool stays. Returns the notice that says so.
+     */
+    private String selectPlaced(List<Selection> twins) {
+        selection.clear();
+        twins.forEach(twin -> selection.addAll(expand(twin)));
+        selected = twins.getFirst().coords(); selectedObject = twins.getFirst().object();
+        return Messages.getString("BoardEditor.alreadyPlaced");
     }
 
     /**
      * Puts a copy of the armed object brush at {@code value} "x,y,level" of the inspected hex (x and y in hex widths and
      * heights): on {@code receiver}'s surface, or at the fixed level when {@code receiver} is empty. One undo step; the
-     * new object becomes the selection.
+     * new object becomes the selection. Where its twin stands it adds nothing and selects the twin with its group.
      */
     private void place(String receiver, String value) {
         require(selected != null, Messages.getString("BoardEditor.selectHexFirst"));
@@ -1799,8 +1862,8 @@ public final class BoardEditorSession {
             require(supports(hex, receiver), Messages.getString("BoardEditor.nothingToPlaceOn"));
             placement = onSupport(hex, receiver, prototype);
         }
-        addObject(selected, brushCopy(prototype, Double.parseDouble(spot[0]), Double.parseDouble(spot[1]), placement));
-        selection.clear(); selection.add(new Selection(selected, selectedObject));
+        Selection twin = addObject(selected, brushCopy(prototype, Double.parseDouble(spot[0]), Double.parseDouble(spot[1]), placement));
+        if (twin != null) { message = selectPlaced(List.of(twin)); }
         finishStroke();
     }
 
@@ -2286,7 +2349,7 @@ public final class BoardEditorSession {
 
     /** Re-validates every hex, as after loading or creating a document. */
     void validateAll() {
-        issues.clear();
+        issues.clear(); copies.clear();
         List<Coords> cells = new ArrayList<>(board().getWidth() * board().getHeight());
         for (int y = 0; y < board().getHeight(); y++) {
             for (int x = 0; x < board().getWidth(); x++) { cells.add(new Coords(x, y)); }
@@ -2296,7 +2359,8 @@ public final class BoardEditorSession {
 
     /**
      * Re-validates {@code cells}: the game's own hex and building-exit rules ({@link Board#hexErrors}, the per-hex step
-     * of the board validation) and each placed object's art and support. Issues never block saving.
+     * of the board validation), each placed object's art and support, and identical copies ({@link #stacks}), one issue
+     * per copied object at that object. Issues never block saving.
      */
     private void validate(java.util.Collection<Coords> cells) {
         for (Coords at : cells) {
@@ -2313,6 +2377,13 @@ public final class BoardEditorSession {
                     found.add(new BoardIssue(at, object.id(), Messages.getString("BoardEditor.issueNoSupport", receiver.surface(), support)));
                 }
             }
+            int copied = 0;
+            for (List<BoardDecoration> stack : stacks(hex)) {
+                found.add(new BoardIssue(at, stack.getFirst().id(),
+                      Messages.getString("BoardEditor.issueCopies", stack.size() - 1, label(stack.getFirst()))));
+                copied += stack.size() - 1;
+            }
+            if (copied == 0) { copies.remove(at); } else { copies.put(at, copied); }
             if (found.isEmpty()) { issues.remove(at); } else { issues.put(at, List.copyOf(found)); }
         }
         var imported = importIssues.stream().filter(issue -> board().contains(issue.coords()) && board().getHex(issue.coords())
@@ -2320,6 +2391,51 @@ public final class BoardEditorSession {
         issueList = java.util.stream.Stream.concat(issues.values().stream().flatMap(List::stream), imported)
               .sorted(Comparator.comparingInt((BoardIssue issue) -> issue.coords().getX()).thenComparingInt(issue -> issue.coords().getY()))
               .toList();
+    }
+
+    /**
+     * The hex's identical copies: each object that has twins after it ({@link BoardDecoration#twin}), first, with them, in
+     * the hex's order; a copy counts with the first object it repeats. Grouped by asset and sorted by position, so a hex
+     * of thousands of copies stays fast.
+     */
+    private static List<List<BoardDecoration>> stacks(Hex hex) {
+        // Per asset, the stacks so far by their first object's x.
+        Map<String, java.util.TreeMap<Double, List<List<BoardDecoration>>>> firsts = new java.util.HashMap<>();
+        List<List<BoardDecoration>> stacks = new ArrayList<>();
+        for (BoardDecoration object : hex.getDecorations()) {
+            var byX = firsts.computeIfAbsent(object.asset(), asset -> new java.util.TreeMap<>());
+            var stack = byX.subMap(object.x() - BoardDecoration.TWIN_DISTANCE, true, object.x() + BoardDecoration.TWIN_DISTANCE, true)
+                  .values().stream().flatMap(List::stream).filter(candidate -> candidate.getFirst().twin(object)).findFirst();
+            if (stack.isPresent()) { stack.get().add(object); continue; }
+            List<BoardDecoration> started = new ArrayList<>(List.of(object));
+            byX.computeIfAbsent(object.x(), x -> new ArrayList<>()).add(started);
+            stacks.add(started);
+        }
+        return stacks.stream().filter(stack -> stack.size() > 1).toList();
+    }
+
+    /** An object as the issues list names it: its own name, else its palette entry's label, else its art. */
+    private String label(BoardDecoration object) {
+        var entry = blueprint.asset(object.asset());
+        return object.name() != null ? object.name() : entry != null ? entry.label() : object.asset();
+    }
+
+    /**
+     * Removes every identical copy ({@link #stacks}), keeping the first object of each stack, with its group, in one undo
+     * step; only the hexes the issues list reports copies in are visited.
+     */
+    private void removeCopies() {
+        int removed = copies.values().stream().mapToInt(Integer::intValue).sum();
+        for (Coords at : List.copyOf(copies.keySet())) {
+            change(at, hex -> {
+                Set<BoardDecoration> repeated = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+                stacks(hex).forEach(stack -> repeated.addAll(stack.subList(1, stack.size())));
+                hex.setDecorations(hex.getDecorations().stream().filter(object -> !repeated.contains(object)).toList());
+            });
+        }
+        finishStroke();
+        deselectRemoved();
+        message = removed == 0 ? Messages.getString("BoardEditor.nothingChanged") : Messages.getString("BoardEditor.copiesRemoved", removed);
     }
 
     /**
@@ -2403,7 +2519,8 @@ public final class BoardEditorSession {
             if (!continuousEdit) { finishStroke(); }
             return;
         }
-        BoardDecoration next = objectValue(object(board().getHex(selected)), property, value);
+        BoardDecoration current = object(board().getHex(selected));
+        BoardDecoration next = property.equals("asset") ? familyMember(current, value) : objectValue(current, property, value);
         if (property.equals("offset") || property.equals("level")) {
             next = next.transform(next.x(), next.y(), next.rotation(), next.mirror(), next.scale(),
                   BoardEditorSnapping.clamp(board().getHex(selected), next.placement()));
@@ -2412,6 +2529,28 @@ public final class BoardEditorSession {
         selection.add(new Selection(selected, selectedObject));
         moveObjects(Map.of(destination.getKey(), destination.getValue()));
         if (!continuousEdit) { finishStroke(); }
+    }
+
+    /**
+     * {@code object} as the member {@code key} of its palette family (Edit's Type row): the same object with the member's
+     * model. Its name is the member's label when the member is an alias (a pond), else its own unless that was the old
+     * alias's label; its colours are the member's when it defines some, else its own unless they were the old member's.
+     */
+    private BoardDecoration familyMember(BoardDecoration object, String key) {
+        var from = blueprint.assetOf(object);
+        var to = blueprint.asset(key);
+        var fromEntry = from == null ? null : blueprint.entry(from.id());
+        var toEntry = to == null ? null : blueprint.entry(key);
+        require(fromEntry != null && toEntry != null && blueprint.card(fromEntry) == blueprint.card(toEntry)
+              && blueprint.card(toEntry).picker() && to.layout() == null, Messages.getString("BoardEditor.familyMemberOnly"));
+        boolean fromAlias = !from.model().equals(from.id());
+        String name = !to.model().equals(to.id()) ? to.label() : fromAlias && from.label().equals(object.name()) ? null : object.name();
+        var colours = !to.colours().slots().isEmpty() ? to.colours()
+              : object.colours().equals(from.colours()) ? BoardDecoration.Colours.NONE : object.colours();
+        return new BoardDecoration(object.id(), object.kind(), to.model(), name, object.x(), object.y(), object.rotation(),
+              object.mirror(), object.scale(), object.placement(), object.drawOrder(), object.clipToHex(), object.rotationX(),
+              object.rotationY(), object.group(), object.bare(), object.connections(), object.stretch(), colours,
+              object.tracks(), object.pillars());
     }
 
     private void setVariant(Hex hex, String owner, String value) {
@@ -2459,7 +2598,9 @@ public final class BoardEditorSession {
 
     private void configureBrush(String target, String value) {
         Hex next = paintTemplate.duplicate();
-        if (target.startsWith("terrain:")) { setTerrain(next, target.substring(8), Integer.parseInt(value)); }
+        // An empty value removes an optional field the card offers (Water's Current: None).
+        if (target.startsWith("terrain:") && value.isEmpty()) { next.removeTerrain(Terrains.getType(target.substring(8))); }
+        else if (target.startsWith("terrain:")) { setTerrain(next, target.substring(8), Integer.parseInt(value)); }
         else if (target.startsWith("variant:")) { setVariant(next, target.substring(8), value); }
         else if (target.startsWith("object:")) {
             require(!next.getDecorations().isEmpty(), Messages.getString("BoardEditor.chooseObjectBrush"));
@@ -2543,12 +2684,16 @@ public final class BoardEditorSession {
         }
         if (!changed.isEmpty()) { board().setHexes(changed); }
         finishStroke();
-        // A selected object the command removed is no longer selected.
+        deselectRemoved();
+        return changed.size();
+    }
+
+    /** A selected object the last command removed is no longer selected. */
+    private void deselectRemoved() {
         selection.removeIf(item -> !item.object().isEmpty() && decoration(item).isEmpty());
         if (selected != null && board().getHex(selected).getDecorations().stream().noneMatch(o -> o.id().equals(selectedObject))) {
             selectedObject = "";
         }
-        return changed.size();
     }
 
     /**
@@ -2599,6 +2744,34 @@ public final class BoardEditorSession {
             hex.addTerrain(new Terrain(Terrains.WATER, surface - hex.getLevel() + depth));
             hex.setLevel(surface);
         });
+    }
+
+    /**
+     * Paint or Erase of {@code definition}'s fields on {@code hex}, each as {@code template} holds it. Paint also gives a
+     * hex that lacks one the template's terrain outside those fields: a preset's own, as Hazardous liquid's water.
+     */
+    private void paintFields(Hex hex, Hex template, BoardEditorBlueprint.Component definition) {
+        Set<Integer> fields = new java.util.HashSet<>();
+        for (var field : definition.fields()) {
+            int type = Terrains.getType(field.terrain());
+            fields.add(type);
+            Terrain value = template.getTerrain(type);
+            if (!definition.replaceExisting() && value == null) { continue; }
+            // The Deployment zone card adds its zone, and Erase removes it; the hex keeps its other zones.
+            if (type == Terrains.DEPLOYMENT_ZONE && value != null) { zones(hex, value.getExits(), tool != Tool.ERASE); }
+            else if (tool == Tool.ERASE || value == null) { hex.removeTerrain(type); }
+            else { hex.addTerrain(new Terrain(value)); }
+        }
+        if (tool == Tool.ERASE) { return; }
+        for (int type : template.getTerrainTypes()) {
+            if (!fields.contains(type) && !hex.containsTerrain(type)) { hex.addTerrain(new Terrain(template.getTerrain(type))); }
+        }
+    }
+
+    /** The armed preset's other hexes by direction, when it is a multi-hex blueprint (the DropShip); none otherwise. */
+    private Map<Integer, String> brushHexes() {
+        var entry = sampledHex == null ? blueprint.entry(brushKey) : null;
+        return entry == null || entry.preset() == null ? Map.of() : entry.preset().hexes();
     }
 
     /**

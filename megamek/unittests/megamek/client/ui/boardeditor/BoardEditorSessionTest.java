@@ -294,7 +294,9 @@ class BoardEditorSessionTest {
 
     @Test void choosingAndConfiguringABrushDoesNotReadOrChangeTheInspectedHex() {
         var session = session();
-        send(session, Action.CHOOSE_BRUSH, "vegetation", "jungle-3");
+        send(session, Action.CHOOSE_BRUSH, "vegetation", "jungle-1");
+        send(session, Action.BRUSH_VALUE, "terrain:jungle", "3");
+        send(session, Action.BRUSH_VALUE, "terrain:foliage_elev", "3");
         assertEquals(BoardEditorSession.Tool.PAINT, session.snapshot().tool());
         assertFalse(session.dirty()); assertFalse(session.board().getHex(at).containsTerrain(Terrains.JUNGLE));
         send(session, Action.TOOL, "", "SELECT");
@@ -314,7 +316,7 @@ class BoardEditorSessionTest {
         assertEquals(75, session.snapshot().objects().getFirst().rotation());
         send(session, Action.OBJECT_VALUE, "scale", ".5");
         assertEquals(1.5, session.snapshot().activeBrush().object().scale(), "An inspector edit cannot silently change the brush");
-        send(session, Action.CHOOSE_BRUSH, "road", "3");
+        send(session, Action.CHOOSE_BRUSH, "road", "1");
         assertNull(session.snapshot().activeBrush().object(), "Terrain replaces the object brush instead of leaving a second active brush");
     }
 
@@ -520,7 +522,8 @@ class BoardEditorSessionTest {
     @Test void roadChoicesAlwaysCarryTheirDefinedFinishAndRemovingAnotherObjectKeepsSelection() {
         var session = session();
         for (var choice : BoardEditorBlueprint.get().component("road").fields().getFirst().choices()) {
-            send(session, Action.CHOOSE_BRUSH, "road", Integer.toString(choice.value()));
+            send(session, Action.CHOOSE_BRUSH, "road", "1");
+            send(session, Action.BRUSH_VALUE, "terrain:road", Integer.toString(choice.value()));
             session.pointer(at, 0, 0, false); session.finishStroke();
             assertEquals(choice.material(), session.board().getHex(at).getAppearance().get("road").material());
             assertEquals(choice.value(), session.board().getHex(at).terrainLevel(Terrains.ROAD));
@@ -530,7 +533,8 @@ class BoardEditorSessionTest {
         send(session, Action.VARIANT, "road", "road/material/dirt");
         assertEquals(3, session.board().getHex(at).terrainLevel(Terrains.ROAD));
         send(session, Action.ASSET, "", "birch-young"); session.pointer(at, 0, 0, false); session.finishStroke();
-        String first = session.snapshot().object(); session.pointer(at, 0, 0, false); session.finishStroke();
+        String first = session.snapshot().object();
+        send(session, Action.BRUSH_VALUE, "object:rotation", "90"); session.pointer(at, 0, 0, false); session.finishStroke();
         String second = session.snapshot().object(); send(session, Action.REMOVE_OBJECT, first, "");
         assertEquals(second, session.snapshot().object()); assertEquals(1, session.snapshot().objects().size());
     }
@@ -1223,7 +1227,8 @@ class BoardEditorSessionTest {
         assertEquals(Messages.getString("BoardEditor.tagAutomatic"), session.snapshot().message());
         assertEquals(List.of("Hills of Home"), session.snapshot().tags(), "Automatic tags come only from the tagger's rule");
         session.board().addTag("Stale (Auto)");
-        send(session, Action.CHOOSE_BRUSH, "vegetation", "woods-2");
+        send(session, Action.CHOOSE_BRUSH, "vegetation", "woods-1");
+        send(session, Action.BRUSH_VALUE, "terrain:woods", "2");
         send(session, Action.BRUSH, "", "4");
         session.pointer(new Coords(8, 8), 0, 0, false); session.finishStroke();
         send(session, Action.BOARD, "autotags", "");

@@ -41,13 +41,10 @@ class GpuEditorTextKeysTest {
     private static final List<String> KEYED = List.of("boardeditor/BoardEditorSession.java",
           "clientGUI/boardview/gpu/BoardEditorTerrain.java", "clientGUI/boardview/gpu/GpuBoardWindow.java");
     /**
-     * Literals that read as words but are never shown: the Assets section ids (blueprint categories and the two object
-     * kinds; their names are BoardEditor.category.*), blueprint asset groups that pick a Layers icon, the Resize edges'
-     * key and actor-name fragments (ExpandMapDialog.labelNorth ...) and a preview image's loaded marker.
+     * Literals that read as words but are never shown: the Resize edges' key and actor-name fragments
+     * (ExpandMapDialog.labelNorth ...) and a preview image's loaded marker.
      */
-    private static final Set<String> IDENTIFIERS = Set.of("Terrain", "Features", "Structures", "Props", "Decals",
-          "Trees and plants", "Alien plants", "Maglev and wagons", "Vehicles", "Transport", "Animals",
-          "North", "East", "South", "West", "Ready");
+    private static final Set<String> IDENTIFIERS = Set.of("North", "East", "South", "West", "Ready");
     /** A message key, a key prefix ("BoardEditor.help.") or a key suffix ("Field.toolTip"). */
     private static final Pattern KEY = Pattern.compile("[A-Z][A-Za-z0-9]*\\.[A-Za-z0-9_.]*");
     private static final Pattern UNICODE = Pattern.compile("\\\\u([0-9A-Fa-f]{4})");
@@ -80,7 +77,7 @@ class GpuEditorTextKeysTest {
         assertEquals(List.of(), problems);
     }
 
-    /** The keys the editor builds from a tool, a sculpt mode or an Assets section exist for every one of them. */
+    /** The keys the editor builds from a tool, a sculpt mode or an Assets category or section exist for every one of them. */
     @Test
     void everyToolSculptModeAndAssetsSectionHasItsText() throws IOException {
         Properties english = texts("");
@@ -93,10 +90,14 @@ class GpuEditorTextKeysTest {
             String name = mode.name().toLowerCase(Locale.ROOT);
             keys.addAll(List.of("BoardEditor.sculpt." + name, "BoardEditor.hint." + name));
         }
-        // The Assets sections: every palette component's blueprint category, then the two object kinds.
-        BoardEditorBlueprint.get().components().stream().filter(BoardEditorBlueprint.Component::palette)
-              .forEach(component -> keys.add("BoardEditor.category." + component.category().toLowerCase(Locale.ROOT)));
-        keys.addAll(List.of("BoardEditor.category.props", "BoardEditor.category.decals"));
+        // The Assets palette: every category and section of the blueprint, and the Theme category's two sections.
+        for (var category : BoardEditorBlueprint.get().categories()) {
+            keys.add("BoardEditor.palette." + category.id());
+            category.sections().forEach(section -> keys.add("BoardEditor.palette." + section.category() + "." + section.id()));
+            if (category.themes() != null) {
+                keys.addAll(List.of("BoardEditor.palette." + category.id() + ".themes", "BoardEditor.palette." + category.id() + ".special"));
+            }
+        }
         assertEquals(List.of(), keys.stream().filter(key -> !english.containsKey(key)).distinct().toList());
     }
 

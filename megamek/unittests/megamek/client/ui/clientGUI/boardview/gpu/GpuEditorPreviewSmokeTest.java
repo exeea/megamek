@@ -51,10 +51,11 @@ class GpuEditorPreviewSmokeTest {
           new Place("train", "stamp/rail-train", RAIL.translated(3).translated(3).translated(3), 0, 0, 0),
           new Place("decal", "decal/emblems/red-cross", new Coords(11, 4), 0, 0, 0));
 
-    /** Terrain cards: component and preset or variant. */
-    private static final List<String[]> CARDS = List.of(new String[] { "vegetation", "woods-2" }, new String[] { "water", "deep" },
-          new String[] { "building", "default" }, new String[] { "road", "2" }, new String[] { "bridge", "bridge/truss" },
-          new String[] { "hazards", "fire" }, new String[] { "hazards", "magma" }, new String[] { "scenario", "deployment" },
+    /** Terrain cards: component and preset or variant, then optionally a level of one of its fields (a Brush row). */
+    private static final List<String[]> CARDS = List.of(new String[] { "vegetation", "woods-1", "woods", "2" },
+          new String[] { "water", "shallow", "water", "2" }, new String[] { "building", "default" },
+          new String[] { "road", "1", "road", "2" }, new String[] { "bridge", "bridge/truss" }, new String[] { "hazards", "fire" },
+          new String[] { "hazards", "magma-crust", "magma", "2" }, new String[] { "scenario", "deployment" },
           new String[] { "ground", "swamp" }, new String[] { "weather", "ice" });
 
     @Test void ghostsStandWhereTheirClicksPlaceAndEraseOutlinesWhatGoes() throws Exception {
@@ -71,7 +72,8 @@ class GpuEditorPreviewSmokeTest {
             session.finishStroke();
             send(session, Action.ASSET, "", "scenery/vehicles/car");
             for (Coords car : List.of(CARS, CARS.translated(2))) { session.pointer(car, 0, 0, false); session.finishStroke(); }
-            send(session, Action.CHOOSE_BRUSH, "vegetation", "woods-2");
+            send(session, Action.CHOOSE_BRUSH, "vegetation", "woods-1");
+            send(session, Action.BRUSH_VALUE, "terrain:woods", "2");
             send(session, Action.BRUSH, "", "2");
             session.pointer(WOODS, 0, 0, false); session.finishStroke();
             send(session, Action.BRUSH, "", "1");
@@ -300,7 +302,11 @@ class GpuEditorPreviewSmokeTest {
                 /** A terrain card at radius 6: a stand-in for every hex its click changes; nothing rebuilt by hovering. */
                 private void card(String[] card, GpuEditorPreview.Data preview) throws Exception {
                     switch (stage) {
-                        case 0 -> { command(Action.CHOOSE_BRUSH, card[0], card[1]); next(); }
+                        case 0 -> {
+                            command(Action.CHOOSE_BRUSH, card[0], card[1]);
+                            if (card.length > 2) { command(Action.BRUSH_VALUE, "terrain:" + card[2], card[3]); }
+                            next();
+                        }
                         case 1 -> aim(TERRAIN, at(TERRAIN, 0, 0, 0));
                         default -> {
                             if (preview.standIns().isEmpty() || !built(preview, TERRAIN)) { return; }
@@ -337,7 +343,7 @@ class GpuEditorPreviewSmokeTest {
                         }
                         case 2 -> {
                             assertEquals(ghosts.size() - 2, installed(cars).size(), "The click removed exactly the outlined cars");
-                            command(Action.CHOOSE_BRUSH, "vegetation", "woods-2");
+                            command(Action.CHOOSE_BRUSH, "vegetation", "woods-1");
                             command(Action.TOOL, "", "ERASE");
                             next();
                         }

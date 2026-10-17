@@ -35,6 +35,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /** Real artwork capture must not let cosmetic terrain transitions replace native ground materials. */
 class BoardGroundCaptureTest {
+    /** SeaPort's structured pavement: the hexes the board stored as pavement 4 before that alias became pavement 1. */
+    private static final Set<String> STRUCTURED = Set.of("0601", "0801", "0901", "0602", "0702", "0902", "0603", "0707", "0807",
+          "1007", "1207", "0708", "1310", "1311", "1411", "1412", "1313", "1314", "1315", "1316", "1317");
+
     @Test
     void seaportStructuredPavementKeepsNativeConcreteWithoutPaintedGroundDecals() throws Exception {
         onEdt(() -> {
@@ -48,7 +52,7 @@ class BoardGroundCaptureTest {
                 var scene = source.takeFrame().scene();
                 int structured = 0;
                 for (var tile : scene.tiles()) {
-                    if (board.getHex(tile.coords()).terrainLevel(Terrains.PAVEMENT) != 4) { continue; }
+                    if (!STRUCTURED.contains(tile.coords().getBoardNum())) { continue; }
                     structured++;
                     assertEquals(BoardScene.Surface.CONCRETE, tile.surface(), tile.coords().toString());
                     assertTrue(tile.detailedGround(), "Native concrete at " + tile.coords());

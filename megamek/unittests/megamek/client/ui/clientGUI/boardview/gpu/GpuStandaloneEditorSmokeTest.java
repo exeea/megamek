@@ -77,8 +77,10 @@ class GpuStandaloneEditorSmokeTest {
                         if (GpuBoardTestUi.loading(this) || terrain().busy() || frames() < nextFrame) { return; }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         if (step == 0) {
-                            var category = (megamek.client.ui.gdx.UiButton) GpuBoardTestUi.stage().getRoot().findActor("editor-category");
-                            assertEquals("Terrain · Ground", category.getText().toString(), "One compact category drop-down");
+                            // The Assets panel's start page has a tile per palette category (it opens on the page shown last).
+                            for (var category : megamek.common.board.BoardEditorBlueprint.get().categories()) {
+                                assertNotNull(GpuBoardTestUi.stage().getRoot().findActor("editor-category-" + category.id()), category.id());
+                            }
                             assertTextsResolved();
                             assertWorkspaceSpacing();
                             assertCorners(source.editorState().tool());

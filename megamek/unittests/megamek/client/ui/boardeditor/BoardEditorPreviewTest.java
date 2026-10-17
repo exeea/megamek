@@ -59,16 +59,18 @@ class BoardEditorPreviewTest {
 
         // Terrain cards at radius 3: Only overwrite clear hexes leaves the building and the water out.
         brush(session, Action.BRUSH, "", "3");
-        brush(session, Action.CHOOSE_BRUSH, "vegetation", "woods-2");
+        woods(session, 2);
         brush(session, Action.BRUSH_VALUE, "clearOnly", "true");
         Preview woods = same(session, centre, 0, 0, "ground");
         assertFalse(woods.after().containsKey(centre.translated(0)), "The building is not clear");
         assertFalse(woods.after().containsKey(centre.translated(3)), "nor is the water");
         brush(session, Action.BRUSH_VALUE, "clearOnly", "false");
-        for (String[] card : new String[][] { { "water", "deep" }, { "building", "default" }, { "road", "2" },
-              { "hazards", "fire" }, { "weather", "ice" }, { "ground", "swamp" }, { "scenario", "deployment" },
-              { "bridge", "bridge/truss" } }) {
+        // A card, then optionally a level of one of its fields (the Brush rows).
+        for (String[] card : new String[][] { { "water", "shallow", "water", "2" }, { "building", "default" },
+              { "road", "1", "road", "2" }, { "hazards", "fire" }, { "hazards", "hazard-liquid" }, { "weather", "ice" },
+              { "ground", "swamp" }, { "scenario", "deployment" }, { "bridge", "bridge/truss" } }) {
             brush(session, Action.CHOOSE_BRUSH, card[0], card[1]);
+            if (card.length > 2) { brush(session, Action.BRUSH_VALUE, "terrain:" + card[2], card[3]); }
             same(session, centre, 0, 0, "ground");
         }
         brush(session, Action.CHOOSE_BRUSH, "ground", "clear");
@@ -85,7 +87,7 @@ class BoardEditorPreviewTest {
 
     @Test void everyErasePreviewHighlightsExactlyWhatItsClickRemoves() {
         var session = board();
-        brush(session, Action.CHOOSE_BRUSH, "vegetation", "woods-2");
+        woods(session, 2);
         brush(session, Action.BRUSH, "", "2");
         session.pointer(centre, 0, 0, false); session.finishStroke();
         brush(session, Action.ASSET, "", "scenery/vehicles/car");
@@ -98,7 +100,7 @@ class BoardEditorPreviewTest {
         brush(session, Action.BRUSH_VALUE, "precision", "true");
         assertSame(session.preview(centre, .2, -.1, "ground"), session.preview(centre, -.3, .25, "ground"));
         brush(session, Action.BRUSH_VALUE, "precision", "false");
-        brush(session, Action.CHOOSE_BRUSH, "vegetation", "woods-2");
+        woods(session, 2);
         brush(session, Action.TOOL, "", "ERASE");
         Preview woods = same(session, centre, 0, 0, "ground");
         assertTrue(woods.removed().isEmpty(), "Erasing a component keeps the objects");
@@ -194,6 +196,12 @@ class BoardEditorPreviewTest {
         cells.forEach(cell -> session.pointer(cell, 0, 0, true));
         session.finishStroke();
         return session;
+    }
+
+    /** The Woods card at {@code level} (its Brush row). */
+    private static void woods(BoardEditorSession session, int level) {
+        brush(session, Action.CHOOSE_BRUSH, "vegetation", "woods-1");
+        brush(session, Action.BRUSH_VALUE, "terrain:woods", Integer.toString(level));
     }
 
     private static void brush(BoardEditorSession session, Action action, String target, String value) {

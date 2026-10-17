@@ -4,10 +4,13 @@ package megamek.common.board;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,7 +19,11 @@ import megamek.common.Hex;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 
-/** Content shared by the editor and artwork resolver. Loading this index never loads a model or texture. */
+/**
+ * Content shared by the editor and artwork resolver. Loading this index never loads a model or texture. It also holds
+ * the Assets palette: categories of sections of cards, in data order. An entry (preset, variant or asset) is on the
+ * palette when it names a section; entries sharing a {@code family} are one card.
+ */
 public final class BoardEditorBlueprint {
     public record Choice(int value, String label, String material) { }
     /** Height fields store levels above the owning hex and can be dragged in the editor's side section. */
@@ -28,10 +35,26 @@ public final class BoardEditorBlueprint {
             return present.isEmpty() || present.stream().anyMatch(hasTerrain);
         }
     }
-    /** A complete paintable terrain choice; optional fields no longer require painting an empty component first. */
-    public record Preset(String id, String label, String terrain) { }
+    /**
+     * A complete paintable terrain choice; optional fields no longer require painting an empty component first.
+     * {@code settings} are optional fields the Brush offers although the preset leaves them out; {@code hexes} make it a
+     * multi-hex blueprint: by direction (0-5 = N, NE, SE, S, SW, NW) the terrain of that neighbour of the painted hex.
+     */
+    public record Preset(String id, String label, String terrain, List<String> sections, List<String> settings,
+          Map<Integer, String> hexes) { }
+    /** {@code pieces}: a model per building weight and exits ({@link #model}) for a look that names no single asset. */
     public record Variant(String id, String label, String owner, String selectors, String asset, String thumbnail,
-          String material, boolean blend, String group) { }
+          String material, boolean blend, List<String> sections, String family, String pieces) {
+        /** The model this design shows on {@code hex}: its asset, else its pieces for the hex's building weight and exits ("" if none). */
+        public String model(Hex hex) {
+            Terrain building = hex.getTerrain(Terrains.BUILDING);
+            if (!asset.isBlank() || pieces.isBlank() || building == null || building.getLevel() < 1 || building.getLevel() > WEIGHTS.size()) {
+                return asset;
+            }
+            return pieces.replace("{weight}", WEIGHTS.get(building.getLevel() - 1))
+                  .replace("{nn}", String.format(Locale.ROOT, "%02d", building.getExits()));
+        }
+    }
     /** Local X/Y use hex width/height; Z uses board levels. Heading is the connector's outward XY direction. */
     public record Connector(double x, double y, double z, double heading) { }
     public record Snap(String set, List<Connector> connectors, double radius, double angleTolerance) { }
@@ -41,8 +64,43 @@ public final class BoardEditorBlueprint {
      * id, unless the entry names another model) in {@code colours}: a pond is the pool of its outline in pond colours.
      * A decal's card shows its image by path convention ({@link BoardDecalArt#image}); {@code thumbnail} is a stamp's.
      */
-    public record Asset(String id, String label, String kind, String thumbnail, String group,
-          Snap snap, boolean palette, String layout, String model, BoardDecoration.Colours colours) { }
+    public record Asset(String id, String label, String kind, String thumbnail, Snap snap, String layout,
+          String model, BoardDecoration.Colours colours, List<String> sections, String family) { }
+    /** One palette entry; {@code key} is the session's brush key: "owner/presetId", a variant id or an asset id. */
+    public record Entry(String key, String owner, String label, Preset preset, Variant variant, Asset asset) {
+        public List<String> sections() {
+            return preset != null ? preset.sections() : variant != null ? variant.sections() : asset.sections();
+        }
+
+        /** The family label, or null. */
+        public String family() { return variant != null ? variant.family() : asset != null ? asset.family() : null; }
+
+        /** A composition: a stamp layout or a multi-hex preset (the BLUEPRINT chip). */
+        public boolean blueprint() { return asset != null && asset.layout() != null || preset != null && !preset.hexes().isEmpty(); }
+    }
+    /** A card: one entry, a picker family (assets) or a gallery (variants), labelled with the family. */
+    public record Card(String label, List<Entry> members) {
+        public boolean family() { return members.size() > 1; }
+        public boolean gallery() { return family() && members.getFirst().variant() != null; }
+        /** A picker family: assets on one card, which a Type row swaps. */
+        public boolean picker() { return family() && !gallery(); }
+    }
+    public record Section(String category, String id, List<Card> cards) {
+        public String path() { return category + "/" + id; }
+    }
+    /** {@code themes}: null except for the Theme category (its special themes); {@code iconNode}: one hex in the .board2 form. */
+    public record Category(String id, List<String> themes, List<Section> sections, String iconNode) {
+        /** A fresh hex each call. */
+        public Hex icon() {
+            try { return BoardFile.fromClipboard(HEX + iconNode); }
+            catch (IOException failure) { throw new IllegalStateException("Unreadable icon of " + id, failure); }
+        }
+    }
+
+    private static final String HEX = "MegaMek Hex2\n";
+    private static final List<String> DIRECTIONS = List.of("N", "NE", "SE", "S", "SW", "NW");
+    /** Building levels 1-4 name their pieces' weight. */
+    private static final List<String> WEIGHTS = List.of("light", "medium", "heavy", "hard");
 
     private final List<Component> components;
     private final Map<String, Variant> variants;
@@ -54,6 +112,9 @@ public final class BoardEditorBlueprint {
      */
     private final Map<Integer, List<Variant>> selecting = new HashMap<>();
     private final Map<String, Asset> assets;
+    private final List<Category> categories;
+    private final Map<String, Entry> entries;
+    private final Map<String, Card> cards;
 
     private static BoardEditorBlueprint shared;
 
@@ -70,10 +131,14 @@ public final class BoardEditorBlueprint {
         }
     }
 
-    private BoardEditorBlueprint(List<Component> components, Map<String, Variant> variants, Map<String, Asset> assets) {
+    private BoardEditorBlueprint(List<Component> components, Map<String, Variant> variants, Map<String, Asset> assets,
+          List<Category> categories, Map<String, Entry> entries, Map<String, Card> cards) {
         this.components = List.copyOf(components);
-        this.variants = java.util.Collections.unmodifiableMap(variants);
-        this.assets = java.util.Collections.unmodifiableMap(assets);
+        this.variants = Collections.unmodifiableMap(variants);
+        this.assets = Collections.unmodifiableMap(assets);
+        this.categories = List.copyOf(categories);
+        this.entries = Collections.unmodifiableMap(entries);
+        this.cards = Map.copyOf(cards);
         for (Variant variant : variants.values()) {
             if (!variant.selectors().isBlank() && !variant.selectors().contains(";") && variant.asset().isBlank()) {
                 selecting.computeIfAbsent(new Terrain(variant.selectors()).getType(), type -> new ArrayList<>()).add(variant);
@@ -86,9 +151,22 @@ public final class BoardEditorBlueprint {
         if (!"megamek-editor-blueprint".equals(root.path("format").asText()) || root.path("version").asInt() != 1) {
             throw new IOException("Unsupported board editor blueprint: " + file);
         }
+        // The palette's sections by path, in declared order; each collects its cards below.
+        Map<String, List<Card>> sections = new LinkedHashMap<>();
+        for (JsonNode category : root.withArray("categories")) {
+            String id = required(category, "id");
+            for (JsonNode section : category.withArray("sections")) {
+                if (sections.putIfAbsent(id + "/" + section.asText(), new ArrayList<>()) != null) {
+                    throw new IOException("Duplicate palette section " + id + "/" + section.asText());
+                }
+            }
+            try { BoardFile.fromClipboard(HEX + category.path("icon")); }
+            catch (IOException failure) { throw new IOException("Unreadable icon of " + id, failure); }
+        }
         List<Component> components = new ArrayList<>();
         Map<String, Variant> variants = new LinkedHashMap<>();
         Map<String, Asset> assets = new LinkedHashMap<>();
+        Map<String, Entry> entries = new LinkedHashMap<>();
         for (JsonNode entry : root.withArray("components")) {
             List<Field> fields = new ArrayList<>();
             for (JsonNode field : entry.withArray("fields")) {
@@ -106,25 +184,34 @@ public final class BoardEditorBlueprint {
                       field.path("optional").asBoolean(), List.copyOf(choices), min, max, step, field.path("brush").asBoolean(),
                       field.path("height").asBoolean()));
             }
-            List<String> present = new ArrayList<>();
-            JsonNode condition = entry.path("present");
-            if (condition.isArray()) { condition.forEach(value -> present.add(value.asText())); }
-            else if (!condition.asText().isEmpty()) { present.add(condition.asText()); }
+            List<String> present = strings(entry.path("present"));
             for (String terrain : present) {
                 if (Terrains.getType(terrain) <= 0) { throw new IOException("Unknown component terrain " + terrain); }
             }
-            if (components.stream().anyMatch(c -> c.id().equals(entry.path("id").asText()))) { throw new IOException("Duplicate component"); }
+            String id = required(entry, "id");
+            if (components.stream().anyMatch(c -> c.id().equals(id))) { throw new IOException("Duplicate component"); }
             List<Preset> presets = new ArrayList<>();
-            for (JsonNode preset : entry.withArray("presets")) {
-                String terrain = preset.path("terrain").asText();
-                Hex sample = new Hex(0, terrain, "");
-                List<String> errors = new ArrayList<>();
-                if (!sample.isValid(errors)) { throw new IOException("Invalid brush " + preset.path("id") + ": " + errors); }
-                presets.add(new Preset(required(preset, "id"), required(preset, "label"), terrain));
+            for (JsonNode node : entry.withArray("presets")) {
+                Map<Integer, String> hexes = new TreeMap<>();
+                for (var neighbour : node.path("hexes").properties()) {
+                    int direction = DIRECTIONS.indexOf(neighbour.getKey());
+                    if (direction < 0) { throw new IOException("Unknown direction " + neighbour.getKey() + " of " + node.path("id")); }
+                    hexes.put(direction, terrain(node, neighbour.getValue().asText()));
+                }
+                List<String> settings = strings(node.path("settings"));
+                for (String setting : settings) {
+                    if (fields.stream().noneMatch(field -> field.terrain().equals(setting))) {
+                        throw new IOException("Setting " + setting + " of " + node.path("id") + " is no field of " + id);
+                    }
+                }
+                Preset preset = new Preset(required(node, "id"), required(node, "label"), terrain(node, node.path("terrain").asText()),
+                      sections(node, sections), settings, Collections.unmodifiableMap(hexes));
+                presets.add(preset);
+                add(entries, new Entry(id + "/" + preset.id(), id, preset.label(), preset, null, null));
             }
-            components.add(new Component(required(entry, "id"), required(entry, "label"), List.copyOf(present),
+            components.add(new Component(id, required(entry, "label"), present,
                   entry.path("defaults").asText(), List.copyOf(fields), entry.path("category").asText("Terrain"),
-                  entry.path("receiver").asText(entry.path("id").asText()),
+                  entry.path("receiver").asText(id),
                   entry.path("preview").path("terrain").asText(entry.path("defaults").asText()),
                   entry.path("preview").path("level").asInt(0), entry.path("palette").asBoolean(true),
                   entry.path("replaceExisting").asBoolean(true), List.copyOf(presets)));
@@ -132,10 +219,12 @@ public final class BoardEditorBlueprint {
         for (JsonNode entry : root.withArray("variants")) {
             Variant variant = new Variant(required(entry, "id"), required(entry, "label"), required(entry, "owner"),
                   entry.path("selectors").asText(), entry.path("asset").asText(), entry.path("thumbnail").asText(),
-                  entry.path("material").asText(), entry.path("blend").asBoolean(), entry.path("group").asText("Designs"));
+                  entry.path("material").asText(), entry.path("blend").asBoolean(), sections(entry, sections),
+                  entry.path("family").asText(null), entry.path("pieces").asText());
             if (!HexAppearance.OWNERS.contains(variant.owner()) || variants.putIfAbsent(variant.id(), variant) != null) {
                 throw new IOException("Invalid or duplicate variant " + variant.id());
             }
+            add(entries, new Entry(variant.id(), variant.owner(), variant.label(), null, variant, null));
         }
         for (JsonNode entry : root.withArray("assets")) {
             Asset asset;
@@ -144,24 +233,86 @@ public final class BoardEditorBlueprint {
                 List<String> colours = new ArrayList<>();
                 for (JsonNode colour : entry.withArray("colours")) { colours.add(colour.isNull() ? null : colour.asText()); }
                 asset = new Asset(required(entry, "id"), required(entry, "label"), required(entry, "kind"),
-                      entry.path("thumbnail").asText(), entry.path("group").asText("Other"),
-                      snap(entry), entry.path("palette").asBoolean(true),
+                      entry.path("thumbnail").asText(), snap(entry),
                       entry.hasNonNull("layout") ? entry.get("layout").asText() : null,
-                      entry.path("model").asText(entry.path("id").asText()), new BoardDecoration.Colours(colours));
+                      entry.path("model").asText(entry.path("id").asText()), new BoardDecoration.Colours(colours),
+                      sections(entry, sections), entry.path("family").asText(null));
                 new BoardDecoration("check", asset.kind(), asset.id(), null, 0, 0, 0, false, 1,
                       BoardDecoration.Placement.ground(), 0).withColours(asset.colours());
                 new BoardDecoration("check", asset.kind(), asset.model(), null, 0, 0, 0, false, 1,
                       BoardDecoration.Placement.ground(), 0);
             } catch (IllegalArgumentException failure) { throw new IOException("Invalid asset " + entry.path("id"), failure); }
             if (assets.putIfAbsent(asset.id(), asset) != null) { throw new IOException("Duplicate asset " + asset.id()); }
+            add(entries, new Entry(asset.id(), "", asset.label(), null, null, asset));
         }
-        return new BoardEditorBlueprint(components, variants, assets);
+        // Cards in data order (presets, variants, assets); a family is one card where its first member stands.
+        Map<String, List<Entry>> families = new LinkedHashMap<>();
+        for (Entry entry : entries.values()) {
+            if (entry.family() != null) { families.computeIfAbsent(entry.family(), family -> new ArrayList<>()).add(entry); }
+        }
+        for (var family : families.entrySet()) {
+            Entry first = family.getValue().getFirst();
+            if (family.getValue().size() < 2 || family.getValue().stream().anyMatch(member -> (member.variant() == null) != (first.variant() == null)
+                  || !member.owner().equals(first.owner()) || !member.sections().equals(first.sections()) || member.blueprint() != first.blueprint()
+                  || member.asset() != null && !member.asset().kind().equals(first.asset().kind()))) {
+                throw new IOException("Family " + family.getKey() + " needs two or more members of one kind, owner and sections");
+            }
+        }
+        Map<String, Card> cards = new HashMap<>();
+        for (Entry entry : entries.values()) {
+            if (cards.containsKey(entry.key())) { continue; }
+            List<Entry> members = entry.family() == null ? List.of(entry) : List.copyOf(families.get(entry.family()));
+            Card card = new Card(entry.family() == null ? entry.label() : entry.family(), members);
+            members.forEach(member -> cards.put(member.key(), card));
+            entry.sections().forEach(path -> sections.get(path).add(card));
+        }
+        List<Category> categories = new ArrayList<>();
+        for (JsonNode category : root.withArray("categories")) {
+            String id = category.path("id").asText();
+            List<Section> list = new ArrayList<>();
+            for (JsonNode section : category.withArray("sections")) {
+                list.add(new Section(id, section.asText(), List.copyOf(sections.get(id + "/" + section.asText()))));
+            }
+            categories.add(new Category(id, category.has("themes") ? strings(category.get("themes")) : null, List.copyOf(list),
+                  category.path("icon").toString()));
+        }
+        return new BoardEditorBlueprint(components, variants, assets, categories, entries, cards);
     }
 
     private static String required(JsonNode node, String name) throws IOException {
         String value = node.path(name).asText();
         if (value.isBlank()) { throw new IOException("Blueprint requires " + name); }
         return value;
+    }
+
+    /** A string or a list of strings; none when absent or empty. */
+    private static List<String> strings(JsonNode value) {
+        List<String> result = new ArrayList<>();
+        if (value.isArray()) { value.forEach(item -> result.add(item.asText())); }
+        else if (!value.asText().isEmpty()) { result.add(value.asText()); }
+        return List.copyOf(result);
+    }
+
+    /** The entry's palette sections ({@code section}: one path or a list); each must be declared. */
+    private static List<String> sections(JsonNode entry, Map<String, ?> declared) throws IOException {
+        List<String> paths = strings(entry.path("section"));
+        for (String path : paths) {
+            if (!declared.containsKey(path)) { throw new IOException("Unknown palette section " + path + " of " + entry.path("id")); }
+        }
+        return paths;
+    }
+
+    private static String terrain(JsonNode preset, String terrain) throws IOException {
+        List<String> errors = new ArrayList<>();
+        if (!new Hex(0, terrain, "").isValid(errors)) { throw new IOException("Invalid brush " + preset.path("id") + ": " + errors); }
+        return terrain;
+    }
+
+    /** Only palette entries (with a section) are entries; their keys are unique. */
+    private static void add(Map<String, Entry> entries, Entry entry) throws IOException {
+        if (!entry.sections().isEmpty() && entries.putIfAbsent(entry.key(), entry) != null) {
+            throw new IOException("Duplicate palette entry " + entry.key());
+        }
     }
 
     private static Snap snap(JsonNode asset) throws IOException {
@@ -191,6 +342,30 @@ public final class BoardEditorBlueprint {
     public Component component(String id) {
         return components.stream().filter(c -> c.id().equals(id)).findFirst()
               .orElseThrow(() -> new IllegalArgumentException("Unknown component " + id));
+    }
+
+    /** The palette's categories in start-page order. */
+    public List<Category> categories() { return categories; }
+
+    /** The palette entry of a brush key; null for a key that is no palette entry ("hex/sample", an automatic piece). */
+    public Entry entry(String key) { return entries.get(key); }
+
+    /** The card that shows {@code entry} (the same card in each of its sections). */
+    public Card card(Entry entry) { return cards.get(entry.key()); }
+
+    /** The Theme category (the one with {@code themes}), or null. */
+    public Category themeCategory() { return categories.stream().filter(c -> c.themes() != null).findFirst().orElse(null); }
+
+    /** The Theme category's themes: the special ones the tilesets do not list. */
+    public List<String> specialThemes() { return themeCategory() == null ? List.of() : themeCategory().themes(); }
+
+    /** The category of a section path ("category/section"). */
+    public static String categoryOf(String section) { return section.substring(0, section.indexOf('/')); }
+
+    /** The palette asset a placed object came from: the alias whose model and label match (a pond), else its own asset. */
+    public Asset assetOf(BoardDecoration object) {
+        return assets.values().stream().filter(a -> !a.model().equals(a.id()) && a.model().equals(object.asset())
+              && a.label().equals(object.name())).findFirst().orElseGet(() -> assets.get(object.asset()));
     }
 
     /**

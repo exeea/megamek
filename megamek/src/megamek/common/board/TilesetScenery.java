@@ -181,7 +181,7 @@ public final class TilesetScenery {
         var building = hex.getAppearance().get("building");
         if (building != null && hex.containsTerrain(Terrains.BUILDING)) {
             var variant = BoardEditorBlueprint.get().variant(building.variant());
-            String asset = building.asset() != null ? building.asset() : variant == null ? null : variant.asset();
+            String asset = building.asset() != null ? building.asset() : variant == null ? null : variant.model(hex);
             if (asset != null && !asset.isBlank() && (new File(Configuration.dataDir(), "models/board/" + asset + ".glb").isFile()
                   || asset.startsWith("buildings/") && customBuildingFile(asset).isFile())) { models.put(Terrains.BUILDING, asset); }
         }

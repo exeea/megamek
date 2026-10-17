@@ -29,7 +29,6 @@ import org.junit.jupiter.api.Test;
 
 /** Legacy maglev decodes to route markers and separate pieces measured from its sprites; the palette keeps five entries. */
 class BoardSceneryMaglevTest {
-    private static final String GROUP = "Maglev and wagons";
     private static final String WAGON = "scenery/maglev/wagon", CAB = "scenery/maglev/cab", PLATFORM = "scenery/maglev/platform";
 
     /** What each legacy sprite shows: the route's sides, a platform, cab and wagon count, and parked cars. */
@@ -73,18 +72,19 @@ class BoardSceneryMaglevTest {
     @Test
     void thePaletteOffersBothRoutesInTransportAndTheRollingStockAndStampsWithoutDuplicateMeshes() {
         var blueprint = BoardEditorBlueprint.get();
-        // Maglev and Rail are two choices in Transport, beside the crossing signal and the level crossing.
-        var transport = blueprint.assets().stream().filter(asset -> asset.group().equals("Transport") && asset.palette())
-              .map(BoardEditorBlueprint.Asset::id).collect(Collectors.toSet());
-        assertTrue(transport.containsAll(Set.of(RailRoute.Kind.MAGLEV.asset, RailRoute.Kind.RAIL.asset,
-              "scenery/rail/crossing-signal", "decal/rail/level-crossing")), transport.toString());
-        var stock = blueprint.assets().stream().filter(asset -> asset.group().equals(GROUP) && asset.palette())
-              .map(BoardEditorBlueprint.Asset::id).collect(Collectors.toSet());
-        assertTrue(stock.containsAll(Set.of(PLATFORM, WAGON, CAB, "stamp/maglev-train", "stamp/maglev-colony-train",
-              "stamp/rail-train", "stamp/express-train", "stamp/colony-train", "scenery/rail/locomotive")), stock.toString());
-        assertTrue(stock.stream().noneMatch(id -> RailRoute.Kind.of(id) != null), "A route is a Transport choice");
-        assertTrue(blueprint.assets().stream().filter(asset -> asset.group().equals(GROUP)).allMatch(asset -> asset.snap() == null));
-        assertFalse(blueprint.asset("scenery/maglev/coupler").palette(), "The coupler comes with the train stamp");
+        // Maglev and Rail are two cards in Transportation's Rail and maglev section, beside the crossing signal, the level
+        // crossing and the station platform; the rolling stock has two sections and the train stamps are blueprints.
+        var rail = section(blueprint, "transportation/rail-maglev");
+        assertTrue(rail.containsAll(Set.of(RailRoute.Kind.MAGLEV.asset, RailRoute.Kind.RAIL.asset,
+              "scenery/rail/crossing-signal", "decal/rail/level-crossing", PLATFORM)), rail.toString());
+        var stock = new java.util.HashSet<>(section(blueprint, "transportation/maglev-stock"));
+        stock.addAll(section(blueprint, "transportation/rail-stock"));
+        assertTrue(stock.containsAll(Set.of(WAGON, CAB, "scenery/rail/locomotive")), stock.toString());
+        assertTrue(section(blueprint, "transportation/blueprints").containsAll(Set.of("stamp/maglev-train", "stamp/maglev-colony-train",
+              "stamp/rail-train", "stamp/express-train", "stamp/colony-train")));
+        assertTrue(stock.stream().noneMatch(id -> RailRoute.Kind.of(id) != null), "A route is a Rail and maglev card");
+        assertTrue(stock.stream().allMatch(id -> blueprint.asset(id).snap() == null));
+        assertTrue(blueprint.asset("scenery/maglev/coupler").sections().isEmpty(), "The coupler comes with the train stamp");
         var stamp = blueprint.asset("stamp/maglev-train");
         assertEquals("scenery/maglev/train", stamp.layout());
         assertTrue(Files.isRegularFile(Configuration.dataDir().toPath().resolve(stamp.thumbnail())), "Stamps use static thumbnails");
@@ -286,6 +286,12 @@ class BoardSceneryMaglevTest {
     private static double dx(int direction) { return new double[] { 0, .75, .75, 0, -.75, -.75 }[direction]; }
 
     private static double dy(int direction) { return new double[] { 1, .5, -.5, -1, -.5, .5 }[direction]; }
+
+    /** The ids of the palette assets in the section at {@code path}. */
+    private static Set<String> section(BoardEditorBlueprint blueprint, String path) {
+        return blueprint.assets().stream().filter(asset -> asset.sections().contains(path))
+              .map(BoardEditorBlueprint.Asset::id).collect(Collectors.toSet());
+    }
 
     private static long count(List<BoardSceneryLayouts.Component> rows, String asset) {
         return rows.stream().filter(row -> row.asset().equals(asset)).count();

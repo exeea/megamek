@@ -98,7 +98,7 @@ class GpuEditorSalvageRotationSmokeTest {
                                       new Ray(new Vector3(center.x, center.y, placed.bounds().max.z + 100), new Vector3(0, 0, -1)));
                                 assertNotNull(hit); assertEquals("car", hit.id());
                                 GpuBoardTestUi.capture(new File(output, "editor-salvage-rotation-deployment.png"));
-                                GpuBoardTestUi.category("Vehicles");
+                                GpuBoardTestUi.category("transportation");
                                 command(Action.SAMPLE, "", "");
                             }
                             case 2 -> {
