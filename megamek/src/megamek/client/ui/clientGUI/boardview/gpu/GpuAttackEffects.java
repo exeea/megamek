@@ -78,12 +78,17 @@ final class GpuAttackEffects implements Disposable {
     private Color laser = LASERS[0][0];
     /** The current laser's light: its colour in linear light, as bright as a muzzle flash. */
     private Vector3 laserLight = new Vector3();
+    /** The current laser's or PPC's light power against its family's reference: {@link #beamScale(WeaponType, int)}. */
+    private float beamScale = 1;
     /**
-     * The power of a laser's light along its beam and of its glow where it strikes, both sized .35 hex. The light along
-     * a beam is spread over its length (lava-lighting.glsl).
+     * The power of a medium laser's light along its beam and of its glow where it strikes, both sized .35 hex. The
+     * light along a beam is spread over its length (lava-lighting.glsl).
      */
     static final float BEAM_LIGHT = .45f, STRIKE_LIGHT = .5f;
-    /** A PPC's, far brighter: a band along its bolt, a broad glow on its target, and round the weapon as it charges. */
+    /**
+     * A standard PPC's, far brighter: a band along its bolt, a broad glow on its target, and round the weapon as it
+     * charges.
+     */
     static final float PPC_BEAM_LIGHT = 12, PPC_STRIKE_LIGHT = 1.5f, PPC_CHARGE_LIGHT = 8;
     /** This frame's weapon lights: muzzle blasts, laser and PPC light, flamer streams. */
     private final List<GpuLavaLighting.Source> weaponLights = new ArrayList<>();
@@ -149,9 +154,11 @@ final class GpuAttackEffects implements Disposable {
     private void prepare(UnitAttack next) {
         attack = next;
         muzzleCount = 0;
-        laser = laserTint(EquipmentType.get(attack.event.result().equipmentName()) instanceof WeaponType weapon
-              ? weapon : null, attack.event.attackerClan());
+        var weapon = EquipmentType.get(attack.event.result().equipmentName()) instanceof WeaponType type ? type : null;
+        laser = laserTint(weapon, attack.event.attackerClan());
         laserLight = laserLight(laser);
+        beamScale = beamScale(weapon,
+              attack.event.attacker().location().coords().distance(attack.event.destination().coords()));
         if (attack.event.attacker().sensorContact()) { return; }
         var event = attack.event;
         var unit = event.attacker();
@@ -478,6 +485,8 @@ final class GpuAttackEffects implements Disposable {
 
     /** Counter-fire samples the very same path and clock as the incoming missile and its disappearing trail. */
     private void renderInterceptions() {
+        // Counter-fire deals no damage of its own: its lasers keep the reference light, not the last shot's.
+        beamScale = 1;
         for (var salvo : volley) {
             if (salvo.defensive() || salvo.interception() == null) { continue; }
             var captured = launches.get(salvo);
@@ -701,7 +710,7 @@ final class GpuAttackEffects implements Disposable {
             float charge = MathUtils.clamp(attack.seconds / UnitAttack.ANTICIPATION_SECONDS, 0, 1);
             float radius = .4f + charge * 3.5f;
             electricGlow(muzzle, radius, charge);
-            light(muzzle.cpy(), PPC_CHARGE_LIGHT * charge, PPC_LIGHT, BoardGeometry.width() * .35f);
+            light(muzzle.cpy(), PPC_CHARGE_LIGHT * charge * beamScale, PPC_LIGHT, BoardGeometry.width() * .35f);
             for (int arc = 0; arc < 4; arc++) {
                 float angle = arc * 2.399963f + charge * 5;
                 point.set(muzzle).add(MathUtils.sin(angle) * radius, MathUtils.cos(angle) * radius,
@@ -719,7 +728,7 @@ final class GpuAttackEffects implements Disposable {
 
     private void electricGlow(Vector3 center, float radius, float alpha) {
         beams.billboard(camera, center, radius, PPC_GLOW, alpha);
-        light(center.cpy(), alpha, PPC_LIGHT, radius * 3);
+        light(center.cpy(), alpha * beamScale, PPC_LIGHT, radius * 3);
     }
 
     /**
@@ -734,6 +743,18 @@ final class GpuAttackEffects implements Disposable {
         int size = words.contains("Small") || words.contains("Micro") ? 0 : words.contains("Large") ? 2 : 1;
         int family = words.contains("Heavy") ? 3 : words.contains("ER") ? (clan ? 2 : 1) : 0;
         return LASERS[family][size];
+    }
+
+    /**
+     * A laser's or PPC's light power against its family's reference, a medium laser (5 damage) or a standard PPC (10):
+     * linear in its damage at {@code range} hexes (a variable-damage weapon's for that range bracket), from .4 (a micro
+     * laser) to 3 times. Any other weapon, or one without a fixed damage (infantry lasers, bays), keeps the reference.
+     */
+    static float beamScale(WeaponType weapon, int range) {
+        boolean ppc = weapon != null && weapon.hasFlag(WeaponType.F_PPC);
+        if (weapon == null || !ppc && !weapon.hasFlag(WeaponType.F_LASER)) { return 1; }
+        int damage = weapon.getDamage(range);
+        return damage <= 0 ? 1 : MathUtils.clamp(damage / (ppc ? 10f : 5f), .4f, 3);
     }
 
     /** A laser's light: its tint in linear light, as bright as a muzzle flash. */
@@ -795,10 +816,11 @@ final class GpuAttackEffects implements Disposable {
     /** Constant width even when a missed beam continues far off-board. */
     private void beam(Vector3 start, Vector3 finish, float width, float kind, float alpha) {
         beams.ribbon(camera, start, finish, width, kind, alpha, kind == LASER ? laser.toFloatBits() : Color.WHITE_FLOAT_BITS);
+        float power = alpha * beamScale;
         if (kind == LASER) {
-            beamLights(start, finish, width, laserLight, BEAM_LIGHT * alpha, STRIKE_LIGHT * alpha, weaponLights);
+            beamLights(start, finish, width, laserLight, BEAM_LIGHT * power, STRIKE_LIGHT * power, weaponLights);
         } else {
-            beamLights(start, finish, width, PPC_LIGHT, PPC_BEAM_LIGHT * alpha, PPC_STRIKE_LIGHT * alpha, weaponLights);
+            beamLights(start, finish, width, PPC_LIGHT, PPC_BEAM_LIGHT * power, PPC_STRIKE_LIGHT * power, weaponLights);
         }
     }
 
