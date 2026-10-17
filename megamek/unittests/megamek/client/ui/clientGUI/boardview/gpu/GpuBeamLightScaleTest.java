@@ -19,6 +19,21 @@ class GpuBeamLightScaleTest {
     }
 
     @Test
+    void everyLaserColourLightsAsBrightlyAsTheMediumLaser() {
+        float medium = luminance(GpuAttackEffects.laserLight(GpuAttackEffects.laserTint(weapon("ISMediumLaser"), false)));
+        for (String laser : new String[] { "ISSmallLaser", "ISLargeLaser", "ISERLargeLaser", "CLERSmallLaser", "CLHeavyLargeLaser" }) {
+            float other = luminance(GpuAttackEffects.laserLight(GpuAttackEffects.laserTint(weapon(laser), laser.startsWith("CL"))));
+            assertEquals(medium, other, medium * 1e-4, laser + ": only its damage changes its brightness, not its colour");
+        }
+    }
+
+    private static WeaponType weapon(String name) { return (WeaponType) EquipmentType.get(name); }
+
+    private static float luminance(com.badlogic.gdx.math.Vector3 linear) {
+        return .2126f * linear.x + .7152f * linear.y + .0722f * linear.z;
+    }
+
+    @Test
     void laserLightGrowsWithDamageFromTheMediumLasersCalibration() {
         assertEquals(1, scale("ISMediumLaser", 3));
         assertTrue(scale("ISSmallLaser", 3) < scale("ISMediumLaser", 3));

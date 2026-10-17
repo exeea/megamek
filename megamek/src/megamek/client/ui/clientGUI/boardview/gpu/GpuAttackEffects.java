@@ -759,8 +759,19 @@ final class GpuAttackEffects implements Disposable {
 
     /** A laser's light: its tint in linear light, as bright as a muzzle flash. */
     static Vector3 laserLight(Color tint) {
-        return new Vector3((float) Math.pow(tint.r, 2.2), (float) Math.pow(tint.g, 2.2), (float) Math.pow(tint.b, 2.2))
-              .scl(2.6f);
+        Vector3 linear = new Vector3((float) Math.pow(tint.r, 2.2), (float) Math.pow(tint.g, 2.2),
+              (float) Math.pow(tint.b, 2.2));
+        // Every colour lights as brightly as the medium laser's green (Rec. 709 luminance), so its damage alone
+        // (beamScale) sets how bright a laser is: a blue large laser no longer lights less than a green medium one.
+        return linear.scl(LASER_LUMINANCE / luminance(linear));
+    }
+
+    /** The light of the medium laser's green: {@link #laserLight}'s brightness for every laser colour. */
+    private static final float LASER_LUMINANCE = 2.6f * luminance(new Vector3((float) Math.pow(.15, 2.2),
+          (float) Math.pow(.8, 2.2), (float) Math.pow(.15, 2.2)));
+
+    private static float luminance(Vector3 linear) {
+        return Math.max(.2126f * linear.x + .7152f * linear.y + .0722f * linear.z, 1e-4f);
     }
 
     private void light(Vector3 position, float power, Vector3 color, float size) {
