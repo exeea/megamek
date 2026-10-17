@@ -474,9 +474,10 @@ final class GpuTerrain implements Disposable {
                     if (has(tundraLayersUniform)) {
                         set(tundraLayersUniform, (float) SCULPT_LAYERS.indexOf("tundra-earth") * 2,
                               (float) SCULPT_LAYERS.indexOf("tundra-fungus") * 2,
-                              (float) SCULPT_LAYERS.indexOf("tundra-crust") * 2);
+                              (float) SCULPT_LAYERS.indexOf("tundra-crust") * 2,
+                              (float) SCULPT_LAYERS.indexOf("tundra-lichen") * 2);
                         set(tundraTilesUniform, assets.sculptTile("tundra-earth"), assets.sculptTile("tundra-fungus"),
-                              assets.sculptTile("tundra-crust"));
+                              assets.sculptTile("tundra-crust"), assets.sculptTile("tundra-lichen"));
                     }
                     // BaseShader skips uniforms absent from a program. All lit surfaces share the same rain clock.
                     set(rainScaleUniform, 1f / BoardGeometry.width());
@@ -1462,7 +1463,7 @@ final class GpuTerrain implements Disposable {
     };
     private static final List<String> SCULPT_LAYERS = java.util.stream.Stream.concat(
           Arrays.stream(SCULPT_MATERIALS).flatMap(Arrays::stream),
-          java.util.stream.Stream.of("tundra-crust", "tundra-earth", "tundra-fungus", "earth"))
+          java.util.stream.Stream.of("tundra-crust", "tundra-earth", "tundra-fungus", "earth", "tundra-lichen"))
           .distinct().toList();
 
     /**

@@ -1,7 +1,14 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Reference-authored lichen/tussocks, fungal colonies and barren mineral crust in the shared texture array.
 // Preserve actual image pigments and internal detail instead of thresholding them into flat coloured spots.
-uniform vec3 u_tundraLayers, u_tundraTiles; // earth, fungus, mineral; normal/AO at colour layer + 1
+uniform vec4 u_tundraLayers, u_tundraTiles; // earth, fungus, mineral, lichen; normal/AO at colour layer + 1
+
+float tundraLichen(vec2 world) {
+    // Communities span several hexes; the finer field only breaks up their boundaries.
+    float patches = .8 * biomeNoise(world / 120.0 + vec2(17.0, 43.0))
+          + .2 * biomeNoise(world / 33.0 + vec2(71.0, 11.0));
+    return smoothstep(.43, .57, patches);
+}
 
 vec3 tundraFamily(float f) {
     if (abs(f - FUNGUS_FAMILY) < .5) return vec3(0.0, 1.0, 0.0);
@@ -16,44 +23,48 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
     MaterialProjection projection = materialProjection(world, face);
     amount *= smoothstep(.08, .65, face.z);
     if (amount < .0001) return;
-    vec3 kinds = tundraFamily(sculptFamily);
+    vec4 kinds = vec4(tundraFamily(sculptFamily), 0.0);
     float meadow = family(0.0) || family(TROPICAL_FAMILY) ? 1.0 : 0.0;
     float snow = family(5.0) ? 1.0 : 0.0;
     float concrete = family(4.0) ? 1.0 : 0.0;
 #ifdef terrainBlendFlag
     vec4 weights = max(v_coverWeights, vec4(0.0));
     weights /= max(dot(weights, vec4(1.0)), .0001);
-    kinds = vec3(0.0); meadow = 0.0; snow = 0.0; concrete = 0.0;
+    kinds = vec4(0.0); meadow = 0.0; snow = 0.0; concrete = 0.0;
     for (int i = 0; i < 4; i++) {
         float f = coverFamilies[i];
-        kinds += tundraFamily(f) * weights[i];
+        kinds.xyz += tundraFamily(f) * weights[i];
         meadow += (abs(f) < .5 || abs(f - TROPICAL_FAMILY) < .5 ? 1.0 : 0.0) * weights[i];
         snow += (abs(f - 5.0) < .5 ? 1.0 : 0.0) * weights[i];
         concrete += (abs(f - 4.0) < .5 ? 1.0 : 0.0) * weights[i];
     }
 #endif
+    if (kinds.x > .0001) {
+        kinds.w = kinds.x * tundraLichen(world.xy);
+        kinds.x -= kinds.w;
+    }
     // Keep source colonies intact over broad regions; colour and relief use the same slow translation field.
     float variation = biomeNoise(world.xy / 80.0 + 29.0);
     vec3 treated = vec3(0.0), mappedNormal = vec3(0.0);
     float mappedCavity = 0.0, mappedRoughness = 0.0;
+    float concreteLichen = 0.0;
     bool authoredRoughnessPresent = false;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         if (kinds[i] < .0001) continue;
         vec4 source = sampleMaterial(u_tundraLayers[i], u_tundraTiles[i], 1.0, projection,
               world, variation, 0.0, 0.0, false, true, 0.0, vec2(0.0));
         float light = dot(source.rgb, vec3(.2126, .7152, .0722));
         vec3 pigment = source.rgb;
-        if (i == 0) {
-            // Exposed local geology remains between mats on Rock/Dirt/Desert. Meadows replace green turf.
-            float cover = max(meadow + snow,
-                  mix(.40, .96, smoothstep(toLinear(vec3(.28)).r, toLinear(vec3(.55)).r, light)));
+        if (i == 0 || i == 3) {
+            // Keep a little local geology, without turning fine pigment into another patch coverage mask.
+            float cover = max(meadow + snow, .88);
             pigment = mix(color, source.rgb, clamp(cover, 0.0, 1.0));
             // Retain the source's pale lichen branches, leaving concrete visible through the warm soil/tussocks.
             // Relative linear chroma separates pale lichen from warm soil without encoding the sampled pigment.
             float warmth = (source.r - source.b) / max(source.r + source.b, .001);
             float lichen = smoothstep(toLinear(vec3(.30)).r, toLinear(vec3(.48)).r, light)
                   * (1.0 - smoothstep(.25, .55, warmth));
-            amount *= mix(1.0, lichen, concrete);
+            concreteLichen += lichen * kinds[i];
             pigment = mix(pigment, source.rgb * toLinear(vec3(.72, .82, .64)), concrete);
         } else if (i == 1) {
             // Fungal mats retain their authored lilac/cyan/copper detail and the local plum ground.
@@ -74,6 +85,7 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
             mappedCavity += relief.a * kinds[i];
         }
     }
+    amount *= mix(1.0, concreteLichen / max(kinds.x + kinds.w, .0001), concrete);
     // The Snow theme retains quiet snow remnants, free of lichen speckling. Explicit SNOW wins at capture.
     float remnant = smoothstep(.55, .72, biomeNoise(world.xy / 8.0 + 29.0)) * snow;
     amount *= 1.0 - remnant;
