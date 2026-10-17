@@ -1227,6 +1227,8 @@ final class GpuTerrain implements Disposable {
         private final boolean industrial;
         /** Cosmetic cover, including instanced fungi; excluded from wireframe fill and lines. */
         private boolean scatter;
+        /** A tree of the hex's woods or jungle cover (no scatter, no placed plant): the Tactical View keeps it. */
+        private boolean cover;
         /** A placed object under a quarter hex, which zoomed-out views skip ({@link GpuTerrain#drawn}). */
         private boolean small;
         /**
@@ -1595,6 +1597,8 @@ final class GpuTerrain implements Disposable {
         final List<Prop> props = new ArrayList<>();
         final List<Prop> cutaways = new ArrayList<>();
         final GpuTreeInstances.Stand stand = new GpuTreeInstances.Stand();
+        /** The stand's cover trees alone, which the Tactical View draws ({@link Prop#cover}). */
+        final GpuTreeInstances.Stand coverStand = new GpuTreeInstances.Stand();
         final List<GpuFungus.Emitter> spores = new ArrayList<>();
         final List<GpuGeysers.Emitter> geysers = new ArrayList<>();
         final List<GpuLavaLighting.Source> fungalLights = new ArrayList<>();
@@ -1720,10 +1724,15 @@ final class GpuTerrain implements Disposable {
          */
         void restand() {
             stand.trees.clear();
+            coverStand.trees.clear();
             for (Prop prop : props) {
                 if (!prop.scatter && prop.standing()) { stand.add(prop.treeAsset, prop.instance().transform); }
+                if (prop.cover && prop.standing()) { coverStand.add(prop.treeAsset, prop.instance().transform); }
             }
         }
+
+        /** The trees a pass draws: the whole stand, or in the Tactical View only the cover's ({@code fluff} hidden). */
+        GpuTreeInstances.Stand trees(boolean fluff) { return fluff ? stand : coverStand; }
 
         /**
          * Placed objects, in every view: their parts borrow the shared asset meshes and draw instanced, so changing a
@@ -3866,8 +3875,10 @@ final class GpuTerrain implements Disposable {
                         || feature.asset().startsWith("buildings/"),
                   Float.NaN, feature.kind() == BoardScene.FeatureKind.INDUSTRIAL);
             prop.scatter = feature.kind() == BoardScene.FeatureKind.SCATTER;
-            // The Tactical View keeps terrain scenery with gameplay value: rubble and fortifications.
-            prop.tactical = !placedObject && gameplayScenery(instance);
+            prop.cover = object == null && standTree && !prop.scatter;
+            // The Tactical View keeps terrain scenery with gameplay value (rubble and fortifications) and a woods cover's
+            // look: its trees (cover) and its skin's rows (a container yard).
+            prop.tactical = placedObject ? BoardFeatures.coverSkin(object) : gameplayScenery(instance);
             // Placed objects, from either file format, under a quarter hex: zoomed-out views skip them (drawn).
             prop.small = object != null && !BoardRail.route(feature)
                   && !standTree && !foliageModel(model) && geyser == null
@@ -6451,10 +6462,10 @@ final class GpuTerrain implements Disposable {
     boolean columns() { return installedColumns; }
 
     /**
-     * The Tactical View's draw rule, with no rebuild: trees, scatter, grass and biome vegetation,
+     * The Tactical View's draw rule, with no rebuild: scatter trees, placed plants, grass and biome vegetation,
      * building, industrial, fuel tank and placed object models, decals and paint, scars and ground damage, water and its
      * wave simulations, spores and geysers hide; the terrain, roads, bridges, rough, rubble, fortifications, tunnel
-     * portals and routes stay. Picking still sees what it hides, so a click picks the same hex and floor as before.
+     * portals, routes and a woods cover's look (its trees and its skin, Prop#cover, BoardFeatures#coverSkin) stay. Picking still sees what it hides, so a click picks the same hex and floor as before.
      * The 3D prop caches and their pages stay as they are: the passes draw each chunk's kept props instead
      * (Chunk#keptProps), so only the shadow map is redrawn.
      */
@@ -6561,7 +6572,7 @@ final class GpuTerrain implements Disposable {
                 propBatch.add(chunk.routeRenderables, propPage, visible);
             }
             if (terrain) {
-                trees.add(chunk.stand, chunk.treeLod, visible && fluff);
+                trees.add(chunk.trees(fluff), chunk.treeLod, visible);
                 trees.add(chunk.scatterStand, chunk.treeLod, scatterVisible);
             }
             if (!visible) {
@@ -7017,7 +7028,7 @@ final class GpuTerrain implements Disposable {
             for (Chunk chunk : chunks) {
                 boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
                 boolean scatterVisible = includeScatter && fluff && visible && chunk.scatterVisible;
-                trees.add(chunk.stand, Math.max(chunk.treeLod, coarsest), visible && fluff);
+                trees.add(chunk.trees(fluff), Math.max(chunk.treeLod, coarsest), visible);
                 trees.add(chunk.scatterStand, Math.max(chunk.treeLod, coarsest), scatterVisible);
                 if (visible) {
                     pass.render(chunk.depthTerrain);

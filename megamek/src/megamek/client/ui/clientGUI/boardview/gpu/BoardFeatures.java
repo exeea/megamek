@@ -341,6 +341,14 @@ final class BoardFeatures {
      */
     static boolean terrainOwned(megamek.common.board.BoardDecoration object) { return object.id().startsWith(TERRAIN_OWNED); }
 
+    /** A row of a woods cover's skin (a container yard, {@link #decorations}): the cover's look, kept in the Tactical View. */
+    static boolean coverSkin(megamek.common.board.BoardDecoration object) {
+        return terrainOwned(object) && object.id().contains(SKIN_ROW);
+    }
+
+    /** The id infix of a skin's rows ({@link #decorations}). */
+    private static final String SKIN_ROW = ":skin#";
+
     /** Whether a placed tree of this species turns to its {@code -snow} form on snow. */
     static boolean hasSnowForm(String asset) { return SNOW_FORMS.contains(asset); }
 
@@ -409,7 +417,7 @@ final class BoardFeatures {
         var skin = BoardSceneryLayouts.skin(hex);
         if (skin != null) {
             int[] next = { 0 };
-            String prefix = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":skin#";
+            String prefix = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + SKIN_ROW;
             skin.decorations(coords, hex, () -> prefix + next[0]++, null, false).forEach(object -> result.add(feature(hex, object)));
         }
         return List.copyOf(result);

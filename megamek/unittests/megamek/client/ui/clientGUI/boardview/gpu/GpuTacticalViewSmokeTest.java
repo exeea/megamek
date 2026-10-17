@@ -80,8 +80,9 @@ import org.junit.jupiter.api.Test;
  * grass; the bases show the side, the facing, the done and destroyed states; units are picked by their meeples; T
  * again restores the 3D view's models and its exact pose. A second test captures the mock-up battle in the movement and
  * firing phases (b11 tactical mock-ups) for review, a third drives its overlays through the Overlays panel and
- * captures the panel's places. The terrain draws no tree, scatter, grass, placed object, building model or water there
- * (GpuTerrain#setFluffHidden), in either graphics, and still picks and drapes as before.
+ * captures the panel's places. The terrain draws no scatter, grass, placed object, building model or water there, but
+ * keeps a woods cover's trees and skin (GpuTerrain#setFluffHidden), in either graphics, and still picks and drapes as
+ * before.
  */
 @Tag("on-demand")
 class GpuTacticalViewSmokeTest {
@@ -351,7 +352,7 @@ class GpuTacticalViewSmokeTest {
         forest(hexes, 2, 2, Terrains.WOODS, 1);
         forest(hexes, 6, 8, Terrains.WOODS, 2);
         forest(hexes, 10, 8, Terrains.JUNGLE, 2);
-        // A light container yard (b12): placed objects its woods own, which the Tactical View hides (verifyFluffHidden).
+        // A light container yard (b12): rows its woods own, which the Tactical View keeps as the cover's look.
         forest(hexes, 3, 0, Terrains.WOODS, 1);
         hexes[3].setAppearance(Map.of("vegetation", new megamek.common.board.HexAppearance("woods/container-yard/rows", null, null, null)));
         building(hexes, BUILDING, 2, 2, 40);
@@ -618,8 +619,8 @@ class GpuTacticalViewSmokeTest {
     }
 
     /**
-     * In the Tactical View the terrain draws no tree, placed object, building model, scatter, grass or water and none of
-     * the packed props (fuel tank, industry), only the kept ones, while the Enhanced bridge, relief geometry
+     * In the Tactical View the terrain draws no scatter, grass, water, placed plant or other placed object, building
+     * model or packed prop (fuel tank, industry), only the kept ones and a woods cover's look (its trees and its skin), while the Enhanced bridge, relief geometry
      * (GpuTerrain#builtBridge), stays drawn with the opaque terrain; a click on any hex picks the same hex and floor, and
      * the overlays and labels drape on the same surfaces, as with the fluff shown: the rule hides at draw time only.
      */
@@ -631,11 +632,13 @@ class GpuTacticalViewSmokeTest {
             drawn = audit.totals();
             decks = audit.draws("opaque", Attribute.getAttributeType("boardBridgeDeck"));
         }
-        for (String source : List.of("instanced-trees", "grass", "scatter", "water", "props", "props-batched")) {
+        for (String source : List.of("grass", "scatter", "water", "props-batched")) {
             assertEquals(0, drawn.getOrDefault(source, 0), "The Tactical View draws no " + source + ": " + drawn);
         }
         if (!terrain.columns()) {
             assertTrue(decks > 0, "The bridge's deck is drawn with the opaque terrain: " + drawn);
+            // A woods cover keeps its look: its trees and its container yard's rows, under the cover overlay.
+            assertTrue(drawn.getOrDefault("instanced-trees", 0) > 0, "The Tactical View draws the woods' trees: " + drawn);
         }
         assertTrue(drawn.keySet().stream().noneMatch(family -> family.startsWith("water-")), "No water: " + drawn);
         List<Object> hidden = new ArrayList<>(), shown = new ArrayList<>();
