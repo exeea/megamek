@@ -15,6 +15,7 @@ import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.glutils.GLOnlyTextureData;
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
@@ -22,7 +23,7 @@ import com.badlogic.gdx.utils.Disposable;
 /**
  * Shared local light: installed lava, burning hexes and luminous fungi, and each frame's fireballs and weapon fire.
  * Every visible emitter is binned on the board plane: each grid cell lists the emitters whose reach overlaps it, so a
- * lit pixel evaluates only those (lava-lighting.glsl).
+ * lit pixel evaluates only those (lava-lighting.glsl). An emitter is a point, or a segment such as a beam.
  */
 final class GpuLavaLighting extends Attribute implements Disposable {
     static final long TYPE = register("boardLavaLighting");
@@ -30,8 +31,17 @@ final class GpuLavaLighting extends Attribute implements Disposable {
     private static final int ROW = 1024;
     /** Integers stored as floats stay exact below 2^24, which is also 16384 rows, the common maximum texture height. */
     private static final int MAX_TEXELS = 1 << 24;
-    /** An emitter; {@code tile} indexes the scene's tiles for the field-of-view mask, or is negative for an effect. */
-    record Source(int tile, Vector3 position, float power, Vector3 color, float size) { }
+    /**
+     * An emitter; {@code tile} indexes the scene's tiles for the field-of-view mask, or is negative for an effect. A
+     * segment (a beam or a flamer stream) runs from {@code position} to {@code end} as a tube of {@code radius}, in
+     * world units, and spreads the light of a point of the same power and size along its length (lava-lighting.glsl);
+     * a point has no end.
+     */
+    record Source(int tile, Vector3 position, float power, Vector3 color, float size, Vector3 end, float radius) {
+        Source(int tile, Vector3 position, float power, Vector3 color, float size) {
+            this(tile, position, power, color, size, null, 0);
+        }
+    }
     /** A burning hex's flames: warmer and dimmer than molten lava, reaching about two hexes. */
     private static final Vector3 FIRE = new Vector3(2f, .8f, .22f);
     private final GpuAssets assets; // Borrowed from the same owner as the rendered material.
@@ -44,7 +54,10 @@ final class GpuLavaLighting extends Attribute implements Disposable {
     private float level;
     // The binned snapshot: replaced whole on the render thread when the visible emitters change, never mutated.
     private List<Source> binned = List.of();
-    /** Whole rows of texels: one per grid cell (first entry texel, count), then two per entry (as in the shader). */
+    /**
+     * Whole rows of texels: one per grid cell (first entry texel, end texel), then two per point and four per segment
+     * (as in the shader).
+     */
     private float[] list = new float[ROW * 4];
     private int columns;
     private int rows;
@@ -130,10 +143,11 @@ final class GpuLavaLighting extends Attribute implements Disposable {
         float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
         for (Source source : visible) {
             float reach = reach(source);
-            minX = Math.min(minX, source.position().x - reach);
-            minY = Math.min(minY, source.position().y - reach);
-            maxX = Math.max(maxX, source.position().x + reach);
-            maxY = Math.max(maxY, source.position().y + reach);
+            Vector3 end = end(source);
+            minX = Math.min(minX, Math.min(source.position().x, end.x) - reach);
+            minY = Math.min(minY, Math.min(source.position().y, end.y) - reach);
+            maxX = Math.max(maxX, Math.max(source.position().x, end.x) + reach);
+            maxY = Math.max(maxY, Math.max(source.position().y, end.y) + reach);
         }
         originX = minX;
         originY = minY;
@@ -141,38 +155,56 @@ final class GpuLavaLighting extends Attribute implements Disposable {
         columns = (int) ((maxX - minX) / cell) + 1;
         rows = (int) ((maxY - minY) / cell) + 1;
         int cells = columns * rows;
-        // Counts per cell first, then each cell's next free entry texel while filling.
+        // Texels per cell first, then each cell's next free entry texel while filling.
         int[] next = new int[cells];
-        int entries = 0;
-        for (Source source : visible) { entries += overlapped(source, cell, at -> next[at]++); }
-        // Entries start on an even texel, so each entry's two texels share a row.
+        long texels = 0;
+        for (Source source : visible) {
+            int size = texels(source);
+            texels += (long) size * overlapped(source, cell, at -> next[at] += size);
+        }
+        // Entries start on an even texel and take whole pairs, so each pair shares a row.
         int start = cells + (cells & 1);
-        long texels = start + 2L * entries;
+        texels += start;
         if (texels > MAX_TEXELS) { throw new IllegalStateException("Local light list exceeds " + MAX_TEXELS + " texels"); }
         float[] packed = new float[(int) ((texels + ROW - 1) / ROW) * ROW * 4];
         for (int at = 0, first = start; at < cells; at++) {
-            int count = next[at];
+            int size = next[at];
             packed[at * 4] = first;
-            packed[at * 4 + 1] = count;
+            packed[at * 4 + 1] = first + size;
             next[at] = first;
-            first += 2 * count;
+            first += size;
         }
         for (Source source : visible) {
+            int size = texels(source);
             overlapped(source, cell, at -> {
                 int texel = next[at] * 4;
-                next[at] += 2;
+                next[at] += size;
                 packed[texel] = source.position().x;
                 packed[texel + 1] = source.position().y;
                 packed[texel + 2] = source.position().z;
-                packed[texel + 3] = source.power();
+                // A segment flags itself by a negative power, so a point keeps its two texels and its maths; never -0,
+                // which the shader would read as a point.
+                packed[texel + 3] = source.end() == null ? source.power()
+                      : -Math.max(source.power(), Float.MIN_NORMAL);
                 packed[texel + 4] = source.color().x;
                 packed[texel + 5] = source.color().y;
                 packed[texel + 6] = source.color().z;
                 packed[texel + 7] = source.size();
+                if (source.end() != null) {
+                    packed[texel + 8] = source.end().x;
+                    packed[texel + 9] = source.end().y;
+                    packed[texel + 10] = source.end().z;
+                    packed[texel + 11] = source.radius() / Math.max(source.size(), .001f);
+                }
             });
         }
         list = packed;
     }
+
+    /** A point's two texels, or a segment's four: its end and tube in the third, the fourth keeping pairs aligned. */
+    private static int texels(Source source) { return source.end() == null ? 2 : 4; }
+
+    private static Vector3 end(Source source) { return source.end() == null ? source.position() : source.end(); }
 
     /**
      * The source's light reaches exactly zero at twice its size (lava-lighting.glsl's reach term), in 3D and so also
@@ -181,25 +213,66 @@ final class GpuLavaLighting extends Attribute implements Disposable {
      */
     private static float reach(Source source) { return 2 * Math.max(source.size(), .001f) * 1.001f; }
 
-    /** Visits each cell whose square the source's reach disk overlaps; returns the number of cells. */
+    /**
+     * Visits each cell whose square the source's reach overlaps on the board plane: a disk round a point, a capsule
+     * round a segment. Returns the number of cells.
+     */
     private int overlapped(Source source, float cell, IntConsumer action) {
         float reach = reach(source), x = source.position().x - originX, y = source.position().y - originY;
-        int x0 = Math.max(0, (int) Math.floor((x - reach) / cell));
-        int x1 = Math.min(columns - 1, (int) Math.floor((x + reach) / cell));
-        int y0 = Math.max(0, (int) Math.floor((y - reach) / cell));
-        int y1 = Math.min(rows - 1, (int) Math.floor((y + reach) / cell));
+        float endX = end(source).x - originX, endY = end(source).y - originY;
+        int x0 = Math.max(0, (int) Math.floor((Math.min(x, endX) - reach) / cell));
+        int x1 = Math.min(columns - 1, (int) Math.floor((Math.max(x, endX) + reach) / cell));
+        int y0 = Math.max(0, (int) Math.floor((Math.min(y, endY) - reach) / cell));
+        int y1 = Math.min(rows - 1, (int) Math.floor((Math.max(y, endY) + reach) / cell));
         int count = 0;
         for (int row = y0; row <= y1; row++) {
-            float dy = Math.max(0, Math.max(row * cell - y, y - (row + 1) * cell));
             for (int column = x0; column <= x1; column++) {
-                float dx = Math.max(0, Math.max(column * cell - x, x - (column + 1) * cell));
-                if (dx * dx + dy * dy <= reach * reach) {
+                if (squaredDistance(x, y, endX, endY, column * cell, row * cell, (column + 1) * cell,
+                      (row + 1) * cell) <= reach * reach) {
                     action.accept(row * columns + column);
                     count++;
                 }
             }
         }
         return count;
+    }
+
+    /**
+     * The squared distance from the segment between (x, y) and (endX, endY), a point where they agree, to the
+     * rectangle from (left, bottom) to (right, top): zero where the segment crosses it, otherwise the least distance
+     * from an end to the rectangle or from a corner to the segment.
+     */
+    static float squaredDistance(float x, float y, float endX, float endY, float left, float bottom, float right,
+          float top) {
+        float dx = Math.max(0, Math.max(left - x, x - right));
+        float dy = Math.max(0, Math.max(bottom - y, y - top));
+        float nearest = dx * dx + dy * dy;
+        if (nearest == 0 || (x == endX && y == endY)) { return nearest; }
+        // Clip the segment to the rectangle (Liang-Barsky): any part left inside means they cross.
+        float alongX = endX - x, alongY = endY - y, enter = 0, exit = 1;
+        float[] toward = { -alongX, alongX, -alongY, alongY };
+        float[] room = { x - left, right - x, y - bottom, top - y };
+        for (int side = 0; side < 4; side++) {
+            if (toward[side] == 0) {
+                if (room[side] < 0) { exit = -1; }
+            } else if (toward[side] < 0) {
+                enter = Math.max(enter, room[side] / toward[side]);
+            } else {
+                exit = Math.min(exit, room[side] / toward[side]);
+            }
+        }
+        if (enter <= exit) { return 0; }
+        dx = Math.max(0, Math.max(left - endX, endX - right));
+        dy = Math.max(0, Math.max(bottom - endY, endY - top));
+        nearest = Math.min(nearest, dx * dx + dy * dy);
+        float length2 = alongX * alongX + alongY * alongY;
+        for (int corner = 0; corner < 4; corner++) {
+            float cornerX = ((corner & 1) == 0 ? left : right) - x, cornerY = (corner < 2 ? bottom : top) - y;
+            float t = MathUtils.clamp((cornerX * alongX + cornerY * alongY) / length2, 0, 1);
+            float offX = cornerX - t * alongX, offY = cornerY - t * alongY;
+            nearest = Math.min(nearest, offX * offX + offY * offY);
+        }
+        return nearest;
     }
 
     /**

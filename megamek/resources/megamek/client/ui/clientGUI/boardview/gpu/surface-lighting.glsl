@@ -137,9 +137,11 @@ vec3 surfaceEnvironment(vec3 normal, float film, float roughness, vec3 groundAlb
           environmentGround(groundAlbedo), surfaceAmbient(vec3(0.0, 0.0, 1.0)));
 }
 
-// Irradiance for scattering volumes and optical coats, before their own reflection/transmission split.
-void incidentLighting(vec3 normal, out vec3 ambient, out vec3 direct) {
-    ambient = skyLight(normal, GROUND_ALBEDO) + lavaIrradiance(v_cloudPosition, normal);
+// Irradiance for scattering volumes and optical coats, before their own reflection/transmission split. Without local,
+// it leaves out the local lights, for water that walks them once with their reflection (lavaLighting).
+void incidentLighting(vec3 normal, bool local, out vec3 ambient, out vec3 direct) {
+    ambient = skyLight(normal, GROUND_ALBEDO);
+    if (local) ambient += lavaIrradiance(v_cloudPosition, normal);
     direct = vec3(0.0);
 #if numDirectionalLights > 0
     for (int i = 0; i < numDirectionalLights; i++) {
@@ -147,6 +149,10 @@ void incidentLighting(vec3 normal, out vec3 ambient, out vec3 direct) {
     }
 #endif
     direct *= surfaceVisibility();
+}
+
+void incidentLighting(vec3 normal, out vec3 ambient, out vec3 direct) {
+    incidentLighting(normal, true, ambient, direct);
 }
 
 void surfaceLighting(vec3 normal, vec3 face, float film, float roughness,

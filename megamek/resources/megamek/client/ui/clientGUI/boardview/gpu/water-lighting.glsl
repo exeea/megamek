@@ -33,15 +33,23 @@ vec3 waterDirectReflection(vec3 normal, vec3 light, vec3 view, float roughness) 
     return reflected;
 }
 
-// The local lights (lava-lighting.glsl) mirrored as the sun is, each through its own size-widened lobe. Their diffuse
-// light already enters waterLighting() through incidentLighting. The orthographic glare ceiling stays the sun's: no
-// local light meets a whole lake at its mirror angle at once.
-vec3 waterLocalReflection(vec3 normal, vec3 view, float roughness) {
-    vec3 specular = vec3(0.0);
+// The local lights (lava-lighting.glsl), in one walk. Their irradiance on a level surface joins the light the water
+// scatters, as the sky's does through incidentLighting in waterLighting(false). The facets (normal, roughness) mirror
+// them as they mirror the sun, each source through its own size-widened lobe and a beam along its whole length, and
+// so does a fall's sheet in sheetGlint.
+// The orthographic glare ceiling stays the sun's: no local light meets a whole lake at its mirror angle at once.
+vec3 waterLocalLighting(inout WaterLighting illumination, vec3 normal, vec3 view, float roughness, bool falling,
+      vec3 sheet, float sheetRoughness, out vec3 sheetGlint) {
+    vec3 glint = vec3(0.0);
+    sheetGlint = vec3(0.0);
 #ifdef lightingFlag
-    lavaIrradiance(v_cloudPosition, normal, view, roughness, vec3(.02037), specular);
+    vec3 irradiance = lavaLighting(v_cloudPosition, vec3(0.0, 0.0, 1.0), view, vec3(.02037), falling ? 2 : 1, normal,
+          roughness, glint, sheet, sheetRoughness, sheetGlint);
+    illumination.light += irradiance;
+    illumination.whiteLight += irradiance;
+    illumination.ambient += irradiance;
 #endif
-    return specular;
+    return glint;
 }
 
 vec3 waterEnvironmentReflection(vec3 normal, vec3 view, float roughness, WaterLighting illumination) {
@@ -107,9 +115,10 @@ vec3 waterFroth(vec4 mixture, vec3 tint) {
           mix(.3, .08, mixture.x)) * tint;
 }
 
-WaterLighting waterLighting() {
+WaterLighting waterLighting(bool local) {
     // Level-surface irradiance for the column, foam, mist and falls alike: white water scatters light through its
-    // whole volume, so a fall's foam reads exactly like the foam it lands in.
+    // whole volume, so a fall's foam reads exactly like the foam it lands in. Pools and falls leave out the local
+    // lights here and add them with their reflection (waterLocalLighting).
     vec3 ambient = vec3(0.0);
     vec3 lightNormal = vec3(0.0, 0.0, 1.0);
     vec3 albedo = vec3(1.0);
@@ -117,7 +126,7 @@ WaterLighting waterLighting() {
 #ifdef lightingFlag
     // This is incident irradiance for a scattering volume, before any particular surface BRDF/Fresnel split.
     vec3 direct = vec3(0.0), sheen = vec3(0.0);
-    incidentLighting(lightNormal, ambient, direct);
+    incidentLighting(lightNormal, local, ambient, direct);
     albedo *= ambient + direct;
 #if numDirectionalLights > 0
     // Shadowed, cloud-filtered sunlight arriving along the sun direction, for the reflected glints.
@@ -136,6 +145,8 @@ WaterLighting waterLighting() {
 #endif
     return WaterLighting(light, whiteLight, sunlight, ambient, ground);
 }
+
+WaterLighting waterLighting() { return waterLighting(true); }
 
 void waterOutput(vec4 color) {
     color *= v_opacity;

@@ -17,7 +17,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Vector3;
@@ -97,20 +96,19 @@ class GpuWaterLocalLightSmokeTest {
         int[] lit = capture(terrain, frame, overview, calm, output, "night-explosion");
         capture(terrain, frame, low, calm, output, "night-explosion-low");
 
-        // A laser across calm water between two wading units: its weapon light and its hit, as GpuAttackEffects.beam
-        // places them (no beam ribbon or units are drawn here).
-        Color tint = GpuAttackEffects.laserTint(null, false);
-        var laser = new Vector3((float) Math.pow(tint.r, 2.2), (float) Math.pow(tint.g, 2.2),
-              (float) Math.pow(tint.b, 2.2)).scl(2.6f);
-        float size = BoardGeometry.width() * .35f;
+        // A laser across calm water between two wading units: its light along the beam and its strike, as
+        // GpuAttackEffects lights a beam (no beam ribbon or units are drawn here).
+        Vector3 laser = GpuAttackEffects.laserLight(GpuAttackEffects.laserTint(null, false));
         BoardScene.Tile shooter = calm.tile(new Coords(3, 4));
         Vector3 muzzle = BoardGeometry.center(shooter.coords(), 0);
         muzzle.z = BoardGeometry.waterZ(shooter) + BoardRelief.metres(9);
         BoardScene.Tile target = calm.tile(new Coords(6, 4));
         Vector3 hit = BoardGeometry.center(target.coords(), 0);
         hit.z = BoardGeometry.waterZ(target) + BoardRelief.metres(6);
-        terrain.setEffectLights(List.of(new GpuLavaLighting.Source(-1, hit, .8f, laser, size),
-              new GpuLavaLighting.Source(-1, muzzle, .35f, laser, size * .6f)));
+        var beam = new ArrayList<GpuLavaLighting.Source>();
+        GpuAttackEffects.beamLights(muzzle, hit, .65f, laser, GpuAttackEffects.BEAM_LIGHT,
+              GpuAttackEffects.STRIKE_LIGHT, beam);
+        terrain.setEffectLights(beam);
         capture(terrain, frame, overview, calm, output, "night-laser");
         capture(terrain, frame, low, calm, output, "night-laser-low");
 

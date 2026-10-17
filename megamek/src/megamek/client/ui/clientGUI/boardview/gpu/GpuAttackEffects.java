@@ -77,7 +77,14 @@ final class GpuAttackEffects implements Disposable {
         { new Color(1, .85f, .15f, .4f), new Color(.1f, .85f, .8f, .4f), new Color(.85f, .2f, .85f, .4f) } };
     private Color laser = LASERS[0][0];
     /** The current laser's light: its colour in linear light, as bright as a muzzle flash. */
-    private final Vector3 laserLight = new Vector3();
+    private Vector3 laserLight = new Vector3();
+    /**
+     * The power of a laser's light along its beam and of its glow where it strikes, both sized .35 hex. The light along
+     * a beam is spread over its length (lava-lighting.glsl).
+     */
+    static final float BEAM_LIGHT = .45f, STRIKE_LIGHT = .5f;
+    /** A PPC's, far brighter: a band along its bolt, a broad glow on its target, and round the weapon as it charges. */
+    static final float PPC_BEAM_LIGHT = 12, PPC_STRIKE_LIGHT = 1.5f, PPC_CHARGE_LIGHT = 8;
     /** This frame's weapon lights: muzzle blasts, laser and PPC light, flamer streams. */
     private final List<GpuLavaLighting.Source> weaponLights = new ArrayList<>();
     private final GpuArtilleryBlast artilleryBlasts = new GpuArtilleryBlast();
@@ -144,8 +151,7 @@ final class GpuAttackEffects implements Disposable {
         muzzleCount = 0;
         laser = laserTint(EquipmentType.get(attack.event.result().equipmentName()) instanceof WeaponType weapon
               ? weapon : null, attack.event.attackerClan());
-        laserLight.set((float) Math.pow(laser.r, 2.2), (float) Math.pow(laser.g, 2.2), (float) Math.pow(laser.b, 2.2))
-              .scl(2.6f);
+        laserLight = laserLight(laser);
         if (attack.event.attacker().sensorContact()) { return; }
         var event = attack.event;
         var unit = event.attacker();
@@ -695,6 +701,7 @@ final class GpuAttackEffects implements Disposable {
             float charge = MathUtils.clamp(attack.seconds / UnitAttack.ANTICIPATION_SECONDS, 0, 1);
             float radius = .4f + charge * 3.5f;
             electricGlow(muzzle, radius, charge);
+            light(muzzle.cpy(), PPC_CHARGE_LIGHT * charge, PPC_LIGHT, BoardGeometry.width() * .35f);
             for (int arc = 0; arc < 4; arc++) {
                 float angle = arc * 2.399963f + charge * 5;
                 point.set(muzzle).add(MathUtils.sin(angle) * radius, MathUtils.cos(angle) * radius,
@@ -729,8 +736,20 @@ final class GpuAttackEffects implements Disposable {
         return LASERS[family][size];
     }
 
+    /** A laser's light: its tint in linear light, as bright as a muzzle flash. */
+    static Vector3 laserLight(Color tint) {
+        return new Vector3((float) Math.pow(tint.r, 2.2), (float) Math.pow(tint.g, 2.2), (float) Math.pow(tint.b, 2.2))
+              .scl(2.6f);
+    }
+
     private void light(Vector3 position, float power, Vector3 color, float size) {
-        if (power > .02f) { weaponLights.add(new GpuLavaLighting.Source(-1, position, power, color, size)); }
+        light(weaponLights, position, null, power, color, size, 0);
+    }
+
+    /** Adds a point light, or with an end a segment of that tube radius; the faintest are left out. */
+    private static void light(List<GpuLavaLighting.Source> lights, Vector3 position, Vector3 end, float power,
+          Vector3 color, float size, float radius) {
+        if (power > .02f) { lights.add(new GpuLavaLighting.Source(-1, position, power, color, size, end, radius)); }
     }
 
     /** Fixed segment count and the shared attack clock keep electrical flicker bounded and deterministic. */
@@ -746,7 +765,7 @@ final class GpuAttackEffects implements Disposable {
             electricEnd.set(start).mulAdd(electricAxis, t)
                   .mulAdd(electricSide, (UnitAttack.noise(seed + segment * 31) * 2 - 1) * width)
                   .mulAdd(electricUp, (UnitAttack.noise(seed + segment * 53) * 2 - 1) * width * .5f);
-            beam(electricStart, electricEnd, .4f, PPC, alpha);
+            beams.ribbon(camera, electricStart, electricEnd, .4f, PPC, alpha);
             electricStart.set(electricEnd);
         }
     }
@@ -762,7 +781,8 @@ final class GpuAttackEffects implements Disposable {
         }
         if (!hit) {
             if (on < DESIGNATOR_MISS_SECONDS) {
-                beam(muzzle, target, GpuDesignators.WIDTH, GpuDesignators.LINE, .35f * (1 - on / DESIGNATOR_MISS_SECONDS));
+                beams.ribbon(camera, muzzle, target, GpuDesignators.WIDTH, GpuDesignators.LINE,
+                      .35f * (1 - on / DESIGNATOR_MISS_SECONDS));
             }
             return;
         }
@@ -775,11 +795,22 @@ final class GpuAttackEffects implements Disposable {
     /** Constant width even when a missed beam continues far off-board. */
     private void beam(Vector3 start, Vector3 finish, float width, float kind, float alpha) {
         beams.ribbon(camera, start, finish, width, kind, alpha, kind == LASER ? laser.toFloatBits() : Color.WHITE_FLOAT_BITS);
-        // A beam lights most where it ends and where it leaves the weapon.
-        Vector3 color = kind == LASER ? laserLight : PPC_LIGHT;
+        if (kind == LASER) {
+            beamLights(start, finish, width, laserLight, BEAM_LIGHT * alpha, STRIKE_LIGHT * alpha, weaponLights);
+        } else {
+            beamLights(start, finish, width, PPC_LIGHT, PPC_BEAM_LIGHT * alpha, PPC_STRIKE_LIGHT * alpha, weaponLights);
+        }
+    }
+
+    /**
+     * A beam lights all along its length, from the weapon to where it ends, as a tube as wide as the beam, and most
+     * where it strikes.
+     */
+    static void beamLights(Vector3 start, Vector3 finish, float width, Vector3 color, float beam, float strike,
+          List<GpuLavaLighting.Source> lights) {
         float size = BoardGeometry.width() * .35f;
-        light(finish.cpy(), .8f * alpha, color, size);
-        light(start.cpy(), .35f * alpha, color, size * .6f);
+        light(lights, start.cpy(), finish.cpy(), beam, color, size, width);
+        light(lights, finish.cpy(), null, strike, color, size, 0);
     }
 
     /** A short stream of growing, rolling flame packets; all positions come from the shared attack clock. */
@@ -794,7 +825,9 @@ final class GpuAttackEffects implements Disposable {
         if (flameSide.isZero()) { flameSide.set(Vector3.X); }
         flameUp.set(flameSide).crs(direction).nor();
         float burning = MathUtils.clamp(time, 0, 1) * fade;
-        light(start.cpy().mulAdd(direction, .7f * Math.min(1, time)), .9f * burning, FLAMER_LIGHT, size * 10);
+        // The stream lights from the nozzle to its leading packet, growing with it, as wide as its packets midway.
+        light(weaponLights, start.cpy(), start.cpy().mulAdd(direction, Math.min(1, time)), .9f * burning, FLAMER_LIGHT,
+              size * 10, size * 2);
         // These wisps are transient exhaust; the game alone decides whether terrain actually catches fire.
         for (int puff = 0; puff < 6; puff++) {
             float age = time - .7f - puff * .12f;

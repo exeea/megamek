@@ -13,7 +13,10 @@ void waterHabitat(out vec4 habitat, out vec4 mixture) {
     if (dot(connected, vec4(1.0)) > .5) mixture = connected;
 }
 
-vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 tint, vec3 authored, WaterLighting illumination) {
+// The local lights complete illumination here, in the walk that also gives their reflection: a fall's sheet (sheet,
+// sheetRoughness) receives its own in sheetGlint.
+vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 tint, vec3 authored,
+      inout WaterLighting illumination, vec3 sheet, float sheetRoughness, out vec3 sheetGlint) {
     bool procedural = u_waterMaterial.y > 0.5;
     vec2 rest = v_cloudPosition.xy;
 #ifdef waterSurfaceFlag
@@ -238,6 +241,9 @@ vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 ti
     float footprint = clamp(calm + 0.06 * log2(1.0 + max(texels.x, texels.y)), 0.16, 0.45);
     float roughness = max(footprint, antialiasedRoughness(calm, surfaceVariance));
     roughness = mix(roughness, .45, falling ? 0.0 : min(length(surfaceNormal.xy) * 20.0, 1.0));
+    // Fires, lava, fungi and weapon fire light the water and glint on the same facets.
+    vec3 localGlint = waterLocalLighting(illumination, normal, view, roughness, falling, sheet, sheetRoughness,
+          sheetGlint);
     float fresnel = specularAlbedo(facing, roughness, vec3(.02037)).r;
     vec3 reflection = waterEnvironmentReflection(normal, view, roughness, illumination);
     vec3 glint = vec3(0.0);
@@ -267,8 +273,7 @@ vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 ti
     glow = waterShallows(mixture) * (illumination.sunlight * (0.15 + 0.85 * behind * behind) * 0.6
           + illumination.light * 0.25) * crest * effects;
 #endif
-    // Fires, lava, fungi and weapon fire glint on the same facets.
-    glint += waterLocalReflection(normal, view, roughness);
+    glint += localGlint;
     // The brighter side of the sky lights the faces tilted toward it, even overcast or seen from straight above.
     facets *= clamp(1.0 - dot(broadSlope, key) * 1.1, 0.6, 1.4);
     vec3 body;

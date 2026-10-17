@@ -784,9 +784,10 @@ class GpuTerrainRealismSmokeTest {
             result.add(new Variant("diagnostic-no-shadows", null, Map.of("surface-lighting.glsl", surface)));
         }
         if (all || diagnostics.contains("localLight")) {
+            // Every reader of the light list walks it through lavaLighting: terrain, units, water and volumes.
             result.add(new Variant("diagnostic-no-local-light", null, Map.of("lava-lighting.glsl",
-                  functionBody(GpuShaderSource.readDisk("lava-lighting.glsl"),
-                        "vec3 lavaIrradiance(vec3 position, vec3 normal)", "return vec3(0.0);"))));
+                  functionBody(GpuShaderSource.readDisk("lava-lighting.glsl"), "vec3 lavaLighting(",
+                        "specular = vec3(0.0); specular2 = vec3(0.0); return vec3(0.0);"))));
         }
         if (diagnostics.contains("fixedExposure")) {
             float diagnosticExposure = Float.parseFloat(System.getProperty("megamek.gpu.realismFixedExposure", "1.02573"));

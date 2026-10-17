@@ -19,8 +19,7 @@ void main() {
     vec3 tint = waterTint(mixture);
     bool procedural = u_waterMaterial.y > 0.5;
     vec3 authored = procedural ? vec3(0.0) : texture(u_diffuseTexture, v_diffuseUV).rgb;
-    WaterLighting illumination = waterLighting();
-    vec4 pool = waterPool(true, geometric, habitat, mixture, tint, authored, illumination);
+    WaterLighting illumination = waterLighting(false);
     float palette = u_waterMaterial.x, effects = u_waterEffects;
     vec2 position = v_cloudPosition.xy * u_rainScale;
     vec3 view = -viewDirection();
@@ -63,6 +62,10 @@ void main() {
     // Preserve the geometric lip and volume-scattering normal; only the shared optical reflection frame is repaired.
     vec3 reflectionNormal = shadingNormal(surfaceNormal, geometric, view);
     sheetRoughness = antialiasedRoughness(sheetRoughness, surfaceVariance);
+    // The crest's pool completes the illumination with the local lights, and mirrors them for the sheet too.
+    vec3 sheetGlint;
+    vec4 pool = waterPool(true, geometric, habitat, mixture, tint, authored, illumination, reflectionNormal,
+          sheetRoughness, sheetGlint);
     float sheetFresnel = specularAlbedo(max(0.0, dot(reflectionNormal, view)), sheetRoughness, vec3(.02037)).r;
     vec3 sheetReflection = waterEnvironmentReflection(reflectionNormal, view, sheetRoughness, illumination);
     // Clear water pouring over the crest shows the pool's blue, lit through and mirroring the sky.
@@ -82,7 +85,7 @@ void main() {
     glass += illumination.sunlight * float(dot(geometric, sun) > 0.0)
           * waterDirectReflection(reflectionNormal, sun, view, sheetRoughness) * glassy;
 #endif
-    glass += waterLocalReflection(reflectionNormal, view, sheetRoughness) * glassy;
+    glass += sheetGlint * glassy;
     // Between the streaks the water itself turns milky and opaque as bubbles fill it.
     glass = mix(glass, froth * fallLight * 0.8, aerate * 0.5);
     vec3 sheet = mix(glass, materialReflectance(froth * mix(0.85, 1.35, foamy)) * fallLight, white);

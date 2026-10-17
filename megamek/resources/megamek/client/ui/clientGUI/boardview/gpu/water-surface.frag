@@ -23,6 +23,7 @@ void main() {
     vec3 tint = waterTint(mixture);
     bool procedural = u_waterMaterial.y > 0.5;
     vec3 authored = procedural ? vec3(0.0) : texture(u_diffuseTexture, v_diffuseUV).rgb;
-    WaterLighting illumination = waterLighting();
-    waterOutput(waterPool(false, geometric, habitat, mixture, tint, authored, illumination));
+    WaterLighting illumination = waterLighting(false);
+    vec3 noSheet;
+    waterOutput(waterPool(false, geometric, habitat, mixture, tint, authored, illumination, face, 1.0, noSheet));
 }
