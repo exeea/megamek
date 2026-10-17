@@ -242,8 +242,7 @@ class GpuContainerYardSmokeTest {
             if (!content.contains("fluff:80:") && !content.contains("fluff:81:")) { continue; }
             Board sheet = BoardFile.loadSheet(file, false, true);
             BoardScene scene = GpuLegacyImportSmokeTest.scene(sheet);
-            @SuppressWarnings("unchecked")
-            var pinned = (Set<Coords>) GpuCamouflageReview.field(BoardConcrete.of(scene), "objectPins");
+            var pinned = BoardConcrete.of(scene).fit().pinned();
             long yards = pinned.stream().filter(at -> BoardSceneryLayouts.skin(sheet.getHex(at)) != null).count();
             if (yards > 0) {
                 boards++;

@@ -12,7 +12,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import megamek.common.Hex;
@@ -201,6 +204,61 @@ class BoardSceneryLayoutsTest {
         }
         // The container yard (5,0) is no taken layer: its look, a hex design, draws it.
         assertEquals(9, taken);
+    }
+
+    /** A park beside a pool on a legacy board ({@code flat}: the pool paved over, so nothing walls the park). */
+    private static Board park(boolean flat) {
+        Board board = Board.createEmptyBoard(3, 3);
+        String[] hexes = { "pavement:1", "pavement:1;fluff:93:7", "pavement:1;fluff:93:8", "pavement:1;fluff:93:7",
+              "water:1;fluff:8:3", "pavement:1;fluff:93:10", "water:1;fluff:8:2", "water:2", "water:1;fluff:8:4" };
+        for (int i = 0; i < hexes.length; i++) {
+            put(board, new Coords(i % 3, i / 3), flat && hexes[i].startsWith("water") ? "pavement:1" : hexes[i]);
+        }
+        return board;
+    }
+
+    /**
+     * A legacy board's park tables that the fitted pool bank would cut step clear of it, so the 3D board keeps the fitted
+     * outline there: each stands clear and the art's group moved as one, its tables keeping their spacing. The pool's
+     * coping (roof-ledge art, which follows the hex sides) that the bank reaches keeps its place; a second conversion,
+     * and the same tables on a native board with their token typed again in the editor, move nothing.
+     */
+    @Test
+    void aLegacyBoardsMinorObjectsStepClearOfTheFittedConcreteWalls() throws IOException {
+        Coords tables = new Coords(0, 1), pool = new Coords(1, 1);
+        Board legacy = park(false), flat = park(true);
+        BoardSceneryLayouts.convert(legacy);
+        BoardSceneryLayouts.convert(flat);
+        ConcreteFit fit = new ConcreteFit(3, 3, ConcreteFit.cells(legacy), 1, true, Set.of());
+        List<BoardDecoration> moved = legacy.getHex(tables).getDecorations(), placed = flat.getHex(tables).getDecorations();
+        assertEquals(placed.stream().map(BoardDecoration::id).toList(), moved.stream().map(BoardDecoration::id).toList());
+        double farthest = 0;
+        Map<String, double[]> offsets = new HashMap<>();
+        int members = 0;
+        for (int i = 0; i < moved.size(); i++) {
+            var object = moved.get(i);
+            assertFalse(fit.reaches(BoardModelBounds.footprint(tables, object), tables), object.id() + " stands clear of the bank");
+            double dx = (object.x() - placed.get(i).x()) * HexTile.WIDTH, dy = (object.y() - placed.get(i).y()) * HexTile.HEIGHT;
+            farthest = Math.max(farthest, Math.hypot(dx, dy));
+            if (object.group() == null) { continue; }
+            double[] offset = offsets.computeIfAbsent(object.group(), group -> new double[] { dx, dy });
+            assertTrue(Math.hypot(dx - offset[0], dy - offset[1]) < 1e-6, object.id() + " moves with its group");
+            members++;
+        }
+        assertTrue(farthest > 1 && members > offsets.size(), "The bank moved a group of tables: " + farthest);
+        var coping = legacy.getHex(pool).getDecorations().getFirst();
+        assertTrue(coping.asset().startsWith("scenery/roofs/") && fit.reaches(BoardModelBounds.footprint(pool, coping), pool),
+              "The coping stays on the bank");
+        String converted = text(legacy);
+        BoardSceneryLayouts.convert(legacy);
+        assertEquals(converted, text(legacy), "A second conversion moves nothing");
+        Board authored = park(false);
+        Hex hex = authored.getHex(tables).duplicate();
+        hex.setDecorations(placed);
+        authored.setHex(tables, hex);
+        authored.setNativeFormat(true);
+        BoardSceneryLayouts.convert(authored, List.of(tables));
+        assertEquals(placed, authored.getHex(tables).getDecorations(), "A native board is drawn as authored");
     }
 
     /**

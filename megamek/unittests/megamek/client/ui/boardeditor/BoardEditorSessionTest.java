@@ -1838,6 +1838,39 @@ class BoardEditorSessionTest {
         assertEquals("woods/container-yard/scattered", session.board().getHex(at).getAppearance().get("vegetation").variant());
     }
 
+    /**
+     * Pavement Edges: the Brush's Edges paints Fitted on every hex of a stroke and Auto clears it; the Edit panel's row
+     * sets Hex in one undo step and is refused on a hex without pavement; a saved .board2 keeps Hex.
+     */
+    @Test void pavementEdgesArePaintedSetInTheEditRowAndSaved() throws Exception {
+        var session = session();
+        send(session, Action.EDGES, "", "fitted");
+        assertEquals(Messages.getString("BoardEditor.pavementFirst"), session.snapshot().message());
+        assertTrue(session.board().getHex(at).getAppearance().isEmpty());
+        send(session, Action.CHOOSE_BRUSH, "pavement", "1");
+        send(session, Action.BRUSH_VALUE, "edges", "fitted");
+        send(session, Action.BRUSH, "", "2");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        List<Coords> painted = session.brush(at);
+        assertEquals(7, painted.size());
+        for (Coords hex : painted) {
+            assertEquals(megamek.common.board.HexAppearance.EDGES_FITTED, session.board().getHex(hex).getAppearance().get("pavement"));
+            assertTrue(session.board().getHex(hex).containsTerrain(Terrains.PAVEMENT));
+        }
+        send(session, Action.BRUSH_VALUE, "edges", "auto");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        assertTrue(painted.stream().allMatch(hex -> session.board().getHex(hex).getAppearance().isEmpty()), "Auto is stored as none");
+        send(session, Action.TOOL, "", "SELECT"); session.pointer(at, 0, 0, false); session.finishStroke();
+        send(session, Action.EDGES, "", "hex");
+        assertEquals(megamek.common.board.HexAppearance.Edges.HEX,
+              megamek.common.board.HexAppearance.edges(session.board().getHex(at).getAppearance()));
+        send(session, Action.UNDO, "", "");
+        assertTrue(session.board().getHex(at).getAppearance().isEmpty(), "One undo step");
+        send(session, Action.REDO, "", "");
+        Path file = directory.resolve("edges.board2"); session.save(file);
+        assertEquals(megamek.common.board.HexAppearance.EDGES_HEX, BoardFile.read(file).getHex(at).getAppearance().get("pavement"));
+    }
+
     private static String text(java.awt.datatransfer.Clipboard clipboard) throws Exception {
         return (String) clipboard.getData(java.awt.datatransfer.DataFlavor.stringFlavor);
     }

@@ -86,6 +86,18 @@ class BoardEditorBlueprintPaletteTest {
         assertNull(BLUEPRINT.entry("buildings/saxarba/building_light/building_light_12"));
     }
 
+    /** Ground & water's Liquids: the Water card and the Lava card, liquid magma on the water's depth. */
+    @Test
+    void theLiquidsSectionHoldsWaterAndLava() {
+        assertEquals(List.of("basic", "gameplay", "liquids"), BLUEPRINT.categories().get(1).sections().stream()
+              .map(BoardEditorBlueprint.Section::id).toList());
+        assertEquals(List.of("water/shallow", "water/magma"), section("ground-water/liquids").cards().stream()
+              .map(card -> card.members().getFirst().key()).toList());
+        Hex lava = new Hex(0, BLUEPRINT.entry("water/magma").preset().terrain(), "");
+        assertEquals("Lava", BLUEPRINT.entry("water/magma").label());
+        assertTrue(HexTile.liquid(lava) && lava.terrainLevel(Terrains.MAGMA) == 2 && lava.terrainLevel(Terrains.WATER) == 1);
+    }
+
     @Test
     void everyDecalIsListedUnderDecalsAndAtMostOnceMoreByItsPurpose() {
         for (var decal : BLUEPRINT.assets().stream().filter(a -> !a.sections().isEmpty() && a.kind().equals("decal")).toList()) {

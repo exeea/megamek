@@ -66,7 +66,8 @@ class BoardEditorPreviewTest {
         assertFalse(woods.after().containsKey(centre.translated(3)), "nor is the water");
         brush(session, Action.BRUSH_VALUE, "clearOnly", "false");
         // A card, then optionally a level of one of its fields (the Brush rows).
-        for (String[] card : new String[][] { { "water", "shallow", "water", "2" }, { "building", "default" },
+        for (String[] card : new String[][] { { "water", "shallow", "water", "2" }, { "water", "magma", "water", "2" },
+              { "theme", "mars" }, { "building", "default" },
               { "road", "1", "road", "2" }, { "hazards", "fire" }, { "hazards", "hazard-liquid" }, { "weather", "ice" },
               { "ground", "swamp" }, { "scenario", "deployment" }, { "bridge", "bridge/truss" } }) {
             brush(session, Action.CHOOSE_BRUSH, card[0], card[1]);

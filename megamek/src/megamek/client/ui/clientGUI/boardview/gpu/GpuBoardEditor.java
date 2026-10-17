@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardHud.GAP;
 import static megamek.client.ui.gdx.UiKit.onChange;
+import static megamek.common.board.BoardEditorBlueprint.themeLabel;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -174,7 +175,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     /** An issue's hex waiting to be framed until its selection has applied, and when that wait ends (nanoTime). */
     private megamek.common.board.Coords pendingFrame;
     private long pendingFrameUntil;
-    private List<BoardIssue> shownIssues;
+    private List<BoardIssue> shownIssues, sessionIssues;
+    /** The installed fit's objects inside the walls of Fitted pavement hexes; listed after the session's issues. */
+    private List<BoardConcrete.Cut> shownCuts = List.of();
     private final Label status, documentName;
     private final Table documentStatus = new Table();
     private final ScrollPane inspectorScroll, layersScroll, libraryScroll, tilesScroll;
@@ -670,6 +673,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             installed = board.editorObjects(next.selected()); installedReads++;
         }
         terrainBuilding = building; installedFrom = board;
+        var cuts = board == null ? List.<BoardConcrete.Cut>of() : board.concreteCuts();
+        if (cuts != shownCuts) { shownCuts = cuts; issuesChanged(); }
         boolean placed = !sameAnchors(installed, installedObjects);
         installedObjects = installed;
         section.update(next, generation, installedObjects, placed);
@@ -783,14 +788,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         nextBrush = new BrushState(next.tool(), next.brush(), next.activeBrush());
         for (int i = 0; i < tools.size(); i++) { tools.get(i).pressed(i == next.tool().ordinal()); }
         undo.setDisabled(!next.canUndo()); redo.setDisabled(!next.canRedo());
-        if (next.issues() != shownIssues) {
+        if (next.issues() != sessionIssues) {
             // The session publishes a new list only when validation changed it.
-            shownIssues = next.issues();
-            issues.setVisible(!shownIssues.isEmpty());
-            issuesTip.getActor().setText(UiKit.text("BoardEditor.issuesTip", UiKit.text("BoardEditor.issueCount", shownIssues.size())));
-            if (issueMenu != null && choices.isVisible() && issueMenu.isDescendantOf(choices)) {
-                if (shownIssues.isEmpty()) { choices.cancel(); } else { showIssues(); }
-            }
+            sessionIssues = next.issues();
+            issuesChanged();
         }
         // Hexes are written by their board number everywhere in the editor: "0807".
         String coords = next.selected() == null ? "" : next.selected().getBoardNum();
@@ -811,7 +812,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             showMapSettings(next);
         }
         libraryCards.removeIf(card -> card.getStage() == null);
-        String active = activeKey(next.activeBrush()), category = activeCategory(active);
+        String active = next.activeBrush().key(), category = activeCategory(active);
         for (UiButton card : libraryCards) { card.pressed(((java.util.Set<?>) card.getUserObject()).contains(active)); }
         categoryMarks.forEach((id, mark) -> mark.setVisible(id.equals(category)));
     }
@@ -1006,8 +1007,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     /**
-     * A grid card: a Theme card arms Clear ground with its theme; a gallery card opens its designs; any other card arms
-     * its entry, a picker family its first member. Its user object holds the palette keys that highlight it.
+     * A grid card: a Theme card arms its theme's brush; a gallery card opens its designs; any other card arms its entry, a
+     * picker family its first member. Its user object holds the brush keys that highlight it.
      */
     private UiButton card(Tile tile) {
         Image preview = new Image();
@@ -1015,10 +1016,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (tile.theme() != null) {
             String theme = tile.theme();
             samples.add(theme, "", "", preview);
-            card = visualCard(themeLabel(theme), preview, 70, () -> {
-                send(Action.CHOOSE_BRUSH, "ground", "clear"); send(Action.BRUSH_VALUE, "theme", theme);
-            });
-            card.setName("editor-library-theme/" + theme); card.setUserObject(java.util.Set.of("theme/" + theme));
+            card = visualCard(themeLabel(theme), preview, 70, () -> send(Action.CHOOSE_BRUSH, "theme", theme));
+            card.setName("editor-library-theme/" + theme); card.setUserObject(java.util.Set.of(BoardEditorSession.THEME_BRUSH + theme));
         } else {
             var shown = tile.card();
             var first = shown.members().getFirst();
@@ -1044,7 +1043,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         }
         // The whole name, which a long one's card cuts short.
         ui.tip(card).getActor().setText(card.getText());
-        if (snapshot != null) { card.pressed(((java.util.Set<?>) card.getUserObject()).contains(activeKey(snapshot.activeBrush()))); }
+        if (snapshot != null) { card.pressed(((java.util.Set<?>) card.getUserObject()).contains(snapshot.activeBrush().key())); }
         libraryCards.add(card);
         return card;
     }
@@ -1055,15 +1054,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         else { send(Action.CHOOSE_BRUSH, entry.owner(), entry.preset() != null ? entry.preset().id() : entry.variant().id()); }
     }
 
-    /** The palette key the active brush stands for: a Theme card's, "theme/id", while it is Clear ground with its theme ticked. */
-    private static String activeKey(BoardEditorSession.Brush brush) {
-        return brush.key().equals("ground/clear") && brush.themeEnabled()
-              ? "theme/" + (brush.theme().isEmpty() ? "grass" : brush.theme()) : brush.key();
-    }
-
-    /** The category of a palette key (its entry's first section, or the Theme category's); null for none, as a hex stamp. */
+    /** The category of a brush key (its entry's first section, or the Theme category's); null for none, as a hex stamp. */
     private String activeCategory(String key) {
-        if (key.startsWith("theme/")) { return blueprint.themeCategory() == null ? null : blueprint.themeCategory().id(); }
+        if (key.startsWith(BoardEditorSession.THEME_BRUSH)) { return blueprint.themeCategory() == null ? null : blueprint.themeCategory().id(); }
         var entry = blueprint.entry(key);
         return entry == null ? null : BoardEditorBlueprint.categoryOf(entry.sections().getFirst());
     }
@@ -1129,6 +1122,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                 familyRow(brush);
                 brushRow(hint(UiKit.text(stamp ? "BoardEditor.hint.stamp" : "BoardEditor.hint.hexBlueprint")));
             }
+            else if (brush.themeCard() && tool == BoardEditorSession.Tool.ERASE) { brushRow(hint(UiKit.text("BoardEditor.themeNoErase"))); }
             else if (tool == BoardEditorSession.Tool.ERASE) {
                 // A maglev brush erases the maglevs within a level of its height; routes crossing above or below stay.
                 boolean maglev = route && RailRoute.kind(brush.object()) == RailRoute.Kind.MAGLEV;
@@ -1155,8 +1149,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
 
     /**
      * A terrain brush's radius and the options its component offers for painting: Level and Theme for ground and a hex
-     * stamp, and, except on a hex stamp, a row per brush field the brush holds (a number or a choice of its levels) and
-     * per optional field its card offers ({@code settings}), whose None leaves the field out.
+     * stamp (a Theme card, which is its theme, has Level only), and, except on a hex stamp, a row per brush field the
+     * brush holds (a number or a choice of its levels) and per optional field its card offers ({@code settings}), whose
+     * None leaves the field out.
      */
     private void componentControls(BoardEditorSession.Brush brush) {
         List<Actor> controls = new ArrayList<>();
@@ -1165,11 +1160,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (brush.sampledHex() != null || definition.id().equals("ground")) {
             controls.add(brushNumber(UiKit.text("BoardEditor.levelLabel"), brush.elevation(), -10, 30, 1, Action.BRUSH_VALUE, "elevation")
                   .withCheckbox(brush.elevationEnabled(), checked -> send(Action.BRUSH_VALUE, "applyElevation", Boolean.toString(checked))));
-            var theme = ui.checkbox(UiKit.text("BoardEditor.labTheme"), brush.themeEnabled());
-            onChange(theme, () -> send(Action.BRUSH_VALUE, "applyTheme", Boolean.toString(theme.isTicked())));
-            Table themeControl = new Table(); themeControl.add(theme).padRight(4);
-            themeControl.add(choice("", themeLabel(brush.theme()), themeOptions(), value -> send(Action.BRUSH_VALUE, "theme", value)))
-                  .width(125).height(27); controls.add(themeControl);
+            if (!brush.themeCard()) {
+                var theme = ui.checkbox(UiKit.text("BoardEditor.labTheme"), brush.themeEnabled());
+                onChange(theme, () -> send(Action.BRUSH_VALUE, "applyTheme", Boolean.toString(theme.isTicked())));
+                Table themeControl = new Table(); themeControl.setName("editor-brush-theme"); themeControl.add(theme).padRight(4);
+                themeControl.add(choice("", themeLabel(brush.theme()), themeOptions(), value -> send(Action.BRUSH_VALUE, "theme", value)))
+                      .width(125).height(27); controls.add(themeControl);
+            }
         }
         var entry = blueprint.entry(brush.key());
         List<String> settings = entry == null || entry.preset() == null ? List.of() : entry.preset().settings();
@@ -1197,12 +1194,22 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             controls.add(brushNumber(UiKit.text("BoardEditor.designRotation"), style.rotation() == null ? 0 : style.rotation(),
                   0, 330, 30, Action.BRUSH_VALUE, "rotation:" + definition.id()));
         }
+        if (brush.sampledHex() == null && definition.id().equals("pavement")) {
+            List<Option> options = new ArrayList<>();
+            for (var edges : megamek.common.board.HexAppearance.Edges.values()) {
+                options.add(new Option(UiKit.text(edgesKey(edges)), edges.name().toLowerCase(Locale.ROOT)));
+            }
+            var current = megamek.common.board.HexAppearance.edges(brush.appearance());
+            Table row = choice(UiKit.text("BoardEditor.pavementEdges"), UiKit.text(edgesKey(current)), options,
+                  chosen -> send(Action.BRUSH_VALUE, "edges", chosen));
+            row.setName("editor-brush-edges"); controls.add(row);
+        }
         var zone = zoneBrush(brush);
         if (zone != null) { controls.add(zoneNumber(zone)); }
         controls.add(clearOnly(brush));
         brushRows.add(controls);
         brushRow(hint(UiKit.text(brush.sampledHex() != null ? "BoardEditor.hint.paintStamp"
-              : zone != null ? "BoardEditor.deploymentZoneHint"
+              : brush.themeCard() ? "BoardEditor.hint.theme" : zone != null ? "BoardEditor.deploymentZoneHint"
               : snapshot.drawsRoutes() ? "BoardEditor.hint.road" : "BoardEditor.hint.paint")));
     }
 
@@ -1588,6 +1595,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             }
         } else if (appearance.hasChildren()) { detail.add(appearance).row(); }
         for (var field : definition.fields()) { if (!field.optional() || snapshot.property(field.terrain()) != null) { field(field); } }
+        if (definition.id().equals("pavement")) { pavementEdges(); }
         var optional = definition.fields().stream().filter(f -> f.optional() && !f.terrain().contains("fluff") && !f.terrain().equals("cliff_top")
               && snapshot.property(f.terrain()) == null).toList();
         if (!optional.isEmpty()) {
@@ -1642,6 +1650,27 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (!definition.present().isEmpty()) {
             detail.add(removeButton(UiKit.text("BoardEditor.removeComponent"), () -> send(Action.REMOVE_COMPONENT, definition.id()))).row();
         }
+    }
+
+    /** The pavement hex's Edges ({@link megamek.common.board.HexAppearance.Edges}): one row of Auto, Fitted and Hex. */
+    private void pavementEdges() {
+        heading(UiKit.text("BoardEditor.pavementEdges"));
+        var current = megamek.common.board.HexAppearance.edges(snapshot.appearance());
+        Table row = new Table(); row.defaults().growX().uniformX().minWidth(0).pad(0, 2, 0, 2);
+        for (var edges : megamek.common.board.HexAppearance.Edges.values()) {
+            String value = edges.name().toLowerCase(Locale.ROOT), key = edgesKey(edges);
+            UiButton button = button(UiKit.text(key), () -> send(Action.EDGES, value));
+            button.setName("editor-pavement-edges-" + value);
+            button.pressed(edges == current);
+            ui.tip(button).getActor().setText(UiKit.text(key + ".tooltip"));
+            row.add(button);
+        }
+        detail.add(row).growX().row();
+    }
+
+    private static String edgesKey(megamek.common.board.HexAppearance.Edges edges) {
+        String name = edges.name();
+        return "BoardEditor.edges" + name.charAt(0) + name.substring(1).toLowerCase(Locale.ROOT);
     }
 
     private void field(BoardEditorBlueprint.Field field) {
@@ -1980,11 +2009,6 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             choices.header(label, null).content(list); choices.showAbove(face, 0);
         });
         return row;
-    }
-    private String themeLabel(String value) {
-        // A theme's name is its tileset id written as words; no theme is the default grass.
-        String words = (value.isEmpty() ? "grass" : value).replace('_', ' ').replace('-', ' ');
-        return words.substring(0, 1).toUpperCase(Locale.ROOT) + words.substring(1);
     }
     /** The tilesets' themes and the Theme category's special ones (Dirt, Rock), as every theme choice lists them. */
     private List<Option> themeOptions() {
@@ -2376,6 +2400,24 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         helpBody.add(text).growX().minWidth(0).minHeight(26).padTop(2).padBottom(2).padRight(12);
         helpBody.add(badge).width(160).padTop(3).padBottom(3).padRight(10).row();
     }
+    /**
+     * The triangle's list: the session's issues, then each object inside a wall of a Fitted pavement hex, which only the
+     * installed 3D fit knows.
+     */
+    private void issuesChanged() {
+        if (sessionIssues == null) { return; }
+        List<BoardIssue> merged = new ArrayList<>(sessionIssues);
+        for (var cut : shownCuts) {
+            merged.add(new BoardIssue(cut.at(), cut.object(), UiKit.text("BoardEditor.issueInsideWall", assetLabel(cut.asset()))));
+        }
+        shownIssues = List.copyOf(merged);
+        issues.setVisible(!shownIssues.isEmpty());
+        issuesTip.getActor().setText(UiKit.text("BoardEditor.issuesTip", UiKit.text("BoardEditor.issueCount", shownIssues.size())));
+        if (issueMenu != null && choices.isVisible() && issueMenu.isDescendantOf(choices)) {
+            if (shownIssues.isEmpty()) { choices.cancel(); } else { showIssues(); }
+        }
+    }
+
     /** Lists the issues under the triangle; choosing one frames its hex and selects it, and its object if it has one. */
     private void showIssues() {
         if (shownIssues == null || shownIssues.isEmpty()) { return; }

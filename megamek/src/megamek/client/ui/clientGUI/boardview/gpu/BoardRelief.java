@@ -15,6 +15,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.ConcreteFit;
 import megamek.common.board.Coords;
 
 /**
@@ -839,7 +840,7 @@ final class BoardRelief {
             x = cornerX(ix);
             y = cornerY(iy);
             this.around = around;
-            BoardConcrete.Shift constructed = coast.shift(key);
+            ConcreteFit.Shift constructed = coast.shift(key);
             if (constructed.x() != 0 || constructed.y() != 0) { move = new float[] { constructed.x(), constructed.y() }; }
             variation = hash(ix * 7 + 3, iy * 13 - 5);
             boolean anyPinned = false;

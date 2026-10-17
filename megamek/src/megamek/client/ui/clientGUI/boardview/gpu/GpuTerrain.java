@@ -2408,7 +2408,7 @@ final class GpuTerrain implements Disposable {
         return tile.features().stream().filter(f -> f.decoration() == null || !f.decoration().kind().equals("decal")).toList();
     }
 
-    /** Whether any hex changed what the concrete fit reads: its ground, water, level, roads or structures. */
+    /** Whether any hex changed what the concrete fit reads: its ground, water, level, roads, structures or Edges. */
     private static boolean concreteInputsChanged(BoardScene before, BoardScene after) {
         for (int index = 0; index < after.tiles().size(); index++) {
             BoardScene.Tile was = before.tiles().get(index), is = after.tiles().get(index);
@@ -2418,7 +2418,8 @@ final class GpuTerrain implements Disposable {
                   || was.ultraSublevel() != is.ultraSublevel() || was.bare() != is.bare()
                   || was.wayExits() != is.wayExits() || was.road() != is.road()
                   || was.cliffTopExits() != is.cliffTopExits() || was.detailedGround() != is.detailedGround()
-                  || !structures(was).equals(structures(is))) { return true; }
+                  || !structures(was).equals(structures(is))
+                  || BoardConcrete.edges(was) != BoardConcrete.edges(is)) { return true; }
         }
         return false;
     }
@@ -2430,6 +2431,9 @@ final class GpuTerrain implements Disposable {
     private static List<BoardScene.Feature> structures(BoardScene.Tile tile) {
         return tile.features().stream().filter(BoardConcrete::fitFeature).toList();
     }
+
+    /** The installed board's placed objects inside a wall of a Fitted pavement hex ({@link BoardConcrete#cuts}). */
+    List<BoardConcrete.Cut> concreteCuts() { return coast == null ? List.of() : coast.cuts(); }
 
     private static int editReach(BoardScene before, BoardScene after, Coords at) {
         if (!shoreNearby(before, after, at)) { return 2; }

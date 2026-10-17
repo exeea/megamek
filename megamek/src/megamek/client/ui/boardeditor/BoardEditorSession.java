@@ -117,7 +117,12 @@ public final class BoardEditorSession {
          * Turns the inspected hex's skin design ({@link BoardEditorBlueprint.Skin}, a container yard) of an owner (target)
          * to a clockwise rotation (value, degrees, snapped to 30-degree steps). One undo step.
          */
-        DESIGN_ROTATION
+        DESIGN_ROTATION,
+        /**
+         * Sets the inspected pavement hex's {@link HexAppearance.Edges} (value "auto", "fitted" or "hex"), stored as its
+         * pavement appearance (Auto as none). One undo step.
+         */
+        EDGES
     }
     /** Text values are parsed and validated here, never by a view that also owns game state. */
     public record Command(Action action, String target, String value) {
@@ -147,7 +152,15 @@ public final class BoardEditorSession {
         /** A hex stamp's objects are contents of the stamp, not an individually placeable object brush. */
         public BoardDecoration object() { return sampledHex == null && !objects.isEmpty() ? objects.getFirst() : null; }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
+        /** Whether this is a Theme card's brush ({@link #THEME_BRUSH}). */
+        public boolean themeCard() { return key.startsWith(THEME_BRUSH); }
     }
+    /**
+     * The key prefix of a Theme card's brush, "theme/" and its theme (CHOOSE_BRUSH with target "theme"): Paint gives each
+     * hex the theme and the Clear ground look (no ground design) and keeps everything else, ground terrain included; it
+     * has no Erase.
+     */
+    public static final String THEME_BRUSH = "theme/";
     private static Property property(List<Property> properties, String name) {
         return properties.stream().filter(p -> p.terrain().equals(name)).findFirst().orElse(null);
     }
@@ -361,6 +374,8 @@ public final class BoardEditorSession {
     private static final double HEADING = .2;
     /** How far from its centre towards its sides a hex's core reaches, as a share of the way ({@link #core}). */
     private static final double CORE = .6;
+    /** The MAGMA level of liquid magma, lava (1 is its crust). */
+    private static final int LAVA = 2;
 
     public BoardEditorSession() { this(BoardEditorBlueprint.get()); }
     public BoardEditorSession(BoardEditorBlueprint blueprint) {
@@ -673,6 +688,7 @@ public final class BoardEditorSession {
                     hex.setAppearance(styles);
                 });
                 case DESIGN_ROTATION -> edit(hex -> rotate(hex, command.target(), command.value()));
+                case EDGES -> edit(hex -> setEdges(hex, command.value()));
                 case ASSET -> {
                     var design = blueprint.asset(command.value()); require(design != null, "Unknown object design");
                     paintTemplate = new Hex(0); sampledHex = null;
@@ -1309,6 +1325,9 @@ public final class BoardEditorSession {
                     selection.clear(); selection.add(new Selection(at, ""));
                 }
             } else {
+                // A Theme card paints no ground field: the hex keeps its sand, mud, swamp and the rest.
+                boolean theme = brushKey.startsWith(THEME_BRUSH);
+                require(!theme || tool == Tool.PAINT, Messages.getString("BoardEditor.themeNoErase"));
                 selected = at; selectedObject = ""; component = brushComponent;
                 var definition = blueprint.component(brushComponent);
                 List<Coords> spots = new ArrayList<>();
@@ -1316,7 +1335,7 @@ public final class BoardEditorSession {
                     if (!painted.add(spot)) { continue; }
                     spots.add(spot);
                     change(spot, hex -> {
-                        paintFields(hex, paintTemplate, definition);
+                        if (!theme) { paintFields(hex, paintTemplate, definition); }
                         var styles = new LinkedHashMap<>(hex.getAppearance());
                         if (tool != Tool.ERASE && paintTemplate.getAppearance().containsKey(brushComponent)) {
                             // A Built or Truss bridge card keeps the hex's piers.
@@ -2605,7 +2624,27 @@ public final class BoardEditorSession {
         hex.setAppearance(styles);
     }
 
+    /**
+     * Gives a pavement hex its {@link HexAppearance.Edges} ({@code value} "auto", "fitted" or "hex"): the Edit panel's
+     * and the Brush's Edges row.
+     */
+    private void setEdges(Hex hex, String value) {
+        require(hex.containsTerrain(Terrains.PAVEMENT), Messages.getString("BoardEditor.pavementFirst"));
+        var edges = HexAppearance.Edges.valueOf(value.toUpperCase(java.util.Locale.ROOT));
+        Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
+        if (edges == HexAppearance.Edges.AUTO) { styles.remove("pavement"); } else { styles.put("pavement", HexAppearance.of(edges)); }
+        hex.setAppearance(styles);
+    }
+
+    /** Arms a card: {@code owner}'s preset or design {@code key}, or for owner "theme" the Theme card of theme {@code key}. */
     private void chooseBrush(String owner, String key) {
+        if (owner.equals("theme")) {
+            require(!key.isBlank(), "Unknown brush choice");
+            paintTemplate = new Hex(0, "", key); sampledHex = null; brushComponent = "ground"; brushElevation = false; brushTheme = true;
+            brushKey = THEME_BRUSH + key; brushLabel = BoardEditorBlueprint.themeLabel(key);
+            tool = Tool.PAINT; message = "";
+            return;
+        }
         var definition = blueprint.component(owner);
         var preset = definition.presets().stream().filter(p -> p.id().equals(key)).findFirst().orElse(null);
         var variant = blueprint.variant(key);
@@ -2628,6 +2667,7 @@ public final class BoardEditorSession {
         else if (target.startsWith("terrain:")) { setTerrain(next, target.substring(8), Integer.parseInt(value)); }
         else if (target.startsWith("variant:")) { setVariant(next, target.substring(8), value); }
         else if (target.startsWith("rotation:")) { rotate(next, target.substring(9), value); }
+        else if (target.equals("edges")) { setEdges(next, value); }
         else if (target.startsWith("object:")) {
             require(!next.getDecorations().isEmpty(), Messages.getString("BoardEditor.chooseObjectBrush"));
             next.setDecorations(List.of(objectValue(next.getDecorations().getFirst(), target.substring(7), value)));
@@ -2774,7 +2814,10 @@ public final class BoardEditorSession {
 
     /**
      * Paint or Erase of {@code definition}'s fields on {@code hex}, each as {@code template} holds it. Paint also gives a
-     * hex that lacks one the template's terrain outside those fields: a preset's own, as Hazardous liquid's water.
+     * hex that lacks one the template's terrain outside those fields: a preset's own, as Hazardous liquid's water. Water
+     * and lava (liquid magma on the water's depth, {@link HexTile#liquid}) replace each other, and the hex shows the
+     * painted liquid: Lava makes the magma liquid and takes a hazardous liquid it would hide, Water takes any magma
+     * (crust hides water too), and the Water component's Erase takes liquid magma with the depth; crust stays.
      */
     private void paintFields(Hex hex, Hex template, BoardEditorBlueprint.Component definition) {
         Set<Integer> fields = new java.util.HashSet<>();
@@ -2787,6 +2830,12 @@ public final class BoardEditorSession {
             if (type == Terrains.DEPLOYMENT_ZONE && value != null) { zones(hex, value.getExits(), tool != Tool.ERASE); }
             else if (tool == Tool.ERASE || value == null) { hex.removeTerrain(type); }
             else { hex.addTerrain(new Terrain(value)); }
+        }
+        if (definition.id().equals("water")) {
+            if (tool != Tool.ERASE && template.terrainLevel(Terrains.MAGMA) == LAVA) {
+                hex.addTerrain(new Terrain(Terrains.MAGMA, LAVA));
+                hex.removeTerrain(Terrains.HAZARDOUS_LIQUID);
+            } else if (tool != Tool.ERASE || hex.terrainLevel(Terrains.MAGMA) == LAVA) { hex.removeTerrain(Terrains.MAGMA); }
         }
         if (tool == Tool.ERASE) { return; }
         for (int type : template.getTerrainTypes()) {

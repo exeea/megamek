@@ -20,7 +20,9 @@ import java.util.function.BiPredicate;
 import com.badlogic.gdx.math.EarClippingTriangulator;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.ConcreteFit;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 
 /** The actual topography of one hex. Rendering, road continuity, banks and picking share it. */
 final class BoardSurface {
@@ -80,7 +82,7 @@ final class BoardSurface {
     /** Only inputs that alter topology; the ramp mask also captures second-ring road/bridge approaches. */
     record Geometry(int elevation, int waterDepth, boolean frozen, int roadExits, BoardScene.Surface surface,
           BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps,
-          List<BoardConcrete.Shift> coast, BoardRoad.Kind road, BoardScene.Biome biome, int cliffTopExits, boolean bare,
+          List<ConcreteFit.Shift> coast, BoardRoad.Kind road, BoardScene.Biome biome, int cliffTopExits, boolean bare,
           boolean barren, BoardSurfaceBlend.Cover groundCover, boolean ultraSublevel) { }
 
     /** What of a hex further out can reach a hex's shape: through the water's shore, its level, liquid and ground. */
@@ -744,8 +746,7 @@ final class BoardSurface {
               || connectingBridge(neighbor, tile, reverse) != null) {
             return false;
         }
-        return (exit && continuation)
-              || ((exit || continuation) && Math.abs(tile.elevation() - neighbor.elevation()) <= 2);
+        return HexTile.roadApproach(exit, continuation, Math.abs(tile.elevation() - neighbor.elevation()));
     }
 
     static BoardScene.Feature connectingBridge(BoardScene.Tile road, BoardScene.Tile bridge, int direction) {

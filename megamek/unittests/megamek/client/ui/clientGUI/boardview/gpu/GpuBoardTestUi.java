@@ -163,12 +163,16 @@ final class GpuBoardTestUi {
 
     /**
      * Opens an Assets palette category: its tile on the start page (cleared of a search first), else the item of the
-     * category name's drop-down on a category page.
+     * category name's drop-down on a category page (a gallery page, which the panel may reopen on, goes back to it).
      */
     static void category(String id) {
         Group root = stage().getRoot();
         if (!shown(root.findActor("editor-category-" + id)) && root.findActor("editor-category") == null) {
             ((com.badlogic.gdx.scenes.scene2d.ui.TextField) root.findActor("editor-search")).setText("");
+        }
+        if (!shown(root.findActor("editor-category-" + id)) && root.findActor("editor-category") == null) {
+            click("editor-back");
+            stage().draw(); // lays the category page out for the real clicks below
         }
         if (shown(root.findActor("editor-category-" + id))) { click("editor-category-" + id); return; }
         click("editor-category");

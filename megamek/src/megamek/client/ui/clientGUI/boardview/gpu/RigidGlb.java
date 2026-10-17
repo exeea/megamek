@@ -101,9 +101,8 @@ final class RigidGlb {
     record Source(File file, String variant) { }
 
     static Source source(File root, String asset) {
-        File own = new File(root, asset + ".glb");
-        File bare = asset.endsWith("-snow") ? new File(root, asset.substring(0, asset.length() - "-snow".length()) + ".glb") : null;
-        return !own.isFile() && bare != null && bare.isFile() ? new Source(bare, "snow") : new Source(own, null);
+        File file = megamek.common.board.BoardModelBounds.file(root, asset);
+        return new Source(file, file.equals(new File(root, asset + ".glb")) ? null : "snow");
     }
 
     static List<ModelData> loadLods(Source source, Path textureRoot) {

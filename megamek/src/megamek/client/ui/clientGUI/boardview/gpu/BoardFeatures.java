@@ -115,7 +115,7 @@ final class BoardFeatures {
         if (hex.containsTerrain(Terrains.SNOW) || theme.contains("snow")) {
             return BoardScene.Surface.SNOW;
         }
-        if (hex.containsTerrain(Terrains.PAVEMENT)) {
+        if (HexTile.concrete(hex)) {
             return BoardScene.Surface.CONCRETE;
         }
         // The theme supplies geology. BoardSurfaceBlend captures the independent gameplay SAND cover.

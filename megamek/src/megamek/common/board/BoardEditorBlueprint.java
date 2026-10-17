@@ -490,6 +490,12 @@ public final class BoardEditorBlueprint {
     /** The Theme category's themes: the special ones the tilesets do not list. */
     public List<String> specialThemes() { return themeCategory() == null ? List.of() : themeCategory().themes(); }
 
+    /** A theme's name: its tileset id written as words, "Grass" for no theme. */
+    public static String themeLabel(String theme) {
+        String words = (theme.isEmpty() ? "grass" : theme).replace('_', ' ').replace('-', ' ');
+        return words.substring(0, 1).toUpperCase(Locale.ROOT) + words.substring(1);
+    }
+
     /** The category of a section path ("category/section"). */
     public static String categoryOf(String section) { return section.substring(0, section.indexOf('/')); }
 

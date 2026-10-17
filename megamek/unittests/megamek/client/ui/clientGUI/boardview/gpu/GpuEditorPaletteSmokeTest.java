@@ -9,9 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
@@ -31,8 +33,10 @@ import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -40,10 +44,12 @@ import org.junit.jupiter.api.Test;
  * The Assets palette in the real panel: the start page's nine category tiles fit without scrolling and show their
  * rendered icons; a tile opens its category, [<] goes back and the category's name jumps to another; the search covers
  * every category and the designs behind a gallery card, under a "Search results" header; Esc clears the search, then
- * leaves a gallery, then a category; a Theme card arms Clear ground with its theme and stays highlighted; the Water
- * card's Brush offers Depth and Current, and the cards then preview clear water, since Water does not paint the Volcano
- * theme it keeps; a picker family's Type changes the brush's asset; the DropShip blueprint paints its seven hexes and erases as its
- * component, over a radius; and a new editor window opens on the page the last one showed. Captures under b12-palette at 1366x768 and 1280x800.
+ * leaves a gallery, then a category; a Theme card arms its theme's brush (Radius, an unticked Level and Only overwrite
+ * clear hexes; no Theme row) and stays highlighted; Ground & water's Liquids hold Water and Lava; the Water card's Brush
+ * offers Depth and Current, and the cards then preview clear water, since Water does not paint the Volcano theme it
+ * keeps; the Lava card previews lava and its Brush offers Depth only; "lava" and "magma" find it; a picker family's Type
+ * changes the brush's asset; the DropShip blueprint paints its seven hexes and erases as its component, over a radius;
+ * and a new editor window opens on the page the last one showed. Captures under b12-palette at 1366x768 and 1280x800.
  */
 @Tag("on-demand")
 class GpuEditorPaletteSmokeTest {
@@ -71,13 +77,21 @@ class GpuEditorPaletteSmokeTest {
               },
               (view, source, root) -> { assertNotNull(root.findActor("editor-category")); return true; }));
         run(1280, 800, List.of(
-              // The new window reopens on Ground & water: Basic, Gameplay and Water.
+              // The new window reopens on Ground & water: Basic, Gameplay and Liquids.
               (view, source, root) -> {
-                  for (String section : List.of("basic", "gameplay", "water")) {
+                  for (String section : List.of("basic", "gameplay", "liquids")) {
                       assertNotNull(root.findActor("editor-section-ground-water/" + section), section);
                   }
                   if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))) { return false; }
                   GpuBoardTestUi.capture(new File(OUTPUT, "ground-water.png"));
+                  GpuBoardTestUi.reveal("editor-section-ground-water/liquids");
+                  return true;
+              },
+              (view, source, root) -> {
+                  assertNotNull(root.findActor("editor-library-water/shallow"));
+                  assertNotNull(root.findActor("editor-library-water/magma"), "Lava beside Water");
+                  if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))) { return false; }
+                  GpuBoardTestUi.capture(new File(OUTPUT, "liquids.png"));
                   GpuBoardTestUi.click("editor-back");
                   return true;
               },
@@ -158,13 +172,22 @@ class GpuEditorPaletteSmokeTest {
               },
               (view, source, root) -> {
                   var brush = source.editorState().activeBrush();
-                  assertEquals(List.of("ground/clear", true, "volcano"), List.of(brush.key(), brush.themeEnabled(), brush.theme()));
+                  assertEquals(List.of("theme/volcano", true, "volcano", false),
+                        List.of(brush.key(), brush.themeEnabled(), brush.theme(), brush.elevationEnabled()));
                   assertTrue(((UiButton) root.findActor("editor-library-theme/volcano")).isChecked(), "The Theme card stays highlighted");
                   assertTrue(root.findActor("editor-category-mark-theme").isVisible(), "The Theme tile marks the brush's category");
+                  // The card is its theme: Radius, an unticked Level and Only overwrite clear hexes, no Theme row.
+                  Group panel = root.findActor("editor-brush");
+                  assertNotNull(panel.findActor("editor-brush-"), "Radius");
+                  assertNotNull(panel.findActor("editor-brush-elevation"), "Level");
+                  assertNotNull(panel.findActor("editor-clear-only"));
+                  assertNull(panel.findActor("editor-brush-theme"), "No Theme row");
+                  assertEquals(UiKit.text("BoardEditor.hint.theme"), ((Label) panel.findActor("editor-brush-hint")).getText().toString());
+                  GpuBoardTestUi.capture(new File(OUTPUT, "theme-brush.png"));
                   GpuBoardTestUi.category("ground-water");
                   return true;
               },
-              (view, source, root) -> { GpuBoardTestUi.reveal("editor-section-ground-water/water"); return true; },
+              (view, source, root) -> { GpuBoardTestUi.reveal("editor-section-ground-water/liquids"); return true; },
               (view, source, root) -> { GpuBoardTestUi.click("editor-library-water/shallow"); return true; },
               (view, source, root) -> {
                   Group brush = root.findActor("editor-brush");
@@ -176,6 +199,29 @@ class GpuEditorPaletteSmokeTest {
                   Color water = hexTop(root.findActor("editor-library-water/shallow"));
                   assertTrue(water.b > water.r, "Clear blue water, not the volcano theme's: " + water);
                   GpuBoardTestUi.capture(new File(OUTPUT, "water-brush.png"));
+                  GpuBoardTestUi.click("editor-library-water/magma");
+                  return true;
+              },
+              (view, source, root) -> {
+                  assertEquals("water/magma", source.editorState().activeBrush().key());
+                  Group brush = root.findActor("editor-brush");
+                  assertNotNull(brush.findActor("editor-brush-terrain:water"), "Depth");
+                  assertNull(brush.findActor("editor-brush-terrain:rapids"), "Lava has no current");
+                  if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))) { return false; }
+                  Color lava = hexTop(root.findActor("editor-library-water/magma"));
+                  assertTrue(lava.r > lava.b, "The Lava card shows lava: " + lava);
+                  GpuBoardTestUi.capture(new File(OUTPUT, "lava-brush.png"));
+                  search(root, "lava");
+                  return true;
+              },
+              (view, source, root) -> {
+                  assertNotNull(root.findActor("editor-library-water/magma"), "lava finds the Lava card");
+                  search(root, "magma");
+                  return true;
+              },
+              (view, source, root) -> {
+                  assertNotNull(root.findActor("editor-library-water/magma"), "magma finds the Lava card");
+                  assertNotNull(root.findActor("editor-library-hazards/magma-crust"), "and the Hazards' Magma card");
                   search(root, "landing beacon");
                   return true;
               },
@@ -221,6 +267,94 @@ class GpuEditorPaletteSmokeTest {
               }));
     }
 
+    /**
+     * On a Grassland board (no theme) whose hexes have the Grass look and sand, one a pond and one a car: a Mars Theme
+     * stroke gives them Mars and Clear ground and keeps the sand, the pond and the car; then a lava lake painted with the
+     * Lava card beside a lake of the Water card. Captures theme-before.png, theme-after.png and lava-beside-water.png.
+     */
+    @Test void aThemeStrokeKeepsTheHexesAndLavaLiesBesideWater() throws Exception {
+        assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
+        List<Coords> stroke = List.of(new Coords(3, 4), new Coords(5, 4), new Coords(7, 4));
+        Coords pond = new Coords(4, 4), car = new Coords(6, 4), lava = new Coords(3, 9), water = new Coords(6, 9);
+        long[] generation = { 0 };
+        run(1366, 768, () -> {
+            Board board = Board.createEmptyBoard(12, 12);
+            var grass = new HexAppearance("ground/blend/grass", null, null, .5);
+            for (int x = 0; x < 12; x++) {
+                for (int y = 0; y < 12; y++) {
+                    Coords at = new Coords(x, y);
+                    Hex hex = new Hex(0, at.equals(pond) ? "water:1;sand:1" : y < 7 ? "sand:1" : "", "");
+                    hex.setAppearance(Map.of("ground", grass));
+                    if (at.equals(car)) {
+                        hex.setDecorations(List.of(new BoardDecoration("car", "prop", "scenery/vehicles/car", null, 0, 0, 30, false, 2.5,
+                              BoardDecoration.Placement.ground(), 0)));
+                    }
+                    board.setHex(at, hex);
+                }
+            }
+            return board;
+        }, List.of(
+              (view, source, root) -> {
+                  if (root.findActor("editor-back") != null) { GpuBoardTestUi.click("editor-back"); return false; }
+                  view.boardCamera.center(BoardGeometry.center(pond.translated(2), 0));
+                  view.boardCamera.zoom(.45f / view.boardCamera.camera.zoom);
+                  return true;
+              },
+              (view, source, root) -> {
+                  if (busy(view)) { return false; }
+                  GpuBoardTestUi.capture(new File(OUTPUT, "theme-before.png"));
+                  GpuBoardTestUi.category("theme");
+                  return true;
+              },
+              (view, source, root) -> { GpuBoardTestUi.click("editor-library-theme/mars"); return true; },
+              (view, source, root) -> {
+                  assertEquals("theme/mars", source.editorState().activeBrush().key());
+                  generation[0] = source.takeFrame().boardGeneration();
+                  source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.BRUSH, "", "2"), generation[0]);
+                  source.editorPointer(stroke.getFirst(), 0, 0, false, generation[0]);
+                  stroke.stream().skip(1).forEach(at -> source.editorPointer(at, 0, 0, true, generation[0]));
+                  source.endEditorStroke();
+                  return true;
+              },
+              (view, source, root) -> {
+                  var scene = source.takeFrame().scene();
+                  if (busy(view) || scene.tile(pond).appearance().containsKey("ground")) { return false; }
+                  for (Coords at : List.of(pond, car, stroke.getFirst(), stroke.getLast())) {
+                      assertTrue(scene.tile(at).appearance().isEmpty(), "Clear ground at " + at);
+                  }
+                  assertEquals(BoardLiquid.Kind.WATER, scene.tile(pond).liquid().kind(), "The pond stays");
+                  assertEquals("mars", scene.tile(pond).liquid().theme(), "as Mars water");
+                  assertTrue(scene.tile(car).features().stream().anyMatch(f -> f.asset().equals("scenery/vehicles/car")), "The car stays");
+                  assertTrue(source.editorState().canUndo());
+                  GpuBoardTestUi.capture(new File(OUTPUT, "theme-after.png"));
+                  GpuBoardTestUi.category("ground-water");
+                  return true;
+              },
+              (view, source, root) -> { GpuBoardTestUi.reveal("editor-section-ground-water/liquids"); return true; },
+              (view, source, root) -> { GpuBoardTestUi.click("editor-library-water/magma"); return true; },
+              (view, source, root) -> {
+                  generation[0] = source.takeFrame().boardGeneration();
+                  source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.BRUSH_VALUE, "terrain:water", "2"), generation[0]);
+                  source.editorPointer(lava, 0, 0, false, generation[0]); source.endEditorStroke();
+                  return true;
+              },
+              (view, source, root) -> { GpuBoardTestUi.click("editor-library-water/shallow"); return true; },
+              (view, source, root) -> {
+                  generation[0] = source.takeFrame().boardGeneration();
+                  source.editorPointer(water, 0, 0, false, generation[0]); source.endEditorStroke();
+                  view.boardCamera.center(BoardGeometry.center(new Coords(5, 9), 0));
+                  return true;
+              },
+              (view, source, root) -> {
+                  var scene = source.takeFrame().scene();
+                  if (busy(view) || !scene.tile(water).liquid().present()) { return false; }
+                  assertTrue(scene.tile(lava).liquid().molten() && scene.tile(lava).waterDepth() == 2, "A lava lake two levels deep");
+                  assertEquals(BoardLiquid.Kind.WATER, scene.tile(water).liquid().kind());
+                  GpuBoardTestUi.capture(new File(OUTPUT, "lava-beside-water.png"));
+                  return true;
+              }));
+    }
+
     /** The gallery's sixth design. */
     private static BoardEditorBlueprint.Entry modular() {
         return BoardEditorBlueprint.get().categories().stream().flatMap(c -> c.sections().stream()).flatMap(s -> s.cards().stream())
@@ -262,13 +396,20 @@ class GpuEditorPaletteSmokeTest {
 
     /** Opens an editor window of {@code width} x {@code height} on a pavement board and runs {@code steps} in order. */
     static void run(int width, int height, List<Step> steps) throws Exception {
-        var setup = new FutureTask<GpuMapSource>(() -> {
-            var editor = new BoardEditorSession();
+        run(width, height, () -> {
             Board board = Board.createEmptyBoard(12, 12);
             for (int x = 0; x < 12; x++) {
                 for (int y = 0; y < 12; y++) { board.setHex(new Coords(x, y), new Hex(0, "pavement:1", "")); }
             }
-            editor.game().setBoard(board);
+            return board;
+        }, steps);
+    }
+
+    /** Opens an editor window of {@code width} x {@code height} on the board {@code board} makes (on the EDT) and runs {@code steps}. */
+    static void run(int width, int height, Supplier<Board> board, List<Step> steps) throws Exception {
+        var setup = new FutureTask<GpuMapSource>(() -> {
+            var editor = new BoardEditorSession();
+            editor.game().setBoard(board.get());
             return new GpuMapSource(editor.game(), null, editor);
         });
         SwingUtilities.invokeAndWait(setup);

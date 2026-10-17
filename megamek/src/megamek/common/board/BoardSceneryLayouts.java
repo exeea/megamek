@@ -384,7 +384,8 @@ public final class BoardSceneryLayouts {
      * ground or its bridge's deck ({@link #railPlacement}); art without sides joins the rails beside it ({@link #railJoins})
      * or places nothing. On a legacy (not native) board only, converted maglevs a level up or beside a row of pillar art
      * stand on Pillars ({@link #maglevPillars}) and a rail bridge carries its rail across its span ({@link #carryRails}),
-     * and a crane tip that a converted crane's boom reaches places nothing ({@link #reachedTips}). A token that a hex
+     * a crane tip that a converted crane's boom reaches places nothing ({@link #reachedTips}), and minor objects step
+     * clear of the fitted concrete walls ({@link #clearOfConcreteWalls}). A token that a hex
      * design draws gets that design ({@link #design}): seaport container yards and cranes on woods become the woods'
      * container yard look at their rotation (a skin, {@link #skin}). A hex that already holds a twin of every object its art
      * decodes to ({@link BoardDecoration#twin}: a token typed again in the editor) gets none of them. A legacy board's
@@ -572,6 +573,7 @@ public final class BoardSceneryLayouts {
         if (!nativeBoard) {
             maglevPillars(board, maglevs, pillarRows);
             carryRails(board, scanned);
+            clearOfConcreteWalls(board, scanned);
         }
         design(board, scanned);
         typeBridges(board, bridges);
@@ -709,6 +711,71 @@ public final class BoardSceneryLayouts {
         Map<BoardLocation, Hex> result = new HashMap<>();
         changed.forEach((at, hex) -> result.put(BoardLocation.of(at, board.getBoardId()), hex));
         if (!result.isEmpty()) { board.setHexes(result); }
+    }
+
+    /**
+     * Moves the minor objects of {@code hexes} that the fitted concrete ({@link ConcreteFit}, as the 3D board fits this
+     * board without pins) would cut, by at least 4 px² inside their hex ({@link ConcreteFit#reaches}), the shortest way
+     * clear of the walls and banks of their hex ({@link ConcreteFit#clearance}), so the 3D board keeps the fitted outline
+     * there. The members of a group in the hex move as one body (the hull of their footprints), by one offset, so the
+     * art's layout stays. Objects that follow the hex sides ({@link #followsHexSides}) stay and pin their hex in the 3D
+     * board, as does an object without a model (missing or unreadable on the converting machine), one that would move
+     * more than 42 px, and every member of a group with such a member. A legacy board's conversion only: a .board2 is
+     * drawn as authored.
+     */
+    private static void clearOfConcreteWalls(Board board, List<Coords> hexes) {
+        ConcreteFit fit = new ConcreteFit(board.getWidth(), board.getHeight(), ConcreteFit.cells(board), 1, true, Set.of());
+        for (Coords at : hexes) {
+            if (fit.footprint(at) == null) { continue; }
+            Hex hex = board.getHex(at);
+            List<BoardDecoration> objects = new ArrayList<>(hex.getDecorations());
+            // The bodies that move: each group's members, and each object without a group on its own.
+            Map<Object, List<Integer>> bodies = new LinkedHashMap<>();
+            for (int i = 0; i < objects.size(); i++) {
+                String group = objects.get(i).group();
+                bodies.computeIfAbsent(group == null ? i : group, key -> new ArrayList<>()).add(i);
+            }
+            boolean moved = false;
+            for (List<Integer> body : bodies.values()) {
+                List<ConcreteFit.Point> points = new ArrayList<>();
+                boolean reached = false;
+                for (int i : body) {
+                    BoardDecoration object = objects.get(i);
+                    List<ConcreteFit.Point> footprint = followsHexSides(object) ? null : BoardModelBounds.footprint(at, object);
+                    if (footprint == null) {
+                        points = null;
+                        break;
+                    }
+                    points.addAll(footprint);
+                    reached |= fit.reaches(footprint, at);
+                }
+                if (points == null || !reached) { continue; }
+                ConcreteFit.Shift move = fit.clearance(ConcreteFit.hull(points), at);
+                if (move == null || move.equals(ConcreteFit.Shift.ZERO)) { continue; }
+                for (int i : body) {
+                    BoardDecoration object = objects.get(i);
+                    objects.set(i, object.transform(object.x() + move.x() / TILE_WIDTH, object.y() + move.y() / TILE_HEIGHT,
+                          object.rotation(), object.mirror(), object.scale(), object.placement()));
+                }
+                moved = true;
+            }
+            if (moved) {
+                Hex result = replacement(hex);
+                result.setDecorations(objects);
+                board.setHex(at, result);
+            }
+        }
+    }
+
+    /**
+     * Objects whose shape follows the hex sides: route markers (rails, maglevs) and the pieces that ride them
+     * ({@link RailRoute#rides}), decals, roof parts and seaport pieces. The legacy conversion never moves them off their
+     * place ({@link #clearOfConcreteWalls}).
+     */
+    private static boolean followsHexSides(BoardDecoration object) {
+        return RailRoute.Kind.of(object.asset()) != null || RailRoute.rides(object.asset()) != null
+              || object.kind().equals("decal") || object.asset().startsWith("scenery/roofs/")
+              || object.asset().startsWith("scenery/seaport/");
     }
 
     /**

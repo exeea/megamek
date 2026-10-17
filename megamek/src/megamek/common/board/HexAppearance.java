@@ -31,6 +31,33 @@ public record HexAppearance(String variant, String asset, String material, Doubl
     public static final HexAppearance TRUSS = new HexAppearance("bridge/truss", null, null, null);
     public static final HexAppearance TRUSS_PILLARS = new HexAppearance("bridge/truss-pillars", null, null, null);
 
+    /**
+     * How a pavement hex's walls and banks follow the fitted concrete outline (owner {@code "pavement"}). Cosmetic, like
+     * the bridge types: the 3D views draw them; rules and the 2D views ignore it. {@link #AUTO}, stored as none: fitted
+     * straight or rounded, except where a placed object stands on a wall the fit moves; {@link #FITTED}: fitted even
+     * through objects; {@link #HEX}: plain hex steps.
+     */
+    public enum Edges { AUTO, FITTED, HEX }
+
+    public static final HexAppearance EDGES_FITTED = new HexAppearance("pavement/fitted", null, null, null);
+    public static final HexAppearance EDGES_HEX = new HexAppearance("pavement/hex", null, null, null);
+
+    /** A hex's stored pavement {@link Edges}; {@link Edges#AUTO} when none is stored. */
+    public static Edges edges(Map<String, HexAppearance> appearance) {
+        HexAppearance stored = appearance.get("pavement");
+        String variant = stored == null ? null : stored.variant();
+        return EDGES_FITTED.variant().equals(variant) ? Edges.FITTED : EDGES_HEX.variant().equals(variant) ? Edges.HEX : Edges.AUTO;
+    }
+
+    /** The pavement appearance that stores {@code edges}; null for {@link Edges#AUTO}, which is stored as none. */
+    public static HexAppearance of(Edges edges) {
+        return switch (edges) {
+            case AUTO -> null;
+            case FITTED -> EDGES_FITTED;
+            case HEX -> EDGES_HEX;
+        };
+    }
+
     /** An appearance without colours. */
     public HexAppearance(String variant, String asset, String material, Double strength) {
         this(variant, asset, material, strength, BoardDecoration.Colours.NONE);
