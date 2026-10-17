@@ -1243,7 +1243,7 @@ public class BoardUtilities {
                 field.addTerrain(new Terrain(Terrains.ICE, 1));
             } else if (field.containsTerrain(Terrains.SWAMP)) {
                 field.removeTerrain(Terrains.SWAMP);
-                if (field.terrainsPresent() == 0) {
+                if (field.isClear()) {
                     if (Compute.randomInt(100) < 30) {
                         // if no other terrains present, 30% chance to change to
                         // rough
@@ -1304,7 +1304,7 @@ public class BoardUtilities {
             if (field.containsTerrain(Terrains.SWAMP)) {
                 field.removeTerrain(Terrains.SWAMP); // any swamps are dried
                 // up to hardened mud
-                if ((field.terrainsPresent() == 0) && (Compute.randomInt(100) < 30)) {
+                if (field.isClear() && (Compute.randomInt(100) < 30)) {
                     // if no other terrains present, 30% chance to change to
                     // rough
                     field.addTerrain(new Terrain(Terrains.ROUGH, 1));
@@ -1415,9 +1415,9 @@ public class BoardUtilities {
                 Coords c = new Coords(x, y);
                 Hex hex = board.getHex(c);
 
-                //moderate rain - mud in clear hexes, depth 0 water, and dirt roads
+                //moderate rain - mud in clear hexes (Hex#isClear), depth 0 water, and dirt roads
                 if (weatherCond.isModerateRainOrLightningStorm()) {
-                    if ((hex.terrainsPresent() == 0)
+                    if (hex.isClear()
                           || (hex.containsTerrain(Terrains.WATER) && (hex.depth() == 0))
                           || (hex.containsTerrain(Terrains.ROAD)
                           && hex.terrainLevel(Terrains.ROAD) == Terrains.ROAD_LVL_DIRT)) {

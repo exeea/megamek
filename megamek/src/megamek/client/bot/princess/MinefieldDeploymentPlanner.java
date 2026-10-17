@@ -646,7 +646,7 @@ public class MinefieldDeploymentPlanner {
 		}
 		
 		// infantry don't like being in open terrain because of the 2x damage
-		if (hex.isClearHex()) {
+		if (hex.isClear()) {
 			hexScore--;
 		}
 		

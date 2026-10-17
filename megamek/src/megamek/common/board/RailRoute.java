@@ -114,6 +114,19 @@ public final class RailRoute {
     }
 
     /**
+     * Whether the hex holds a rail on its ground (a RAIL marker that does not ride a deck), which keeps the ground from
+     * being clear ({@link Hex#isClear}). Maglev never does. Rails as rules terrain (b13 item 4) replace this body.
+     */
+    public static boolean groundRail(Hex hex) {
+        return markers(hex, Kind.RAIL).stream().anyMatch(marker -> !onDeck(marker));
+    }
+
+    /** Whether the hex's bridge deck carries a rail ({@link Hex#isClearDeck}); b13 item 4 replaces this body. */
+    public static boolean deckRail(Hex hex) {
+        return markers(hex, Kind.RAIL).stream().anyMatch(RailRoute::onDeck);
+    }
+
+    /**
      * Whether a rail with these sides may ride a bridge with these exits: one of its sides runs along the deck. A deck
      * carries track only along itself ({@link #drawnSides}), so the conversion and the editor put a rail on a deck only
      * then; any other rail on a bridge hex, one crossing under it, lies beneath.

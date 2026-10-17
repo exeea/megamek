@@ -58,9 +58,10 @@ public class Terrains implements Serializable {
     // ultra
     /**
      * Base {@link #FLUFF} terrain level for the cosmetic "cleared rubble path" overlay left after a bulldozer clears a
-     * rubble hex (TacOps). The hex itself becomes clear terrain (rubble removed); a fluff terrain at
-     * {@code CLEARED_RUBBLE_FLUFF_BASE + structureType} (1 light .. 5 wall) is added purely so the tileset can draw the
-     * rubble "_path" tiles showing the hex was once rubble. Fluff has no gameplay effect (see {@code Hex.isClearHex}).
+     * rubble hex (TacOps). The rubble is removed; a fluff terrain at
+     * {@code CLEARED_RUBBLE_FLUFF_BASE + structureType} (1 light .. 5 wall) is added so the tileset can draw the
+     * rubble "_path" tiles showing the hex was once rubble. The marker keeps the hex from counting as clear
+     * ({@code Hex.isClear}); it has no other gameplay effect.
      */
     public static final int CLEARED_RUBBLE_FLUFF_BASE = 2000;
     public static final int JUNGLE = 5; // 1: light 2: heavy 3: ultra

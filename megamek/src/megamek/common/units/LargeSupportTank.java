@@ -442,7 +442,7 @@ public class LargeSupportTank extends SupportTank {
                 return true;
             }
             // Can't deploy in clear hex
-            if (hex.isClearHex()) {
+            if (hex.isClear()) {
                 return true;
             }
         }

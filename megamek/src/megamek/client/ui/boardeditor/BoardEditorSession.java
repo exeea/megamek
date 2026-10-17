@@ -1081,10 +1081,12 @@ public final class BoardEditorSession {
 
     /**
      * The old editor's "Only overwrite clear hexes": while it is on, Paint and Sculpt change only hexes without terrain
-     * ({@link Hex#isClearHex}; their level and theme do not count). Select and Erase are not filtered.
+     * (automatic markers, level and theme do not count; this is not the rules' {@link Hex#isClear}). Select and Erase
+     * are not filtered.
      */
     private boolean overwrites(Coords at) {
-        return !clearOnly || tool != Tool.PAINT && tool != Tool.SCULPT || board().getHex(at).isClearHex();
+        return !clearOnly || tool != Tool.PAINT && tool != Tool.SCULPT
+              || Terrains.AUTOMATIC.containsAll(board().getHex(at).getTerrainTypesSet());
     }
 
     /** What a Sculpt click on {@code hexes} footprint hexes at {@code hover} does without Ctrl, e.g. "Raise · 7 hexes". */

@@ -50,6 +50,7 @@ import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.HexAppearance;
+import megamek.common.board.RailRoute;
 import megamek.common.board.BoardFile;
 import megamek.common.enums.BasementType;
 import megamek.common.equipment.Minefield;
@@ -827,20 +828,41 @@ public class Hex implements Serializable {
     }
 
     /**
-     * @return if this hex is "clear", based on the absence of most terrain types.
+     * Terrain types that never make a hex unclear ({@link #isClear}): art tokens (cleared rubble aside), automatic and
+     * authored edge markers, lying limbs, metal content (sensors only), deployment zones, the woods' height helper, a
+     * malformed "none", and the bridge family: a bridge above the ground is judged by {@link #isClearDeck}.
      */
-    public boolean isClearHex() {
-        for (int t = 1; t <= Terrains.BLDG_BASE_COLLAPSED; t++) {
-            // Ignore some terrain types
-            if ((t == Terrains.FLUFF) || (t == Terrains.ARMS) || (t == Terrains.LEGS)) {
-                continue;
-            }
+    private static final Set<Integer> NOT_CLEARING = Set.of(0, Terrains.FLUFF, Terrains.GROUND_FLUFF,
+          Terrains.ROAD_FLUFF, Terrains.WATER_FLUFF, Terrains.BLDG_FLUFF, Terrains.ARMS, Terrains.LEGS,
+          Terrains.METAL_CONTENT, Terrains.DEPLOYMENT_ZONE, Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM,
+          Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM, Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM,
+          Terrains.FOLIAGE_ELEV, Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED);
 
-            if (containsTerrain(t)) {
+    /**
+     * Whether the hex's ground is CLEAR (the rules' "clear hex", e.g. TO:AR p.57 and p.61): it shows only basic ground.
+     * Looks, themes, art tokens and placed objects never count, nor do inclines. Any other terrain does (water of any
+     * depth, woods, rough, rubble, roads, pavement, mud, snow, ice, buildings, heavy industry and every other structure,
+     * smoke, fire...), and so do cleared rubble, a rail on the ground and a built bridge deck at the hex's level (its
+     * surface). A bridge above the ground and a suspended maglev do not.
+     */
+    public boolean isClear() {
+        for (int type : terrains.keySet()) {
+            if (!NOT_CLEARING.contains(type)) {
                 return false;
             }
         }
-        return true;
+        return Math.max(terrainLevel(Terrains.FLUFF), terrainLevel(Terrains.GROUND_FLUFF))
+              < Terrains.CLEARED_RUBBLE_FLUFF_BASE
+              && !(hasBridge() && terrainLevel(Terrains.BRIDGE_ELEV) <= 0 && !isClearDeck())
+              && !RailRoute.groundRail(this);
+    }
+
+    /**
+     * Whether the hex's bridge deck is CLEAR: a natural bridge ({@link HexAppearance#NATURAL_BRIDGE}) carrying no rail.
+     * A built deck never is; an untyped bridge is built, as the 3D board draws it.
+     */
+    public boolean isClearDeck() {
+        return hasBridge() && HexAppearance.bridgeBuilt(getAppearance()) == Boolean.FALSE && !RailRoute.deckRail(this);
     }
 
     /** Determine whether a minefield of the given type can be placed here.

@@ -119,7 +119,6 @@ class BoardSceneryTest {
             assertEquals(List.of("scenery/saxarba/cleared_rubble_gravel", "scenery/saxarba/rubble_" + families.get(type - 1)
                   + "_path"), path.scenery().models());
             assertFalse(cleared.containsTerrain(Terrains.RUBBLE), "Cosmetic debris must not restore the obstacle");
-            assertTrue(cleared.isClearHex());
         }
         assertEquals(List.of("scenery/saxarba/misc/fortified"), capture(new Hex(0, "fortified:1", "")).scenery().models());
     }
