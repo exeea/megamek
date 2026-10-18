@@ -3,19 +3,11 @@
 uniform sampler2DArray u_groundDamage;
 uniform vec2 u_groundDamageSize;
 uniform vec3 u_groundDamageGrid;
-// x: 1 once a nuclear blast has scorched the board (GpuGroundDamage.scorch); y: Ground Zero's heat, cooling after it
+// x: 1 while any scorch shows (a nuclear blast's or a hex's authored one); y: Ground Zero's heat, cooling after a blast
 uniform vec2 u_groundScorch;
 
-#ifdef surfaceScarFlag
-in vec3 v_scarUV;
-vec4 surfaceScarMask;
-vec4 surfaceScar() {
-    vec2 uv = (v_scarUV.xy * GROUND_DAMAGE_INNER + GROUND_DAMAGE_BORDER) / GROUND_DAMAGE_TILE;
-    return textureGrad(u_groundDamage, vec3(uv, v_scarUV.z), dFdx(uv), dFdy(uv));
-}
-#endif
-
-// The directory texel of an 8 m tile: R and G name its image layer, B holds a nuclear blast's scorch.
+// The directory texel of an 8 m tile: R and G name its image layer, B holds a nuclear blast's scorch, A the hex's
+// authored scorch (GpuGroundDamage.author).
 vec4 groundDamageEntry(ivec2 cell) {
     if (any(lessThan(cell, ivec2(0))) || any(greaterThanEqual(cell, ivec2(u_groundDamageGrid.yz)))) return vec4(0.0);
     int size = int(GROUND_DAMAGE_TILE);
@@ -23,19 +15,27 @@ vec4 groundDamageEntry(ivec2 cell) {
     return texelFetch(u_groundDamage, ivec3(address % size, (address / size) % size, address / (size * size)), 0);
 }
 
-// A nuclear blast's scorch here, 0 to 1: bilinear between the tiles' centres, so its 8 m tiles never show.
-float groundScorchAt(vec2 world) {
-    if (u_groundScorch.x <= 0.0 || u_groundDamageSize.x <= 0.0) return 0.0;
+// The scorch here, 0 to 1: x a nuclear blast's, y the hexes' authored one; bilinear between the tiles' centres, so its
+// 8 m tiles never show.
+vec2 groundScorches(vec2 world) {
+    if (u_groundScorch.x <= 0.0) return vec2(0.0);
     vec2 position = vec2(world.x, -world.y) / u_groundDamageGrid.x - .5;
     ivec2 cell = ivec2(floor(position));
     vec2 f = position - vec2(cell);
-    float near = mix(groundDamageEntry(cell).b, groundDamageEntry(cell + ivec2(1, 0)).b, f.x);
-    float far = mix(groundDamageEntry(cell + ivec2(0, 1)).b, groundDamageEntry(cell + ivec2(1, 1)).b, f.x);
+    vec2 near = mix(groundDamageEntry(cell).ba, groundDamageEntry(cell + ivec2(1, 0)).ba, f.x);
+    vec2 far = mix(groundDamageEntry(cell + ivec2(0, 1)).ba, groundDamageEntry(cell + ivec2(1, 1)).ba, f.x);
     return mix(near, far, f.y);
 }
 
-// A nuclear blast's scorch on a surface (shadeSurface): soot over the blast area, which the falling damage thins
-// toward its edge, and near Ground Zero the dark, glassy crust the heat fuses from the ground (trinitite).
+// The scorch that shows here: the stronger of a nuclear blast's and the authored one.
+float groundScorchAt(vec2 world) {
+    vec2 scorches = groundScorches(world);
+    return max(scorches.x, scorches.y);
+}
+
+// Scorch on a surface (shadeSurface): soot over a nuclear blast's area, which the falling damage thins toward its edge,
+// or over a hex scorched in the editor, and at full scorch the dark, glassy crust the heat fuses from the ground
+// (trinitite).
 void scorchGround(float scorch, inout vec3 albedo, inout float roughness) {
     float ash = smoothstep(0.0, .45, scorch);
     float luminance = dot(albedo, vec3(.2126, .7152, .0722));

@@ -1890,6 +1890,35 @@ class BoardEditorSessionTest {
         assertEquals(megamek.common.board.HexAppearance.EDGES_HEX, BoardFile.read(file).getHex(at).getAppearance().get("pavement"));
     }
 
+    /**
+     * Scorched ground: a member of its card paints, the Brush's Severity switches the level, Erase takes it off, the Edit
+     * row sets it in one undo step and a saved .board2 keeps it; it is a look, so the ground stays CLEAR.
+     */
+    @Test void scorchedGroundIsPaintedErasedSetInEditAndSaved() throws Exception {
+        var session = session();
+        send(session, Action.CHOOSE_BRUSH, "scorch", "scorch/charred");
+        send(session, Action.BRUSH_VALUE, "variant:scorch", "scorch/ash");
+        send(session, Action.BRUSH, "", "2");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        List<Coords> painted = session.brush(at);
+        assertEquals(7, painted.size());
+        for (Coords hex : painted) {
+            assertEquals(.62f, megamek.common.board.HexAppearance.scorch(session.board().getHex(hex).getAppearance()));
+            assertTrue(session.board().getHex(hex).isClear());
+        }
+        send(session, Action.TOOL, "", "ERASE");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        assertTrue(painted.stream().allMatch(hex -> session.board().getHex(hex).getAppearance().isEmpty()));
+        send(session, Action.TOOL, "", "SELECT"); session.pointer(at, 0, 0, false); session.finishStroke();
+        send(session, Action.VARIANT, "scorch", "scorch/glass");
+        assertEquals(1f, megamek.common.board.HexAppearance.scorch(session.board().getHex(at).getAppearance()));
+        send(session, Action.UNDO, "", "");
+        assertTrue(session.board().getHex(at).getAppearance().isEmpty(), "One undo step");
+        send(session, Action.REDO, "", "");
+        Path file = directory.resolve("scorch.board2"); session.save(file);
+        assertEquals("scorch/glass", BoardFile.read(file).getHex(at).getAppearance().get("scorch").variant());
+    }
+
     private static String text(java.awt.datatransfer.Clipboard clipboard) throws Exception {
         return (String) clipboard.getData(java.awt.datatransfer.DataFlavor.stringFlavor);
     }

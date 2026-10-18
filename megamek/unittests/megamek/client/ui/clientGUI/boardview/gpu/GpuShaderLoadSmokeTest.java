@@ -10,6 +10,7 @@ import static org.mockito.Mockito.spy;
 import java.io.File;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -20,9 +21,12 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
+import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.Renderable;
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
+import com.badlogic.gdx.utils.Array;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.common.Player;
 import megamek.common.ResolvedAttack;
@@ -95,7 +99,7 @@ class GpuShaderLoadSmokeTest {
             // The spy holds a copy of the source's fields; the captures happen on the source.
             doAnswer(ignored -> fixture.source.reserveUnits()).when(source).reserveUnits();
             new Lwjgl3Application(new GpuBattleView(source) {
-                int step;
+                int step, links, programs;
 
                 @Override
                 public void render() {
@@ -104,7 +108,8 @@ class GpuShaderLoadSmokeTest {
                         super.render();
                         if (!watch.frame(GpuBoardTestUi.loading(this))) { return; }
                         double seconds = watch.seconds();
-                        BoardScene scene = step < 4 ? fixture.source.takeFrame().scene() : null;
+                        var terrain = (GpuTerrain) GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain");
+                        BoardScene scene = step < 4 || step == 9 ? fixture.source.takeFrame().scene() : null;
                         var tuning = (GpuBoardTuning) GpuMixedUnitBenchmarkSmokeTest.field(this, "tuning");
                         if (step == 0) {
                             boardCamera.setIsometric(true);
@@ -144,7 +149,18 @@ class GpuShaderLoadSmokeTest {
                             tuning.setWireframe(false);
                             ((SelectBox<?>) GpuMixedUnitBenchmarkSmokeTest.field(tuning, "antiAliasing")).setSelectedIndex(0);
                             step++;
-                        } else if (step == 9 && seconds > WATCH_SECONDS) {
+                        } else if (step == 9 && seconds > 45) {
+                            // Hits on walls: their scar patches draw with the walls' own programs.
+                            links = GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading();
+                            programs = programs(terrain);
+                            hitWalls(terrain, scene);
+                            step++;
+                        } else if (step == 10 && seconds > WATCH_SECONDS) {
+                            assertTrue(terrain.surfaceScars().triangleCount() > 0, "The walls took scars");
+                            assertEquals(links, GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading(),
+                                  "The scars linked a program");
+                            assertEquals(programs, programs(terrain), "The scars added a program");
+                            noScarPrograms(terrain);
                             assertTrue(fixture.source.takeFrame().scene().units().stream()
                                   .anyMatch(unit -> unit.id() == late.get(1).getId()), "The platoon deployed");
                             Gdx.app.exit();
@@ -263,11 +279,49 @@ class GpuShaderLoadSmokeTest {
         watch.check();
     }
 
-    /** Where combat cannot happen, no scar program is prepared. */
+    /** No program is prepared for scars: they draw with their receivers' programs. */
     private static void noScarPrograms(Object terrain) throws Exception {
         for (Object sample : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "terrainMaterialSamples")) {
-            assertFalse(((Renderable) sample).material.has(GpuSurfaceScars.Marking.TYPE), "An editor scar program");
+            assertFalse(((Renderable) sample).material.has(GpuSurfaceScars.Marking.TYPE), "A scar program");
         }
+    }
+
+    /** The programs the terrain's shader provider holds. */
+    static int programs(GpuTerrain terrain) throws Exception {
+        var provider = ((ModelBatch) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "batch")).getShaderProvider();
+        if (provider instanceof GpuShaderProvider edited) { provider = edited.active(); }
+        return ((Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(provider, "shaders")).size;
+    }
+
+    /** An autocannon hit on each of the board's three steepest walls, through the game's contact path. */
+    private static void hitWalls(GpuTerrain terrain, BoardScene scene) {
+        List<BoardSurface.Face> walls = new ArrayList<>();
+        for (var tile : scene.tiles()) {
+            var surface = terrain.tacticalSurface(tile.coords());
+            if (surface != null) { walls.addAll(surface.walls()); }
+        }
+        walls.sort(Comparator.comparingDouble(face -> Math.abs(normal(face).z)));
+        int hits = 0;
+        for (var face : walls) {
+            if (hits == 3) { break; }
+            var point = face.a().cpy().add(face.b()).add(face.c()).scl(1f / 3);
+            var incoming = normal(face).scl(-1);
+            var origin = point.cpy().mulAdd(incoming, -BoardRelief.metres(20));
+            var aim = point.cpy().mulAdd(incoming, BoardRelief.metres(.1f));
+            var mark = GroundDamagePlaybackTest.impact("ISAC20", null);
+            mark.attack().landscape = ray -> terrain.hit(scene, ray);
+            mark.attack().landscapeSegment = (ray, length) -> terrain.hit(scene, ray, length);
+            var contact = mark.attack().landscapeContact(t -> origin.cpy().lerp(aim, (float) t), 1);
+            if (contact == null) { continue; }
+            terrain.impact(scene, new GpuGroundDamage.Impact(mark.attack(), "wall-" + hits, origin, contact.point(),
+                  mark.effect(), mark.shot()));
+            hits++;
+        }
+        assertEquals(3, hits, "The board has walls to hit");
+    }
+
+    private static Vector3 normal(BoardSurface.Face face) {
+        return face.b().cpy().sub(face.a()).crs(face.c().cpy().sub(face.a())).nor();
     }
 
     private static Lwjgl3ApplicationConfiguration window() {

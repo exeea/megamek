@@ -16,7 +16,7 @@ import java.util.Set;
 public record HexAppearance(String variant, String asset, String material, Double strength,
       BoardDecoration.Colours colours, Integer rotation, Integer tracks) implements Serializable {
     public static final Set<String> OWNERS = Set.of("ground", "road", "building", "pavement", "fuelTank",
-          "vegetation", "rough", "bridge", "rail", "bridgeRail");
+          "vegetation", "rough", "bridge", "rail", "bridgeRail", "scorch");
     /**
      * A built bridge with concrete piers under the joints between its hexes, never at a hex centre (owner
      * {@code "bridge"}). Cosmetic, like the other bridge types: the 3D views draw them; rules and the 2D views ignore it.
@@ -56,6 +56,32 @@ public record HexAppearance(String variant, String asset, String material, Doubl
         HexAppearance stored = appearance.get("pavement");
         String variant = stored == null ? null : stored.variant();
         return EDGES_FITTED.variant().equals(variant) ? Edges.FITTED : EDGES_HEX.variant().equals(variant) ? Edges.HEX : Edges.AUTO;
+    }
+
+    /**
+     * How badly a hex's ground is scorched (owner {@code "scorch"}), each named level a share of the scorch a nuclear
+     * blast leaves at Ground Zero (1). Cosmetic, like the pavement {@link Edges}: the 3D views draw it; rules and the 2D
+     * views ignore it.
+     */
+    public enum Scorch {
+        SINGED("scorch/singed", .15f), CHARRED("scorch/charred", .35f), ASH("scorch/ash", .62f), GLASS("scorch/glass", 1f);
+
+        private final String variant;
+        private final float severity;
+
+        Scorch(String variant, float severity) { this.variant = variant; this.severity = severity; }
+
+        public String variant() { return variant; }
+    }
+
+    /** A hex's stored scorch, 0 to 1 ({@link Scorch}); 0 when none or an unknown level is stored. */
+    public static float scorch(Map<String, HexAppearance> appearance) {
+        HexAppearance stored = appearance.get("scorch");
+        if (stored == null) { return 0; }
+        for (Scorch level : Scorch.values()) {
+            if (level.variant.equals(stored.variant())) { return level.severity; }
+        }
+        return 0;
     }
 
     /** The pavement appearance that stores {@code edges}; null for {@link Edges#AUTO}, which is stored as none. */

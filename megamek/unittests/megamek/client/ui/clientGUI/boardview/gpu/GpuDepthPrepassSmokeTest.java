@@ -249,7 +249,8 @@ class GpuDepthPrepassSmokeTest {
             Object colourLadder = colour.active();
             Capture off = capture(terrain, frame, camera, scene, view, NONE, GL20.GL_EQUAL, timings);
             expectTwins("shader edits, before", true, off, terrain, frame, camera, scene, view, timings, report);
-            String depth = GpuShaderSource.readDisk("terrain-depth.frag"), marker = "// depth twin live draft";
+            // A directive: the compiled stages drop comments (GpuGlsl.withoutComments).
+            String depth = GpuShaderSource.readDisk("terrain-depth.frag"), marker = "#define depthTwinLiveDraft";
 
             var edit = session.apply(Map.of("terrain-depth.frag", depth + "\n" + marker + "\n"));
             report.append("  edit of terrain-depth.frag: ").append(edit.message()).append('\n');

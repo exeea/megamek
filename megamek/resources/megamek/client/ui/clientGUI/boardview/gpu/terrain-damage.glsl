@@ -2,11 +2,8 @@
 // Authored luminance and transparency survive into the material; the source is not reduced to a soot silhouette.
 void groundDamage(vec3 world, vec3 face, float grass, float sand, float exposed,
       inout vec3 albedo, inout vec3 normal, inout float cavity, inout float roughness) {
-    #ifdef surfaceScarFlag
-    vec4 scar = surfaceScarMask * exposed;
-    #else
-    vec4 scar = groundDamageAt(v_cloudPosition.xy) * exposed;
-    #endif
+    // A scar patch's draw takes its own image (scar-material.glsl); the receiver's own draw the ground's.
+    vec4 scar = (u_surfaceScar > .5 ? surfaceScarMask : groundDamageAt(v_cloudPosition.xy)) * exposed;
     float coverage = scar.r;
     // Keep the receiving material's grain at its own scale instead of covering it with a flat grey image.
     // Grass reveals this terrain family's existing soil map. Capture gradients before the scar branch.

@@ -299,9 +299,12 @@ class GpuVerticalScarsSmokeTest {
             var contact = mark.attack().landscapeContact(t -> origin.cpy().lerp(aim, (float) t), 1);
             assertNotNull(contact);
             assertEquals("building", contact.surface().receiver());
+            int programs = GpuShaderLoadSmokeTest.programs(terrain);
             terrain.impact(scene, new GpuGroundDamage.Impact(mark.attack(), "building", origin, contact.point(), mark.effect(), mark.shot()));
             for (int i = 0; i < 4; i++) { frame.render(terrain, camera, scene); }
             assertTrue(terrain.surfaceScars().tileCount() > 0, "A building wall must receive a scar");
+            assertEquals(programs, GpuShaderLoadSmokeTest.programs(terrain),
+                  "The scar draws with the wall's own program");
             assertTrue(differences(clean, pixels()) > 100, "The native model material must display the wall scar");
             GpuReviewFrame.save(new File(output, "building-ac20.png"));
             int masks = terrain.surfaceScars().tileCount();

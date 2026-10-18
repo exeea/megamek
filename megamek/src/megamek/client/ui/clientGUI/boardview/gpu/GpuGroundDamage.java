@@ -33,6 +33,7 @@ import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
 import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.logging.MMLogger;
 
 /** Cosmetic ground history on the render thread. Neither marks nor their texture change the board or game rules. */
@@ -200,6 +201,10 @@ final class GpuGroundDamage implements Disposable {
     private int marks;
     private boolean scorched;
     private long scorchedAt;
+    /** The hexes' authored scorch bytes as last written to the directory's alpha byte, and the tiles they came from. */
+    private byte[] authored = new byte[0];
+    private List<BoardScene.Tile> authoredTiles;
+    private boolean authoredAny;
     /** The fused crust at Ground Zero cools over about this many seconds. */
     static final float HEAT_SECONDS = 25;
     private int nextSurfaceKey = -1;
@@ -242,8 +247,11 @@ final class GpuGroundDamage implements Disposable {
     float height() { return worldHeight; }
     int marks() { return marks; }
 
-    /** Whether a nuclear blast has scorched this board: the terrain then reads the scorch even without a mark. */
+    /** Whether a nuclear blast has scorched this board: Ground Zero's heat ({@link #scorchHeat}) is its own. */
     boolean scorched() { return scorched; }
+
+    /** Whether any scorch shows: a nuclear blast's or a hex's authored one ({@link HexAppearance#scorch}). */
+    boolean scorchShown() { return scorched || authoredAny; }
 
     /** Ground Zero's glow after the last blast: 1 as it goes off, a third left after {@link #HEAT_SECONDS}. */
     float scorchHeat() {
@@ -260,7 +268,7 @@ final class GpuGroundDamage implements Disposable {
      * Scorches every 8 m tile within the blast area: each takes the blast's damage there as a share of Ground Zero's,
      * which falls off linearly to nothing at the edge as the rules' damage does, and the crater takes all of it. The
      * share lives in the directory texels' blue byte, which the terrain reads with the scars (terrain-damage-mask.glsl);
-     * a later blast keeps the stronger scorch. It is written once, so even the largest blast costs one pass over its
+     * a later blast keeps the stronger scorch, and the authored scorch in the alpha byte stays. It is written once, so even the largest blast costs one pass over its
      * tiles and one directory upload, and nothing per frame.
      */
     void scorch(Scorch blast) {
@@ -302,6 +310,45 @@ final class GpuGroundDamage implements Disposable {
             if (COMBAT_SCARS) { allocate(); }
         }
         groundScene = scene;
+        author(scene);
+    }
+
+    /**
+     * The hexes' authored scorch ({@link HexAppearance#scorch}) in the directory texels' alpha byte, for every 8 m tile
+     * whose centre lies in the hex; the terrain shows the stronger of it and a nuclear blast's. Only hexes whose scorch
+     * changed since the last scene are rewritten, and nothing when the scene's tiles are the same.
+     */
+    private void author(BoardScene scene) {
+        if (directory.isEmpty() || scene.tiles() == authoredTiles) { return; }
+        authoredTiles = scene.tiles();
+        if (authored.length != columns * rows) { authored = new byte[columns * rows]; }
+        int pageSize = TILE_SIZE * TILE_SIZE;
+        boolean any = false;
+        for (BoardScene.Tile tile : scene.tiles()) {
+            int value = Math.round(HexAppearance.scorch(tile.appearance()) * 255);
+            any |= value > 0;
+            int index = tile.coords().getY() * columns + tile.coords().getX();
+            if ((authored[index] & 255) == value) { continue; }
+            authored[index] = (byte) value;
+            Vector3 centre = BoardGeometry.center(tile.coords(), 0);
+            float halfWidth = BoardGeometry.width() * .5f, halfHeight = BoardGeometry.height() * .5f;
+            int firstX = Math.max(0, (int) Math.floor((centre.x - halfWidth) / tileWorldSize));
+            int lastX = Math.min(tileColumns - 1, (int) Math.floor((centre.x + halfWidth) / tileWorldSize));
+            int firstY = Math.max(0, (int) Math.floor((-centre.y - halfHeight) / tileWorldSize));
+            int lastY = Math.min(tileRows - 1, (int) Math.floor((-centre.y + halfHeight) / tileWorldSize));
+            for (int y = firstY; y <= lastY; y++) {
+                for (int x = firstX; x <= lastX; x++) {
+                    if (!BoardGeometry.contains(tile.coords(), (x + .5f) * tileWorldSize, -(y + .5f) * tileWorldSize)) { continue; }
+                    int key = y * tileColumns + x;
+                    Pixmap page = directory.get(key / pageSize);
+                    int address = key % pageSize;
+                    int pixel = page.getPixel(address % TILE_SIZE, address / TILE_SIZE);
+                    page.drawPixel(address % TILE_SIZE, address / TILE_SIZE, pixel & 0xFFFFFF00 | value);
+                }
+            }
+            directoryDirty = true;
+        }
+        authoredAny = any;
     }
 
     void impact(BoardScene scene, Impact impact, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
@@ -785,6 +832,7 @@ final class GpuGroundDamage implements Disposable {
         brushes.values().forEach(art -> art.levels().forEach(Pixmap::dispose));
         brushes.clear();
         texture = null; capacity = 0; seen.clear(); marks = 0; scorched = false;
+        authored = new byte[0]; authoredTiles = null; authoredAny = false;
         nextSurfaceKey = -1;
         pending.clear(); resumeTile = 0; groundScene = null;
         worldWidth = 0; worldHeight = 0; columns = 0; rows = 0;

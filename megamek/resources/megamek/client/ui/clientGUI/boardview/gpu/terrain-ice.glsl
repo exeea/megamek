@@ -357,7 +357,7 @@ vec3 iceFinish(vec3 underlying, vec3 worldDx, vec3 worldDy) {
 
 void main() {
 #ifdef iceFlag
-    // Capture before iceBaseSurface can discard a road-mask or projected-scar fragment.
+    // Capture before iceBaseSurface can discard a road-mask fragment or end a scar patch's.
     vec3 worldDx = dFdx(v_cloudPosition), worldDy = dFdy(v_cloudPosition);
     vec3 iceFace = normalize(v_normal);
     float iceVariance = normalVariance(dFdx(iceFace), dFdy(iceFace));
@@ -371,6 +371,10 @@ void main() {
     // Land and black ice still need their actual underlying surface for transmission and the broken border.
     if (u_iceMode > 2.5 && u_iceMode < 3.5) fragColor = vec4(0.0, 0.0, 0.0, 1.0);
     else iceBaseSurface();
+#ifdef SURFACE_SCARS
+    // Where a scar patch's image leaves its receiver bare (scar-material.glsl), no coat covers the empty texel either.
+    if (u_surfaceScar > .5 && surfaceScarMask.r <= 0.0) return;
+#endif
     // The coat's own normal, not the variance of the support's maps.
     surfaceVariance = iceVariance;
     fragColor.rgb = iceFinish(fragColor.rgb, worldDx, worldDy);

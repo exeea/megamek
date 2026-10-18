@@ -1194,6 +1194,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             controls.add(brushNumber(UiKit.text("BoardEditor.designRotation"), style.rotation() == null ? 0 : style.rotation(),
                   0, 330, 30, Action.BRUSH_VALUE, "rotation:" + definition.id()));
         }
+        if (brush.sampledHex() == null && definition.id().equals("scorch")) {
+            controls.add(scorchSeverity(brush.appearance(), chosen -> send(Action.BRUSH_VALUE, "variant:scorch", chosen)));
+        }
         if (brush.sampledHex() == null && definition.id().equals("pavement")) {
             List<Option> options = new ArrayList<>();
             for (var edges : megamek.common.board.HexAppearance.Edges.values()) {
@@ -1461,7 +1464,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                   .children(objectRows(snapshot.objects().stream().filter(object -> !snapshot.grouped(object)
                         && object.placement().receiver() != null && component.receiver().equals(object.placement().receiver().terrain()))
                         .toList(), component.receiver()));
-            if (!component.present().isEmpty()) {
+            if (!component.present().isEmpty() || component.fields().isEmpty()) {
                 String remove = id + "-remove";
                 layerCommands.put(remove, () -> send(Action.REMOVE_COMPONENT, component.id()));
                 row = row.action(new UiTree.Action(remove, "close", null, true));
@@ -1502,13 +1505,15 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     /**
-     * Whether Layers lists {@code component} for the inspected hex: Ground always, a component by its own terrain, and
-     * an additive one without terrain of its own (Hazards, Weather, Scenario features, Salvage, Elevators) while any of
-     * its fields is in the hex. An additive row has no remove button: each field has its own in Edit.
+     * Whether Layers lists {@code component} for the inspected hex: Ground always, a component by its own terrain, one
+     * with no fields at all (a look such as Scorched ground) by its appearance, and an additive one without terrain of
+     * its own (Hazards, Weather, Scenario features, Salvage, Elevators) while any of its fields is in the hex. An
+     * additive row has no remove button: each field has its own in Edit.
      */
     private boolean listed(BoardEditorBlueprint.Component component) {
         if (component.id().equals("ground")) { return true; }
         if (!component.present().isEmpty()) { return component.isPresent(name -> snapshot.property(name) != null); }
+        if (component.fields().isEmpty()) { return snapshot.appearance().containsKey(component.id()); }
         return component.palette() && component.fields().stream().anyMatch(field -> snapshot.property(field.terrain()) != null);
     }
 
@@ -1576,8 +1581,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         }
         Table appearance = new Table(); appearance.defaults().growX().minWidth(0).uniformX().top().pad(0, 2, 0, 2);
         if (definition.id().equals("ground")) { appearance.add(themeChoice(UiKit.text("BoardEditor.hexTheme"), snapshot.theme(), v -> send(Action.THEME, v))); }
-        // A bridge's designs are its type: the Built and Natural buttons below.
-        if (!designVariants(definition.id()).isEmpty() && !definition.id().equals("bridge")) {
+        // A bridge's designs are its type: the Built and Natural buttons below; a scorch's its Severity row.
+        if (!designVariants(definition.id()).isEmpty() && !definition.id().equals("bridge") && !definition.id().equals("scorch")) {
             var style = snapshot.appearance().get(definition.id());
             var variant = style == null ? null : blueprint.variant(style.variant());
             String designId = variant == null ? blueprint.variants(definition.id()).stream()
@@ -1600,6 +1605,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         } else if (appearance.hasChildren()) { detail.add(appearance).row(); }
         for (var field : definition.fields()) { if (!field.optional() || snapshot.property(field.terrain()) != null) { field(field); } }
         if (definition.id().equals("pavement")) { pavementEdges(); }
+        if (definition.id().equals("scorch")) {
+            detail.add(scorchSeverity(snapshot.appearance(), chosen -> send(Action.VARIANT, "scorch", chosen))).growX().row();
+        }
         // Deck mud is offered only where it plays: on a natural raised deck (Hex#deckMud).
         var deck = snapshot.property("bridge_elev");
         boolean deckMud = Boolean.FALSE.equals(megamek.common.board.HexAppearance.bridgeBuilt(snapshot.appearance()))
@@ -1655,9 +1663,19 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         UiButton sample = button(UiKit.text("BoardEditor.useAsBrush"), () -> send(Action.SAMPLE)); sample.setName("editor-use-hex-brush");
         ui.tip(sample).getActor().setText(UiKit.text("BoardEditor.useAsBrush.tooltip"));
         detail.add(sample).padTop(8).row();
-        if (!definition.present().isEmpty()) {
+        if (!definition.present().isEmpty() || definition.fields().isEmpty()) {
             detail.add(removeButton(UiKit.text("BoardEditor.removeComponent"), () -> send(Action.REMOVE_COMPONENT, definition.id()))).row();
         }
+    }
+
+    /** A scorched hex's Severity (HexAppearance.Scorch): its named levels, the stored one shown. */
+    private Table scorchSeverity(Map<String, megamek.common.board.HexAppearance> appearance, Consumer<String> choose) {
+        var style = appearance.get("scorch");
+        var current = style == null ? null : blueprint.variant(style.variant());
+        Table row = choice(UiKit.text("BoardEditor.scorchSeverity"), current == null ? UiKit.text("BoardEditor.none") : current.label(),
+              blueprint.variants("scorch").stream().map(variant -> new Option(variant.label(), variant.id())).toList(), choose);
+        row.setName("editor-scorch-severity");
+        return row;
     }
 
     /** The pavement hex's Edges ({@link megamek.common.board.HexAppearance.Edges}): one row of Auto, Fitted and Hex. */

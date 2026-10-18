@@ -167,7 +167,8 @@ void main() {
 #ifdef lightingFlag
     vec3 geometric = visibleFace(worldDx, worldDy, -viewDirection());
 #endif
-    // surface-frame-ready
+    // A scar patch's draw shades only where its image covers the receiver (scar-material.glsl).
+    if (!surfaceScarCovers()) { fragColor = vec4(0.0); return; }
     terrainMaterialLod(world, face);
     // The area a pixel covers, as a length: a tilted view's foreshortening alone does not remove the detail.
     float footprint = sqrt(length(worldDx.xy) * length(worldDy.xy));
@@ -481,9 +482,7 @@ void main() {
         }
         groundDamage(world, face, grass, sand, exposed, albedo, normal, cavity, roughness);
     }
-    #ifdef surfaceScarFlag
-    if (!ground) groundDamage(world, face, 0.0, sand, exposed, albedo, normal, cavity, roughness);
-    #endif
+    if (!ground && u_surfaceScar > .5) groundDamage(world, face, 0.0, sand, exposed, albedo, normal, cavity, roughness);
     // Rain darkens exposed ground and rock, and gathers in puddles on level ground.
     float wet = u_wetness * rainCover * exposed;
     // Moisture darkens porous peat, but does not turn its entire surface into standing water. Rain

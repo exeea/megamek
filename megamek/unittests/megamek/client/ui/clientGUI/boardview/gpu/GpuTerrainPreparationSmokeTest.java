@@ -212,13 +212,11 @@ class GpuTerrainPreparationSmokeTest {
                             ordinaryFamily = line.substring("#define VOLCANIC_ORDINARY_FAMILY ".length());
                         }
                         if (line.startsWith("#define ICE_MODE ")) {
-                            compiledIceModes.add(line.substring("#define ICE_MODE ".length())
-                                  + (text.contains("#define surfaceScarFlag") ? " scar" : " ordinary"));
+                            compiledIceModes.add(line.substring("#define ICE_MODE ".length()));
                         }
                     }
                     if (text.contains("#define volcanicFlag") && text.contains("#define terrainBlendFlag")) {
-                        compiledPalettes.add((ordinaryFamily == null ? "generic" : ordinaryFamily)
-                              + (text.contains("#define surfaceScarFlag") ? " scar" : " ordinary"));
+                        compiledPalettes.add(ordinaryFamily == null ? "generic" : ordinaryFamily);
                     }
                 }
                 boolean first = sources.add(text);
@@ -284,50 +282,32 @@ class GpuTerrainPreparationSmokeTest {
                     Files.writeString(report, String.format(Locale.ROOT, "phase %d ready after %.3f ms%n",
                           phase, (System.nanoTime() - started) / 1_000_000.0), StandardOpenOption.APPEND);
                     if (phase == 0) {
-                        assertEquals(1, compiledSources.stream().filter(text -> !text.contains("#define surfaceScarFlag")).count(),
-                              "Uniform grass needs one ordinary sculpt program");
-                        assertEquals(GpuGroundDamage.COMBAT_SCARS ? 1 : 0,
-                              compiledSources.stream().filter(text -> text.contains("#define surfaceScarFlag")).count(),
-                              "The matching scar program must be prepared before the first impact");
+                        assertEquals(1, compiledSources.size(),
+                              "Uniform grass needs one sculpt program, which also draws its scars");
                         assertFalse(variants.contains("terrainBlendFlag"), "A uniform board must not prepare unused blends");
                     }
                     if (phase == 1) {
                         int[] roles = checkBlendedRoles(terrain, "preparation phase " + phase);
                         assertTrue(roles[0] > 0, "The mixed fixture must contain installed blended geometry");
                         // Frozen land and its dry neighbour share attribute/vertex masks, but compile different
-                        // ICE_MODE programs. Readiness must cover both, including their eventual scar receivers.
-                        assertTrue(compiledIceModes.containsAll(Set.of("1.0 ordinary", "4.0 ordinary")),
+                        // ICE_MODE programs. Readiness must cover both; their scars draw with the same programs.
+                        assertTrue(compiledIceModes.containsAll(Set.of("1.0", "4.0")),
                               "Both same-mask ice modes must be compiled before drawing: " + compiledIceModes);
-                        if (GpuGroundDamage.COMBAT_SCARS) {
-                            assertTrue(compiledIceModes.containsAll(Set.of("1.0 scar", "4.0 scar")),
-                                  "Ice scars must not defer compilation until an impact: " + compiledIceModes);
-                        }
                     }
                     if (phase == 4) {
                         for (String palette : new String[] { "3", "2", "0", "-2", "generic" }) {
-                            assertTrue(compiledPalettes.contains(palette + " ordinary"),
+                            assertTrue(compiledPalettes.contains(palette),
                                   "Readiness must include each ordinary-family dispatch: " + compiledPalettes);
-                            if (GpuGroundDamage.COMBAT_SCARS) {
-                                assertTrue(compiledPalettes.contains(palette + " scar"),
-                                      "Scars must retain each palette's own specialization: " + compiledPalettes);
-                            }
                         }
                         for (String family : new String[] { "3", "2", "0", "-2" }) {
                             String prefix = "#define VOLCANIC_ORDINARY_FAMILY " + family + "\n";
-                            assertEquals(1, compiledSources.stream().filter(text -> text.contains(prefix)
-                                        && !text.contains("#define surfaceScarFlag")).count(),
-                                  "Slot order must not multiply a family's prepared ordinary programs: " + family);
-                            assertEquals(GpuGroundDamage.COMBAT_SCARS ? 1 : 0,
-                                  compiledSources.stream().filter(text -> text.contains(prefix)
-                                        && text.contains("#define surfaceScarFlag")).count(),
-                                  "Slot order must not multiply a family's prepared scar programs: " + family);
+                            assertEquals(1, compiledSources.stream().filter(text -> text.contains(prefix)).count(),
+                                  "Slot order must not multiply a family's prepared programs: " + family);
                         }
                     }
                     if (phase >= 5) {
-                        assertTrue(compiledIceModes.containsAll(Set.of("3.0 ordinary", "6.0 ordinary")),
+                        assertTrue(compiledIceModes.containsAll(Set.of("3.0", "6.0")),
                               "Actual slab and fall programs must be published before drawing: " + compiledIceModes);
-                        assertFalse(compiledIceModes.contains("3.0 scar") || compiledIceModes.contains("6.0 scar"),
-                              "Transparent ice must not prepare unused scar variants: " + compiledIceModes);
                     }
                     int preparedSources = compiledSources.size();
                     long drawStarted = System.nanoTime();

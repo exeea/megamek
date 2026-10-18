@@ -68,6 +68,7 @@ import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
 import com.badlogic.gdx.graphics.g3d.utils.RenderableSorter;
 import com.badlogic.gdx.graphics.g3d.utils.ShaderProvider;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
@@ -165,9 +166,12 @@ final class GpuTerrain implements Disposable {
          */
         private final String depthFragment;
 
+        // A scar patch draws with its receiver's program (GpuSurfaceScars): every vertex stage forwards the patch's
+        // page UV, and the sculpt and model fragment stages draw the patch.
         TerrainShaders(boolean depthOnly) {
-            super(invariantPosition(GpuCloudShadow.vertex(GpuUnitShader.linearVertex(DefaultShader.getDefaultVertexShader()))),
-                  GpuCloudShadow.fragment(GpuUnitShader.fragment()));
+            super(GpuSurfaceScars.vertex(invariantPosition(GpuCloudShadow.vertex(GpuUnitShader.linearVertex(
+                        DefaultShader.getDefaultVertexShader())))),
+                  GpuSurfaceScars.fragment(GpuCloudShadow.fragment(GpuUnitShader.fragment())));
             this.depthOnly = depthOnly;
             depthFragment = depthOnly ? GpuShaderSource.read("terrain-depth.frag") : null;
         }
@@ -246,10 +250,6 @@ final class GpuTerrain implements Disposable {
                   } : animated ? liquidShader : config;
             // Only these programs use model.frag (GpuUnitShader.fragment); custom surfaces own their factor colours.
             boolean modelColors = chosen == config || chosen == instancedPropShader || chosen == liquidShader;
-            if (renderable.material.has(GpuSurfaceScars.Marking.TYPE)) {
-                chosen = new DefaultShader.Config(GpuSurfaceScars.vertex(chosen.vertexShader),
-                      GpuSurfaceScars.fragment(chosen.fragmentShader, renderable.material.has(Sculpt.TYPE)));
-            }
             String prefix = GpuCloudShadow.prefix(renderable, chosen)
                   + (renderable.environment != null ? "#define sceneUnlitFlag\n" : "")
                   + (renderable.material.has(Sculpt.TYPE) || waterMode != null
@@ -257,7 +257,6 @@ final class GpuTerrain implements Disposable {
                         || renderable.material.has(GpuBiomeVegetation.Kind.TYPE)
                         || renderable.material.has(Impostor.TYPE)
                         || renderable.material.has(GpuRoads.Coats.TYPE) ? "#define vertexDataFlag\n" : "")
-                  + (renderable.material.has(GpuSurfaceScars.Marking.TYPE) ? "#define surfaceScarFlag\n" : "")
                   + "#define SURFACE_FAMILIES " + BoardScene.Surface.values().length + "\n"
                   + "#define LUNAR_FAMILY " + BoardScene.Surface.LUNAR.ordinal() + ".0\n"
                   + "#define FUNGUS_FAMILY " + BoardScene.Surface.FUNGUS.ordinal() + ".0\n"
@@ -300,12 +299,13 @@ final class GpuTerrain implements Disposable {
                   + (renderable.material.has(GpuSurfaceBlend.TYPE) ? " blend" : "")
                   + (ordinaryFamily != -1 ? " ordinary-" + ordinaryFamily : "")
                   + (renderable.material.has(GpuMagmaShader.TYPE) ? " volcanic" : "")
-                  + (renderable.material.has(GpuSurfaceScars.Marking.TYPE) ? " scar" : "")
                   + (GpuIceShader.mode(renderable.material) != 0 ? " ice-" + GpuIceShader.mode(renderable.material) : "")
                   + (renderable.environment != null && renderable.environment.has(GpuCloudShadow.TYPE) ? " cloud" : "")
                   + (renderable.environment != null && renderable.environment.shadowMap != null ? " shadow" : "")
                   + (GpuTreeInstances.instanced(renderable) ? " instanced" : "")
                   + GpuFamilyPrograms.name(renderable.material, Sculpt.TYPE);
+            // From the colour program's stages: the prefix is also the vertex stage's, which a twin shares.
+            prefix += GpuShaderSource.sculptMaterialPrefix(SCULPT_LAYERS.size(), chosen.vertexShader, fragment);
             if (depthOnly) {
                 // A cutout's twin returns after its alpha test (GpuGlsl.source moves the version line above the define);
                 // a solid surface's twin has an empty fragment stage.
@@ -313,7 +313,6 @@ final class GpuTerrain implements Disposable {
                       : depthFragment;
                 shaderName += " depth twin";
             }
-            prefix += GpuShaderSource.sculptMaterialPrefix(SCULPT_LAYERS.size(), chosen.vertexShader, fragment);
             // The pre-pass draws twin by twin (renderPrepass): a twin sorts with no program.
             Shader group = depthOnly ? null : familyGroup(renderable, shaders);
             DefaultShader result = new DefaultShader(renderable, chosen,
@@ -396,6 +395,9 @@ final class GpuTerrain implements Disposable {
                 private long globalsPass = -1;
                 private final long instances = instanceMask(renderable);
                 private final int iceMode = GpuIceShader.mode(renderable.material);
+                private final VertexAttributes createdLayout = renderable.meshPart.mesh.getVertexAttributes();
+                private final long vertexLayout = GpuSurfaceScars.receiverLayout(createdLayout);
+                private final int textureCoordinates = createdLayout.getTextureCoordinates();
 
                 @Override
                 public boolean canRender(Renderable other) {
@@ -407,7 +409,36 @@ final class GpuTerrain implements Disposable {
                                 flowingMagma)
                           // A shadow map changes the compiled samplers without changing the environment's mask.
                           && shadowMap == (other.environment != null && other.environment.shadowMap != null)
-                          && instances == instanceMask(other) && super.canRender(other);
+                          && instances == instanceMask(other) && drawsLayout(other);
+                }
+
+                /**
+                 * DefaultShader.canRender without a scar patch's marking and page UV: a receiver's program draws its
+                 * patches (GpuSurfaceScars), and a program first made for a patch draws its receiver.
+                 */
+                private boolean drawsLayout(Renderable other) {
+                    VertexAttributes vertices = other.meshPart.mesh.getVertexAttributes();
+                    long mask = (other.environment == null ? 0 : other.environment.getMask()) | other.material.getMask()
+                          | IntAttribute.CullFace | DepthTestAttribute.Type;
+                    return (other.bones == null || other.bones.length <= config.numBones)
+                          && vertices.getBoneWeights() <= config.numBoneWeights
+                          && vertices.getTextureCoordinates() == textureCoordinates
+                          && ((mask ^ attributesMask) & ~GpuSurfaceScars.Marking.TYPE) == 0
+                          && GpuSurfaceScars.receiverLayout(vertices) == vertexLayout
+                          && (other.environment != null) == lighting;
+                }
+
+                @Override
+                public void init(ShaderProgram program, Renderable created) {
+                    // The attributes a program binds come from the mesh it was created for: add its patches' page UV.
+                    Mesh layout = GpuSurfaceScars.layout(program, created.meshPart.mesh);
+                    if (layout == null) {
+                        super.init(program, created);
+                        return;
+                    }
+                    Renderable mapped = new Renderable().set(created);
+                    mapped.meshPart.mesh = layout;
+                    try { super.init(program, mapped); } finally { layout.dispose(); }
                 }
 
                 @Override
@@ -447,12 +478,13 @@ final class GpuTerrain implements Disposable {
                     set(clayUniform, clay ? 1f : 0f);
                     set(terrainWearUniform, clay ? 0f : terrainWear);
                     set(elevationGradingUniform, !clay && elevationGrading ? 1f : 0f);
-                    // The Tactical View shows no craters or ground damage (setFluffHidden).
-                    boolean damaged = combatScars && !clay && !fluffHidden
-                          && (groundDamage.marks() > 0 || groundDamage.scorched()) && groundDamage.texture() != null;
+                    // The Tactical View shows no craters, ground damage or scorch (setFluffHidden). Authored scorch also
+                    // shows where combat scars do not (the editor, its previews).
+                    boolean damaged = combatScars && !clay && !fluffHidden && groundDamage.marks() > 0
+                          && groundDamage.texture() != null;
                     set(groundDamageSizeUniform, damaged ? groundDamage.width() : 0, damaged ? groundDamage.height() : 0);
                     set(groundDamageGridUniform, groundDamage.tileWorldSize(), (float) groundDamage.tileColumns(), (float) groundDamage.tileRows());
-                    boolean scorched = damaged && groundDamage.scorched();
+                    boolean scorched = !clay && !fluffHidden && groundDamage.scorchShown() && groundDamage.texture() != null;
                     set(groundScorchUniform, scorched ? 1f : 0f, scorched ? groundDamage.scorchHeat() : 0f);
                     set(sculptMetreUniform, BoardRelief.metres(1));
                     set(waterLineUniform, BoardGeometry.hexScale());
@@ -511,6 +543,13 @@ final class GpuTerrain implements Disposable {
                 protected void bindMaterial(Attributes attributes) {
                     super.bindMaterial(attributes);
                     GpuUnitShader.bindSceneBlending(context, attributes);
+                    // A scar patch (opaque, like its receiver) covers the receiver where its image does: elsewhere it
+                    // ends with alpha 0 (scar-material.glsl), which this blending leaves unseen. It writes no depth.
+                    if (attributes.has(GpuSurfaceScars.Marking.TYPE)) {
+                        context.setBlending(true, GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA, GL20.GL_ONE,
+                              GL20.GL_ONE_MINUS_SRC_ALPHA);
+                        context.setDepthMask(false);
+                    }
                     // A draw the depth pre-pass drew keeps that depth: it shades only where its own depth won, writing none.
                     if (prepassed && twin(this, attributes) != null) {
                         context.setDepthTest(prepassDepthFunction);
@@ -603,6 +642,7 @@ final class GpuTerrain implements Disposable {
             GpuAmbientOcclusion.register(result);
             GpuModelMaterial.register(result);
             GpuBuildingCutaway.register(result);
+            GpuSurfaceScars.register(result);
             GpuLiquidShader.register(result);
             GpuMagmaShader.register(result, rainNoise);
             // Upload before drawing: creating ice maps from a uniform setter disturbs the active texture bindings.
@@ -834,12 +874,13 @@ final class GpuTerrain implements Disposable {
         if (blend != null && blend.blended || material.has(DepthTestAttribute.Type)
               || material.has(GpuSurfaceScars.Marking.TYPE) || material.has(GpuBuildingCutaway.TYPE)
               || material.has(GpuTilesetTerrain.Grading.TYPE)) { return null; }
+        // terrain-foliage.frag discards by the alpha test alone, which a cutout's twin repeats. Plants are GLB models
+        // too (GpuModelMaterial), so they are told apart first.
+        if (material.has(Foliage.TYPE)) { return material.has(Impostor.TYPE) ? Prepass.IMPOSTORS : Prepass.FOLIAGE; }
         // model.frag discards only under an alpha test: an opaque object's empty twin repeats its coverage.
         if (material.has(GpuModelMaterial.TYPE)) {
             return material.has(FloatAttribute.AlphaTest) ? null : Prepass.OBJECTS;
         }
-        // terrain-foliage.frag discards by the alpha test alone, which a cutout's twin repeats.
-        if (material.has(Foliage.TYPE)) { return material.has(Impostor.TYPE) ? Prepass.IMPOSTORS : Prepass.FOLIAGE; }
         // The relief's fragment stages never discard; these materials' stages do, or are not relief.
         if (blend != null || material.has(FloatAttribute.AlphaTest) || material.has(GpuWaterShader.TYPE)
               || material.has(GpuLiquidShader.Frame.TYPE) || material.has(GpuGroundCover.Wind.TYPE)
@@ -2331,8 +2372,9 @@ final class GpuTerrain implements Disposable {
     void setElevationGrading(boolean enabled) { elevationGrading = enabled; }
 
     /**
-     * Whether combat scars show. Off before the board builds (the editor, previews), it also prepares no scar programs:
-     * where combat cannot happen they are never drawn.
+     * Whether combat scars show. On before the board builds (games), it also prepares the plain programs of the objects
+     * drawn instanced, with which their scar patches draw (GpuSurfaceScars); a patch on the terrain draws with its
+     * receiver's sculpt program. Off where combat cannot happen (the editor, previews).
      */
     void setCombatScars(boolean scars) { combatScars = scars; }
 
@@ -3160,11 +3202,6 @@ final class GpuTerrain implements Disposable {
 
     /** Retain one layout per program variant discovered in actual chunk materials. */
     private void prepareTerrainMaterial(Material material, VertexAttributes attributes) {
-        // Terrain scar receivers are sculpted; transparent ice and plain ground do not acquire scar variants.
-        if (combatScars && material.has(Sculpt.TYPE)
-              && !material.has(GpuSurfaceScars.Marking.TYPE)) {
-            prepareTerrainMaterial(GpuSurfaceScars.material(material), GpuSurfaceScars.attributes(attributes));
-        }
         for (Renderable sample : terrainMaterialSamples) {
             // A cliff chunk's relief takes its own sample, which links the program's depth twin too.
             if (sample.material.getMask() == material.getMask() && prepass(sample.material) == prepass(material)
@@ -4645,13 +4682,13 @@ final class GpuTerrain implements Disposable {
                     }
                 }
             }
-            // Combat scars mark the 3D relief and what stands on it; the Classic columns show none.
+            // Combat scars mark the 3D relief and what stands on it; the Classic columns show none. A scar patch draws
+            // with its receiver's plain program (GpuSurfaceScars), which an instanced object never draws with itself.
             if (combatScars && !chunk.columns) {
                 for (var layer : List.of(chunk.sharedProps, chunk.propRenderables, chunk.decorationRenderables)) {
                     for (Renderable part : layer) {
                         if (instancedShader(part.material) && scarReceiver(part)) {
-                            prepareTerrainMaterial(GpuSurfaceScars.material(part.material),
-                                  GpuSurfaceScars.attributes(part.meshPart.mesh.getVertexAttributes()));
+                            prepareTerrainMaterial(part.material, part.meshPart.mesh.getVertexAttributes());
                         }
                     }
                 }
@@ -4729,7 +4766,9 @@ final class GpuTerrain implements Disposable {
         if (receiver.prop() < 0) {
             for (int index = 0; index < tile.ranges.size(); index++) {
                 var range = tile.ranges.get(index);
-                if (range.layer() != 0 || !range.material().has(Sculpt.TYPE)) { continue; }
+                if (range.layer() != 0 || !range.material().has(Sculpt.TYPE) || !drawsScars(range.material())) {
+                    continue;
+                }
                 var view = new Renderable();
                 view.material = range.material();
                 view.meshPart.set("scar-receiver", range.mesh(), range.offset(), range.count(), GL20.GL_TRIANGLES);
@@ -4750,8 +4789,19 @@ final class GpuTerrain implements Disposable {
 
     private static boolean scarReceiver(Renderable view) {
         var blend = view.material.get(BlendingAttribute.class, BlendingAttribute.Type);
-        return !view.material.has(Foliage.TYPE) && (blend == null || !blend.blended)
+        return drawsScars(view.material) && (blend == null || !blend.blended)
               && view.meshPart.primitiveType == GL20.GL_TRIANGLES && view.bones == null;
+    }
+
+    /**
+     * Whether createShader draws a material with a program that draws its scar patches: the sculpt program or one from
+     * model.frag (plain, instanced, liquid). A surface any other program draws receives no patch.
+     */
+    private static boolean drawsScars(Material material) {
+        long mask = material.getMask();
+        return (mask & (Foliage.TYPE | Pit.TYPE | GpuBankTurf.Turf.TYPE | GpuBiomeVegetation.Kind.TYPE
+              | GpuGroundCover.Wind.TYPE)) == 0
+              && ((mask & Sculpt.TYPE) != 0 || (mask & (Ground.TYPE | GpuWaterShader.TYPE | GpuMagmaShader.TYPE)) == 0);
     }
 
     private static GpuSurfaceScars.Source scarSource(GpuSurfaceScars.Receiver receiver, Renderable view) {

@@ -59,12 +59,14 @@ vec3 thinTransmission(vec3 albedo, float share) {
 // onto it and how many levels of water lie over it (water-optics.glsl).
 vec3 shadeSurface(Surface s, float caustic, float submerged) {
 #ifdef GROUND_DAMAGE_TILE
-    // A nuclear blast's scorch (terrain-damage-mask.glsl), on every terrain surface lit here; models never read it.
-    float scorch = groundScorchAt(v_cloudPosition.xy) * (1.0 - submerged);
+    // Scorch (terrain-damage-mask.glsl), a nuclear blast's or a hex's authored one, on every terrain surface lit here;
+    // models never read it.
+    vec2 scorches = groundScorches(v_cloudPosition.xy) * (1.0 - submerged);
+    float scorch = max(scorches.x, scorches.y);
     if (scorch > 0.0) {
         scorchGround(scorch, s.albedo, s.roughness);
-        // The fused crust still glows after the blast, dimming as it cools.
-        s.emission += vec3(1.1, .28, .06) * scorchGlow(v_cloudPosition.xy, scorch, u_groundScorch.y);
+        // A blast's fused crust still glows after it, dimming as it cools; authored scorch is cold.
+        s.emission += vec3(1.1, .28, .06) * scorchGlow(v_cloudPosition.xy, scorches.x, u_groundScorch.y);
     }
 #endif
     vec3 view = -viewDirection();
