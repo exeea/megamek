@@ -14,7 +14,9 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.JPanel;
@@ -56,6 +58,39 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuBoardSourceTest {
+    @Test
+    void movementPaletteCapturesEveryClientColorWithoutSharingMutableState() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            GUIPreferences gui = GUIPreferences.getInstance();
+            Map<GpuMovePlan.Band, String> settings = Map.of(
+                  GpuMovePlan.Band.WALK, GUIPreferences.BOARD_MOVE_DEFAULT_COLOR,
+                  GpuMovePlan.Band.BACK, GUIPreferences.BOARD_MOVE_BACK_COLOR,
+                  GpuMovePlan.Band.RUN, GUIPreferences.BOARD_MOVE_RUN_COLOR,
+                  GpuMovePlan.Band.BOOST, GUIPreferences.BOARD_MOVE_MASC_COLOR,
+                  GpuMovePlan.Band.SPRINT, GUIPreferences.BOARD_MOVE_SPRINT_COLOR,
+                  GpuMovePlan.Band.JUMP, GUIPreferences.BOARD_MOVE_JUMP_COLOR,
+                  GpuMovePlan.Band.ILLEGAL, GUIPreferences.BOARD_MOVE_ILLEGAL_COLOR);
+            Map<String, Color> saved = new HashMap<>();
+            Map<GpuMovePlan.Band, Integer> expected = new HashMap<>();
+            try {
+                settings.forEach((band, setting) -> {
+                    saved.put(setting, gui.getColor(setting));
+                    Color color = new Color(30 + band.ordinal() * 25, 170 - band.ordinal() * 15, 90);
+                    gui.setColor(setting, color);
+                    expected.put(band, color.getRGB());
+                });
+                BoardSource.UiPreferences captured = BoardSource.UiPreferences.capture();
+                assertEquals(expected, captured.movementColors());
+                settings.values().forEach(setting -> gui.setColor(setting, Color.PINK));
+                assertEquals(expected, captured.movementColors(), "Published colours stay immutable");
+                assertTrue(BoardSource.UiPreferences.capture().movementColors().values().stream()
+                      .allMatch(rgb -> rgb == Color.PINK.getRGB()), "Every changed preference is captured");
+            } finally {
+                saved.forEach(gui::setColor);
+            }
+        });
+    }
+
     @Test
     void heatSnapshotsFollowGameHeatOnlyForUnitsThatTrackIt() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {

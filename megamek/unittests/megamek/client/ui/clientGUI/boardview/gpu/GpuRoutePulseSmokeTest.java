@@ -16,22 +16,27 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.gdx.UiTestStage;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Tag;
@@ -53,6 +58,102 @@ class GpuRoutePulseSmokeTest {
     /** The hex radius in world units. */
     private static final float RADIUS = BoardGeometry.WIDTH / 2;
     private static final GpuBattleStatus.Snapshot STATUS = GpuHudFixtures.status();
+
+    @Test
+    void pulseHeadAndArrivalUseTheConfiguredSegmentColorsInBothViews() throws Exception {
+        Coords origin = new Coords(3, 7);
+        BoardScene scene;
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(Board.createEmptyBoard(7, 9))) {
+            scene = onSwing(() -> {
+                fixture.entity.setPosition(origin);
+                fixture.source.refresh();
+                return fixture.source.takeFrame().scene();
+            });
+        }
+        BoardSource.UiPreferences preferences = onSwing(BoardSource.UiPreferences::capture);
+        Map<GpuMovePlan.Band, Integer> colors = new HashMap<>(preferences.movementColors());
+        colors.put(GpuMovePlan.Band.WALK, java.awt.Color.RED.getRGB());
+        colors.put(GpuMovePlan.Band.RUN, java.awt.Color.GREEN.getRGB());
+        colors.put(GpuMovePlan.Band.BOOST, java.awt.Color.BLUE.getRGB());
+        BoardSource.UiPreferences custom = new BoardSource.UiPreferences(preferences.scale(),
+              preferences.reportKeywords(), preferences.reportFilterKeywords(), preferences.minimapEnabled(),
+              preferences.contactsEnabled(), preferences.conditionsVisible(), preferences.turnDetails(),
+              preferences.binds(), preferences.graphics(), preferences.overlays(), colors);
+        GpuHudTestStage.run(hud -> {
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            GpuBoardOverlay overlay = new GpuBoardOverlay();
+            try {
+                board.units = false;
+                List<GpuMovePlan.Step> route = List.of(
+                      step(scene, origin.translated(0, 1), 0, GpuMovePlan.Band.WALK),
+                      step(scene, origin.translated(0, 2), 0, GpuMovePlan.Band.RUN),
+                      step(scene, origin.translated(0, 3), 0, GpuMovePlan.Band.BOOST));
+                GpuMovePlan.Snapshot plan = GpuBoardOverlaySmokeTest.move(ATLAS, route, List.of(), List.of(),
+                      Map.of(), true);
+                var frame = GpuBoardOverlaySmokeTest.frame(scene, STATUS,
+                      GpuBoardOverlaySmokeTest.panels(plan, GpuFireOrders.Snapshot.EMPTY));
+                List<Color> expected = List.of(Color.RED, Color.GREEN, Color.BLUE);
+                for (boolean tactical : List.of(false, true)) {
+                    GpuHudState state = GpuBoardOverlaySmokeTest.state(STATUS);
+                    show(overlay, scene, tactical, GpuMovePlan.Snapshot.EMPTY, state);
+                    overlay.update(frame, GpuBoardOverlaySmokeTest.view(tactical, null, Entity.NONE), custom, state);
+                    GpuBoardOverlaySmokeTest.frame(board, tactical, route.get(1).coords(), 150, 960, 540);
+                    GpuRoutePulse pulse = overlay.pulse();
+                    Set<Integer> seen = new HashSet<>();
+                    for (int tick = 0; tick < 120 && pulse.head() >= 0; tick++) {
+                        float progress = pulse.head() / pulse.length() * route.size();
+                        int segment = Math.min(route.size() - 1, (int) progress);
+                        // Sample inside each segment, away from its boundary and the initial fade-in.
+                        if (progress - segment > .4f && progress - segment < .7f) {
+                            Renderable rendered = pulse.renderable(board.camera.camera);
+                            assertNotNull(rendered);
+                            var mesh = rendered.meshPart.mesh;
+                            int stride = mesh.getVertexSize() / Float.BYTES;
+                            int color = mesh.getVertexAttribute(VertexAttributes.Usage.ColorPacked).offset / Float.BYTES;
+                            float[] vertices = new float[mesh.getNumVertices() * stride];
+                            mesh.getVertices(vertices);
+                            // The head's innermost quad is last, after the trail and streak.
+                            assertHue(expected.get(segment), vertices[vertices.length - stride + color]);
+                            if (seen.add(segment)) {
+                                board.draw(overlay::render);
+                                hud.captureBackBuffer("pulse-color-" + tactical + "-segment-" + segment).dispose();
+                            }
+                        }
+                        pulse.advance(FRAME);
+                    }
+                    assertEquals(Set.of(0, 1, 2), seen, "The head must visit all three colour bands");
+                    assertEquals(Color.BLUE, pulse.arrivalColor(new Color()), "The ghost surge uses the final colour");
+                    // Once the trail and flash fade, only the arrival ripples remain.
+                    for (int tick = 0; tick < 33; tick++) { pulse.advance(FRAME); }
+                    Renderable arrived = pulse.renderable(board.camera.camera);
+                    assertNotNull(arrived);
+                    var mesh = arrived.meshPart.mesh;
+                    int stride = mesh.getVertexSize() / Float.BYTES;
+                    int color = mesh.getVertexAttribute(VertexAttributes.Usage.ColorPacked).offset / Float.BYTES;
+                    float[] vertices = new float[mesh.getNumVertices() * stride];
+                    mesh.getVertices(vertices);
+                    for (int index = color; index < vertices.length; index += stride) {
+                        assertHue(Color.BLUE, vertices[index]);
+                    }
+                    board.draw(overlay::render);
+                    hud.captureBackBuffer("pulse-color-" + tactical + "-arrival").dispose();
+                }
+            } finally {
+                overlay.dispose();
+                board.dispose();
+            }
+        });
+    }
+
+    private static void assertHue(Color expected, float packed) {
+        Color actual = new Color();
+        Color.abgr8888ToColor(actual, packed);
+        float strength = Math.max(actual.r, Math.max(actual.g, actual.b));
+        assertTrue(strength > .01f, "The pulse must remain visible");
+        assertEquals(expected.r, actual.r / strength, .01f);
+        assertEquals(expected.g, actual.g / strength, .01f);
+        assertEquals(expected.b, actual.b / strength, .01f);
+    }
 
     /**
      * One pulse at 60 frames a second as the pulse reports it, frame by frame: the head (-1 once it landed) and the
@@ -364,10 +465,9 @@ class GpuRoutePulseSmokeTest {
                 Pixmap resting = live.board();
                 try {
                     Vector2 at = live.stage(head);
-                    int lit = live.pixel(travelling, at);
-                    int dark = live.pixel(resting, at);
-                    assertTrue(channels(lit) > channels(dark) + 60, "The head shines in the real view: "
-                          + Integer.toHexString(lit) + " over " + Integer.toHexString(dark));
+                    // The centre can match an already-saturated path; the surrounding glow must still change.
+                    assertTrue(peak(travelling, resting, at, 12) > 60,
+                          "The coloured head's glow must remain visible over the resting path");
                 } finally {
                     travelling.dispose();
                     resting.dispose();
@@ -375,11 +475,6 @@ class GpuRoutePulseSmokeTest {
                 assertEquals(builds, live.overlay.builds(), "The view's frames never rebuild the overlay");
             });
         }
-    }
-
-    /** The sum of a pixel's red, green and blue. */
-    private static int channels(int rgba) {
-        return (rgba >>> 24) + (rgba >>> 16 & 0xFF) + (rgba >>> 8 & 0xFF);
     }
 
     // Plans.

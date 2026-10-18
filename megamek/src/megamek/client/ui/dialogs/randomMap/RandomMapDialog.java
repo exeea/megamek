@@ -387,6 +387,7 @@ public class RandomMapDialog extends JDialog implements ActionListener {
             newMapSettings.setBoardsSelectedVector(mapSettings.getBoardsSelectedVector());
             for (int i = 0; i < mapSettings.getBoardsSelectedVector().size(); i++) {
                 newMapSettings.setBoardTheme(i, mapSettings.getBoardTheme(i));
+                newMapSettings.setBoardLevelOffset(i, mapSettings.getBoardLevelOffset(i));
             }
         }
         mapSettings = newMapSettings;

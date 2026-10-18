@@ -82,6 +82,9 @@ public class MapSettings implements Serializable {
     public static final String BOARD_SURPRISE = "[SURPRISE]";
     public static final String BOARD_GENERATED = "[GENERATED]";
 
+    public static final int MIN_BOARD_LEVEL_OFFSET = -50;
+    public static final int MAX_BOARD_LEVEL_OFFSET = 50;
+
     public static final int MOUNTAIN_PLAIN = 0;
     public static final int MOUNTAIN_VOLCANO_EXTINCT = 1;
     public static final int MOUNTAIN_VOLCANO_DORMANT = 2;
@@ -106,6 +109,8 @@ public class MapSettings implements Serializable {
     private ArrayList<String> boardsSelected = new ArrayList<>();
     /** Session-only overrides by map-panel index. Missing entries retain the source board's themes. */
     private Map<Integer, String> boardThemes = new HashMap<>();
+    /** Session-only elevation offsets by map-panel index. Missing entries leave levels unchanged. */
+    private Map<Integer, Integer> boardLevelOffsets = new HashMap<>();
     private ArrayList<String> boardsAvailable = new ArrayList<>();
     private ArrayList<BuildingTemplate> boardBuildings = new ArrayList<>();
 
@@ -496,6 +501,9 @@ public class MapSettings implements Serializable {
         if (other.boardThemes != null) {
             boardThemes.putAll(other.boardThemes);
         }
+        if (other.boardLevelOffsets != null) {
+            boardLevelOffsets.putAll(other.boardLevelOffsets);
+        }
         boardsAvailable = new ArrayList<>(other.getBoardsAvailableVector());
 
         invertNegativeTerrain = other.getInvertNegativeTerrain();
@@ -617,9 +625,7 @@ public class MapSettings implements Serializable {
             this.boardHeight = boardHeight;
 
             boardsAvailable.clear();
-            if (boardThemes != null) {
-                boardThemes.clear();
-            }
+            clearBoardOverrides();
         }
     }
 
@@ -654,23 +660,12 @@ public class MapSettings implements Serializable {
         if (boardsSelected.size() != mapWidth * mapHeight) {
             boardsSelected.clear();
             boardsSelected.addAll(Collections.nCopies(mapWidth * mapHeight, null));
-            if (boardThemes != null) {
-                boardThemes.clear();
-            }
+            clearBoardOverrides();
         }
 
         // Keep overrides on the same panel coordinates as the boards retained below.
-        Map<Integer, String> resizedThemes = new HashMap<>();
-        if (boardThemes != null) {
-            boardThemes.forEach((index, selectedTheme) -> {
-                int x = index % mapWidth;
-                int y = index / mapWidth;
-                if ((x < newWidth) && (y < newHeight)) {
-                    resizedThemes.put(y * newWidth + x, selectedTheme);
-                }
-            });
-        }
-        boardThemes = resizedThemes;
+        boardThemes = resizeBoardOverrides(boardThemes, newWidth, newHeight);
+        boardLevelOffsets = resizeBoardOverrides(boardLevelOffsets, newWidth, newHeight);
 
         // Change in height
         if (newHeight > mapHeight) {
@@ -697,14 +692,35 @@ public class MapSettings implements Serializable {
         mapWidth = newWidth;
     }
 
+    private <T> Map<Integer, T> resizeBoardOverrides(Map<Integer, T> overrides, int newWidth, int newHeight) {
+        Map<Integer, T> resized = new HashMap<>();
+        if (overrides != null) {
+            overrides.forEach((index, value) -> {
+                int x = index % mapWidth;
+                int y = index / mapWidth;
+                if ((x < newWidth) && (y < newHeight)) {
+                    resized.put(y * newWidth + x, value);
+                }
+            });
+        }
+        return resized;
+    }
+
     public List<String> getBoardsSelectedVector() {
         return boardsSelected;
     }
 
     public void setBoardsSelectedVector(List<String> newBoards) {
         boardsSelected = new ArrayList<>(newBoards);
+        clearBoardOverrides();
+    }
+
+    private void clearBoardOverrides() {
         if (boardThemes != null) {
             boardThemes.clear();
+        }
+        if (boardLevelOffsets != null) {
+            boardLevelOffsets.clear();
         }
     }
 
@@ -728,12 +744,37 @@ public class MapSettings implements Serializable {
         }
     }
 
-    /** Applies this panel's override to its freshly loaded sheet, before combining the game board. */
-    public void applyBoardTheme(Board board, int index) {
+    /** Returns this panel's level offset, or zero to keep the source board's levels. */
+    public int getBoardLevelOffset(int index) {
+        // Older serialized settings have no offset map; resized previews can query old panel indices.
+        return (boardLevelOffsets == null) || (index < 0) || (index >= mapWidth * mapHeight)
+              ? 0 : boardLevelOffsets.getOrDefault(index, 0);
+    }
+
+    /** Sets a session-only panel level offset. Zero restores the original levels on the next load. */
+    public void setBoardLevelOffset(int index, int offset) {
+        Objects.checkIndex(index, mapWidth * mapHeight);
+        if ((offset < MIN_BOARD_LEVEL_OFFSET) || (offset > MAX_BOARD_LEVEL_OFFSET)) {
+            throw new IllegalArgumentException("Board level offset must be between "
+                  + MIN_BOARD_LEVEL_OFFSET + " and " + MAX_BOARD_LEVEL_OFFSET);
+        }
+        if (boardLevelOffsets == null) {
+            boardLevelOffsets = new HashMap<>();
+        }
+        if (offset == 0) {
+            boardLevelOffsets.remove(index);
+        } else {
+            boardLevelOffsets.put(index, offset);
+        }
+    }
+
+    /** Applies this panel's overrides to its freshly loaded sheet, before combining the game board. */
+    public void applyBoardOverrides(Board board, int index) {
         String selectedTheme = getBoardTheme(index);
         if (selectedTheme != null) {
             board.overrideTheme(selectedTheme);
         }
+        board.shiftLevels(getBoardLevelOffset(index));
     }
 
     /**
@@ -841,6 +882,7 @@ public class MapSettings implements Serializable {
                     if (remainingBoards.isEmpty()) {
                         boardsSelected.set(i, null);
                         setBoardTheme(i, null);
+                        setBoardLevelOffset(i, 0);
                     } else if (remainingBoards.size() == 1) {
                         boardsSelected.set(i, remainingBoards.getFirst());
                     } else {
@@ -851,6 +893,7 @@ public class MapSettings implements Serializable {
                     if (!boardsAvailable.contains(boardName)) {
                         boardsSelected.set(i, null);
                         setBoardTheme(i, null);
+                        setBoardLevelOffset(i, 0);
                     }
                 }
             }

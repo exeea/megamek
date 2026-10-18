@@ -151,6 +151,23 @@ public class Hex implements Serializable {
     }
 
     /**
+     * Moves this hex and its absolute placements by {@code delta} levels, including the Solaris elevator's alternate
+     * level. Water depth, structure heights, industrial elevator shafts and surface-relative placements stay unchanged.
+     */
+    public void shiftLevel(int delta) {
+        if (delta == 0) { return; }
+        setLevel(getLevel() + delta);
+        Terrain elevator = getTerrain(Terrains.SOLARIS_ELEVATOR);
+        if (elevator != null) {
+            addTerrain(new Terrain(Terrains.SOLARIS_ELEVATOR, elevator.getLevel() + delta, elevator.hasExitsSpecified(),
+                  elevator.getExits()));
+        }
+        setDecorations(getDecorations().stream().map(object -> !object.placement().mode().equals("absolute") ? object
+              : object.transform(object.x(), object.y(), object.rotation(), object.mirror(), object.scale(),
+                    BoardDecoration.Placement.absolute(object.placement().level() + delta))).toList());
+    }
+
+    /**
      * The theme is intended as a tag for the tileset file to indicate a special graphic for the hex
      *
      * @return the theme name

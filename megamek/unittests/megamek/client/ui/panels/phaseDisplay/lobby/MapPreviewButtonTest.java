@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
@@ -16,11 +19,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.awt.Dimension;
+import java.awt.Component;
 import java.awt.image.BufferedImage;
 import java.util.List;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JRadioButtonMenuItem;
+import javax.swing.JSpinner;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
@@ -29,6 +35,76 @@ import megamek.common.loaders.MapSettings;
 import org.junit.jupiter.api.Test;
 
 class MapPreviewButtonTest {
+    @Test
+    void levelDialogEnforcesBoundsChangesOnlyItsPanelAndResetBypassesInvalidInput() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            ChatLounge lobby = mock(ChatLounge.class);
+            lobby.mapSettings = MapSettings.getInstance();
+            lobby.mapSettings.setMapSize(2, 2);
+            lobby.mapSettings.setBoardLevelOffset(0, 5);
+            when(lobby.maxMapButtonSize()).thenReturn(new Dimension(100, 100));
+            when(lobby.createBoardTooltip(anyString())).thenReturn("");
+            doAnswer(call -> {
+                lobby.mapSettings.setBoardLevelOffset(call.getArgument(0), call.getArgument(1));
+                return null;
+            }).when(lobby).changeMapLevelOffset(anyInt(), anyInt());
+
+            try (var artwork = mockStatic(BoardArtwork.class);
+                  var blueprints = mockStatic(BoardEditorBlueprint.class, CALLS_REAL_METHODS);
+                  var dialogs = mockStatic(JOptionPane.class)) {
+                artwork.when(BoardArtwork::themes).thenReturn(List.of("grass"));
+                blueprints.when(BoardEditorBlueprint::get).thenReturn(mock(BoardEditorBlueprint.class));
+                int[] step = { 0 };
+                dialogs.when(() -> JOptionPane.showOptionDialog(any(Component.class), any(Object[].class),
+                      anyString(), eq(JOptionPane.DEFAULT_OPTION), eq(JOptionPane.PLAIN_MESSAGE), isNull(),
+                      any(Object[].class), any()))
+                      .thenAnswer(call -> {
+                          Object[] options = call.getArgument(6);
+                          assertEquals(3, options.length);
+                          assertEquals(options[0], call.getArgument(7));
+                          JSpinner spinner = (JSpinner) ((Object[]) call.getArgument(1))[1];
+                          String text = switch (step[0]++) {
+                              case 0 -> "51";
+                              case 1 -> "-50";
+                              case 2 -> "50";
+                              default -> "invalid input";
+                          };
+                          ((JSpinner.DefaultEditor) spinner.getEditor()).getTextField().setText(text);
+                          return switch (step[0]) {
+                              case 4 -> 2; // Cancel
+                              case 5 -> JOptionPane.CLOSED_OPTION;
+                              case 6 -> 1; // Reset, without committing the invalid field
+                              default -> 0; // Okay
+                          };
+                      });
+                MapPreviewButton button = new MapPreviewButton(lobby, 3);
+                button.setImage(new BufferedImage(8, 8, BufferedImage.TYPE_INT_RGB), "sample");
+                JMenuItem item = (JMenuItem) button.createPopup().getComponent(2);
+                assertTrue(item.isEnabled());
+                item.doClick();
+                assertEquals(-50, lobby.mapSettings.getBoardLevelOffset(3));
+                dialogs.verify(() -> JOptionPane.showMessageDialog(eq(button), anyString(), anyString(),
+                      eq(JOptionPane.ERROR_MESSAGE)));
+                item.doClick();
+                assertEquals(50, lobby.mapSettings.getBoardLevelOffset(3));
+                item.doClick();
+                assertEquals(50, lobby.mapSettings.getBoardLevelOffset(3));
+                item.doClick();
+                assertEquals(50, lobby.mapSettings.getBoardLevelOffset(3));
+                item.doClick();
+                assertEquals(0, lobby.mapSettings.getBoardLevelOffset(3));
+                assertEquals(6, step[0], "Reset must close without reopening the dialog");
+                dialogs.verify(() -> JOptionPane.showMessageDialog(eq(button), anyString(), anyString(),
+                      eq(JOptionPane.ERROR_MESSAGE)));
+                assertEquals(5, lobby.mapSettings.getBoardLevelOffset(0));
+                assertEquals(0, lobby.mapSettings.getBoardLevelOffset(1));
+                assertEquals(0, lobby.mapSettings.getBoardLevelOffset(2));
+                lobby.mapSettings.setMedium(MapSettings.MEDIUM_SPACE);
+                assertFalse(((JMenuItem) button.createPopup().getComponent(2)).isEnabled());
+            }
+        });
+    }
+
     @Test
     void themeRadioChoicesChangeOnlyTheirPanelAndDefaultRestoresNoOverride() throws Exception {
         SwingUtilities.invokeAndWait(() -> {

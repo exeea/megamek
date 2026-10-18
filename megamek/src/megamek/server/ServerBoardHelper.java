@@ -156,7 +156,7 @@ public class ServerBoardHelper {
                 File file = new MegaMekFile(Configuration.boardsDir(), BoardFile.fileName(name)).getFile();
                 sheetBoards[i] = BoardFile.loadSheet(file, flipBoard, !onlyFixedBoards);
             }
-            mapSettings.applyBoardTheme(sheetBoards[i], i);
+            mapSettings.applyBoardOverrides(sheetBoards[i], i);
         }
 
         Board finalBoard;

@@ -665,7 +665,7 @@ public final class BoardEditorSession {
                     int value = Integer.parseInt(command.value());
                     require(command.target().equals("by") || command.target().equals("to"), "Move the board by or to a level.");
                     boolean to = command.target().equals("to");
-                    int changed = everyHex(hex -> shiftLevel(hex, to ? value - hex.getLevel() : value));
+                    int changed = everyHex(hex -> hex.shiftLevel(to ? value - hex.getLevel() : value));
                     message = changed == 0 ? Messages.getString("BoardEditor.nothingChanged") : to
                           ? Messages.getString("BoardEditor.boardLevelTo", value) : Messages.getString("BoardEditor.boardLevelBy", value);
                 }
@@ -2798,25 +2798,6 @@ public final class BoardEditorSession {
         if (selected != null && board().getHex(selected).getDecorations().stream().noneMatch(o -> o.id().equals(selectedObject))) {
             selectedObject = "";
         }
-    }
-
-    /**
-     * Moves {@code hex} by {@code delta} levels with everything that stands at a fixed level in it: the hex level, the
-     * Solaris elevator's alternate level (an absolute level the elevator swaps with the hex's, see ElevatorProcessor) and
-     * every object placed at a fixed level (route markers, fixed props). Relative values stay: water depth, structure
-     * and bridge heights, industrial elevator shafts and objects on a surface.
-     */
-    private static void shiftLevel(Hex hex, int delta) {
-        if (delta == 0) { return; }
-        hex.setLevel(hex.getLevel() + delta);
-        Terrain elevator = hex.getTerrain(Terrains.SOLARIS_ELEVATOR);
-        if (elevator != null) {
-            hex.addTerrain(new Terrain(Terrains.SOLARIS_ELEVATOR, elevator.getLevel() + delta, elevator.hasExitsSpecified(),
-                  elevator.getExits()));
-        }
-        hex.setDecorations(hex.getDecorations().stream().map(object -> !object.placement().mode().equals("absolute") ? object
-              : object.transform(object.x(), object.y(), object.rotation(), object.mirror(), object.scale(),
-                    BoardDecoration.Placement.absolute(object.placement().level() + delta))).toList());
     }
 
     /**

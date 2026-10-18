@@ -50,6 +50,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.Serial;
+import java.text.ParseException;
 import java.util.Objects;
 import java.util.TreeSet;
 import javax.swing.BorderFactory;
@@ -58,7 +59,11 @@ import javax.swing.JButton;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComponent;
 import javax.swing.JMenu;
+import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JRadioButtonMenuItem;
+import javax.swing.JSpinner;
+import javax.swing.SpinnerNumberModel;
 import javax.swing.TransferHandler;
 
 import megamek.MMConstants;
@@ -120,7 +125,7 @@ public class MapPreviewButton extends JButton {
 
     /**
      * Shows the button's right-click menu (checked on both press and release, as the popup trigger is
-     * platform-dependent). Rotation and the session-only theme apply to this board slot.
+     * platform-dependent). Rotation, theme and level offset apply to this board slot.
      */
     private void maybeShowPopup(MouseEvent event) {
         if (!event.isPopupTrigger()) {
@@ -145,7 +150,40 @@ public class MapPreviewButton extends JButton {
         ScalingPopup popup = new ScalingPopup();
         popup.add(rotateItem);
         popup.add(themeMenu());
+        JMenuItem levelItem = new JMenuItem(Messages.getString("ChatLounge.MapPreviewButton.levelOffset"));
+        levelItem.setEnabled(!boardName.isBlank() && lobby.mapSettings.getMedium() != MapSettings.MEDIUM_SPACE);
+        levelItem.addActionListener(event -> editLevelOffset());
+        popup.add(levelItem);
         return popup;
+    }
+
+    private void editLevelOffset() {
+        JSpinner spinner = new JSpinner(new SpinnerNumberModel(lobby.mapSettings.getBoardLevelOffset(index),
+              MapSettings.MIN_BOARD_LEVEL_OFFSET, MapSettings.MAX_BOARD_LEVEL_OFFSET, 1));
+        String title = Messages.getString("ChatLounge.MapPreviewButton.levelOffset");
+        Object[] content = { Messages.getString("ChatLounge.MapPreviewButton.levelOffsetHelp",
+              MapSettings.MIN_BOARD_LEVEL_OFFSET, MapSettings.MAX_BOARD_LEVEL_OFFSET), spinner };
+        Object[] options = { Messages.getString("Okay"),
+              Messages.getString("ChatLounge.MapPreviewButton.resetLevelOffset"), Messages.getString("Cancel") };
+        while (true) {
+            int choice = JOptionPane.showOptionDialog(this, content, title, JOptionPane.DEFAULT_OPTION,
+                  JOptionPane.PLAIN_MESSAGE, null, options, options[0]);
+            if (choice == 1) {
+                lobby.changeMapLevelOffset(index, 0);
+                return;
+            }
+            if (choice != 0) { return; }
+            try {
+                spinner.commitEdit();
+                lobby.changeMapLevelOffset(index, (Integer) spinner.getValue());
+                return;
+            } catch (ParseException ex) {
+                JOptionPane.showMessageDialog(this,
+                      Messages.getString("ChatLounge.MapPreviewButton.levelOffsetInvalid",
+                            MapSettings.MIN_BOARD_LEVEL_OFFSET, MapSettings.MAX_BOARD_LEVEL_OFFSET), title,
+                      JOptionPane.ERROR_MESSAGE);
+            }
+        }
     }
 
     private JMenu themeMenu() {
@@ -286,6 +324,8 @@ public class MapPreviewButton extends JButton {
                     String text = cleanBoardName(getText(), lobby.mapSettings);
                     String theme = lobby.mapSettings.getBoardTheme(index);
                     if (theme != null) { text += " [" + theme + "]"; }
+                    int offset = lobby.mapSettings.getBoardLevelOffset(index);
+                    if (offset != 0) { text += " [" + (offset > 0 ? "+" : "") + offset + "]"; }
                     drawMinimapLabel(text, width, height, graphics, lobby.hasInvalidBoard(getText()));
                 }
                 graphics.dispose();

@@ -2170,6 +2170,19 @@ public class Board implements Serializable {
         maxElevation = UNDEFINED_MAX_ELEV;
     }
 
+    /**
+     * Shifts a freshly loaded sheet before lobby/game assembly. Depths and heights relative to a hex stay unchanged;
+     * absolute object placements move with the sheet. The assembled board rebuilds its shared edge terrain normally.
+     */
+    public void shiftLevels(int offset) {
+        if (offset == 0) { return; }
+        for (Hex hex : data) {
+            hex.shiftLevel(offset);
+        }
+        resetStoredElevation();
+        processBoardEvent(new BoardEvent(this, null, BoardEvent.BOARD_CHANGED_ALL_HEXES));
+    }
+
     public boolean containsBridges() {
         if (isSpace() || isSky()) {
             return false;

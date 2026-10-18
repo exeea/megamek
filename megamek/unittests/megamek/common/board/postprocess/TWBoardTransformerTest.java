@@ -177,7 +177,7 @@ class TWBoardTransformerTest {
     }
 
     @Test
-    void perPanelThemesAgreeInPreviewAndMatchAssemblyAndKeepRotation() throws IOException {
+    void perPanelOverridesAgreeInPreviewAndMatchAssemblyAndKeepRotation() throws IOException {
         MapSettings settings = MapSettings.getInstance();
         settings.setBoardSize(2, 2);
         settings.setMapSize(2, 2);
@@ -185,6 +185,9 @@ class TWBoardTransformerTest {
               Board.BOARD_REQUEST_ROTATION + THEMED_BOARD_NAME));
         settings.setBoardTheme(0, "volcano");
         settings.setBoardTheme(3, "snow");
+        settings.setBoardLevelOffset(0, 5);
+        settings.setBoardLevelOffset(2, -4);
+        settings.setBoardLevelOffset(3, 2);
 
         Board game = TWBoardTransformer.instantiateBoard(settings, new PlanetaryConditions(), new GameOptions());
         Board preview = ServerBoardHelper.getPossibleGameBoard(MapSettings.getInstance(settings), false);
@@ -194,31 +197,77 @@ class TWBoardTransformerTest {
                 assertEquals(game.getHex(x, y).getLevel(), preview.getHex(x, y).getLevel());
                 if ((x < 2) && (y < 2)) {
                     assertEquals("volcano", game.getHex(x, y).getTheme());
+                    assertEquals(5 + x + 2 * y, game.getHex(x, y).getLevel());
                 } else if ((x >= 2) && (y >= 2)) {
                     assertEquals("snow", game.getHex(x, y).getTheme());
+                    assertEquals(2 + (3 - x) + 2 * (3 - y), game.getHex(x, y).getLevel());
+                } else if (x < 2) {
+                    assertEquals(-4 + x + 2 * (y - 2), game.getHex(x, y).getLevel());
+                } else {
+                    assertEquals(x - 2 + 2 * y, game.getHex(x, y).getLevel());
                 }
             }
         }
         assertEquals("grass", game.getHex(2, 0).getTheme());
         assertEquals("desert", game.getHex(3, 1).getTheme(), "Default keeps mixed source themes");
         assertEquals("grass", game.getHex(0, 2).getTheme());
-        assertEquals(3, game.getHex(2, 2).getLevel(), "The overridden sheet remains rotated");
+        assertEquals(5, game.getHex(2, 2).getLevel(), "The shifted sheet remains rotated");
         assertEquals(THEMED_BOARD_CONTENT,
               Files.readString(temporaryBoardsDirectory.resolve(THEMED_BOARD_NAME + ".board")));
     }
 
     @Test
-    void defaultReloadRestoresOriginalThemesWithoutChangingSourceOrEarlierBoard() throws IOException {
+    void defaultReloadRestoresOriginalThemesAndLevelsWithoutChangingSourceOrEarlierBoard() throws IOException {
         MapSettings settings = createMapSettingsFor(List.of(THEMED_BOARD_NAME));
         settings.setBoardTheme(0, "volcano");
+        settings.setBoardLevelOffset(0, -10);
         Board overridden = TWBoardTransformer.instantiateBoard(settings, new PlanetaryConditions(), new GameOptions());
         settings.setBoardTheme(0, null);
+        settings.setBoardLevelOffset(0, 0);
         Board restored = TWBoardTransformer.instantiateBoard(settings, new PlanetaryConditions(), new GameOptions());
         assertEquals("volcano", overridden.getHex(1, 1).getTheme());
         assertEquals("grass", restored.getHex(0, 0).getTheme());
         assertEquals("desert", restored.getHex(1, 1).getTheme());
+        assertEquals(-10, overridden.getHex(0, 0).getLevel());
+        assertEquals(-7, overridden.getHex(1, 1).getLevel());
+        assertEquals(0, restored.getHex(0, 0).getLevel());
+        assertEquals(3, restored.getHex(1, 1).getLevel());
         assertEquals(THEMED_BOARD_CONTENT,
               Files.readString(temporaryBoardsDirectory.resolve(THEMED_BOARD_NAME + ".board")));
+    }
+
+    @Test
+    void positiveOffsetJoinsFlatSheetToLevelFiveEdge() throws IOException {
+        String raised = """
+              size 2 2
+              hex 0101 5 "" ""
+              hex 0201 5 "" ""
+              hex 0102 5 "" ""
+              hex 0202 5 "" ""
+              end""";
+        String flat = """
+              size 2 2
+              hex 0101 0 "" ""
+              hex 0201 1 "" ""
+              hex 0102 0 "" ""
+              hex 0202 0 "" ""
+              end""";
+        Path raisedFile = temporaryBoardsDirectory.resolve("raised.board");
+        Path flatFile = temporaryBoardsDirectory.resolve("flat.board");
+        Files.writeString(raisedFile, raised);
+        Files.writeString(flatFile, flat);
+        MapSettings settings = createMapSettingsFor(List.of("raised", "flat"));
+        settings.setBoardLevelOffset(1, 5);
+
+        Board board = TWBoardTransformer.instantiateBoard(settings, new PlanetaryConditions(), new GameOptions());
+
+        assertEquals(5, board.getHex(1, 0).getLevel());
+        assertEquals(5, board.getHex(2, 0).getLevel());
+        assertEquals(5, board.getHex(1, 1).getLevel());
+        assertEquals(5, board.getHex(2, 1).getLevel());
+        assertEquals(6, board.getHex(3, 0).getLevel(), "The original level-one hill shifts by the same amount");
+        assertEquals(raised, Files.readString(raisedFile));
+        assertEquals(flat, Files.readString(flatFile));
     }
 
     @Test

@@ -58,9 +58,8 @@ import megamek.logging.MMLogger;
 final class GpuBoardOverlay implements Disposable {
     /** One prototype pixel in hex radii at the prototype's Tactical View zoom, where 38 pixels are 1.25 radii. */
     static final float PIXEL = 1.25f / 38;
-    // overlay.js:10-12, the palette of both views; a jump takes the client's jump colour.
+    // overlay.js:10-12, the selection palette of both views; movement uses the client's colours.
     private static final Color MINT = new Color(.45f, .92f, .80f, 1);
-    private static final Color RUN = new Color(.93f, .76f, .40f, 1);
     private static final Color CORAL = new Color(1, .44f, .40f, 1);
     private static final Color BLIP = new Color(1, .66f, .34f, 1);
     private static final Color WRECK = new Color(.3f, .3f, .3f, 1);
@@ -126,10 +125,8 @@ final class GpuBoardOverlay implements Disposable {
     private GpuMovePlan.Snapshot move;
     private GpuFireOrders.Snapshot fire;
     private GpuPhysicalOptions.Snapshot physical;
-    /** MegaMek's sprint colour, for a route's sprint steps; the prototype has no sprint band. */
-    private int sprintRgb;
-    /** MegaMek's jump colour, for a route's jump (the user's decision of 2026-10-10: red by default). */
-    private int jumpRgb;
+    /** The client's movement palette, captured on the EDT for both views and the route pulse. */
+    private Map<GpuMovePlan.Band, Integer> movementColors = Map.of();
     private int hoveredUnit = Entity.NONE;
     private int inspected = Entity.NONE;
     private boolean tactical;
@@ -166,8 +163,8 @@ final class GpuBoardOverlay implements Disposable {
     /**
      * Shows the frame's overlay. The marks are worked out again only when what they show changed: the scene's units,
      * the status, the presented units, the fire or physical snapshot or the view state; the meshes are rebuilt only
-     * when what they draw changed: the scene's units or terrain, the movement, fire or physical snapshot, the sprint
-     * colour or the view state. {@code view} gives the Tactical View flag and the hovered unit; {@code state} the
+     * when what they draw changed: the scene's units or terrain, the movement, fire or physical snapshot, the movement
+     * colours or the view state. {@code view} gives the Tactical View flag and the hovered unit; {@code state} the
      * inspected unit and the presented units (C.6). Called once a frame, it also moves the route's pulse on by the
      * frame's time.
      */
@@ -183,8 +180,7 @@ final class GpuBoardOverlay implements Disposable {
         boolean sameMarks = same && frame.status() == status && state.presentedUnits() == units
               && view.hoveredUnit() == hoveredUnit && state.inspected == inspected;
         // A hovered unit hides the hover route (G3), so for the meshes only whether one is hovered counts.
-        boolean sameMeshes = same && panels.move() == move && preferences.moveSprintRgb() == sprintRgb
-              && preferences.moveJumpRgb() == jumpRgb
+        boolean sameMeshes = same && panels.move() == move && preferences.movementColors().equals(movementColors)
               && (view.hoveredUnit() == Entity.NONE) == (hoveredUnit == Entity.NONE)
               && revision == BoardGeometry.revision();
         scene = frame.scene();
@@ -193,8 +189,7 @@ final class GpuBoardOverlay implements Disposable {
         move = panels.move();
         fire = panels.fire();
         physical = panels.physical();
-        sprintRgb = preferences.moveSprintRgb();
-        jumpRgb = preferences.moveJumpRgb();
+        movementColors = preferences.movementColors();
         hoveredUnit = view.hoveredUnit();
         inspected = state.inspected;
         tactical = view.tactical();
@@ -516,7 +511,7 @@ final class GpuBoardOverlay implements Disposable {
      */
     private void surge(float surge) {
         float opaque = Math.min(1, surge) * GpuRoutePulse.GHOST_SURGE_OPACITY;
-        Color authoredGlow = new Color(GpuRoutePulse.GHOST_SURGE).mul(surge).add(GHOST_GLOW);
+        Color authoredGlow = pulse.arrivalColor(new Color()).mul(surge * GpuRoutePulse.GHOST_SURGE).add(GHOST_GLOW);
         for (int index = 0; index < ghost.materials.size; index++) {
             Material material = ghost.materials.get(index);
             ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity =
@@ -904,13 +899,7 @@ final class GpuBoardOverlay implements Disposable {
     }
 
     private Color moveColor(GpuMovePlan.Band band) {
-        return switch (band) {
-            case WALK -> MINT;
-            case RUN -> RUN;
-            case SPRINT -> rgb(sprintRgb);
-            case JUMP -> rgb(jumpRgb);
-            case ILLEGAL -> CORAL;
-        };
+        return rgb(movementColors.get(band));
     }
 
     // Primitives. Sizes are in hex radii, as the prototype's (its hex radius is 1); dy lifts above the surface.
