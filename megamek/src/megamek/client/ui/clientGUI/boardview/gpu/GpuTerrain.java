@@ -2594,8 +2594,13 @@ final class GpuTerrain implements Disposable {
 
     boolean refine(Camera camera, boolean editing) {
         if (kinds != null) { takeKinds(); }
+        // A requested board's update plan starts before links, which can hold a first frame for seconds; links wait
+        // until its first sections start, so these prepare on the workers while they link.
+        if (requested != null && rebuild == null && detailJob == null) { startRebuild(); }
+        boolean starting = rebuild != null && rebuild.started.isEmpty()
+              && (rebuild.plan == null || !rebuild.remaining.isEmpty());
         // Launch links while CPU terrain jobs are being prepared, and poll without blocking the loading screen.
-        if (!materialsReady() && linking) {
+        if (!materialsReady() && linking && !starting) {
             if (terrainMaterialPreparation == null && requested != null) { updateLight(requested.scene().light()); }
             prepareTerrainMaterials();
         }
@@ -2719,24 +2724,7 @@ final class GpuTerrain implements Disposable {
         }
         if (requested != null) {
             if (rebuild == null) {
-                Request request = requested;
-                BoardScene previous = coverScene;
-                float bottom = floor;
-                BoardConcrete previousCoast = coast;
-                Map<Coords, BoardFlow.Current> flow = currents;
-                Map<GroundSlot, BoardScene.Pixels> colors = terrainPixels, normals = normalPixels;
-                Map<DecalSlot, BoardScene.Pixels> overlays = decalPixels;
-                BoardScene.Pixels incline = assets.inclineMask(), highIncline = assets.highInclineMask();
-                // A graphics switch rebuilds every chunk, as a new board does; so does one reversed after its atlases.
-                boolean changedTuning = installedSettings == null || !sameSettings(installedSettings, request.settings())
-                      || installedColumns != request.columns() || atlasColumns != request.columns();
-                boolean changedLimbScale = installedSettings != null
-                      && installedSettings.geometry().unitScale() != request.settings().geometry().unitScale();
-                TerrainLoadProgress progress = new TerrainLoadProgress();
-                var previousPaint = installedPaint;
-                rebuild = new Rebuild(request, CompletableFuture.supplyAsync(() -> request.settings().call(
-                      () -> prepareUpdate(request, previous, bottom, previousCoast, flow, colors, normals, overlays,
-                            changedTuning, changedLimbScale, incline, highIncline, progress, previousPaint)), detailWorker), progress);
+                startRebuild();
                 return false;
             }
             if (!rebuild.preparation.isDone()) { return false; }
@@ -2792,6 +2780,28 @@ final class GpuTerrain implements Disposable {
             }
         }
         return false;
+    }
+
+    /** The requested board's update plan, on a worker, against the installed state it changes. */
+    private void startRebuild() {
+        Request request = requested;
+        BoardScene previous = coverScene;
+        float bottom = floor;
+        BoardConcrete previousCoast = coast;
+        Map<Coords, BoardFlow.Current> flow = currents;
+        Map<GroundSlot, BoardScene.Pixels> colors = terrainPixels, normals = normalPixels;
+        Map<DecalSlot, BoardScene.Pixels> overlays = decalPixels;
+        BoardScene.Pixels incline = assets.inclineMask(), highIncline = assets.highInclineMask();
+        // A graphics switch rebuilds every chunk, as a new board does; so does one reversed after its atlases.
+        boolean changedTuning = installedSettings == null || !sameSettings(installedSettings, request.settings())
+              || installedColumns != request.columns() || atlasColumns != request.columns();
+        boolean changedLimbScale = installedSettings != null
+              && installedSettings.geometry().unitScale() != request.settings().geometry().unitScale();
+        TerrainLoadProgress progress = new TerrainLoadProgress();
+        var previousPaint = installedPaint;
+        rebuild = new Rebuild(request, CompletableFuture.supplyAsync(() -> request.settings().call(
+              () -> prepareUpdate(request, previous, bottom, previousCoast, flow, colors, normals, overlays,
+                    changedTuning, changedLimbScale, incline, highIncline, progress, previousPaint)), detailWorker), progress);
     }
 
     /** Loading and local edits share the same bounded CPU/GL pipeline, without extra worker threads. */

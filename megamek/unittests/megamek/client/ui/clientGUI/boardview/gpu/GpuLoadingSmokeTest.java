@@ -113,6 +113,10 @@ class GpuLoadingSmokeTest {
                                   loading.getRoot().<Label>findActor("board-loading-ready").getText().toString());
                             var shaders = terrain.shaderProgress();
                             assertTrue(shaders.linked() >= 0 && shaders.linked() <= shaders.total(), shaders::toString);
+                            // The update plan and the first sections start before the first build's links, which can
+                            // hold a frame for seconds: those sections prepare on the workers meanwhile.
+                            assertTrue(restarted || started > 0 || shaders.total() == 0,
+                                  "Terrain programs must not link before the first sections start: " + shaders);
                             assertEquals(shaders.linked() < shaders.total(),
                                   loading.getRoot().findActor("board-loading-shaders").isVisible(),
                                   "The shader bar shows exactly while programs are left to link");
