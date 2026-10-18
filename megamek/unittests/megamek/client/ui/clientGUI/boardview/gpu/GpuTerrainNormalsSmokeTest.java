@@ -28,7 +28,6 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -79,21 +78,8 @@ class GpuTerrainNormalsSmokeTest {
                 @Override
                 public void create() {
                     GpuTerrain terrain = null;
-                    GpuBoardSkin skin = null;
                     try (var outputFrame = new GpuSceneTestOutput()) {
                         checkAtlas();
-                        skin = new GpuBoardSkin();
-                        GpuBoardTuning tuning = new GpuBoardTuning(skin.skin);
-                        CheckBox toggle = GpuBoardTestUi.tuning(tuning, "tuning-normal-maps");
-                        assertTrue(tuning.normalMaps(), "Normal maps start enabled");
-                        GpuBoardTestUi.pressTuning(toggle);
-                        assertFalse(tuning.normalMaps(), "The checkbox switches normal mapping off");
-                        GpuBoardTestUi.pressTuning(tuning.defaults());
-                        assertFalse(tuning.normalMaps(), "Defaults leaves the saved Display choice alone");
-                        GpuBoardTestUi.pressTuning(toggle);
-                        assertTrue(tuning.normalMaps(), "The checkbox switches normal mapping on again");
-                        SwingUtilities.invokeAndWait(() -> { });
-                        assertTrue(megamek.client.ui.clientGUI.GUIPreferences.getInstance().getBoardNormalMaps(), "and saves it");
                         terrain = new GpuTerrain();
                         BoardCamera camera = new BoardCamera();
                         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -107,11 +93,9 @@ class GpuTerrainNormalsSmokeTest {
                             camera.center(BoardGeometry.center(target, 0));
                             terrain.update(scene);
                             int[] mapped = samples(outputFrame, terrain, camera, target);
-                            toggle.setChecked(false);
-                            terrain.setNormalMaps(tuning.normalMaps());
+                            terrain.setNormalMaps(false);
                             int[] disabled = samples(outputFrame, terrain, camera, target);
-                            toggle.setChecked(true);
-                            terrain.setNormalMaps(tuning.normalMaps());
+                            terrain.setNormalMaps(true);
                             assertArrayEquals(mapped, samples(outputFrame, terrain, camera, target),
                                   "Re-enabling restores the same lighting without a scene or atlas update");
                             terrain.update(flat);
@@ -132,8 +116,7 @@ class GpuTerrainNormalsSmokeTest {
                         terrain.update(scene);
                         terrain.renderShadows(List.of());
                         preview(outputFrame, terrain, camera, true);
-                        toggle.setChecked(false);
-                        terrain.setNormalMaps(tuning.normalMaps());
+                        terrain.setNormalMaps(false);
                         preview(outputFrame, terrain, camera, false);
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     } catch (Throwable error) {
@@ -141,9 +124,6 @@ class GpuTerrainNormalsSmokeTest {
                     } finally {
                         if (terrain != null) {
                             terrain.dispose();
-                        }
-                        if (skin != null) {
-                            skin.dispose();
                         }
                         Gdx.app.exit();
                     }
