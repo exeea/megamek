@@ -182,7 +182,11 @@ final class BoardBridgeTruss {
         return line.getLast();
     }
 
-    /** Warren panels keep even parity across a joint; their nodes do not simplify the upper chord's contour. */
+    /**
+     * Warren panels keep even parity across a joint; their nodes do not simplify the upper chord's contour. A run of
+     * sharp points joined by short segments (a rounded join) is one corner; corners a real edge apart, such as the two
+     * of a dead end, each take a node.
+     */
     private static List<Point> nodes(List<Point> line) {
         double[] along = new double[line.size()];
         for (int i = 1; i < line.size(); i++) { along[i] = along[i - 1] + line.get(i).sub(line.get(i - 1)).length(); }
@@ -199,7 +203,7 @@ final class BoardBridgeTruss {
         for (int i = 1; i + 1 < line.size(); i++) {
             if (!sharp[i]) { continue; }
             int end = i;
-            while (end + 2 < line.size() && sharp[end + 1]) { end++; }
+            while (end + 2 < line.size() && sharp[end + 1] && along[end + 1] - along[end] < PANEL / 2) { end++; }
             double middle = (along[i] + along[end]) / 2;
             int corner = i;
             for (int j = i + 1; j <= end; j++) {
