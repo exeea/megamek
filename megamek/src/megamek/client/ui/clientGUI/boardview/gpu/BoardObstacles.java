@@ -65,16 +65,12 @@ final class BoardObstacles {
             if (feature.asset().equals("bridge") && object == null) {
                 // A pier stands from below the floor up to the deck: its whole column is solid wherever cover could grow.
                 for (int d = 0; d < 6; d++) {
-                    if (BoardBridgeFooting.pier(scene, tile, d)) { pier(tile, d, false); }
+                    if (BoardBridgeFooting.pier(scene, tile, d)) {
+                        pier(tile, d, BoardBridge.guideway(tile) || BoardBridge.guideway(scene.neighbor(tile, d)));
+                    }
                 }
                 deck(scene, tile, feature);
                 continue;
-            }
-            if (BoardRail.route(feature)) {
-                // A maglev's piers stand so too, up to its beam; the beam itself is the model footprint below.
-                for (int d = 0; d < 6; d++) {
-                    if (BoardBridgeFooting.pier(scene, tile, feature, d) != null) { pier(tile, d, true); }
-                }
             }
             // Paint has no model footprint. Structures already provide clearance for objects on their roofs/decks.
             if (object != null && (object.kind().equals("decal") || object.placement().receiver() != null
@@ -250,13 +246,13 @@ final class BoardObstacles {
      * does not grow through it. A raised deck leaves the ground beneath it as it is.
      */
     private void deck(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature bridge) {
-        float s = BoardGeometry.hexScale(), half = BoardBridge.PASSAGE_HALF_WIDTH * s, centreZ = BoardBridge.deckZ(tile);
+        float s = BoardGeometry.hexScale(), centreZ = BoardBridge.deckZ(tile);
         var centre = BoardGeometry.center(tile.coords(), 0);
         for (int d = 0; d < 6; d++) {
             if ((bridge.bridgeExits() & (1 << d)) == 0) { continue; }
             var edge = BoardGeometry.center(tile.coords().translated(d), 0).add(centre).scl(.5f);
             var across = new Vector3(edge).sub(centre).nor();
-            across.set(-across.y, across.x, 0).scl(half);
+            across.set(-across.y, across.x, 0).scl(BoardBridge.passage(tile, d) * s);
             var a = new Vector3(centre).add(across);
             var b = new Vector3(centre).sub(across);
             var c = new Vector3(edge).sub(across);

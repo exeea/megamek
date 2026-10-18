@@ -3,20 +3,27 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.io.File;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.Environment;
+import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
@@ -28,6 +35,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Configuration;
+import megamek.common.board.RailRoute;
 
 /** A page-sized, disposable preview queue: CPU model decoding off-thread; one upload/render per UI frame. */
 final class GpuEditorModelPreviews implements Disposable {
@@ -47,6 +55,61 @@ final class GpuEditorModelPreviews implements Disposable {
     private ModelBatch batch;
     private GpuSceneDisplay display;
     private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
+    private final List<Renderable> warmup = new ArrayList<>();
+    private GpuGlsl.Preparation links;
+    private record Programs(GpuTerrain board, long lighting) { }
+    /** The requested program set is ready once its retained warmup samples are empty. */
+    private Programs programs;
+
+    /** Asset cards use the imported-model layouts already found by the board's palette preparation. */
+    boolean prepare(GpuTerrain board) {
+        Environment light = lighting();
+        Programs requested = new Programs(board, light.getMask());
+        if (requested.equals(programs) && warmup.isEmpty()) { return true; }
+        if (links == null) { links = new GpuGlsl.Preparation(); }
+        if (batch == null) { batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider)); }
+        if (!requested.equals(programs)) {
+            clearWarmup();
+            programs = requested;
+            board.previewModelMaterials((material, attributes) -> prepare(material, attributes, light));
+            // Junction cards use the raw generated route, before the board's linear-colour material conversion.
+            // Rail and maglev share this builder's single material/layout; their shape and colours are only data.
+            Model route = new Model(BoardRail.model(BoardRail.flat(RailRoute.Kind.RAIL,
+                  RailRoute.side(0) | RailRoute.side(3), 0)));
+            try {
+                Renderable part = new ModelInstance(route).getRenderable(new Renderable());
+                prepare(new Material(part.material), part.meshPart.mesh.getVertexAttributes(), light);
+            } finally { route.dispose(); }
+        }
+        boolean ready = true;
+        for (Renderable sample : warmup) { ready &= links.run(() -> batch.getShaderProvider().getShader(sample)); }
+        if (ready) { clearWarmup(); }
+        return ready;
+    }
+
+    private void clearWarmup() {
+        warmup.forEach(sample -> sample.meshPart.mesh.dispose());
+        warmup.clear();
+    }
+
+    private void prepare(Material material, VertexAttributes attributes, Environment light) {
+        Renderable sample = new Renderable();
+        sample.material = material;
+        sample.environment = light;
+        sample.meshPart.set("editor-model-warmup", new Mesh(true, 0, 0, attributes), 0, 0, GL20.GL_TRIANGLES);
+        warmup.add(sample);
+    }
+
+    private Environment lighting() {
+        var lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
+        Environment light = new Environment();
+        environmentLighting.set(lighting);
+        light.set(environmentLighting);
+        GpuEnvironmentLighting.applyAntialiasing(light);
+        light.set(ColorAttribute.createAmbientLight(lighting.ambient()));
+        light.add(new DirectionalLight().set(lighting.direct(), lighting.direction()));
+        return light;
+    }
 
     /** Its display program links with the editor, behind the loading stage, for framebuffer objects. */
     GpuEditorModelPreviews() { GpuGlsl.offscreen(() -> display = new GpuSceneDisplay()); }
@@ -125,15 +188,10 @@ final class GpuEditorModelPreviews implements Disposable {
             camera.up.set(top ? Vector3.Y : Vector3.Z);
             camera.position.set(center).add((top ? new Vector3(0, -.25f, 1) : new Vector3(1, -1.3f, 1)).nor().scl(radius * (top ? 3 : 3.7f)));
             camera.lookAt(center); camera.near = radius / 100; camera.far = radius * 10; camera.update();
-            Environment light = new Environment();
             var lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
             float exposure = lighting.adaptation();
             float backdropScale = GpuSceneRadiance.SCALE / exposure;
-            environmentLighting.set(lighting);
-            light.set(environmentLighting);
-            GpuEnvironmentLighting.applyAntialiasing(light);
-            light.set(ColorAttribute.createAmbientLight(lighting.ambient()));
-            light.add(new DirectionalLight().set(lighting.direct(), lighting.direction()));
+            Environment light = lighting();
             if (batch == null) { batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider)); }
             scene = GpuHeatGlow.buffer(128, 96, true);
             image = GpuAtmosphere.buffer(128, 96, true);
@@ -173,6 +231,8 @@ final class GpuEditorModelPreviews implements Disposable {
     }
     @Override public void dispose() {
         clear(); worker.shutdownNow();
+        if (links != null) { links.dispose(); }
+        clearWarmup();
         if (batch != null) { batch.dispose(); }
         if (display != null) { display.dispose(); }
         environmentLighting.dispose();

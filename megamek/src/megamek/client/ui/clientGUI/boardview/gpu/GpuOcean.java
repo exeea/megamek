@@ -171,7 +171,7 @@ final class GpuOcean implements Disposable {
      */
     void update(float time, Vector3 wind, float gravity) {
         if (!supported()) { return; }
-        if (gravity == 0) { dispose(); return; }
+        if (gravity == 0) { reset(); return; }
         if (this.gravity != gravity) {
             this.gravity = gravity;
             // Both the spectrum's amplitudes and its wave frequencies change with gravity.
@@ -612,6 +612,11 @@ final class GpuOcean implements Disposable {
             if (program != null) { GpuShaderManager.dispose(program); }
         }
         spectrum = butterfly = finish = seed = cover = null;
+        reset();
+    }
+
+    /** Release an absent liquid's simulation storage; its warmed programs remain for the next wet editor sample. */
+    void reset() {
         if (quad != null) { quad.dispose(); }
         quad = null;
         for (int i = 0; i < spectra.length; i++) {

@@ -101,9 +101,8 @@ pools use nearby landing segments to place foam and agitation, including a fall
 that lands beside a hex corner. Water surface, fall, spray and cut faces use
 separate shader modes because they have different opacity and lighting needs.
 
-`BoardSurface.FALLS_OFF_THE_BOARD` optionally extends outgoing rivers below the
-board edge. It is disabled by default. Ordinary exposed edges show a cut surface;
-an off-board fall has no invented receiving pool or landing spray. The cut shares
+Water that runs into the board edge, rivers included, is cut off there with the
+board and shows a cut surface. The cut shares
 the surface's wave vertex program: its top vertices (colour G zero) follow the
 waves at the same rest positions as the surface's border samples, so the section
 shows the wave profile without a gap. Its bottom stays on the bed.
@@ -254,7 +253,7 @@ A descent keeps its own current-driven surface: its mesh normal, exactly up on
 level water, tilts from the lip, and the tilt both removes the wind's chop and
 broadens the sun's glint, since water running down a slope is broken. A mirror-like
 glint there would trace a thin static line along the descent's curve. Bed caustics
-and the refraction sway of a submerged bed follow neither wind nor current.
+follow neither wind nor current.
 
 Only the longest cascade displaces geometry; shorter ones exist in the normals.
 Shading separates a broad normal (swell and some chop), which lights the waves so
@@ -263,6 +262,19 @@ glitter. Crests glow turquoise with light scattered through them, strongest when
 looking towards the sun. Air/water Fresnel uses a 0.02037 normal-incidence
 reflectance and a fifth-power angular response.
 
+The shared local lights (`lava-lighting.glsl`: lava, burning hexes, luminous fungi,
+fireballs and weapon fire) reach water as the sun does. Their irradiance on a level
+surface lights the water body, foam, falls and spray. Pools and the glassy part of
+falling sheets also mirror them, with the water's f0 and the same antialiased roughness
+as the sun's glint, each source through its own size-widened lobe; a beam or flamer
+stream mirrors along its whole length. A pool or fall pixel walks the light list once
+(`waterLocalLighting`, which calls `lavaLighting`): the walk gives the level irradiance
+and the highlight on the wave facets, and on a fall also the highlight on its sheet.
+`waterLighting(false)` therefore leaves the local lights out of the sky and sun
+irradiance. Spray and board-edge sections take only the irradiance, through
+`waterLighting()`; spray gets no forward-scattering glow from them. The submerged bed
+receives them through `shadeSurface`.
+
 Orthographic views use a soft ceiling on direct sun glare: their parallel camera
 rays can put every level water surface at the mirror angle simultaneously.
 `WATER_ORTHOGRAPHIC_GLARE` in `water-lighting.glsl` limits this contribution to
@@ -270,7 +282,8 @@ rays can put every level water surface at the mirror angle simultaneously.
 Weak glints stay unchanged and highlight colour is preserved. This is a readability
 choice at normal exposure, not a physical reflectance limit. It applies to pools
 and waterfall sheets with effects on or off; perspective reflections, sky/cloud
-reflections, foam and the shared scene exposure remain unchanged.
+reflections, local-light reflections, foam and the shared scene exposure remain
+unchanged.
 
 The FFT targets belong to the renderer, rather than individual hexes. Rapids keep
 their existing current-driven patches. The **Water effects** control under Tuning →

@@ -26,7 +26,9 @@ import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardFile;
+import megamek.common.board.BridgeSpan;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.board.RailRoute;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -34,7 +36,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Batch 10's rail system on shipped boards, as a game loads them and as the editor opens them (one 3D board): the
  * most rail-heavy board (the Shipyard), ground rails on slopes and a deck over water (The Trainjob, Desert Mesa
- * Oasis), a level crossing (Wagon Wheel), and two maglev routes crossing at two levels. Captures go to
+ * Oasis), a level crossing (Wagon Wheel), and a maglev guideway over a ground railway. Captures go to
  * {@code build/gpu-board-review/b10-s2/}.
  */
 @Tag("on-demand")
@@ -138,33 +140,24 @@ class GpuRailSmokeTest {
     private static final Shot FIT = new Shot(new Coords(0, 0), 0, 60, 0);
 
     @Test
-    void twoMaglevRoutesCrossAtTwoLevelsAndARailRunsBeneathThem() throws Exception {
+    void oneImplicitMaglevDeckCrossesAGroundRailway() throws Exception {
         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
         Board board = Board.createEmptyBoard(9, 9);
         Coords centre = new Coords(4, 4);
-        Map<Coords, List<BoardDecoration>> objects = new LinkedHashMap<>();
-        // Low maglev N-S at level 2, high maglev NE-SW at level 3 over it, a rail on the ground NW-SE beneath both.
-        line(objects, centre, 0, RailRoute.Kind.MAGLEV, BoardDecoration.Placement.absolute(2), "low");
-        line(objects, centre, 1, RailRoute.Kind.MAGLEV, BoardDecoration.Placement.absolute(3), "high");
-        line(objects, centre, 2, RailRoute.Kind.RAIL, BoardDecoration.Placement.ground(), "rail");
-        for (int x = 0; x < 9; x++) {
-            for (int y = 0; y < 9; y++) {
-                Coords at = new Coords(x, y);
-                Hex hex = new Hex(0);
-                hex.setDecorations(objects.getOrDefault(at, List.of()));
-                board.setHex(at, hex);
-            }
-        }
+        // The supported ground + one-deck model: maglev N-S at level 2 and ground rail NW-SE beneath it.
+        line(board, centre, 0, RailRoute.Kind.MAGLEV, 2);
+        line(board, centre, 2, RailRoute.Kind.RAIL, 0);
         board.setNativeFormat(true);
         var crossing = board.getHex(centre);
-        assertEquals(2, RailRoute.markers(crossing, RailRoute.Kind.MAGLEV).size(), "two maglev markers in one hex");
-        assertEquals(0, RailRoute.markers(crossing, RailRoute.Kind.MAGLEV).get(0).connections()
-              & RailRoute.markers(crossing, RailRoute.Kind.MAGLEV).get(1).connections(), "owning disjoint sides");
+        assertEquals(1, RailRoute.markers(crossing, RailRoute.Kind.MAGLEV).size());
+        assertTrue(RailRoute.onDeck(RailRoute.find(crossing, RailRoute.Kind.MAGLEV)));
+        assertFalse(RailRoute.onDeck(RailRoute.find(crossing, RailRoute.Kind.RAIL)));
+        assertTrue(crossing.getDecorations().isEmpty(), "Both ways are terrain data");
         BoardScene scene = GpuLegacyImportSmokeTest.scene(board);
         Map<String, BoardScene> scenes = new LinkedHashMap<>();
         Map<String, Map<String, Shot>> shots = new LinkedHashMap<>();
-        for (var shot : Map.of("maglev-crossing-two-levels", new Shot(centre, 1, 60, .3f),
-              "maglev-crossing-two-levels-top", new Shot(centre, 1, 0, .35f)).entrySet()) {
+        for (var shot : Map.of("maglev-over-ground-rail", new Shot(centre, 1, 60, .3f),
+              "maglev-over-ground-rail-top", new Shot(centre, 1, 0, .35f)).entrySet()) {
             scenes.put(shot.getKey(), scene);
             shots.put(shot.getKey(), Map.of("", shot.getValue()));
         }
@@ -172,17 +165,17 @@ class GpuRailSmokeTest {
     }
 
     /** A straight route of {@code kind} along {@code direction} through {@code centre}, three hexes each way. */
-    private static void line(Map<Coords, List<BoardDecoration>> objects, Coords centre, int direction, RailRoute.Kind kind,
-          BoardDecoration.Placement placement, String name) {
+    private static void line(Board board, Coords centre, int direction, RailRoute.Kind kind, int level) {
         List<Coords> cells = new ArrayList<>();
         for (int step = -3; step <= 3; step++) {
             cells.add(step < 0 ? centre.translated((direction + 3) % 6, -step) : centre.translated(direction, step));
         }
         for (int i = 0; i < cells.size(); i++) {
             int sides = (i > 0 ? RailRoute.side((direction + 3) % 6) : 0) | (i < cells.size() - 1 ? RailRoute.side(direction) : 0);
-            var marker = new BoardDecoration(name + i, "prop", kind.asset, null, 0, 0, 0, false, 1, placement, 0)
-                  .withConnections(sides);
-            objects.computeIfAbsent(cells.get(i), at -> new ArrayList<>()).add(marker);
+            var hex = board.getHex(cells.get(i));
+            RailRoute.lay(hex, level > 0, sides, 0, kind);
+            if (level > 0) { BridgeSpan.carry(hex, level, "bridge:4;bridge_cf:650"); }
+            board.setHex(cells.get(i), hex);
         }
     }
 
@@ -209,19 +202,21 @@ class GpuRailSmokeTest {
             }
             session.game().setBoard(board);
             session.command(new BoardEditorSession.Command(BoardEditorSession.Action.ASSET, "", RailRoute.Kind.MAGLEV.asset), null);
-            session.command(new BoardEditorSession.Command(BoardEditorSession.Action.BRUSH_VALUE, "object:level", "2"), null);
+            session.command(new BoardEditorSession.Command(BoardEditorSession.Action.BRUSH_VALUE, "wayHeight", "level"), null);
+            session.command(new BoardEditorSession.Command(BoardEditorSession.Action.BRUSH_VALUE, "wayOffset", "2"), null);
             for (int i = 0; i < path.size(); i++) { session.pointer(path.get(i), 0, 0, i > 0); }
             session.finishStroke();
             session.command(new BoardEditorSession.Command(BoardEditorSession.Action.TOOL, "", "SELECT"), null);
-            session.pointer(path.getFirst(), 0, 0, false, RailRoute.find(board.getHex(path.getFirst()), RailRoute.Kind.MAGLEV).id());
+            session.pointer(path.getFirst(), 0, 0, false);
             session.finishStroke(); session.release();
+            session.command(new BoardEditorSession.Command(BoardEditorSession.Action.COMPONENT, "", "bridge"), null);
             session.command(new BoardEditorSession.Command(BoardEditorSession.Action.PILLARS, "", "true"), null);
             session.save(file.toPath());
             return session.board();
         });
         SwingUtilities.invokeAndWait(drawn);
         for (Coords at : path) {
-            assertTrue(RailRoute.find(drawn.get().getHex(at), RailRoute.Kind.MAGLEV).pillars(), at + " has the route's pillars");
+            assertTrue(HexAppearance.pillars(drawn.get().getHex(at).getAppearance()), at + " has bridge pillars");
         }
         BoardScene game = game(file), editor = editor(file);
         assertEquals(routes(game), routes(editor), "the game and the editor build the same pillared route");
@@ -257,11 +252,11 @@ class GpuRailSmokeTest {
      * a rail bridge carries its rail across its whole span (Desert Mesa Oasis, Smash n Grab's double track); the row of
      * pillar art along Karkand's maglev line is its Pillars, the line a level up; Koryo's maglev over industrial plants has
      * Pillars (a level up) but no pier at a plant's joint. Then a pillared
-     * maglev drawn over a building and an industrial plant stands no pier at their joints, and a click on a pier picks
-     * its route. Captures go to {@code build/gpu-board-review/b10-f3/}.
+     * maglev skips a building and draws over an industrial plant, with no pier at their joints. Clicking a pier picks
+     * its bridge hex. Captures go to {@code build/gpu-board-review/b10-f3/}.
      */
     @Test
-    void theReportAnswersDrawAlikeInGameAndEditorAndAPierPicksItsMaglev() throws Exception {
+    void theReportAnswersDrawAlikeInGameAndEditorAndAPierPicksItsBridge() throws Exception {
         File output = new File(OUTPUT.getParentFile(), "b10-f3");
         assertTrue(output.isDirectory() || output.mkdirs());
         Map<String, Map<String, Shot>> boards = new LinkedHashMap<>();
@@ -300,12 +295,14 @@ class GpuRailSmokeTest {
             board.setHex(plant, new Hex(0, "heavy_industrial:2", ""));
             session.game().setBoard(board);
             session.command(new BoardEditorSession.Command(BoardEditorSession.Action.ASSET, "", RailRoute.Kind.MAGLEV.asset), null);
-            session.command(new BoardEditorSession.Command(BoardEditorSession.Action.BRUSH_VALUE, "object:level", "4"), null);
+            session.command(new BoardEditorSession.Command(BoardEditorSession.Action.BRUSH_VALUE, "wayHeight", "level"), null);
+            session.command(new BoardEditorSession.Command(BoardEditorSession.Action.BRUSH_VALUE, "wayOffset", "4"), null);
             for (int i = 0; i < path.size(); i++) { session.pointer(path.get(i), 0, 0, i > 0); }
             session.finishStroke();
             session.command(new BoardEditorSession.Command(BoardEditorSession.Action.TOOL, "", "SELECT"), null);
-            session.pointer(path.getFirst(), 0, 0, false, RailRoute.find(board.getHex(path.getFirst()), RailRoute.Kind.MAGLEV).id());
+            session.pointer(path.getFirst(), 0, 0, false);
             session.finishStroke(); session.release();
+            session.command(new BoardEditorSession.Command(BoardEditorSession.Action.COMPONENT, "", "bridge"), null);
             session.command(new BoardEditorSession.Command(BoardEditorSession.Action.PILLARS, "", "true"), null);
             session.save(file.toPath());
             return null;
@@ -316,13 +313,12 @@ class GpuRailSmokeTest {
         for (int i = 0; i + 1 < path.size(); i++) {
             Coords a = path.get(i), b = path.get(i + 1);
             var tile = game.tile(a);
-            boolean pier = BoardBridgeFooting.pier(game, tile, BoardRail.route(tile), a.direction(b)) != null;
+            boolean pier = BoardBridgeFooting.pier(game, tile, a.direction(b));
             boolean structure = a.equals(building) || b.equals(building) || a.equals(plant) || b.equals(plant);
             assertEquals(!structure, pier, a + "-" + b + (structure ? ": no pier beside a structure" : ": a pier"));
         }
-        // A level-2 ray across the joint of two plain hexes meets the pier's shaft below the beam: it picks the route.
+        // A level-2 ray across the joint of two plain hexes meets the pier's shaft below the beam: it picks its terrain.
         Coords near = path.get(9), far = path.get(10);
-        var ids = List.of(BoardRail.route(game.tile(near)).decoration().id(), BoardRail.route(game.tile(far)).decoration().id());
         var joint = BoardGeometry.center(near, 2).lerp(BoardGeometry.center(far, 2), .5f);
         var along = BoardGeometry.center(far, 0).sub(BoardGeometry.center(near, 0)).nor();
         var across = new Vector3(-along.y, along.x, 0);
@@ -330,9 +326,10 @@ class GpuRailSmokeTest {
         Map<String, BoardScene> pierScene = new LinkedHashMap<>(Map.of("maglev-over-structures", game));
         render(output, pierScene, Map.of("maglev-over-structures", Map.of("", new Shot(path.get(5), 2, 60, .45f))),
               (name, terrain) -> {
-                  var hit = terrain.decorationHit(game, ray);
-                  assertNotNull(hit, "The ray across the joint picks an object");
-                  assertTrue(ids.contains(hit.id()), "A click on a pier selects its maglev: " + hit.id());
+                  var hit = terrain.selectionHit(game, ray);
+                  assertNotNull(hit, "The ray across the joint picks bridge terrain");
+                  assertTrue(List.of(near, far).contains(hit.coords()), "A click on a pier selects its bridge hex: " + hit.coords());
+                  assertTrue(terrain.decorationHit(game, ray) == null, "Terrain-owned piers are not placed objects");
               });
     }
 

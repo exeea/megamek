@@ -14,16 +14,18 @@
 | `BoardRelief` | Reserve entrances and move obstructing decorative rocks onto supported bank positions. |
 | `GpuRoads / GpuTerrain` | Apply deck/apron materials and own the installed bridge geometry used for drawing and picking. |
 
-Every connected span is built (manufactured) or natural (a rock formation). `BoardBridge` follows reciprocal
+Every connected span is built (manufactured), natural (a rock formation), or implicit (made to carry an elevated way). `BoardBridge` follows reciprocal
 bridge exits at the same absolute deck elevation or one level apart (`BridgeSpan`, the span the editor edits) and
 draws the type its hexes store in the appearance owner `bridge` (`HexAppearance.bridgeBuilt`; where they differ,
 built wins). The renderer never decodes a type: the legacy conversion (`BoardSceneryLayouts.convert`, run wherever a
 board is loaded, batch 9) stores one on every bridge with the one decode, `BridgeSpan.decode`; see
 [3D board editor](3d-board-editor.md), Bridge types. A bridge still without one (a transient editor state, a
-hand-made scene) draws built, the editor stroke's default; a road approach then only chooses its material. A built span uses the
-existing road-to-bridge height checks for approaches; a road beneath the deck remains a ground road. If an approach
-exists anywhere along the span, the built bridge inherits its best surface: marked asphalt, unmarked asphalt, gravel,
-then dirt. Without one it is plain unmarked asphalt between its kerbs.
+hand-made scene) draws built, the editor stroke's default. A built span uses the
+existing road-to-bridge height checks for approaches; a road beneath the deck remains a ground road.
+Deck paint comes from that hex's `bridge_road` kind and sides. A clean manufactured
+deck is bare concrete; a natural deck retains its rock. Legacy conversion writes the
+old span's road-material vote into `bridge_road` once, so rendering never repeats it.
+Paint may end halfway along a span without changing its structure or the ground beneath.
 
 Decks one level apart meet halfway between their elevations at the shared edge, in either direction.
 The centre retains its authored elevation. Manufactured spans keep a level central hub, with broad
@@ -60,6 +62,18 @@ through the whole bank. Walkable banks also fit the finished top, ignoring decor
 and underside inside the cliff rather than fitting only its upper rim. Connected sections share mouth
 corners, underside clearance and arch support influence, and omit internal end walls across mixed LODs.
 
+At a level bank, the walking surface keeps the bank's height through the entrance rather than eroding
+below its lip. The bank owns the top inside its actual scalloped outline; bridge top facets are clipped
+there, avoiding coplanar overlap. The supported passage uses upward bank normals, while the adjacent
+exposed cliff retains its rounding. The buried rock shell remains separate from the bank. Removing the
+bridge rebuilds the neighbouring terrain and restores its exposed edge; the surface cache key also
+includes the derived natural-bridge type so retyping a span updates this join.
+
+Muddy natural spans keep full coverage on their walking surface and fade deposits down the adjacent
+rock shell. Depth is measured below the actual local top edge during mesh preparation, so the fade
+also follows descending decks. It uses the existing vertex byte and material samples; the underside
+remains bare, and the bridge remains independently removable.
+
 A cliff above deck height also anchors the natural arch and contributes its rock material. The span's
 thicker underside extends into that wall at deck height instead of rising to the cliff top. This keeps
 the rock formation beneath spans such as Lava Tubes 1, with the lower passage still open. Such a cliff
@@ -77,6 +91,19 @@ No foundation is grown down through a lower crossing.
 the actual on-deck `RailRoute` courses, including explicit junctions and unfinished stubs. Standard and truss
 designs share that supporting footprint. Road-only five/six-way spans retain a raised roundabout island;
 an on-deck rail opens its centre. Rail geometry still follows the common route model.
+The local intersection of deck road and traditional rail exits forms a road/rail corridor,
+independently of bridge type or distant banks. Its Middle or Beside footprint widens the
+slab and bank support, using the same dimensions and train course as
+[ground corridors](gpu-roads.md#road-and-rail-corridors).
+
+**Maglev guideways.** An implicit deck with `bridge_rail:2` and no deck road draws the
+existing narrow maglev beam, without the ordinary slab, parapets, landings or apron.
+`BoardRail.guideway` derives the bridge's solid and walkable facets from the exact mesh
+used by the cached visible beam model. The game, editor, Classic and Enhanced views
+therefore pick and support the same beam; its top is four model pixels above its
+authoritative deck plane. It remains a real bridge with the normal CF, height, collapse
+and one-deck-per-hex rules. An explicit deck or a deck also carrying a road keeps its
+ordinary bridge geometry beneath the maglev.
 
 **Truss.** A built span whose design is the truss (`BoardBridge.Deck.truss`, from `BridgeSpan.truss`) adds
 `BoardBridgeTruss` steel along the exposed carriageway boundary. Continuous chords follow the curve; fitted
@@ -113,12 +140,15 @@ never with the level height. Drawing (concrete), shadows, chunk bounds, rebuilds
 come from the bridge shape in every view; a pick selects the hex under the pointer, the side view shows the halves on the inspected hex's edges (under
 water through the liquid's tint, down to its bed), and walkable hits (the hover outline) look through piers.
 `BoardObstacles` keeps ground cover out of each footing, from below the floor up. The toggle is in `BoardBridge.Deck`,
-so changing it rebuilds both joint hexes. Since batch 10 the same code builds the piers of a maglev route whose
-Pillars toggle is on (docs/3d-board-editor.md): the room rule (`BoardBridgeFooting.room`), the joint frame, footing
-sample, liquid sink, stretched shaft and LoD are parameterised by the kit (`bridges/maglev-pier.glb`, slimmer) and by
-the underside carried (the beam's underside on the shared edge, `BoardRail.joint`); the bridge piers it builds are
-bit-identical to before. A maglev joint beside a building, industrial plant or fuel tank gets no pier, and a maglev's
-piers are picked as its route. Limits: chunks of different LOD can meet on one pier with slightly different
+so changing it rebuilds both joint hexes. Implicit maglev guideways use this same bridge
+Pillars flag and machinery, with the slimmer `bridges/maglev-pier.glb` kit. These pillars
+remain optional: `bridge/implicit` draws the beam alone and `bridge/implicit-pillars`
+adds supports without adding a slab. The editor's Pillars control switches these independently of deck height.
+The caps follow the actual shared beam underside and grade (`BoardRail.joint`), including a
+joint with a maglev carried on an ordinary deck. The room check, footing sampling,
+liquid sink, stretched shaft and LoD remain shared. A maglev joint beside a building,
+industrial plant or fuel tank gets no pier. Piers belong to the bridge's terrain shape
+and select its hex, rather than a retired route object. Limits: chunks of different LOD can meet on one pier with slightly different
 halves; the Tactical View shows no piers (nor decks); the 2D views draw no pier art. A legacy `.board` game shows
 them since batch 9, as the game converts the board (pillar art becomes the toggle). `GpuBridgeSmokeTest.piersReachTheDrawnDeckOnEveryDeckKind`
 checks paved decks over water and at 1 and 6 levels over dry ground, a one-level joint, a natural span (no piers), a built deck without a road (unmarked, no apron on
@@ -150,10 +180,33 @@ reuse carries this geometry with the material batches. Manufactured spans are ge
 preparation, graded and supplemented at their bank ends, then retained until their scene inputs change.
 Terminal and pier GLBs remain reusable details; the span itself has no external mesh asset.
 
+## Validation
+
+The focused bridge and rail CPU tests passed on 2026-10-18. `BoardRailTest` checks
+that an implicit maglev is the narrow beam, including its walkable height and picking
+footprint, with no invisible slab or bank landings. `BoardBridgeFootingTest` checks
+optional maglev piers, their shared joint/grade, clearance beneath them and structure
+exclusions. `WayLayerEditorTest` checks the Pillars action and undo without changing
+the implicit guideway into an ordinary bridge.
+
+The NVIDIA `GpuMaglevDeckSmokeTest` passed and its top/angled captures were reviewed
+for Karkand's route and station, Koryo's structures and Rail Crossing. These are under
+`build/shader-audit/handoff-20261018/verified/maglev-decks/`. Natural and sloped bridge
+native checks also passed, with captures in the neighbouring `natural-bridges/` and
+`bridge-slopes/` folders. The subsequent authored deck/road and mud captures are in
+`build/shader-audit/handoff-20261018/multihex/editor-ways/`; their grouped native/CPU
+run and Checkstyle passed in `build/handoff-multihex-verify.log`. These checks establish
+the covered geometry and authoring behaviour, not a performance result.
+
+The final bank join and downward mud fade are captured in
+`build/shader-audit/handoff-20261018/mud-slide-final/mud-join/editor-ways/`, including
+level and descending spans. The native check, all-LOD descending-edge depth regression,
+compilation and main Checkstyle passed on 2026-10-19; the angled captures were reviewed.
+
 ## Limits
 
 The natural silhouette is a procedural interpretation of the existing bridge exits, not a geology
-simulation or a new designer-authored bridge class. The stored type chooses built or natural, not a built deck's
-surface: that still follows the attached roads (a co-located road can belong underneath). A surface choice would
-need its own appearance variant and editor control. Existing unsupported or malformed terrain combinations are not
-normalized by this renderer.
+simulation. The stored type selects its structure; `bridge_road` selects deck road paint,
+and ground roads remain independent. Existing unsupported or malformed terrain combinations are not
+normalized by this renderer. The guideway has no separate performance claim: its visual
+model is reused, while CPU bridge facets supply the ordinary support/picking path.

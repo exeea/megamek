@@ -179,7 +179,7 @@ final class BoardFeatures {
           boolean natural) {
         if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) {
             // A chasm keeps its placed objects and a bridge across it, whose deck stands on the hex's own level.
-            List<BoardScene.Feature> chasm = new ArrayList<>(decorations(hex, coords));
+            List<BoardScene.Feature> chasm = new ArrayList<>(decorations(hex, coords, board));
             addBridge(hex, chasm);
             return List.copyOf(chasm);
         }
@@ -304,7 +304,7 @@ final class BoardFeatures {
         }
         rough(hex, coords, result, board);
         BoardScatter.capture(hex, coords, result);
-        result.addAll(decorations(hex, coords));
+        result.addAll(decorations(hex, coords, board));
         return List.copyOf(result);
     }
 
@@ -414,6 +414,15 @@ final class BoardFeatures {
      * and no stops.
      */
     static List<BoardScene.Feature> decorations(Hex hex, Coords coords) {
+        return decorations(hex, coords, RailRoute.Corridor.NONE, RailRoute.Corridor.NONE);
+    }
+
+    private static List<BoardScene.Feature> decorations(Hex hex, Coords coords, Function<Coords, Hex> board) {
+        return decorations(hex, coords, RailRoute.corridor(hex, coords, board), RailRoute.corridor(hex, coords, board, true));
+    }
+
+    private static List<BoardScene.Feature> decorations(Hex hex, Coords coords,
+          RailRoute.Corridor ground, RailRoute.Corridor deck) {
         List<BoardScene.Feature> result = new ArrayList<>();
         int bridgeExits = hex.containsTerrain(Terrains.BRIDGE) ? hex.getTerrain(Terrains.BRIDGE).getExits() : 0;
         String owned = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":";
@@ -424,10 +433,23 @@ final class BoardFeatures {
             if (RailRoute.kind(object) != RailRoute.Kind.RAIL) { continue; }
             int index = 0;
             String stops = terrainOwned(object) ? object.id() : owned + object.id();
-            for (var stop : RailRoute.stops(RailRoute.drawnSides(object, bridgeExits))) {
+            var corridor = RailRoute.onDeck(object) ? deck : ground;
+            for (var stop : RailRoute.stops(RailRoute.drawnSides(object, bridgeExits), corridor)) {
                 result.add(feature(hex, new megamek.common.board.BoardDecoration(stops + "#" + index++, "prop",
                       RailRoute.BUFFER_STOP, null, object.x() + stop.x() / HexTile.WIDTH, object.y() + stop.y() / HexTile.HEIGHT,
                       stop.rotation(), false, 1, RailRoute.ride(object), 0, false)));
+            }
+            if (corridor.sides() != 0) {
+                boolean onDeck = RailRoute.onDeck(object);
+                int roadExits = hex.getTerrain(onDeck ? Terrains.BRIDGE_ROAD : Terrains.ROAD).getExits();
+                BoardRoad.Kind kind = onDeck ? BoardRoad.deck(hex) : BoardRoad.capture(hex);
+                var road = BoardRoad.layout(coords, roadExits, kind, d -> kind).corridor(corridor);
+                int sides = RailRoute.drawnSides(object, bridgeExits);
+                for (var crossing : road.crossings(RailRoute.lines(sides, RailRoute.pieces(object, sides), corridor))) {
+                    result.add(feature(hex, new megamek.common.board.BoardDecoration(stops + ":crossing:" + index++, "decal",
+                          "decal/rail/level-crossing", null, crossing.x() / HexTile.WIDTH, crossing.y() / HexTile.HEIGHT,
+                          crossing.rotation(), crossing.mirror(), 1, RailRoute.ride(object), 0, false)));
+                }
             }
         }
         var skin = BoardSceneryLayouts.skin(hex);

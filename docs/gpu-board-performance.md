@@ -37,7 +37,10 @@ boards (`megamek.gpu.reach.boards`, `.samples`) and fails when a hex differs fro
 a full build or changed without being rebuilt. It leaves road masks' atlas slots
 out of that comparison, since each build packs a section's masks afresh.
 
-Camera refinement and local edits use the same bounded preparation pipeline.
+Camera refinement and local edits use the same bounded preparation pipeline, with
+at most four sections in flight (`GpuTerrain.BUILD_JOBS`). A new board's update plan
+starts on the first frame, and terrain program links wait until its first sections
+have started, so those prepare on the terrain workers while the programs link.
 Collection/upload is spread over frames, but the frame budget is soft: an individual
 tile collection or buffer upload can overrun it. Retired chunks are disposed by
 the GL owner once they are no longer installed or cached.

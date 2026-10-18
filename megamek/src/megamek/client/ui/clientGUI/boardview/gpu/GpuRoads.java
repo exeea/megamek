@@ -24,6 +24,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
 
 /** Road material masks on terrain or bridge decks; the supporting surfaces own their physical shape. */
@@ -207,9 +208,23 @@ final class GpuRoads {
         return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false);
     }
 
+    /** The authored material of this road layer's own paint; verges and neighbouring transition coats keep theirs. */
+    static String material(BoardScene.Tile tile, boolean deck, String texture) {
+        if (!texture.startsWith("roads/")) { return null; }
+        String base = texture.substring("roads/".length());
+        if (!texture.equals(texture(deck ? tile.deckRoad() : tile.road()))) { return base; }
+        var style = tile.appearance().get(deck ? "bridgeRoad" : "road");
+        if (style == null) { return base; }
+        var variant = BoardEditorBlueprint.get().variant(style.variant());
+        String authored = style.material() != null ? style.material() : variant == null ? "" : variant.material();
+        return authored.isBlank() ? base : authored;
+    }
+
     /** The deck road's paint: its kind on its own sides ({@link BoardBridge.Deck#road}). */
     static List<Patch> deckPatches(BoardScene.Tile tile, BoardBridge.Deck deck, BoardRoad road) {
-        return patches(tile.coords(), tile.surface(), deck.kind(), deck.roadExits(), road, true);
+        // A rock arch carries ordinary ground paint, including loose shoulders and worn ends. Only a built deck
+        // clips them to its carriageway; the arch's own top facets already keep the paint off its sides.
+        return patches(tile.coords(), tile.surface(), deck.kind(), deck.roadExits(), road, !deck.natural());
     }
 
     /** A bare bank gets a grounded material apron after the solid deck and its tapered rails have ended. */
@@ -309,6 +324,10 @@ final class GpuRoads {
         }
         if (kind == BoardRoad.Kind.PAVED) {
             patches.add(markings(road, coords, exits));
+            Area median = road.medianLines();
+            if (!median.isEmpty()) {
+                patches.add(new Patch(median, "concrete", new Color(.95f, .78f, .25f, 1), 1.5f, .065f, null));
+            }
         } else if (!paved) {
             Area tracks = road.tracks(exits);
             Area worn = new Area(tracks);

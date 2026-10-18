@@ -573,8 +573,15 @@ public final class BoardSceneryLayouts {
                 if (pillared) { result.setAppearance(appearance(result, artwork)); }
                 for (var rail : rails) {
                     boolean deck = railOnDeck(board, coords, rail.connections(), scenery);
-                    RailRoute.lay(result, deck, deck ? rail.connections() & RailRoute.bridgeExits(result) & 63
-                          : rail.connections(), rail.tracks());
+                    int sides = rail.connections();
+                    if (!nativeBoard && !deck && HexTile.road(result) && !result.containsTerrain(Terrains.WATER)) {
+                        int stubs = RailRoute.stranded(sides);
+                        if ((stubs & ~result.getTerrain(Terrains.ROAD).getExits()) == 0) { sides &= ~stubs; }
+                    }
+                    if (sides != 0) {
+                        sides = deck ? sides & RailRoute.bridgeExits(result) & 63 : sides;
+                        RailRoute.lay(result, deck, sides, RailRoute.valid(sides, rail.tracks()) ? rail.tracks() : 0);
+                    }
                 }
                 // The rail terrain draws the rail sprite in 2D, so its art's token goes.
                 if (!rails.isEmpty() && result.terrainLevel(Terrains.FLUFF) == RAIL_ART) { result.removeTerrain(Terrains.FLUFF); }
@@ -591,6 +598,7 @@ public final class BoardSceneryLayouts {
         design(board, scanned);
         typeBridges(board, bridges);
         if (!nativeBoard) { deckRoads(board); }
+        maglevTerrain(board, maglevs, issues, !nativeBoard);
         board.setNativeFormat(true);
         return List.copyOf(issues);
     }
@@ -620,6 +628,8 @@ public final class BoardSceneryLayouts {
                 for (Coords member : span) {
                     Hex hex = hexes.apply(member);
                     rail |= RailRoute.deckRail(hex);
+                    rail |= hex.getDecorations().stream().anyMatch(object -> RailRoute.kind(object) == RailRoute.Kind.MAGLEV
+                          && object.placement().level(hex) == hex.getLevel() + hex.terrainLevel(Terrains.BRIDGE_ELEV));
                     for (int d = 0; d < 6; d++) {
                         Hex next = hexes.apply(member.translated(d));
                         if (next == null || decksJoin(hex, next, d) || !meets(next, hex, (d + 3) % 6)) { continue; }
@@ -767,7 +777,7 @@ public final class BoardSceneryLayouts {
         maglevs.forEach((at, ids) -> ids.forEach(id -> {
             if (done.contains(at + id)) { return; }
             var marker = hexes.apply(at).getDecorations().stream().filter(d -> d.id().equals(id)).findFirst().orElseThrow();
-            var run = RailRoute.run(hexes, at, marker);
+            var run = legacyMaglevRun(hexes, at, marker);
             run.forEach(member -> done.add(member.at() + member.marker().id()));
             boolean posts = run.stream().anyMatch(member -> {
                 for (int d = 0; d < 6; d++) {
@@ -800,6 +810,107 @@ public final class BoardSceneryLayouts {
         Map<BoardLocation, Hex> result = new HashMap<>();
         changed.forEach((at, hex) -> result.put(BoardLocation.of(at, board.getBoardId()), hex));
         if (!result.isEmpty()) { board.setHexes(result); }
+    }
+
+    /** Only the converter reads temporary route objects; runtime routes come exclusively from terrain. */
+    private static List<RailRoute.Member> legacyMaglevRun(Function<Coords, Hex> hexes, Coords start,
+          BoardDecoration marker) {
+        List<RailRoute.Member> run = new ArrayList<>(List.of(new RailRoute.Member(start, marker)));
+        Set<RailRoute.Member> found = new HashSet<>(run);
+        for (int i = 0; i < run.size(); i++) {
+            var member = run.get(i);
+            for (int d = 0; d < 6; d++) {
+                Coords at = member.at().translated(d);
+                Hex hex = hexes.apply(at);
+                if (hex == null || (member.marker().connections() & RailRoute.side(d)) == 0) { continue; }
+                for (var other : hex.getDecorations()) {
+                    if (RailRoute.joined(member.marker(), d, other)) {
+                        var next = new RailRoute.Member(at, other);
+                        if (found.add(next)) { run.add(next); }
+                    }
+                }
+            }
+        }
+        return run;
+    }
+
+    /** Converts only the maglev art placed by this import; a native board is otherwise read exactly as authored. */
+    private static void maglevTerrain(Board board, Map<Coords, List<String>> maglevs, List<BoardIssue> issues,
+          boolean legacy) {
+        Map<BoardLocation, Hex> changed = new HashMap<>();
+        maglevs.forEach((at, ids) -> {
+            Hex hex = replacement(board.getHex(at));
+            boolean drawnBridge = hex.containsTerrain(Terrains.BRIDGE) && !HexAppearance.implicit(hex.getAppearance());
+            List<BoardDecoration> objects = new ArrayList<>(hex.getDecorations());
+            for (String id : ids) {
+                BoardDecoration marker = objects.stream().filter(object -> object.id().equals(id)).findFirst().orElseThrow();
+                double level = marker.placement().level(hex);
+                if (level < hex.getLevel()) {
+                    issues.add(new BoardIssue(at, id, "Maglev below the ground was moved onto the ground"));
+                    level = hex.getLevel();
+                }
+                int elevation = (int) Math.round(level - hex.getLevel());
+                boolean deck = elevation > 0 || hex.terrainLevel(Terrains.WATER) > 0
+                      || hex.containsTerrain(Terrains.BRIDGE)
+                            && elevation == hex.terrainLevel(Terrains.BRIDGE_ELEV);
+                boolean existing = hex.containsTerrain(Terrains.BRIDGE);
+                int layer = deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL;
+                String refusal = deck && hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK)
+                      ? "Maglev over a building or fuel tank was omitted: one structure per hex"
+                      : deck && existing && elevation != hex.terrainLevel(Terrains.BRIDGE_ELEV)
+                            ? "Maglev was omitted: one deck per hex"
+                            : hex.containsTerrain(layer) && hex.terrainLevel(layer) != 2
+                                  ? "Maglev was omitted: one rail kind per layer" : null;
+                objects.remove(marker);
+                if (refusal != null) {
+                    issues.add(new BoardIssue(at, id, refusal));
+                    objects.removeIf(object -> RailRoute.rides(object.asset()) == RailRoute.Kind.MAGLEV
+                          && object.placement().equals(marker.placement()));
+                    continue;
+                }
+                int sides = marker.connections() & 63;
+                if (deck && drawnBridge) {
+                    Terrain bridge = hex.getTerrain(Terrains.BRIDGE);
+                    if (legacy && (sides & ~bridge.getExits()) != 0) {
+                        // Legacy artwork can cross a bridge sideways. Preserve both routes on the existing deck;
+                        // its road keeps its original exits, while the structure also carries the maglev arms.
+                        hex.addTerrain(new Terrain(Terrains.BRIDGE, bridge.getLevel(), true, bridge.getExits() | sides));
+                        issues.add(new BoardIssue(at, id, "Bridge exits were widened to carry the legacy maglev crossing"));
+                    } else {
+                        sides &= RailRoute.bridgeExits(hex);
+                    }
+                }
+                int tracks = marker.tracks();
+                if (hex.containsTerrain(layer)) {
+                    int oldSides = hex.getTerrain(layer).getExits();
+                    int oldTracks = HexAppearance.tracks(hex.getAppearance(), deck ? "bridgeRail" : "rail");
+                    sides |= hex.getTerrain(layer).getExits();
+                    tracks = RailRoute.layout(sides, RailRoute.pieces(marker, marker.connections())
+                          | (oldTracks != 0 && RailRoute.valid(oldSides, oldTracks) ? oldTracks : RailRoute.pieces(oldSides)));
+                }
+                RailRoute.lay(hex, deck, sides, RailRoute.valid(sides, tracks) ? tracks : 0, RailRoute.Kind.MAGLEV);
+                if (deck) {
+                    BridgeSpan.carry(hex, elevation, "bridge:4;bridge_cf:650");
+                    if (!existing && marker.pillars()) {
+                        Map<String, HexAppearance> appearance = new HashMap<>(hex.getAppearance());
+                        appearance.put("bridge", HexAppearance.IMPLICIT_PILLARS);
+                        hex.setAppearance(appearance);
+                    }
+                }
+                var placement = deck ? BoardDecoration.Placement.on("bridge", 0) : BoardDecoration.Placement.ground();
+                objects.replaceAll(object -> RailRoute.rides(object.asset()) == RailRoute.Kind.MAGLEV
+                      && object.placement().equals(marker.placement())
+                            ? object.transform(object.x(), object.y(), object.rotation(), object.mirror(), object.scale(), placement)
+                            : object);
+            }
+            hex.setDecorations(objects);
+            // Rule terrain draws the track; its trains/platforms remain the separately authored objects.
+            if (hex.terrainLevel(Terrains.FLUFF) == 9 && hex.getTerrain(Terrains.FLUFF).getExits() < 3) {
+                hex.removeTerrain(Terrains.FLUFF);
+            }
+            changed.put(BoardLocation.of(at, board.getBoardId()), hex);
+        });
+        if (!changed.isEmpty()) { board.setHexes(changed); }
     }
 
     /**

@@ -7,7 +7,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import com.badlogic.gdx.math.Vector3;
-import megamek.common.board.BoardDecoration;
 import megamek.common.board.Coords;
 import megamek.common.board.RailRoute;
 import org.junit.jupiter.api.Test;
@@ -32,20 +31,11 @@ class BoardRailTest {
         return scene(nodes, sides, RailRoute.Kind.MAGLEV);
     }
 
-    /** Markers of {@code kind}: a maglev at the node's level, a rail on the ground. */
+    /** Native way terrain: a maglev on an implicit deck at the node's level, a rail on the ground. */
     static BoardScene scene(Map<Coords, Double> nodes, Map<Coords, Integer> sides, RailRoute.Kind kind) {
-        return BoardSurfaceBlendTest.scene(coords -> {
-            var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
-            var features = new ArrayList<BoardScene.Feature>();
-            if (nodes.containsKey(coords)) {
-                var route = new BoardDecoration("rail-" + coords, "prop", kind.asset, null, 0, 0, 0, false, 1,
-                      kind == RailRoute.Kind.MAGLEV ? BoardDecoration.Placement.absolute(nodes.get(coords))
-                            : BoardDecoration.Placement.ground(), 0).withConnections(sides.get(coords));
-                features.add(new BoardScene.Feature(kind.asset, 0, 0, 0, 1, 1, 0, BoardScene.FeatureKind.PROP, 0, false, route));
-            }
-            return new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), tile.ground(), null, null, null, null,
-                  features, List.of(), BoardLiquid.NONE, null, true);
-        });
+        return BoardSurfaceBlendTest.scene(coords -> nodes.containsKey(coords)
+              ? BoardBridgeFootingTest.routeTile(coords, false, kind, nodes.get(coords).intValue(), sides.get(coords), false, 0)
+              : BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0));
     }
 
     static BoardRail.Layout layout(BoardScene scene, Coords at) {
@@ -68,8 +58,10 @@ class BoardRailTest {
         assertEquals(1, open.ends().size());
         assertEquals(0, open.ends().getFirst().z(), .0001f);
         assertEquals(0, open.ends().getFirst().slope(), .0001f);
-        var joined = layout(scene(Map.of(CENTER, 2.0, north, 5.0), Map.of(CENTER, 1, north, 8)), CENTER);
+        var joined = layout(scene(Map.of(CENTER, 2.0, north, 3.0), Map.of(CENTER, 1, north, 8)), CENTER);
         assertTrue(joined.ends().getFirst().z() > 0, "A joined side climbs towards its neighbour's level");
+        var unreachable = layout(scene(Map.of(CENTER, 2.0, north, 5.0), Map.of(CENTER, 1, north, 8)), CENTER);
+        assertEquals(0, unreachable.ends().getFirst().z(), "Separate bridge levels do not form a steep unsupported ramp");
         // An empty mask still draws the short N/S marker stub.
         var stub = layout(scene(Map.of(CENTER, 2.0), Map.of(CENTER, 0)), CENTER);
         assertTrue(stub.ends().isEmpty());
@@ -79,19 +71,19 @@ class BoardRailTest {
     @Test void allSixConnectionsMeetAtExactlyTheSameMeshCornersAcrossElevations() {
         for (int direction = 0; direction < 6; direction++) {
             var next = CENTER.translated(direction);
-            var scene = scene(Map.of(CENTER, 1.0, next, 3.5,
-                  CENTER.translated((direction + 2) % 6), 2.0, CENTER.translated((direction + 4) % 6), .5));
+            var scene = scene(Map.of(CENTER, 2.0, next, 3.0,
+                  CENTER.translated((direction + 2) % 6), 2.0, CENTER.translated((direction + 4) % 6), 1.0));
             var a = layout(scene, CENTER); var b = layout(scene, next);
-            Vector3 edge = b.ends().getFirst().point().add(BoardGeometry.center(next, 3.5f));
-            assertTrue(a.ends().stream().anyMatch(end -> end.point().add(BoardGeometry.center(CENTER, 1)).epsilonEquals(edge, .0001f)));
-            var first = edgeValues(a, CENTER, 1, edge, false);
-            var second = edgeValues(b, next, 3.5f, edge, false);
+            Vector3 edge = b.ends().getFirst().point().add(BoardGeometry.center(next, 3));
+            assertTrue(a.ends().stream().anyMatch(end -> end.point().add(BoardGeometry.center(CENTER, 2)).epsilonEquals(edge, .0001f)));
+            var first = edgeValues(a, CENTER, 2, edge, false);
+            var second = edgeValues(b, next, 3, edge, false);
             assertEquals(8, first.size()); assertEquals(first.size(), second.size());
             for (var vertex : first) {
                 assertTrue(second.stream().anyMatch(v -> v.epsilonEquals(vertex, .0001f)), "Unmatched seam vertex " + vertex);
             }
-            var firstNormals = edgeValues(a, CENTER, 1, edge, true);
-            var secondNormals = edgeValues(b, next, 3.5f, edge, true);
+            var firstNormals = edgeValues(a, CENTER, 2, edge, true);
+            var secondNormals = edgeValues(b, next, 3, edge, true);
             assertEquals(1, firstNormals.size()); assertEquals(1, secondNormals.size());
             assertTrue(firstNormals.getFirst().epsilonEquals(secondNormals.getFirst(), .0001f),
                   "Lighting normals must carry the same slope across every turnout seam");
@@ -120,7 +112,7 @@ class BoardRailTest {
         for (int mask = 0; mask < 64; mask++) {
             var nodes = new java.util.HashMap<Coords, Double>(); nodes.put(CENTER, 2.0);
             for (int direction = 0; direction < 6; direction++) {
-                if ((mask & (1 << direction)) != 0) { nodes.put(CENTER.translated(direction), 1.0 + direction); }
+                if ((mask & (1 << direction)) != 0) { nodes.put(CENTER.translated(direction), 1.0 + direction % 3); }
             }
             var layout = layout(scene(nodes), CENTER);
             var mesh = BoardRail.model(layout).meshes.first();
@@ -146,7 +138,7 @@ class BoardRailTest {
 
     @Test void steadyClimbsAndDescentsKeepAConstantGradeWithoutPerHexFlatSpots() {
         for (int direction = 0; direction < 6; direction++) {
-            for (double change : new double[] { -1.5, 1.5 }) {
+            for (double change : new double[] { -1, 1 }) {
                 var nodes = new java.util.HashMap<Coords, Double>();
                 for (int step = -2; step <= 2; step++) {
                     nodes.put(CENTER.translated(step < 0 ? (direction + 3) % 6 : direction, Math.abs(step)), 5 + change * step);
@@ -169,8 +161,8 @@ class BoardRailTest {
     }
 
     @Test void changingGradesStayMonotoneAndCrestsNeverOvershootChosenHeights() {
-        for (double incoming : new double[] { -3, -1, 0, 1, 3 }) {
-            for (double outgoing : new double[] { -3, -1, 0, 1, 3 }) {
+        for (double incoming : new double[] { -1, 0, 1 }) {
+            for (double outgoing : new double[] { -1, 0, 1 }) {
                 var shape = layout(scene(Map.of(CENTER, 5.0, CENTER.translated(0), 5 + incoming,
                       CENTER.translated(3), 5 + outgoing)), CENTER);
                 var path = BoardRail.paths(shape).getFirst();
@@ -272,8 +264,26 @@ class BoardRailTest {
         assertNotEquals(layout(scene(Map.of(CENTER, 2.0, next, 3.0, beyond, 3.0)), CENTER),
               layout(scene(Map.of(CENTER, 2.0, next, 3.0, beyond, 4.0)), CENTER),
               "An edge's grade also follows its neighbour's continuation, within the existing two-hex edit invalidation");
-        var valley = layout(scene(Map.of(CENTER, 2.0, next, 4.0, CENTER.translated(3), 4.0)), CENTER);
+        var valley = layout(scene(Map.of(CENTER, 2.0, next, 3.0, CENTER.translated(3), 3.0)), CENTER);
         var path = BoardRail.paths(valley).getFirst();
         assertEquals(0, path.get(path.size() / 2).z, .0001f, "Equal higher neighbours still respect this hex's chosen level");
+    }
+
+    @Test void implicitMaglevIsTheNarrowPickableBeamWithoutSlabOrLandings() {
+        var scene = scene(Map.of(CENTER, 2.0, CENTER.translated(0), 2.0, CENTER.translated(3), 2.0));
+        var tile = scene.tile(CENTER);
+        assertTrue(BoardBridge.guideway(tile));
+        var surfaces = new java.util.HashMap<Coords, BoardSurface>();
+        var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, surfaces);
+        assertTrue(footing.shape().facets().isEmpty(), "No ordinary slab supports or landings");
+        assertTrue(footing.lengths().stream().allMatch(length -> length == 0));
+        var shape = footing.withDeck(scene, tile, BoardBridge.deck(scene, tile), TerrainLod.FULL, surfaces);
+        assertEquals(4 * BoardGeometry.hexScale(), shape.bounds().getWidth(), .001f);
+        var centre = BoardGeometry.center(CENTER, 2);
+        assertEquals(centre.z + 4 * BoardGeometry.hexScale(), BoardBridge.top(shape, centre.x, centre.y), .001f);
+        var ray = new com.badlogic.gdx.math.collision.Ray(new Vector3(centre).add(0, 0, 50), new Vector3(0, 0, -1));
+        assertTrue(Float.isFinite(shape.hit(ray)), "The guideway remains a pickable bridge deck");
+        ray.origin.x += 6 * BoardGeometry.hexScale();
+        assertFalse(Float.isFinite(shape.hit(ray)), "No invisible wide slab next to the beam");
     }
 }

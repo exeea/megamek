@@ -44,6 +44,8 @@ final class GpuGroundDamage implements Disposable {
     static final int TILE_BORDER = 8;
     static final int TILE_INTERIOR = TILE_SIZE - 2 * TILE_BORDER;
     static final float TILE_METRES = 8;
+    /** Half of the authored transition: eight metres on either side of a different-severity hex boundary. */
+    static final float AUTHORED_EDGE_METRES = 8;
     static final int STAMPS_PER_FRAME = 8;
     /**
      * Texels the marks one frame paints may cover, at least one tile's worth: a few craters fit in a frame, while a
@@ -314,15 +316,16 @@ final class GpuGroundDamage implements Disposable {
     }
 
     /**
-     * The hexes' authored scorch ({@link HexAppearance#scorch}) in the directory texels' alpha byte, for every 8 m tile
-     * whose centre lies in the hex; the terrain shows the stronger of it and a nuclear blast's. Only hexes whose scorch
-     * changed since the last scene are rewritten, and nothing when the scene's tiles are the same.
+     * The hexes' authored scorch ({@link HexAppearance#scorch}) in the directory texels' alpha byte. Neighbouring
+     * severities blend across their shared edge; equal severities stay constant. Only changed hexes and their neighbours
+     * are rewritten, and nothing when the scene's tiles are the same. Nuclear B and combat RG remain untouched.
      */
     private void author(BoardScene scene) {
         if (directory.isEmpty() || scene.tiles() == authoredTiles) { return; }
         authoredTiles = scene.tiles();
         if (authored.length != columns * rows) { authored = new byte[columns * rows]; }
         int pageSize = TILE_SIZE * TILE_SIZE;
+        Set<Coords> changed = new HashSet<>();
         boolean any = false;
         for (BoardScene.Tile tile : scene.tiles()) {
             int value = Math.round(HexAppearance.scorch(tile.appearance()) * 255);
@@ -330,7 +333,15 @@ final class GpuGroundDamage implements Disposable {
             int index = tile.coords().getY() * columns + tile.coords().getX();
             if ((authored[index] & 255) == value) { continue; }
             authored[index] = (byte) value;
-            Vector3 centre = BoardGeometry.center(tile.coords(), 0);
+            changed.add(tile.coords());
+            for (int direction = 0; direction < 6; direction++) {
+                var next = scene.neighbor(tile, direction);
+                if (next != null) { changed.add(next.coords()); }
+            }
+        }
+        // Publish every byte before sampling the field, so painting/erasing a group is independent of tile order.
+        for (Coords coords : changed) {
+            Vector3 centre = BoardGeometry.center(coords, 0);
             float halfWidth = BoardGeometry.width() * .5f, halfHeight = BoardGeometry.height() * .5f;
             int firstX = Math.max(0, (int) Math.floor((centre.x - halfWidth) / tileWorldSize));
             int lastX = Math.min(tileColumns - 1, (int) Math.floor((centre.x + halfWidth) / tileWorldSize));
@@ -338,7 +349,9 @@ final class GpuGroundDamage implements Disposable {
             int lastY = Math.min(tileRows - 1, (int) Math.floor((-centre.y + halfHeight) / tileWorldSize));
             for (int y = firstY; y <= lastY; y++) {
                 for (int x = firstX; x <= lastX; x++) {
-                    if (!BoardGeometry.contains(tile.coords(), (x + .5f) * tileWorldSize, -(y + .5f) * tileWorldSize)) { continue; }
+                    float px = (x + .5f) * tileWorldSize, py = -(y + .5f) * tileWorldSize;
+                    if (!BoardGeometry.contains(coords, px, py)) { continue; }
+                    int value = authoredAt(px, py);
                     int key = y * tileColumns + x;
                     Pixmap page = directory.get(key / pageSize);
                     int address = key % pageSize;
@@ -349,6 +362,26 @@ final class GpuGroundDamage implements Disposable {
             directoryDirty = true;
         }
         authoredAny = any;
+    }
+
+    /** The same bounded hex-distance stencil used by biome coverage, evaluated only when authored data changes. */
+    private int authoredAt(float x, float y) {
+        float width = BoardRelief.metres(AUTHORED_EDGE_METRES), sum = 0, severity = 0;
+        int column = (int) Math.floor(x / (BoardGeometry.width() * .75f));
+        for (int cx = column - 1; cx <= column + 1; cx++) {
+            if (cx < 0 || cx >= columns) { continue; }
+            int row = (int) Math.floor(-y / BoardGeometry.height() - (cx & 1) * .5f);
+            for (int cy = row - 1; cy <= row + 1; cy++) {
+                if (cy < 0 || cy >= rows) { continue; }
+                var coords = new Coords(cx, cy);
+                float distance = BoardBiome.hexDistance(Math.abs(x - BoardGeometry.centerX(coords)),
+                      Math.abs(y - BoardGeometry.centerY(coords)));
+                float weight = 1 - BoardRelief.smooth((distance + width) / (2 * width));
+                sum += weight;
+                severity += weight * (authored[cy * columns + cx] & 255);
+            }
+        }
+        return sum > 0 ? Math.round(severity / sum) : 0;
     }
 
     void impact(BoardScene scene, Impact impact, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {

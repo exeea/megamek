@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import com.badlogic.gdx.Gdx;
@@ -598,10 +599,7 @@ final class GpuBiomeVegetation implements Disposable {
                 try { mesh = new GpuInstancedMesh(template); } finally { template.dispose(); }
                 var builder = new ModelBuilder();
                 builder.begin();
-                var material = new Material(ColorAttribute.createDiffuse(Color.WHITE), IntAttribute.createCullFace(GL20.GL_NONE),
-                      new Kind(crop), new FloatAttribute(Kind.LOD, lod));
-                if (texture != null) { material.set(TextureAttribute.createDiffuse(texture)); }
-                builder.part(crop ? "crop" : "reeds", mesh, GL20.GL_TRIANGLES, material);
+                builder.part(crop ? "crop" : "reeds", mesh, GL20.GL_TRIANGLES, material(crop, lod, texture));
                 builder.manage(mesh);
                 instance = new ModelInstance(builder.end());
             }
@@ -609,10 +607,7 @@ final class GpuBiomeVegetation implements Disposable {
             if (count > capacity) {
                 if (capacity > 0) { mesh.disableInstancedRendering(); }
                 capacity = Math.max(count, Math.max(256, capacity * 2));
-                var root = new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverRoot");
-                // libGDX indexes instance attributes by usage/unit, separately from the mesh's vertex attributes.
-                mesh.enableInstancedRendering(false, capacity, crop ? new VertexAttribute[] { root,
-                      new VertexAttribute(VertexAttributes.Usage.Position, 4, "a_coverRow") } : new VertexAttribute[] { root });
+                mesh.enableInstancedRendering(false, capacity, instanceAttributes(crop));
             }
             mesh.setInstanceData(data.items, 0, data.size);
             uploads++;
@@ -624,6 +619,31 @@ final class GpuBiomeVegetation implements Disposable {
             if (instance != null) { instance.model.dispose(); }
             mesh = null; instance = null; capacity = 0;
             begin(); previous.clear(); previousSpans.clear(); previousSizes.clear(); data.clear();
+        }
+    }
+
+    private static Material material(boolean crop, int lod, Texture texture) {
+        Material material = new Material(ColorAttribute.createDiffuse(Color.WHITE), IntAttribute.createCullFace(GL20.GL_NONE),
+              new Kind(crop), new FloatAttribute(Kind.LOD, lod));
+        if (texture != null) { material.set(TextureAttribute.createDiffuse(texture)); }
+        return material;
+    }
+
+    private static VertexAttribute[] instanceAttributes(boolean crop) {
+        var root = new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverRoot");
+        // libGDX indexes instance attributes by usage/unit, separately from the mesh's vertex attributes.
+        return crop ? new VertexAttribute[] { root, new VertexAttribute(VertexAttributes.Usage.Position, 4, "a_coverRow") }
+              : new VertexAttribute[] { root };
+    }
+
+    /** These batches are created at draw time, outside terrain chunks; prepare their real layouts before editor cards draw. */
+    void prepareMaterials(BiConsumer<Material, Mesh> consumer) {
+        for (boolean isCrop : new boolean[] { true, false }) {
+            Mesh layout = template(isCrop, 0);
+            try {
+                layout.enableInstancedRendering(true, 1, instanceAttributes(isCrop));
+                consumer.accept(material(isCrop, 0, texture(isCrop, false)), layout);
+            } finally { layout.dispose(); }
         }
     }
 
@@ -798,14 +818,7 @@ final class GpuBiomeVegetation implements Disposable {
     }
 
     private void submit(Batch batch, List<ModelInstance> result, Vector3 centre) {
-        if (!batch.current.isEmpty() && (batch.crop ? crop == null : sedge == null)) {
-            if (batch.crop) {
-                var textures = cropTextures();
-                crop = textures[0];
-                canopy = textures[1];
-            } else { sedge = plantTexture("marsh-sedge"); }
-        }
-        Texture texture = batch.crop ? batch == distantCrops ? canopy : crop : sedge;
+        Texture texture = batch.current.isEmpty() ? null : texture(batch.crop, batch == distantCrops);
         long before = batch.uploads;
         ModelInstance instance = batch.upload(texture);
         uploads += batch.uploads - before;
@@ -813,6 +826,17 @@ final class GpuBiomeVegetation implements Disposable {
             instance.transform.setToTranslation(centre);
             result.add(instance);
         }
+    }
+
+    private Texture texture(boolean isCrop, boolean distant) {
+        if (isCrop ? crop == null : sedge == null) {
+            if (isCrop) {
+                var textures = cropTextures();
+                crop = textures[0];
+                canopy = textures[1];
+            } else { sedge = plantTexture("marsh-sedge"); }
+        }
+        return isCrop ? distant ? canopy : crop : sedge;
     }
 
     long uploads() { return uploads; }

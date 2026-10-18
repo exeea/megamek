@@ -171,6 +171,15 @@ final class GpuWaterPages implements Disposable {
         return material;
     }
 
+    /** The exposed water section at the board edge, also prepared for single-hex editor samples. */
+    static Material cutMaterial(Material original) {
+        Material material = new Material(original);
+        material.id = original.id + ":cut";
+        material.remove(GpuLiquidShader.Frame.TYPE | GpuLiquidShader.Frame.BLEND);
+        material.set(original.get(GpuWaterShader.class, GpuWaterShader.TYPE).cut());
+        return material;
+    }
+
     private static GpuWaterShader water(Renderable part) { return part.material.get(GpuWaterShader.class, GpuWaterShader.TYPE); }
     long rebuilds() { return rebuilds; }
     long atlasUploads() { return atlasUploads; }

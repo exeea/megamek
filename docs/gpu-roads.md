@@ -10,7 +10,7 @@ unit support must continue to agree on the underlying surface.
 
 | Code | Responsibility |
 | --- | --- |
-| `BoardScene.Tile.road / roadExits` | Carry captured road kind and exit connectivity through scene updates. `railExits` (the ground-rail sides, derived from the tile's route markers) and `wayExits` (road or rail) give the carriageway that shapes the ground. |
+| `BoardScene.Tile.road / roadExits` | Carry captured ground road kind and exits. `railBed` comes from ground rail terrain; `wayExits` (road or rail) shapes the carriageway. `deckRoad / deckRoadExits` and `corridor / deckCorridor` keep the two layers separate. |
 | `BoardRoad` | Build carriageway/junction footprints, end shapes, wear coordinates and obstacle-clearance queries. |
 | `BoardSurface` | Shape the physical approach between plateau, neighboring road and bridge deck. |
 | `BoardRelief / BoardConcrete` | Join the approach to natural cut/fill or engineered retaining walls. |
@@ -33,7 +33,7 @@ neighbor-derived tangents, and tighter adjacent-exit turns keep their own layout
 Three/four-way junctions retain their radial approaches and add the same broad curve
 at full carriageway width for every legal gentle pair of exits, including pairs used
 only by explicit rail layouts. Their approach markings and tyre wear stay unchanged.
-The rail course itself is unchanged.
+Rail and road use that same course before applying an authored beside-corridor offset.
 
 Roundabout approaches use a two-pixel fillet where they meet the circulating road.
 The closing operation erodes only exposed boundaries; internal seams between filled
@@ -54,7 +54,50 @@ relief's own rim, talus and field rocks and shrubs may stand beside a road but n
 on its carriageway or shoulder (`BoardRelief.place`).
 Changing width or a junction therefore affects more than its rendered mask.
 Markings follow the main paved route through unmarked branches. Wheel wear follows
-fixed lateral offsets through bends, endings and material changes.
+the lane centres through bends, endings and material changes.
+
+## Road and rail corridors
+
+A corridor exists only on reciprocal road/rail sides that share the same reachable
+layer. Ground roads and traditional rails use their shared, non-stranded sides;
+submerged ground and five/six-way road roundabouts do not form corridors. On a deck,
+the candidates are the intersection of `bridge_road`, `bridge_rail:1` and bridge
+exits. Deck type and distant bank connectivity do not gate a corridor. Ground and
+deck values are captured independently, and off-board shared exits retain full width.
+
+The default **Middle** layout has a central ballast strip and a 2.8-metre lane on
+either side: road half-width 13.4 model pixels, ballast half-width 5.6, and lane-centre
+wear at ±9.5. Yellow median lines border the ballast; centre dashes stop on the shared
+arms. Ordinary side roads keep their 7.5-pixel half-width. Where one crosses the track,
+the rails are set into the carriageway, the median lines stop and the existing
+level-crossing decal marks the crossing. Crossings are derived terrain decorations,
+never separate stored or pickable objects.
+
+**Beside** keeps the ordinary road width and centre dashes, nudges its centre 6.35 pixels
+to one side, and puts the rail centre 8.25 pixels to the other. Its side is stored in
+the `rail` or `bridgeRail` appearance's `beside` bits. The editor changes a connected
+corridor run together; Swap side reverses it, and Middle clears it. The one shared
+`RailRoute` course drives track meshes, buffer stops, train snapping/following and
+clearance. Authored junction layouts also determine the median rather than inventing
+a different crossing underneath the rails.
+
+The conservative clearance half-width is 13.9 pixels on shared exits. Road masks,
+scatter, bridge slabs, bridge mouths and terminal support consume that corridor.
+Sloped ground retains the existing 9-pixel ramp mouth, so the widened road accepts
+the adjoining cross-slope. These are CPU footprint and mesh changes using the existing
+road material and rail vertex colours; there is no new shader program or per-hex variant.
+
+`RailCorridorTest` covers layer matching, persistence, flips, run propagation, stops
+and riders. `BoardRoadRailTest` covers widths, markings, crossings, wheel wear and
+the shared height at the shipped Trainjob approach. The on-demand
+`GpuRoadRailSmokeTest` renders Middle and Beside on Trainjob, Depot and Ocoee from
+above and at an angle. These focused CPU and native checks passed on 2026-10-18;
+the reviewed corridor captures are in
+`build/shader-audit/handoff-20261018/final/road-rail/`. The later Depot42 mask and
+draw-order regression also passed in the grouped run recorded by
+`build/handoff-multihex-verify.log`, with its corrected capture in
+`build/shader-audit/handoff-20261018/multihex/depot42/`. No corridor timing
+improvement is claimed.
 
 Roads run like real roads through plain two-way hexes at one level: `BoardRoad.bends`
 crosses each shared border along the line from the border before it to the border after
@@ -103,14 +146,18 @@ reliably order overlapping coats after batching. Roads render before the other b
 overlays, whose normal depth ordering is retained. This adds 16 bytes per road vertex
 for atlas placement, with the existing CPU and GPU copies; it adds no triangles or masks.
 
-Coats merge as well: all road coats of a chunk share one material and one draw.
+Coats merge as well: road coats of a chunk using one mask-atlas page share one material and one draw.
 `GpuAssets.roadArray` holds the colour, normal and surface maps of asphalt, dirt and
 gravel in one texture array; markings and sand/snow verges sample the existing sculpt
 array. Each coat's maps, finish and wet response travel in its vertex colour
 (`GpuRoads.coat`), which coats did not otherwise use. A chunk emits its coats in lift
 order, so its one draw blends base coats first and wear and paint over them. A draw
 that overflows a 16-bit mesh continues with that coat's lift, which the sorter orders
-after the first. Data sets without complete road maps, and coats whose sculpt material
+after the first. If a chunk's coats span multiple pages, draws retain their coat lift:
+a gravel/markings page cannot safely draw wholly before or after an asphalt page.
+This fixes the Depot42 junction's atlas-dependent verge ordering without changing
+its geometry or coverage masks. Single-page batching is unchanged; this correction
+has no new timing claim. Data sets without complete road maps, and coats whose sculpt material
 is not in the array, keep separate materials. Bridge decks and tunnel floors keep their
 own road textures.
 
@@ -196,11 +243,11 @@ cover portals and cliff clipping.
 
 ## Bridges and invalidation
 
-`BoardBridge` follows reciprocal span connections and connected approaches. Manufactured
-spans inherit the best connected road surface: marked asphalt, unmarked asphalt, gravel,
-then dirt; without an approach the deck is plain unmarked asphalt. A co-located road below
-a deck is not an explicit deck-surface override. The span's stored type (the legacy conversion stores one on
-every loaded bridge; an untyped span draws built) makes it built or natural; natural spans use
+`BoardBridge` follows reciprocal span connections and connected approaches. Deck road
+material and exits come directly from `bridge_road`; a clean manufactured deck is
+bare concrete. A ground road below it does not paint its deck. Legacy conversion writes
+the old connected-road material choice into deck terrain once when loading old boards.
+The stored type selects manufactured, natural or implicit geometry; natural spans use
 [natural bridge geometry](gpu-natural-bridges.md).
 
 `BoardBridgeMesh` generates the built slab and kerbs from the road footprint and the
@@ -216,7 +263,10 @@ spans both retain one complete `BoardBridge.Shape` in the prepared terrain snaps
 drawing, picking, rail placement and road paint consume those same facets. Geometry is
 built during chunk preparation and retained between edits, without a separate per-frame
 bridge builder or a second camera-specific mesh. Shape-specific bridge GLBs are no longer
-used for spans; terminal and pier GLBs remain reusable details.
+used for spans; terminal and pier GLBs remain reusable details. An implicit deck
+carrying only `bridge_rail:2` uses the existing maglev guideway beam instead of the
+ordinary slab. Its exact beam triangles provide bridge picking and support, and it
+has no road landing or material apron.
 
 `BoardBridgeFooting` extends terminal decks to actual bank support. Road-connected
 ends retain the ordinary material transition. At a bare bank, rails taper after they
@@ -226,8 +276,8 @@ The physical span remains opaque.
 
 Changing a road's kind, exits or supporting geometry must invalidate the ground and
 road masks together. Rail layout edits also rebuild the containing bridge's footprint and
-side structure. A changed approach can affect the inherited surface of a connected
-span across chunk boundaries. Reused road materials must bind the replacement chunk's
+side structure. Corridor edits recapture the local neighbourhood and invalidate both
+ground and deck inputs; their eligibility has no span-wide gate. Reused road materials must bind the replacement chunk's
 atlas before the previous atlas is disposed.
 
 ## Assets and fallback

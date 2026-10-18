@@ -9,9 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import org.junit.jupiter.api.Test;
 
 class BoardSurfaceCacheTest {
@@ -51,6 +53,23 @@ class BoardSurfaceCacheTest {
         BoardSurface other = cache.get(edited, edited.tile(CENTER.translated(1)));
         assertEquals(changed.height(edge.x, edge.y), other.height(edge.x, edge.y), .003f,
               "A material boundary keeps one continuous surface");
+    }
+
+    @Test
+    void changingAnAdjacentNaturalSpanToBuiltRestoresTheBanksCliffRim() {
+        var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.SAND, false, false);
+        var span = BoardNaturalBridgeTest.CENTER;
+        var bank = span.translated(0);
+        var cache = new BoardSurface.Cache();
+        var supported = cache.get(scene, scene.tile(bank));
+        var retyped = BoardNaturalBridgeTest.replace(scene, BoardBridgeTypeTest.appearance(scene.tile(span),
+              Map.of("bridge", HexAppearance.BUILT_BRIDGE)));
+        assertEquals(scene.tile(span).features(), retyped.tile(span).features(),
+              "Changing construction family does not change the bridge terrain");
+        assertSame(scene.tile(bank), retyped.tile(bank), "Only the neighboring span was edited");
+        var cliff = cache.get(retyped, retyped.tile(bank));
+        assertNotSame(supported, cliff, "Natural approach normals must not survive replacing the rock span with a slab");
+        assertSame(cliff, cache.get(retyped, retyped.tile(bank)));
     }
 
     @Test

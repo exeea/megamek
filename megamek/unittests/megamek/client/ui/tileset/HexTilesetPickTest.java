@@ -67,6 +67,11 @@ class HexTilesetPickTest {
         assertTrue(picks("saxarba.tileset", "water:1;bridge:1:9;bridge_cf:40;bridge_elev:1;bridge_rail:1:9", "").stream()
               .allMatch(pick -> pick.contains("hq_fluff/rail09.gif")));
         assertTrue(picks("saxarba.tileset", "rail:0:9", "").stream().noneMatch(pick -> pick.contains("rail")));
+        for (String tileset : List.of("saxarba.tileset", "classic.tileset")) {
+            assertEquals(picks(tileset, "fluff:9:0", ""), picks(tileset, "rail:2:9", ""));
+            assertTrue(picks(tileset, "water:1;bridge:4:18;bridge_cf:650;bridge_elev:1;bridge_rail:2:18", "").stream()
+                  .allMatch(pick -> pick.contains("fluff/maglevtrack2.gif")));
+        }
     }
 
     /**

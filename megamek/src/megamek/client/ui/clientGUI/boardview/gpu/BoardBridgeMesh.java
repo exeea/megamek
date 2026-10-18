@@ -33,17 +33,20 @@ final class BoardBridgeMesh {
             if (RailRoute.kind(marker) != RailRoute.Kind.RAIL || !RailRoute.onDeck(marker)) { continue; }
             rail = true;
             int sides = RailRoute.drawnSides(marker, deck.exits());
-            for (var line : RailRoute.lines(sides, RailRoute.pieces(marker, sides))) {
+            for (var line : RailRoute.lines(sides, RailRoute.pieces(marker, sides), deck.corridor())) {
                 Path2D.Float path = new Path2D.Float();
-                path.moveTo(line.a()[0], line.a()[1]);
+                float[] first = line.at(0);
+                path.moveTo(first[0], first[1]);
                 int samples = line.from() >= 0 && line.to() >= 0
-                      && !RailRoute.straight(RailRoute.piece(line.from(), line.to())) ? 24 : 1;
+                      && (!RailRoute.straight(RailRoute.piece(line.from(), line.to())) || line.oa() != line.ob()) ? 24 : 1;
                 for (int i = 1; i <= samples; i++) {
-                    float[] point = RailRoute.course(line.a()[0], line.a()[1], line.b()[0], line.b()[1], i / (float) samples);
+                    float[] point = line.at(i / (float) samples);
                     path.lineTo(point[0], point[1]);
                 }
-                carriageway.add(band(path, BoardRoad.Kind.PAVED.halfWidth));
-                slab.add(band(path, BoardRoad.Kind.PAVED.halfWidth + BoardRoad.SHOULDER));
+                float half = deck.corridor().sides() == 0 ? BoardRoad.Kind.PAVED.halfWidth
+                      : BoardRoad.CORRIDOR_HALF - RailRoute.BESIDE_RAIL;
+                carriageway.add(band(path, half));
+                slab.add(band(path, half + BoardRoad.SHOULDER));
             }
         }
         if (BoardRoad.roundabout(deck.exits())) {

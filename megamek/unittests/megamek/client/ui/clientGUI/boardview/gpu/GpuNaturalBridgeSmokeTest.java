@@ -48,6 +48,7 @@ class GpuNaturalBridgeSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
                     terrain.animate(0, List.of());
                     for (var at : List.of(new Coords(6, 6), new Coords(9, 9))) {
@@ -99,6 +100,7 @@ class GpuNaturalBridgeSmokeTest {
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND, BoardScene.Surface.SNOW)) {
                         var scene = BoardNaturalBridgeTest.scene(family, false, true);
+                        frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         terrain.animate(0, List.of());
                         camera.camera.zoom = .16f;
@@ -121,6 +123,7 @@ class GpuNaturalBridgeSmokeTest {
                         }
                     }
                     var river = BoardNaturalBridgeTest.scene(BoardScene.Surface.ROCK, true, false);
+                    frame.prepare(terrain, camera, river);
                     terrain.update(river);
                     camera.setIsometric(true);
                     camera.orbit(75, 10);
@@ -130,6 +133,7 @@ class GpuNaturalBridgeSmokeTest {
                     GpuReviewFrame.save(new File(output, "river-oblique.png"));
 
                     var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.GRASS, false, true);
+                    frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
                     camera.setIsometric(false);
                     camera.center(BoardGeometry.center(at, 3));
@@ -147,6 +151,7 @@ class GpuNaturalBridgeSmokeTest {
                     var gravelTip = BoardGeometry.center(at, 3).lerp(BoardGeometry.center(at.translated(3), 3), .5f)
                           .add(0, -footing.lengths().get(3) * BoardGeometry.hexScale() - BoardRelief.metres(5), 0);
                     int bareBank = sample(camera, gravelTip);
+                    frame.prepare(terrain, camera, edited);
                     terrain.update(edited);
                     GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
                     frame.render(terrain, camera, edited);
@@ -180,6 +185,7 @@ class GpuNaturalBridgeSmokeTest {
                     camera.camera.zoom = .16f;
                     camera.setIsometric(false);
                     camera.center(BoardGeometry.center(at, 3));
+                    frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);

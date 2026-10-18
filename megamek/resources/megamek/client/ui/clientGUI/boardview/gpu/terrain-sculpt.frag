@@ -1,4 +1,5 @@
 #version 330 core
+#define SCORCH_IN_MATERIAL
 layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Sculpted tops, cliffs and the rock kit. Geometry supplies the landforms; this shader layers each surface family's
@@ -10,9 +11,9 @@ in vec2 v_diffuseUV;   // ground: rim / foot distance (drowned cliff: height abo
                             // / below top. All in metres. Wet rock: above root / pigment variation.
                             // Plants: authored red / green.
 in vec3 v_normal;
-in vec4 v_color;       // r: occlusion. g: game level (+64)/255, or for cliffs how much rock the face is (0
+in vec4 v_color;       // r: occlusion (mud-draining shell: local drop / 8 m). g: game level (+64)/255, or for cliffs how much rock the face is (0
                             // bank, 1 cliff). b: kind (0 ground, .1 a natural bridge's muddy deck top
-                            // (GpuTerrain.naturalBridge), .3 plant, .45 panel, .5 cliff, .6 abyss wall, .75 tree pit,
+                            // (GpuTerrain.naturalBridge), .3 plant, .45 panel, .5 cliff (byte 140: mud-draining shell), .6 abyss wall, .75 tree pit,
                             // 1 rock). a: bed
                             // hardness (cliff), authored blue (plant), variation (rock, a pit's earth below .5; its kerb is 1),
                             // nearest step height (.3 + .1 per level, dry ground), or below .25 on a water hex's banks
@@ -25,6 +26,7 @@ uniform sampler2DArray u_terrainData;
 uniform vec4 u_sculptLayers; // this family's colour/height layers: ground, debris, wall, mantle; normal/AO one up
 uniform vec4 u_sculptTiles; // metres per repeat: ground, debris, wall, mantle
 uniform vec2 u_treePitMaterial; // authored mulch colour layer and metres per repeat
+uniform vec2 u_scorchedMaterial; // colour/height layer and metres per repeat; data packs normal XY, roughness, AO
 uniform float u_metre;      // world units per metre
 uniform float u_normalMaps;
 uniform float u_groundResponse;
@@ -140,10 +142,10 @@ void main() {
     terrainWallProjection = panel ? projection : vec3(0.0);
     float hardness = panel ? .5 : v_color.a;
     bool abyss = cliff && kind > .55;
+    bool mudShell = cliff && !panel && !abyss && kind > 139.0 / 255.0;
+    if (mudShell) occlusion = 1.0;
     bool pit = kind >= .625 && kind < .875;
     bool shore = ground && v_color.a < .25;
-    // Dry ground's spare kind range (shores use it for their level): a natural bridge's muddy deck top.
-    bool deckMud = ground && !shore && kind > .05;
     // Rock-kind bytes 224..254 carry the fractional water level; 255 remains ordinary dry rock.
     bool wetRock = kind >= .875 && kind < .999;
     bool waterCovered = shore || wetRock;
@@ -187,6 +189,11 @@ void main() {
     // Smooth value fields from the shared 64-texel noise: broad has ~11 m cells, fine ~2.5 m, and region ~40 m.
     vec3 fields = groundFields(u_rainNoise, world);
     float broad = fields.x, fine = fields.y, region = fields.z;
+    // Keep the walking surface fully muddy. Deposits continue over its caprock edge and drain down the shell,
+    // with the existing world fields varying their reach. The shell carries drop from its local TOP edge, so
+    // descending decks keep the same fade. The material's own height breaks the margin without extra reads.
+    float deckMud = ground && !shore && kind > .05 ? 1.0
+          : mudShell ? 1.0 - smoothstep(.35, mix(1.3, 2.9, .35 * broad + .65 * fine), v_color.r * 8.0) : 0.0;
     MaterialProjection rockProjection = materialProjection(world, face);
     vec3 albedo = toLinear(vec3(.52));
     vec3 normal = face;
@@ -420,7 +427,7 @@ void main() {
 #ifdef biomeMaskFlag
         if (ground || cliff || bedrock) {
             biomeSurface(world, face, shore, above, cliff || bedrock ? v_diffuseUV.x : 0.0,
-                  cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x, materialHeight, sand, deckMud ? 1.0 : 0.0,
+                  cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x, materialHeight, sand, deckMud, region,
                   albedo, normal, cavity, roughness, grass, bounce, biomePool, biomeDamp);
         }
 #endif
@@ -483,6 +490,40 @@ void main() {
         groundDamage(world, face, grass, sand, exposed, albedo, normal, cavity, roughness);
     }
     if (!ground && u_surfaceScar > .5) groundDamage(world, face, 0.0, sand, exposed, albedo, normal, cavity, roughness);
+    // Scorch replaces material before rain, grid and elevation grade. Severity zero takes no material samples.
+    if (u_clay < .5 && u_groundScorch.x > 0.0 && volcanic < 1.0) {
+        vec2 scorch = groundScorches(v_cloudPosition.xy) * exposed * (1.0 - volcanic);
+        float severity = max(scorch.x, scorch.y);
+        if (severity > 0.0) {
+            severity += .025 * (2.0 * fine - 1.0) * 4.0 * severity * (1.0 - severity);
+            float top = leaf ? 0.0 : smoothstep(.35, .65, face.z);
+            vec3 sites = SCORCH_SITES;
+            float height = .5, referenceRoughness = .28, ao = 1.0;
+            vec3 detail = vec3(0.0, 0.0, 1.0);
+            if (top > 0.0) {
+                PackedTopCoordinates uv = packedTopCoordinates(rockProjection, u_scorchedMaterial.y, region);
+                vec4 reference = packedTopColor(u_scorchedMaterial.x, uv);
+                vec2 surface = packedTopSurface(u_scorchedMaterial.x, uv, detail);
+                sites = mix(sites, scorchSites(reference.rgb, surface.x), top);
+                height = mix(height, reference.a, top);
+                referenceRoughness = sqrt(mix(referenceRoughness * referenceRoughness, surface.x * surface.x, top));
+                ao = mix(ao, surface.y, top);
+            }
+            Scorched deposit = scorched(severity, sites, referenceRoughness, height);
+            albedo = mix(albedo, deposit.albedo, deposit.coverage);
+            roughness = sqrt(mix(roughness * roughness, deposit.roughness * deposit.roughness, deposit.coverage));
+            cavity = mix(cavity, ao, deposit.coverage);
+            if (u_normalMaps > .5 && terrainNormalDetail > 0.0 && top > 0.0) {
+                detail = normalize(vec3(detail.xy * deposit.detail, detail.z));
+                normal = normalize(mix(normal, upNormal(detail, face),
+                      deposit.coverage * smoothstep(.12, .75, severity) * top * terrainNormalDetail));
+            }
+            // Only a nuclear blast heats the sparse fused fissures. Painted glass is always cold.
+            float heat = u_groundScorch.y;
+            emission += deposit.coverage * smoothstep(.78, .97, scorch.x) * top
+                  * (1.0 - smoothstep(.04, .12, height)) * heat * heat * 1.1 * vec3(1.0, .12, .01);
+        }
+    }
     // Rain darkens exposed ground and rock, and gathers in puddles on level ground.
     float wet = u_wetness * rainCover * exposed;
     // Moisture darkens porous peat, but does not turn its entire surface into standing water. Rain

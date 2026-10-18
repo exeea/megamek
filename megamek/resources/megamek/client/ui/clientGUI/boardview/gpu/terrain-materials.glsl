@@ -805,6 +805,35 @@ void topCoordinates(MaterialProjection p, float tile, float variation, bool tran
     }
 }
 
+// Authored packed layers share translated coordinates for colour/height and normal XY/roughness/AO.
+// Keep the reads separate so height competition can reject a layer before its surface data is fetched.
+struct PackedTopCoordinates { vec2 a; vec2 b; mat2 gradient; float blend; };
+
+PackedTopCoordinates packedTopCoordinates(MaterialProjection p, float tile, float variation) {
+    PackedTopCoordinates uv;
+    topCoordinates(p, tile, variation, true, uv.a, uv.b, uv.gradient, uv.blend);
+    return uv;
+}
+
+vec4 packedTopColor(float layer, PackedTopCoordinates uv) {
+    return mix(materialTexel(u_terrainLayers, layer * .5, uv.a, uv.gradient),
+          materialTexel(u_terrainLayers, layer * .5, uv.b, uv.gradient), uv.blend);
+}
+
+// Returns RMS roughness and AO. Numeric maps remain necessary when normal detail is disabled or distant.
+vec2 packedTopSurface(float layer, PackedTopCoordinates uv, out vec3 normal) {
+    vec4 a = materialTexel(u_terrainData, layer * .5, uv.a, uv.gradient);
+    vec4 b = materialTexel(u_terrainData, layer * .5, uv.b, uv.gradient);
+    normal = vec3(0.0, 0.0, 1.0);
+    if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+        vec2 xyA = a.rg * 2.0 - 1.0, xyB = b.rg * 2.0 - 1.0;
+        vec3 nA = normalize(vec3(xyA, sqrt(max(1.0 - dot(xyA, xyA), .001))));
+        vec3 nB = normalize(vec3(xyB, sqrt(max(1.0 - dot(xyB, xyB), .001))));
+        normal = normalize(mix(nA, nB, uv.blend));
+    }
+    return vec2(sqrt(mix(a.b * a.b, b.b * b.b, uv.blend)), mix(a.a, b.a, uv.blend));
+}
+
 // Sides: one read per projection, the two side projections always and the top only where the face lies back.
 // Tops (no sides): the top projection's two reads; far away two repeats settle to the map's average.
 vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float variation, bool translated) {

@@ -191,7 +191,9 @@ class GpuTerrainPreparationSmokeTest {
                 // Recognize actual ice fragment programs as well as sculpt assembly; unrelated vegetation
                 // includes groundToneFor too. The macro plus fragment helper excludes ice vertex sources.
                 boolean ice = text.contains("#define iceFlag\n") && text.contains("vec3 iceFinish(");
-                if (!ice && !text.contains("// sculpt-material-functions")) {
+                // GpuGlsl removes comments before driver upload. Identify executable sculpt code, not its
+                // assembly marker, so this observes both synchronous and shared-context compilation.
+                if (!ice && !text.contains("vec4 debrisWeights()")) {
                     if (drawing && !compiled && text.contains("vec3 groundToneFor(")) {
                         Files.writeString(report, String.format(Locale.ROOT,
                               "phase %d non-sculpt shared-ground source %08x submitted during draw (%d chars)%n",
@@ -204,7 +206,6 @@ class GpuTerrainPreparationSmokeTest {
                 for (String flag : new String[] { "iceFlag", "volcanicFlag", "terrainBlendFlag", "cloudShadowFlag" }) {
                     if (text.contains("#define " + flag)) { variants.add(flag); }
                 }
-                if (!text.contains("#define shadowMapFlag")) { variants.add("unlit"); }
                 if (compiled) {
                     String ordinaryFamily = null;
                     for (String line : text.split("\\R")) {
@@ -282,8 +283,8 @@ class GpuTerrainPreparationSmokeTest {
                     Files.writeString(report, String.format(Locale.ROOT, "phase %d ready after %.3f ms%n",
                           phase, (System.nanoTime() - started) / 1_000_000.0), StandardOpenOption.APPEND);
                     if (phase == 0) {
-                        assertEquals(1, compiledSources.size(),
-                              "Uniform grass needs one sculpt program, which also draws its scars");
+                        assertEquals(1, compiledSources.stream().filter(text -> !text.contains("#define SCULPT_FAMILY ")).count(),
+                              "Uniform grass needs one generic sculpt program, which also draws its scars");
                         assertFalse(variants.contains("terrainBlendFlag"), "A uniform board must not prepare unused blends");
                     }
                     if (phase == 1) {
@@ -301,13 +302,19 @@ class GpuTerrainPreparationSmokeTest {
                         }
                         for (String family : new String[] { "3", "2", "0", "-2" }) {
                             String prefix = "#define VOLCANIC_ORDINARY_FAMILY " + family + "\n";
-                            assertEquals(1, compiledSources.stream().filter(text -> text.contains(prefix)).count(),
+                            assertEquals(1, compiledSources.stream().filter(text -> text.contains(prefix)
+                                        && !text.contains("#define SCULPT_FAMILY ")).count(),
                                   "Slot order must not multiply a family's prepared programs: " + family);
                         }
                     }
                     if (phase >= 5) {
                         assertTrue(compiledIceModes.containsAll(Set.of("3.0", "6.0")),
                               "Actual slab and fall programs must be published before drawing: " + compiledIceModes);
+                    }
+                    if (phase == 2 || phase == 6) {
+                        assertFalse(frame.lighting().sunlight(), "The fixture reached its moonless night phase");
+                        assertEquals(0f, frame.lighting().direct().r + frame.lighting().direct().g + frame.lighting().direct().b,
+                              "Moonless lighting has no direct source; the same prepared program remains usable");
                     }
                     int preparedSources = compiledSources.size();
                     long drawStarted = System.nanoTime();
@@ -325,7 +332,7 @@ class GpuTerrainPreparationSmokeTest {
                           phase, (System.nanoTime() - drawStarted) / 1_000_000.0, preparedSources, compiledSources.size()),
                           StandardOpenOption.APPEND);
                     if (++phase == 7) {
-                        assertTrue(variants.containsAll(Set.of("iceFlag", "volcanicFlag", "terrainBlendFlag", "cloudShadowFlag", "unlit")),
+                        assertTrue(variants.containsAll(Set.of("iceFlag", "volcanicFlag", "terrainBlendFlag", "cloudShadowFlag")),
                               "The fixture must exercise every required variant: " + variants);
                         Gdx.app.exit();
                     } else {

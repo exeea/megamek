@@ -177,11 +177,9 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         }
     }
 
-    /** A layout-only mesh with a batch's instance attributes, for an instanced part's warm-up sample. */
-    static Mesh sampleMesh(VertexAttributes layout) {
-        Mesh mesh = new Mesh(true, 0, 0, layout);
-        mesh.enableInstancedRendering(true, 1, attributes(RigidGlb.colourSlotted(layout)));
-        return mesh;
+    /** A batch's actual instance layout, including colour slots when its vertex layout addresses them. */
+    static VertexAttributes instanceAttributes(VertexAttributes layout) {
+        return new VertexAttributes(attributes(RigidGlb.colourSlotted(layout)));
     }
 
     /** One chunk's trees, grouped by species; each tree as {@link #STRIDE} floats. */

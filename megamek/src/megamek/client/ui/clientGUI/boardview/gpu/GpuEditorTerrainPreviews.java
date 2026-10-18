@@ -15,6 +15,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.client.ui.boardeditor.BoardEditorSession;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardEditorBlueprint;
@@ -46,6 +47,21 @@ final class GpuEditorTerrainPreviews implements Disposable {
     private final BoardCamera camera = new BoardCamera();
     private GpuTerrain lender;
 
+    /** Prepare the private renderer while the editor still shows its loading stage, not at the first palette card. */
+    boolean prepare(GpuTerrain board, BoardScene shown) {
+        boolean[] ready = { false };
+        GpuGlsl.offscreen(() -> {
+            use(board);
+            if (lender == null) { return; }
+            createRenderer();
+            configure(shown);
+            atmosphere.prepare();
+            terrain.prepareEffects();
+            ready[0] = terrain.preparePreviewPrograms(board);
+        });
+        return ready[0];
+    }
+
     void add(String theme, String component, String variant, Image target) {
         add(new Sample(theme.isEmpty() ? "grass" : theme, component, variant, null), target);
     }
@@ -74,10 +90,7 @@ final class GpuEditorTerrainPreviews implements Disposable {
     }
 
     private void updateSamples(GpuTerrain board) {
-        if (board != lender) {
-            disposeRenderer();
-            lender = board;
-        }
+        use(board);
         if (lender == null) { return; }
         cache.values().forEach(value -> value.targets().removeIf(image -> image.getStage() == null));
         queue.values().forEach(targets -> targets.removeIf(image -> image.getStage() == null));
@@ -125,26 +138,41 @@ final class GpuEditorTerrainPreviews implements Disposable {
         }
     }
 
+    private void use(GpuTerrain board) {
+        if (board != lender) {
+            disposeRenderer();
+            lender = board;
+        }
+    }
+
     /** Starts building {@link #scene}, the current sample, in the sample renderer. */
     private void show() {
-        if (terrain == null) {
-            terrain = new GpuTerrain(lender); atmosphere = new GpuAtmosphere();
-            atmosphere.configure(BoardAtmosphere.DEFAULTS);
-            camera.resize(WIDTH, HEIGHT);
-        }
+        createRenderer();
         camera.setIsometric(true);
         if (current.component().isEmpty()) {
             camera.orbit(-15, 0);
             camera.fit(scene, THEME_HEXES.stream().map(scene::tile).toList());
         } else { camera.fit(scene); }
+        configure(scene);
+        terrain.update(scene, camera.camera);
+    }
+
+    private void createRenderer() {
+        if (terrain == null) {
+            terrain = new GpuTerrain(lender); atmosphere = new GpuAtmosphere();
+            atmosphere.configure(BoardAtmosphere.DEFAULTS);
+            camera.resize(WIDTH, HEIGHT);
+        }
+    }
+
+    private void configure(BoardScene board) {
         atmosphere.updateLight(camera.camera); terrain.setAtmosphere(atmosphere.lighting());
-        atmosphere.configureClouds(terrain, scene);
+        atmosphere.configureClouds(terrain, board);
         // The board's lighting configuration, so the samples draw with its programs. Outside the board's opaque pass
         // its occlusion reads visibility 1 (GpuAmbientOcclusion.texture).
         var occlusion = lender.environment().get(GpuAmbientOcclusion.TYPE);
         if (occlusion == null) { terrain.environment().remove(GpuAmbientOcclusion.TYPE); }
         else { terrain.environment().set(occlusion); }
-        terrain.update(scene, camera.camera);
     }
 
     /** The sample renderer goes before the board renderer whose assets it borrows. */
@@ -168,7 +196,7 @@ final class GpuEditorTerrainPreviews implements Disposable {
         } catch (RuntimeException failure) { buffer.dispose(); throw failure; }
     }
 
-    private BoardScene capture(Sample sample) {
+    private static BoardScene capture(Sample sample) {
         BoardEditorBlueprint blueprint = BoardEditorBlueprint.get();
         boolean theme = sample.component().isEmpty();
         Board board = Board.createEmptyBoard(theme ? 2 : 1, theme ? 2 : 1);
@@ -231,9 +259,11 @@ final class GpuEditorTerrainPreviews implements Disposable {
      * loads (GpuTerrain), so a stroke of lava, water, ice or another surface the board lacks, and the palette's cards,
      * find them linked.
      */
-    static BoardScene kinds() {
+    static List<BoardScene> kinds() {
         BoardEditorBlueprint blueprint = BoardEditorBlueprint.get();
         List<Hex> hexes = new ArrayList<>();
+        // Category icons are real hex stamps, including their placed props and coloured plant variants.
+        blueprint.categories().forEach(category -> hexes.add(category.icon()));
         for (var component : blueprint.components()) {
             if (component.preview() != null && !component.preview().isEmpty()) { hexes.add(hex(blueprint, component.id(), "", "")); }
             component.presets().forEach(preset -> hexes.add(hex(blueprint, component.id(), "preset:" + preset.id(), "")));
@@ -241,14 +271,21 @@ final class GpuEditorTerrainPreviews implements Disposable {
                 blueprint.variants(component.id()).forEach(variant -> hexes.add(hex(blueprint, component.id(), variant.id(), "")));
             }
         }
-        blueprint.specialThemes().forEach(theme -> hexes.add(new Hex(0, "", theme)));
+        // Ice can be painted over a material boundary; clear-on-clear ice alone has no blend vertex layout.
+        hexes.add(new Hex(0, "ice:1", "rock"));
         // Clear ground between them, as around a stroke on a plain board: each blends with that alone.
         int width = (int) Math.ceil(Math.sqrt(hexes.size()));
         Board board = Board.createEmptyBoard(2 * width - 1, 2 * ((hexes.size() + width - 1) / width) - 1);
         board.setNativeFormat(true);
         for (int i = 0; i < hexes.size(); i++) { board.setHex(new Coords(2 * (i % width), 2 * (i / width)), hexes.get(i)); }
-        return new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board), List.of(), List.of(), -1,
-              "", List.of());
+        List<BoardScene> scenes = new ArrayList<>();
+        scenes.add(new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board), List.of(), List.of(), -1,
+              "", List.of()));
+        // Species selection uses hex coordinates. Keep the actual theme card's coordinates rather than moving its
+        // plants onto the mixed sheet, which can choose different models (notably normal-mapped desert cacti).
+        java.util.stream.Stream.concat(BoardArtwork.themes().stream(), blueprint.specialThemes().stream()).distinct()
+              .forEach(theme -> scenes.add(capture(new Sample(theme, "", "", null))));
+        return scenes;
     }
 
     private static void assign(Image target, FrameBuffer buffer) {

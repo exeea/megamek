@@ -69,7 +69,7 @@ a slowly varying board-wide field, so neighbouring formations align. A fifth of 
 plain and its root is never above the downhill side; one near the hex edge shrinks to fit.
 
 At zero gravity `terrain-sculpt.frag` shades the dry rock kit with the ground's own
-`naturalMaterial` as fully exposed rock: bedding planes and skirts take the plain's cover in the
+`cliffMaterial` as fully exposed rock: bedding planes and skirts take the plain's cover in the
 same world projection, scarps its wall. Occlusion toward the root remains only on scarps. Rim
 formations and fallen blocks below cliffs share this shading but keep their placement.
 

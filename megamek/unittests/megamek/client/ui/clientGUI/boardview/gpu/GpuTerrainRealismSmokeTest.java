@@ -35,6 +35,7 @@ import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.planetaryConditions.Atmosphere;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -57,6 +58,7 @@ class GpuTerrainRealismSmokeTest {
     private record Variant(String name, String repeat, Map<String, String> sources) { }
 
     private static final List<Landscape> LANDSCAPES = List.of(
+          new Landscape("grassland", "AGoAC Maps/16x17 Grassland 3.board"),
           new Landscape("forest", "Map Set 4/16x17 Heavy Forest 1.board"),
           new Landscape("canyon", "Map Pack Savannahs/16x17 Box Canyon (Savannah).board"),
           new Landscape("lake", "Map Pack Savannahs/16x17 Mountain Lake (Savannah).board"),
@@ -76,12 +78,28 @@ class GpuTerrainRealismSmokeTest {
         var selectedViews = Arrays.asList(System.getProperty("megamek.gpu.realismViews", "top,iso").split(","));
         var selectedConditions = Arrays.asList(System.getProperty("megamek.gpu.realismConditions", "morning,midday,overcast,night").split(","));
         boolean overlays = Boolean.getBoolean("megamek.gpu.realismOverlays");
+        boolean fitted = Boolean.getBoolean("megamek.gpu.realismFitted");
+        boolean scorch = Boolean.getBoolean("megamek.gpu.realismScorch");
+        assertTrue(!scorch || System.getProperty("megamek.gpu.shaderAuditBaseline") == null,
+              "Scorched cost compares current clean/scorched boards, not old/new scorch recipes");
         boolean freezeAnimation = CAPTURE_ONLY || overlays || Boolean.getBoolean("megamek.gpu.realismFreezeAnimation");
         var views = new ArrayList<View>();
         for (Landscape landscape : LANDSCAPES) {
             if (!selected.contains(landscape.name)) { continue; }
             var board = new Board();
             board.load(new File("data/boards", landscape.path));
+            if (scorch) {
+                var severities = List.of("singed", "charred", "ash", "glass");
+                for (int x = 0; x < board.getWidth(); x++) {
+                    for (int y = 0; y < board.getHeight(); y++) {
+                        var hex = board.getHex(x, y);
+                        var appearance = new HashMap<>(hex.getAppearance());
+                        int quadrant = (x < board.getWidth() / 2 ? 0 : 1) + (y < board.getHeight() / 2 ? 0 : 2);
+                        appearance.put("scorch", new HexAppearance("scorch/" + severities.get(quadrant), null, null, null));
+                        hex.setAppearance(appearance);
+                    }
+                }
+            }
             var captured = new AtomicReference<BoardScene>();
             try (var fixture = GpuBoardFixture.create(board)) {
                 SwingUtilities.invokeAndWait(() -> {
@@ -141,8 +159,9 @@ class GpuTerrainRealismSmokeTest {
         config.setWindowedMode(1440, 900);
         config.useVsync(false);
         config.setForegroundFPS(0);
-        int warmup = CAPTURE_ONLY ? 3 : 30;
-        int samples = CAPTURE_ONLY ? 0 : 60;
+        int warmup = CAPTURE_ONLY ? 3 : Integer.getInteger("megamek.gpu.realismWarmup", 30);
+        int samples = CAPTURE_ONLY ? 0 : Integer.getInteger("megamek.gpu.realismSamples", 60);
+        assertTrue(warmup >= 0 && (CAPTURE_ONLY || samples > 0), "Invalid measurement frame counts");
         String reportName = CAPTURE_ONLY ? "visual-review.txt" : "timings.txt";
         new Lwjgl3Application(new ApplicationAdapter() {
             private final GpuShaderManager manager = new GpuShaderManager();
@@ -240,6 +259,12 @@ class GpuTerrainRealismSmokeTest {
                         report.append("Lighting review: animation advances .5s once per board, then freezes across cases.\n");
                     }
                     if (pressureName != null) { report.append("Pressure override: ").append(pressureName).append('\n'); }
+                    report.append("Camera framing: ").append(fitted ? "fitted board" : "middle zoom").append('\n');
+                    if (scorch) {
+                        report.append("Scorch workload: singed/charred/ash/glass in NW/NE/SW/SE quadrants, ")
+                              .append("plus one cooled nuclear footprint; current shaders only. ")
+                              .append("Compare with the identical clean-board current run.\n");
+                    }
                     if (stableOrder) { report.append("Stable draw sorting enabled for this process.\n"); }
                     if (variants.size() > 1) {
                         report.append("Source comparisons use stable draw sorting; frozen same-source repeats must be byte-exact.\n")
@@ -619,6 +644,18 @@ class GpuTerrainRealismSmokeTest {
                     compositor.prepare(terrain, camera, installed.board);
                     long initialBuild = preparationStart(view.name() + "-initial-update-blocking");
                     terrain.update(installed.board);
+                    if (scorch) {
+                        var centre = BoardGeometry.center(new Coords(installed.board.width() / 2,
+                              installed.board.height() / 2), 0);
+                        terrain.scorch(installed.board, new GpuGroundDamage.Scorch(centre,
+                              BoardRelief.metres(80), BoardRelief.metres(15)));
+                        // Cold nuclear residue retains the directory workload without a wall-clock-varying image.
+                        var clock = GpuGroundDamage.class.getDeclaredField("scorchedAt");
+                        clock.setAccessible(true);
+                        clock.setLong(terrain.groundDamage(), System.nanoTime() - 3_600_000_000_000L);
+                        terrain.groundDamage().upload();
+                        assertTrue(terrain.groundDamage().scorchShown());
+                    }
                     preparationEnd(view.name() + "-initial-update-blocking", initialBuild, report);
                     var coords = new Coords(installed.board.width() / 2, installed.board.height() / 2);
                     var center = BoardGeometry.center(coords, 0);
@@ -639,7 +676,7 @@ class GpuTerrainRealismSmokeTest {
                 if (CAPTURE_ONLY || view.conditions.name.equals("midday")) {
                     GpuReviewFrame.save(new File(output, view.name() + "-overview.png"));
                 }
-                camera.camera.zoom = Math.min(.55f, camera.camera.zoom);
+                if (!fitted) { camera.camera.zoom = Math.min(.55f, camera.camera.zoom); }
                 camera.update();
                 long closeStart = preparationStart(view.name() + "-close-settle");
                 settleView();

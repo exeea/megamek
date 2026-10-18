@@ -83,7 +83,7 @@ final class BoardSurface {
     record Geometry(int elevation, int waterDepth, boolean frozen, int roadExits, BoardScene.Surface surface,
           BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps,
           List<ConcreteFit.Shift> coast, BoardRoad.Kind road, BoardScene.Biome biome, int cliffTopExits, boolean bare,
-          boolean barren, BoardSurfaceBlend.Cover groundCover, boolean ultraSublevel) { }
+          boolean barren, BoardSurfaceBlend.Cover groundCover, boolean ultraSublevel, boolean naturalBridge) { }
 
     /** What of a hex further out can reach a hex's shape: through the water's shore, its level, liquid and ground. */
     record Shape(int elevation, int waterDepth, boolean frozen, BoardLiquid liquid, boolean detailedGround, BoardScene.Surface surface,
@@ -135,7 +135,8 @@ final class BoardSurface {
         return tile == null ? null : new Geometry(tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
               tile.surface(), tile.liquid(), tile.detailedGround(), tile.features(), ramps(scene, tile),
               BoardConcrete.of(scene).corners(tile.coords()), tile.road(), tile.biome(), tile.cliffTopExits(), tile.bare(),
-              tile.barren(), tile.groundCover(), tile.ultraSublevel());
+              tile.barren(), tile.groundCover(), tile.ultraSublevel(),
+              BoardBridge.feature(tile) != null && BoardBridge.family(tile) == BoardBridge.Family.NATURAL);
     }
 
     static int ramps(BoardScene scene, BoardScene.Tile tile) {
@@ -2343,7 +2344,7 @@ final class BoardSurface {
     }
 
     private void simplifyRoad() {
-        BoardRoad road = BoardRoad.clearance(tile.coords(), tile.wayExits() | ramps);
+        BoardRoad road = BoardRoad.clearance(tile.coords(), tile.wayExits() | ramps, tile.corridor());
         float scale = BoardGeometry.hexScale();
         BoardRampMesh.simplify(faces, center, p -> road.distance((p.x - center.x) / scale, (p.y - center.y) / scale)
               <= BoardRoad.SHOULDER, p -> roadRamps.stream().anyMatch(ramp -> ramp.curved(p)));
@@ -2352,7 +2353,7 @@ final class BoardSurface {
     /** Concrete stays a flat slab outside the road corridor; retaining walls carry the cut/fill inside it. */
     private void concreteRoad() {
         List<Face> graded = List.copyOf(faces);
-        BoardRoad road = BoardRoad.clearance(tile.coords(), tile.wayExits() | ramps);
+        BoardRoad road = BoardRoad.clearance(tile.coords(), tile.wayExits() | ramps, tile.corridor());
         Area corridor = road.footprint(BoardRoad.SHOULDER);
         float scale = BoardGeometry.hexScale();
         corridor.transform(new AffineTransform(scale, 0, 0, scale, center.x, center.y));

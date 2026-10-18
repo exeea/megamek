@@ -41,6 +41,24 @@ class BoardLegacyRailTest {
     private static List<BoardDecoration> rails(Hex hex) { return RailRoute.markers(hex, RailRoute.Kind.RAIL); }
 
     @Test
+    void roadFollowingHairpinStubsAreDroppedOnlyByLegacyConversion() {
+        for (int sides : new int[] { 3, 7 }) {
+            Board board = board(Map.of(AT, "road:1:" + sides + ";fluff:10:" + sides));
+            BoardSceneryLayouts.convert(board);
+            int kept = sides & ~RailRoute.stranded(sides);
+            if (kept == 0) { assertFalse(board.getHex(AT).containsTerrain(Terrains.RAIL)); }
+            else { assertEquals(kept, board.getHex(AT).getTerrain(Terrains.RAIL).getExits()); }
+            assertTrue(board.getHex(AT).containsTerrain(Terrains.ROAD), "The road still follows its full hairpin");
+        }
+        Board offRoad = board(Map.of(AT, "road:1:9;fluff:10:3"));
+        BoardSceneryLayouts.convert(offRoad);
+        assertEquals(3, offRoad.getHex(AT).getTerrain(Terrains.RAIL).getExits(), "Unrelated rail stubs stay");
+        Board deck = board(Map.of(AT, "water:1;bridge:1:3;bridge_elev:1;bridge_cf:40;road:1:3;fluff:10:3"));
+        BoardSceneryLayouts.convert(deck);
+        assertEquals(3, deck.getHex(AT).getTerrain(Terrains.BRIDGE_RAIL).getExits(), "Deck rails are not dropped");
+    }
+
+    @Test
     void everyLegacyRailSpriteBecomesRailTerrainWithItsSidesAndLeavesNoToken() throws Exception {
         for (int value = 1; value < 70; value++) {
             String terrain = "fluff:10:" + value;
@@ -209,7 +227,7 @@ class BoardLegacyRailTest {
         var rail = new BoardDecoration("r", "prop", RailRoute.Kind.RAIL.asset, null, 0, 0, 0, false, 1,
               BoardDecoration.Placement.on("bridge", 0), 0, false).withConnections(9);
         hex.addTerrain(new megamek.common.units.Terrain(Terrains.BRIDGE, 1, true, 9));
-        hex.setDecorations(List.of(rail));
+        RailRoute.lay(hex, true, 9, 0);
         var train = BoardSceneryLayouts.stamp("scenery/rail/train", hex, AT);
         assertFalse(train.isEmpty());
         for (var vehicle : train) {

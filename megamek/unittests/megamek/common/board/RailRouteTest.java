@@ -160,7 +160,7 @@ class RailRouteTest {
     }
 
     @Test
-    void joinsNeedTheSameKindAndBothSidesAndCrossingMaglevsOwnDisjointSides() {
+    void joinsNeedTheSameKindAndBothSidesAndGroundAndDeckStaySeparate() {
         var north = marker(RailRoute.Kind.RAIL, "n", 8, BoardDecoration.Placement.ground());
         var here = marker(RailRoute.Kind.RAIL, "h", 9, BoardDecoration.Placement.ground());
         assertTrue(RailRoute.joined(here, 0, north));
@@ -168,18 +168,14 @@ class RailRouteTest {
         var maglevNorth = marker(RailRoute.Kind.MAGLEV, "mn", 8, BoardDecoration.Placement.absolute(2));
         assertFalse(RailRoute.joined(here, 0, maglevNorth), "rails and maglev never join");
 
-        // A hex with a maglev N-S at level 2 and one NE-SW at level 4, crossing over it: each neighbour joins the marker
-        // that owns its side.
-        var low = marker(RailRoute.Kind.MAGLEV, "low", 9, BoardDecoration.Placement.absolute(2));
-        var high = marker(RailRoute.Kind.MAGLEV, "high", 18, BoardDecoration.Placement.absolute(4));
-        var crossing = new Hex(0);
-        crossing.setDecorations(List.of(low, high));
-        var southWest = marker(RailRoute.Kind.MAGLEV, "sw", 2, BoardDecoration.Placement.absolute(4));
-        var south = marker(RailRoute.Kind.MAGLEV, "s", 1, BoardDecoration.Placement.absolute(2));
-        assertEquals(List.of(low, high), RailRoute.markers(crossing, RailRoute.Kind.MAGLEV));
-        assertSame(high, RailRoute.joined(southWest, 1, crossing), "the SW neighbour joins the upper route");
-        assertSame(low, RailRoute.joined(south, 0, crossing), "the S neighbour joins the lower route");
-        assertNull(RailRoute.joined(here, 0, crossing), "no rail there");
+        var crossing = new Hex(0, "rail:2:9;bridge:4:18;bridge_elev:4;bridge_cf:650;bridge_rail:2:18", "");
+        var routes = RailRoute.markers(crossing, RailRoute.Kind.MAGLEV);
+        assertEquals(2, routes.size());
+        var southWest = marker(RailRoute.Kind.MAGLEV, "sw", 2, BoardDecoration.Placement.on("bridge", 0));
+        var south = marker(RailRoute.Kind.MAGLEV, "s", 1, BoardDecoration.Placement.ground());
+        assertEquals(RailRoute.DECK_RAIL, RailRoute.joined(southWest, 1, crossing).id());
+        assertEquals(RailRoute.GROUND_RAIL, RailRoute.joined(south, 0, crossing).id());
+        assertNull(RailRoute.joined(here, 0, crossing), "No ordinary rail there");
     }
 
     @Test
@@ -187,7 +183,8 @@ class RailRouteTest {
         var hex = new Hex(0, "bridge:1:18;bridge_elev:1;bridge_cf:40", "");
         var ground = marker(RailRoute.Kind.RAIL, "g", 9, BoardDecoration.Placement.ground());
         var deck = marker(RailRoute.Kind.RAIL, "d", 18 | 1, BoardDecoration.Placement.on("bridge", 0));
-        hex.setDecorations(List.of(ground, deck, marker(RailRoute.Kind.MAGLEV, "m", 36, BoardDecoration.Placement.absolute(3))));
+        RailRoute.lay(hex, false, 9, 0);
+        RailRoute.lay(hex, true, 18, 0);
         assertEquals(9, RailRoute.groundSides(hex), "a rail beneath the deck shapes the ground; the deck's and maglev's do not");
         assertEquals(18, RailRoute.drawnSides(deck, 18), "a deck carries track only along itself");
         assertEquals(9, RailRoute.drawnSides(ground, 18));
@@ -234,12 +231,12 @@ class RailRouteTest {
     void tracksRoundTripThroughBoard2() throws Exception {
         var board = Board.createEmptyBoard(1, 1);
         var route = marker(RailRoute.Kind.RAIL, "r", 29, BoardDecoration.Placement.ground()).withTracks(1 | 1 << RailRoute.piece(2, 4));
-        board.getHex(0, 0).setDecorations(List.of(route, marker(RailRoute.Kind.RAIL, "plain", 9, BoardDecoration.Placement.ground())));
+        RailRoute.lay(board.getHex(0, 0), false, route.connections(), route.tracks());
         var output = new java.io.ByteArrayOutputStream();
         BoardFile.write(board, output);
         String saved = output.toString(java.nio.charset.StandardCharsets.UTF_8);
         assertEquals(1, saved.split("\"tracks\"", -1).length - 1, "written only where it differs from the default");
-        assertEquals(board.getHex(0, 0).getDecorations(), BoardFile.readNative(saved).getHex(0, 0).getDecorations());
+        assertEquals(board.getHex(0, 0).getAppearance(), BoardFile.readNative(saved).getHex(0, 0).getAppearance());
     }
 
     /**
@@ -247,14 +244,14 @@ class RailRouteTest {
      * each with its exits as sides and its stored junction layout where that fits them, before any stored marker.
      */
     @Test
-    void railTerrainYieldsDerivedMarkersBeforeTheStoredOnes() throws Exception {
+    void railTerrainIsTheOnlySourceOfRuntimeMarkers() throws Exception {
         int crossing = 1 | 1 << RailRoute.piece(2, 4);
         var hex = new Hex(0, "rail:1:29;bridge:1:18;bridge_cf:40;bridge_elev:1;bridge_rail:1:18", "");
         hex.setAppearance(Map.of("rail", HexAppearance.tracks(crossing), "bridgeRail", HexAppearance.tracks(crossing)));
         var stored = marker(RailRoute.Kind.RAIL, "stored", 36, BoardDecoration.Placement.ground());
         hex.setDecorations(List.of(stored));
         var markers = RailRoute.markers(hex, RailRoute.Kind.RAIL);
-        assertEquals(List.of(RailRoute.GROUND_RAIL, RailRoute.DECK_RAIL, "stored"), markers.stream().map(BoardDecoration::id).toList());
+        assertEquals(List.of(RailRoute.GROUND_RAIL, RailRoute.DECK_RAIL), markers.stream().map(BoardDecoration::id).toList());
         var ground = markers.get(0);
         var deck = markers.get(1);
         assertFalse(RailRoute.onDeck(ground));
@@ -263,7 +260,7 @@ class RailRouteTest {
         assertEquals(crossing, ground.tracks(), "the stored layout of its sides");
         assertEquals(0, deck.tracks(), "a layout that does not fit the deck rail's sides lays the default");
         assertTrue(RailRoute.groundRail(hex) && RailRoute.deckRail(hex));
-        assertEquals(29 | 36, RailRoute.groundSides(hex));
+        assertEquals(29, RailRoute.groundSides(hex));
         assertEquals(List.of(), RailRoute.markers(hex, RailRoute.Kind.MAGLEV));
 
         var destroyed = new Hex(0, "rail:0:9", "");
@@ -287,40 +284,22 @@ class RailRouteTest {
         assertThrows(IllegalArgumentException.class, () -> HexAppearance.tracks(crossing).validateOwner("road"));
     }
 
-    /**
-     * Pillars belong to a maglev marker only (rails lie on their support), stay through every copy, are written only
-     * when on, and apply to its connected run: through a junction, not to the maglev crossing it at another level.
-     */
     @Test
-    void onlyAMaglevStandsOnPillarsWhichApplyToItsConnectedRun() throws Exception {
-        var pillared = marker(RailRoute.Kind.MAGLEV, "m", 9, BoardDecoration.Placement.absolute(2)).withPillars(true);
-        assertTrue(pillared.duplicate().pillars() && pillared.flip(true, false).pillars() && pillared.withConnections(1).pillars()
-              && pillared.transform(0, 0, 0, false, 1, BoardDecoration.Placement.absolute(3)).pillars());
-        var rail = marker(RailRoute.Kind.RAIL, "r", 9, BoardDecoration.Placement.ground());
-        assertThrows(IllegalArgumentException.class, () -> rail.withPillars(true));
-        assertThrows(IllegalArgumentException.class, () -> new BoardDecoration("b", "prop", "scenery/parks/bench", null,
-              0, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0).withPillars(true));
-
-        // A N-S line of three with a branch to the SE from its middle, and a maglev at level 4 crossing the middle.
-        var board = Board.createEmptyBoard(5, 5);
-        Coords middle = new Coords(2, 2), north = middle.translated(0), south = middle.translated(3), east = middle.translated(2);
-        board.getHex(north).setDecorations(List.of(marker(RailRoute.Kind.MAGLEV, "n", 8, BoardDecoration.Placement.absolute(2))));
-        var low = marker(RailRoute.Kind.MAGLEV, "low", 1 | 8 | 4, BoardDecoration.Placement.absolute(2)).withPillars(true);
-        var high = marker(RailRoute.Kind.MAGLEV, "high", 2 | 16, BoardDecoration.Placement.absolute(4));
-        board.getHex(middle).setDecorations(List.of(low, high));
-        board.getHex(south).setDecorations(List.of(marker(RailRoute.Kind.MAGLEV, "s", 1, BoardDecoration.Placement.absolute(2))));
-        board.getHex(east).setDecorations(List.of(marker(RailRoute.Kind.MAGLEV, "e", 32, BoardDecoration.Placement.absolute(2))));
-        board.getHex(middle.translated(1)).setDecorations(
-              List.of(marker(RailRoute.Kind.MAGLEV, "ne", 16, BoardDecoration.Placement.absolute(4))));
-        var run = RailRoute.run(board::getHex, south, RailRoute.find(board.getHex(south), RailRoute.Kind.MAGLEV));
-        assertEquals(List.of("s", "low", "n", "e"), run.stream().map(member -> member.marker().id()).toList());
-        assertEquals(List.of("high", "ne"), RailRoute.run(board::getHex, middle, high).stream()
-              .map(member -> member.marker().id()).toList());
-
+    void maglevPillarsBelongToTheBridgeAndGroundRailsDoNotJoinDifferentKinds() throws Exception {
+        var board = Board.createEmptyBoard(3, 3);
+        var hex = board.getHex(1, 1);
+        RailRoute.lay(hex, true, 9, 0, RailRoute.Kind.MAGLEV);
+        BridgeSpan.carry(hex, 2, "bridge:4;bridge_cf:650");
+        hex.setAppearance(Map.of("bridge", HexAppearance.IMPLICIT_PILLARS));
         var output = new java.io.ByteArrayOutputStream();
         BoardFile.write(board, output);
-        String saved = output.toString(java.nio.charset.StandardCharsets.UTF_8);
-        assertEquals(1, saved.split("\"pillars\"", -1).length - 1, "written only when on");
-        assertEquals(board.getHex(middle).getDecorations(), BoardFile.readNative(saved).getHex(middle).getDecorations());
+        var saved = BoardFile.readNative(output.toString(java.nio.charset.StandardCharsets.UTF_8)).getHex(1, 1);
+        assertTrue(HexAppearance.pillars(saved.getAppearance()));
+        assertTrue(saved.getDecorations().isEmpty());
+        assertTrue(RailRoute.onDeck(RailRoute.find(saved, RailRoute.Kind.MAGLEV)));
+        var ordinary = new Hex(0, "rail:1:9", "");
+        var maglev = new Hex(0, "rail:2:9", "");
+        assertFalse(RailRoute.along(ordinary, maglev, 0));
+        assertTrue(RailRoute.along(maglev, maglev, 0));
     }
 }

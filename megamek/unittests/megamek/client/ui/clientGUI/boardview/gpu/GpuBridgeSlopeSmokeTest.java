@@ -62,7 +62,8 @@ class GpuBridgeSlopeSmokeTest {
                         GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
                         assertPick(terrain, edited, at, p, 2 * BoardGeometry.level() + lift);
                     }
-                    var natural = BoardBridgeSlopeTest.scene(at, 9, false);
+                    var natural = BoardBridgeTypeTest.typed(BoardBridgeSlopeTest.scene(at, 9, false),
+                          megamek.common.board.HexAppearance.NATURAL_BRIDGE);
                     frame.prepare(terrain, camera, natural);
                     terrain.update(natural);
                     GpuTerrainLodSmokeTest.settle(terrain, null, natural, camera);

@@ -24,6 +24,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.Array;
@@ -33,6 +34,7 @@ import megamek.common.ResolvedAttack;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
+import megamek.common.board.RailRoute;
 import megamek.common.enums.GamePhase;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
@@ -46,9 +48,10 @@ import org.junit.jupiter.api.Test;
  * No shader compile holds a frame once the loading stage has gone. A game on Grassland 3 shows its overview, a close
  * view, a pan, a volley of a laser, an autocannon and missiles and the Tactical View; then a tank and an infantry
  * platoon that were not on the board deploy, and SMAA and the thermal view are switched on and off. The 3D editor on the
- * same board opens every Assets category and reveals each of its sections, searches, and paints lava, water, ice and a
- * car. Each reports the longest frame after its loading stage and the programs that linked off the render thread
- * meanwhile, and asserts that no program compiled on it and that no loading stage came back.
+ * same board opens every Assets category and reveals each of its sections, searches, and paints lava, water, ice, a
+ * car and scorch. It also switches specular anti-aliasing, waits for that lighting change's loading stage, and renders
+ * fresh model and junction cards. Each phase reports the longest frame after its loading stage and asserts that no
+ * program compiled or started a deferred link afterwards, and that no unexpected loading stage came back.
  * {@code -Dmegamek.gpu.shaderTiming=true} logs every link: "after-loading" ones held a frame, "after-loading-deferred"
  * ones linked off the render thread while their draws waited.
  */
@@ -192,6 +195,8 @@ class GpuShaderLoadSmokeTest {
     void editorCompilesNothingAfterItsLoadingStage() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         Watch watch = new Watch("editor");
+        AtomicReference<Watch> relight = new AtomicReference<>();
+        AtomicReference<Boolean> originalSpecular = new AtomicReference<>();
         var setup = new FutureTask<GpuMapSource>(() -> {
             var editor = new BoardEditorSession();
             editor.game().setBoard(BoardFile.loadSheet(GRASSLAND, false, true));
@@ -199,7 +204,7 @@ class GpuShaderLoadSmokeTest {
         });
         SwingUtilities.invokeAndWait(setup);
         GpuMapSource source = setup.get();
-        // Every category and its sections, a search, then four strokes.
+        // Every category and its sections, a search, then surfaces and an appearance-only scorch stroke.
         List<Runnable> steps = new ArrayList<>();
         for (var category : BoardEditorBlueprint.get().categories()) {
             steps.add(() -> GpuBoardTestUi.category(category.id()));
@@ -214,12 +219,14 @@ class GpuShaderLoadSmokeTest {
         for (String text : List.of("tree", "lava")) {
             steps.add(() -> ((TextField) GpuBoardTestUi.stage().getRoot().findActor("editor-search")).setText(text));
         }
-        List<Coords> strokes = List.of(new Coords(3, 3), new Coords(7, 3), new Coords(11, 3), new Coords(5, 9));
+        List<Coords> strokes = List.of(new Coords(3, 3), new Coords(7, 3), new Coords(11, 3), new Coords(5, 9),
+              new Coords(9, 9));
         List<BoardEditorSession.Command> brushes = List.of(
               new BoardEditorSession.Command(BoardEditorSession.Action.CHOOSE_BRUSH, "water", "magma"),
               new BoardEditorSession.Command(BoardEditorSession.Action.CHOOSE_BRUSH, "water", "shallow"),
               new BoardEditorSession.Command(BoardEditorSession.Action.CHOOSE_BRUSH, "weather", "ice"),
-              new BoardEditorSession.Command(BoardEditorSession.Action.ASSET, "", "scenery/vehicles/car"));
+              new BoardEditorSession.Command(BoardEditorSession.Action.ASSET, "", "scenery/vehicles/car"),
+              new BoardEditorSession.Command(BoardEditorSession.Action.CHOOSE_BRUSH, "scorch", "scorch/charred"));
         for (int i = 0; i < strokes.size(); i++) {
             int stroke = i;
             steps.add(() -> {
@@ -229,17 +236,63 @@ class GpuShaderLoadSmokeTest {
                 source.endEditorStroke();
             });
         }
+        steps.add(() -> ((TextField) GpuBoardTestUi.stage().getRoot().findActor("editor-search")).setText(""));
+        steps.add(() -> GpuBoardTestUi.category("hazards"));
+        steps.add(() -> GpuBoardTestUi.reveal("editor-section-hazards/scorched"));
+        steps.add(() -> GpuBoardTestUi.click("editor-gallery-"
+              + BoardEditorBlueprint.get().card(BoardEditorBlueprint.get().entry("scorch/singed")).label()));
         try {
             new Lwjgl3Application(new GpuBattleView(source) {
                 int step = -1;
                 double stepAt;
+                long relightStarted;
+                boolean changedLighting, sawRelighting;
+                Image modelCard, railCard;
 
                 @Override
                 public void render() {
                     try {
-                        watch.before(GpuBoardTestUi.loading(this));
+                        boolean wasLoading = GpuBoardTestUi.loading(this);
+                        int compilesBefore = GpuGlsl.compilesAfterLoading(), deferredBefore = GpuGlsl.deferredAfterLoading();
+                        Watch active = changedLighting ? relight.get() : watch;
+                        if (active != null) { active.before(wasLoading); }
                         super.render();
-                        if (!watch.frame(GpuBoardTestUi.loading(this))) { return; }
+                        boolean loading = GpuBoardTestUi.loading(this);
+                        if (changedLighting) {
+                            sawRelighting |= loading;
+                            assertTrue(System.nanoTime() - relightStarted < 600_000_000_000L,
+                                  "The lighting change and its cards must finish");
+                            if (active == null) {
+                                if (loading) { return; }
+                                // Exclude only the intentional reload. Counters from before this frame still catch
+                                // programs first requested by the frame that dismisses its loading stage.
+                                active = new Watch("editor-AA", compilesBefore, deferredBefore);
+                                active.before(wasLoading);
+                                relight.set(active);
+                            }
+                        }
+                        if (!active.frame(loading)) { return; }
+                        if (changedLighting) {
+                            if (loading) { return; }
+                            assertTrue(sawRelighting, "A changed shader flag gets a loading stage");
+                            if (modelCard == null) {
+                                var hud = GpuMixedUnitBenchmarkSmokeTest.field(this, "ui");
+                                var editor = GpuMixedUnitBenchmarkSmokeTest.field(hud, "editor");
+                                var models = (GpuEditorModelPreviews) GpuMixedUnitBenchmarkSmokeTest.field(editor, "models");
+                                var junctions = (GpuEditorModelPreviews) GpuMixedUnitBenchmarkSmokeTest.field(editor, "junctions");
+                                // Fresh image targets cannot reuse cards rendered before the lighting switch.
+                                modelCard = new Image(); railCard = new Image();
+                                modelCard.setBounds(10, 10, 128, 96); railCard.setBounds(148, 10, 128, 96);
+                                GpuBoardTestUi.stage().addActor(modelCard); GpuBoardTestUi.stage().addActor(railCard);
+                                models.add("scenery/vehicles/car", modelCard);
+                                junctions.add(RailRoute.Kind.RAIL, RailRoute.side(0) | RailRoute.side(3), 0, railCard);
+                            } else if ("Ready".equals(modelCard.getUserObject()) && "Ready".equals(railCard.getUserObject())) {
+                                Gdx.app.exit();
+                            } else {
+                                assertTrue(active.seconds() < 60, "Fresh model and rail previews must finish after loading");
+                            }
+                            return;
+                        }
                         var root = GpuBoardTestUi.stage().getRoot();
                         double seconds = watch.seconds();
                         if (step == -1) {
@@ -253,10 +306,10 @@ class GpuShaderLoadSmokeTest {
                             }
                             return;
                         }
-                        // The next step two seconds after the cards and the board settled, at most eight.
+                        // Completed card renders and an idle board permit the next step without a long idle dwell.
                         boolean settled = GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))
                               && !((GpuTerrain) GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain")).busy();
-                        if (step < steps.size() && seconds - stepAt > (settled ? 2 : 8)) {
+                        if (step < steps.size() && seconds - stepAt > (settled ? .25 : 8)) {
                             steps.get(step++).run();
                             stepAt = seconds;
                         } else if (step == steps.size() && settled && seconds - stepAt > 4) {
@@ -264,7 +317,20 @@ class GpuShaderLoadSmokeTest {
                             assertTrue(scene.tile(strokes.get(0)).liquid().molten(), "The lava stroke shows");
                             assertTrue(scene.tile(strokes.get(1)).liquid().present(), "The water stroke shows");
                             assertFalse(scene.tile(strokes.get(3)).features().isEmpty(), "The car stands");
-                            Gdx.app.exit();
+                            assertTrue(megamek.common.board.HexAppearance.scorch(scene.tile(strokes.get(4)).appearance()) > 0,
+                                  "The authored scorch stroke shows");
+                            for (var severity : megamek.common.board.HexAppearance.Scorch.values()) {
+                                assertTrue(root.findActor("editor-library-" + severity.variant()) != null,
+                                      "The gallery offers " + severity);
+                            }
+                            File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
+                            assertTrue(output.isDirectory() || output.mkdirs());
+                            GpuBoardTestUi.capture(new File(output, "editor-scorch-gallery.png"));
+                            watch.check();
+                            originalSpecular.set(GpuEnvironmentLighting.specularAntialiasing);
+                            GpuEnvironmentLighting.specularAntialiasing = !originalSpecular.get();
+                            changedLighting = true;
+                            relightStarted = System.nanoTime();
                         } else if (seconds - stepAt > 60) {
                             throw new AssertionError("The board did not settle after the last stroke");
                         }
@@ -274,9 +340,13 @@ class GpuShaderLoadSmokeTest {
                     }
                 }
             }, window());
-        } finally { SwingUtilities.invokeAndWait(source::close); }
+        } finally {
+            if (originalSpecular.get() != null) { GpuEnvironmentLighting.specularAntialiasing = originalSpecular.get(); }
+            SwingUtilities.invokeAndWait(source::close);
+        }
         if (failure.get() != null) { throw new AssertionError(failure.get()); }
-        watch.check();
+        assertTrue(relight.get() != null, "The changed lighting must reach its presented phase");
+        relight.get().check();
     }
 
     /** No program is prepared for scars: they draw with their receivers' programs. */
@@ -345,14 +415,18 @@ class GpuShaderLoadSmokeTest {
         /** Frames longer than this are logged with their start, to find what held them in the timing log. */
         private static final long LONG_FRAME = 100_000_000;
         private final String name;
-        private final int compiles = GpuGlsl.compilesAfterLoading(), deferred = GpuGlsl.deferredAfterLoading();
+        private final int compiles, deferred;
         private LocalDateTime frameStart;
         private boolean wasLoading = true;
         private long loaded, previous, longest;
         private double longestAt;
         private int frames, loadingAgain;
 
-        Watch(String name) { this.name = name; }
+        Watch(String name) { this(name, GpuGlsl.compilesAfterLoading(), GpuGlsl.deferredAfterLoading()); }
+
+        Watch(String name, int compiles, int deferred) {
+            this.name = name; this.compiles = compiles; this.deferred = deferred;
+        }
 
         void before(boolean loading) {
             wasLoading = loading;
@@ -395,6 +469,8 @@ class GpuShaderLoadSmokeTest {
             LOGGER.info(report);
             System.out.println(report);
             assertEquals(0, after, name + ": shaders compiled on the render thread after the loading stage (see the timing log)");
+            assertEquals(0, GpuGlsl.deferredAfterLoading() - deferred,
+                  name + ": shader links were deferred until after the loading stage (see the timing log)");
             assertEquals(0, loadingAgain, name + ": a loading stage came back");
         }
     }

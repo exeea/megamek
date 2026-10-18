@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -93,6 +94,33 @@ class BoardBridgeMaterialsTest {
             assertTrue(GpuRoads.deckPatches(tile, deck, deck.road(at)).stream()
                   .anyMatch(p -> p.texture().equals("concrete") && !p.shape().isEmpty()));
         }
+    }
+
+    @Test
+    void dirtOnANaturalArchKeepsItsLooseMarginsAndWornTerminal() {
+        var at = new Coords(4, 4);
+        var scene = BoardBridgeTypeTest.typed(straight(at, 0, 1, BoardRoad.Kind.NONE,
+              BoardRoad.Kind.NONE, BoardRoad.Kind.NONE), HexAppearance.NATURAL_BRIDGE);
+        scene = replace(scene, withDeckRoad(scene.tile(at), BoardRoad.Kind.DIRT, 1));
+        var deck = BoardBridge.deck(scene, scene.tile(at));
+        var patches = GpuRoads.deckPatches(scene.tile(at), deck, deck.road(at));
+        assertTrue(patches.stream().anyMatch(patch -> !patch.shape().isEmpty() && patch.fade() != null
+              && patch.fade().outer() > 0 && patch.fade().inner() < 0), "A rock arch has ground-like loose shoulders");
+        assertTrue(patches.stream().anyMatch(patch -> !patch.shape().isEmpty() && patch.fade() != null
+              && patch.fade().end() > 0), "A dirt road ending on the arch must wear out rather than stop square");
+    }
+
+    @Test
+    void groundAndDeckRoadPaintUseTheirOwnAppearanceWithoutRepaintingOtherCoats() {
+        var at = new Coords(4, 4);
+        var tile = BoardBridgeTypeTest.appearance(BoardRoadTest.tile(at, BoardRoad.Kind.PAVED, 9,
+              0, BoardScene.Surface.GRASS), Map.of("road", new HexAppearance(null, null, "gravel", null),
+                    "bridgeRoad", new HexAppearance(null, null, "dirt", null)));
+        tile = withDeckRoad(tile, BoardRoad.Kind.PAVED, 9);
+        assertEquals("gravel", GpuRoads.material(tile, false, "roads/asphalt"));
+        assertEquals("dirt", GpuRoads.material(tile, true, "roads/asphalt"));
+        assertEquals("gravel", GpuRoads.material(tile, true, "roads/gravel"), "Transition and shoulder coats stay distinct");
+        assertNull(GpuRoads.material(tile, true, "concrete"), "Markings retain their own material");
     }
 
     /** b13 ways: a deck's road is painted on its own sides only; the slab still spans every bridge exit. */

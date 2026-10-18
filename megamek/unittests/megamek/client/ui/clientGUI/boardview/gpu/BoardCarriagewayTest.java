@@ -230,9 +230,8 @@ class BoardCarriagewayTest {
               "the track's ballast band");
         assertFalse(obstacles.obstructs(new Vector3(centre).add(20 * BoardGeometry.hexScale(), 0, 0), 0, 1));
         // A dead end's stop is the rail's, at its place, riding the rail top; the hex never stores it.
-        Hex hex = new Hex(0);
-        var marker = rail(AT, 1, BoardDecoration.Placement.ground()).decoration();
-        hex.setDecorations(List.of(marker));
+        Hex hex = new Hex(0, "rail:1:1", "");
+        var marker = RailRoute.derived(hex, "terrain").getFirst();
         var features = BoardFeatures.capture(hex, AT, Map.of());
         var stops = features.stream().filter(feature -> feature.asset().equals(RailRoute.BUFFER_STOP)).toList();
         assertEquals(1, stops.size());
@@ -240,7 +239,7 @@ class BoardCarriagewayTest {
         assertTrue(BoardFeatures.terrainOwned(stop), "never picked or stored as an object");
         assertEquals(RailRoute.ride(marker), stop.placement());
         assertEquals(RailRoute.STOP_DEPTH / BoardGeometry.TILE_HEIGHT, stop.y(), 1e-6);
-        assertEquals(1, hex.getDecorations().size());
+        assertTrue(hex.getDecorations().isEmpty(), "The rail and its stop are terrain-owned, never stored objects");
     }
 
     @Test

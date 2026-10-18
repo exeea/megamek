@@ -3121,6 +3121,7 @@ final class BoardRelief {
         int count = points.length - 1;
         boolean drop = edge.upper == self && edge.profiled;
         boolean planar = planarConcrete(self);
+        var bridge = drop ? BoardNaturalBridge.bankApproach(scene, tile, BoardGeometry.edgeDirection(e)) : null;
         Vector3[] below = null;
         if (drop && !planar) {
             float[] rows = rows(edge.bottom(), edge.top());
@@ -3155,6 +3156,11 @@ final class BoardRelief {
                 normal = groundNormal(p);
             } else {
                 normal = new Vector3(0, 0, 1);
+            }
+            if (bridge != null) {
+                float join = 1 - smooth((Math.abs(bridge.lateral(p)) / bridge.width() - .8f) / .2f);
+                normal.lerp(Vector3.Z, join).nor();
+                seam[0] = lerp(seam[0], 99, join);
             }
             // At the foot of a step with room this ground and the step's lowest row take one occlusion, from the step.
             float occlusion = foot != null && foot.footRoom > 0 ? footOcclusion(foot, p)

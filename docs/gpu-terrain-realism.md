@@ -74,7 +74,7 @@ The user set these boundaries:
   rim, slope, cliff and scattered rocks; other families use rounded boulders. Rough
   forms fractured groups of a rooted mass and two smaller pieces, with a
   board-space fracture direction shared by nearby hexes.
-- **Materials.** All sculpt materials share one texture array, world-scale
+- **Materials.** All sculpt materials use shared texture arrays, world-scale
   projection, height-based contacts and projected-size normal detail. Desert, Mars
   and volcanic plateaus expose connected stone; sandstone and basalt use authored
   height sources, and their caps fade around the crest into the face. Concrete
@@ -84,7 +84,9 @@ The user set these boundaries:
   hardpan .90, rock and concrete .80, snow .82, lunar .96 and fungus .84. Rock faces
   range from .80 to .66 with hardness (+.08 for sand, desert and Mars); lunar faces
   are .92 and fungal faces .84. Grain varies these by up to ±.04 with normal detail.
-  A material's JSON can override them with `roughness` or `roughness_map`. Marsh
+  A material's JSON `roughness` or `roughness_map` overrides them on ordinary rock kits,
+  pavement, tree pits and volcanic programs' natural material. The `cliffMaterial` path
+  (including zero-gravity bedrock), biomes and tundra keep the estimates. Marsh
   peat (.80), quick mud (.72) and moss (.93) stay rough; only exposed pools get the
   water response. Cavity is visibility, not roughness.
 - **Lighting.** The scene stays linear in RGBA16F targets with highlight headroom,
@@ -115,13 +117,12 @@ backgrounds. This does not change emission or lens effects in the live board vie
 
 | Control | Default | Effect |
 | --- | --- | --- |
-| **GPU Tuning → Terrain → Surface appearance → Elevation grading** | On (`GpuTerrain.DEFAULT_ELEVATION_GRADING`) | Optional elevation styling; changes apply through a shared uniform without a terrain rebuild or shader recompile. |
-| **GPU Tuning → Terrain → Surface weathering → Ambient wear** | 1 (`GpuTerrain.DEFAULT_TERRAIN_WEAR`) | 0–1 in steps of .01; scales all ambient weathering, and 0 removes it. |
+| `GpuTerrain.DEFAULT_ELEVATION_GRADING` | On | Elevation styling through a shared uniform, without a terrain rebuild or shader recompile. |
+| `GpuTerrain.DEFAULT_TERRAIN_WEAR` | 1 | Full-strength ambient weathering. |
 | `GpuGroundDamage.COMBAT_SCARS` | `true` | Source constant for [combat scars](gpu-terrain-materials.md#combat-scars), independent of ambient wear. |
 
-**Defaults** in GPU Tuning restores both terrain values. `GpuTerrain.setClay`, used
-by the native reviews, isolates geometry and light from materials and turns wear
-and grading off.
+`GpuTerrain.setClay`, used by the native reviews, isolates geometry and light from
+materials and turns wear and grading off.
 
 Elevation grading leaves level zero unchanged. Uphill, one scalar exposure curve
 keeps RGB ratios and bright texture variation; valleys darken and warm, and fungus

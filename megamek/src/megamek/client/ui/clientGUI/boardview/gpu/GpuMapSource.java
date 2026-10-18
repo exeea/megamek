@@ -233,7 +233,11 @@ final class GpuMapSource implements BoardSource {
         // An unchanged editor state keeps its instance, so the views' identity checks mean a real change.
         var previous = publication == null ? null : publication.editor();
         var state = editor == null ? null : editor.snapshot();
-        publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, preview(state));
+        var projected = preview(state);
+        if (editor != null && state.activeBrush().way() && editorHover != null) {
+            editorBrush = new EditorBrush(hover, boardGeneration, editor.brush(hover), editor.wayHint(editorHover.coords(), shownPreview));
+        }
+        publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, projected);
     }
 
     /** Map workspaces expose their existing document and application actions without requiring a game client. */

@@ -3,6 +3,8 @@
 // Earth shares the already-bound terrain array; projection and metre scale are unchanged.
 uniform float u_biomeSoilLayer;
 uniform float u_biomeSoilTile;
+// One shared material for ground mud and natural bridge mud: colour/height + packed normal XY/roughness/AO.
+uniform vec2 u_mudMaterial;
 
 // Explicit projection gradients keep texture mip selection valid at wetland/field edges and between slope modes.
 vec4 biomeTexel(sampler2DArray maps, float layer, vec2 uv, mat2 gradient) {
@@ -42,7 +44,7 @@ vec3 biomeSoilNormal(MaterialProjection p, vec3 face, float mixer) {
 }
 
 void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, float rim, float materialHeight, float sand,
-      float deckMud, inout vec3 color, inout vec3 normal, inout float cavity, inout float roughness,
+      float deckMud, float region, inout vec3 color, inout vec3 normal, inout float cavity, inout float roughness,
       inout float grass, inout vec3 bounce, out float pool, out float damp) {
     pool = 0.0; damp = 0.0;
     // Capture every quad derivative before any spatial return/branch. Projection already contains world XYZ.
@@ -57,9 +59,6 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
     vec4 cover, fringe;
     float tundra;
     biomeCoverage(world, 14.0, length(abs(worldDx.xy) + abs(worldDy.xy)), cover, fringe, tundra);
-    // A natural bridge's muddy deck is mud at its own height (ground mud reaches only its hex's ground).
-    cover.w = max(cover.w, deckMud);
-    fringe.w = max(fringe.w, deckMud);
     if (!shore) { tundraSurface(world, face, tundra, color, normal, cavity, grass, bounce); }
     if (family(4.0)) return;
     cover.yzw *= min(3.0, 1.0 / max(dot(cover.yzw, vec3(1.0)), .0001));
@@ -86,6 +85,10 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
     fringe = max(fringe, cover);
     cover.yzw *= 1.0 - cover.x;
     fringe.yzw *= (1.0 - fringe.x) * min(1.0, 1.0 / max(dot(fringe.yzw, vec3(1.0)), .0001));
+    // Deck mud belongs at the bridge's height, including material sliding over its rock shell. Apply it after
+    // ground-mask spreading and slope gates: those would amplify the fade or remove deposits on vertical sides.
+    cover.w = max(cover.w, deckMud);
+    fringe.w = max(fringe.w, deckMud);
     float strength = max(max(fringe.x, fringe.y), max(fringe.z, fringe.w));
     if (strength < .0001) return;
     float broad = biomeNoise(world.xy / 4.7 + 13.0);
@@ -119,15 +122,15 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         grass *= 1.0 - amount;
         bounce = mix(bounce, vec3(.17, .15, .065), amount);
     }
-    float wetland = fringe.y + fringe.z + fringe.w;
+    float wetland = fringe.y + fringe.z;
     if (wetland > 0.0) {
         vec3 wetness = biomeWetnessGradient(world.xy);
         float wet = wetness.x;
         float quick = fringe.z / wetland;
-        float bare = (fringe.z + fringe.w) / wetland;
+        float bare = fringe.z / wetland;
         float aa = max(.003, abs(dot(wetness.yz, worldDx.xy)) + abs(dot(wetness.yz, worldDy.xy)));
         float emerged = shore ? smoothstep(-.10, -.01, above) : 1.0;
-        float supported = clamp(dot(cover.yzw, vec3(1.0)) / wetland, 0.0, 1.0);
+        float supported = clamp((cover.y + cover.z) / wetland, 0.0, 1.0);
         // Moss can anchor to saturated banks between marsh levels; reflecting pools still need level support.
         float anchored = max(supported, smoothstep(.15, .80, face.z) * .9);
         float hummock = smoothstep(.50, .67, wet) * (1.0 - bare) * emerged * anchored;
@@ -204,5 +207,28 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         cavity = mix(mix(cavity, .78 + .22 * soil.a, wetland), 1.0, pool);
         grass *= 1.0 - wetland;
         bounce = mix(bounce, vec3(.09, .10, .045), wetland);
+    }
+    if (fringe.w > 0.0) {
+        // World UVs do not restart at the bank, deck or rim. Height, pools, pigment and relief all come from the PTEX.
+        PackedTopCoordinates uv = packedTopCoordinates(projection, u_mudMaterial.y, region);
+        vec4 mud = packedTopColor(u_mudMaterial.x, uv);
+        float amount = materialWeights(vec4(1.0 - fringe.w, fringe.w, 0.0, 0.0),
+              vec4(materialHeight, mud.a, 0.0, 0.0)).y;
+        if (amount > 0.0) {
+            vec3 detail;
+            vec2 surface = packedTopSurface(u_mudMaterial.x, uv, detail);
+            color = mix(color, mud.rgb, amount);
+            roughness = sqrt(mix(roughness * roughness, surface.x * surface.x, amount));
+            cavity = mix(cavity, surface.y, amount);
+            if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+                normal = normalize(mix(normal, upNormal(detail, face), amount * terrainNormalDetail));
+            }
+            // Only the authored shallow basins have a water film; the same wet clods remain rough on both surfaces.
+            float puddle = (1.0 - smoothstep(.14, .20, mud.a)) * smoothstep(.94, .995, face.z);
+            pool = mix(pool, puddle, amount);
+            damp = max(damp, amount);
+            grass *= 1.0 - amount;
+            bounce = mix(bounce, mud.rgb, amount);
+        }
     }
 }

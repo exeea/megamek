@@ -1,6 +1,6 @@
 # Terrain geometry and materials
 
-[Docs index](README.md) · [Class responsibilities](gpu-code-map.md)
+[Docs index](README.md) Ãƒâ€šÃ‚Â· [Class responsibilities](gpu-code-map.md)
 
 The native board separates game terrain, finished geometry and shading. The game
 provides levels/types/exits; CPU builders derive a shared surface; shaders add
@@ -126,14 +126,13 @@ has its own recess/crest colour response and balance between grain-height wear
 and chipped mineral edges. It does not place independent slash shapes on the map.
 This is ordinary terrain material construction in `terrain-materials.glsl`:
 cover erosion participates in layer blending, then pigment wear applies before
-lighting. **GPU Tuning → Terrain → Surface weathering → Ambient wear** controls
-both with a live 0–1 slider: 0 disables ambient wear, 1 is full strength (the
-default), and Defaults restores 1.
+lighting. Both run at full strength (`GpuTerrain.DEFAULT_TERRAIN_WEAR`); clay
+mode turns them off.
 It includes the broad pale exposed-rock patches on desert hardpan, the related
 mineral exposure in other families, rim abrasion and worn organic cover. Slope
 geology, the source textures and loose sand's tile-cover behaviour remain intact.
-The window's tuning model supplies the float to `GpuTerrain` each frame; updating
-the shader uniform does not rebuild the terrain. It does not depend on combat history.
+The strength is a shader uniform, so it needs no terrain rebuild. It does not depend
+on combat history.
 Desert's maximum recess darkening is 20% before field/detail modulation. Snow's
 base maps have shallow irregular crust and fine grains; its cool compaction response
 reaches 16% in the red channel before modulation. Pigment changes multiply the source
@@ -270,8 +269,9 @@ documents editing and reload.
 Vertical scars use cached patches clipped from the installed receiving triangles,
 including deformed cliffs and opaque model walls. Each patch retains the original
 material, UVs and vertex attributes, and adds its image-layer coordinates. A small
-surface offset prevents depth fighting; the shared scar material response runs in
-the receiver's normal lighting shader. Empty mask fragments are discarded.
+surface offset prevents depth fighting. The receiver's own program draws its patches
+(a per-draw uniform, `u_surfaceScar`), with the shared scar material response; empty
+mask fragments end with alpha 0 under the patch's blending, and patches write no depth.
 Patches share the existing page batching, including in perspective view, and are
 drawn after opaque receivers. Further hits on the same area repaint its image;
 they do not add meshes or draw calls. Detail replacement rebuilds patches from
@@ -345,6 +345,53 @@ Hex padding uses the same step-room machinery; it does not enlarge the lattice.
 When altering these controls, follow `BoardRelief.stepRoom`, corner/edge sampling,
 surface construction and bounds together.
 
+## Authored scorched ground
+
+The editor's **Scorched ground** card stores one appearance on each hex: Singed
+(.15), Charred (.35), Ash (.62), or Glass (1). It changes neither terrain rules nor
+height. The sparse damage directory stores authored severity in A and nuclear
+severity in B. Authored severities feather across hex boundaries over roughly
+16 metres, written into the existing eight-metre directory cells when an edit
+changes the field. Equal neighbouring severities stay constant. Shading uses the
+stronger of authored and nuclear severity. Disabling combat scars does not hide authored scorch. Erasing
+the appearance clears A without erasing combat history.
+
+The editable source is `mm-data/tools/materials/terrain/surfaces/scorched/scorched.ptex`.
+Its procedural deposits, cinders, ash and fused fissures export with stock Material
+Maker 1.7 through `tools/materials/export.py terrain/surfaces/scorched/scorched.ptex`.
+The authoring-only `preview_s` control previews severity; exports always contain
+the fixed material basis. The two 512-square maps cover a 64-metre square, wider
+than a hex. Deposits span metres while the re-authored grain remains sub-metre:
+
+- `scorched.png`: sRGB colour in RGB, linear height in A.
+- `scorched-normal.png`: linear normal XY in RG, **roughness in B**, AO in A.
+  Authored scorch and mud store roughness instead of normal Z; their shaders reconstruct Z.
+
+`scorched()` in `terrain-damage-mask.glsl` evaluates one shared linear palette and
+partition of soil, cinder, ash and glass. Sculpted tops sample the two existing
+material arrays only where severity is positive. Mud and scorch share translated
+top coordinates selected by the existing slow world-region field, preserving
+feature size across hexes. Colour/height and packed surface data use identical
+offsets and weights; normals are reconstructed before blending and roughness
+blends as squared roughness. Steep faces use the same averaged
+response without projecting a stretched texture. Coverage blends material before
+rain, grid lines and elevation grading; roughness blends as squared roughness.
+The ordinary ground, road and plant paths use the shared response without those
+material samples. Imported models retain their existing materials. Enhanced shows
+scorch; Classic does not borrow this material.
+
+Painted glass is always cold. Only nuclear severity heats the low-height fissures,
+using the existing cooling clock; distant mip levels suppress these small details.
+A later nuke still restarts that shared clock. Even Singed severity clears grass
+blades and bank turf; only the fading fringe gradually retains grass. Authored
+scorch also removes baked dry-grass scatter when its chunk rebuilds. Nuclear-only
+scorch still tints that scatter because it shares the opaque rock mesh. Shrubs,
+biome crops and reeds remain.
+There is one appended material layer and one uniform, with no new sampler or
+shader variant. Zero severity leaves the original material unchanged. Scorched
+boards add four directory reads per receiving fragment, then four material samples
+on affected tops; performance is checked separately on Iris Xe.
+
 ## Shores, ramps and support
 
 Water geometry also participates in canonical corners and cliffs. `BoardSurface`
@@ -390,11 +437,12 @@ the board's explicit Rough terrain remains separate from this cosmetic rule.
 Each natural family combines ground cover, soil/mantle, exposed rock and deposits.
 `GpuTerrain.SCULPT_MATERIALS` selects each family's maps; `GpuAssets` loads and
 owns the shared textures. Sculpt maps are under
-`mm-data/data/models/board/textures/terrain/surfaces`. Every sculpt map is a layer of one
-texture array (`GpuAssets.sculptArray`, bound as `u_terrainLayers`): colour/height at
-a map's layer and normal/AO at the next. A sculpt material's `SculptLayers` gives
-its family's ground, debris, wall and mantle layers (`u_sculptLayers`), and boundary
-palettes give theirs per family, so all of them take one texture unit (see
+`mm-data/data/models/board/textures/terrain/surfaces`. `GpuAssets.MaterialArrays` owns
+two compact texture arrays: sRGB colour/height (`u_terrainLayers`) and raw normal/AO
+(`u_terrainData`). Sampling helpers map the stable even-colour/odd-normal semantic
+IDs into those arrays. A sculpt material's `SculptLayers` gives its family's ground,
+debris, wall and mantle IDs (`u_sculptLayers`), and boundary palettes give theirs per
+family. The shared pair takes two texture units (see
 [shaders](gpu-shaders.md#boundaries-to-preserve) for the 16-unit budget). The arrays set
 their own anisotropic filtering, because libGDX's `setAnisotropicFilter` only addresses
 `GL_TEXTURE_2D`.
@@ -402,10 +450,21 @@ their own anisotropic filtering, because libGDX's `setAnisotropicFilter` only ad
 Sculpt albedo textures store height in alpha; their tangent-normal partners store
 ambient occlusion in alpha. Each material's `<name>.json` gives its repeat in metres.
 The Material Maker project `mm-data/tools/materials/terrain/surfaces/<name>/<name>.ptex`
-generates a material's maps from its `sources/` images. `python tools/materials/export.py`,
-run from the mm-data root, exports every project; Gradle `stageData` mirrors the maps
+generates a material's maps from editable primitives and any required `sources/` images.
+`python tools/materials/export.py`, run from the mm-data root, exports every project;
+an optional path relative to `tools/materials` exports one project. The script uses
+the official Material Maker CLI. Gradle `stageData` mirrors the maps
 into `megamek/data`. Their height, normal and AO are artistic estimates, not measured
 scans.
+
+Concrete planting pits use `tree-pit-mulch` for their interiors and the existing
+authored concrete for their kerbs. The mulch project exposes bark-chip placement,
+palette and relief controls, reuses the soil-contact source for the soil substrate,
+and exports registered colour/height and normal/AO maps. Its metadata sets a 1 m
+repeat, 1.5 cm shading relief and scalar roughness of 0.92. The shader applies no
+separate brown palette or fixed kerb brightness boost. Bare stone beneath snow caps
+likewise keeps its authored granite pigment; snow coverage and per-rock population
+variation remain separate material effects.
 LUNAR has its own `lunar`, `lunar-scree` and `lunar-cliff` map pairs (neutral
 regolith, angular scree and fractured bedrock) and its own geology profile,
 independent of terrestrial rock. Editing either family must leave the other alone.
@@ -443,18 +502,32 @@ maps. Editing a normal map will not correct a geometric seam.
 ### Physical texture scale
 
 `BoardRelief.metres` defines 30 metres across a hex. Sculpt UVs are world positions
-divided by the repeat in the asset manifest; slopes blend ground and vertical
+divided by the repeat in the asset manifest; walls and banks blend ground and vertical
 projections at the same physical scale. No UV origin or fixed repetition count is
 assigned per hex. A material can span several source windows within a hex without
 restarting at its edges. Window blending breaks up recognisable repetitions.
 
-Natural cliff sampling also advances its translated source selection with projected
-height. The horizontal ground field alone stays constant down a vertical face and
-repeats identical patches on tall walls such as Thunder Rift's basalt. Color/height
-and normal/AO use the same height-dependent offsets, keeping the source's metre scale
-and upright grain. This reuses the existing two reads per projection, material LOD,
-texture array and geometry; flat ground, constructed concrete and flowing lava retain
-their own sampling.
+Outside volcanic programs every natural surface takes `cliffMaterial`
+(`terrain-materials.glsl`): tops, walls, banks (drowned walls too) and zero-gravity
+bedrock. `cliffFamily` holds each family's role rules as data: cover, mantle or arid
+cap plates, foot deposit and wall rock. On level ground worn turf opens onto soil,
+fungal crust forms colonies above level zero and along raised rims, and exposed stone
+keeps a dust film of its cover (arid .24, dirt .18, rock and lunar .12). Only the two
+strongest roles are sampled. Walls read once per side projection, plus the top
+projection where the face lies back; the bed hardness `BoardRelief` stores per cliff
+vertex tints their strata by about 4 %. Tops read the top projection twice: two
+repeats (the second 2.37 times larger and turned) mixed by a world field, settling to
+the map's average far away, or two offsets of one repeat for sand, desert and volcano
+cap plates and fungus. A blended cliff takes its two strongest palette slots
+(`blendCliff`). A blended top (`blendCovers`) leaves out slots under 2 % coverage, its
+neighbour slots take only their strongest role, and one noise read per family breaks
+the contacts.
+
+Volcanic programs keep `naturalMaterialFor` on every face. Their side projections
+advance the translated source selection with projected height, so tall walls do not
+repeat identical patches at the map period. `cliffMaterial` reads each wall map once,
+so tall walls such as Thunder Rift's basalt repeat at the map period, broken only by
+the strata tint.
 
 | Material | Base source span in metres |
 | --- | --- |
@@ -575,11 +648,14 @@ pigments on Mars and Lunar. Dense meadow blades stop at the shared biome
 boundary; existing dry-grass scatter remains available on Grass and Tropical.
 Mats continue over slopes between tundra terraces using the same broad contact
 stencil as marsh sediment. Isolated banks taper below their rim, and sheer faces
-retain exposed geology. Shared material projection carries color and normals over bends.
+retain exposed geology. Shared material projection carries color and normals over bends:
+two translated reads of the top projection, plus one read per side projection in
+volcanic programs.
 
 The existing biome snapshot, per-hex texture and nine-hex coverage stencil carry the
-tundra mask for both cameras. Three source materials (lichen/tussocks, fungal colonies,
-and barren mineral crust) occupy six layers of the shared terrain texture array,
+tundra mask for both cameras. Four source materials (two complete earth-tundra
+mixtures, fungal colonies and barren mineral crust) occupy four colour/height and
+four normal/AO layers of the shared terrain arrays,
 with no new sampler or flat-ground geometry. The shader preserves their image
 pigments and internal detail rather than thresholding one gray source into flat
 colored spots. Theme contacts use the existing material weights.
@@ -589,11 +665,16 @@ suppress it; fields, marsh, quicksand and mud keep their biome precedence. Expli
 SAND or SNOW also covers it. A Snow *theme* can show exposed tundra between snow
 remnants. None of these appearance choices changes the board's terrain or rules.
 
-The `tundra-earth`, `tundra-fungus` and `tundra-crust` color/height and normal/AO
+The `tundra-earth`, `tundra-earth-variant`, `tundra-fungus` and `tundra-crust` color/height and normal/AO
 maps are 512 pixels square. Living mats repeat over 24 metres and mineral crust over
-28 metres, enlarged to keep coherent colonies readable at tactical zoom. Their
-4–10 centimetre relief is an artistic estimate from image luminance, not measured
-geometry.
+28 metres. Both earth variants contain the same moss, pale lichen, humus and sparse
+rust-coloured vegetation palette, with different local arrangements. A world-space
+16-metre field blends these complete mixtures. Large contrasting moss-only or
+lichen-only regions are deliberately excluded: every tundra hex must read as the
+same terrain. This breaks repeated motifs without inventing apparent terrain
+boundaries. Earth, fungal and mineral shading relief is respectively 6, 8 and 4
+centimetres; these are artistic estimates, not measured geometry. Material Maker
+projects and their required source images remain the authoring source of truth.
 
 `BoardTundraTest` checks native capture, theme preservation, precedence, cliff
 reach, connected coverage and grass roots. `GpuTundraSmokeTest` renders paired
@@ -688,7 +769,7 @@ material softens exposed horizontal stone. Color, normal, cavity, height and
 roughness all use the same final weights. Submerged beds keep their sediment.
 
 Sandstone and basalt caps extend around the rounded crest and fade with its
-slope and the existing depth-below-rim field (a variable 1–3 metre falloff).
+slope and the existing depth-below-rim field (a variable 1ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“3 metre falloff).
 Cap and cliff are treated as two presentations of the same rock: their blended
 height competes with hardpan and deposits, then the rock weight is distributed
 smoothly between the two maps. This prevents the height competition from
@@ -737,3 +818,29 @@ Use the dedicated guides for [rough](gpu-rough.md), [fields/marsh](gpu-fields-ma
 [grass](gpu-grass-rendering.md), [buildings](gpu-modular-buildings.md) and
 [terrain fire/smoke](gpu-terrain-fire-smoke.md). Their builders share the surface and
 resource boundaries described here.
+
+
+## Shared mud
+
+`mm-data/tools/materials/terrain/surfaces/mud/mud.ptex` is the shared procedural mud
+material for MUD ground hexes and BRIDGE_MUD on natural arches. Its author controls
+cover clod size, basin size and coverage, pigment, roughness, repeat size and relief.
+Stock Material Maker exports it with
+`tools/materials/export.py terrain/surfaces/mud/mud.ptex`. The two 512-square maps
+repeat every 64 metres (wider than two hexes): `mud.png` stores sRGB colour and linear height;
+`mud-normal.png` uses the packed normal XY/roughness/AO format described above.
+
+Both surfaces sample those same maps at world coordinates. Muddy ground continuing
+onto an arch therefore keeps the same pigment, clods and shallow pools across the
+join. The bridge keeps its muddy walking surface, then fades deposits over the
+caprock and down the adjacent sides into the underlying rock. Existing world
+variation and the material's height break up that margin; the underside stays bare.
+The authored low basins use the existing wet-surface BRDF;
+there is no second transparent surface, water simulation or additional draw.
+The interior uses four texture samples: two colour/height and two packed surface
+reads, with no runtime pigment recolouring. The shifted samples reuse the ordinary
+terrain helper and the slow world-region field. If height competition rejects the
+mud, its two surface-data reads are skipped. Absent mud takes no material reads.
+Normal detail fades with distance; packed roughness/AO remain needed. This adds no
+sampler, pass or shader variant and does not alter the base terrain's role pruning.
+Marsh and quicksand retain their existing materials and vegetation.

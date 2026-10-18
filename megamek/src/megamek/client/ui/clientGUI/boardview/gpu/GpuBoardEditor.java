@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -123,6 +124,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
           List.of("GpuBoard.hud.mouse.ctrlClick", "BoardEditor.help.ctrlClick"),
           List.of("BoardEditor.help.mouse.ctrlDrag", "BoardEditor.help.ctrlDrag"),
           List.of("BoardEditor.help.mouse.ctrlWheel", "BoardEditor.help.ctrlWheel"),
+          List.of("BoardEditor.help.mouse.brushPicker", "BoardEditor.help.brushPicker"),
           List.of("GpuBoard.hud.mouse.altClick", "GpuBoard.hud.help.altClick"),
           List.of("GpuBoard.hud.mouse.rightDrag", "GpuBoard.hud.hint.pan"),
           List.of("GpuBoard.hud.mouse.orbitDrag", "GpuBoard.hud.help.orbit"),
@@ -750,6 +752,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         });
     }
 
+    /** Palette programs join the editor's loading boundary, including cards that have not been opened yet. */
+    boolean prepare(BoardScene scene) {
+        GpuTerrain board = terrain.get();
+        if (board == null) { return false; }
+        return samples.prepare(board, scene) & models.prepare(board) & junctions.prepare(board);
+    }
+
     /** The hovered item as a level key of the inspected hex: the side view's, else a Layers row's, else the board's. */
     private String hovered() {
         String own = sideOpen ? section.hovered() : "";
@@ -1110,7 +1119,6 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             String name = toolName(tool);
             Label title = ui.label(tool == BoardEditorSession.Tool.SCULPT ? name : name + " · " + brush.label(), "hud-title", 12, UiTheme.TEXT);
             title.setName("editor-brush-title"); title.setEllipsis(true); brushRow(title);
-            boolean route = brush.object() != null && megamek.common.board.RailRoute.isRoute(brush.object());
             // A stamp brush keeps only its id: it has no options, and each click places its layout as one new group. A
             // multi-hex blueprint (the DropShip) has none either: each click builds it on the hex and its neighbours; its
             // Erase is its component's, over the radius.
@@ -1123,17 +1131,15 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                 brushRow(hint(UiKit.text(stamp ? "BoardEditor.hint.stamp" : "BoardEditor.hint.hexBlueprint")));
             }
             else if (brush.themeCard() && tool == BoardEditorSession.Tool.ERASE) { brushRow(hint(UiKit.text("BoardEditor.themeNoErase"))); }
-            else if (tool == BoardEditorSession.Tool.ERASE) {
-                // A maglev brush erases the maglevs within a level of its height; routes crossing above or below stay.
-                boolean maglev = route && RailRoute.kind(brush.object()) == RailRoute.Kind.MAGLEV;
-                if (!route) {
-                    UiNumber radius = brushNumber(UiKit.text("BoardEditor.radius"), snapshot.brush(), 1, 20, 1, Action.BRUSH, "");
-                    var zone = zoneBrush(brush);
-                    if (zone == null) { brushRow(radius); } else { brushRow(radius, zoneNumber(zone)); }
-                } else if (maglev) { brushRow(routeHeight(brush.object(), true, Action.BRUSH_VALUE)); }
+            else if (tool == BoardEditorSession.Tool.ERASE && brush.way()) {
+                wayHeight(brush);
+                brushRow(hint(UiKit.text("BoardEditor.way.eraseHint")));
+            } else if (tool == BoardEditorSession.Tool.ERASE) {
+                UiNumber radius = brushNumber(UiKit.text("BoardEditor.radius"), snapshot.brush(), 1, 20, 1, Action.BRUSH, "");
+                var zone = zoneBrush(brush);
+                if (zone == null) { brushRow(radius); } else { brushRow(radius, zoneNumber(zone)); }
                 brushRow(hint(UiKit.text(brush.sampledHex() != null ? "BoardEditor.hint.eraseHexes"
-                      : brush.object() == null ? "BoardEditor.hint.eraseComponent" : maglev ? "BoardEditor.hint.eraseMaglev"
-                      : route ? "BoardEditor.hint.eraseObjects" : "BoardEditor.hint.eraseObjectsInRadius")));
+                      : brush.object() == null ? "BoardEditor.hint.eraseComponent" : "BoardEditor.hint.eraseObjectsInRadius")));
             } else if (brush.object() != null) { objectControls(brush.object()); }
             else {
                 if (brush.sampledHex() != null) {
@@ -1155,7 +1161,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
      */
     private void componentControls(BoardEditorSession.Brush brush) {
         List<Actor> controls = new ArrayList<>();
-        controls.add(brushNumber(UiKit.text("BoardEditor.radius"), snapshot.brush(), 1, 20, 1, Action.BRUSH, ""));
+        if (brush.way()) { wayHeight(brush); }
+        else { controls.add(brushNumber(UiKit.text("BoardEditor.radius"), snapshot.brush(), 1, 20, 1, Action.BRUSH, "")); }
         var definition = blueprint.component(brush.component());
         if (brush.sampledHex() != null || definition.id().equals("ground")) {
             controls.add(brushNumber(UiKit.text("BoardEditor.levelLabel"), brush.elevation(), -10, 30, 1, Action.BRUSH_VALUE, "elevation")
@@ -1173,7 +1180,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         for (var field : brush.sampledHex() != null ? List.<BoardEditorBlueprint.Field>of() : definition.fields()) {
             var value = brush.property(field.terrain());
             boolean offered = settings.contains(field.terrain());
-            if (!field.brush() || value == null && !offered) { continue; }
+            if (!field.brush() || value == null && !offered || brush.way() && field.terrain().equals("bridge_elev")) { continue; }
             String target = "terrain:" + field.terrain();
             if (field.choices().isEmpty()) {
                 if (value != null) { controls.add(brushNumber(field.label(), value.value(), field.min(), field.max(), field.step(), Action.BRUSH_VALUE, target)); }
@@ -1213,7 +1220,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         var fill = ui.checkbox(UiKit.text("BoardEditor.fill"), brush.fill()); fill.setName("editor-fill");
         onChange(fill, () -> send(Action.BRUSH_VALUE, "fill", Boolean.toString(fill.isTicked())));
         ui.tip(fill).getActor().setText(UiKit.text("BoardEditor.fill.tooltip"));
-        controls.add(fill);
+        if (!brush.way()) { controls.add(fill); }
         brushRows.add(controls);
         brushRow(hint(UiKit.text(brush.sampledHex() != null ? "BoardEditor.hint.paintStamp"
               : brush.themeCard() ? "BoardEditor.hint.theme" : zone != null ? "BoardEditor.deploymentZoneHint"
@@ -1272,9 +1279,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         Action action = Action.BRUSH_VALUE;
         String prefix = "object:";
         if (RailRoute.isRoute(object)) {
-            // Only a maglev holds a height of its own; a rail follows the ground or a deck.
+            wayHeight(snapshot.activeBrush());
             boolean maglev = RailRoute.kind(object) == RailRoute.Kind.MAGLEV;
-            if (maglev) { brushRow(routeHeight(object, true, action)); }
             brushRow(hint(UiKit.text(maglev ? "BoardEditor.hint.route" : "BoardEditor.hint.rail")));
             return;
         }
@@ -1308,6 +1314,23 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private double heightOffset(BoardDecoration object) {
         var placement = object.placement();
         return placement.offset() == null ? placement.level() - snapshot.elevation() : placement.offset();
+    }
+
+    /** All six route cards share the document's height policy. */
+    private void wayHeight(BoardEditorSession.Brush brush) {
+        UiKit.Segmented mode = ui.segmented("hud-seg", false, UiKit.text("BoardEditor.way.follow"), UiKit.text("BoardEditor.way.level"));
+        mode.buttons.get(0).setName("editor-way-follow"); mode.buttons.get(1).setName("editor-way-level");
+        onChange(mode.buttons.get(0), () -> send(Action.BRUSH_VALUE, "wayHeight", "follow"));
+        onChange(mode.buttons.get(1), () -> send(Action.BRUSH_VALUE, "wayHeight", "level"));
+        mode.select(brush.levelHeight() ? 1 : 0);
+        var pillars = ui.checkbox(UiKit.text("BoardEditor.pillars"), brush.pillars());
+        pillars.setName("editor-way-pillars");
+        onChange(pillars, () -> send(Action.BRUSH_VALUE, "wayPillars", Boolean.toString(pillars.isTicked())));
+        brushRow(mode, brushNumber(UiKit.text("BoardEditor.way.height"), brush.heightOffset(), 0, 50, 1,
+              Action.BRUSH_VALUE, "wayOffset"), pillars);
+        sculptHint = ui.label(source.editorHint(), "hud-small", 12, UiTheme.TEXT);
+        sculptHint.setName("editor-way-readout"); sculptHint.setWrap(true);
+        brushRow(sculptHint);
     }
 
     /** Sculpt's options share the tray: mode, Slope and the common radius, plus the hovered hex's hint. */
@@ -1622,6 +1645,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         }
         if (definition.id().equals("ground") || definition.id().equals("cliff")) { heading(UiKit.text("BoardEditor.cliffEdges")); edges("cliff_top"); }
         if (definition.id().equals("bridge")) {
+            if (megamek.common.board.HexAppearance.implicit(snapshot.appearance())) { text(UiKit.text("BoardEditor.way.implicit")); }
             // This hex's state; a click sets the whole connected bridge.
             Boolean built = megamek.common.board.HexAppearance.bridgeBuilt(snapshot.appearance());
             Table type = new Table(); type.defaults().growX().uniformX().minWidth(0).pad(0, 2, 0, 2);
@@ -1659,6 +1683,15 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                           (slot, value) -> send(Action.BRIDGE_COLOUR, value));
                 }
             }
+        }
+        if (definition.id().equals("ground")) {
+            heading(UiKit.text("BoardEditor.way.groundSection"));
+            wayRow("road", false); wayRow("rail", false);
+        } else if (definition.id().equals("bridge")) {
+            heading(UiKit.text("BoardEditor.way.deckSection"));
+            wayRow("bridge_road", true); wayRow("bridge_rail", true);
+        } else if (definition.id().equals("road") && snapshot.property("bridge") != null) {
+            wayLayerButtons("road", false);
         }
         UiButton sample = button(UiKit.text("BoardEditor.useAsBrush"), () -> send(Action.SAMPLE)); sample.setName("editor-use-hex-brush");
         ui.tip(sample).getActor().setText(UiKit.text("BoardEditor.useAsBrush.tooltip"));
@@ -1699,6 +1732,48 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         return "BoardEditor.edges" + name.charAt(0) + name.substring(1).toLowerCase(Locale.ROOT);
     }
 
+    private void wayRow(String terrain, boolean deck) {
+        var owner = blueprint.component(terrain.equals("road") ? "road" : "ways");
+        var field = owner.fields().stream().filter(item -> item.terrain().equals(terrain)).findFirst().orElseThrow();
+        if (snapshot.property(terrain) == null) { text(field.label() + " · " + UiKit.text("BoardEditor.none")); return; }
+        field(field);
+        if (snapshot.property("bridge") != null) { wayLayerButtons(terrain, deck); }
+        if (terrain.equals("rail") || terrain.equals("bridge_rail")) {
+            var rail = snapshot.property(terrain);
+            var kind = rail.value() == 2 ? RailRoute.Kind.MAGLEV : RailRoute.Kind.RAIL;
+            int tracks = megamek.common.board.HexAppearance.tracks(snapshot.appearance(), deck ? "bridgeRail" : "rail");
+            int current = tracks == 0 ? RailRoute.pieces(rail.exits()) : tracks;
+            var layouts = RailRoute.junctions(rail.exits());
+            if (layouts.size() > 1 || current != layouts.getFirst().tracks()) {
+                Image preview = new Image(); junctions.add(kind, rail.exits(), current, preview);
+                var chosen = layouts.stream().filter(layout -> layout.tracks() == current).findFirst().orElse(null);
+                var card = visualCard(junctionLabel(chosen), preview, 64,
+                      () -> openJunctions(kind, rail.exits(), current, terrain));
+                card.setName("editor-junction"); detail.add(card).row();
+            }
+            String road = deck ? "bridge_road" : "road";
+            if (snapshot.property(road) != null) {
+                String key = deck ? "bridgeRail" : "rail";
+                int beside = megamek.common.board.HexAppearance.beside(snapshot.appearance(), key);
+                choose(UiKit.text("BoardEditor.way.corridor"), UiKit.text(beside == 0 ? "BoardEditor.way.middle" : "BoardEditor.way.beside"),
+                      List.of(new Option(UiKit.text("BoardEditor.way.middle"), "middle"), new Option(UiKit.text("BoardEditor.way.beside"), "beside")),
+                      value -> send(Action.CORRIDOR, key, value));
+                if (beside != 0) { detail.add(button(UiKit.text("BoardEditor.way.swap"), () -> send(Action.CORRIDOR, key, "swap"))).row(); }
+            }
+        }
+    }
+
+    private void wayLayerButtons(String terrain, boolean deck) {
+        Table layers = new Table();
+        for (boolean target : new boolean[] { true, false }) {
+            UiButton button = button(UiKit.text(target ? "BoardEditor.railOnDeck" : "BoardEditor.railBeneath"),
+                  () -> send(Action.WAY_LAYER, terrain, target ? "deck" : "ground"));
+            button.pressed(deck == target); button.setName("editor-way-" + terrain + (target ? "-deck" : "-beneath"));
+            layers.add(button).growX().uniformX();
+        }
+        detail.add(layers).growX().row();
+    }
+
     private void field(BoardEditorBlueprint.Field field) {
         var value = snapshot.property(field.terrain());
         if (field.terrain().contains("fluff") || field.terrain().equals("cliff_top")) { return; }
@@ -1715,9 +1790,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             for (var choice : field.choices()) {
                 Image image = new Image();
                 // Each finish's sample: the component's preview hex at that level in its material.
-                var owner = blueprint.component(snapshot.component());
+                boolean road = field.terrain().equals("road") || field.terrain().equals("bridge_road");
+                var owner = blueprint.component(road ? "road" : snapshot.component());
                 var sample = new megamek.common.Hex(owner.previewLevel(), owner.preview(), snapshot.theme());
-                int type = megamek.common.units.Terrains.getType(field.terrain());
+                int type = megamek.common.units.Terrains.getType(road ? "road" : field.terrain());
                 var shown = sample.getTerrain(type);
                 sample.addTerrain(new megamek.common.units.Terrain(type, choice.value(), shown != null && shown.hasExitsSpecified(),
                       shown == null ? 0 : shown.getExits()));
@@ -1779,7 +1855,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
               side -> send(Action.EDGE, terrain, Integer.toString(side)));
         edges.setName("editor-edges-" + terrain);
         detail.add(edges).row();
-        if (!terrain.equals("cliff_top") && value != null) {
+        if (!Set.of("cliff_top", "bridge", "bridge_road", "bridge_rail", "rail").contains(terrain) && value != null) {
             detail.add(button(UiKit.text(value.explicit() ? "BoardEditor.useAutoEdges" : "BoardEditor.autoEdges"),
                   () -> send(Action.AUTO_EDGES, terrain))).row();
         }
@@ -1792,7 +1868,6 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
     private void object(BoardDecoration object) {
         heading(objectLabel(object));
-        if (RailRoute.isRoute(object)) { route(object); return; }
         // An object of a picker family swaps to another member in place: Type.
         var asset = blueprint.assetOf(object);
         var entry = asset == null ? null : blueprint.entry(asset.id());
@@ -1845,56 +1920,6 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     /**
-     * A route marker's Edit panel: its kind, what carries it (a maglev's level; a rail running along a bridge its deck or
-     * the ground beneath, {@link RailRoute#alongDeck}), the sides it leaves by, its junction layout where its sides have
-     * more than one, and the maglev's Pillars toggle.
-     */
-    private void route(BoardDecoration object) {
-        boolean maglev = RailRoute.kind(object) == RailRoute.Kind.MAGLEV;
-        text(UiKit.text(maglev ? "BoardEditor.routeHint" : "BoardEditor.railHint"));
-        var bridge = snapshot.property("bridge");
-        if (maglev) { detail.add(routeHeight(object, false, Action.OBJECT_VALUE)).row(); }
-        else if (bridge != null && RailRoute.alongDeck(object.connections(), bridge.exits())) {
-            Table support = new Table(); support.defaults().growX().uniformX().minWidth(0).pad(0, 2, 0, 2);
-            for (boolean deck : new boolean[] { true, false }) {
-                String key = deck ? "BoardEditor.railOnDeck" : "BoardEditor.railBeneath";
-                UiButton button = button(UiKit.text(key), () -> send(Action.OBJECT_VALUE, "receiver", deck ? "bridge/deck" : "ground/top"));
-                button.setName(deck ? "editor-rail-deck" : "editor-rail-beneath");
-                button.pressed(deck == RailRoute.onDeck(object));
-                ui.tip(button).getActor().setText(UiKit.text(key + ".tooltip"));
-                support.add(button);
-            }
-            detail.add(support).growX().row();
-        } else { text(UiKit.text("BoardEditor.support.ground")); }
-        // A side joins the neighbouring route only while both have it; toggling sets both.
-        UiHexSides sides = new UiHexSides(ui, object.connections(), side -> send(Action.OBJECT_VALUE, "side", Integer.toString(side)));
-        sides.setName("editor-route-sides");
-        detail.add(sides).row();
-        var layouts = RailRoute.junctions(object.connections());
-        int current = RailRoute.pieces(object, object.connections());
-        if (layouts.size() > 1 || current != layouts.getFirst().tracks()) {
-            Image preview = new Image(); junctions.add(RailRoute.kind(object), object.connections(), current, preview);
-            Table junction = new Table(); junction.defaults().growX().minWidth(0);
-            junction.add(ui.caption(UiKit.text("BoardEditor.junction"))).left().padBottom(5).row();
-            var chosen = layouts.stream().filter(layout -> layout.tracks() == current).findFirst().orElse(null);
-            UiButton card = visualCard(junctionLabel(chosen), preview, 64, () -> openJunctions(object));
-            card.setName("editor-junction"); ui.tip(card).getActor().setText(UiKit.text("BoardEditor.junction.tooltip"));
-            junction.add(card);
-            detail.add(junction).padTop(8).row();
-        }
-        if (maglev) {
-            // As a bridge's Pillars: the whole connected route, one undo step.
-            boolean on = object.pillars();
-            UiButton pillars = button(UiKit.text("BoardEditor.pillars"), () -> send(Action.PILLARS, Boolean.toString(!on)));
-            pillars.setName("editor-route-pillars"); pillars.pressed(on);
-            ui.tip(pillars).getActor().setText(UiKit.text("BoardEditor.routePillars.tooltip"));
-            detail.add(pillars).padTop(8).row();
-        }
-        detail.add(button(UiKit.text("BoardEditor.useAsBrush"), () -> send(Action.SAMPLE))).padTop(8).row();
-        detail.add(removeButton(UiKit.text("BoardEditor.remove"), () -> send(Action.REMOVE_OBJECT))).row();
-    }
-
-    /**
      * A junction layout's descriptive name ({@link RailRoute#junctions}: "Crossing", "Turnout to SE", ...), naming its
      * side where it has one; one drawn by strokes that is no listed layout (null) is "As drawn".
      */
@@ -1909,17 +1934,16 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
      * The junction card's gallery, in the design gallery's layer: each sensible layout of the route's sides seen from
      * above, the default first; a pick stores it as the route's tracks, one undo step.
      */
-    private void openJunctions(BoardDecoration route) {
+    private void openJunctions(RailRoute.Kind kind, int sides, int current, String terrain) {
         stage.setKeyboardFocus(null); choices.cancel(); numbers.forEach(UiNumber::dismiss);
         designOwner = ""; designHeading.setText(UiTheme.upper(UiKit.text("BoardEditor.junctionTitle")));
         designCards.clearChildren(); designPages.clearChildren();
-        int sides = route.connections(), current = RailRoute.pieces(route, sides);
         var layouts = RailRoute.junctions(sides);
         for (int index = 0; index < layouts.size(); index++) {
             int layout = layouts.get(index).tracks();
-            Image image = new Image(); junctions.add(RailRoute.kind(route), sides, layout, image);
+            Image image = new Image(); junctions.add(kind, sides, layout, image);
             UiButton card = visualCard(junctionLabel(layouts.get(index)) + (layout == current ? "  ✓" : ""), image, 80, () -> {
-                send(Action.OBJECT_VALUE, "tracks", Integer.toString(layout)); closeDesigns();
+                send(Action.WAY_TRACKS, terrain, Integer.toString(layout)); closeDesigns();
             });
             card.setName("editor-junction-" + index);
             designCards.addActor(card);
@@ -2006,20 +2030,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         detail.add(button(UiKit.text("BoardEditor.mirror"), () -> send(Action.GROUP_VALUE, "mirror", "true"))).row();
     }
 
-    private Table routeHeight(BoardDecoration object, boolean compact, Action action) {
-        var placement = object.placement();
-        boolean absolute = placement.mode().equals("absolute");
-        String prefix = action == Action.BRUSH_VALUE ? "object:" : "";
-        var fixed = ui.checkbox(UiKit.text("BoardEditor.fixedElevation"), absolute);
-        fixed.setName("editor-maglev-fixed-height");
-        onChange(fixed, () -> send(action, prefix + "receiver", fixed.isTicked() ? "absolute" : "ground/top"));
-        String label = UiKit.text(absolute ? "BoardEditor.levelLabel" : "BoardEditor.heightAboveGround");
-        String target = prefix + (absolute ? "level" : "offset");
-        double value = absolute ? placement.level() : placement.offset();
-        UiNumber number = compact ? brushNumber(label, value, -10, 30, .25, action, target)
-              : numeric(label, value, -10, 30, .25, action, target);
-        Table row = new Table(); row.add(fixed).left().row(); row.add(number).growX().minWidth(0); return row;
-    }
+
     private void choose(String label, String selected, List<Option> options, Consumer<String> commit) {
         detail.add(choice(label, selected, options, commit)).row();
     }

@@ -13,6 +13,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.HexAppearance;
 
 /** Tiny textured details, baked into a single opaque material per terrain chunk and shared prop page. */
 final class GpuScatter {
@@ -75,6 +76,9 @@ final class GpuScatter {
 
     static void build(MeshPartBuilder mesh, BoardScene.Tile tile, BoardSurface surface, BoardScene.Feature feature) {
         if (!BoardScatter.allowed(tile)) { return; }
+        // Authored edits rebuild this baked mesh. Nuclear-only scorch still tints it: it shares the opaque rock draw.
+        if ((feature.asset().equals("scatter-grass") || feature.asset().equals("scatter-dry-grass"))
+              && HexAppearance.scorch(tile.appearance()) > 0) { return; }
         BoardShape bush = feature.asset().equals("scatter-plant") ? BoardScatter.plant(tile.surface()) : null;
         float bushScale = bush == null ? 0 : BoardScatter.bushScale(bush, feature.scale());
         // On the hex's own ground, never over a receding rim or a transition's slope.

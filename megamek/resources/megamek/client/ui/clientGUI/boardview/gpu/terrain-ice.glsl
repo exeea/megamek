@@ -379,8 +379,8 @@ void main() {
     surfaceVariance = iceVariance;
     fragColor.rgb = iceFinish(fragColor.rgb, worldDx, worldDy);
 #ifdef GROUND_DAMAGE_TILE
-    // A nuclear blast's soot settles on ice and snow as well (scorchGround blackens the ground beneath).
-    fragColor.rgb *= 1.0 - .9 * smoothstep(0.0, .45, groundScorchAt(v_cloudPosition.xy));
+    // The same deposit coverage as the ground below; ice keeps its existing optical layer.
+    fragColor.rgb *= 1.0 - .9 * scorchCoverage(groundScorchAt(v_cloudPosition.xy));
 #endif
 #else
     iceBaseSurface();

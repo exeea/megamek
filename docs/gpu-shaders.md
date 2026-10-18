@@ -83,15 +83,72 @@ driver links one program at a time across contexts, so on Iris Xe 30 terrain pro
 took 168 s with one context, 192 s with two and 295 s with four.
 
 `GpuProgramCache` keeps every linked program in `mmconf/gpu-program-cache`, named by
-the SHA-256 of the driver's vendor, renderer and version and both complete stages, so
-a later launch loads it instead of compiling; Intel's own cache stores nothing once it
-is full. A damaged entry, or one the driver rejects, is deleted and compiles again; a
-driver without binary formats compiles at every launch. Opening a board window, and
-every 64 MB written, deletes entries unused for 30 days, then the least recently used
-beyond 256 MB. `-Dmegamek.gpu.programCache=false` compiles from source, for compiler
-timings. On Iris Xe the calibration board's 30 terrain programs compile in 168 s and
+the SHA-256 of the driver's vendor, renderer and version, a salt and both complete stages
+without their comments (`GpuGlsl.withoutComments` keeps the line breaks), so a later
+launch loads it instead of compiling and a comment-only edit changes nothing; Intel's own
+cache stores nothing once it is full. A damaged entry, or one the driver rejects, is
+deleted and compiles again; a driver without binary formats compiles at every launch.
+Opening a board window, and every 256 MB written, deletes entries unused for 30 days, then
+the least recently used beyond 1 GB. `-Dmegamek.gpu.programCacheDir=` keeps the entries
+elsewhere; the Gradle `test`, `gpuBoardSmoke`, `gpuBoardBenchmark` and `gpuBoardLargeMapTest`
+tasks use `build/gpu-program-cache`, so test runs never evict the player's entries.
+`-Dmegamek.gpu.programCache=false` compiles from source, for compiler timings. On Iris Xe the calibration board's 30 terrain programs compile in 168 s and
 load from the cache in 0.3 s; a warm load of the board takes 6–10 s, and its 44
 programs take 5.5 MB (`GpuProgramCacheSmokeTest`).
+
+No program compiles once the loading stage has gone. No program exists for combat scars: a
+scar patch on a wall or an object draws with its receiver's sculpt or model program, which
+its page UV per vertex and a per-draw uniform (`u_surfaceScar`, `scar-material.glsl`) make
+draw the patch where its image covers the receiver and nothing elsewhere (alpha 0 under
+blending, no discard, `GpuSurfaceScars`). In games (`GpuTerrain.setCombatScars`) the loading
+stage also links the plain program of each object drawn instanced. The editor's samples take the board's ambient-occlusion setting,
+so they draw with the board's programs; on NVIDIA they match the samples without it bit for
+bit (`GpuExactProgramsSmokeTest`). Sculpted ground leaves out the biome stage (biomes,
+tundra, mixed liquids) on a board without biomes that the editor does not change
+(`GpuBiomeSurface.Present`, part of the environment's mask): the frames stay bit-identical,
+and on NVIDIA a one-family program links in 0.9 s instead of 1.9 s. Ground, water and magma
+programs link behind the loading stage with the sculpt programs. The frames after a loading
+stage still draw under it, so that their programs link first: the board as it will show
+and, unless the board makes its entrance, its Tactical View and a close view of its centre;
+the effects of play (weapons, missiles, explosions, flares, fire and smoke, splashes, jump
+jets, spores, geysers, weather, heat, hex masks, ECM fields) link with the first of them
+(`GpuBattleView.warmUp`). Without the parallel compiler, a program requested for a
+framebuffer object links on a context that never draws (`GpuGlsl.linkOffscreen`), since
+Intel would compile it again at its first scene draw and keep that variant in its binary.
+The game's units not on the board (`BoardSource.reserveUnits`) stand in the middle of each
+of those frames, and the last draws the thermal view with SMAA, whose programs stay when it
+is off; every loading stage, a lighting switch's too, probes again. The editor's board also
+prepares the palette's kinds while it loads (`GpuEditorTerrainPreviews.kinds`: each preview,
+preset and look but buildings' designs, apart on clear ground; frozen land and its border
+both ways) and the wave simulations. `GpuMapHud.prepare` also warms the palette's own
+terrain and model preview providers before the loading stage ends; warming the main board
+provider alone does not prepare those separate owners. An edit whose new materials still
+need a program shows the previous terrain until it is linked (`GpuTerrain.awaitingLinks`),
+not the loading stage. Changing wet terrain to dry resets ocean storage while retaining
+its compiled programs; only final disposal releases those programs.
+Once the board shows, a material program still missing links in the same preparation
+(`GpuGlsl.deferral`) while its draws are skipped (`GpuShaderProvider.UNLINKED`), at most
+6 ms of starts a frame; palette cards, model previews and print tiles draw again until
+complete. `-Dmegamek.gpu.shaderTiming=true` logs a compile that held a frame as
+`after-loading` (`after-loading-offscreen` for those renderers), one linked so as
+`after-loading-deferred`; `GpuShaderLoadSmokeTest` asserts no late synchronous or deferred
+links and no returning loading stage for a game (late deployments, SMAA, thermal view)
+and for the editor (every Assets category, a search, strokes of lava, water, ice, scorch
+and a car, followed by a specular-AA switch and fresh model/junction previews). Such links still
+cost frames: NVIDIA reports a parallel link complete, then holds its first status query for
+about half the link (5–150 ms for an object's program, 5–8 s for a sculpt program), and
+first draws a program loaded from the cache slowly (3.5 s for the ice card's sculpt program);
+on Iris Xe a link on the shared context holds the render thread throughout. The preview
+warm-up therefore includes the palette's object models even when no terrain kind shows them.
+Model previews key preparation by both the board renderer and their actual lighting
+environment flags, so changing specular AA prepares the new programs during the
+lighting reload. Obsolete warmup meshes are disposed when that key changes.
+
+The 2026-10-19 Iris Xe runtime check passed with zero late synchronous/deferred links
+and no returning loading stage, both during normal editing and on the first presented
+frames after the AA change. This used a private application cache and is a preparation
+correctness result, not a claim of hitch-free editing: the longest editing frame was
+546.5 ms. Evidence is in `build/shader-audit/handoff-20261018/iris-finish/runtime-editor/`.
 
 Once the board shows, sculpted ground draws with family programs (`GpuFamilyPrograms`): the
 same source with the draw's surface families as constants (`SCULPT_FAMILY`,
@@ -99,8 +156,8 @@ same source with the draw's surface families as constants (`SCULPT_FAMILY`,
 generic program of the same flags stays every draw's fallback and draws the same pixels; a
 family program sorts with it, so draw order and depth-tie winners do not change. Family
 programs build behind the loading stage, after the generic ones: when a board opens, the
-graphics switch or the lighting changes, the most-drawn variants compile one at a time on
-the same worker. Variants that appear later, such as a newly painted combination, keep the
+graphics switch or the lighting changes, the most-drawn variants compile six at a time with
+the driver's parallel compiler (NVIDIA), one at a time on the worker otherwise. Variants that appear later, such as a newly painted combination, keep the
 generic program until the next load. Crust and bank draws and volcanic palettes with at most
 one ordinary family keep the generic program, which already compiles one family's path; so
 do scarred surfaces, scatter, water, editor previews and board prints. A terrain keeps at
@@ -114,27 +171,33 @@ the family programs with the other variants, on the render thread.
 
 The depth pre-pass (`GpuTerrain.renderPrepass`) draws the trees' depth before the opaque colour pass: leaves and
 impostor cards with their own alpha test, after which `terrain-foliage.frag` returns under `depthPrepassFlag`, trunks
-and other solid tree parts with an empty fragment stage (`terrain-depth.frag`). Their colour draws then test
-`GL_EQUAL` without writing depth, so hidden leaves are not shaded. Each pre-passed generic program has a depth twin
-with the same prefix and vertex stage, which its family programs share. Twins are programs beside the colour programs,
+and other solid tree parts with an empty fragment stage (`terrain-depth.frag`). It also draws the relief of chunks with
+many cliffs, with that empty stage: a chunk's walls (each relief triangle's area as seen from beside it, the board's
+outer sides left out) must cover more than 0.45 of its hexes' area (`GpuTerrain.cliffWalls`), measured where its meshes
+are prepared. Such a chunk marks its relief materials (`Ground.cliffs`, `Prepass.CLIFFS`), so their draws stay apart
+from other chunks' in shared pages and batches and use the same programs. Their colour draws then test `GL_EQUAL`
+without writing depth, so hidden leaves and ground are not shaded. Each pre-passed generic program has a depth twin with
+the same prefix and vertex stage, which its family programs share. Twins are programs beside the colour programs,
 outside the family programs' capacity, and link behind the loading stage with the generic programs, every tree detail
 level included. Every terrain vertex stage declares `gl_Position` invariant, and a cutout's vertex stage also the alpha
 test's inputs (`foliage-coverage.glsl`); below GLSL 4.20, `terrain-foliage.frag` declares those inputs invariant too
 (`coverageIn`). The frame's single gather, draw order and flushes do not change. A draw without a twin, a variant that
 appears later and a shader edit's replacements draw as before until the warm-up pairs them. The Tactical View, the
 Classic columns and the wireframe draw without it. `-Dmegamek.gpu.depthPrepass=false` turns it off; `=all` adds the
-ground relief, for measurements only, since on an Iris Xe its twins cost about what they save. On NVIDIA the frames
-are bit-identical with and without the pre-pass; on an Iris Xe, `GL_EQUAL` drops a few isolated pixels on leaf edges
-and tufts (5 to 2133 of a 1080p view's 2.07 million). On an Iris Xe at 1080p the 40 by 40 forest's middle view draws
-in 32 ms instead of 53.5 ms. `GpuDepthPrepassSmokeTest` checks the parity and shader edits;
-`GpuDepthPrepassBenchmarkSmokeTest` times it.
+other chunks' relief, for measurements only, since on an Iris Xe their twins cost about what they save. On NVIDIA the
+frames are bit-identical with and without the pre-pass; on an Iris Xe, `GL_EQUAL` drops a few isolated pixels on leaf
+edges and tufts (5 to 2133 of a 1080p view's 2.07 million) and on cliff relief (0 to 5). On an Iris Xe at 1080p the 40
+by 40 forest's middle view draws in 32 ms instead of 53.5 ms; the cliff chunks take the Box Canyon's middle view from
+19.2 to 13.5 ms and the calibration board's from 22.2 to 20.7 ms, leave the Jotun Mountains' unchanged within its
+rounds' spread of about 1 ms, and the 48 by 48 city and Grassland 3 have none. `GpuDepthPrepassSmokeTest` checks the
+parity and shader edits; `GpuDepthPrepassBenchmarkSmokeTest` times it.
 
 Ambient occlusion (`GpuAmbientOcclusion`; the Display page's Ambient occlusion, off until switched on, and its
 strength) darkens the sky light where the relief and the trees hide the sky. It runs between the depth pre-pass, which
 also draws the relief while it is on, and the opaque colour draws: ground-truth ambient occlusion (Jimenez et al. 2016,
 `ambient-occlusion-horizon.frag`) at half resolution from the pre-pass depth, with normals from that depth, two
 directions of four steps on each side within 8 m (at most 160 scene pixels on screen), then two depth-aware blur
-passes (`ambient-occlusion-blur.frag`) that remove its 4 by 4 rotation pattern and apply the strength. The same pass
+passes (`ambient-occlusion-blur.frag`) that remove its 4 by 4 rotation pattern. The same pass
 marches contact shadows: eight jittered steps toward the sun or moon over 2 m of the pre-pass depth, an occluder taken
 as 1 m deep, for the small occluders the shadow map is too coarse for; none without a direct light. Lit programs read
 both with `screenOcclusion()` (`ambient-occlusion.glsl`; `shadeSurface` multiplies the sky's occlusion by the first and
@@ -144,7 +207,7 @@ read 1, as does every draw after the units (water, transparent effects). Its env
 `ambientOcclusionFlag` into the lit programs, so a switch rebuilds them behind the loading stage; without it the accessor
 is the constant 1 and the frames are bit-identical to those without the feature. Sculpted ground with both ice and
 volcanic crust draws without it: its sampler would be the program's 17th texture unit (`GpuSamplerBudgetSmokeTest`).
-Its two RGBA32F targets (visibility, camera distance, contact visibility) follow the scene's size. `GpuAmbientOcclusionSmokeTest` checks it and, with
+Its two RGBA16F targets (visibility, camera distance, contact visibility) follow the scene's size; in an orthographic view the distance is stored less the orbit pivot's depth (`GpuAmbientOcclusion.rangeOrigin`), since that camera stands about 10,000 units back, and the sky is clamped to 60,000. `GpuAmbientOcclusionSmokeTest` checks it and, with
 `-Dmegamek.gpu.measureAmbientOcclusion=true`, times it.
 
 ## Uniforms, inputs and previews

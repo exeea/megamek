@@ -352,23 +352,21 @@ class BoardBridgeFootingTest {
             }
         }
 
-        // Two maglevs crossing at levels 2 and 4 in the middle hex: four joints there, each at its own beam.
+        // A ground rail crossing beneath the deck stays on its own layer and does not add elevated joints.
         Coords middle = START.translated(3);
         Map<Coords, BoardScene.Tile> tiles = new HashMap<>();
-        tiles.put(middle, routeTile(middle, false, maglev("low", 2, 1 | 8, true), maglev("high", 4, 2 | 16, true)));
-        for (int d : new int[] { 0, 3 }) { tiles.put(middle.translated(d), routeTile(middle.translated(d), false,
-              maglev("low" + d, 2, RailRoute.side((d + 3) % 6), false))); }
+        tiles.put(middle, routeTile(middle, false, RailRoute.Kind.MAGLEV, 4, 18, true, 9));
         for (int d : new int[] { 1, 4 }) { tiles.put(middle.translated(d), routeTile(middle.translated(d), false,
-              maglev("high" + d, 4, RailRoute.side((d + 3) % 6), false))); }
+              RailRoute.Kind.MAGLEV, 4, RailRoute.side((d + 3) % 6), false, 0)); }
         var crossing = BoardSurfaceBlendTest.scene(at -> tiles.getOrDefault(at,
               BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
-        assertEquals(4, joints(maglevPiers(crossing, middle), middle));
+        assertEquals(2, joints(maglevPiers(crossing, middle), middle));
         for (int d = 0; d < 6; d++) {
             var edge = BoardGeometry.center(middle, 0).lerp(BoardGeometry.center(middle.translated(d), 0), .5f);
             float top = (float) vertices(maglevPiers(crossing, middle.translated(d)), edge).stream()
                   .mapToDouble(p -> p.z).max().orElse(Double.NaN);
-            assertEquals(d % 3 == 2 ? Float.NaN : (d % 3 == 0 ? 2 : 4) * BoardGeometry.level() + .75f, top, .01f,
-                  "The neighbour's half at side " + d + " (either marker's toggle carries the joint)");
+            assertEquals(d % 3 != 1 ? Float.NaN : 4 * BoardGeometry.level() + .75f, top, .01f,
+                  "The neighbour's half at side " + d + " (either bridge's toggle carries the joint)");
         }
 
         // Over water the footing sinks out of sight, its lip (0.6) and half a px below the lowest bed under it.
@@ -380,21 +378,17 @@ class BoardBridgeFootingTest {
 
         assertEquals(0, joints(maglevPiers(line(RailRoute.Kind.MAGLEV, new double[] { 2, 2, 2 }, Set.of(), Set.of()), second),
               second), "Off");
-        assertEquals(0, joints(maglevPiers(line(RailRoute.Kind.MAGLEV, new double[] { .5, .5, .5 }, Set.of(0, 1, 2), Set.of()),
-              second), second), "Less than a level of room under the beam");
+        assertEquals(0, joints(maglevPiers(line(RailRoute.Kind.MAGLEV, new double[] { 0, 0, 0 }, Set.of(0, 1, 2), Set.of()),
+              second), second), "A ground maglev has no bridge piers");
         var rails = line(RailRoute.Kind.RAIL, new double[] { 0, 0, 0 }, Set.of(), Set.of());
         assertEquals(0, joints(maglevPiers(rails, second), second), "A rail lies on the ground");
         var along = BoardNaturalBridgeTest.replace(dry, withRoad(dry.tile(second), 9));
         assertEquals(0, joints(maglevPiers(along, second), second), "A road beneath along the route keeps its lane");
         var across = BoardNaturalBridgeTest.replace(dry, withRoad(dry.tile(second), 18));
         assertEquals(2, joints(maglevPiers(across, second), second), "A road crossing beneath, not along");
-        var railBeneath = BoardNaturalBridgeTest.replace(dry, routeTile(second, false, maglev("m", 2, 9, true),
-              new BoardDecoration("r", "prop", RailRoute.Kind.RAIL.asset, null, 0, 0, 0, false, 1,
-                    BoardDecoration.Placement.ground(), 0).withConnections(9)));
+        var railBeneath = BoardNaturalBridgeTest.replace(dry,
+              routeTile(second, false, RailRoute.Kind.MAGLEV, 2, 9, true, 9));
         assertEquals(0, joints(maglevPiers(railBeneath, second), second), "A ground rail beneath along the route keeps its track");
-        var overDeck = BoardNaturalBridgeTest.replace(dry, withFeatures(deckTile(second, 9, true, 0),
-              List.of(feature(maglev("m", 2, 9, true)))));
-        assertEquals(0, joints(maglevPiers(overDeck, second), second), "A bridge deck crossing beneath");
     }
 
     /**
@@ -419,22 +413,30 @@ class BoardBridgeFootingTest {
 
     static final Coords START = new Coords(4, 2);
 
-    /** A maglev marker at {@code level} with these sides and its Pillars toggle. */
-    private static BoardDecoration maglev(String id, double level, int sides, boolean pillars) {
-        return new BoardDecoration(id, "prop", RailRoute.Kind.MAGLEV.asset, null, 0, 0, 0, false, 1,
-              BoardDecoration.Placement.absolute(level), 0).withConnections(sides).withPillars(pillars);
-    }
-
     private static BoardScene.Feature feature(BoardDecoration marker) {
         return new BoardScene.Feature(marker.asset(), 0, 0, 0, 1, 1, 0, BoardScene.FeatureKind.PROP, 0, false, marker);
     }
 
-    /** A grass hex at level 0, over water:1 when {@code water}, holding these route markers. */
-    private static BoardScene.Tile routeTile(Coords at, boolean water, BoardDecoration... markers) {
+    /** Native terrain owns the route and, for a raised maglev, the implicit bridge and its Pillars choice. */
+    static BoardScene.Tile routeTile(Coords at, boolean water, RailRoute.Kind kind, int level, int sides,
+          boolean pillars, int groundRail) {
+        boolean deck = kind == RailRoute.Kind.MAGLEV && level > 0;
+        Hex hex = new Hex(0, (water ? "water:1;" : "") + (deck
+              ? "bridge:1:" + sides + ";bridge_elev:" + level + ";bridge_cf:40;bridge_rail:2:" + sides
+                    + (groundRail == 0 ? "" : ";rail:1:" + groundRail)
+              : "rail:" + (kind == RailRoute.Kind.MAGLEV ? 2 : 1) + ":" + sides), "");
+        if (deck) { hex.setAppearance(Map.of("bridge", pillars ? HexAppearance.IMPLICIT_PILLARS : HexAppearance.IMPLICIT_BRIDGE)); }
         var ground = BoardSurfaceBlendTest.tile(at, BoardScene.Surface.GRASS, 0, water ? 1 : -1, 0).ground();
-        return new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, ground, null, null, null, null,
-              java.util.Arrays.stream(markers).map(BoardBridgeFootingTest::feature).toList(), List.of(),
-              water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE);
+        var features = new java.util.ArrayList<BoardScene.Feature>();
+        RailRoute.derived(hex, "terrain").forEach(marker -> features.add(feature(marker)));
+        if (deck) { features.add(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, level, BoardScene.FeatureKind.PROP, sides)); }
+        var t = new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, ground, null, null, null, null,
+              features, List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE);
+        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(),
+              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.tileset(),
+              t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
+              t.groundCover(), t.bridge(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), hex.getAppearance(),
+              t.cover(), t.barren(), BoardRoad.Kind.NONE, 0, false, RailRoute.groundSides(hex));
     }
 
     /**
@@ -446,10 +448,7 @@ class BoardBridgeFootingTest {
         for (int i = 0; i < levels.length; i++) {
             Coords at = START.translated(3, i);
             int sides = (i > 0 ? RailRoute.side(0) : 0) | (i < levels.length - 1 ? RailRoute.side(3) : 0);
-            var marker = kind == RailRoute.Kind.MAGLEV ? maglev("route" + i, levels[i], sides, toggled.contains(i))
-                  : new BoardDecoration("route" + i, "prop", kind.asset, null, 0, 0, 0, false, 1,
-                        BoardDecoration.Placement.ground(), 0).withConnections(sides);
-            tiles.put(at, routeTile(at, wet.contains(i), marker));
+            tiles.put(at, routeTile(at, wet.contains(i), kind, (int) levels[i], sides, toggled.contains(i), 0));
         }
         return BoardSurfaceBlendTest.scene(at -> tiles.getOrDefault(at,
               BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
@@ -463,9 +462,7 @@ class BoardBridgeFootingTest {
     /** The hex's maglev pier facets, as the terrain builds them for each of its route markers. */
     static List<BoardBridge.Facet> maglevPiers(BoardScene scene, Coords at) {
         var tile = scene.tile(at);
-        var surfaces = new HashMap<Coords, BoardSurface>();
-        return tile.features().stream().filter(BoardRail::route)
-              .flatMap(feature -> BoardBridgeFooting.piers(scene, tile, feature, TerrainLod.FULL, surfaces).stream()).toList();
+        return BoardBridge.guideway(tile) ? piers(scene, at) : List.of();
     }
 
     /**

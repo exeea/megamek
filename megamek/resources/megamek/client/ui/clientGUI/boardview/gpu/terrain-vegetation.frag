@@ -74,6 +74,9 @@ void main() {
     vec3 albedo = v_color.rgb;
 #if (defined(biomeVegetationFlag) || defined(bankTurfFlag)) && defined(diffuseTextureFlag)
     // Opaque depth ownership avoids ordering halos between intersecting clumps; mipmaps filter distant leaves.
+#ifdef bankTurfFlag
+    plant.a *= 1.0 - scorchedGrass(v_cloudPosition.xy);
+#endif
     if (plant.a < .32) discard;
 #ifdef bankTurfFlag
     albedo *= turfColor(plant.rgb, turfGradient, roughness);

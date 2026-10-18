@@ -11,12 +11,13 @@ import java.util.Set;
  * {@code rotation} turns a vegetation design clockwise, in 30-degree steps from 30 to 330 (a container yard's look,
  * {@link BoardEditorBlueprint.Skin}); 0 is no rotation and is stored as none. {@code tracks} is a rail's junction layout
  * where it differs from the default of its sides ({@link RailRoute#pieces(int)}): owners {@code "rail"} (the ground
- * rail) and {@code "bridgeRail"} (the deck rail) only, made by {@link #tracks(int)}.
+ * rail) and {@code "bridgeRail"} (the deck rail) only, made by {@link #tracks(int)}. {@code beside} chooses the beside-road
+ * corridor and its physical side at each border ({@link #beside(Map, String)}); the middle corridor stores none.
  */
 public record HexAppearance(String variant, String asset, String material, Double strength,
-      BoardDecoration.Colours colours, Integer rotation, Integer tracks) implements Serializable {
+      BoardDecoration.Colours colours, Integer rotation, Integer tracks, Integer beside) implements Serializable {
     public static final Set<String> OWNERS = Set.of("ground", "road", "building", "pavement", "fuelTank",
-          "vegetation", "rough", "bridge", "rail", "bridgeRail", "scorch");
+          "vegetation", "rough", "bridge", "bridgeRoad", "rail", "bridgeRail", "scorch");
     /**
      * A built bridge with concrete piers under the joints between its hexes, never at a hex centre (owner
      * {@code "bridge"}). Cosmetic, like the other bridge types: the 3D views draw them; rules and the 2D views ignore it.
@@ -109,9 +110,27 @@ public record HexAppearance(String variant, String asset, String material, Doubl
         this(variant, asset, material, strength, colours, rotation, null);
     }
 
+    /** An appearance without a beside-road rail placement. */
+    public HexAppearance(String variant, String asset, String material, Double strength, BoardDecoration.Colours colours,
+          Integer rotation, Integer tracks) {
+        this(variant, asset, material, strength, colours, rotation, tracks, null);
+    }
+
     /** The rail appearance that stores the junction layout {@code tracks}; null (none) for the default layout, 0. */
     public static HexAppearance tracks(int tracks) {
-        return tracks == 0 ? null : new HexAppearance("rail/layout", null, null, null, BoardDecoration.Colours.NONE, null, tracks);
+        return rail(tracks, 0);
+    }
+
+    /** Rail junction and corridor appearance. Middle corridors and default track layouts store nothing. */
+    public static HexAppearance rail(int tracks, int beside) {
+        return tracks == 0 && beside == 0 ? null : new HexAppearance("rail/layout", null, null, null,
+              BoardDecoration.Colours.NONE, null, tracks == 0 ? null : tracks, beside == 0 ? null : beside);
+    }
+
+    /** 0 for a middle corridor, otherwise 64 plus its six border-side bits ({@link RailRoute.Corridor}). */
+    public static int beside(Map<String, HexAppearance> appearance, String owner) {
+        HexAppearance stored = appearance.get(owner);
+        return stored == null || stored.beside() == null ? 0 : stored.beside();
     }
 
     /** The junction layout a hex's appearance stores for {@code owner} ({@code "rail"} or {@code "bridgeRail"}), else 0. */
@@ -187,13 +206,16 @@ public record HexAppearance(String variant, String asset, String material, Doubl
         if (tracks != null && (tracks <= 0 || tracks >= 1 << RailRoute.PIECES)) {
             throw new IllegalArgumentException("A rail layout is a mask of track pieces; the default is stored as none");
         }
+        if (beside != null && (beside < 64 || beside > 127)) {
+            throw new IllegalArgumentException("Beside-road rails store 64 plus their border-side bits");
+        }
     }
 
     public void validateOwner(String owner) {
         if (!OWNERS.contains(owner) || asset != null && !owner.equals("building")
-              || material != null && !owner.equals("road") || strength != null && !owner.equals("ground")
+              || material != null && !owner.equals("road") && !owner.equals("bridgeRoad") || strength != null && !owner.equals("ground")
               || !colours.slots().isEmpty() && !owner.equals("bridge") || rotation != null && !owner.equals("vegetation")
-              || tracks != null && !owner.equals("rail") && !owner.equals("bridgeRail")) {
+              || (tracks != null || beside != null) && !owner.equals("rail") && !owner.equals("bridgeRail")) {
             throw new IllegalArgumentException("Appearance fields do not belong to " + owner);
         }
     }

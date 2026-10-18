@@ -33,33 +33,34 @@ float groundScorchAt(vec2 world) {
     return max(scorches.x, scorches.y);
 }
 
-// Scorch on a surface (shadeSurface): soot over a nuclear blast's area, which the falling damage thins toward its edge,
-// or over a hex scorched in the editor, and at full scorch the dark, glassy crust the heat fuses from the ground
-// (trinitite).
-void scorchGround(float scorch, inout vec3 albedo, inout float roughness) {
-    float ash = smoothstep(0.0, .45, scorch);
-    float luminance = dot(albedo, vec3(.2126, .7152, .0722));
-    albedo = mix(albedo, vec3(luminance * .12) + vec3(.010, .009, .008), ash);
-    float glass = smoothstep(.72, .92, scorch);
-    albedo = mix(albedo, vec3(.018, .03, .024), glass);
-    roughness = mix(roughness, mix(.95, .15, glass), max(ash * .6, glass));
+// Even Singed (.15) clears grass; only the visual fringe retains partial coverage.
+float scorchedGrass(vec2 world) { return smoothstep(0.0, .10, groundScorchAt(world)); }
+
+// One deposit evaluation for every land surface. Sculpt tops supply the authored reference maps; steep faces and
+// plants use their average sites, without a stretched map or extra samples. All palette values are linear reflectance.
+const vec3 SCORCH_SITES = vec3(.35, .22, .5); // cinder, ash, fused mineral
+struct Scorched { vec3 albedo; float roughness; float coverage; float detail; };
+
+float scorchCoverage(float severity) { return smoothstep(0.0, .55, severity); }
+
+vec3 scorchSites(vec3 reference, float roughness) {
+    float luminance = dot(reference, vec3(.2126, .7152, .0722));
+    return vec3(1.0 - smoothstep(.03, .10, luminance), smoothstep(.10, .26, luminance),
+          1.0 - smoothstep(.35, .65, roughness));
 }
 
-float scorchHash(vec2 cell) { return fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453); }
-
-// The glow of Ground Zero's fused crust while it cools (shadeSurface): bright veins along the cracks of the crust, a dim
-// glow between them, both as hot as its scorch and the heat left since the blast.
-float scorchGlow(vec2 world, float scorch, float heat) {
-    float glow = heat * smoothstep(.8, 1.0, scorch);
-    if (glow <= 0.0) return 0.0;
-    // Cracks about 3 m apart, in metres from the 8 m tiles' world size.
-    vec2 p = world / (u_groundDamageGrid.x * .4);
-    vec2 cell = floor(p), f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float noise = mix(mix(scorchHash(cell), scorchHash(cell + vec2(1.0, 0.0)), f.x),
-          mix(scorchHash(cell + vec2(0.0, 1.0)), scorchHash(cell + vec2(1.0, 1.0)), f.x), f.y);
-    float vein = 1.0 - abs(noise * 2.0 - 1.0);
-    return glow * (.15 + .85 * pow(vein, 6.0));
+Scorched scorched(float severity, vec3 sites, float roughness, float height) {
+    float fused = smoothstep(.78, .97, severity);
+    float cinder = smoothstep(.12, .45, severity) * sites.x;
+    float ash = smoothstep(.35, .68, severity) * sites.y * (1.0 - .65 * fused);
+    float glass = fused * sites.z;
+    vec4 weights = vec4((1.0 - glass) * (1.0 - ash) * (1.0 - cinder),
+          (1.0 - glass) * (1.0 - ash) * cinder, (1.0 - glass) * ash, glass);
+    vec3 pigment = weights.x * vec3(.060, .043, .026) + weights.y * vec3(.016, .018, .017)
+          + weights.z * vec3(.230, .220, .200) + weights.w * vec3(.028, .037, .030);
+    return Scorched(pigment * mix(.8, 1.2, height),
+          dot(weights, vec4(.90, .86, .97, clamp(roughness, .18, .38))), scorchCoverage(severity),
+          dot(weights, vec4(.5, .9, .35, .3)));
 }
 
 vec4 groundDamageAt(vec2 world) {

@@ -15,6 +15,7 @@ import megamek.common.board.BoardDecoration;
 import megamek.common.board.BridgeSpan;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
+import megamek.common.board.RailRoute;
 
 /**
  * The shared deck shape and its presentation: its family (natural, truss or standard, {@link #family}) and the road it
@@ -70,17 +71,24 @@ final class BoardBridge {
      * continues there and ends with an end post at every other exit. Any change rebuilds the hex.
      */
     record Deck(BoardRoad.Kind kind, int roadExits, int exits, boolean natural, List<BoardRoad.Kind> neighbors,
-          BoardScene.Surface surface, List<Float> rises, boolean piers, BoardDecoration.Colours colours, int joints) {
+          BoardScene.Surface surface, List<Float> rises, boolean piers, BoardDecoration.Colours colours, int joints,
+          RailRoute.Corridor corridor) {
+        Deck(BoardRoad.Kind kind, int roadExits, int exits, boolean natural, List<BoardRoad.Kind> neighbors,
+              BoardScene.Surface surface, List<Float> rises, boolean piers, BoardDecoration.Colours colours, int joints) {
+            this(kind, roadExits, exits, natural, neighbors, surface, rises, piers, colours, joints, RailRoute.Corridor.NONE);
+        }
+
         /** The deck road's course over its own sides: what its paint covers. */
-        BoardRoad road(Coords coords) { return BoardRoad.layout(coords, roadExits, kind, neighbors::get); }
+        BoardRoad road(Coords coords) { return BoardRoad.layout(coords, roadExits, kind, neighbors::get).corridor(corridor); }
 
         /** The carriageway over every bridge exit at a road's width: the slab and its top. */
         BoardRoad slab(Coords coords) {
-            return BoardRoad.layout(coords, exits, kind == BoardRoad.Kind.NONE ? BoardRoad.Kind.ALLEY : kind, neighbors::get);
+            return BoardRoad.layout(coords, exits, kind == BoardRoad.Kind.NONE ? BoardRoad.Kind.ALLEY : kind, neighbors::get)
+                  .corridor(corridor);
         }
 
         /** Whether the deck road paints the whole top: it has every bridge exit. */
-        boolean paved() { return kind != BoardRoad.Kind.NONE && (roadExits & exits) == exits; }
+        boolean paved() { return kind != BoardRoad.Kind.NONE && (roadExits & exits) == exits && corridor.beside() == 0; }
         boolean sloped() { return rises.stream().anyMatch(rise -> rise != 0); }
         boolean truss() { return colours != null; }
     }
@@ -165,6 +173,18 @@ final class BoardBridge {
         return tile == null ? null : tile.features().stream().filter(f -> f.asset().equals("bridge")).findFirst().orElse(null);
     }
 
+    /** An implicit bridge carrying only a maglev is the guideway beam itself, without a road slab or landings. */
+    static boolean guideway(BoardScene.Tile tile) {
+        return tile != null && feature(tile) != null && HexAppearance.implicit(tile.appearance())
+              && tile.deckRoad() == BoardRoad.Kind.NONE && tile.features().stream().anyMatch(f ->
+                    RailRoute.kind(f.decoration()) == RailRoute.Kind.MAGLEV && RailRoute.onDeck(f.decoration()));
+    }
+
+    static BoardScene.Feature guidewayRoute(BoardScene.Tile tile) {
+        return tile.features().stream().filter(f -> RailRoute.kind(f.decoration()) == RailRoute.Kind.MAGLEV
+              && RailRoute.onDeck(f.decoration())).findFirst().orElse(null);
+    }
+
     static Deck deck(BoardScene scene, BoardScene.Tile tile) {
         var bridge = feature(tile);
         if (bridge == null) { return null; }
@@ -182,7 +202,7 @@ final class BoardBridge {
         }
         return new Deck(tile.deckRoad(), tile.deckRoadExits(), bridge.bridgeExits(), family == Family.NATURAL,
               List.copyOf(neighbors), material.surface(), List.copyOf(rises), HexAppearance.pillars(tile.appearance()),
-              material.truss(), joints);
+              material.truss(), joints, tile.deckCorridor());
     }
 
     /**
@@ -272,12 +292,19 @@ final class BoardBridge {
             float length = direction.len();
             direction.scl(1 / length);
             // Both styles reserve the usable passage. A distant road edit must not change the bank's ground mesh.
-            float width = PASSAGE_HALF_WIDTH * BoardGeometry.hexScale();
+            float width = passage(tile, d) * BoardGeometry.hexScale();
             float level = span ? Math.min(tile.elevation() + own.elevation(),
                   edgeElevation(tile, scene.tile(tile.coords().translated(d)), d)) * BoardGeometry.level() : center.z;
             result.add(new Approach(center.x, center.y, direction.x, direction.y, length, width, level));
         }
         return List.copyOf(result);
+    }
+
+    /** Clear the whole corridor at a shared exit, leaving every ordinary bank and side arm unchanged. */
+    static float passage(BoardScene.Tile tile, int direction) {
+        if (guideway(tile)) { return 2; }
+        return ((tile.corridor().sides() | tile.deckCorridor().sides()) & 1 << direction) != 0
+              ? BoardRoad.CORRIDOR_HALF + BoardRoad.SHOULDER : PASSAGE_HALF_WIDTH;
     }
 
     /** The decks join ({@link BridgeSpan#joined}): one span, one type, a joint the piers may stand under. */

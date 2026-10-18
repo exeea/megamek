@@ -219,6 +219,8 @@ final class GpuMapHud implements GpuBoardHud {
         losPanel.update(new GpuHud.Inputs(frame, view, dialog, preferences, metrics, occupied));
     }
 
+    boolean prepare() { return editor == null || editor.prepare(scene); }
+
     boolean measuring() { return losPanel.pending(); }
 
     /** Centres a hex in the board area between the editor's panels, as Fit board fits the board into it. */
@@ -352,8 +354,8 @@ final class GpuMapHud implements GpuBoardHud {
         // A tree that holds the keyboard focus (Layers, after a click on a row) takes its navigation keys.
         if (stage.getKeyboardFocus() instanceof megamek.client.ui.gdx.UiTree && stage.keyDown(key)) { return true; }
         if (key == Input.Keys.ESCAPE && editor != null && editor.escape()) { return true; }
-        // Bare tool keys win inside the editor only; a map preview keeps Z for its overview.
-        if (editor != null && modifiers == 0 && editor.toolKey(key)) { return true; }
+        // Bare tool keys win inside the editor only; B waits for a picker click without ending a stroke.
+        if (editor != null && modifiers == 0 && (key == Input.Keys.B || editor.toolKey(key))) { return true; }
         if (state.dialog == Dialog.NONE) {
             return key == Input.Keys.ESCAPE && (losPanel.cancel() || editor != null && editor.escapeAssets());
         }

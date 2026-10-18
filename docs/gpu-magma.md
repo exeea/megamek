@@ -13,7 +13,7 @@
 | `liquid-flow.glsl` | Shared water/lava advection phases, weights and material coordinates. |
 | `magma-solid.glsl / magma-flow.glsl / magma-lighting.glsl` | Own crust relief, molten advection and heat/lighting; terrain boundaries reuse these evaluations. |
 | `GpuAtmosphere / GpuHeatGlow` | Preserve molten HDR energy, select visible hot highlights and composite a reduced-resolution camera halo. |
-| `GpuLavaLighting / lava-lighting.glsl` | The binned local lights for terrain, units and props: volcanic tiles, burning hexes, luminous fungi, and each frame's fireballs and cannon muzzle blasts (`GpuAttackEffects.lights`, the 64 brightest). Diffuse light, plus a GGX highlight widened by the source's size on glossy pixels. |
+| `GpuLavaLighting / lava-lighting.glsl` | The binned local lights for terrain, units, props and water: volcanic tiles, burning hexes, luminous fungi, and each frame's fireballs, muzzle blasts, laser and PPC beams and flamer streams (`GpuAttackEffects.lights`, the 64 brightest). Points, and segments for beams and streams. Diffuse light, plus a GGX highlight widened by the source's size on glossy pixels. |
 
 MAGMA level 1 is solid basalt crust with incandescent fissures. Level 2 is opaque
 flowing lava, including falling sheets and exposed board-edge cuts. The captured
@@ -150,16 +150,34 @@ keeps those the captured client LOS shows. Molten tiles emit strongly; cooling c
 retains 3.5% source power. Every visible emitter, lava and fungal alike, is binned on
 a board-plane grid of one hex width per cell, into each cell its reach overlaps. The
 falloff reaches exactly zero at twice the source size, so the binning drops only
-zero contributions. One RGBA32F texture holds each cell's first entry and count,
-then the entries; `lavaIrradiance` reads its pixel's cell with `texelFetch` and
-evaluates only those emitters, in the same per-light maths. The list has no fixed
-size and is rebuilt and uploaded only when the visible emitters change. The same
-environment attribute reaches terrain, units, buildings and props without extra
-render passes or game state. Changing terrain or board scale refreshes positions;
-removing lava empties the list. This is a short-range lighting approximation, with
-no obstacle shadow rays or global illumination; light can leak through nearby
-geometry. The camera halo and local lighting both respect captured visibility,
-through their own existing render paths.
+zero contributions. One RGBA32F texture holds each cell's first and end entry texel,
+then the entries: two texels for a point, four for a segment, which flags itself by
+a negative power and adds its far end and tube radius. `lavaLighting` reads its
+pixel's cell with `texelFetch` and evaluates only those emitters; a point entry
+takes its two fetches and its own maths, with only the sign test added. A segment (a
+laser or PPC beam, or a flamer stream from its nozzle to its leading packet) is binned
+into every cell its capsule touches. It lights a pixel from its nearest point, with
+its power divided by 1 + 0.7 × its length in sizes: in all, a flamer stream lights
+about as much as one point of that power, a thin laser beam about two thirds. It
+glints from its point nearest the mirrored ray (Karis 2013, tube lights), widened
+across by its tube and normalized along its length, so calm water mirrors a beam all
+along it. A beam also has a point light where it strikes, both at 0.35 hex: 0.45 along
+a medium laser and 0.5 at its strike (`GpuAttackEffects.BEAM_LIGHT`, `STRIKE_LIGHT`),
+12 and 1.5 for a standard PPC's bolt (`PPC_BEAM_LIGHT`, `PPC_STRIKE_LIGHT`), a bright
+band along it and a broad glow on its target. A charging PPC lights the ground round
+it with 8 (`PPC_CHARGE_LIGHT`). A laser's or PPC's lights scale linearly with its
+positive damage at the shot's range in hexes against these, 5 and 10, held between
+0.4 and 3 times (`GpuAttackEffects.beamScale`); weapons without positive damage keep
+the reference power. PPC arcs and TAG lines do not light. The list grows with the
+emitters, within its packed texture capacity, and is rebuilt and uploaded only when
+the visible emitters change. The
+same environment attribute reaches terrain, units, buildings, props and water without
+extra render passes or game state; water walks the list once for its irradiance and
+its reflection. Changing terrain or board scale refreshes positions; removing all
+visible emitters empties the list. This is a short-range lighting approximation, with no obstacle
+shadow rays or global illumination; light can leak through nearby geometry. The
+camera halo and local lighting both respect captured visibility, through their own
+existing render paths.
 
 Relief uses normals and bounded parallax, not geometric displacement, so silhouettes
 and picking remain the existing board geometry. Crust traces two to twelve depth

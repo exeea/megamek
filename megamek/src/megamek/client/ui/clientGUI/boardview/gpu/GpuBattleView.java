@@ -48,6 +48,8 @@ import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.Messages;
+import megamek.client.ui.boardeditor.BoardEditorSession.Action;
+import megamek.client.ui.boardeditor.BoardEditorSession.Command;
 import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
@@ -1014,6 +1016,7 @@ class GpuBattleView extends ApplicationAdapter {
                     terrain.prepareEffects();
                 });
                 tactical.prepare();
+                if (ui instanceof GpuMapHud map && !map.prepare()) { break; }
                 // Probing moves the camera: not while the board makes its entrance.
                 if (probed || entrancePending || boardCamera.isFraming() || boardCamera.tactical()) {
                     warmUp = WarmUp.THERMAL;
@@ -1207,6 +1210,10 @@ class GpuBattleView extends ApplicationAdapter {
             lines.setColor(1, preview.erase() ? .33f : 1, preview.erase() ? .3f : 1, alpha);
             for (Coords coords : preview.hexes()) {
                 if (scene.tile(coords) != null) { ring(coords, BoardTacticalGeometry.floatingZ(scene, coords)); }
+            }
+            for (var deck : preview.decks()) {
+                lines.setColor(1, deck.removed() ? .33f : .65f, deck.removed() ? .3f : .12f, alpha);
+                ring(deck.at(), (deck.level() + .06f) * BoardGeometry.level());
             }
             // A drawn route's turns too sharp to lay, which end in stubs on release: red, twice.
             lines.setColor(1, .33f, .3f, alpha);
@@ -2231,6 +2238,8 @@ class GpuBattleView extends ApplicationAdapter {
         private final UiCursorCapture cursorCapture = new UiCursorCapture();
         /** Frozen at the press: an editor LOS gesture must never paint, even if Alt is released first. */
         private boolean measurementGesture;
+        /** B+click samples a whole hex; releasing B before the mouse must not invoke the active tool. */
+        private boolean brushPickerGesture;
         /**
          * A Select press that grabbed no selected item: its drag draws a selection box (Shift adds, Ctrl removes) and a
          * release without a drag is a click. Only a press on the selection, or inside a selected object's outline,
@@ -2322,6 +2331,11 @@ class GpuBattleView extends ApplicationAdapter {
         /** The hit a Paint, Erase or Select event along {@code ray} takes: an object brush's support, else the ground. */
         private BoardGeometry.Hit editorHit(com.badlogic.gdx.math.collision.Ray ray,
               megamek.client.ui.boardeditor.BoardEditorSession.Snapshot state) {
+            if (state != null && state.activeBrush().way()
+                  && (state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.PAINT
+                  || state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.ERASE)) {
+                return terrain.walkableHit(scene, ray);
+            }
             return state != null && state.tool() == megamek.client.ui.boardeditor.BoardEditorSession.Tool.PAINT
                   && state.activeBrush().object() != null ? terrain.placementHit(scene, ray) : terrain.selectionHit(scene, ray);
         }
@@ -2508,6 +2522,8 @@ class GpuBattleView extends ApplicationAdapter {
             gestureModifiers = modifiers();
             measurementGesture = button == Input.Buttons.LEFT && (GpuBoardSource.isMeasurement(gestureModifiers)
                   || ui instanceof GpuMapHud map && map.measuring());
+            brushPickerGesture = source.isEditor() && button == Input.Buttons.LEFT && !measurementGesture
+                  && gestureModifiers == 0 && Gdx.input.isKeyPressed(Input.Keys.B);
             gestureBoardGeneration = boardGeneration;
             dragged = false;
             panning = button == Input.Buttons.RIGHT || button == Input.Buttons.MIDDLE;
@@ -2515,7 +2531,7 @@ class GpuBattleView extends ApplicationAdapter {
             // Right drags pan and middle drags orbit or look around; Shift at the press swaps them in every mode.
             orbiting = panning && (button == Input.Buttons.MIDDLE) != shiftDown;
             ui.boardPress();
-            if (button == Input.Buttons.LEFT && source.isEditor() && !measurementGesture) {
+            if (button == Input.Buttons.LEFT && source.isEditor() && !measurementGesture && !brushPickerGesture) {
                 // A press on the selection's rotation handle turns the selection.
                 var handle = rotationHandle();
                 double angle = handle == null || !onHandle(handle, x, y) ? Double.NaN : handleAngle(handle, x, y);
@@ -2541,7 +2557,7 @@ class GpuBattleView extends ApplicationAdapter {
             if (!boardGesture) {
                 return false;
             }
-            if (source.isEditor() && gestureButton == Input.Buttons.LEFT && !measurementGesture) {
+            if (source.isEditor() && gestureButton == Input.Buttons.LEFT && !measurementGesture && !brushPickerGesture) {
                 if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < DRAG_THRESHOLD * layoutScale) { return true; }
                 dragged = true;
                 dragX = x;
@@ -2581,7 +2597,7 @@ class GpuBattleView extends ApplicationAdapter {
             if (!boardGesture || button != gestureButton) {
                 return false;
             }
-            if (source.isEditor() && !measurementGesture && button == Input.Buttons.LEFT) {
+            if (source.isEditor() && !measurementGesture && !brushPickerGesture && button == Input.Buttons.LEFT) {
                 if (marquee && dragged) { selectBox(x, y); }
                 // A click: Ctrl removes the clicked item; otherwise it selects it, or with Shift toggles it.
                 else if (marquee && (gestureModifiers & InputEvent.CTRL_DOWN_MASK) != 0) {
@@ -2616,6 +2632,13 @@ class GpuBattleView extends ApplicationAdapter {
                     ((GpuMapHud) ui).boardMenu(picked.coords(), pointedZ, x, y);
                 } else if (measurementGesture) {
                     source.measure(picked.coords(), gestureModifiers, pointedZ);
+                } else if (brushPickerGesture) {
+                    Coords at = picked.coords();
+                    if (at != null) {
+                        source.editorCommand(new Command(Action.SELECT_AT, at.getX() + "," + at.getY(), ""),
+                              gestureBoardGeneration);
+                        source.editorCommand(new Command(Action.SAMPLE), gestureBoardGeneration);
+                    }
                 } else {
                     source.setHover(picked.coords());
                 }
@@ -2631,6 +2654,7 @@ class GpuBattleView extends ApplicationAdapter {
             dragged = false;
             boardGesture = false;
             measurementGesture = false;
+            brushPickerGesture = false;
             marquee = false;
             editorGrab = null; editorHexGrab = null; rotationGrab = null;
             clearElevationScroll();
@@ -2645,7 +2669,8 @@ class GpuBattleView extends ApplicationAdapter {
             // The window can pause or close while it still shows the loading screen, before any map is attached.
             if (source == null) { return false; }
             var state = source.editorState();
-            return boardGesture && gestureButton == Input.Buttons.LEFT && !measurementGesture && !marquee && rotationGrab == null
+            return boardGesture && gestureButton == Input.Buttons.LEFT && !measurementGesture && !brushPickerGesture
+                  && !marquee && rotationGrab == null
                   && source.isEditor() && state != null && state.drawsRoutes();
         }
 

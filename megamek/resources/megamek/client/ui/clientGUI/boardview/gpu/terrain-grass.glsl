@@ -28,8 +28,7 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     if (density <= a_coverRoot.w) { return false; }
     uint seed = floatBitsToUint(root.x) ^ (floatBitsToUint(root.y) * 1664525u) ^ uint(a_coverRoot.w);
     // Reject the whole rooted blade, not fragments of a swaying tip. Buffers remain unchanged after an impact.
-    // A nuclear blast burns the turf off its blast area, the more the nearer Ground Zero.
-    float scar = max(groundScarCover(groundDamageAt(root.xy)), smoothstep(.1, .4, groundScorchAt(root.xy)));
+    float scar = max(groundScarCover(groundDamageAt(root.xy)), scorchedGrass(root.xy));
     if (scar > grassRandom(seed + 83u)) { return false; }
     float angle = grassRandom(seed) * 6.2831853;
     float variation = grassRandom(seed + 23u);

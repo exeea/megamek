@@ -36,7 +36,9 @@ import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.common.Hex;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
+import megamek.common.board.BridgeSpan;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 
@@ -57,9 +59,10 @@ final class GpuEditorPreview implements Disposable {
      * the label at {@link #at} and the hexes where the route ends in a new stub (marked red).
      */
     record Data(Coords at, boolean erase, List<Coords> hexes, Map<Coords, List<BoardScene.Feature>> objects,
-          List<StandIn> standIns, int tint, String label, List<Coords> stubs) {
-        static final Data NONE = new Data(null, false, List.of(), Map.of(), List.of(), 0, "", List.of());
+          List<StandIn> standIns, int tint, String label, List<Coords> stubs, List<DeckOutline> decks) {
+        static final Data NONE = new Data(null, false, List.of(), Map.of(), List.of(), 0, "", List.of(), List.of());
     }
+    record DeckOutline(Coords at, int level, boolean removed) { }
 
     /**
      * A terrain card's result in one hex, in levels: a flat top at {@code high}, sides down to {@code low} where it holds
@@ -114,14 +117,20 @@ final class GpuEditorPreview implements Disposable {
      */
     static Data data(BoardEditorSession.Preview preview, boolean erase, String brush,
           BiFunction<Coords, Hex, BoardScene.Tile> capture) {
-        if (preview.after().isEmpty() && preview.path().isEmpty()) { return Data.NONE; }
+        if (preview.after().isEmpty() && preview.path().isEmpty() && preview.layers().isEmpty()) { return Data.NONE; }
         Set<String> removed = preview.removed().stream().map(BoardEditorSession.Selection::object).collect(Collectors.toSet());
         Map<Coords, List<BoardScene.Feature>> objects = new LinkedHashMap<>();
         List<StandIn> standIns = new ArrayList<>();
+        List<DeckOutline> decks = new ArrayList<>();
         Coords labelled = null;
         for (var entry : preview.after().entrySet()) {
             Coords at = entry.getKey();
             Hex after = entry.getValue(), before = preview.before().get(at);
+            if (!before.hasBridge() && after.hasBridge() && HexAppearance.implicit(after.getAppearance())) {
+                decks.add(new DeckOutline(at, BridgeSpan.deck(after), false));
+            } else if (before.hasBridge() && !after.hasBridge()) {
+                decks.add(new DeckOutline(at, BridgeSpan.deck(before), true));
+            }
             var shown = BoardFeatures.decorations(after, at);
             var was = BoardFeatures.decorations(before, at);
             if (!erase && !shown.equals(was)) { objects.put(at, shown); }
@@ -148,10 +157,13 @@ final class GpuEditorPreview implements Disposable {
             if (!preview.notice().isEmpty()) { label += " \u00B7 " + preview.notice(); }
             hexes = preview.path().stream().distinct().toList();
         }
+        if (preview.path().isEmpty() && !preview.notice().isEmpty()) { label = preview.notice(); }
+        List<Coords> stubs = new ArrayList<>(preview.stubs());
+        preview.layers().forEach((at, layer) -> { if (layer.refused() && !stubs.contains(at)) { stubs.add(at); } });
         int tint = erase ? Color.rgba8888(ERASE) : labelled == null ? 0
               : GpuMinimap.colour(capture.apply(labelled, preview.after().get(labelled)));
         return new Data(labelled == null ? preview.at() : labelled, erase, hexes, objects, List.copyOf(standIns), tint, label,
-              preview.stubs());
+              List.copyOf(stubs), List.copyOf(decks));
     }
 
     /** A hex's file form without its objects: what a terrain card changes. */

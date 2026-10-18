@@ -113,7 +113,7 @@ final class GpuTilesetTerrain {
             bounds.ext(face.a()).ext(face.b()).ext(face.c());
             opaque.accept(material(assets.material(side(tile.surface(), face.finish()))), mesh -> wall(mesh, face));
         }
-        if (deck != null) {
+        if (deck != null && !BoardBridge.guideway(tile)) {
             Material material = material(deck.getTexture());
             // The art is transparent beside the deck: cut out there, so the deck writes depth only where it lies.
             // The default shader tests alpha only for blended materials.

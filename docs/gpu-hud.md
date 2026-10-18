@@ -624,8 +624,10 @@ the tileset columns, Enhanced the shaded 3D terrain), without the fluff that has
   focused enemy's rear arcs. Liquids lie a hair under their surface and the rest on a plane above the board, so a
   bridge deck covers the water fill.
 - **Terrain.** The 3D Graphics setting chooses the terrain, not the view ([GPU board](gpu-board.md#graphics-classic-and-enhanced)),
-  and `GpuTerrain.setFluffHidden` hides what has no gameplay value at draw time: trees, scatter, grass, building and
-  placed object models, decals and paint, scars, water, spores and geysers ([GPU board](gpu-board.md#tactical-view)).
+  and `GpuTerrain.setFluffHidden` hides what has no gameplay value at draw time: scatter trees, placed plants, grass,
+  building and placed object models, decals and paint, scars, water, spores and geysers
+  ([GPU board](gpu-board.md#tactical-view)). A woods cover keeps its trees and its skin (a container yard) under the
+  cover overlay.
   Picking is unchanged by that rule. The wireframe view and the Tactical View exclude each other: turning one on turns
   the other off. The minimap shows the tileset art.
 - **Board overlay.** One palette serves both views; the route's ghost is the translucent meeple, and the front arc and
@@ -885,10 +887,10 @@ A developer and tester tool, to be removed before release.
 
 | Page | Sections |
 | --- | --- |
-| Display | Display mode Windowed/Fullscreen, VSync, Render resolution 50-100% with its scene size, UI scale 50-100% (saved, applied when the drag is released, reset by Defaults), Anti-aliasing Off/SMAA and Specular anti-aliasing (both saved across sessions), the detected graphics and the Graphics card choice with its in-use and pending notes |
-| Board | Geometry (with Normal maps and Unit display), Unit family sizes, Zoom-out unit scaling, Route pulse (on/off, speed, intensity), Unit visibility, Outside field of view, Outside sensor range, Unit damage |
+| Display | Display mode Windowed/Fullscreen, VSync, Render resolution 50-100% with its scene size, UI scale 50-100% (applied when the drag is released), Anti-aliasing Off/SMAA, Specular anti-aliasing, Normal maps (on until chosen), Ambient occlusion (off until chosen), the detected graphics and the Graphics card choice with its in-use and pending notes. Resolution, UI scale, both anti-aliasing choices, normal maps and ambient occlusion are saved across sessions; Defaults leaves the whole Display page alone |
+| Board | Geometry (with Unit display), Unit family sizes, Zoom-out unit scaling, Route pulse (on/off, speed, intensity), Unit visibility, Outside field of view, Outside sensor range, Unit damage |
 | Atmosphere | Atmosphere presets with "Planetary conditions…" (the Swing editor), Lighting (time of day, exposure, moonlight, fixed sun, the lighting environment and Show lighting sky, not saved, which shows the sky that lights the scene, or its image, as the backdrop), Planet properties, Clouds and ground air, Weather effects, Light and fog effects |
-| Terrain | Terrain build progress, concrete shapes, river shape and land, banks and river openings, waterfalls, terrain detail (grass blades, water effects, terrain LoD, object LoD), material geology |
+| Terrain | Terrain build progress, Hex joins (Hex transitions, Hex padding), Water (Cliffs directly into water), Terrain detail (Grass blades, Water effects). Terrain and object detail levels are always on |
 | Camera | Fixed sun/moon, framing on selection, framing on movement (combat framing is the dock's Follow toggle); the model's camera rows: Free Flight, the thermal wireframe view, the Free Flight field of view |
 
 **Removing it before release:**

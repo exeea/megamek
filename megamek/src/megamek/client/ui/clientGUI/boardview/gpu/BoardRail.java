@@ -76,7 +76,9 @@ final class BoardRail {
 
     /** A route marker's level by the placement support rule; a route holds a fixed level or follows its support. */
     static float level(BoardScene.Tile tile, BoardScene.Feature feature) {
-        return (float) feature.decoration().placement().level(tile.elevation(), receiver -> tile.elevation());
+        return (float) feature.decoration().placement().level(tile.elevation(), receiver -> tile.elevation()
+              + (receiver.equals("bridge") && BoardBridge.feature(tile) != null
+                    ? BoardBridge.feature(tile).elevation() : 0));
     }
 
     /** Half the width a route's mesh covers on its hex: the maglev beam, the rail's ballast. */
@@ -91,12 +93,15 @@ final class BoardRail {
     private static Join joined(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature, int direction) {
         var neighbor = scene.neighbor(tile, direction);
         if (neighbor == null) { return null; }
+        Join best = null;
+        float gap = Float.POSITIVE_INFINITY;
         for (var other : neighbor.features()) {
             if (route(other) && RailRoute.joined(feature.decoration(), direction, other.decoration())) {
-                return new Join(neighbor, other);
+                float score = RailRoute.joinScore(feature.decoration(), level(tile, feature), other.decoration(), level(neighbor, other));
+                if (score < gap) { best = new Join(neighbor, other); gap = score; }
             }
         }
-        return null;
+        return best;
     }
 
     /** The sides a marker draws: on a bridge deck only its bridge's exits. */
@@ -181,7 +186,7 @@ final class BoardRail {
         var ends = ends(scene, tile, feature);
         var kind = RailRoute.kind(feature.decoration());
         int sides = drawnSides(tile, feature);
-        var paths = courses(ends, RailRoute.pieces(feature.decoration(), sides));
+        var paths = courses(ends, RailRoute.pieces(feature.decoration(), sides), corridor(tile, feature));
         if (kind == RailRoute.Kind.MAGLEV) { return new Layout(kind, ends, paths, List.of()); }
         float scale = BoardGeometry.hexScale(), base = level(tile, feature) * BoardGeometry.level();
         float cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
@@ -201,7 +206,7 @@ final class BoardRail {
         List<List<Boolean>> streets = new ArrayList<>(paths.size());
         for (var path : paths) {
             var points = drape(path, carrier);
-            var street = points.stream().map(p -> road != null && road.distance(p.x, p.y) < 0).toList();
+            var street = points.stream().map(p -> road != null && road.street(p.x, p.y)).toList();
             // Keep the points where the line bends, in plan or in height, and where it enters or leaves a road.
             List<Vector3> kept = new ArrayList<>();
             List<Boolean> keptStreet = new ArrayList<>();
@@ -241,7 +246,7 @@ final class BoardRail {
                 continue;
             }
             var road = street(scene, tile, deck);
-            return road != null && road.distance(x, y) < 0 ? STREET_TOP : RailRoute.RAIL_TOP;
+            return road != null && road.street(x, y) ? STREET_TOP : RailRoute.RAIL_TOP;
         }
         return 0;
     }
@@ -273,7 +278,13 @@ final class BoardRail {
 
     /** The centre lines of a marker on the board plane (a maglev's with its heights): what its mesh covers. */
     static List<List<Vector3>> paths(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
-        return courses(ends(scene, tile, feature), RailRoute.pieces(feature.decoration(), drawnSides(tile, feature)));
+        return courses(ends(scene, tile, feature), RailRoute.pieces(feature.decoration(), drawnSides(tile, feature)),
+              corridor(tile, feature));
+    }
+
+    private static RailRoute.Corridor corridor(BoardScene.Tile tile, BoardScene.Feature feature) {
+        return RailRoute.kind(feature.decoration()) != RailRoute.Kind.RAIL ? RailRoute.Corridor.NONE
+              : RailRoute.onDeck(feature.decoration()) ? tile.deckCorridor() : tile.corridor();
     }
 
     private static int sides(List<End> ends) {
@@ -294,16 +305,21 @@ final class BoardRail {
      * side's stub and the lone stub of a marker without sides level.
      */
     private static List<List<Vector3>> courses(List<End> ends, int pieces) {
+        return courses(ends, pieces, RailRoute.Corridor.NONE);
+    }
+
+    private static List<List<Vector3>> courses(List<End> ends, int pieces, RailRoute.Corridor corridor) {
         End[] at = new End[6];
         for (End end : ends) { at[direction(end)] = end; }
         var result = new ArrayList<List<Vector3>>();
-        for (var line : RailRoute.lines(sides(ends), pieces)) {
-            if (line.from() >= 0 && line.to() >= 0) { result.add(curve(at[line.from()], at[line.to()])); }
-            else if (line.to() >= 0) { result.add(curve(new End(0, 0, 0, 0, 0), at[line.to()])); }
+        for (var line : RailRoute.lines(sides(ends), pieces, corridor)) {
+            if (line.from() >= 0 && line.to() >= 0) { result.add(curve(at[line.from()], at[line.to()], line)); }
+            else if (line.to() >= 0) { result.add(curve(new End(0, 0, 0, 0, 0), at[line.to()], line)); }
             else {
                 // A short level stub from the edge, closed by a buffer stop on a rail or the beam's end on a maglev.
-                Vector3 edge = line.from() >= 0 ? at[line.from()].point() : new Vector3(line.a()[0], line.a()[1], 0);
-                result.add(List.of(edge, new Vector3(line.b()[0], line.b()[1], edge.z)));
+                float z = line.from() >= 0 ? at[line.from()].z() : 0;
+                float[] a = line.at(0), b = line.at(1);
+                result.add(List.of(new Vector3(a[0], a[1], z), new Vector3(b[0], b[1], z)));
             }
         }
         return List.copyOf(result);
@@ -335,16 +351,18 @@ final class BoardRail {
         return incoming * outgoing <= 0 ? 0 : 2 * incoming * outgoing / (incoming + outgoing);
     }
 
-    private static List<Vector3> curve(End from, End to) {
+    private static List<Vector3> curve(End from, End to, RailRoute.Line line) {
         Vector3 a = from.point(), b = to.point();
         boolean terminal = a.isZero();
         // Constant grades need only one segment, including the half-hex at a route's end.
         boolean straight = Math.abs(a.x * b.y - a.y * b.x) < .001f;
         float middle = terminal ? to.centerSlope() : monotone(-from.centerSlope(), to.centerSlope());
-        if (straight && Math.abs(to.slope() - middle) < .0001f && Math.abs(to.z() - middle * horizontalLength(b)) < .0001f
+        if (straight && line.oa() == line.ob() && Math.abs(to.slope() - middle) < .0001f
+              && Math.abs(to.z() - middle * horizontalLength(b)) < .0001f
               && (terminal || Math.abs(from.slope() + middle) < .0001f
                     && Math.abs(from.z() + middle * horizontalLength(a)) < .0001f)) {
-            return List.of(a, b);
+            float[] start = line.at(0), end = line.at(1);
+            return List.of(new Vector3(start[0], start[1], a.z), new Vector3(end[0], end[1], b.z));
         }
         // Horizontal approaches meet neighbouring hexes squarely; the one course in plan (RailRoute.course), which is
         // also what rolling stock rides.
@@ -353,8 +371,9 @@ final class BoardRail {
         var distance = new float[steps + 1];
         for (int i = 0; i <= steps; i++) {
             float t = (float) i / steps;
-            float[] plan = RailRoute.course(a.x, a.y, b.x, b.y, t);
-            var point = terminal ? new Vector3(b).scl(t) : new Vector3(plan[0], plan[1], 0);
+            float[] plan = line.at(t);
+            var point = terminal && line.oa() == 0 && line.ob() == 0 ? new Vector3(b).scl(t)
+                  : new Vector3(plan[0], plan[1], 0);
             point.z = 0;
             if (i > 0) { distance[i] = distance[i - 1] + point.dst(result.getLast()); }
             result.add(point);
@@ -432,6 +451,27 @@ final class BoardRail {
         var data = new ModelData(); data.id = id;
         data.meshes.add(mesh); data.materials.add(material); data.nodes.add(node);
         return data;
+    }
+
+    /** The guideway's walkable/pickable bridge shape, taken from the exact same mesh as its cached visible model. */
+    static BoardBridge.Shape guideway(BoardScene scene, BoardScene.Tile tile) {
+        var route = BoardBridge.guidewayRoute(tile);
+        var mesh = model(layout(scene, tile, route)).meshes.first();
+        float scale = BoardGeometry.hexScale(), level = level(tile, route);
+        var origin = BoardGeometry.center(tile.coords(), level);
+        List<BoardBridge.Facet> faces = new ArrayList<>();
+        for (var part : mesh.parts) {
+            for (int i = 0; i < part.indices.length; i += 3) {
+                Vector3[] p = new Vector3[3];
+                for (int j = 0; j < 3; j++) {
+                    int at = Short.toUnsignedInt(part.indices[i + j]) * 7;
+                    p[j] = new Vector3(mesh.vertices[at], mesh.vertices[at + 1], mesh.vertices[at + 2]).scl(scale).add(origin);
+                }
+                float z = new Vector3(p[1]).sub(p[0]).crs(new Vector3(p[2]).sub(p[0])).z;
+                BoardBridge.triangle(faces, p[0], p[1], p[2], z > 0 ? BoardBridge.Part.TOP : BoardBridge.Part.STRUCTURE);
+            }
+        }
+        return BoardBridge.shape(BoardScene.Surface.CONCRETE, level, faces);
     }
 
     private static void beam(MeshBuilder mesh, Layout layout, List<Vector3> path, float halfWidth, float low, float high, Color color) {

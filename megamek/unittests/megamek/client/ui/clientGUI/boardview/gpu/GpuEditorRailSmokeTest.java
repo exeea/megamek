@@ -17,7 +17,8 @@ import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
 import megamek.common.board.Board;
-import megamek.common.board.BoardDecoration;
+import megamek.common.board.BridgeSpan;
+import megamek.common.board.HexAppearance;
 import megamek.common.board.Coords;
 import megamek.common.board.RailRoute;
 import org.junit.jupiter.api.Tag;
@@ -26,8 +27,8 @@ import org.junit.jupiter.api.Test;
 /**
  * The editor drawing rails as a user does, by strokes: a main line, a turnout to a siding, a line crossing it (a
  * diamond, one of the junctions with a choice of tracks) and a sharp step that ends in buffer stops. The diamond's
- * junction card opens its gallery and a pick lays the double slip; then two maglevs crossing over one hex at two
- * levels show as two Layers rows and two side-view pills, each selected on its own.
+ * junction card opens its gallery and a pick lays the double slip. A second elevated maglev crossing is refused;
+ * the accepted deck is selected as bridge terrain in Layers and the side view.
  */
 @Tag("on-demand")
 class GpuEditorRailSmokeTest {
@@ -48,11 +49,11 @@ class GpuEditorRailSmokeTest {
             stroke(session, run(diamond.translated(4).translated(4).translated(4), 1, 4));
             // A sharp step (S, then SE) in one hex: no 120-degree turn, two stubs with buffer stops.
             stroke(session, line(new Coords(7, 8), 0, 0, 2));
-            // Two maglevs crossing over one hex at levels 2 and 4.
+            // A maglev at level 2; another at level 4 is refused at their crossing.
             session.command(new Command(Action.ASSET, "", RailRoute.Kind.MAGLEV.asset), null);
-            session.command(new Command(Action.BRUSH_VALUE, "object:level", "2"), null);
+            session.command(new Command(Action.BRUSH_VALUE, "wayOffset", "2"), null);
             stroke(session, run(crossing.translated(0).translated(0), 3, 4));
-            session.command(new Command(Action.BRUSH_VALUE, "object:level", "4"), null);
+            session.command(new Command(Action.BRUSH_VALUE, "wayOffset", "4"), null);
             stroke(session, run(crossing.translated(1).translated(1), 4, 4));
             // Trains stamped on the tracks ride them: a freight train round the siding's curve, an express on the main
             // line through the diamond, a city maglev on the lower beam.
@@ -62,7 +63,8 @@ class GpuEditorRailSmokeTest {
                 session.pointer(stamp.getValue(), 0, 0, false); session.finishStroke();
             }
             assertEquals(27, RailRoute.find(board.getHex(diamond), RailRoute.Kind.RAIL).connections(), "The drawn diamond");
-            assertEquals(2, RailRoute.markers(board.getHex(crossing), RailRoute.Kind.MAGLEV).size());
+            assertEquals(1, RailRoute.markers(board.getHex(crossing), RailRoute.Kind.MAGLEV).size());
+            assertEquals(2, BridgeSpan.deck(board.getHex(crossing)), "The existing deck survives the refused crossing");
             session.command(new Command(Action.TOOL, "", "SELECT"), null);
             session.pointer(diamond, 0, 0, false, RailRoute.find(board.getHex(diamond), RailRoute.Kind.RAIL).id());
             session.finishStroke(); session.release();
@@ -94,7 +96,7 @@ class GpuEditorRailSmokeTest {
                             }
                             case 1 -> {
                                 assertNotNull(root.findActor("editor-junction"), "A diamond has a choice of tracks");
-                                assertNotNull(root.findActor("editor-route-sides"));
+                                assertNotNull(root.findActor("editor-edges-rail"));
                                 if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-junction"))) { return; }
                                 GpuBoardTestUi.capture(new File(OUTPUT, "editor-rail-drawn.png"));
                                 GpuBoardTestUi.click("editor-junction");
@@ -127,26 +129,11 @@ class GpuEditorRailSmokeTest {
                                 if (root.findActor("editor-hex-section") == null) { GpuBoardTestUi.click("editor-side-view-toggle"); }
                             }
                             case 5 -> {
-                                var markers = RailRoute.markers(editor.get().board().getHex(crossing), RailRoute.Kind.MAGLEV);
-                                assertEquals(markers.getLast().id(), source.editorState().object());
-                                GpuHexSection section = root.findActor("editor-hex-section");
-                                for (BoardDecoration marker : markers) {
-                                    assertNotNull(root.findActor("editor-content-" + marker.id()), "A Layers row for each maglev");
-                                    assertNotNull(section.pill(marker.id()), "A side-view pill for each maglev");
-                                }
-                                assertTrue(section.pill(markers.getFirst().id()).y < section.pill(markers.getLast().id()).y,
-                                      "The level-2 pill below the level-4 one");
-                                // Hovering the lower maglev's Layers row outlines that maglev alone in 3D.
-                                var row = root.findActor("editor-content-" + markers.getFirst().id());
-                                var point = row.localToStageCoordinates(new com.badlogic.gdx.math.Vector2(row.getWidth() / 2, row.getHeight() / 2));
-                                GpuBoardTestUi.stage().stageToScreenCoordinates(point);
-                                GpuBoardTestUi.stage().mouseMoved((int) point.x, (int) point.y);
-                            }
-                            case 6 -> {
-                                var markers = RailRoute.markers(editor.get().board().getHex(crossing), RailRoute.Kind.MAGLEV);
-                                var hud = GpuBattleView.class.getDeclaredField("ui"); hud.setAccessible(true);
-                                assertEquals(List.of(markers.getFirst().id()), ((GpuMapHud) hud.get(this)).editorHoverObjects());
-                                GpuBoardTestUi.capture(new File(OUTPUT, "editor-maglev-two-levels.png"));
+                                assertEquals("bridge", source.editorState().component());
+                                assertTrue(source.editorState().object().isEmpty());
+                                assertNotNull(root.findActor("editor-component-bridge"), "The way belongs to its deck");
+                                assertNotNull(root.findActor("editor-edges-bridge_rail"));
+                                GpuBoardTestUi.capture(new File(OUTPUT, "editor-maglev-one-deck.png"));
                                 Gdx.app.exit(); return;
                             }
                             default -> throw new AssertionError(step);
@@ -160,8 +147,8 @@ class GpuEditorRailSmokeTest {
     }
 
     /**
-     * A maglev's Edit panel Pillars button (step 4): pressing it on one selected marker gives the whole route its piers in
-     * one undo step, and the button shows it pressed; captured in {@code build/gpu-board-review/b10-s4/}.
+     * A maglev deck's Pillars button gives the whole connected bridge its piers in one undo step and shows it pressed;
+     * captured in {@code build/gpu-board-review/b10-s4/}.
      */
     @Test void thePillarsButtonGivesTheSelectedMaglevRouteItsPiers() throws Exception {
         var editor = new AtomicReference<BoardEditorSession>();
@@ -171,7 +158,8 @@ class GpuEditorRailSmokeTest {
             var board = Board.createEmptyBoard(9, 7);
             session.game().setBoard(board);
             session.command(new Command(Action.ASSET, "", RailRoute.Kind.MAGLEV.asset), null);
-            session.command(new Command(Action.BRUSH_VALUE, "object:level", "2"), null);
+            session.command(new Command(Action.BRUSH_VALUE, "wayOffset", "2"), null);
+            session.command(new Command(Action.BRUSH_VALUE, "wayPillars", "false"), null);
             stroke(session, route);
             session.command(new Command(Action.TOOL, "", "SELECT"), null);
             session.pointer(route.get(3), 0, 0, false, RailRoute.find(board.getHex(route.get(3)), RailRoute.Kind.MAGLEV).id());
@@ -203,21 +191,21 @@ class GpuEditorRailSmokeTest {
                         switch (step) {
                             case 0 -> { boardCamera.center(BoardGeometry.center(route.get(3), 1)); boardCamera.zoom(.45f); }
                             case 1 -> {
-                                megamek.client.ui.gdx.UiButton pillars = root.findActor("editor-route-pillars");
+                                megamek.client.ui.gdx.UiButton pillars = root.findActor("editor-bridge-pillars");
                                 assertFalse(pillars.isChecked() || pillars.isDisabled());
-                                GpuBoardTestUi.click("editor-route-pillars");
+                                GpuBoardTestUi.click("editor-bridge-pillars");
                             }
                             case 2 -> {
                                 for (Coords at : route) {
-                                    assertTrue(RailRoute.find(board.getHex(at), RailRoute.Kind.MAGLEV).pillars(), at + ": the whole route");
+                                    assertTrue(HexAppearance.pillars(board.getHex(at).getAppearance()), at + ": the whole route");
                                 }
-                                assertTrue(((megamek.client.ui.gdx.UiButton) root.findActor("editor-route-pillars")).isChecked());
+                                assertTrue(((megamek.client.ui.gdx.UiButton) root.findActor("editor-bridge-pillars")).isChecked());
                                 GpuBoardTestUi.capture(new File(output, "editor-maglev-pillars.png"));
                                 SwingUtilities.invokeAndWait(() -> editor.get().command(new Command(Action.UNDO, "", ""), null));
                             }
                             case 3 -> {
                                 for (Coords at : route) {
-                                    assertFalse(RailRoute.find(board.getHex(at), RailRoute.Kind.MAGLEV).pillars(), "One undo step");
+                                    assertFalse(HexAppearance.pillars(board.getHex(at).getAppearance()), "One undo step");
                                 }
                                 Gdx.app.exit(); return;
                             }

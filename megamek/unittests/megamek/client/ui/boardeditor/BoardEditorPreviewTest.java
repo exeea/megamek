@@ -78,7 +78,7 @@ class BoardEditorPreviewTest {
         brush(session, Action.BRUSH_VALUE, "theme", "snow");
         brush(session, Action.BRUSH_VALUE, "elevation", "2");
         same(session, centre, 0, 0, "ground");
-        // A hex stamp: the whole captured hex, its route marker with new ids.
+        // A hex stamp: the whole captured hex, including its rail terrain.
         session.command(new Command(Action.TOOL, "", "SELECT"), null);
         session.pointer(new Coords(10, 4), 0, 0, false); session.finishStroke();
         brush(session, Action.SAMPLE, "", "");
@@ -106,10 +106,12 @@ class BoardEditorPreviewTest {
         Preview woods = same(session, centre, 0, 0, "ground");
         assertTrue(woods.removed().isEmpty(), "Erasing a component keeps the objects");
         assertTrue(woods.after().values().stream().noneMatch(hex -> hex.containsTerrain(Terrains.WOODS)));
-        // A route brush erases its kind's markers, and the neighbours' sides towards them.
+        // A route brush erases its terrain layer and cuts the neighbours' sides; no stored object is removed.
         brush(session, Action.ASSET, "", RailRoute.Kind.RAIL.asset);
         brush(session, Action.TOOL, "", "ERASE");
-        assertFalse(same(session, new Coords(10, 5), 0, 0, "ground").removed().isEmpty());
+        Preview rail = same(session, new Coords(10, 5), 0, 0, "ground");
+        assertTrue(rail.removed().isEmpty());
+        assertFalse(rail.after().get(new Coords(10, 5)).containsTerrain(Terrains.RAIL));
         // A hex stamp erases whole hexes.
         brush(session, Action.TOOL, "", "SELECT");
         session.pointer(new Coords(10, 4), 0, 0, false); session.finishStroke();
