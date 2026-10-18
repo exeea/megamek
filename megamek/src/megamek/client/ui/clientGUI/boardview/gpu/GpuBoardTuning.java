@@ -122,7 +122,6 @@ final class GpuBoardTuning {
     private final SelectBox<String> antiAliasing;
     private final CheckBox specularAntialiasing;
     private final CheckBox ambientOcclusion;
-    private final List<Control> ambientOcclusionStrength;
     /** The graphics card rows; null on computers without two cards to choose from. */
     private SelectBox<GpuGraphicsCard> graphicsCard;
     private Label cardInUse;
@@ -248,7 +247,7 @@ final class GpuBoardTuning {
         resolution.setName("tuning-render-resolution");
         resolution.addListener(new TextTooltip("The 3D scene renders at this share of the window's pixels and is then "
               + "scaled up to the window: lower is faster and softer. Overlays, labels and the HUD keep the window's "
-              + "resolution.", skin, "menu"));
+              + "resolution. The choice is saved for the next session.", skin, "menu"));
         renderSize = new Label("", skin, "small");
         renderSize.setName("tuning-render-size");
         rows.add(renderSize).colspan(3).left().height(18).row();
@@ -293,11 +292,6 @@ final class GpuBoardTuning {
                 SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardAmbientOcclusion(enabled));
             }
         });
-        ambientOcclusionStrength = controls(skin, List.of(new Knob("Occlusion strength", 0, 2, .05f, "%.2f")),
-              this::applyAmbientOcclusionStrength, 0);
-        ambientOcclusionStrength.getFirst().slider().setName("tuning-ambient-occlusion-strength");
-        ambientOcclusionStrength.getFirst().slider().addListener(new TextTooltip("How much ambient occlusion darkens:"
-              + " 1 as computed, 0 none, 2 twice as deep.", skin, "menu"));
         Label graphics = new Label("Graphics: " + GpuGlsl.description(), skin, "small");
         graphics.setName("tuning-graphics");
         graphics.addListener(new TextTooltip("Detected when the board opens: the board compiles its shaders for the newest "
@@ -647,9 +641,9 @@ final class GpuBoardTuning {
         });
         reset = new TextButton("Defaults", skin, "menu-control");
         reset.setName("tuning-defaults");
-        reset.addListener(new TextTooltip("Restore all tabs: camera projection, geometry, render resolution, "
-              + "UI scale, terrain, water, family sizes, visibility, light/fog effects, "
-              + "the game's current planetary conditions, and disable damage preview.",
+        reset.addListener(new TextTooltip("Restore all tabs but Display: camera projection, geometry, terrain, "
+              + "water, family sizes, visibility, light/fog effects, the game's current planetary conditions, and "
+              + "disable damage preview. The Display settings are saved choices and stay as they are.",
               skin, "menu"));
         reset.setProgrammaticChangeEvents(false);
         reset.addListener(new ChangeListener() {
@@ -676,10 +670,13 @@ final class GpuBoardTuning {
             }
         });
         restoreDefaults();
-        // The saved UI scale; unlike the other saved choices, Defaults resets it.
-        setValues(uiScale, new float[] { GUIPreferences.getInstance().getBoardUiScale() * 100 });
+        // The Display page's saved choices; Defaults leaves them alone.
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        setValues(uiScale, new float[] { preferences.getBoardUiScale() * 100 });
         applyUiScale();
         uiScaleSaved = value(uiScale, 0) / 100;
+        setValues(renderResolution, new float[] { preferences.getBoardRenderResolution() * 100 });
+        applyRenderResolution();
     }
 
     boolean takeAssetReloadRequest() {
@@ -855,12 +852,6 @@ final class GpuBoardTuning {
         applyCamera();
         normalMaps.setChecked(true);
         unitDisplayMode.setSelected(UnitDisplayMode.DEFAULT);
-        setValues(renderResolution, new float[] { 100 });
-        applyRenderResolution();
-        setValues(ambientOcclusionStrength, new float[] { 1 });
-        applyAmbientOcclusionStrength();
-        setValues(uiScale, new float[] { 100 });
-        applyUiScale();
         grass.setChecked(true);
         waterEffects.setChecked(true);
         boolean fixedSunKept = fixedSun.isChecked();
@@ -1029,15 +1020,6 @@ final class GpuBoardTuning {
         return ambientOcclusion.isChecked();
     }
 
-    /** The exponent on the ambient occlusion's visibility: 1 as computed. */
-    float ambientOcclusionStrength() {
-        return value(ambientOcclusionStrength, 0);
-    }
-
-    private void applyAmbientOcclusionStrength() {
-        updateReadings(ambientOcclusionStrength);
-    }
-
     /** The window's physical size, after a resize: the render resolution shows the scene size it gives. */
     void windowPixels(int width, int height) {
         windowWidth = width;
@@ -1051,10 +1033,13 @@ final class GpuBoardTuning {
         SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardAntiAliasing(choice));
     }
 
+    /** The view reads the choice each frame; it is also saved for later sessions, on the Swing thread. */
     private void applyRenderResolution() {
-        BoardCamera.renderScale = value(renderResolution, 0) / 100;
+        float resolution = value(renderResolution, 0) / 100;
+        BoardCamera.renderScale = resolution;
         updateReadings(renderResolution);
         showRenderSize();
+        SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardRenderResolution(resolution));
     }
 
     /**

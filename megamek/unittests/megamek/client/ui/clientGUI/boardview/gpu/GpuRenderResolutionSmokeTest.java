@@ -144,11 +144,12 @@ class GpuRenderResolutionSmokeTest {
                         }
                         resolution.setValue(50);
                         GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(view, "tuning-defaults"));
-                        assertEquals(100, resolution.getValue(), "Defaults restores 100%");
-                        assertEquals(1, BoardCamera.renderScale);
-                        assertEquals(1, antiAliasing.getSelectedIndex(), "Defaults leaves anti-aliasing alone");
+                        assertEquals(50, resolution.getValue(), "Defaults leaves the render resolution alone");
+                        assertEquals(.5f, BoardCamera.renderScale);
+                        assertEquals(1, antiAliasing.getSelectedIndex(), "and anti-aliasing");
                         assertEquals("Windowed", displayMode.getSelected(), "and the display mode");
-                        // The choice is saved: leave Off behind for the tests that follow in this process.
+                        // The choices are saved: leave 100% and Off behind for the tests that follow in this process.
+                        resolution.setValue(100);
                         antiAliasing.setSelectedIndex(0);
                     } catch (Throwable error) {
                         failure.set(error);

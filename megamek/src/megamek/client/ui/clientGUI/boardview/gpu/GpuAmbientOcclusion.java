@@ -60,7 +60,6 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
     /** The half-resolution horizons, where the second blur pass leaves the final occlusion, and the first's output. */
     private FrameBuffer horizons;
     private FrameBuffer blurred;
-    private float strength = 1;
     private boolean current;
     /** What the colour programs read with the occlusion: the projection's depth terms and a scene pixel's world size. */
     private final float[] projectionDepth = new float[4];
@@ -78,11 +77,9 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
 
     /**
      * Puts this attribute in the environment while {@code enabled}, else removes it and its targets; called before the
-     * frame's terrain is submitted, as material readiness follows the environment. The strength, an exponent on the
-     * visibility, applies from the next occlusion.
+     * frame's terrain is submitted, as material readiness follows the environment.
      */
-    void configure(Environment environment, boolean enabled, float strength) {
-        this.strength = strength;
+    void configure(Environment environment, boolean enabled) {
         if (!enabled) {
             environment.remove(TYPE);
             disposeTargets();
@@ -145,8 +142,8 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
         horizon.setUniformf("u_contactThickness", BoardRelief.metres(CONTACT_THICKNESS_METRES));
         horizon.setUniformf("u_rangeOrigin", rangeOrigin);
         quad.render(horizon, GL20.GL_TRIANGLES);
-        blur(blurred, horizons, 1, 0, 1, context);
-        blur(horizons, blurred, 0, 1, strength, context);
+        blur(blurred, horizons, 1, 0, context);
+        blur(horizons, blurred, 0, 1, context);
         Gdx.gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, previous);
         Gdx.gl.glViewport(viewportX, viewportY, viewportWidth, viewportHeight);
         // Leave the texture units as a batch starts them: the colour draws rebind what they sample, and a texture created
@@ -158,12 +155,12 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
         current = true;
     }
 
-    private void blur(FrameBuffer target, FrameBuffer source, int x, int y, float exponent, RenderContext context) {
+    private void blur(FrameBuffer target, FrameBuffer source, int x, int y, RenderContext context) {
         target.bind();
         blur.bind();
         blur.setUniformi("u_occlusion", context.textureBinder.bind(source.getColorBufferTexture()));
         blur.setUniformi("u_direction", x, y);
-        blur.setUniformf("u_blur", pixelBase, pixelSlope, exponent);
+        blur.setUniformf("u_blur", pixelBase, pixelSlope);
         quad.render(blur, GL20.GL_TRIANGLES);
     }
 

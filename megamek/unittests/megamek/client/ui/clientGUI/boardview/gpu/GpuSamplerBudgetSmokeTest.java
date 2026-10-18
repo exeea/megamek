@@ -175,7 +175,7 @@ class GpuSamplerBudgetSmokeTest {
             var camera = new BoardCamera();
             camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             camera.fit(scene);
-            frame.setAmbientOcclusion(occlusion, 1);
+            frame.setAmbientOcclusion(occlusion);
             frame.prepare(terrain, camera, scene);
             terrain.update(scene);
             long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(10);

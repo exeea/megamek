@@ -26,7 +26,6 @@ final class GpuReviewFrame implements Disposable {
     /** Off unless a review turns it on (setAmbientOcclusion), as on the board's Display page. */
     private final GpuAmbientOcclusion ambientOcclusion = new GpuAmbientOcclusion();
     private boolean occlusion;
-    private float occlusionStrength = 1;
 
     GpuReviewFrame(BoardAtmosphere.Settings settings) {
         atmosphere.setOptions(OPTIONS);
@@ -51,9 +50,8 @@ final class GpuReviewFrame implements Disposable {
     GpuAtmosphere atmosphere() { return atmosphere; }
 
     /** The board's ambient occlusion for the next frames; a switch rebuilds the terrain's programs (settle again). */
-    void setAmbientOcclusion(boolean enabled, float strength) {
+    void setAmbientOcclusion(boolean enabled) {
         occlusion = enabled;
-        occlusionStrength = strength;
     }
 
     /** Borrowed: the occlusion this frame draws with. */
@@ -64,7 +62,7 @@ final class GpuReviewFrame implements Disposable {
         atmosphere.updateLight(camera.camera);
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
-        ambientOcclusion.configure(terrain.environment(), occlusion, occlusionStrength);
+        ambientOcclusion.configure(terrain.environment(), occlusion);
     }
 
     /** One frame of the scene from the camera, lit, shadowed and composited as on the board. */

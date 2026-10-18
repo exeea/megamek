@@ -429,7 +429,7 @@ class GpuTuningPanelSmokeTest {
     }
 
     @Test
-    void theUiScaleShowsTheSavedShareIsSavedOnceSetAndDefaultsRestoresIt() {
+    void theUiScaleShowsTheSavedShareIsSavedOnceSetAndDefaultsLeavesIt() {
         GUIPreferences preferences = GUIPreferences.getInstance();
         float saved = preferences.getBoardUiScale();
         try {
@@ -450,14 +450,41 @@ class GpuTuningPanelSmokeTest {
                     SwingUtilities.invokeAndWait(() -> { });
                     assertEquals(.65f, preferences.getBoardUiScale(), NEAR, "saved");
                     hud.click("tuning-defaults");
-                    assertEquals("100%", reading(hud, "tuning-ui-scale"));
+                    assertEquals("65%", reading(hud, "tuning-ui-scale"), "Defaults leaves the Display settings");
                     hud.tuning.saveUiScale();
                     SwingUtilities.invokeAndWait(() -> { });
-                    assertEquals(1, preferences.getBoardUiScale(), NEAR, "Defaults restores and saves 100%");
+                    assertEquals(.65f, preferences.getBoardUiScale(), NEAR);
                 }
             });
         } finally {
             preferences.setBoardUiScale(saved);
+        }
+    }
+
+    @Test
+    void theRenderResolutionShowsTheSavedShareIsSavedAndDefaultsLeavesIt() {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        float saved = preferences.getBoardRenderResolution();
+        try {
+            preferences.setBoardRenderResolution(.7f);
+            GpuHudTestStage.run(harness -> {
+                try (Hud hud = new Hud(harness)) {
+                    hud.show();
+                    hud.click("tuning-button");
+                    assertEquals("70%", reading(hud, "tuning-render-resolution"), "the saved share");
+                    assertEquals(.7f, BoardCamera.renderScale, NEAR);
+                    hud.drag("tuning-render-resolution", 50);
+                    SwingUtilities.invokeAndWait(() -> { });
+                    assertEquals(.5f, preferences.getBoardRenderResolution(), NEAR, "saved");
+                    hud.click("tuning-defaults");
+                    SwingUtilities.invokeAndWait(() -> { });
+                    assertEquals("50%", reading(hud, "tuning-render-resolution"), "Defaults leaves the Display settings");
+                    assertEquals(.5f, preferences.getBoardRenderResolution(), NEAR);
+                }
+            });
+        } finally {
+            preferences.setBoardRenderResolution(saved);
+            BoardCamera.renderScale = 1;
         }
     }
 

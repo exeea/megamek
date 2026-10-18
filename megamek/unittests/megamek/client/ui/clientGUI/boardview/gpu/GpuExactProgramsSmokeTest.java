@@ -71,7 +71,7 @@ class GpuExactProgramsSmokeTest {
             var stage = new Stage(new ScreenViewport());
             try {
                 byte[][] without = { sample(lender, stage, ""), sample(lender, stage, "ground") };
-                occlusion.configure(lender.environment(), true, 1);
+                occlusion.configure(lender.environment(), true);
                 byte[][] with = { sample(lender, stage, ""), sample(lender, stage, "ground") };
                 assertArrayEquals(without[0], with[0], "The theme sample");
                 assertArrayEquals(without[1], with[1], "The ground sample");

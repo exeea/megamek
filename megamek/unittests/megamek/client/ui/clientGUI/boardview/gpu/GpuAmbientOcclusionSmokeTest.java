@@ -100,10 +100,10 @@ class GpuAmbientOcclusionSmokeTest {
             for (View view : views) {
                 String name = "ambient-occlusion-" + view.name().replace(' ', '-');
                 GpuDepthPrepassBaselineSmokeTest.show(view, scene, camera);
-                frame.setAmbientOcclusion(false, 1);
+                frame.setAmbientOcclusion(false);
                 byte[] off = draw(terrain, frame, camera, scene, new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT,
                       name + "-off.png"));
-                frame.setAmbientOcclusion(true, 1);
+                frame.setAmbientOcclusion(true);
                 draw(terrain, frame, camera, scene, new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT, name + "-on.png"));
                 Visibility visibility = Visibility.read(frame.ambientOcclusion());
                 visibility.save(new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT, name + "-visibility.png"));
@@ -112,7 +112,7 @@ class GpuAmbientOcclusionSmokeTest {
                       visibility.percentile(.01f)));
                 if (creases) { checkCreases(view, scene, camera, visibility, report); }
                 if (MEASURE) { measure(view, terrain, frame, camera, scene, report); }
-                frame.setAmbientOcclusion(false, 1);
+                frame.setAmbientOcclusion(false);
                 byte[] again = draw(terrain, frame, camera, scene, null);
                 if (!Arrays.equals(off, again)) {
                     FAILURES.add(view.name() + ": the frame with ambient occlusion off again differs from the frame"
@@ -209,7 +209,7 @@ class GpuAmbientOcclusionSmokeTest {
           BoardScene scene, StringBuilder report) throws InterruptedException {
         try (var timings = new GpuStageTimings()) {
             for (boolean enabled : new boolean[] { false, true, true, false }) {
-                frame.setAmbientOcclusion(enabled, 1);
+                frame.setAmbientOcclusion(enabled);
                 GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
                 GpuAmbientOcclusion occlusion = frame.ambientOcclusion();
                 for (int i = -60; i < 240; i++) {

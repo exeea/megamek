@@ -689,7 +689,7 @@ class GpuBattleView extends ApplicationAdapter {
         atmosphere.updateLight(boardCamera);
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
-        ambientOcclusion.configure(terrain.environment(), tuning.ambientOcclusion(), tuning.ambientOcclusionStrength());
+        ambientOcclusion.configure(terrain.environment(), tuning.ambientOcclusion());
         terrain.setGravity(atmosphereSettings.gravity());
         terrain.setVacuum(atmosphereSettings.pressure().isVacuum());
         // The 3D Graphics choose what the terrain builds; the first frame already has the saved choice, and a switch

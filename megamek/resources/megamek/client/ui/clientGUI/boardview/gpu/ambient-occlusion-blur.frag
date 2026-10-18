@@ -2,13 +2,12 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // One axis of the depth-aware blur over the half-resolution occlusion (ambient-occlusion-horizon.frag). Five taps
 // weighted .5, 1, 1, 1, .5 give each phase of the 4 by 4 pattern the same weight, so two passes remove it; a tap on
-// another surface, by camera distance, drops out. The second pass also applies the strength to the occlusion; the
-// contact shadow in B is averaged alike.
+// another surface, by camera distance, drops out. The contact shadow in B is averaged alike.
 layout(location = 0) out vec4 fragColor;
 uniform sampler2D u_occlusion; // R visibility, G camera distance less its origin, B contact visibility
 uniform ivec2 u_direction;
-// world size of one scene pixel at camera distance d: x + y * d (y is 0 where the origin is not); the strength exponent
-uniform vec3 u_blur;
+// world size of one scene pixel at camera distance d: x + y * d (y is 0 where the origin is not)
+uniform vec2 u_blur;
 
 void main() {
     ivec2 centre = ivec2(gl_FragCoord.xy);
@@ -26,5 +25,5 @@ void main() {
         contact += tap.b * weight;
         total += weight;
     }
-    fragColor = vec4(pow(max(sum / total, 1e-4), u_blur.z), middle.g, contact / total, 0.0);
+    fragColor = vec4(sum / total, middle.g, contact / total, 0.0);
 }

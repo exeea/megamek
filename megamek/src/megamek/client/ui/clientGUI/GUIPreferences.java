@@ -332,6 +332,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String BOARD_AMBIENT_OCCLUSION = "BoardAmbientOcclusion";
     /** The 3D board's UI scale, a choice of its Tuning panel: the share (0.5 to 1) of the scale the window sets. */
     public static final String BOARD_UI_SCALE = "BoardUiScale";
+    /** The 3D board's render resolution, a choice of its Tuning panel: the share (0.5 to 1) of the window's pixels. */
+    public static final String BOARD_RENDER_RESOLUTION = "BoardRenderResolution";
     /** The 3D board's graphics, a {@link BoardGraphics} name. */
     public static final String BOARD_GRAPHICS = "BoardGraphics";
     /** The 3D board editor's Layers share of its right column; negative: their natural height. */
@@ -893,6 +895,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOARD_SPECULAR_ANTI_ALIASING, true);
         store.setDefault(BOARD_AMBIENT_OCCLUSION, false);
         store.setDefault(BOARD_UI_SCALE, 1f);
+        store.setDefault(BOARD_RENDER_RESOLUTION, 1f);
         store.setDefault(BOARD_GRAPHICS, BoardGraphics.ENHANCED.name());
         store.setDefault(BOARD_EDITOR_LAYERS_SPLIT, -1f);
         store.setDefault(BOARD_EDITOR_SIDE_VIEW, true);
@@ -1987,6 +1990,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setBoardUiScale(float scale) {
         store.setValue(BOARD_UI_SCALE, scale);
+    }
+
+    /** The 3D board's render resolution: the share of the window's pixels its 3D scene renders. */
+    public float getBoardRenderResolution() {
+        return store.getFloat(BOARD_RENDER_RESOLUTION);
+    }
+
+    public void setBoardRenderResolution(float resolution) {
+        store.setValue(BOARD_RENDER_RESOLUTION, resolution);
     }
 
     /** Classic or Enhanced 3D graphics; unlike the graphics card, a change applies at once. */
