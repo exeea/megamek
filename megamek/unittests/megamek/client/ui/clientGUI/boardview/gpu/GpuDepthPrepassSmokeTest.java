@@ -77,8 +77,9 @@ class GpuDepthPrepassSmokeTest {
           new Setting("relief", EnumSet.of(GpuTerrain.Prepass.RELIEF), GL20.GL_EQUAL),
           new Setting("foliage", EnumSet.of(GpuTerrain.Prepass.FOLIAGE), GL20.GL_EQUAL),
           new Setting("impostors", EnumSet.of(GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
-          // The default (GpuTerrain.depthPrepass).
-          new Setting("trees", EnumSet.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
+          // The default (GpuTerrain.depthPrepass): the trees and the cliff chunks' relief.
+          new Setting("default", EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
+                GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
           new Setting("all", ALL, GL20.GL_EQUAL), new Setting("all-lequal", ALL, GL20.GL_LEQUAL));
 
     /**
@@ -176,8 +177,11 @@ class GpuDepthPrepassSmokeTest {
                           drawn);
                 }
                 for (int i = 0; i < SETTINGS.size(); i++) {
-                    // A category that never drew would leave its parity untested; the calibration board has few trees.
-                    boolean expected = !calibration || SETTINGS.get(i).categories().contains(GpuTerrain.Prepass.RELIEF);
+                    // A category that never drew would leave its parity untested; the calibration board has few trees,
+                    // and its cliff bay's chunks draw in the default pre-pass (GpuTerrain.cliffWalls).
+                    Set<GpuTerrain.Prepass> categories = SETTINGS.get(i).categories();
+                    boolean expected = !calibration || categories.contains(GpuTerrain.Prepass.RELIEF)
+                          || categories.contains(GpuTerrain.Prepass.CLIFFS);
                     if (expected && drawn[i] == 0) {
                         FAILURES.add(board + ": the " + SETTINGS.get(i).name() + " setting drew no twin in any view");
                     }

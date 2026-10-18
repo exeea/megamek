@@ -79,6 +79,7 @@ import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.ShortArray;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 
 /** Chunked solid hex columns, flat decals and authored features; owns all GL resources it creates. */
 final class GpuTerrain implements Disposable {
@@ -813,12 +814,12 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * Whether the depth pre-pass draws a category: those of depthPrepass, and the relief while ambient occlusion reads
+     * Whether the depth pre-pass draws a category: those of depthPrepass, and all relief while ambient occlusion reads
      * the pre-pass depth (GpuAmbientOcclusion in the environment, so its switch prepares the twins as a lighting change).
      */
     private boolean prepasses(Prepass category) {
         return category != null && (depthPrepass.contains(category)
-              || category == Prepass.RELIEF && environment.has(GpuAmbientOcclusion.TYPE));
+              || (category == Prepass.RELIEF || category == Prepass.CLIFFS) && environment.has(GpuAmbientOcclusion.TYPE));
     }
 
     /**
@@ -842,8 +843,15 @@ final class GpuTerrain implements Disposable {
               || material.has(GpuLiquidShader.Frame.TYPE) || material.has(GpuGroundCover.Wind.TYPE)
               || material.has(GpuBiomeVegetation.Kind.TYPE) || material.has(GpuBankTurf.Turf.TYPE)
               || material.has(GpuRoads.Mask.TYPE)) { return null; }
-        return material.has(Ground.TYPE) || material.has(Sculpt.TYPE) || material.has(Pit.TYPE)
+        Ground ground = material.get(Ground.class, Ground.TYPE);
+        if (ground != null && ground.cliffs) { return Prepass.CLIFFS; }
+        return ground != null || material.has(Sculpt.TYPE) || material.has(Pit.TYPE)
               || material.has(GpuMagmaShader.TYPE) ? Prepass.RELIEF : null;
+    }
+
+    /** Relief that a cliff chunk measures and marks (Ground.cliffs): all but the pits' and bare magma's. */
+    private static boolean cliffRelief(Attributes material) {
+        return prepass(material) == Prepass.RELIEF && material.has(Ground.TYPE);
     }
 
     /** Every terrain vertex stage: a depth twin and its colour program place each vertex identically. */
@@ -1039,21 +1047,32 @@ final class GpuTerrain implements Disposable {
      * What the depth pre-pass draws (renderPrepass): ground relief and solid plant parts with an empty fragment stage,
      * cutout leaves and impostor cards with their own alpha test. Native measurements take one category at a time.
      */
-    /** OBJECTS: placed buildings and props, opaque model surfaces (model.frag) whose draw order leaves overdraw. */
-    enum Prepass { RELIEF, FOLIAGE, IMPOSTORS, OBJECTS }
+    /**
+     * OBJECTS: placed buildings and props, opaque model surfaces (model.frag) whose draw order leaves overdraw. CLIFFS:
+     * the relief of a chunk whose walls pass cliffWalls; RELIEF: the relief of the other chunks.
+     */
+    enum Prepass { RELIEF, CLIFFS, FOLIAGE, IMPOSTORS, OBJECTS }
 
     /**
-     * The categories the depth pre-pass draws: the trees' leaves and impostor cards, whose cutouts hide the most shading.
-     * {@code -Dmegamek.gpu.depthPrepass=false} turns it off; {@code =objects} adds buildings and props; {@code =all} adds
-     * them and the relief, for measurements only (on an Iris Xe the relief's twins cost what they save). Twins build
-     * behind the loading stage for the categories set then; native checks also switch it between frames.
+     * The categories the depth pre-pass draws: the trees' leaves and impostor cards, whose cutouts hide the most shading,
+     * and the relief of cliff-heavy chunks, whose walls hide ground behind them. {@code -Dmegamek.gpu.depthPrepass=false}
+     * turns it off; {@code =objects} adds buildings and props; {@code =all} adds them and the other chunks' relief, for
+     * measurements only (on an Iris Xe their twins cost what they save). Twins build behind the loading stage for the
+     * categories set then; native checks also switch it between frames.
      */
-    static Set<Prepass> depthPrepass = switch (System.getProperty("megamek.gpu.depthPrepass", "trees")) {
+    static Set<Prepass> depthPrepass = switch (System.getProperty("megamek.gpu.depthPrepass", "")) {
         case "false" -> EnumSet.noneOf(Prepass.class);
         case "all" -> EnumSet.allOf(Prepass.class);
-        case "objects" -> EnumSet.of(Prepass.FOLIAGE, Prepass.IMPOSTORS, Prepass.OBJECTS);
-        default -> EnumSet.of(Prepass.FOLIAGE, Prepass.IMPOSTORS);
+        case "objects" -> EnumSet.of(Prepass.CLIFFS, Prepass.FOLIAGE, Prepass.IMPOSTORS, Prepass.OBJECTS);
+        default -> EnumSet.of(Prepass.CLIFFS, Prepass.FOLIAGE, Prepass.IMPOSTORS);
     };
+    /**
+     * A chunk's relief is cliffs (Prepass.CLIFFS) when its walls, each relief triangle's area as seen from beside it,
+     * cover more than this share of its hexes' area (MeshBatch.wallArea): the Box Canyon's and the calibration board's
+     * cliff bay's chunks (.46 to 2), not grassland hills or a city (at most .21). Native measurements set it before a
+     * build.
+     */
+    static float cliffWalls = .45f;
     /** The colour pass's depth test for a draw the pre-pass drew; native measurements compare GL_LEQUAL. */
     static int prepassDepthFunction = GL20.GL_EQUAL;
     /**
@@ -1373,17 +1392,38 @@ final class GpuTerrain implements Disposable {
     /** An animated liquid material: its frames, whether it falls, and the current it moves with. */
     record LiquidSurface(Material material, BoardLiquid.Textures source, boolean falling, BoardFlow.Current current) { }
 
-    /** Marks exposed ground and carries its water-film response; negative excludes snow, ice and water. */
+    /**
+     * Marks exposed ground and carries its water-film response; negative excludes snow, ice and water. {@code cliffs}
+     * marks a cliff-heavy chunk's relief (Prepass.CLIFFS): its draws stay apart from other chunks' in shared pages and
+     * batches, and share their programs.
+     */
     private static final class Ground extends FloatAttribute {
         static final long TYPE = register("boardGround");
+        final boolean cliffs;
 
         Ground(float response) {
+            this(response, false);
+        }
+
+        Ground(float response, boolean cliffs) {
             super(TYPE, response);
+            this.cliffs = cliffs;
         }
 
         @Override
         public Ground copy() {
-            return new Ground(value);
+            return new Ground(value, cliffs);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * super.hashCode() + (cliffs ? 1 : 0);
+        }
+
+        @Override
+        public int compareTo(Attribute other) {
+            int order = super.compareTo(other);
+            return order != 0 || other.type != type ? order : Boolean.compare(cliffs, ((Ground) other).cliffs);
         }
     }
 
@@ -1952,10 +1992,15 @@ final class GpuTerrain implements Disposable {
         private record Part(MeshPart mesh, Material material) { }
         private record Range(Coords owner, Material material, int offset, int count) { }
         private static final class Buffer {
-            final MeshBuilder builder = new MeshBuilder();
+            final Builder builder = new Builder();
             final List<Part> parts = new ArrayList<>();
             final List<Range> ranges = new ArrayList<>();
             Buffer(VertexAttributes attributes) { builder.begin(attributes); }
+        }
+        /** Lends its own vertex and index arrays to wallArea, on the worker that fills it, without copying them. */
+        private static final class Builder extends MeshBuilder {
+            float[] vertexArray() { return getVertices(); }
+            short[] indexArray() { return getIndices(); }
         }
         private static final VertexAttributes STANDARD = MeshBuilder.createAttributes(ATTRIBUTES);
         private final List<Buffer> buffers = new ArrayList<>();
@@ -2001,6 +2046,41 @@ final class GpuTerrain implements Disposable {
                       : material.has(GpuDecalOrder.TYPE) ? continued(material) : material);
             }
             return current.builder;
+        }
+
+        /**
+         * The walls' area among the ranges whose source material a cliff chunk marks (cliffRelief): each triangle's area
+         * as seen from beside it, none for level ground and all of it for a vertical face. The board's sides, which face
+         * past its {@code columns} by {@code rows} hexes, hide nothing and do not count.
+         */
+        float wallArea(int columns, int rows) {
+            float width = BoardGeometry.width(), height = BoardGeometry.height(), step = width / 4;
+            double area = 0;
+            for (Buffer buffer : buffers) {
+                float[] vertices = buffer.builder.vertexArray();
+                short[] indices = buffer.builder.indexArray();
+                int stride = buffer.builder.getFloatsPerVertex();
+                int position = buffer.builder.getAttributes().getOffset(VertexAttributes.Usage.Position);
+                for (Range range : buffer.ranges) {
+                    if (!cliffRelief(range.material())) { continue; }
+                    for (int i = range.offset(); i < range.offset() + range.count(); i += 3) {
+                        int a = Short.toUnsignedInt(indices[i]) * stride + position;
+                        int b = Short.toUnsignedInt(indices[i + 1]) * stride + position;
+                        int c = Short.toUnsignedInt(indices[i + 2]) * stride + position;
+                        float ux = vertices[b] - vertices[a], uy = vertices[b + 1] - vertices[a + 1];
+                        float uz = vertices[b + 2] - vertices[a + 2], vx = vertices[c] - vertices[a];
+                        float vy = vertices[c + 1] - vertices[a + 1], vz = vertices[c + 2] - vertices[a + 2];
+                        // The cross product's horizontal part: twice the triangle's area projected on a vertical plane.
+                        float x = uy * vz - uz * vy, y = uz * vx - ux * vz, side = (float) Math.sqrt(x * x + y * y);
+                        if (side == 0) { continue; }
+                        // A quarter of a hex from its middle toward where it faces: a board's side faces no hex.
+                        float px = (vertices[a] + vertices[b] + vertices[c]) / 3 + x / side * step;
+                        float py = (vertices[a + 1] + vertices[b + 1] + vertices[c + 1]) / 3 + y / side * step;
+                        if (HexTile.at(px, py, width, height, columns, rows) >= 0) { area += side / 2; }
+                    }
+                }
+            }
+            return (float) area;
         }
 
         /** A paint layer continued in another mesh draws after its first part. */
@@ -3084,7 +3164,8 @@ final class GpuTerrain implements Disposable {
             prepareTerrainMaterial(GpuSurfaceScars.material(material), GpuSurfaceScars.attributes(attributes));
         }
         for (Renderable sample : terrainMaterialSamples) {
-            if (sample.material.getMask() == material.getMask()
+            // A cliff chunk's relief takes its own sample, which links the program's depth twin too.
+            if (sample.material.getMask() == material.getMask() && prepass(sample.material) == prepass(material)
                   && sameMaterialVariant(material, GpuIceShader.mode(sample.material), linearDiffuse(sample.material),
                         GpuSurfaceBlend.ordinaryFamily(sample.material), waterMode(sample.material),
                         flowingMagma(sample.material))
@@ -4275,6 +4356,8 @@ final class GpuTerrain implements Disposable {
         final Map<String, LiquidSurface> animations = new HashMap<>();
         final Map<Material, Material> reusedMaterials = new java.util.IdentityHashMap<>();
         List<MeshBatch> meshes;
+        /** Whether the chunk's relief is cliffs (cliffWalls), measured where its meshes are prepared. */
+        boolean cliffs;
         int collected, uploadLayer, uploadBuffer;
 
         ChunkBuild(BoardScene scene, int x, int y, float floor, TerrainLod lod, boolean columns, Prepared prepared,
@@ -4415,6 +4498,9 @@ final class GpuTerrain implements Disposable {
 
         void prepare(Runnable check) {
             meshes = layers.stream().map(layer -> layer.prepare(check, progress::advance)).toList();
+            // A hex's area: odd-q columns stand three quarters of a hex's width apart.
+            cliffs = meshes.getFirst().wallArea(scene.width(), scene.height())
+                  > cliffWalls * width * height * .75f * BoardGeometry.width() * BoardGeometry.height();
             progress.begin("upload", meshes.stream().mapToInt(mesh -> mesh.buffers.size()).sum());
         }
 
@@ -4439,6 +4525,14 @@ final class GpuTerrain implements Disposable {
             chunk.bounds.set(bounds);
             chunk.scatterDiameter = scatterDiameter;
             if (chunk.paintOnlyUpdate) { progress.advance(); return chunk; }
+            // ModelInstance copied its materials: a cliff chunk marks its own relief before anything keeps them.
+            for (ModelInstance instance : cliffs ? chunk.opaque : List.<ModelInstance>of()) {
+                for (Material material : instance.materials) {
+                    if (cliffRelief(material)) {
+                        material.set(new Ground(material.get(Ground.class, Ground.TYPE).value, true));
+                    }
+                }
+            }
             chunk.terrainRenderables = GpuTerrainDepth.snapshot(chunk.opaque);
             chunk.scatterRenderables = GpuTerrainDepth.snapshot(chunk.scatter);
             chunk.waterRenderables = GpuTerrainDepth.snapshot(chunk.water);

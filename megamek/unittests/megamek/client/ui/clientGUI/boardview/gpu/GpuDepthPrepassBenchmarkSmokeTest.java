@@ -35,8 +35,8 @@ import org.lwjgl.opengl.GL41C;
 
 /**
  * Step 5's depth pre-pass (GpuTerrain.depthPrepass), timed with everything it costs. Each round of a view draws the
- * settings in a palindrome (off, all, all with LEQUAL, the trees (the default: all but relief), all but foliage, all but
- * impostors, then back), so a steady drift of clock or heat cancels; a setting's value in a round is the mean of its two
+ * settings in a palindrome (off, all, all with LEQUAL, the trees, the default (the trees and the cliff chunks' relief),
+ * the trees with objects, all but foliage, all but impostors, then back), so a steady drift of clock or heat cancels; a setting's value in a round is the mean of its two
  * slots, its result the median over the rounds. The opaque stage splits into "opaque preparation" (the frame's detail, uploads and single
  * gather), "depth pre-pass" (the twins) and "colour pass" (the opaque colour draws), beside the frame's other stages for
  * its total. Each board's report also gives its load time with the twins and its colour and twin programs: counts and
@@ -57,6 +57,8 @@ class GpuDepthPrepassBenchmarkSmokeTest {
           new Setting("off", NONE, GL20.GL_EQUAL), new Setting("all", ALL, GL20.GL_EQUAL),
           new Setting("all-lequal", ALL, GL20.GL_LEQUAL),
           new Setting("trees", EnumSet.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
+          new Setting("default", EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
+                GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
           new Setting("objects", EnumSet.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS,
                 GpuTerrain.Prepass.OBJECTS), GL20.GL_EQUAL),
           without(GpuTerrain.Prepass.FOLIAGE), without(GpuTerrain.Prepass.IMPOSTORS)), Setting::name);

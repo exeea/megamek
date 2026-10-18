@@ -296,7 +296,8 @@ class GpuBoardPerformanceSmokeTest {
                 preferences.setBoardAmbientOcclusion(false);
                 preferences.setBoardUiScale(1);
             });
-            GpuTerrain.depthPrepass = EnumSet.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS);
+            GpuTerrain.depthPrepass = EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
+                  GpuTerrain.Prepass.IMPOSTORS);
         }
         if (!graphics.isEmpty()) { setGraphics(graphics.getFirst()); }
         long settleNanos = Integer.getInteger("megamek.gpu.performanceSettleSeconds", 180) * 1_000_000_000L;
@@ -377,7 +378,8 @@ class GpuBoardPerformanceSmokeTest {
                         assertEquals(false, tuning.antiAliasing());
                         assertEquals(true, GpuEnvironmentLighting.specularAntialiasing);
                         assertEquals(false, tuning.ambientOcclusion());
-                        assertEquals(Set.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS), GpuTerrain.depthPrepass);
+                        assertEquals(Set.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
+                              GpuTerrain.Prepass.IMPOSTORS), GpuTerrain.depthPrepass);
                     }
                     System.out.printf("PERF settings renderScale=%.2f specularAA=%s SMAA=%s AO=%s prepass=%s uiScale=%.2f%n",
                           BoardCamera.renderScale, GpuEnvironmentLighting.specularAntialiasing, tuning.antiAliasing(),
