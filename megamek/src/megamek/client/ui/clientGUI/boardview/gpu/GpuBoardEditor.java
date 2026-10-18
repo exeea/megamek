@@ -1207,6 +1207,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         var zone = zoneBrush(brush);
         if (zone != null) { controls.add(zoneNumber(zone)); }
         controls.add(clearOnly(brush));
+        var fill = ui.checkbox(UiKit.text("BoardEditor.fill"), brush.fill()); fill.setName("editor-fill");
+        onChange(fill, () -> send(Action.BRUSH_VALUE, "fill", Boolean.toString(fill.isTicked())));
+        ui.tip(fill).getActor().setText(UiKit.text("BoardEditor.fill.tooltip"));
+        controls.add(fill);
         brushRows.add(controls);
         brushRow(hint(UiKit.text(brush.sampledHex() != null ? "BoardEditor.hint.paintStamp"
               : brush.themeCard() ? "BoardEditor.hint.theme" : zone != null ? "BoardEditor.deploymentZoneHint"

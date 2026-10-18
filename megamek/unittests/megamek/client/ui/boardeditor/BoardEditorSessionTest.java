@@ -1740,6 +1740,25 @@ class BoardEditorSessionTest {
         assertEquals(List.of(house), session.brush(house), "Switched off, the building's hex is in the footprint again");
     }
 
+    /** Fill area: a Paint click covers the clicked hex's connected area of the same level and terrain, as one undo step. */
+    @Test void fillPaintsTheConnectedAreaOnly() {
+        var session = session();
+        Coords centre = new Coords(5, 5), water = centre.translated(2), outside = centre.translated(0).translated(0);
+        session.board().setHex(centre, new Hex(2));
+        for (int direction = 0; direction < 6; direction++) { session.board().setHex(centre.translated(direction), new Hex(2)); }
+        session.board().setHex(water, new Hex(2, "water:1", ""));
+        send(session, Action.CHOOSE_BRUSH, "vegetation", "woods-1");
+        send(session, Action.BRUSH_VALUE, "fill", "true");
+        assertEquals(6, session.brush(centre).size(), "The level 2 hexes without the water");
+        session.pointer(centre, 0, 0, false); session.finishStroke();
+        assertTrue(session.board().getHex(centre.translated(5)).containsTerrain(Terrains.WOODS));
+        assertFalse(session.board().getHex(water).containsTerrain(Terrains.WOODS));
+        assertFalse(session.board().getHex(outside).containsTerrain(Terrains.WOODS), "Level 0 is another area");
+        send(session, Action.UNDO, "", "");
+        assertFalse(session.board().getHex(centre).containsTerrain(Terrains.WOODS));
+        assertFalse(session.board().getHex(centre.translated(5)).containsTerrain(Terrains.WOODS));
+    }
+
     /**
      * Copy also puts the hex as text on the clipboard, so another window's session pastes it with its level, theme,
      * terrain and objects (as new objects); the old editor's text format pastes too, and text that is no hex leaves

@@ -144,11 +144,14 @@ public final class BoardEditorSession {
      * whose {@code min} equals its {@code max} cannot be moved.
      */
     public record Level(String key, boolean object, double level, double min, double max, String receiver) { }
-    /** {@code clearOnly}: the old editor's "Only overwrite clear hexes" for Paint and Sculpt ({@link #brush(Coords)}). */
+    /**
+     * {@code clearOnly}: the old editor's "Only overwrite clear hexes" for Paint and Sculpt; {@code fill}: Paint fills the
+     * clicked hex's connected area instead of the radius (both {@link #brush(Coords)}).
+     */
     public record Brush(String key, String label, String component, int elevation, String theme,
           List<Property> properties, Map<String, HexAppearance> appearance, List<BoardDecoration> objects, Coords sampledHex,
           boolean elevationEnabled, boolean themeEnabled, boolean precision, boolean magnetic,
-          LevelSculpt.Mode sculpt, boolean slope, boolean clearOnly) {
+          LevelSculpt.Mode sculpt, boolean slope, boolean clearOnly, boolean fill) {
         /** A hex stamp's objects are contents of the stamp, not an individually placeable object brush. */
         public BoardDecoration object() { return sampledHex == null && !objects.isEmpty() ? objects.getFirst() : null; }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -298,6 +301,8 @@ public final class BoardEditorSession {
     private boolean magnetic = true;
     /** Paint and Sculpt leave every hex that holds terrain ({@link #overwrites}). */
     private boolean clearOnly;
+    /** Paint fills the clicked hex's connected area ({@link #fillArea}). */
+    private boolean fill;
     private final Set<Selection> selection = new LinkedHashSet<>();
     private final Map<Selection, BoardDecoration> movingObjects = new LinkedHashMap<>();
     /** A press on a member of a wholly selected group; the pointer release selects it alone unless the press dragged. */
@@ -405,7 +410,7 @@ public final class BoardEditorSession {
         Brush active = new Brush(brushKey, brushLabel, brushComponent, paintTemplate.getLevel(),
               paintTemplate.getTheme() == null ? "" : paintTemplate.getTheme(), properties(paintTemplate),
               paintTemplate.getAppearance(), paintTemplate.getDecorations(), sampledHex,
-              brushElevation, brushTheme, precision, magnetic, sculpt, slope, clearOnly);
+              brushElevation, brushTheme, precision, magnetic, sculpt, slope, clearOnly, fill);
         BoardDecoration prototype = active.object();
         return new Snapshot(revision, title(), dirty(), !undo.isEmpty(), !redo.isEmpty(), tool, component,
               prototype == null ? "" : prototype.asset(), brush,
@@ -497,7 +502,7 @@ public final class BoardEditorSession {
     public static Brush hexStamp(String key, Hex hex) {
         return new Brush(key, key, "ground", hex.getLevel(), hex.getTheme() == null ? "" : hex.getTheme(), properties(hex),
               hex.getAppearance(), hex.getDecorations(), new Coords(0, 0), true, true, false, false, LevelSculpt.Mode.RAISE,
-              true, false);
+              true, false, false);
     }
 
     private static List<Property> properties(Hex hex) {
@@ -1067,9 +1072,13 @@ public final class BoardEditorSession {
         }
     }
 
-    /** The hexes a stroke at {@code center} changes, as its preview shows them: the radius, without those it may not overwrite. */
+    /**
+     * The hexes a stroke at {@code center} changes, as its preview shows them: the radius (with Fill, the connected area),
+     * without those it may not overwrite.
+     */
     public List<Coords> brush(Coords center) {
         if (center == null || !board().contains(center)) { return List.of(); }
+        if (fill && tool == Tool.PAINT) { return fillArea(center).stream().filter(this::overwrites).toList(); }
         List<Coords> result = new ArrayList<>();
         for (int x = Math.max(0, center.getX() - brush + 1); x <= Math.min(board().getWidth() - 1, center.getX() + brush - 1); x++) {
             for (int y = Math.max(0, center.getY() - brush + 1); y <= Math.min(board().getHeight() - 1, center.getY() + brush - 1); y++) {
@@ -1077,6 +1086,32 @@ public final class BoardEditorSession {
             }
         }
         return List.copyOf(result);
+    }
+
+    /** The paint bucket's area: {@code center} and every hex joined to it through neighbours that match it ({@link #fillMatch}). */
+    private Set<Coords> fillArea(Coords center) {
+        Object match = fillMatch(board().getHex(center));
+        Set<Coords> area = new LinkedHashSet<>(List.of(center));
+        var open = new ArrayDeque<>(area);
+        while (!open.isEmpty()) {
+            Coords at = open.poll();
+            for (int direction = 0; direction < 6; direction++) {
+                Coords next = at.translated(direction);
+                if (board().contains(next) && !area.contains(next) && match.equals(fillMatch(board().getHex(next)))) {
+                    area.add(next); open.add(next);
+                }
+            }
+        }
+        return area;
+    }
+
+    /** What the paint bucket compares: level, theme and each terrain with its level (automatic markers do not count). */
+    private static Object fillMatch(Hex hex) {
+        Map<Integer, Integer> terrain = new LinkedHashMap<>();
+        for (int type : hex.getTerrainTypesSet()) {
+            if (!Terrains.AUTOMATIC.contains(type)) { terrain.put(type, hex.terrainLevel(type)); }
+        }
+        return List.of(hex.getLevel(), Objects.toString(hex.getTheme(), ""), terrain);
     }
 
     /**
@@ -2682,6 +2717,7 @@ public final class BoardEditorSession {
         else if (target.equals("sculpt")) { sculpt = LevelSculpt.Mode.valueOf(value); }
         else if (target.equals("slope")) { slope = Boolean.parseBoolean(value); }
         else if (target.equals("clearOnly")) { clearOnly = Boolean.parseBoolean(value); }
+        else if (target.equals("fill")) { fill = Boolean.parseBoolean(value); }
         else if (target.equals("zone")) { setZones(next, zoneMask(value)); }
         else { throw new IllegalArgumentException("Unknown brush setting " + target); }
         paintTemplate = next;
