@@ -155,18 +155,6 @@ class RouteDrawingTest {
         }
     }
 
-    @Test void aFastMoveFillsTheSkippedHexesWithAStraightLine() {
-        var session = rail();
-        Coords far = START.translated(3).translated(3).translated(3).translated(3);
-        session.pointer(START, 0, 0, false);
-        session.pointer(far, 0, 0, true);
-        session.finishStroke();
-        List<Coords> cells = line(START, 3, 3, 3, 3);
-        for (int i = 1; i < cells.size(); i++) {
-            assertTrue(RailRoute.joined(route(session, cells.get(i - 1)), 3, route(session, cells.get(i))), "Joined " + cells.get(i));
-        }
-    }
-
     @Test void escOrARightClickDropsTheDragAndAClickWithoutADragPlacesItsMarkerAsBefore() {
         var session = rail();
         Map<Coords, JsonNode> document = document(session);

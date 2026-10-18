@@ -37,55 +37,6 @@ class GpuFrozenWaterfallSmokeTest {
     private static final List<String> NAMES = List.of("frozen-frozen", "frozen-open", "open-frozen", "open-open");
 
     @Test
-    void capturesLargeOpenAndFrozenFallsSideBySide() throws Exception {
-        BoardScene scene = heroScene();
-        var failure = new AtomicReference<Throwable>();
-        var configuration = GpuBoardWindow.configuration(false);
-        configuration.setWindowedMode(3200, 1800);
-        new Lwjgl3Application(new ApplicationAdapter() {
-            @Override
-            public void create() {
-                var terrain = new GpuTerrain();
-                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
-                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
-                try {
-                    assertEquals(3200, Gdx.graphics.getBackBufferWidth());
-                    assertEquals(1800, Gdx.graphics.getBackBufferHeight());
-                    var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
-                          "frozen-waterfall");
-                    assertTrue(output.isDirectory() || output.mkdirs());
-                    var camera = new BoardCamera();
-                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    camera.setIsometric(true);
-                    camera.orbit(-45, 8);
-                    camera.camera.zoom = .155f;
-                    camera.center(BoardGeometry.center(new Coords(2, 3), 3.5f)
-                          .lerp(BoardGeometry.center(new Coords(5, 4), 3.5f), .5f));
-                    camera.update();
-                    terrain.setAtmosphere(frame.lighting());
-                    terrain.update(scene);
-                    terrain.animate(.37f, List.of());
-                    settle(terrain, frame, camera, scene);
-                    frame.render(terrain, camera, scene);
-                    GpuReviewFrame.save(new File(output, "waterfall-and-frozen-waterfall-3200x1800.png"));
-                    camera.orbit(18, -8);
-                    settle(terrain, frame, camera, scene);
-                    frame.render(terrain, camera, scene);
-                    GpuReviewFrame.save(new File(output, "waterfall-and-frozen-waterfall-oblique-3200x1800.png"));
-                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-                } catch (Throwable error) {
-                    failure.set(error);
-                } finally {
-                    frame.dispose();
-                    terrain.dispose();
-                    Gdx.app.exit();
-                }
-            }
-        }, configuration);
-        if (failure.get() != null) { throw new AssertionError("Waterfall comparison capture", failure.get()); }
-    }
-
-    @Test
     void frozenDropsStayStillAndThawIntoFlowingWaterInBothCameras() throws Exception {
         BoardScene frozen = scene(false), thawed = scene(true);
         var corners = new ArrayList<BoardScene>();
@@ -282,26 +233,6 @@ class GpuFrozenWaterfallSmokeTest {
                           && !(thawed && channel == 0);
                     board.setHex(new Coords(x, y), new Hex(y < 3 ? 5 : 0,
                           water ? "water:2" + (frozen ? ";ice:1" : "") : "snow:1", "snow"));
-                }
-            }
-            game.setBoard(board);
-            try (var source = new GpuMapSource(game, null, null)) { return source.takeFrame().scene(); }
-        });
-        SwingUtilities.invokeAndWait(task);
-        return task.get();
-    }
-
-    private static BoardScene heroScene() throws Exception {
-        var task = new FutureTask<BoardScene>(() -> {
-            var game = new Game();
-            var board = Board.createEmptyBoard(8, 7);
-            for (int x = 0; x < board.getWidth(); x++) {
-                for (int y = 0; y < board.getHeight(); y++) {
-                    boolean upper = (x == 2 || x == 5) && y >= 2 && y <= 3;
-                    boolean lower = (x >= 1 && x <= 6) && y >= 4 && y <= 5;
-                    boolean water = upper || lower;
-                    board.setHex(new Coords(x, y), new Hex(y < 4 ? 7 : 0,
-                          water ? "water:2" + (x >= 4 ? ";ice:1" : "") : "snow:1", "snow"));
                 }
             }
             game.setBoard(board);

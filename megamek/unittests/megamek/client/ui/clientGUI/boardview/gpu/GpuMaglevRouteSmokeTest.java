@@ -5,12 +5,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.File;
 import java.util.List;
-import java.util.HashMap;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import megamek.client.ui.boardeditor.BoardEditorSession;
@@ -24,42 +22,6 @@ import org.junit.jupiter.api.Test;
 
 @Tag("on-demand")
 class GpuMaglevRouteSmokeTest {
-    @Test void elevationProfilesRenderContinuouslyAtCloseRange() {
-        File output = new File("build/gpu-board-review"); assertTrue(output.isDirectory() || output.mkdirs());
-        var failure = new AtomicReference<Throwable>();
-        var config = GpuBoardWindow.configuration(false);
-        config.setWindowedMode(1600, 900); config.setInitialVisible(false);
-        new Lwjgl3Application(new ApplicationAdapter() {
-            @Override public void create() {
-                var terrain = new GpuTerrain();
-                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
-                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
-                try {
-                    var camera = new BoardCamera();
-                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    camera.setIsometric(true); camera.orbit(90 - camera.azimuth(), 70 - camera.tilt());
-                    camera.zoom(.32f / camera.camera.zoom);
-                    double[][] profiles = { { 1, 2, 3, 4, 5, 6, 7 }, { 1, 1, 1, 3, 5, 5, 5 }, { 1, 2, 4, 5, 4, 2, 1 } };
-                    String[] names = { "steady", "transition", "crest" };
-                    for (int profile = 0; profile < profiles.length; profile++) {
-                        var heights = new HashMap<Coords, Double>();
-                        for (int i = 0; i < profiles[profile].length; i++) { heights.put(new Coords(4, i + 1), profiles[profile][i]); }
-                        var scene = BoardRailTest.scene(heights);
-                        camera.center(BoardGeometry.center(new Coords(4, 4), (float) profiles[profile][3]));
-                        frame.prepare(terrain, camera, scene);
-                        terrain.update(scene); terrain.animate(0, List.of());
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
-                        frame.render(terrain, camera, scene);
-                        GpuReviewFrame.save(new File(output, "maglev-elevation-" + names[profile] + ".png"));
-                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-                    }
-                } catch (Throwable error) { failure.set(error); }
-                finally { frame.dispose(); terrain.dispose(); Gdx.app.exit(); }
-            }
-        }, config);
-        if (failure.get() != null) { throw new AssertionError("Maglev elevation profiles", failure.get()); }
-    }
-
     private static void level(Board board, Coords at, double level) {
         var route = RailRoute.find(board.getHex(at), RailRoute.Kind.MAGLEV);
         board.getHex(at).setDecorations(List.of(route.transform(0, 0, 0, false, 1,

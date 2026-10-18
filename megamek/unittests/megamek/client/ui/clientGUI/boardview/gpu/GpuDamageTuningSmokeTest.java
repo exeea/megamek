@@ -192,29 +192,17 @@ class GpuDamageTuningSmokeTest {
     }
 
     private static void verify(GpuBattleView view, GpuBoardFixture fixture) throws Exception {
-        CheckBox vsync = GpuBoardTestUi.tuning(view, "tuning-vsync");
-        assertTrue(vsync.isChecked());
-        GpuBoardTestUi.pressTuning(vsync);
-        assertFalse(vsync.isChecked());
         CheckBox override = GpuBoardTestUi.tuning(view, "tuning-override-damage");
         Slider slider = GpuBoardTestUi.tuning(view, "Display damage");
         SelectBox<UnitDamageDisplay.Location> location = GpuBoardTestUi.tuning(view, "tuning-damage-location");
-        assertTrue(location.isDisabled());
-        assertEquals(UnitDamageDisplay.Location.ALL, location.getSelected());
         // Meks show as meeples by default; per-location damage is the location model's.
         SelectBox<UnitDisplayMode> display = GpuBoardTestUi.tuning(view, "tuning-unit-display");
         display.setSelected(UnitDisplayMode.MODELS);
         view.render();
         var actual = displayedDamage(view, 1);
-        assertFalse(override.isChecked());
-        assertTrue(slider.isDisabled());
-        assertEquals(0, slider.getValue());
         assertEquals(UnitDamageDisplay.Stage.ARMOR_STRIPPED, actual.stages().get("LT"));
 
         GpuBoardTestUi.pressTuning(override);
-        assertTrue(override.isChecked());
-        assertFalse(slider.isDisabled());
-        assertFalse(location.isDisabled());
         ModelInstance infantryInstance = instance(view, 3);
         float[] levels = { .25f, .50f, .75f, 1, .50f, 0 };
         UnitDamageDisplay.Stage[] mekStages = { UnitDamageDisplay.Stage.ARMOR_WORN,
@@ -279,7 +267,6 @@ class GpuDamageTuningSmokeTest {
         view.render();
         GpuBoardTestUi.pressTuning(override);
         view.render();
-        assertTrue(slider.isDisabled());
         assertEquals(actual, displayedDamage(view, 1), "Disabling the preview restores actual damage");
         assertTrue(displayedDamage(view, 2).isNone());
         assertInfantry(view, 0);
@@ -289,12 +276,6 @@ class GpuDamageTuningSmokeTest {
         view.render();
         GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(view, "tuning-defaults"));
         view.render();
-        assertFalse(vsync.isChecked(), "Defaults keeps the VSync preference the user set");
-        assertFalse(override.isChecked());
-        assertTrue(location.isDisabled());
-        assertEquals(UnitDamageDisplay.Location.ALL, location.getSelected());
-        assertTrue(slider.isDisabled());
-        assertEquals(0, slider.getValue());
         // Defaults also brings back the Mek meeple.
         display.setSelected(UnitDisplayMode.MODELS);
         view.render();

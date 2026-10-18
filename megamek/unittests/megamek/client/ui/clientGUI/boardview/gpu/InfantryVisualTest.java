@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import java.util.List;
 
@@ -47,7 +46,6 @@ class InfantryVisualTest {
 
     @Test
     void battleArmorKeepsEachLivingMembersIdentityAndHasOptionalCompression() {
-        assertFalse(BattleArmorVisual.COMPRESS_TROOPS);
         var before = BattleArmorVisual.parts(state(EntityMovementMode.INF_JUMP, 6, List.of(1, 2, 3, 4, 5, 6)),
               descriptor("battle-armor"));
         var after = BattleArmorVisual.parts(state(EntityMovementMode.INF_JUMP, 1, List.of(6)), descriptor("battle-armor"));

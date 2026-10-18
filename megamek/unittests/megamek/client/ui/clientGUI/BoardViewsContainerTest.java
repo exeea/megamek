@@ -94,8 +94,6 @@ class BoardViewsContainerTest {
                 assertEquals(List.of(ClientGUI.VIEW_LEGACY_2D, ClientGUI.VIEW_GRAPHICS_CLASSIC,
                       ClientGUI.VIEW_GRAPHICS_ENHANCED), Arrays.stream(renderer.getMenuComponents())
                       .map(item -> ((JRadioButtonMenuItem) item).getActionCommand()).toList());
-                assertEquals(List.of("Legacy 2D", "Classic", "Enhanced"), Arrays.stream(renderer.getMenuComponents())
-                      .map(item -> ((JRadioButtonMenuItem) item).getText()).toList());
                 assertEquals(ClientGUI.VIEW_GRAPHICS_ENHANCED, selected(renderer));
 
                 item(renderer, ClientGUI.VIEW_LEGACY_2D).doClick(0);

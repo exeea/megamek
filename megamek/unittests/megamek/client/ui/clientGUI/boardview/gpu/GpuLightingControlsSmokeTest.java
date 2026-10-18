@@ -2,8 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicReference;
@@ -12,9 +10,6 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.scenes.scene2d.ui.Slider;
-import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
-import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.BufferUtils;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -39,30 +34,21 @@ class GpuLightingControlsSmokeTest {
     }
 
     private static void check(GpuLightingEnvironment image) {
-        var skin = new GpuBoardSkin();
         var environment = new GpuEnvironmentLighting();
         var atmosphere = new GpuAtmosphere();
         var target = GpuHeatGlow.buffer(8, 6, false);
         var quad = GpuAtmosphere.screenQuad();
         try {
-            var tuning = new GpuBoardTuning(skin.skin);
-            Slider shadows = tuning.atmosphereRows().findActor("Shadows");
-            Slider ambient = tuning.atmosphereRows().findActor("Ambient light");
-            Slider sky = tuning.atmosphereRows().findActor("Sky contribution");
-            assertEquals(100, shadows.getValue()); assertEquals(20, ambient.getValue()); assertEquals(100, sky.getValue());
-            shadows.setValue(25); ambient.setValue(60); sky.setValue(50);
-            tuning.setEnvironmentImage(image);
-            assertEquals(.25f, tuning.atmosphereOptions().shadowStrength());
-            assertEquals(.6f, tuning.atmosphereOptions().ambientShare());
-            assertSame(image, tuning.atmosphereOptions().environmentImage());
+            var defaults = GpuAtmosphere.Options.DEFAULTS;
+            var manual = new GpuAtmosphere.Options(defaults.rays(), defaults.fixedSun(), defaults.minCloudShadow(),
+                  defaults.maxCloudShadow(), defaults.sunGlare(), defaults.fogHeightVariation(),
+                  defaults.fogDensityVariation(), defaults.moonShadowContrast(), defaults.taintStrength(),
+                  defaults.fogCalmDrift(), defaults.whiteBalance(), defaults.tint(), defaults.saturation(),
+                  defaults.contrast(), .25f, .6f, .5f, image, false);
             atmosphere.configure(BoardAtmosphere.DEFAULTS);
             float exposure = atmosphere.exposure();
-            atmosphere.setOptions(tuning.atmosphereOptions());
+            atmosphere.setOptions(manual);
             assertEquals(exposure, atmosphere.exposure(), "Manual lighting must not be cancelled by exposure adaptation");
-            TextButton reset = tuning.defaults();
-            reset.fire(new ChangeListener.ChangeEvent());
-            assertNull(tuning.atmosphereOptions().environmentImage());
-            assertEquals(100, shadows.getValue()); assertEquals(20, ambient.getValue()); assertEquals(100, sky.getValue());
 
             var lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS).tuned(1, .2f, 1, image);
             // Select after the atlas exists, exercising a live image replacement without rebuilding materials.
@@ -100,7 +86,7 @@ class GpuLightingControlsSmokeTest {
             } finally { shader.dispose(); }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
-            quad.dispose(); target.dispose(); atmosphere.dispose(); environment.dispose(); skin.dispose();
+            quad.dispose(); target.dispose(); atmosphere.dispose(); environment.dispose();
         }
     }
 }

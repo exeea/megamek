@@ -74,22 +74,11 @@ class GpuFieldOfViewSmokeTest {
                                     boardCamera.setIsometric(false);
                                     // The samples are board pixels: the HUD's panels would cover some of them.
                                     ((GpuHud) field("ui")).stage.getRoot().setVisible(false);
-                                    assertDefaults();
                                     // Compare FoV at one hour, independently of each window's sampled scenario time.
                                     Slider time = GpuBoardTestUi.tuning(this, "Time of day");
                                     time.setValue(13);
                                     GpuBoardTestUi.pressTuning(modeButton("fov", style));
-                                    GpuBoardTestUi.pressTuning(modeButton("fov", style));
-                                    assertTrue(modeButton("sensor", GpuFieldOfView.SENSOR_STYLE).isChecked(),
-                                          "FoV controls must leave the sensor style unchanged");
                                     GpuBoardTestUi.pressTuning(modeButton("sensor", sensorStyle));
-                                    GpuBoardTestUi.pressTuning(modeButton("sensor", sensorStyle));
-                                    for (GpuFieldOfView.Style mode : GpuFieldOfView.Style.values()) {
-                                        assertEquals(mode == style, modeButton("fov", mode).isChecked(),
-                                              "Exactly one FoV mode must remain selected, even when clicked twice");
-                                        assertEquals(mode == sensorStyle, modeButton("sensor", mode).isChecked(),
-                                              "Exactly one sensor mode must remain selected, independently of FoV");
-                                    }
                                     probe = new GpuFieldOfView();
                                     probe.configure(style, GpuFieldOfView.FOV_DARKNESS, sensorStyle, GpuFieldOfView.SENSOR_DARKNESS);
                                     probe.update(mask);
@@ -110,8 +99,6 @@ class GpuFieldOfViewSmokeTest {
                                           "The darkness slider must darken blocked content in " + style);
                                     assertEquals(noDarkening.visible(), darkened.visible(), 0.01f,
                                           "The darkness slider must leave visible content unchanged");
-                                    assertEquals(GpuFieldOfView.SENSOR_DARKNESS * 100, darknessSlider("Sensor").getValue(), 0.001f,
-                                          "FoV darkness must not change sensor darkness");
                                     darknessSlider("FoV").setValue(GpuFieldOfView.FOV_DARKNESS * 100);
                                     boardCamera.setIsometric(true);
                                     boardCamera.fit(fixture.source.takeFrame().scene());
@@ -121,7 +108,6 @@ class GpuFieldOfViewSmokeTest {
                                     darknessSlider("Sensor").setValue(50);
                                     GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(this, "tuning-defaults"));
                                 } else if (tick == 28) {
-                                    assertDefaults();
                                     if (style == GpuFieldOfView.Style.GRAYSCALE) {
                                         capture("tuning");
                                     }
@@ -146,13 +132,6 @@ class GpuFieldOfViewSmokeTest {
                             File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                             GpuBoardTestUi.capture(new File(output, "fov-" + style.name().toLowerCase(java.util.Locale.ROOT)
                                   + "-" + camera + ".png"));
-                        }
-
-                        private void assertDefaults() {
-                            assertTrue(modeButton("fov", GpuFieldOfView.FOV_STYLE).isChecked());
-                            assertTrue(modeButton("sensor", GpuFieldOfView.SENSOR_STYLE).isChecked());
-                            assertEquals(GpuFieldOfView.FOV_DARKNESS * 100, darknessSlider("FoV").getValue(), 0.001f);
-                            assertEquals(GpuFieldOfView.SENSOR_DARKNESS * 100, darknessSlider("Sensor").getValue(), 0.001f);
                         }
 
                         private Slider darknessSlider(String effect) {

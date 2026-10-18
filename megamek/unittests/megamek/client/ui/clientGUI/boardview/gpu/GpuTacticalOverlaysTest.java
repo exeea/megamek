@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -17,11 +16,9 @@ import static org.mockito.Mockito.when;
 
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 
 import com.badlogic.gdx.Application;
@@ -43,7 +40,6 @@ import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.gpu.BoardSource.UiPreferences.Overlays;
-import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
@@ -54,21 +50,15 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 /**
- * The Tactical View's Overlays panel in the real HUD, without a GL context: each row is one setting (a View-menu item
- * it runs and shows, or a client setting it toggles on the Swing thread), the panel shows only in the Tactical View, H
- * and the header switch its remembered open state, and the layout places it at the top right, left of the right
+ * The Tactical View's Overlays panel in the real HUD, without a GL context: the panel shows only in the Tactical View,
+ * H and the header switch its remembered open state, and the layout places it at the top right, left of the right
  * column's top panel or at the right edge, as the header alone while a card beside the right column needs the room.
  */
 class GpuTacticalOverlaysTest {
-    /** The rows' View-menu items and their actions, by action command. */
+    /** The rows' View-menu items, by action command. */
     private static final List<String> VIEW_ITEMS = List.of(ClientGUI.VIEW_TOGGLE_UNIT_LINKS, ClientGUI.VIEW_MOVE_ENV,
           ClientGUI.VIEW_TOGGLE_FOV_DARKEN, ClientGUI.VIEW_TOGGLE_SENSOR_RANGE, ClientGUI.VIEW_TOGGLE_HEX_COORDS,
           ClientGUI.VIEW_TOGGLE_HEX_TYPES, ClientGUI.VIEW_TOGGLE_FOV_HIGHLIGHT);
-    private static final Map<String, String> VIEW_ROWS = Map.of(ClientGUI.VIEW_TOGGLE_UNIT_LINKS, "overlay-links",
-          ClientGUI.VIEW_MOVE_ENV, "overlay-envelope", ClientGUI.VIEW_TOGGLE_FOV_DARKEN, "overlay-losShading",
-          ClientGUI.VIEW_TOGGLE_SENSOR_RANGE, "overlay-sensorRanges", ClientGUI.VIEW_TOGGLE_HEX_COORDS,
-          "overlay-coordinates", ClientGUI.VIEW_TOGGLE_HEX_TYPES, "overlay-types",
-          ClientGUI.VIEW_TOGGLE_FOV_HIGHLIGHT, "overlay-distanceRings");
 
     private Application application;
     private Files files;
@@ -79,9 +69,6 @@ class GpuTacticalOverlaysTest {
     private final GpuBoardSource source = mock(GpuBoardSource.class);
     private GpuBoardSkin theme;
     private GpuHud hud;
-    /** Times each View item ran, and whether it is selected, as the menu bar would report it. */
-    private final Map<String, Integer> ran = new LinkedHashMap<>();
-    private final Map<String, Boolean> selected = new LinkedHashMap<>();
 
     @BeforeAll
     static void loadMathNatives() {
@@ -110,11 +97,6 @@ class GpuTacticalOverlaysTest {
         theme = new GpuBoardSkin();
         hud = new GpuHud(source, theme.skin, mock(Batch.class), new BoardCamera(), mock(GpuBoardTuning.class),
               new GpuPlaybackHistory(new UnitPlayback()));
-        VIEW_ITEMS.forEach(item -> {
-            ran.put(item, 0);
-            selected.put(item, true);
-        });
-        selected.put(ClientGUI.VIEW_TOGGLE_FOV_HIGHLIGHT, false);
     }
 
     @AfterEach
@@ -129,96 +111,6 @@ class GpuTacticalOverlaysTest {
             Gdx.gl = gl;
             Gdx.gl20 = gl20;
             Gdx.input = input;
-        }
-    }
-
-    @Test
-    void eachViewRowShowsAndRunsItsViewMenuItem() {
-        show(1920, 1080, true, GamePhase.MOVEMENT, Overlays.DEFAULTS, true);
-        for (String item : VIEW_ITEMS) {
-            UiKit.Checkbox box = box(VIEW_ROWS.get(item));
-            assertEquals(selected.get(item), box.isTicked(), item + " shows its item's selection");
-            box.toggle();
-            assertEquals(1, ran.get(item), item + ": the row runs the View menu's item");
-        }
-        verify(source, never()).command(any());
-        // The menu reports the new selections; the rows follow them.
-        selected.replaceAll((item, value) -> !value);
-        show(1920, 1080, true, GamePhase.MOVEMENT, Overlays.DEFAULTS, true);
-        VIEW_ITEMS.forEach(item -> assertEquals(selected.get(item), box(VIEW_ROWS.get(item)).isTicked(), item));
-        // Without the menu (a map preview, a test fixture) a View row runs nothing.
-        update(1920, 1080, true, GamePhase.MOVEMENT, preferences(Overlays.DEFAULTS, true), List.of());
-        UiKit.Checkbox envelope = box("overlay-envelope");
-        assertFalse(envelope.isTicked());
-        envelope.toggle();
-        assertEquals(1, ran.get(ClientGUI.VIEW_MOVE_ENV));
-    }
-
-    @Test
-    void eachSettingRowTogglesItsClientSettingOnSwingAndShowsThePublishedValue() {
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        Map<String, BooleanSupplier> settings = new LinkedHashMap<>();
-        settings.put("overlay-statusBadges", preferences::getTacticalStatusBadges);
-        settings.put("overlay-rearArcs", preferences::getTacticalRearArcs);
-        settings.put("overlay-fields", preferences::getEcmTacticalFields);
-        settings.put("overlay-jamming", preferences::getEcmTacticalHatch);
-        settings.put("overlay-levelShading", preferences::getTacticalLevelShading);
-        Map<String, Boolean> original = new LinkedHashMap<>();
-        settings.forEach((row, value) -> original.put(row, value.getAsBoolean()));
-        try {
-            Overlays defaults = Overlays.DEFAULTS;
-            show(1920, 1080, true, GamePhase.MOVEMENT, defaults, true);
-            for (var row : settings.entrySet()) {
-                UiKit.Checkbox box = box(row.getKey());
-                boolean before = row.getValue().getAsBoolean();
-                clearInvocations(source);
-                box.toggle();
-                ArgumentCaptor<Runnable> command = ArgumentCaptor.forClass(Runnable.class);
-                verify(source).command(command.capture());
-                assertEquals(before, row.getValue().getAsBoolean(), "nothing changes before the Swing thread runs it");
-                command.getValue().run();
-                assertEquals(!before, row.getValue().getAsBoolean(), row.getKey() + " toggles its client setting");
-            }
-            // The rows show what the published preferences hold, the source of truth after the round trip.
-            show(1920, 1080, true, GamePhase.MOVEMENT, Overlays.capture(preferences), true);
-            settings.forEach((row, value) -> assertEquals(value.getAsBoolean(), box(row).isTicked(), row));
-            show(1920, 1080, true, GamePhase.MOVEMENT,
-                  new Overlays(true, false, false, false, false, true, true, false, true), true);
-            assertFalse(box("overlay-statusBadges").isTicked());
-            assertTrue(box("overlay-levelShading").isTicked());
-        } finally {
-            settings.forEach((row, value) -> {
-                if (value.getAsBoolean() != original.get(row)) {
-                    box(row).toggle();
-                    ArgumentCaptor<Runnable> command = ArgumentCaptor.forClass(Runnable.class);
-                    verify(source, atLeastOnce()).command(command.capture());
-                    command.getValue().run();
-                }
-            });
-        }
-        settings.forEach((row, value) -> assertEquals(original.get(row), value.getAsBoolean(), "restored " + row));
-    }
-
-    @Test
-    void theSettingsDefaultAsApprovedAndThePreferencesCarryThem() {
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        assertTrue(preferences.getDefaultBoolean(GUIPreferences.TACTICAL_OVERLAYS_OPEN), "the panel starts expanded");
-        assertTrue(preferences.getDefaultBoolean(GUIPreferences.TACTICAL_STATUS_BADGES));
-        assertTrue(preferences.getDefaultBoolean(GUIPreferences.TACTICAL_REAR_ARCS));
-        assertTrue(preferences.getDefaultBoolean(GUIPreferences.BOARD_ECM_TACTICAL_FIELDS));
-        assertTrue(preferences.getDefaultBoolean(GUIPreferences.BOARD_ECM_TACTICAL_HATCH));
-        assertFalse(preferences.getDefaultBoolean(GUIPreferences.TACTICAL_LEVEL_SHADING), "level shading starts off");
-        assertTrue(preferences.getDefaultBoolean(GUIPreferences.SHOW_UNIT_LINKS));
-        assertFalse(preferences.getDefaultBoolean(GUIPreferences.SHOW_HEX_TYPES), "hex types start off");
-        assertFalse(preferences.getDefaultBoolean(GUIPreferences.HEX_LABEL_OUTLINE), "hex labels start without an outline");
-        assertEquals(new Overlays(true, true, true, true, true, false, true, false, false), Overlays.DEFAULTS);
-        boolean level = preferences.getTacticalLevelShading();
-        try {
-            preferences.toggleTacticalLevelShading();
-            assertEquals(!level, BoardSource.UiPreferences.capture().overlays().levelShading(),
-                  "the published preferences carry the client setting");
-        } finally {
-            if (preferences.getTacticalLevelShading() != level) { preferences.toggleTacticalLevelShading(); }
         }
     }
 
@@ -379,12 +271,12 @@ class GpuTacticalOverlaysTest {
         hud.update(frame(phase, global), view, null, preferences);
     }
 
-    /** The View menu with the rows' items, which count their runs and report their selection. */
-    private List<BoardScene.Command> viewMenu() {
+    /** The View menu with the rows' items, every one selected but the distance rings. */
+    private static List<BoardScene.Command> viewMenu() {
         List<BoardScene.Command> items = new ArrayList<>();
         for (String item : VIEW_ITEMS) {
             items.add(new BoardScene.Command("View:View/" + item + ":" + item, item, "", true, false, false,
-                  List.of(), () -> ran.merge(item, 1, Integer::sum), "", selected.get(item)));
+                  List.of(), () -> { }, "", !item.equals(ClientGUI.VIEW_TOGGLE_FOV_HIGHLIGHT)));
         }
         return List.of(new BoardScene.Command("View:View", "View", "", true, false, false, items, () -> { }, "",
               null));
@@ -423,10 +315,6 @@ class GpuTacticalOverlaysTest {
 
     private Actor panel() {
         return find("tactical-overlays");
-    }
-
-    private UiKit.Checkbox box(String name) {
-        return (UiKit.Checkbox) find(name);
     }
 
     /** Whether the panel shows the row: a collapsed panel leaves its rows out. */

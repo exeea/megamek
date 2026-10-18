@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,13 +16,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
-import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
-import com.badlogic.gdx.scenes.scene2d.ui.Slider;
-import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
-import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
 import megamek.common.planetaryConditions.Atmosphere;
@@ -31,13 +27,13 @@ import megamek.common.planetaryConditions.AtmosphericTaint;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Native palette propagation, unchanged draw budget, graded board surfaces, and the live tuning control. */
+/** Native palette propagation, unchanged draw budget, graded board surfaces, and the cached palette. */
 @Tag("on-demand")
 class GpuAtmosphericTaintSmokeTest {
     private final File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
 
     @Test
-    void taintReusesExistingPassesAndTuningUpdatesTheCachedPalette() {
+    void taintReusesExistingPassesAndStrengthUpdatesTheCachedPalette() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
@@ -116,7 +112,7 @@ class GpuAtmosphericTaintSmokeTest {
                 }
             }
             profiler.disable();
-            checkTuning(atmosphere);
+            checkPaletteCache(atmosphere);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
             Files.writeString(new File(output, "taint-draw-budget.txt").toPath(), report);
         } finally {
@@ -138,60 +134,32 @@ class GpuAtmosphericTaintSmokeTest {
         return sum;
     }
 
-    private void checkTuning(GpuAtmosphere atmosphere) throws Exception {
-        var skin = new GpuBoardSkin();
-        try {
-            var tuning = new GpuBoardTuning(skin.skin);
-            var original = settings(12, 0, AtmosphericTaint.TOXIC_POISON, Atmosphere.STANDARD);
-            tuning.useScenario(original, true);
-            Slider strength = GpuBoardTestUi.tuning(tuning, "Taint strength");
-            SelectBox<AtmosphericTaint> taint = GpuBoardTestUi.tuning(tuning, "tuning-atmospheric-taint");
-            assertFalse(strength.isDisabled());
-            assertEquals(original.taint(), taint.getSelected());
-            atmosphere.configure(original);
-            atmosphere.setOptions(tuning.atmosphereOptions());
-            var tinted = atmosphere.lighting();
-            strength.setValue(0);
-            atmosphere.setOptions(tuning.atmosphereOptions());
-            var clear = BoardAtmosphere.lighting(settings(12, 0, AtmosphericTaint.BREATHABLE, Atmosphere.STANDARD));
-            assertEquals(clear, atmosphere.lighting(), "Strength changes must invalidate the palette cache immediately");
-            strength.setValue(1);
-            atmosphere.setOptions(tuning.atmosphereOptions());
-            assertEquals(tinted, atmosphere.lighting());
-            var cached = atmosphere.lighting();
-            atmosphere.configure(original);
-            atmosphere.setOptions(tuning.atmosphereOptions());
-            assertSame(cached, atmosphere.lighting(), "Unchanged settings must reuse the palette");
+    /** A taint strength change regenerates the cached palette at once; unchanged settings reuse it. */
+    private static void checkPaletteCache(GpuAtmosphere atmosphere) {
+        var original = settings(12, 0, AtmosphericTaint.TOXIC_POISON, Atmosphere.STANDARD);
+        var defaults = GpuAtmosphere.Options.DEFAULTS;
+        var untainted = new GpuAtmosphere.Options(defaults.rays(), defaults.fixedSun(), defaults.minCloudShadow(),
+              defaults.maxCloudShadow(), defaults.sunGlare(), defaults.fogHeightVariation(),
+              defaults.fogDensityVariation(), defaults.moonShadowContrast(), 0);
+        atmosphere.configure(original);
+        atmosphere.setOptions(defaults);
+        var tinted = palette(atmosphere.lighting());
+        var clear = palette(BoardAtmosphere.lighting(settings(12, 0, AtmosphericTaint.BREATHABLE, Atmosphere.STANDARD)));
+        assertNotEquals(clear, tinted, "The taint tints the palette");
+        atmosphere.setOptions(untainted);
+        assertEquals(clear, palette(atmosphere.lighting()),
+              "Strength changes must invalidate the palette cache immediately");
+        atmosphere.setOptions(defaults);
+        assertEquals(tinted, palette(atmosphere.lighting()));
+        var cached = atmosphere.lighting();
+        atmosphere.configure(original);
+        atmosphere.setOptions(defaults);
+        assertSame(cached, atmosphere.lighting(), "Unchanged settings must reuse the palette");
+    }
 
-            Slider hour = GpuBoardTestUi.tuning(tuning, "Time of day");
-            hour.setValue(6);
-            assertEquals(original.taint(), tuning.atmosphere().taint());
-            GpuBoardTestUi.<Slider>tuning(tuning, "Ground fog").setValue(0.6f);
-            assertEquals(original.taint(), tuning.atmosphere().taint());
-            strength.setValue(2);
-            var updated = settings(12, 0, AtmosphericTaint.TAINTED_FLAME, Atmosphere.STANDARD);
-            tuning.useScenario(updated, false);
-            assertEquals(updated.taint(), tuning.atmosphere().taint());
-            assertEquals(6, tuning.atmosphere().hour(), "Scenario taint updates preserve clock overrides");
-            assertEquals(2, tuning.atmosphereOptions().taintStrength());
-            assertEquals(updated.taint(), taint.getSelected());
-
-            for (var unavailable : List.of(settings(12, 0, AtmosphericTaint.BREATHABLE, Atmosphere.STANDARD),
-                  settings(12, 0, AtmosphericTaint.TOXIC_POISON, Atmosphere.VACUUM))) {
-                tuning.useScenario(unavailable, false);
-                assertTrue(strength.isDisabled());
-            }
-            TextButton defaults = tuning.defaults();
-            defaults.fire(new ChangeEvent());
-            assertEquals(settings(12, 0, AtmosphericTaint.TOXIC_POISON, Atmosphere.VACUUM), tuning.atmosphere(),
-                  "Defaults restores the latest scenario, including its unavailable atmosphere controls");
-            assertEquals(BoardAtmosphere.DEFAULT_TAINT_STRENGTH, tuning.atmosphereOptions().taintStrength());
-            assertTrue(strength.isDisabled());
-            tuning.useScenario(original, false);
-            assertFalse(strength.isDisabled());
-        } finally {
-            skin.dispose();
-        }
+    /** The colours the taint grades; the generated sky environment is a new image for each palette. */
+    private static List<Color> palette(BoardAtmosphere.Lighting lighting) {
+        return List.of(lighting.direct(), lighting.ambient(), lighting.fog(), lighting.sky(), lighting.horizon());
     }
 
     private static BoardAtmosphere.Settings settings(float hour, float fog, AtmosphericTaint taint, Atmosphere pressure) {

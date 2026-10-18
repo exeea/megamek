@@ -290,7 +290,7 @@ class GpuUnitRecordTest {
             WeaponMounted lrm = atlas.getWeaponList().get(2);
             List<AmmoMounted> bins = atlas.getAmmo().stream()
                   .filter(bin -> bin.getType().getAmmoType() == lrm.getType().getAmmoType()).toList();
-            // One shot fired from the second bin, as in the Unit Display's characterization (UnitDisplayActionsTest)
+            // One shot fired from the second bin tells the list's two entries apart
             SwingUtilities.invokeAndWait(() -> bins.get(1).setShotsLeft(5));
             session.source.setCardUnit(id);
             session.source.record().setSheetOpen(true);
@@ -301,7 +301,7 @@ class GpuUnitRecordTest {
 
             session.source.record().setAmmo(id, weapon.eqNum(), weapon.ammoChoices().get(1));
             session.flush();
-            // What the Unit Display's list sends for the same pick (UnitDisplayActionsTest)
+            // What the Unit Display sends for the same pick (UnitDisplayStateTest)
             verify(session.client).sendAmmoChange(1, 10, 13, 1, 0);
             assertSame(bins.get(1), onSwing(lrm::getLinkedAmmo));
             assertEquals(1, session.record().weapons().get(2).loadedAmmo());

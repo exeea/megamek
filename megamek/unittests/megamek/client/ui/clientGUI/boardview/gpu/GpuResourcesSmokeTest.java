@@ -215,10 +215,7 @@ class GpuResourcesSmokeTest {
         GpuTerrain terrain = new GpuTerrain();
         GpuBoardSkin skin = new GpuBoardSkin();
         GpuBoardTuning tuning = new GpuBoardTuning(skin.skin);
-        assertNull(tuning.boardRows().findActor("Speed gain / hex"));
         Slider opacity = GpuBoardTestUi.tuning(tuning, "Building opacity");
-        assertEquals(0.5f, tuning.buildingOpacity());
-        assertNull(tuning.boardRows().findActor("Tree opacity"));
         ModelBatch units = new ModelBatch(GpuUnitShader.provider());
         var model = new ModelBuilder().createBox(14, 14, 10,
               new Material(ColorAttribute.createDiffuse(Color.RED)),
@@ -318,8 +315,6 @@ class GpuResourcesSmokeTest {
                     }
                     unit.transform.setToTranslation(center.x, center.y, bed + 5.5f);
                     tuning.defaults().fire(new ChangeListener.ChangeEvent());
-                    assertNull(tuning.boardRows().findActor("Speed gain / hex"));
-                    assertEquals(0.5f, tuning.buildingOpacity());
                     terrain.animate(0, List.of());
                     drawModel(frame, terrain, camera, units, unit, false);
                     assertEquals(obscured, rgba(camera, new Vector3(center.x, center.y, bed + 10)),

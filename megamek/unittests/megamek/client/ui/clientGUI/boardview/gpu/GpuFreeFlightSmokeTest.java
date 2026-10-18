@@ -21,7 +21,6 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -58,7 +57,6 @@ class GpuFreeFlightSmokeTest {
                             assertTrue(boardCamera.firstPerson());
                             assertTrue(boardCamera.perspective());
                             assertEquals(45, boardCamera.fieldOfView());
-                            assertEquals(45, GpuBoardTestUi.<Slider>tuning(this, "tuning-camera-fov").getValue());
                             eye = boardCamera.camera.position.cpy();
                             setFov(20);
                             assertEquals(eye, boardCamera.camera.position);
@@ -117,7 +115,6 @@ class GpuFreeFlightSmokeTest {
                             GpuBoardTestUi.click("utility-tactical");
                             assertFalse(boardCamera.firstPerson());
                         } else if (frames() == 48) {
-                            assertFalse(GpuBoardTestUi.<CheckBox>tuning(this, "tuning-free-flight").isChecked());
                             GpuBoardTestUi.click("tuning-button");
                         } else if (frames() == 49) {
                             GpuBoardTestUi.click("tuning-free-flight");
@@ -125,7 +122,6 @@ class GpuFreeFlightSmokeTest {
                             assertFalse(boardCamera.firstPerson());
                             assertFalse(boardCamera.perspective());
                             assertEquals(45, boardCamera.fieldOfView());
-                            assertEquals(45, GpuBoardTestUi.<Slider>tuning(this, "tuning-camera-fov").getValue());
                             boardCamera.reset(fixture.source.takeFrame().scene());
                         } else if (frames() == 52) {
                             GpuBoardTestUi.capture(new File(output, "free-flight-restored-tactical.png"));

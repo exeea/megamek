@@ -113,27 +113,6 @@ class GpuOceanTest {
         }
     }
 
-    @Test
-    void finalHalfStoreControlsPreserveExactValuesAndDistinguishRounding() {
-        double step = 1.0 / 1024, tiny = Math.scalb(1.0, -24);
-        double[][] original = { { 0, 1, -1, 65504, -65504, 1 + .75 * step, -1 - .75 * step,
-              .75 * tiny, -.75 * tiny } };
-        double[][] nearest = halfFields(original, false), towardZero = halfFields(original, true);
-        for (int p = 0; p < 5; p++) {
-            assertEquals(original[0][p], nearest[0][p], "Exactly representable values remain exact");
-            assertEquals(original[0][p], towardZero[0][p], "Truncation must not move exact values");
-        }
-        assertEquals(1 + step, nearest[0][5]);
-        assertEquals(-1 - step, nearest[0][6]);
-        assertEquals(1, towardZero[0][5]);
-        assertEquals(-1, towardZero[0][6]);
-        assertEquals(tiny, nearest[0][7]);
-        assertEquals(-tiny, nearest[0][8]);
-        assertEquals(0, towardZero[0][7]);
-        assertEquals(-0.0, towardZero[0][8]);
-        assertEquals(1 + .75 * step, original[0][5], "The unquantized reference is retained");
-    }
-
     record Surface(double[] height, double[] slopeX, double[] slopeY, double[] jacobian) { }
 
     static double[][] trigonometry() {

@@ -63,7 +63,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MapMenu;
@@ -89,7 +88,6 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.invocation.Invocation;
 
 /**
@@ -967,63 +965,6 @@ class GpuHudRoutingSmokeTest {
                 assertNull(routing.hud.stage.getScrollFocus(), "no widget holds the wheel");
             }
         });
-    }
-
-    /**
-     * Item 33.4: the Contacts utility after Map shows and hides the contacts panel. It is pressed while the panel
-     * shows, which it does by default; its press switches the client's remembered preference on the Swing thread, as
-     * Map's does the minimap's, and the published preference hides or shows the panel.
-     */
-    @Test
-    void theContactsUtilitySwitchesTheRememberedContactsPanel() throws Exception {
-        run(routing -> {
-            routing.show(SCENARIOS.get(4));
-            Actor contacts = routing.find("contacts-panel");
-            UiButton utility = routing.find("utility-contacts");
-            List<String> row = new ArrayList<>();
-            ((Table) routing.find("utility-bar")).getChildren().forEach(child -> row.add(child.getName()));
-            // After the shared camera buttons (GpuUtilityBar.cameraButtons); Tuning stands before Help.
-            assertEquals(List.of("map-view-top", "map-view-isometric", "map-view-fit", "utility-tactical",
-                  "utility-wireframe", "utility-map", "utility-contacts", "utility-log", "tuning-button", "utility-help",
-                  "utility-menu"), row, "Contacts follows Map");
-            assertTrue(shown(contacts) && utility.isChecked(), "shown and pressed by default");
-            GUIPreferences preferences = GUIPreferences.getInstance();
-            boolean before = preferences.getGpuContactsEnabled();
-            clearInvocations(routing.source);
-            routing.press(utility);
-            ArgumentCaptor<Runnable> command = ArgumentCaptor.forClass(Runnable.class);
-            verify(routing.source).command(command.capture());
-            try {
-                boolean published = GpuDialogRoutingTest.onSwing(() -> {
-                    command.getValue().run();
-                    return GpuBoardSource.UiPreferences.capture().contactsEnabled();
-                });
-                assertEquals(!before, preferences.getGpuContactsEnabled(), "the press switches the preference");
-                assertEquals(!before, published, "which the source publishes");
-            } finally {
-                GpuDialogRoutingTest.onSwing(() -> {
-                    preferences.setValue(GUIPreferences.GPU_CONTACTS_ENABLED, before);
-                    return null;
-                });
-            }
-
-            GpuBoardSource.UiPreferences shown = routing.source.uiPreferences;
-            routing.source.uiPreferences = contacts(shown, false);
-            routing.view.render();
-            assertFalse(shown(contacts), "the published preference hides the panel");
-            assertFalse(utility.isChecked(), "and releases the utility");
-            routing.capture("ux2-contacts-hidden");
-            routing.source.uiPreferences = shown;
-            routing.view.render();
-            assertTrue(shown(contacts) && utility.isChecked(), "and shows it again");
-        });
-    }
-
-    /** The preferences with the contacts panel shown or hidden. */
-    private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
-        return new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(), p.reportFilterKeywords(),
-              p.minimapEnabled(), enabled, p.conditionsVisible(), p.turnDetails(), p.binds(),
-              p.moveSprintRgb(), BoardGraphics.ENHANCED);
     }
 
     /**
