@@ -34,16 +34,23 @@
 package megamek.common;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import megamek.common.loaders.MapSettings;
 import org.junit.jupiter.api.Test;
@@ -56,6 +63,103 @@ class MapSettingsTest {
 
     @TempDir
     private Path tempDirectory;
+
+    @Test
+    void panelThemesCopyAndSerializeIndependently() throws Exception {
+        MapSettings original = MapSettings.getInstance();
+        original.setMapSize(2, 2);
+        original.setBoardsSelectedVector(List.of("a", "b", "c", "d"));
+        original.setBoardTheme(0, "volcano");
+        original.setBoardTheme(3, "snow");
+
+        MapSettings copy = MapSettings.getInstance(original);
+        copy.setBoardTheme(0, null);
+        copy.setBoardTheme(1, "desert");
+        assertEquals("volcano", original.getBoardTheme(0));
+        assertNull(original.getBoardTheme(1));
+        assertNull(copy.getBoardTheme(0));
+        assertEquals("snow", copy.getBoardTheme(3));
+
+        var bytes = new ByteArrayOutputStream();
+        try (var output = new ObjectOutputStream(bytes)) {
+            output.writeObject(original);
+        }
+        MapSettings received;
+        try (var input = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            received = (MapSettings) input.readObject();
+        }
+        assertEquals(original.getBoardsSelectedVector(), received.getBoardsSelectedVector());
+        assertEquals("volcano", received.getBoardTheme(0));
+        assertNull(received.getBoardTheme(1));
+        assertNull(received.getBoardTheme(2));
+        assertEquals("snow", received.getBoardTheme(3));
+    }
+
+    @Test
+    void resizingKeepsPanelCoordinatesAndDiscardsCroppedOverrides() {
+        MapSettings settings = MapSettings.getInstance();
+        settings.setMapSize(2, 2);
+        settings.setBoardsSelectedVector(List.of("a", "b", "c", "d"));
+        settings.setBoardTheme(1, "volcano");
+        settings.setBoardTheme(2, "snow");
+        settings.setBoardTheme(3, "desert");
+
+        settings.setMapSize(3, 2);
+        assertEquals("volcano", settings.getBoardTheme(1));
+        assertNull(settings.getBoardTheme(2));
+        assertEquals("snow", settings.getBoardTheme(3));
+        assertEquals("desert", settings.getBoardTheme(4));
+        assertEquals("c", settings.getBoardsSelectedVector().get(3));
+
+        settings.setMapSize(1, 2);
+        assertNull(settings.getBoardTheme(0));
+        assertEquals("snow", settings.getBoardTheme(1));
+        assertNull(settings.getBoardTheme(4), "Removed preview indices are safe to query");
+        settings.setMapSize(2, 2);
+        assertNull(settings.getBoardTheme(1), "A restored panel must not inherit its cropped override");
+        assertEquals("snow", settings.getBoardTheme(2));
+        assertNull(settings.getBoardTheme(3));
+        settings.setMapSize(2, 1);
+        settings.setMapSize(2, 2);
+        assertNull(settings.getBoardTheme(2), "Cropped rows must not restore stale overrides either");
+    }
+
+    @Test
+    void newSheetDimensionsAndSelectionSetsResetOverridesButPanelReplacementKeepsThem() {
+        MapSettings settings = MapSettings.getInstance();
+        settings.setBoardSize(16, 17);
+        settings.setMapSize(1, 1);
+        settings.setBoardsSelectedVector(List.of("a"));
+        settings.setBoardTheme(0, "volcano");
+        settings.getBoardsSelectedVector().set(0, "b");
+        assertEquals("volcano", settings.getBoardTheme(0));
+        settings.setMapSize(1, 1);
+        settings.setBoardSize(16, 17);
+        assertEquals("volcano", settings.getBoardTheme(0));
+        settings.setBoardSize(32, 17);
+        assertNull(settings.getBoardTheme(0));
+        settings.setBoardTheme(0, "snow");
+        settings.setBoardsSelectedVector(List.of("c"));
+        assertNull(settings.getBoardTheme(0));
+    }
+
+    @Test
+    void settingsWithoutSerializedOverridesRetainDefaultAndCanBeEdited() throws Exception {
+        MapSettings settings = MapSettings.getInstance();
+        settings.setMapSize(1, 1);
+        // Java serialization supplies null for a field absent from older settings.
+        var field = MapSettings.class.getDeclaredField("boardThemes");
+        field.setAccessible(true);
+        field.set(settings, null);
+        assertNull(settings.getBoardTheme(0));
+        assertNull(MapSettings.getInstance(settings).getBoardTheme(0));
+        settings.setBoardTheme(0, "");
+        assertEquals("", settings.getBoardTheme(0), "An explicit blank theme is distinct from Default");
+        settings.setBoardTheme(0, null);
+        assertNull(settings.getBoardTheme(0));
+        assertThrows(IndexOutOfBoundsException.class, () -> settings.setBoardTheme(1, "snow"));
+        assertThrows(IllegalArgumentException.class, () -> settings.setMapSize(0, 1));
+    }
 
     @Test
     void testSaveAndLoad() throws IOException {

@@ -2257,6 +2257,38 @@ public class Board implements Serializable {
     }
 
     /**
+     * Applies a lobby theme to this session's loaded sheet. Cosmetic ground paint matching each hex's previous theme
+     * becomes clear ground, so it follows the new theme; different paint and all gameplay terrain remain. The catalog
+     * owns the legacy ground selectors as well as the native appearance IDs. The source file is never changed. Restore
+     * the lobby's Default choice by loading the original sheet again, not by calling {@link #setTheme(String)}.
+     */
+    public void overrideTheme(String newTheme) {
+        Objects.requireNonNull(newTheme, "A theme override must be explicit");
+        BoardEditorBlueprint blueprint = BoardEditorBlueprint.get();
+        for (Hex hex : data) {
+            String previous = hex.getTheme();
+            String ground = "ground/blend/" + (previous == null || previous.isBlank()
+                  ? "grass" : previous.toLowerCase(Locale.ROOT));
+            BoardEditorBlueprint.Variant variant = blueprint.variant(ground);
+            if (variant != null && variant.blend() && variant.owner().equals("ground")) {
+                HexAppearance appearance = hex.getAppearance().get("ground");
+                if (appearance != null && ground.equals(appearance.variant())) {
+                    Map<String, HexAppearance> styles = new HashMap<>(hex.getAppearance());
+                    styles.remove("ground");
+                    hex.setAppearance(styles);
+                }
+                Terrain token = hex.getTerrain(Terrains.GROUND_FLUFF);
+                HexAppearance legacy = token == null ? null : blueprint.reproducing(hex, token);
+                if (legacy != null && ground.equals(legacy.variant())) {
+                    hex.removeTerrain(Terrains.GROUND_FLUFF);
+                }
+            }
+            hex.setTheme(newTheme);
+        }
+        processBoardEvent(new BoardEvent(this, null, BoardEvent.BOARD_CHANGED_ALL_HEXES));
+    }
+
+    /**
      * @return true when the given {@link Coords} coords is on the edge of the board.
      */
     public boolean isOnBoardEdge(Coords coords) {

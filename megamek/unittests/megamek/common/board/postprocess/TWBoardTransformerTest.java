@@ -47,6 +47,7 @@ import megamek.common.board.Board;
 import megamek.common.loaders.MapSettings;
 import megamek.common.options.GameOptions;
 import megamek.common.planetaryConditions.PlanetaryConditions;
+import megamek.server.ServerBoardHelper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -82,6 +83,14 @@ class TWBoardTransformerTest {
 
     private static final String FIRST_BOARD_NAME = "transformerTestBoardOne";
     private static final String SECOND_BOARD_NAME = "transformerTestBoardTwo";
+    private static final String THEMED_BOARD_NAME = "transformerTestThemedBoard";
+    private static final String THEMED_BOARD_CONTENT = """
+          size 2 2
+          hex 0101 0 "" "grass"
+          hex 0201 1 "" "grass"
+          hex 0102 2 "rough:1" "grass"
+          hex 0202 3 "" "desert"
+          end""";
 
     @TempDir
     private static Path temporaryBoardsDirectory;
@@ -92,6 +101,7 @@ class TWBoardTransformerTest {
     static void createBoardFilesAndRedirectBoardsDirectory() throws IOException {
         Files.writeString(temporaryBoardsDirectory.resolve(FIRST_BOARD_NAME + ".board"), FIRST_BOARD_CONTENT);
         Files.writeString(temporaryBoardsDirectory.resolve(SECOND_BOARD_NAME + ".board"), SECOND_BOARD_CONTENT);
+        Files.writeString(temporaryBoardsDirectory.resolve(THEMED_BOARD_NAME + ".board"), THEMED_BOARD_CONTENT);
         originalBoardsDirectory = Configuration.boardsDir();
         Configuration.setBoardsDir(temporaryBoardsDirectory.toFile());
     }
@@ -157,11 +167,58 @@ class TWBoardTransformerTest {
         mapSettings.setBoardSize(16, 17);
         mapSettings.setMapSize(1, 1);
         mapSettings.setBoardsSelectedVector(List.of(MapSettings.BOARD_GENERATED));
+        mapSettings.setBoardTheme(0, "volcano");
 
         Board board = TWBoardTransformer.instantiateBoard(mapSettings, new PlanetaryConditions(), new GameOptions());
 
         assertEquals(16, board.getWidth());
         assertEquals(17, board.getHeight());
+        assertEquals("volcano", board.getHex(0, 0).getTheme());
+    }
+
+    @Test
+    void perPanelThemesAgreeInPreviewAndMatchAssemblyAndKeepRotation() throws IOException {
+        MapSettings settings = MapSettings.getInstance();
+        settings.setBoardSize(2, 2);
+        settings.setMapSize(2, 2);
+        settings.setBoardsSelectedVector(List.of(THEMED_BOARD_NAME, THEMED_BOARD_NAME, THEMED_BOARD_NAME,
+              Board.BOARD_REQUEST_ROTATION + THEMED_BOARD_NAME));
+        settings.setBoardTheme(0, "volcano");
+        settings.setBoardTheme(3, "snow");
+
+        Board game = TWBoardTransformer.instantiateBoard(settings, new PlanetaryConditions(), new GameOptions());
+        Board preview = ServerBoardHelper.getPossibleGameBoard(MapSettings.getInstance(settings), false);
+        for (int y = 0; y < 4; y++) {
+            for (int x = 0; x < 4; x++) {
+                assertEquals(game.getHex(x, y).getTheme(), preview.getHex(x, y).getTheme());
+                assertEquals(game.getHex(x, y).getLevel(), preview.getHex(x, y).getLevel());
+                if ((x < 2) && (y < 2)) {
+                    assertEquals("volcano", game.getHex(x, y).getTheme());
+                } else if ((x >= 2) && (y >= 2)) {
+                    assertEquals("snow", game.getHex(x, y).getTheme());
+                }
+            }
+        }
+        assertEquals("grass", game.getHex(2, 0).getTheme());
+        assertEquals("desert", game.getHex(3, 1).getTheme(), "Default keeps mixed source themes");
+        assertEquals("grass", game.getHex(0, 2).getTheme());
+        assertEquals(3, game.getHex(2, 2).getLevel(), "The overridden sheet remains rotated");
+        assertEquals(THEMED_BOARD_CONTENT,
+              Files.readString(temporaryBoardsDirectory.resolve(THEMED_BOARD_NAME + ".board")));
+    }
+
+    @Test
+    void defaultReloadRestoresOriginalThemesWithoutChangingSourceOrEarlierBoard() throws IOException {
+        MapSettings settings = createMapSettingsFor(List.of(THEMED_BOARD_NAME));
+        settings.setBoardTheme(0, "volcano");
+        Board overridden = TWBoardTransformer.instantiateBoard(settings, new PlanetaryConditions(), new GameOptions());
+        settings.setBoardTheme(0, null);
+        Board restored = TWBoardTransformer.instantiateBoard(settings, new PlanetaryConditions(), new GameOptions());
+        assertEquals("volcano", overridden.getHex(1, 1).getTheme());
+        assertEquals("grass", restored.getHex(0, 0).getTheme());
+        assertEquals("desert", restored.getHex(1, 1).getTheme());
+        assertEquals(THEMED_BOARD_CONTENT,
+              Files.readString(temporaryBoardsDirectory.resolve(THEMED_BOARD_NAME + ".board")));
     }
 
     @Test

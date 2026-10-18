@@ -134,6 +134,7 @@ public class TWBoardTransformer {
                 var file = new MegaMekFile(Configuration.boardsDir(), BoardFile.fileName(name)).getFile();
                 sheetBoards[i] = BoardFile.loadSheet(file, isRotated, true);
             }
+            mapSettings.applyBoardTheme(sheetBoards[i], i);
         }
     }
 

@@ -1290,6 +1290,7 @@ public class ChatLounge extends AbstractPhaseDisplay
                     continue;
                 }
                 if (!button.getBoard().equals(boardName) ||
+                      !Objects.equals(mapSettings.getBoardTheme(index), oldMapSettings.getBoardTheme(index)) ||
                       oldMapSettings.getMedium() != mapSettings.getMedium() ||
                       (!mapSettings.equalMapGenParameters(oldMapSettings) &&
                             mapSettings.getMapWidth() == oldMapSettings.getMapWidth() &&
@@ -1300,6 +1301,7 @@ public class ChatLounge extends AbstractPhaseDisplay
                     if (boardName.startsWith(MapSettings.BOARD_GENERATED) ||
                           (mapSettings.getMedium() == MapSettings.MEDIUM_SPACE)) {
                         buttonBoard = BoardUtilities.generateRandom(mapSettings);
+                        mapSettings.applyBoardTheme(buttonBoard, index);
                         image = MinimapPanel.getMinimapImageMaxZoom(buttonBoard);
                     } else {
                         String boardForImage = boardName;
@@ -1328,6 +1330,7 @@ public class ChatLounge extends AbstractPhaseDisplay
                                   megamek.common.board.BoardFile.fileName(boardForImage)).getFile())) {
                                 buttonBoard.load(is, null, true);
                                 BoardUtilities.flip(buttonBoard, rotateBoard, rotateBoard);
+                                mapSettings.applyBoardTheme(buttonBoard, index);
                             } catch (IOException ex) {
                                 buttonBoard = Board.createEmptyBoard(mapSettings.getBoardWidth(),
                                       mapSettings.getBoardHeight());
@@ -2046,6 +2049,14 @@ public class ChatLounge extends AbstractPhaseDisplay
 
     public void loadRandomNames() {
         clientgui.getRandomNameDialog().showDialog(clientgui.getClient().getGame().getEntitiesVector());
+    }
+
+    /** Changes only this sheet's session settings; source board files are never written. */
+    void changeMapTheme(int index, String theme) {
+        mapSettings.setBoardTheme(index, theme);
+        clientgui.getClient().sendMapSettings(mapSettings);
+        refreshMapButtons();
+        refreshBoardPreviews();
     }
 
     void changeMapDnD(String board, MapPreviewButton button) {
