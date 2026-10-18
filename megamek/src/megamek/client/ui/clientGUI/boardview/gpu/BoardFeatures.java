@@ -176,7 +176,12 @@ final class BoardFeatures {
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
           Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
           boolean natural) {
-        if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return decorations(hex, coords); }
+        if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) {
+            // A chasm keeps its placed objects and a bridge across it, whose deck stands on the hex's own level.
+            List<BoardScene.Feature> chasm = new ArrayList<>(decorations(hex, coords));
+            addBridge(hex, chasm);
+            return List.copyOf(chasm);
+        }
         List<BoardScene.Feature> result = new ArrayList<>();
         // Every scenery model is a layouts.json key (TilesetScenery counts nothing else as a model). Only terrain-owned
         // art is left (geysers, rubble, fortified, cleared-rubble paths, elevator plates): BoardTiles draws a hex without
@@ -219,11 +224,7 @@ final class BoardFeatures {
         if (hex.containsTerrain(Terrains.FIELDS) && !detailedGround(hex, structureModels, blankTerrains)) {
             add(result, "field", 1, 0, 0);
         }
-        if (hex.containsTerrain(Terrains.BRIDGE)) {
-            int exits = hex.getTerrain(Terrains.BRIDGE).getExits() & 63;
-            result.add(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1,
-                  hex.terrainLevel(Terrains.BRIDGE_ELEV), BoardScene.FeatureKind.PROP, exits));
-        }
+        addBridge(hex, result);
         Hex vegetation = hex.getAppearance().containsKey("vegetation")
               ? megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "vegetation") : hex;
         boolean jungle = vegetation.containsTerrain(Terrains.JUNGLE);
@@ -400,6 +401,15 @@ final class BoardFeatures {
      * them, so the hex never stores them, they come and go with the rail's sides or the woods' cover and are never picked
      * as objects ({@link #terrainOwned}). The stops ride the rail ({@link RailRoute#ride}).
      */
+    /** The hex's bridge, at its height above the hex's level (BoardBridge.deckZ). */
+    private static void addBridge(Hex hex, List<BoardScene.Feature> result) {
+        if (hex.containsTerrain(Terrains.BRIDGE)) {
+            int exits = hex.getTerrain(Terrains.BRIDGE).getExits() & 63;
+            result.add(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1,
+                  hex.terrainLevel(Terrains.BRIDGE_ELEV), BoardScene.FeatureKind.PROP, exits));
+        }
+    }
+
     static List<BoardScene.Feature> decorations(Hex hex, Coords coords) {
         List<BoardScene.Feature> result = new ArrayList<>();
         int bridgeExits = hex.containsTerrain(Terrains.BRIDGE) ? hex.getTerrain(Terrains.BRIDGE).getExits() : 0;

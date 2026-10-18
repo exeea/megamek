@@ -170,10 +170,11 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
 
     /**
      * Whether a pier fits under the joint of {@code tile} toward {@code d} that carries a deck or beam at height
-     * {@code top} on the joint: no road or rail crosses that edge beneath, and {@code top} is at least one whole level
-     * above both floors. The one room rule of bridge and maglev piers.
+     * {@code top} on the joint: neither hex is a chasm (no floor to stand on), no road or rail crosses that edge beneath,
+     * and {@code top} is at least one whole level above both floors. The one room rule of bridge and maglev piers.
      */
     private static boolean room(BoardScene.Tile tile, BoardScene.Tile next, int d, float top) {
+        if (tile.ultraSublevel() || next.ultraSublevel()) { return false; }
         // A road or rail passing beneath keeps its carriageway.
         if (BoardRoad.carriageway(tile) && (tile.wayExits() & 1 << d) != 0
               || BoardRoad.carriageway(next) && (next.wayExits() & 1 << (d + 3) % 6) != 0) { return false; }

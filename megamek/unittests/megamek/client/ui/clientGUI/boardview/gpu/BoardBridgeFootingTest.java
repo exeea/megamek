@@ -489,6 +489,26 @@ class BoardBridgeFootingTest {
               BoardRoad.Kind.NONE);
     }
 
+    @Test
+    void noPierStandsInAChasm() {
+        var scene = span(3, false, 2, Set.of(0, 1, 2));
+        Coords middle = START.translated(3);
+        assertTrue(BoardBridgeFooting.pier(scene, scene.tile(START), 3), "A toggled span two levels up has piers");
+        Map<Coords, BoardScene.Tile> tiles = new HashMap<>();
+        for (var tile : scene.tiles()) { tiles.put(tile.coords(), tile.coords().equals(middle) ? chasm(tile) : tile); }
+        var pit = BoardSurfaceBlendTest.scene(tiles::get);
+        assertFalse(BoardBridgeFooting.pier(pit, pit.tile(START), 3), "Its deck crosses the chasm on no pier");
+        assertFalse(BoardBridgeFooting.pier(pit, pit.tile(middle), 3));
+    }
+
+    /** The tile as an ultra sublevel, a chasm. */
+    private static BoardScene.Tile chasm(BoardScene.Tile t) {
+        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(),
+              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.tileset(),
+              t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
+              t.groundCover(), t.bridge(), true, t.tilesetDecals(), t.tilesetScenery(), t.appearance());
+    }
+
     /** The tile with its bridge's Pillars toggle on. */
     static BoardScene.Tile pillared(BoardScene.Tile t) {
         return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(),
