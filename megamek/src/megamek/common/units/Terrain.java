@@ -43,6 +43,7 @@ import java.util.Objects;
 
 import megamek.common.IndustrialElevator;
 import megamek.common.annotations.Nullable;
+import megamek.common.board.RailRoute;
 import megamek.common.equipment.MiscType;
 import megamek.common.options.OptionsConstants;
 import megamek.common.rolls.PilotingRollData;
@@ -615,6 +616,10 @@ public class Terrain implements Serializable {
                 } else {
                     return 0;
                 }
+            case RAIL:
+                // TacOps rails (TO:AR p.32): +1 MP for 'Meks and ground vehicles; a step along the rail pays it instead
+                // of the terrain (MoveStep).
+                return (level > 0) && RailRoute.affects(e) && RailRoute.rules(e.getGame()) ? 1 : 0;
             default:
                 return 0;
         }

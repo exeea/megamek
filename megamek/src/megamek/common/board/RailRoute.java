@@ -5,8 +5,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 import megamek.common.Hex;
+import megamek.common.game.IGame;
+import megamek.common.options.OptionsConstants;
+import megamek.common.units.Entity;
+import megamek.common.units.Mek;
+import megamek.common.units.Tank;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
+import megamek.common.units.VTOL;
 
 /**
  * The one route model of rails and maglev ({@link Kind}): route markers at hex centres. A marker holds the sides it
@@ -108,6 +114,27 @@ public final class RailRoute {
         int sides = rail.getExits() & 63, tracks = HexAppearance.tracks(hex.getAppearance(), owner);
         result.add(new BoardDecoration(id, "prop", Kind.RAIL.asset, null, 0, 0, 0, false, 1, placement, 0, false, 0, 0,
               null, false, sides, BoardDecoration.Stretch.NONE, BoardDecoration.Colours.NONE, valid(sides, tracks) ? tracks : 0));
+    }
+
+    /** Whether TacOps rails are in play (TO:AR p.49). With the option off, rails are drawn and play as nothing. */
+    public static boolean rules(IGame game) {
+        return game != null && game.getOptions().booleanOption(OptionsConstants.ADVANCED_TAC_OPS_RAILS);
+    }
+
+    /** Whether a rail hinders {@code entity} (TO:AR p.49): 'Meks and ground vehicles; infantry, ProtoMeks and aircraft pass. */
+    public static boolean affects(Entity entity) {
+        return entity instanceof Mek || entity instanceof Tank && !(entity instanceof VTOL);
+    }
+
+    /** Whether the hex holds the rules' rail: an intact {@link Terrains#RAIL} on its ground (a destroyed one is clear). */
+    public static boolean intact(Hex hex) {
+        return hex != null && hex.terrainLevel(Terrains.RAIL) > 0;
+    }
+
+    /** Whether a step from {@code from} into the adjacent {@code to}, leaving by {@code direction}, follows an intact rail. */
+    public static boolean along(Hex from, Hex to, int direction) {
+        return intact(from) && intact(to) && from.containsTerrainExit(Terrains.RAIL, direction)
+              && to.containsTerrainExit(Terrains.RAIL, (direction + 3) % 6);
     }
 
     /** The hex's first marker of {@code kind}, or null. */

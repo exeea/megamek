@@ -628,6 +628,9 @@ public class Terrains implements Serializable {
             case ROUGH:
             case PAVEMENT:
                 return 200;
+            case RAIL:
+                // TO:AR p.49 and p.62: CF 20, used only with TacOps rails.
+                return (level > 0) ? 20 : 0;
             case ROAD:
                 if (level == 3) {
                     return 20;
@@ -714,6 +717,8 @@ public class Terrains implements Serializable {
             };
             case SNOW -> (terrainLevel == 2) ? 1 : 0;
             case ICE, MUD -> 1;
+            // TO:AR p.32, used only with TacOps rails.
+            case RAIL -> (terrainLevel > 0) ? 2 : 0;
             default -> 0;
         };
     }

@@ -52,6 +52,7 @@ import megamek.common.bays.BattleArmorBay;
 import megamek.common.bays.Bay;
 import megamek.common.bays.InfantryBay;
 import megamek.common.board.Coords;
+import megamek.common.board.RailRoute;
 import megamek.common.compute.Compute;
 import megamek.common.cost.CombatVehicleCostCalculator;
 import megamek.common.enums.AimingMode;
@@ -903,14 +904,16 @@ public class Tank extends Entity implements Fortifiable, RubbleClearer {
                       (getHeight() >= hex.terrainLevel(Terrains.BRIDGE_ELEV) - hex.getLevel())) {
                     return true;
                 }
-                return (hex.terrainLevel(Terrains.WATER) <= 0) || hex.containsTerrain(Terrains.ICE);
+                // Naval vessels never enter a TacOps rail hex (TO:AR p.32).
+                return (hex.terrainLevel(Terrains.WATER) <= 0) || hex.containsTerrain(Terrains.ICE)
+                      || (RailRoute.rules(game) && RailRoute.intact(hex));
             case SUBMARINE:
                 // Submarines get extra clearance equal to the depth of water.
                 if (hex.containsTerrain(Terrains.BRIDGE) &&
                       (getHeight() >= hex.terrainLevel(Terrains.BRIDGE_ELEV) - hex.floor())) {
                     return true;
                 }
-                return (hex.terrainLevel(Terrains.WATER) <= 0);
+                return (hex.terrainLevel(Terrains.WATER) <= 0) || (RailRoute.rules(game) && RailRoute.intact(hex));
             case WIGE:
                 return isLocationProhibitedWiGE(hex, currElevation);
             default:

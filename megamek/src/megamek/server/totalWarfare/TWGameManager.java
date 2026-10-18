@@ -62,6 +62,7 @@ import megamek.common.board.BoardLocation;
 import megamek.common.board.BuildingEditSpec;
 import megamek.common.board.Coords;
 import megamek.common.board.HexEditSpec;
+import megamek.common.board.RailRoute;
 import megamek.common.board.postprocess.TWBoardTransformer;
 import megamek.common.comparators.WeaponComparatorBV;
 import megamek.common.compute.Compute;
@@ -12117,6 +12118,20 @@ public class TWGameManager extends AbstractGameManager {
                 }
             } else {
                 magma.setTerrainFactor(tf);
+            }
+        }
+        // A TacOps rail takes the damage on its CF 20 and is destroyed at 0, leaving its bed and the hex's other
+        // terrain (TO:AR p.49).
+        Terrain rail = h.getTerrain(Terrains.RAIL);
+        if ((rail != null) && (rail.getLevel() > 0) && RailRoute.rules(game)) {
+            int tf = rail.getTerrainFactor() - nDamage;
+            if (tf <= 0) {
+                h.addTerrain(new Terrain(Terrains.RAIL, 0, true, rail.getExits()));
+                r = new Report(3094, reportType);
+                r.subject = entityId;
+                vPhaseReport.add(r);
+            } else {
+                rail.setTerrainFactor(tf);
             }
         }
         sendChangedHex(c, boardId);
