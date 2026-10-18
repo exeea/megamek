@@ -18,6 +18,7 @@ import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
+import megamek.common.board.RailRoute;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -50,7 +51,7 @@ class GpuRoadSourceTest {
                 var footing = BoardBridgeFooting.build(scene, bridge, lod, surfaces);
                 var triangles = GpuRoads.drape(tile, surfaces.get(tile.coords()), pavement);
                 // The bridge's bank landing spans any recessed shore before it meets the road carrier.
-                triangles.addAll(GpuRoads.deck(pavement, footing.shape()));
+                triangles.addAll(GpuRoads.deck(pavement, footing.shape(), GpuRoads.SURFACE_LIFT));
                 for (float lateral : new float[] { -7, -6, 0, 6, 7 }) {
                     for (float distance : new float[] { .05f, 1, 3, 6, 10 }) {
                         var point = new Vector3(gate).mulAdd(step, lateral).mulAdd(inward, distance);
@@ -183,6 +184,23 @@ class GpuRoadSourceTest {
             });
         }
         return scene.get();
+    }
+
+    /** A destroyed rail ({@code rail:0}) draws no track and no buffer stop, but its bed stays shaped as the intact one's. */
+    @Test
+    void aDestroyedRailKeepsItsBedAndDrawsNoTrack() {
+        Coords at = new Coords(2, 2);
+        Board board = Board.createEmptyBoard(5, 5);
+        for (int level : new int[] { 1, 0 }) {
+            Hex hex = new Hex(0);
+            hex.addTerrain(new Terrain(Terrains.RAIL, level, true, 1));
+            board.setHex(at, hex);
+            var tile = new BoardScene(0, 5, 5, BoardTiles.captureAll(board), List.of(), List.of(), -1, "", List.of()).tile(at);
+            assertEquals(1, tile.wayExits(), "rail:" + level + ": the bed is shaped as a road with its exits");
+            long drawn = tile.features().stream().filter(f -> f.decoration() != null
+                  && (RailRoute.isRoute(f.decoration()) || f.asset().equals(RailRoute.BUFFER_STOP))).count();
+            assertEquals(level == 1 ? 2 : 0, drawn, "rail:" + level + ": the track and the buffer stop of its dead end");
+        }
     }
 
     @Test

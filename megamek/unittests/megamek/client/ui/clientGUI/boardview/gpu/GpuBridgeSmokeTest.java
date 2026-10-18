@@ -169,8 +169,9 @@ class GpuBridgeSmokeTest {
         return ((rgba >>> 24) + ((rgba >>> 16) & 255) + ((rgba >>> 8) & 255)) / 3f;
     }
 
+    /** A deck draws its own road's material; approaches of other kinds leave the deck centre as it is. */
     @Test
-    void bridgeMaterialsFollowApproachesAndDistantEdits() throws Exception {
+    void deckRoadsDrawTheirMaterials() throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots"), "bridges");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
@@ -190,65 +191,41 @@ class GpuBridgeSmokeTest {
                     camera.camera.zoom = .16f;
                     camera.center(BoardGeometry.center(CENTER, 0));
                     var plain = new EnumMap<BoardRoad.Kind, int[]>(BoardRoad.Kind.class);
-                    for (var pair : List.of(List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.PAVED),
-                          List.of(BoardRoad.Kind.ALLEY, BoardRoad.Kind.ALLEY),
-                          List.of(BoardRoad.Kind.DIRT, BoardRoad.Kind.DIRT),
-                          List.of(BoardRoad.Kind.GRAVEL, BoardRoad.Kind.GRAVEL),
-                          List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.DIRT),
-                          List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.GRAVEL),
-                          List.of(BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL))) {
-                        var scene = BoardBridgeMaterialsTest.straight(CENTER, 2, 1, pair.getFirst(), pair.getLast());
+                    // The approaches' kinds, then the deck road's: first each kind with its own approaches.
+                    for (var kinds : List.of(List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.PAVED, BoardRoad.Kind.PAVED),
+                          List.of(BoardRoad.Kind.ALLEY, BoardRoad.Kind.ALLEY, BoardRoad.Kind.ALLEY),
+                          List.of(BoardRoad.Kind.DIRT, BoardRoad.Kind.DIRT, BoardRoad.Kind.DIRT),
+                          List.of(BoardRoad.Kind.GRAVEL, BoardRoad.Kind.GRAVEL, BoardRoad.Kind.GRAVEL),
+                          List.of(BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL, BoardRoad.Kind.PAVED),
+                          List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.GRAVEL, BoardRoad.Kind.DIRT),
+                          List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL))) {
+                        var deck = kinds.getLast();
+                        var scene = BoardBridgeMaterialsTest.straight(CENTER, 2, 1, kinds.get(0), kinds.get(1), deck);
                         terrain.update(scene);
                         terrain.animate(0, List.of());
                         GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
-                        String name = pair.getFirst().name().toLowerCase(java.util.Locale.ROOT) + "-"
-                              + pair.getLast().name().toLowerCase(java.util.Locale.ROOT);
+                        String name = kinds.stream().distinct().map(kind -> kind.name().toLowerCase(java.util.Locale.ROOT))
+                              .collect(java.util.stream.Collectors.joining("-"));
                         GpuReviewFrame.save(new File(output, "material-" + name + "-top.png"));
                         int[] pixels = deckPixels(camera, CENTER, 2);
-                        if (pair.getFirst() == pair.getLast()) { plain.put(pair.getFirst(), pixels); }
+                        if (kinds.get(0) == deck && kinds.get(1) == deck) { plain.put(deck, pixels); }
                         else {
-                            var expected = pair.getFirst() == BoardRoad.Kind.DIRT ? BoardRoad.Kind.GRAVEL : pair.getFirst();
-                            float error = difference(plain.get(expected), pixels);
-                            assertTrue(error < 1,
-                                  "Mixed approaches must keep the best surface at the deck centre: " + name + ", error " + error);
+                            float error = difference(plain.get(deck), pixels);
+                            assertTrue(error < 1, "Approaches must leave the deck road's surface at the deck centre: "
+                                  + name + ", error " + error);
                         }
                         // Banked spans carry the authored terminal block, which stands above the rails.
                         assertEquals(GpuRoads.SURFACE_LIFT + Math.max(2.5f, BoardBridgeFooting.terminalHeight()),
                               terrain.roofBounds(CENTER).max.z, .001f);
                     }
                     assertTrue(difference(plain.get(BoardRoad.Kind.PAVED), plain.get(BoardRoad.Kind.DIRT)) > 8,
-                          "Dirt approaches must visibly resurface the deck");
+                          "A dirt deck road must look unlike a paved one");
                     assertTrue(difference(plain.get(BoardRoad.Kind.PAVED), plain.get(BoardRoad.Kind.GRAVEL)) > 8,
-                          "Gravel approaches must visibly resurface the deck");
+                          "A gravel deck road must look unlike a paved one");
                     assertTrue(difference(plain.get(BoardRoad.Kind.DIRT), plain.get(BoardRoad.Kind.GRAVEL)) > 5,
-                          "Dirt and gravel keep their distinct textures");
+                          "Dirt and gravel deck roads keep their distinct textures");
 
-                    var start = new Coords(4, 1);
-                    var far = new Coords(4, 11);
-                    var before = BoardBridgeMaterialsTest.straight(start, 3, 12, BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL);
-                    terrain.update(before);
-                    camera.center(BoardGeometry.center(far, 0));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, before, camera);
-                    frame.render(terrain, camera, before);
-                    int[] gravel = deckPixels(camera, far, 3);
-                    var edited = BoardBridgeMaterialsTest.straight(start, 3, 12, BoardRoad.Kind.PAVED, BoardRoad.Kind.GRAVEL);
-                    terrain.update(edited);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
-                    frame.render(terrain, camera, edited);
-                    int[] live = deckPixels(camera, far, 3);
-                    GpuReviewFrame.save(new File(output, "material-long-span-edited.png"));
-                    assertTrue(difference(gravel, live) > 5,
-                          "Upgrading the distant approach must repaint the span even beside the unchanged gravel approach");
-                    var fresh = new GpuTerrain();
-                    try {
-                        fresh.update(edited);
-                        fresh.animate(0, List.of());
-                        GpuTerrainLodSmokeTest.settle(fresh, null, edited, camera);
-                        frame.render(fresh, camera, edited);
-                        assertTrue(difference(live, deckPixels(camera, far, 3)) < 1,
-                              "Reused chunks must render the same deck materials as a fresh build");
-                    } finally { fresh.dispose(); }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally {
@@ -685,8 +662,8 @@ class GpuBridgeSmokeTest {
             }
             // Generate the opposite end/joint choices at the same grade. Rays must not pick their absent steel;
             // a face occupying the same place in the installed shape is shared and cannot distinguish the choice.
-            var alternateDeck = new BoardBridge.Deck(deck.kind(), deck.exits(), deck.neighbors(), deck.surface(),
-                  deck.rises(), deck.piers(), deck.colours(), deck.joints() ^ deck.exits());
+            var alternateDeck = new BoardBridge.Deck(deck.kind(), deck.roadExits(), deck.exits(), deck.natural(),
+                  deck.neighbors(), deck.surface(), deck.rises(), deck.piers(), deck.colours(), deck.joints() ^ deck.exits());
             var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, new java.util.HashMap<>());
             var alternate = BoardBridgeSlope.build(tile, alternateDeck, footing);
             float reach = 30 * s, tolerance = .05f * s;
@@ -990,5 +967,112 @@ class GpuBridgeSmokeTest {
             assertEquals(at, hit.coords());
             assertEquals(deck + 2.5f, 200 - Math.sqrt(hit.distance()), .001f, "Raised side remains above the deck");
         }
+    }
+
+    /** A raised natural span of two decks over dry ground at x 3, rows 2-3, between banks at the deck's level. */
+    private static Board naturalSpan(String deck) {
+        Board board = Board.createEmptyBoard(7, 7);
+        board.setNativeFormat(true);
+        board.setHex(new Coords(3, 1), new Hex(2, "", ""));
+        board.setHex(new Coords(3, 4), new Hex(2, "", ""));
+        for (int y = 2; y <= 3; y++) {
+            Hex hex = new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:2" + deck, "");
+            hex.setAppearance(Map.of("bridge", megamek.common.board.HexAppearance.NATURAL_BRIDGE));
+            board.setHex(new Coords(3, y), hex);
+        }
+        return board;
+    }
+
+    /**
+     * Spec-bridge-mud test 8: a raised natural deck that is muddy shows the mud cover on its top, as an edit's recapture
+     * installs it without a reload, and the ground around it is unchanged; a road on a rock arch (b13 ways) lies on its
+     * top. Captures {@code bridges/natural-deck-dry.png}, {@code natural-deck-mud.png} and {@code natural-deck-road.png}.
+     */
+    @Test
+    void aMuddyNaturalDeckShowsMudAndARoadLiesOnTheArch() throws Exception {
+        var dry = GpuLegacyImportSmokeTest.scene(naturalSpan(""));
+        var muddy = GpuLegacyImportSmokeTest.scene(naturalSpan(";bridge_mud:1"));
+        var road = GpuLegacyImportSmokeTest.scene(naturalSpan(";bridge_road:3:9"));
+        Coords deck = new Coords(3, 2), field = new Coords(5, 5);
+        assertTrue(muddy.tile(deck).deckMud() && !dry.tile(deck).deckMud());
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "bridges");
+        Files.createDirectories(output.toPath());
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowSizeLimits(1, 1, -1, -1);
+        config.setWindowedMode(1000, 800);
+        config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var weather = new BoardAtmosphere.Settings(13, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT,
+                      0, 0, new BoardAtmosphere.Effects(0, 0, 0, 0, 0, 0, 0));
+                var frame = new GpuReviewFrame(weather);
+                var terrain = new GpuTerrain();
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    camera.setIsometric(false);
+                    camera.camera.zoom = .16f;
+                    camera.center(BoardGeometry.center(deck, 2));
+                    var top = BoardGeometry.center(deck, 2);
+                    var ground = BoardGeometry.center(field, 0);
+                    float[][] dryPixels = shot(terrain, frame, camera, dry, new File(output, "natural-deck-dry.png"), top, ground);
+                    float[][] mudPixels = shot(terrain, frame, camera, muddy, new File(output, "natural-deck-mud.png"), top, ground);
+                    float[][] roadPixels = shot(terrain, frame, camera, road, new File(output, "natural-deck-road.png"), top, ground);
+                    float dryLuma = dryPixels[0][0] + dryPixels[0][1] + dryPixels[0][2];
+                    float mudLuma = mudPixels[0][0] + mudPixels[0][1] + mudPixels[0][2];
+                    assertTrue(mudLuma < dryLuma - 15, "The muddy deck top is darker: " + mudLuma + " vs " + dryLuma);
+                    assertTrue(mudPixels[0][1] - mudPixels[0][0] < dryPixels[0][1] - dryPixels[0][0],
+                          "and browner: its green cover is gone");
+                    for (int c = 0; c < 3; c++) {
+                        assertEquals(dryPixels[1][c], mudPixels[1][c], 2, "The ground beside the span is unchanged");
+                    }
+                    float roadChange = 0;
+                    for (int c = 0; c < 3; c++) { roadChange += Math.abs(roadPixels[0][c] - dryPixels[0][c]); }
+                    assertTrue(roadChange > 15, "The dirt road shows on the arch's top: " + roadChange);
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally {
+                    terrain.dispose();
+                    frame.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Muddy natural deck", failure.get()); }
+    }
+
+    /**
+     * Installs {@code scene} on {@code terrain} (an edit after the first), renders and saves it, and returns the mean RGB
+     * of a small screen box around each point.
+     */
+    private static float[][] shot(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene, File file,
+          Vector3... points) throws Exception {
+        frame.prepare(terrain, camera, scene);
+        terrain.update(scene);
+        terrain.animate(0, List.of());
+        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        frame.render(terrain, camera, scene);
+        GpuReviewFrame.save(file);
+        var pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+        try {
+            float[][] result = new float[points.length][3];
+            for (int i = 0; i < points.length; i++) {
+                var screen = camera.camera.project(new Vector3(points[i]));
+                int count = 0;
+                for (int dx = -6; dx <= 6; dx++) {
+                    for (int dy = -6; dy <= 6; dy++) {
+                        int pixel = pixels.getPixel(Math.round(screen.x) + dx, Math.round(screen.y) + dy);
+                        result[i][0] += (pixel >>> 24) & 255;
+                        result[i][1] += (pixel >>> 16) & 255;
+                        result[i][2] += (pixel >>> 8) & 255;
+                        count++;
+                    }
+                }
+                for (int c = 0; c < 3; c++) { result[i][c] /= count; }
+            }
+            return result;
+        } finally { pixels.dispose(); }
     }
 }

@@ -74,7 +74,7 @@ class LegacySceneryCorpusTest {
         // Batch-10 answer 7: maglev markers on Pillars, and those a row of pillar art lifted a level above the ground.
         int pillaredMaglevs = 0, raisedMaglevs = 0;
         // Rail: markers, those riding a bridge deck, and those storing tracks other than their sides' default.
-        int rails = 0, deckRails = 0, storedTracks = 0;
+        int rails = 0, deckRails = 0, storedTracks = 0, railTerrain = 0, deckRailTerrain = 0;
         // Car-park roads: lane roads by axis and their boards, roof (or other off-ground) car parks left without a road,
         // car parks keeping an authored road, and neighbour roads whose automatic exits were written out.
         Map<String, Integer> laneRoads = new TreeMap<>();
@@ -147,8 +147,13 @@ class LegacySceneryCorpusTest {
                 for (int x = 0; x < board.getWidth(); x++) {
                     var hex = board.getHex(x, y);
                     String where = file.getFileName() + " " + x + "," + y;
-                    // K: the tokens stay on the converted board, so the 2D views of a game still draw the old sprites.
-                    assertEquals(tokens.getOrDefault(new Coords(x, y), List.of()), tokens(hex), where + ": the tokens stay");
+                    // K: the tokens stay on the converted board, so the 2D views of a game still draw the old sprites; legacy
+                    // rail art becomes rail terrain, which draws its sprite (b13 ways).
+                    boolean laid = hex.containsAnyTerrainOf(Terrains.RAIL, Terrains.BRIDGE_RAIL);
+                    assertEquals(tokens.getOrDefault(new Coords(x, y), List.of()).stream()
+                          .filter(token -> !(laid && token.matches("fluff:10(:.*)?"))).toList(), tokens(hex), where + ": the tokens stay");
+                    if (hex.containsTerrain(Terrains.RAIL)) { railTerrain++; }
+                    if (hex.containsTerrain(Terrains.BRIDGE_RAIL)) { deckRailTerrain++; }
                     // K2: every 3D view draws the hex without its taken tokens, and that hex selects nothing the
                     // conversion took (its objects stand for it). Only a token can select taken art.
                     if (tokens.containsKey(new Coords(x, y))) {
@@ -293,13 +298,15 @@ class LegacySceneryCorpusTest {
               Map.entry("decal/landing-pads spanning", 85), Map.entry("decal/landing-pads/heli-pad", 978),
               Map.entry("decal/lettering", 327), Map.entry("decal/lettering painted", 68),
               Map.entry("decal/rail/level-crossing", 4), Map.entry("decal/runway", 4_525), Map.entry("decal/sport", 142),
-              Map.entry("scenery/rail/crossing-signal", 16), Map.entry("scenery/rail/route", 12_044),
-              Map.entry("scenery/roofs/landing-light", 4_443))), families);
+              Map.entry("scenery/rail/crossing-signal", 16), Map.entry("scenery/roofs/landing-light", 4_443))), families);
         System.out.printf("CORPUS rail markers=%d (on a bridge deck %d, storing tracks %d)%n", rails, deckRails, storedTracks);
         // Only rails with a side along their bridge ride its deck; the four that cross under one lie beneath it. 105 of
         // the 137 are the rail a rail bridge carries across its span (batch-10 answer 3), on 11 boards.
         assertEquals(137, deckRails);
         assertEquals(0, storedTracks);
+        // b13 ways: the 12,044 legacy rails are terrain, no stored marker.
+        assertEquals(11_907, railTerrain);
+        assertEquals(137, deckRailTerrain);
         receivers.forEach((receiver, count) -> System.out.printf("CORPUS receiver %7d objects  %s%n", count, receiver));
         System.out.printf("CORPUS woods drawn without trees (a container yard look): %d hexes%n", noTrees);
         // The shipped boards hold 23 complete 7-hex emblem sets and 226 one-hex variants (none incomplete).

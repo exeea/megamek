@@ -146,7 +146,8 @@ class BoardNaturalBridgeTest {
         for (int x : new int[] { 3, 4 }) {
             var start = new Coords(x, 4);
             for (int d = 0; d < 6; d++) {
-                var scene = BoardBridgeMaterialsTest.straight(start, d, 2, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE);
+                var scene = BoardBridgeMaterialsTest.straight(start, d, 2, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE,
+                      BoardRoad.Kind.NONE);
                 var a = scene.tile(start);
                 var b = scene.tile(start.translated(d));
                 var seam = BoardGeometry.center(start, 0).lerp(BoardGeometry.center(b.coords(), 0), .5f);
@@ -222,7 +223,7 @@ class BoardNaturalBridgeTest {
     }
 
     @Test
-    void anApproachGivesAnUntypedSpanItsMaterialButNeverTurnsANaturalOneBuilt() {
+    void anApproachNeverTurnsANaturalSpanBuiltAndAnUntypedSpanIsACleanBuiltDeck() {
         var scene = scene(BoardScene.Surface.SAND, false, true);
         var tile = scene.tile(CENTER);
         assertTrue(BoardBridge.deck(scene, tile).natural());
@@ -230,11 +231,11 @@ class BoardNaturalBridgeTest {
         var road = BoardRoadTest.tile(entrance, BoardRoad.Kind.GRAVEL, 9, 3, BoardScene.Surface.SAND);
         var edited = replace(scene, road);
         assertTrue(BoardBridge.deck(edited, tile).natural(), "A stored natural span stays a rock arch beside a road");
-        // An untyped span is built (the editor's stroke default) and takes its approach's material.
+        // An untyped span is built (the editor's stroke default); its deck carries only the road it stores.
         var untyped = replace(edited, BoardBridgeTypeTest.appearance(tile, Map.of()));
-        assertEquals(BoardRoad.Kind.GRAVEL, BoardBridge.kind(untyped, untyped.tile(CENTER)));
-        var bare = replace(untyped, scene.tile(entrance));
-        assertEquals(BoardRoad.Kind.ALLEY, BoardBridge.kind(bare, bare.tile(CENTER)), "Without a road: plain asphalt");
+        var deck = BoardBridge.deck(untyped, untyped.tile(CENTER));
+        assertFalse(deck.natural());
+        assertEquals(BoardRoad.Kind.NONE, deck.kind(), "An approach paints no deck");
     }
 
     @Test

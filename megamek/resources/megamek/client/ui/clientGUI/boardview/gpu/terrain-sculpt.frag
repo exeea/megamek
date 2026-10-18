@@ -11,7 +11,9 @@ in vec2 v_diffuseUV;   // ground: rim / foot distance (drowned cliff: height abo
                             // Plants: authored red / green.
 in vec3 v_normal;
 in vec4 v_color;       // r: occlusion. g: game level (+64)/255, or for cliffs how much rock the face is (0
-                            // bank, 1 cliff). b: kind (0 ground, .3 plant, .45 panel, .5 cliff, .6 abyss wall, .75 tree pit, 1 rock). a: bed
+                            // bank, 1 cliff). b: kind (0 ground, .1 a natural bridge's muddy deck top
+                            // (GpuTerrain.naturalBridge), .3 plant, .45 panel, .5 cliff, .6 abyss wall, .75 tree pit,
+                            // 1 rock). a: bed
                             // hardness (cliff), authored blue (plant), variation (rock, a pit's earth below .5; its kerb is 1),
                             // nearest step height (.3 + .1 per level, dry ground), or below .25 on a water hex's banks
                             // and bed its water's palette and that height packed (GpuTerrain.shoreTint).
@@ -140,6 +142,8 @@ void main() {
     bool abyss = cliff && kind > .55;
     bool pit = kind >= .625 && kind < .875;
     bool shore = ground && v_color.a < .25;
+    // Dry ground's spare kind range (shores use it for their level): a natural bridge's muddy deck top.
+    bool deckMud = ground && !shore && kind > .05;
     // Rock-kind bytes 224..254 carry the fractional water level; 255 remains ordinary dry rock.
     bool wetRock = kind >= .875 && kind < .999;
     bool waterCovered = shore || wetRock;
@@ -415,7 +419,7 @@ void main() {
 #ifdef biomeMaskFlag
         if (ground || cliff || bedrock) {
             biomeSurface(world, face, shore, above, cliff || bedrock ? v_diffuseUV.x : 0.0,
-                  cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x, materialHeight, sand,
+                  cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x, materialHeight, sand, deckMud ? 1.0 : 0.0,
                   albedo, normal, cavity, roughness, grass, bounce, biomePool, biomeDamp);
         }
 #endif

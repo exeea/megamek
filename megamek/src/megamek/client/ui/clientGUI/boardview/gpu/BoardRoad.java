@@ -119,8 +119,17 @@ final class BoardRoad {
 
     static Kind capture(Hex hex) {
         // Which roads are drawn is common (HexTile.road), the legacy conversion's statement too.
-        if (!HexTile.road(hex)) { return Kind.NONE; }
-        return switch (hex.terrainLevel(Terrains.ROAD)) {
+        return HexTile.road(hex) ? kind(hex.terrainLevel(Terrains.ROAD)) : Kind.NONE;
+    }
+
+    /** The road its bridge deck carries ({@link Terrains#BRIDGE_ROAD}), NONE on a clean deck or without a bridge. */
+    static Kind deck(Hex hex) {
+        return hex.containsTerrain(Terrains.BRIDGE_ROAD) ? kind(hex.terrainLevel(Terrains.BRIDGE_ROAD)) : Kind.NONE;
+    }
+
+    /** The kind of a road of this ROAD level: 1 paved, 2 alley, 3 dirt, 4 gravel. */
+    private static Kind kind(int level) {
+        return switch (level) {
             case 1 -> Kind.PAVED;
             case 2 -> Kind.ALLEY;
             case Terrains.ROAD_LVL_DIRT -> Kind.DIRT;
@@ -152,8 +161,9 @@ final class BoardRoad {
     static BoardRoad of(BoardScene scene, BoardScene.Tile tile) {
         var road = layout(tile.coords(), tile.roadExits(), tile.road(), direction -> {
             var neighbor = scene.tile(tile.coords().translated(direction));
+            // A road meeting a deck joins the deck's road where it has that side; a clean side keeps the road's own kind.
             if (neighbor != null && BoardSurface.connectingBridge(tile, neighbor, direction) != null) {
-                return BoardBridge.kind(scene, neighbor);
+                return BoardBridge.deckRoad(neighbor, (direction + 3) % 6);
             }
             return neighbor != null && (neighbor.roadExits() & (1 << ((direction + 3) % 6))) != 0
                   ? neighbor.road() : Kind.NONE;

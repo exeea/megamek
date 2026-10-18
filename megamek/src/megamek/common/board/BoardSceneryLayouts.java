@@ -109,7 +109,8 @@ public final class BoardSceneryLayouts {
          * The same rows as native objects on {@code hex}: XY in hex width/height units, ids in row order from
          * {@code ids}. Trees store their bare species; the renderer shows the winter form on snow. A route marker keeps
          * its sides and stays out of {@code group}: a maglev marker holds its support's level ({@link #routePlacement}), a
-         * rail lies on the ground (the conversion puts it on a deck, {@link #railPlacement}). A route's pieces ride it
+         * rail lies on the ground (the conversion lays it as rail terrain, on a deck by {@link #railOnDeck}). A route's
+         * pieces ride it
          * ({@link RailRoute#ride}: at the route's placement; a maglev train's ride height is in its meshes, the renderer
          * stands a rail vehicle on the drawn rail top): the layout's own marker of their kind, else the hex's marker of
          * that kind (a stamped train).
@@ -327,15 +328,15 @@ public final class BoardSceneryLayouts {
 
     /**
      * The one legacy conversion, wherever a board can reach a 3D view. A board that is not native (not converted yet) has
-     * every decodable scenery token decoded ({@link #convert(Board, Collection)} over all its hexes) and its one-sided
-     * bridge exits made mutual ({@link #reciprocalExits}); every untyped bridge of any board gets its type; then the
+     * its bridge exits written out ({@link #bridgeExits}) and every decodable scenery token decoded
+     * ({@link #convert(Board, Collection)} over all its hexes); every untyped bridge of any board gets its type; then the
      * board is native. So converting a converted board only types bridges that lack a type. Returns the issues of the
      * decode.
      */
     public static List<BoardIssue> convert(Board board) {
         List<Coords> hexes = new ArrayList<>();
         if (!board.isNativeFormat()) {
-            reciprocalExits(board);
+            bridgeExits(board);
             for (int y = 0; y < board.getHeight(); y++) {
                 for (int x = 0; x < board.getWidth(); x++) { hexes.add(new Coords(x, y)); }
             }
@@ -344,11 +345,13 @@ public final class BoardSceneryLayouts {
     }
 
     /**
-     * Writes the missing exit of every one-sided bridge exit ({@link BridgeSpan#oneSided}: a deck's exit points into a
-     * neighbouring deck at the same level that does not point back), so the game rules of every player, the 2D board's
-     * included, see the bridge the span unit joins. Decks at different levels keep their exits.
+     * Writes every bridge's exits as specified: the exits the load derived (an automatic bridge joins every adjacent
+     * bridge), with the missing side of each one-sided exit added ({@link BridgeSpan#oneSided}: a deck's exit points into
+     * a neighbouring deck at the same level that does not point back). So the game rules of every player, the 2D board's
+     * included, see the bridge the span unit joins, and no deck drawn later joins a legacy one by itself. Decks at
+     * different levels keep their exits.
      */
-    private static void reciprocalExits(Board board) {
+    private static void bridgeExits(Board board) {
         Map<BoardLocation, Hex> fixed = new HashMap<>();
         for (int y = 0; y < board.getHeight(); y++) {
             for (int x = 0; x < board.getWidth(); x++) {
@@ -360,7 +363,7 @@ public final class BoardSceneryLayouts {
                 for (int d = 0; d < 6; d++) {
                     if (BridgeSpan.oneSided(hex, board.getHex(at.translated(d)), d)) { exits |= 1 << d; }
                 }
-                if (exits == bridge.getExits()) { continue; }
+                if (exits == bridge.getExits() && bridge.hasExitsSpecified()) { continue; }
                 Hex next = replacement(hex);
                 next.addTerrain(new Terrain(Terrains.BRIDGE, bridge.getLevel(), true, exits));
                 fixed.put(BoardLocation.of(at, board.getBoardId()), next);
@@ -380,12 +383,14 @@ public final class BoardSceneryLayouts {
      * ({@link BoardDecalArt#legacy}) becomes its decal: a one-hex variant at its scale and turn, in its paint colour, and
      * the pieces of a 7-hex emblem set ONE emblem on the set's centre hex, spanning its neighbours; a set missing a piece
      * on the board paints exactly its pieces (each the emblem clipped to its hex, one group), and one cut by the board
-     * edge gets the full emblem and an issue. Legacy rail art becomes a rail route marker with the art's sides, on the
-     * ground or its bridge's deck ({@link #railPlacement}); art without sides joins the rails beside it ({@link #railJoins})
-     * or places nothing. On a legacy (not native) board only, converted maglevs a level up or beside a row of pillar art
-     * stand on Pillars ({@link #maglevPillars}) and a rail bridge carries its rail across its span ({@link #carryRails}),
-     * a crane tip that a converted crane's boom reaches places nothing ({@link #reachedTips}), and minor objects step
-     * clear of the fitted concrete walls ({@link #clearOfConcreteWalls}). A token that a hex
+     * edge gets the full emblem and an issue. Legacy rail art becomes rail terrain with the art's sides
+     * ({@link RailRoute#lay}), on the ground or its bridge's deck ({@link #railOnDeck}), and its token goes: the terrain
+     * draws the rail sprite in 2D; art without sides joins the rails beside it ({@link #railJoins}) or lays nothing. On a
+     * legacy (not native) board only, converted maglevs a level up or beside a row of pillar art stand on Pillars
+     * ({@link #maglevPillars}) and a rail bridge carries its rail across its span ({@link #carryRails}), a crane tip that a
+     * converted crane's boom reaches places nothing ({@link #reachedTips}), minor objects step clear of the fitted
+     * concrete walls ({@link #clearOfConcreteWalls}), and, once the bridges are typed, every deck gets the road the 3D
+     * board drew on it ({@link #deckRoads}). A token that a hex
      * design draws gets that design ({@link #design}): seaport container yards and cranes on woods become the woods'
      * container yard look at their rotation (a skin, {@link #skin}). A hex that already holds a twin of every object its art
      * decodes to ({@link BoardDecoration#twin}: a token typed again in the editor) gets none of them. A legacy board's
@@ -514,14 +519,15 @@ public final class BoardSceneryLayouts {
                     keys++;
                     added.addAll(rows.decorations(coords, hex, ids, group, road));
                 }
+                // Rail art is laid as rail terrain on the ground or the deck (railOnDeck); art without sides (rail00)
+                // joins the rails beside it, and lays nothing beside none.
+                List<BoardDecoration> rails = new ArrayList<>(1);
                 for (int i = added.size() - 1; i >= 0; i--) {
                     var rail = added.get(i);
                     if (RailRoute.kind(rail) != RailRoute.Kind.RAIL) { continue; }
-                    // Art without sides (rail00) joins the rails beside it, and places nothing beside none.
+                    added.remove(i);
                     int sides = rail.connections() != 0 ? rail.connections() : railJoins(board, coords, scenery);
-                    if (sides == 0) { added.remove(i); continue; }
-                    added.set(i, rail.withConnections(sides).transform(rail.x(), rail.y(), rail.rotation(), rail.mirror(),
-                          rail.scale(), railPlacement(board, coords, sides, scenery)));
+                    if (sides != 0) { rails.add(rail.withConnections(sides)); }
                 }
                 for (var decal : artwork.decals()) {
                     if (!imported(decal.terrains(), hex)) { continue; }
@@ -565,6 +571,13 @@ public final class BoardSceneryLayouts {
                 objects.addAll(added);
                 result.setDecorations(objects);
                 if (pillared) { result.setAppearance(appearance(result, artwork)); }
+                for (var rail : rails) {
+                    boolean deck = railOnDeck(board, coords, rail.connections(), scenery);
+                    RailRoute.lay(result, deck, deck ? rail.connections() & RailRoute.bridgeExits(result) & 63
+                          : rail.connections(), rail.tracks());
+                }
+                // The rail terrain draws the rail sprite in 2D, so its art's token goes.
+                if (!rails.isEmpty() && result.terrainLevel(Terrains.FLUFF) == RAIL_ART) { result.removeTerrain(Terrains.FLUFF); }
                 laneRoad(board, coords, result, lanes);
                 board.setHex(coords, result);
             }
@@ -577,8 +590,84 @@ public final class BoardSceneryLayouts {
         }
         design(board, scanned);
         typeBridges(board, bridges);
+        if (!nativeBoard) { deckRoads(board); }
         board.setNativeFormat(true);
         return List.copyOf(issues);
+    }
+
+    /** The 3D board's preference among the roads a deck took from its approaches: dirt, gravel, alley, paved (ROAD levels). */
+    private static final List<Integer> DECK_ROAD_RANK = List.of(Terrains.ROAD_LVL_DIRT, Terrains.ROAD_LVL_GRAVEL, 2, 1);
+
+    /**
+     * Legacy fix-up: each deck carries the road the 3D board drew on it before decks stored their roads, over all its
+     * bridge exits ({@link Terrains#BRIDGE_ROAD}). A built span takes the best road (paved, alley, gravel, dirt) that meets
+     * one of its ends at deck height ({@link #meets}; a road level that is not drawn counts as paved); one that no road
+     * meets an Alley road, unless rails meet it or ride it: a rail bridge's deck stays bare. A natural span carries none.
+     */
+    private static void deckRoads(Board board) {
+        Function<Coords, Hex> hexes = at -> board.contains(at) ? board.getHex(at) : null;
+        Set<Coords> seen = new HashSet<>();
+        Map<BoardLocation, Hex> paved = new HashMap<>();
+        for (int y = 0; y < board.getHeight(); y++) {
+            for (int x = 0; x < board.getWidth(); x++) {
+                Coords at = new Coords(x, y);
+                if (!board.getHex(at).containsTerrain(Terrains.BRIDGE) || seen.contains(at)) { continue; }
+                List<Coords> span = BridgeSpan.of(hexes, at);
+                seen.addAll(span);
+                if (Boolean.FALSE.equals(BridgeSpan.type(hexes, span))) { continue; }
+                int best = 0;
+                boolean rail = false;
+                for (Coords member : span) {
+                    Hex hex = hexes.apply(member);
+                    rail |= RailRoute.deckRail(hex);
+                    for (int d = 0; d < 6; d++) {
+                        Hex next = hexes.apply(member.translated(d));
+                        if (next == null || decksJoin(hex, next, d) || !meets(next, hex, (d + 3) % 6)) { continue; }
+                        if (!next.containsTerrain(Terrains.ROAD) || (next.getTerrain(Terrains.ROAD).getExits() & 63) == 0) {
+                            rail = true;
+                            continue;
+                        }
+                        int level = HexTile.road(next) ? next.terrainLevel(Terrains.ROAD) : 1;
+                        if (DECK_ROAD_RANK.indexOf(level) > DECK_ROAD_RANK.indexOf(best)) { best = level; }
+                    }
+                }
+                int level = best != 0 ? best : rail ? 0 : 2;
+                if (level == 0) { continue; }
+                for (Coords member : span) {
+                    Hex hex = replacement(board.getHex(member));
+                    hex.addTerrain(new Terrain(Terrains.BRIDGE_ROAD, level, true,
+                          hex.getTerrain(Terrains.BRIDGE).getExits() & 63));
+                    paved.put(BoardLocation.of(member, board.getBoardId()), hex);
+                }
+            }
+        }
+        if (!paved.isEmpty()) { board.setHexes(paved); }
+    }
+
+    /** Whether the decks of {@code hex} and {@code next} join across {@code direction}: one look span of the 3D board. */
+    private static boolean decksJoin(Hex hex, Hex next, int direction) {
+        return next.containsTerrain(Terrains.BRIDGE) && BridgeSpan.joined(hex.getTerrain(Terrains.BRIDGE).getExits(),
+              BridgeSpan.deck(hex), next.getTerrain(Terrains.BRIDGE).getExits(), BridgeSpan.deck(next), direction);
+    }
+
+    /**
+     * Whether a road or ground rail of {@code way} leaves by {@code direction} onto the deck of the bridge hex
+     * {@code bridge}, as the 3D board joins a way to a deck: neither on a liquid, the deck exiting back within a level,
+     * and the bridge hex not continuing the way on its own ground at the same level.
+     */
+    private static boolean meets(Hex way, Hex bridge, int direction) {
+        if (HexTile.liquid(way) || (ways(way) & (1 << direction)) == 0) { return false; }
+        int back = (direction + 3) % 6;
+        boolean continued = !HexTile.liquid(bridge) && (ways(bridge) & (1 << back)) != 0;
+        int deck = BridgeSpan.deck(bridge);
+        return !(continued && way.getLevel() == bridge.getLevel()) && Math.abs(deck - way.getLevel()) <= 1
+              && (!continued || deck == way.getLevel()) && (RailRoute.bridgeExits(bridge) & (1 << back)) != 0;
+    }
+
+    /** The sides of a hex's road and of its rails on the ground ({@link RailRoute#groundSides}). */
+    private static int ways(Hex hex) {
+        return (hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0)
+              | RailRoute.groundSides(hex);
     }
 
     /**
@@ -816,15 +905,8 @@ public final class BoardSceneryLayouts {
                 Hex hex = board.getHex(member).duplicate();
                 int exits = RailRoute.bridgeExits(hex) & 63;
                 var rail = RailRoute.find(hex, RailRoute.Kind.RAIL);
-                List<BoardDecoration> objects = new ArrayList<>(hex.getDecorations());
-                if (rail == null) {
-                    objects.add(new BoardDecoration("L" + member.getX() + "_" + member.getY() + "_rail", "prop",
-                          RailRoute.Kind.RAIL.asset, null, 0, 0, 0, false, 1, BoardDecoration.Placement.on("bridge", 0), 0,
-                          false).withConnections(exits));
-                } else if ((rail.connections() & exits) != exits) {
-                    objects.set(objects.indexOf(rail), rail.withConnections(rail.connections() | exits));
-                } else { continue; }
-                hex.setDecorations(objects);
+                if (rail != null && (rail.connections() & exits) == exits) { continue; }
+                RailRoute.lay(hex, true, exits, rail == null ? 0 : rail.tracks());
                 carried.put(BoardLocation.of(member, board.getBoardId()), hex);
             }
         }
@@ -927,6 +1009,8 @@ public final class BoardSceneryLayouts {
     private static final int SERVER = 2000;
     /** The FLUFF level of the legacy crane tips, the end of a crane's boom over the next hex ({@link #reachedTips}). */
     private static final int CRANE_TIP = 82;
+    /** The FLUFF level of legacy rail art ({@code fluff:10:NN}), which the conversion lays as rail terrain. */
+    private static final int RAIL_ART = 10;
 
     /** The hex's legacy art tokens, in {@link #ART_TERRAINS} order: every art terrain but a server value. */
     private static List<Integer> tokens(Hex hex) {
@@ -1190,20 +1274,18 @@ public final class BoardSceneryLayouts {
     }
 
     /**
-     * Where a converted rail with {@code sides} on {@code at} lies: on its bridge's deck when one of its sides runs along
-     * the bridge ({@link RailRoute#alongDeck}) and the hex is water, or the rail leaves the bridge's span
+     * Whether a converted rail with {@code sides} on {@code at} lies on its bridge's deck: when one of its sides runs
+     * along the bridge ({@link RailRoute#alongDeck}) and the hex is water, or the rail leaves the bridge's span
      * ({@link BridgeSpan#of}) along the deck (a rail side of a span hex that is a bridge exit) off the board or onto a hex
-     * whose ground is within one level of that deck, as a road meets a deck; otherwise on the ground, beneath any bridge
-     * (a rail crossing under it on water lies on the bed, as its neighbours). Never on a roof, industrial top or fuel
-     * tank: there it runs on the ground inside them. Each span hex's rail sides are its sides as converted
+     * whose ground is within one level of that deck, as a road meets a deck; otherwise it lies on the ground, beneath any
+     * bridge (a rail crossing under it on water lies on the bed, as its neighbours). Never on a roof, industrial top or
+     * fuel tank: there it runs on the ground inside them. Each span hex's rail sides are its sides as converted
      * ({@link #convertedSides}): rail00 art anywhere on the span counts the sides it joins.
      */
-    private static BoardDecoration.Placement railPlacement(Board board, Coords at, int sides,
-          Map<Coords, TilesetScenery.Scenery> scenery) {
+    private static boolean railOnDeck(Board board, Coords at, int sides, Map<Coords, TilesetScenery.Scenery> scenery) {
         Hex hex = board.getHex(at);
-        if (!RailRoute.alongDeck(sides, RailRoute.bridgeExits(hex))) { return BoardDecoration.Placement.ground(); }
-        var deck = BoardDecoration.Placement.on("bridge", 0);
-        if (hex.containsTerrain(Terrains.WATER)) { return deck; }
+        if (!RailRoute.alongDeck(sides, RailRoute.bridgeExits(hex))) { return false; }
+        if (hex.containsTerrain(Terrains.WATER)) { return true; }
         List<Coords> span = BridgeSpan.of(board::getHex, at);
         for (Coords member : span) {
             Hex bridge = board.getHex(member);
@@ -1212,11 +1294,11 @@ public final class BoardSceneryLayouts {
                 Coords next = member.translated(direction);
                 if ((along & RailRoute.side(direction)) == 0 || span.contains(next)) { continue; }
                 if (!board.contains(next) || Math.abs(board.getHex(next).getLevel() - BridgeSpan.deck(bridge)) <= 1) {
-                    return deck;
+                    return true;
                 }
             }
         }
-        return BoardDecoration.Placement.ground();
+        return false;
     }
 
     /** The sides of {@code at}'s rail: its legacy art's, where the scan resolved it, else its rail markers'. */

@@ -86,6 +86,7 @@ final class BoardFeatures {
                       Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.METAL_CONTENT,
                       Terrains.DEPLOYMENT_ZONE, Terrains.IMPASSABLE, Terrains.ULTRA_SUBLEVEL, Terrains.FIRE, Terrains.SMOKE,
                       Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED, Terrains.BRIDGE_MUD,
+                      Terrains.BRIDGE_ROAD, Terrains.BRIDGE_RAIL, Terrains.RAIL,
                       Terrains.FIELDS, Terrains.SWAMP, Terrains.MUD, Terrains.ICE, Terrains.BLACK_ICE, Terrains.BLDG_BASE_COLLAPSED,
                       Terrains.ARMS, Terrains.LEGS, Terrains.WATER_FLUFF -> true;
                 case Terrains.MAGMA -> hex.terrainLevel(Terrains.MAGMA) == 1 || hex.terrainLevel(Terrains.MAGMA) == 2;
@@ -395,12 +396,6 @@ final class BoardFeatures {
                     scale * (float) feature.stretch().z());
     }
 
-    /**
-     * The hex's objects as features, each rail's buffer stops after it ({@link RailRoute#stops} of its drawn sides), then
-     * the rows of its vegetation skin ({@link BoardSceneryLayouts#skin}, a container yard): the rail or the woods own
-     * them, so the hex never stores them, they come and go with the rail's sides or the woods' cover and are never picked
-     * as objects ({@link #terrainOwned}). The stops ride the rail ({@link RailRoute#ride}).
-     */
     /** The hex's bridge, at its height above the hex's level (BoardBridge.deckZ). */
     private static void addBridge(Hex hex, List<BoardScene.Feature> result) {
         if (hex.containsTerrain(Terrains.BRIDGE)) {
@@ -410,16 +405,27 @@ final class BoardFeatures {
         }
     }
 
+    /**
+     * The rails the hex's rail terrain yields ({@link RailRoute#derived}) and its stored objects, as features, each rail's
+     * buffer stops after it ({@link RailRoute#stops} of its drawn sides), then the rows of its vegetation skin
+     * ({@link BoardSceneryLayouts#skin}, a container yard): the terrain, the rail or the woods own them, so the hex never
+     * stores them, they come and go with the terrain, the rail's sides or the woods' cover and are never picked as
+     * objects ({@link #terrainOwned}). The stops ride the rail ({@link RailRoute#ride}). A destroyed rail yields no track
+     * and no stops.
+     */
     static List<BoardScene.Feature> decorations(Hex hex, Coords coords) {
         List<BoardScene.Feature> result = new ArrayList<>();
         int bridgeExits = hex.containsTerrain(Terrains.BRIDGE) ? hex.getTerrain(Terrains.BRIDGE).getExits() : 0;
-        for (var object : hex.getDecorations()) {
+        String owned = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":";
+        List<megamek.common.board.BoardDecoration> objects = new ArrayList<>(RailRoute.derived(hex, owned));
+        objects.addAll(hex.getDecorations());
+        for (var object : objects) {
             result.add(feature(hex, object));
             if (RailRoute.kind(object) != RailRoute.Kind.RAIL) { continue; }
             int index = 0;
+            String stops = terrainOwned(object) ? object.id() : owned + object.id();
             for (var stop : RailRoute.stops(RailRoute.drawnSides(object, bridgeExits))) {
-                result.add(feature(hex, new megamek.common.board.BoardDecoration(
-                      TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":" + object.id() + "#" + index++, "prop",
+                result.add(feature(hex, new megamek.common.board.BoardDecoration(stops + "#" + index++, "prop",
                       RailRoute.BUFFER_STOP, null, object.x() + stop.x() / HexTile.WIDTH, object.y() + stop.y() / HexTile.HEIGHT,
                       stop.rotation(), false, 1, RailRoute.ride(object), 0, false)));
             }

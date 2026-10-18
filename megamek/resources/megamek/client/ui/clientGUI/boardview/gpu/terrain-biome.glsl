@@ -42,7 +42,7 @@ vec3 biomeSoilNormal(MaterialProjection p, vec3 face, float mixer) {
 }
 
 void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, float rim, float materialHeight, float sand,
-      inout vec3 color, inout vec3 normal, inout float cavity, inout float roughness,
+      float deckMud, inout vec3 color, inout vec3 normal, inout float cavity, inout float roughness,
       inout float grass, inout vec3 bounce, out float pool, out float damp) {
     pool = 0.0; damp = 0.0;
     // Capture every quad derivative before any spatial return/branch. Projection already contains world XYZ.
@@ -57,6 +57,9 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
     vec4 cover, fringe;
     float tundra;
     biomeCoverage(world, 14.0, length(abs(worldDx.xy) + abs(worldDy.xy)), cover, fringe, tundra);
+    // A natural bridge's muddy deck is mud at its own height (ground mud reaches only its hex's ground).
+    cover.w = max(cover.w, deckMud);
+    fringe.w = max(fringe.w, deckMud);
     if (!shore) { tundraSurface(world, face, tundra, color, normal, cavity, grass, bounce); }
     if (family(4.0)) return;
     cover.yzw *= min(3.0, 1.0 / max(dot(cover.yzw, vec3(1.0)), .0001));

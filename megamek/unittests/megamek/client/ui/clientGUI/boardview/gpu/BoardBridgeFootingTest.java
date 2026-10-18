@@ -173,9 +173,17 @@ class BoardBridgeFootingTest {
         }
     }
 
+    /** The scene with the deck at {@code at} carrying a road of {@code kind} over all its exits. */
+    private static BoardScene paved(BoardScene scene, Coords at, BoardRoad.Kind kind) {
+        var tile = scene.tile(at);
+        return BoardNaturalBridgeTest.replace(scene, BoardBridgeMaterialsTest.withDeckRoad(tile, kind,
+              BoardBridge.feature(tile).bridgeExits()));
+    }
+
     @Test
     void bridgeToBridgeJoinsDoNotGrow() {
-        var scene = BoardBridgeMaterialsTest.straight(new Coords(4, 4), 3, 3, BoardRoad.Kind.PAVED, BoardRoad.Kind.DIRT);
+        var scene = BoardBridgeMaterialsTest.straight(new Coords(4, 4), 3, 3, BoardRoad.Kind.PAVED, BoardRoad.Kind.DIRT,
+              BoardRoad.Kind.PAVED);
         var middle = scene.tile(new Coords(4, 5));
         var footing = BoardBridgeFooting.build(scene, middle, TerrainLod.FULL, new HashMap<>());
         assertTrue(footing.shape().facets().isEmpty());
@@ -574,6 +582,7 @@ class BoardBridgeFootingTest {
         var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.GRASS, false, true);
         scene = BoardBridgeTypeTest.typed(BoardNaturalBridgeTest.replace(scene,
               BoardRoadTest.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, 3, BoardScene.Surface.GRASS)), HexAppearance.BUILT_BRIDGE);
+        scene = paved(scene, at, BoardRoad.Kind.PAVED);
         var tile = scene.tile(at);
         var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, new HashMap<>());
         float reach = footing.lengths().get(3);
@@ -608,6 +617,7 @@ class BoardBridgeFootingTest {
             var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.GRASS, false, true);
             scene = BoardBridgeTypeTest.typed(BoardNaturalBridgeTest.replace(scene,
                   BoardRoadTest.tile(at.translated(0), kind, 9, 3, BoardScene.Surface.GRASS)), HexAppearance.BUILT_BRIDGE);
+            scene = paved(scene, at, kind);
             var tile = scene.tile(at);
             var surfaces = new HashMap<Coords, BoardSurface>();
             var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, surfaces);

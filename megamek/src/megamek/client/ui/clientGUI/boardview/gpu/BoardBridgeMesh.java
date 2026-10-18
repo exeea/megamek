@@ -25,7 +25,7 @@ final class BoardBridgeMesh {
 
     /** Model coordinates: deck top at zero, before the shared bridge grade and placement are applied. */
     static List<BoardBridge.Facet> build(BoardScene.Tile tile, BoardBridge.Deck deck) {
-        BoardRoad road = deck.road(tile.coords());
+        BoardRoad road = deck.slab(tile.coords());
         Area carriageway = road.footprint(0), slab = road.footprint(BoardRoad.SHOULDER);
         boolean rail = false;
         for (var feature : tile.features()) {

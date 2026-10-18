@@ -207,8 +207,9 @@ final class GpuRoads {
         return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false);
     }
 
+    /** The deck road's paint: its kind on its own sides ({@link BoardBridge.Deck#road}). */
     static List<Patch> deckPatches(BoardScene.Tile tile, BoardBridge.Deck deck, BoardRoad road) {
-        return patches(tile.coords(), tile.surface(), deck.kind(), deck.exits(), road, true);
+        return patches(tile.coords(), tile.surface(), deck.kind(), deck.roadExits(), road, true);
     }
 
     /** A bare bank gets a grounded material apron after the solid deck and its tapered rails have ended. */
@@ -349,15 +350,19 @@ final class GpuRoads {
                   BoardGeometry.corner(tile.coords(), elevation, i + 1).add(0, 0, lift), -1));
         }
         if (footing != null) {
-            result.addAll(deck(patch, footing));
+            result.addAll(deck(patch, footing, SURFACE_LIFT));
         }
         return result;
     }
 
-    /** Sloped decks carry every coat on the same triangles as the structural surface. */
-    static List<BoardTacticalGeometry.Triangle> deck(Patch patch, BoardBridge.Shape shape) {
+    /**
+     * Every coat on the same triangles as the structural surface, the TOP facets of {@code shape}, whose top already
+     * stands {@code lift} (model px) above the deck's plane: a built deck's slab and sloped decks at the road lift, a rock
+     * arch's top at none.
+     */
+    static List<BoardTacticalGeometry.Triangle> deck(Patch patch, BoardBridge.Shape shape, float lift) {
         List<BoardTacticalGeometry.Triangle> result = new ArrayList<>();
-        float offset = (patch.lift() + .01f - SURFACE_LIFT) * BoardGeometry.hexScale();
+        float offset = (patch.lift() + .01f - lift) * BoardGeometry.hexScale();
         for (var face : shape.facets()) {
             if (face.part() != BoardBridge.Part.TOP) { continue; }
             result.add(new BoardTacticalGeometry.Triangle(new Vector3(face.a()).add(0, 0, offset),
@@ -368,7 +373,7 @@ final class GpuRoads {
 
     static List<BoardTacticalGeometry.Triangle> deck(BoardScene.Tile tile, BoardScene.Feature bridge, Patch patch,
           BoardBridgeFooting footing, Map<Coords, BoardSurface> surfaces, BoardBridge.Shape slope) {
-        var result = slope == null ? deck(tile, bridge, patch, footing.shape()) : deck(patch, slope);
+        var result = slope == null ? deck(tile, bridge, patch, footing.shape()) : deck(patch, slope, SURFACE_LIFT);
         for (int d = 0; d < 6; d++) {
             if ((footing.bareExits() & (1 << d)) == 0) { continue; }
             // Only the existing dry bank carries the apron. Never drape it onto the surface under the span.

@@ -157,7 +157,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
      * Whether a pier stands under the joint of the tile's deck toward {@code d}, the edge it shares with the next hex of
      * its deck: the decks are {@link BoardBridge#connected}, the Pillars toggle ({@link HexAppearance#PILLARS}) is on in
      * either hex, no drawn ground road crosses that edge, and the deck is at least one whole level above both floors. The
-     * toggle is a built type, so its span is built ({@link BoardBridge#kind}): a rock arch has none. Never at a hex
+     * toggle is a built type ({@link HexAppearance#bridgeBuilt}): a rock arch has none. Never at a hex
      * centre, a bank, ramp or road landing, an open or off-board end: a one-hex bridge rests on its landings. Scene data
      * only, and the same from both hexes.
      */
@@ -345,6 +345,12 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
     private static Vector3 local(Vector3[] frame, float x, float y) {
         float s = BoardGeometry.hexScale();
         return new Vector3(frame[0]).mulAdd(frame[1], x * s).mulAdd(frame[2], y * s);
+    }
+
+    /** The footing as the deck road's paint sees it: a bare bank's apron only on the road's own sides. */
+    BoardBridgeFooting paint(BoardBridge.Deck deck) {
+        int bare = bareExits & deck.roadExits();
+        return bare == bareExits ? this : new BoardBridgeFooting(shape, lengths, bare, solidExits);
     }
 
     /** Paint extends onto the existing bank after the structural footing has ended. */

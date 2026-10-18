@@ -17,8 +17,8 @@ import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 
 /**
- * The shared deck shape and its presentation: its type (built or natural, {@link HexAppearance#bridgeBuilt}) and the
- * materials of connected roads.
+ * The shared deck shape and its presentation: its family (natural, truss or standard, {@link #family}) and the road it
+ * carries, the stored {@code bridge_road} ({@link BoardScene.Tile#deckRoad}).
  */
 final class BoardBridge {
     static final float NATURAL_HALF_WIDTH = 4;
@@ -61,20 +61,48 @@ final class BoardBridge {
     }
 
     /**
+     * {@code kind} and {@code roadExits}: the road the deck carries on its own sides, NONE and 0 on a clean deck;
+     * {@code exits}: the bridge's. {@code natural}: a rock arch ({@link Family#NATURAL}). {@code neighbors}: per side, the
+     * road kind that meets the deck there (a joined deck's road leaving back, or a road approach's), else NONE.
      * {@code piers}: the hex's Pillars toggle ({@link HexAppearance#PILLARS}), see {@link BoardBridgeFooting#pier}.
-     * {@code colours}: the span's truss colours ({@link BridgeSpan#truss}), null for the standard design or a natural
-     * span. {@code joints}: the exits whose neighbour is a joined deck ({@link #connected}); a truss continues there
-     * and ends with an end post at every other exit. Any change rebuilds the hex.
+     * {@code colours}: the look span's truss colours ({@link BridgeSpan#truss}), null for the standard design or a natural
+     * span. {@code joints}: the exits whose neighbour is a joined deck of its family ({@link #connected}); a truss
+     * continues there and ends with an end post at every other exit. Any change rebuilds the hex.
      */
-    record Deck(BoardRoad.Kind kind, int exits, List<BoardRoad.Kind> neighbors, BoardScene.Surface surface,
-          List<Float> rises, boolean piers, BoardDecoration.Colours colours, int joints) {
-        BoardRoad road(Coords coords) { return BoardRoad.layout(coords, exits, kind, neighbors::get); }
-        boolean natural() { return kind == BoardRoad.Kind.NONE; }
+    record Deck(BoardRoad.Kind kind, int roadExits, int exits, boolean natural, List<BoardRoad.Kind> neighbors,
+          BoardScene.Surface surface, List<Float> rises, boolean piers, BoardDecoration.Colours colours, int joints) {
+        /** The deck road's course over its own sides: what its paint covers. */
+        BoardRoad road(Coords coords) { return BoardRoad.layout(coords, roadExits, kind, neighbors::get); }
+
+        /** The carriageway over every bridge exit at a road's width: the slab and its top. */
+        BoardRoad slab(Coords coords) {
+            return BoardRoad.layout(coords, exits, kind == BoardRoad.Kind.NONE ? BoardRoad.Kind.ALLEY : kind, neighbors::get);
+        }
+
+        /** Whether the deck road paints the whole top: it has every bridge exit. */
+        boolean paved() { return kind != BoardRoad.Kind.NONE && (roadExits & exits) == exits; }
         boolean sloped() { return rises.stream().anyMatch(rise -> rise != 0); }
         boolean truss() { return colours != null; }
     }
 
-    private record Material(BoardRoad.Kind kind, BoardScene.Surface surface, BoardDecoration.Colours truss) { }
+    /**
+     * The look families of decks ({@link HexAppearance#bridgeBuilt}, {@link HexAppearance#truss}): a look span (its
+     * material, its truss colours) joins only decks of one family, and the 3D draws a seam where families meet. Untyped
+     * and implicit decks are standard.
+     */
+    enum Family { NATURAL, TRUSS, STANDARD }
+
+    static Family family(BoardScene.Tile tile) {
+        return Boolean.FALSE.equals(HexAppearance.bridgeBuilt(tile.appearance())) ? Family.NATURAL
+              : HexAppearance.truss(tile.appearance()) ? Family.TRUSS : Family.STANDARD;
+    }
+
+    /** The road of {@code tile}'s deck where it has side {@code side}, else NONE. */
+    static BoardRoad.Kind deckRoad(BoardScene.Tile tile, int side) {
+        return (tile.deckRoadExits() & (1 << side)) != 0 ? tile.deckRoad() : BoardRoad.Kind.NONE;
+    }
+
+    private record Material(BoardScene.Surface surface, BoardDecoration.Colours truss) { }
 
     /**
      * PIER: the concrete piers under the deck's joints ({@link BoardBridgeFooting#pier}), never a walkable level. STEEL:
@@ -140,36 +168,29 @@ final class BoardBridge {
     static Deck deck(BoardScene scene, BoardScene.Tile tile) {
         var bridge = feature(tile);
         if (bridge == null) { return null; }
-        var material = material(scene, tile);
-        var kind = material.kind();
+        var family = family(tile);
+        var material = material(scene, tile, family);
         var neighbors = new ArrayList<BoardRoad.Kind>();
         var rises = new ArrayList<Float>();
         int joints = 0;
         for (int d = 0; d < 6; d++) {
             var next = scene.tile(tile.coords().translated(d));
             boolean joined = connected(tile, next, d);
-            if (joined) { joints |= 1 << d; }
-            neighbors.add(joined ? kind : road(tile, next, d) ? next.road() : BoardRoad.Kind.NONE);
+            if (joined && family(next) == family) { joints |= 1 << d; }
+            neighbors.add(joined ? deckRoad(next, (d + 3) % 6) : road(tile, next, d) ? next.road() : BoardRoad.Kind.NONE);
             rises.add(edgeElevation(tile, next, d) - tile.elevation() - bridge.elevation());
         }
-        return new Deck(kind, bridge.bridgeExits(), List.copyOf(neighbors), material.surface(), List.copyOf(rises),
-              HexAppearance.pillars(tile.appearance()), material.truss(), joints);
+        return new Deck(tile.deckRoad(), tile.deckRoadExits(), bridge.bridgeExits(), family == Family.NATURAL,
+              List.copyOf(neighbors), material.surface(), List.copyOf(rises), HexAppearance.pillars(tile.appearance()),
+              material.truss(), joints);
     }
 
     /**
-     * NONE for a natural span; a built one inherits its best road approach (asphalt, then gravel, then dirt), or without
-     * one is plain unmarked asphalt (ALLEY).
+     * The look span's materials: the decks joined to the tile's of its family. A truss span's design and colours follow
+     * {@link BridgeSpan#truss}; a rock arch takes the commonest surface of the dry banks it rests on (a road meeting it is
+     * no bank).
      */
-    static BoardRoad.Kind kind(BoardScene scene, BoardScene.Tile tile) {
-        return material(scene, tile).kind();
-    }
-
-    /**
-     * The connected span's type and materials. Every bridge of a converted board stores its type; where its hexes
-     * differ, built wins. A span without any type (a transient editor state, a hand-made scene) is built, as the
-     * editor's stroke types a new bridge. A built span's truss design and colours follow {@link BridgeSpan#truss}.
-     */
-    private static Material material(BoardScene scene, BoardScene.Tile tile) {
+    private static Material material(BoardScene scene, BoardScene.Tile tile, Family family) {
         var pending = new ArrayDeque<BoardScene.Tile>();
         var visited = new HashSet<Coords>();
         var banks = new HashSet<Coords>();
@@ -177,28 +198,21 @@ final class BoardBridge {
         int[] votes = new int[surfaces.length];
         pending.add(tile);
         visited.add(tile.coords());
-        BoardRoad.Kind found = BoardRoad.Kind.NONE;
-        Boolean built = null;
         while (!pending.isEmpty()) {
             var current = pending.remove();
-            Boolean type = HexAppearance.bridgeBuilt(current.appearance());
-            if (type != null && (built == null || type)) { built = type; }
             for (int d = 0; d < 6; d++) {
                 var next = scene.tile(current.coords().translated(d));
-                if (connected(current, next, d)) {
+                if (connected(current, next, d) && family(next) == family) {
                     if (visited.add(next.coords())) { pending.add(next); }
-                } else if (next != null && next.roadExits() != 0 && road(current, next, d)) {
-                    // Only a road votes for the deck's material: a span that only rails reach stays plain asphalt.
-                    var kind = next.road() == BoardRoad.Kind.NONE ? BoardRoad.Kind.PAVED : next.road();
-                    if (priority(kind) > priority(found)) { found = kind; }
-                } else if (abutment(current, next, d) && next.surface() != BoardScene.Surface.CONCRETE && banks.add(next.coords())) {
+                } else if (family == Family.NATURAL && !(next != null && next.roadExits() != 0 && road(current, next, d))
+                      && abutment(current, next, d) && next.surface() != BoardScene.Surface.CONCRETE
+                      && banks.add(next.coords())) {
                     votes[next.surface().ordinal()]++;
                 }
             }
         }
-        if (built == null || built) {
-            return new Material(found == BoardRoad.Kind.NONE ? BoardRoad.Kind.ALLEY : found, BoardScene.Surface.ROCK,
-                  BridgeSpan.truss(at -> scene.tile(at).appearance(), visited));
+        if (family != Family.NATURAL) {
+            return new Material(BoardScene.Surface.ROCK, BridgeSpan.truss(at -> scene.tile(at).appearance(), visited));
         }
         var surface = tile.surface() == BoardScene.Surface.CONCRETE ? BoardScene.Surface.ROCK : tile.surface();
         int count = 0;
@@ -208,17 +222,7 @@ final class BoardBridge {
                 count = votes[candidate.ordinal()];
             }
         }
-        return new Material(BoardRoad.Kind.NONE, surface, null);
-    }
-
-    private static int priority(BoardRoad.Kind kind) {
-        return switch (kind) {
-            case NONE -> 0;
-            case DIRT -> 1;
-            case GRAVEL -> 2;
-            case ALLEY -> 3;
-            case PAVED -> 4;
-        };
+        return new Material(surface, null);
     }
 
     /** A carriageway (a road or a ground rail) on {@code next} meets the deck: it gets a half grade and a solid ramp. */

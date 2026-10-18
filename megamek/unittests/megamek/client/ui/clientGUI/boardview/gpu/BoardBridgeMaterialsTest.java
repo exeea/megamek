@@ -27,7 +27,7 @@ class BoardBridgeMaterialsTest {
         for (int x : new int[] { 3, 4 }) {
             var at = new Coords(x, 4);
             for (int d = 0; d < 6; d++) {
-                var scene = straight(at, d, 1, kind, kind);
+                var scene = straight(at, d, 1, kind, kind, kind);
                 var tile = scene.tile(at);
                 var deck = BoardBridge.deck(scene, tile);
                 assertEquals(kind, deck.kind());
@@ -52,7 +52,7 @@ class BoardBridgeMaterialsTest {
             for (int x : new int[] { 3, 4 }) {
                 var at = new Coords(x, 4);
                 for (int d = 0; d < 6; d++) {
-                    var scene = straight(at, d, 1, pair.getFirst(), pair.getLast());
+                    var scene = straight(at, d, 1, pair.getFirst(), pair.getLast(), pair.getFirst());
                     var tile = scene.tile(at);
                     var next = scene.tile(at.translated(d));
                     var deck = BoardBridge.deck(scene, tile);
@@ -86,7 +86,7 @@ class BoardBridgeMaterialsTest {
     void pavedApproachesKeepMarkingsWhenTheOtherApproachIsAnAlley() {
         var at = new Coords(4, 4);
         for (int d = 0; d < 6; d++) {
-            var scene = straight(at, d, 1, BoardRoad.Kind.PAVED, BoardRoad.Kind.ALLEY);
+            var scene = straight(at, d, 1, BoardRoad.Kind.PAVED, BoardRoad.Kind.ALLEY, BoardRoad.Kind.PAVED);
             var tile = scene.tile(at);
             var deck = BoardBridge.deck(scene, tile);
             assertEquals(BoardRoad.Kind.PAVED, deck.kind());
@@ -95,48 +95,27 @@ class BoardBridgeMaterialsTest {
         }
     }
 
+    /** b13 ways: a deck's road is painted on its own sides only; the slab still spans every bridge exit. */
     @Test
-    void onlyConnectedRoadsAtDeckHeightSupplyTheMaterial() {
+    void aDeckRoadIsPaintedOnItsOwnSidesOverTheWholeSlab() {
         var at = new Coords(4, 4);
-        var scene = straight(at, 0, 1, BoardRoad.Kind.DIRT, BoardRoad.Kind.DIRT);
-        scene = replace(scene, BoardRoadTest.tile(at.translated(1), BoardRoad.Kind.PAVED, 63, 0, BoardScene.Surface.GRASS));
-        assertEquals(BoardRoad.Kind.DIRT, BoardBridge.kind(scene, scene.tile(at)), "A road beside the bridge is not an approach");
-        scene = replace(scene, BoardRoadTest.tile(at.translated(0), BoardRoad.Kind.PAVED, 1, 0, BoardScene.Surface.GRASS));
-        assertEquals(BoardRoad.Kind.DIRT, BoardBridge.kind(scene, scene.tile(at)), "The road must have a reciprocal exit");
-        scene = replace(scene, BoardRoadTest.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, -3, BoardScene.Surface.GRASS));
-        assertEquals(BoardRoad.Kind.DIRT, BoardBridge.kind(scene, scene.tile(at)), "A road below the deck does not resurface it");
+        var scene = straight(at, 0, 1, BoardRoad.Kind.PAVED, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE);
+        scene = replace(scene, withDeckRoad(scene.tile(at), BoardRoad.Kind.PAVED, 1));
+        var deck = BoardBridge.deck(scene, scene.tile(at));
+        assertFalse(deck.paved(), "Half a deck painted is half road");
+        float[] north = megamek.common.board.RailRoute.border(0), south = megamek.common.board.RailRoute.border(3);
+        assertTrue(deck.road(at).distance(north[0], north[1]) < 0, "The road reaches its own side");
+        assertTrue(deck.road(at).distance(south[0], south[1]) > 0, "and ends at the centre");
+        assertTrue(deck.slab(at).distance(south[0], south[1]) < 0, "The slab spans every exit");
+        assertFalse(GpuRoads.deckPatches(scene.tile(at), deck, deck.road(at)).isEmpty());
     }
 
-    @Test
-    void longSpansInheritTheirBestApproachAndRespondToDistantEdits() {
-        var start = new Coords(4, 1);
-        for (var best : List.of(BoardRoad.Kind.GRAVEL, BoardRoad.Kind.ALLEY, BoardRoad.Kind.PAVED)) {
-            for (boolean reverse : new boolean[] { false, true }) {
-                var scene = straight(start, 3, 12, reverse ? best : BoardRoad.Kind.DIRT,
-                      reverse ? BoardRoad.Kind.DIRT : best);
-                for (int y = 1; y <= 12; y++) {
-                    var tile = scene.tile(new Coords(4, y));
-                    var deck = BoardBridge.deck(scene, tile);
-                    assertEquals(best, deck.kind(), "Every deck hex must inherit the best approach at either end");
-                    if (y > 1 && y < 12) {
-                        assertTrue(deck.road(tile.coords()).joins().isEmpty(), "No material changes inside a span");
-                    }
-                }
-            }
-        }
-        var onlyDirt = straight(start, 3, 12, BoardRoad.Kind.DIRT, BoardRoad.Kind.NONE);
-        var edited = straight(start, 3, 12, BoardRoad.Kind.GRAVEL, BoardRoad.Kind.NONE);
-        var far = new Coords(4, 11);
-        assertEquals(BoardRoad.Kind.DIRT, BoardBridge.deck(onlyDirt, onlyDirt.tile(far)).kind());
-        assertEquals(BoardRoad.Kind.GRAVEL, BoardBridge.deck(edited, edited.tile(far)).kind());
-        // An untyped span is built: without a road it is plain asphalt; a stored natural type is a rock arch.
-        var isolated = straight(start, 3, 12, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE);
-        assertEquals(BoardRoad.Kind.ALLEY, BoardBridge.deck(isolated, isolated.tile(far)).kind());
-        var natural = BoardBridgeTypeTest.typed(edited, HexAppearance.NATURAL_BRIDGE);
-        assertTrue(BoardBridge.deck(natural, natural.tile(far)).natural(), "A stored natural span ignores its approach");
-    }
-
-    static BoardScene straight(Coords start, int direction, int length, BoardRoad.Kind before, BoardRoad.Kind after) {
+    /**
+     * A straight span of {@code length} deck hexes over water between roads of the kinds {@code before} and
+     * {@code after} (NONE: no road); each deck carries a road of kind {@code deck} over both its exits, or none.
+     */
+    static BoardScene straight(Coords start, int direction, int length, BoardRoad.Kind before, BoardRoad.Kind after,
+          BoardRoad.Kind deck) {
         int exits = (1 << direction) | (1 << ((direction + 3) % 6));
         Map<Coords, BoardScene.Tile> route = new HashMap<>();
         for (int i = 0; i < length; i++) {
@@ -146,9 +125,9 @@ class BoardBridgeMaterialsTest {
             bridge.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 0));
             bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
             var ground = BoardSurfaceBlendTest.tile(at, BoardScene.Surface.GRASS, 0, 1, 0).ground();
-            route.put(at, new BoardScene.Tile(at, 0, 1, false, 0, BoardScene.Surface.GRASS,
+            route.put(at, withDeckRoad(new BoardScene.Tile(at, 0, 1, false, 0, BoardScene.Surface.GRASS,
                   ground, null, null, null, null, BoardFeatures.capture(bridge, at, Map.of()), List.of(),
-                  BoardLiquid.WATER, null, true, BoardRoad.Kind.NONE));
+                  BoardLiquid.WATER, null, true, BoardRoad.Kind.NONE), deck, deck == BoardRoad.Kind.NONE ? 0 : exits));
         }
         Coords entrance = start.translated((direction + 3) % 6), exit = start.translated(direction, length);
         route.put(entrance, BoardRoadTest.tile(entrance, before, before == BoardRoad.Kind.NONE ? 0 : exits, 0, BoardScene.Surface.GRASS));
@@ -165,7 +144,16 @@ class BoardBridgeMaterialsTest {
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
     }
 
-    private static BoardScene replace(BoardScene scene, BoardScene.Tile tile) {
+    /** {@code tile} with its deck carrying a road of {@code kind} on {@code exits} (a stored {@code bridge_road}). */
+    static BoardScene.Tile withDeckRoad(BoardScene.Tile t, BoardRoad.Kind kind, int exits) {
+        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
+              t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(),
+              t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(),
+              t.cliffTopExits(), t.bare(), t.groundCover(), t.bridge(), t.ultraSublevel(), t.tilesetDecals(),
+              t.tilesetScenery(), t.appearance(), t.cover(), t.barren(), kind, exits, t.deckMud(), t.railBed());
+    }
+
+    static BoardScene replace(BoardScene scene, BoardScene.Tile tile) {
         var tiles = new ArrayList<>(scene.tiles());
         tiles.set(tile.coords().getX() * scene.height() + tile.coords().getY(), tile);
         return new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());

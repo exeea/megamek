@@ -31,7 +31,7 @@ import megamek.common.board.RailRoute;
  * without sides draws a short N-S stub. MAGLEV is the elevated beam on the markers' fixed levels, eased between them;
  * RAIL is ballast, sleepers and two rails at real scale draped on what carries it: the ground the road engine shapes for
  * it as for a road ({@link BoardScene.Tile#wayExits}), or its bridge's drawn deck ({@link BoardBridge#drawnTop}). On a
- * drawn road only its rails show, set into the road. Rail ends close with buffer stops, which are objects of their own
+ * drawn road, the ground's or the deck's, only its rails show, set into the road. Rail ends close with buffer stops, which are objects of their own
  * ({@link RailRoute#stops}).
  */
 final class BoardRail {
@@ -218,9 +218,11 @@ final class BoardRail {
         return new Layout(kind, ends, List.copyOf(draped), List.copyOf(streets));
     }
 
-    /** The drawn road a rail of the tile is set into: none on a deck. */
+    /** The drawn road a rail of the tile is set into: its ground's road, or on its deck the deck's road. */
     private static BoardRoad street(BoardScene scene, BoardScene.Tile tile, boolean onDeck) {
-        return !onDeck && BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
+        if (!onDeck) { return BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null; }
+        var deck = BoardBridge.deck(scene, tile);
+        return deck == null || deck.kind() == BoardRoad.Kind.NONE ? null : deck.road(tile.coords());
     }
 
     /**

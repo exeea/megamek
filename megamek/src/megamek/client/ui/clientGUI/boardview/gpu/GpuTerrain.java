@@ -86,6 +86,8 @@ final class GpuTerrain implements Disposable {
     static final int CHUNK_SIZE = TerrainLod.CHUNK_SIZE;
     static final float DEFAULT_TERRAIN_WEAR = 1f;
     static final boolean DEFAULT_ELEVATION_GRADING = true;
+    /** A sculpt vertex's kind (terrain-sculpt.frag, dry ground below .125) on a natural bridge's muddy deck top. */
+    static final float DECK_MUD_KIND = .1f;
     // Extra texels pay for the camera guard band without reducing the former 2048-map's world-space detail.
     static final int SHADOW_RESOLUTION = 2304;
     private static final float SHADOW_GUARD_SCALE = 1.1f;
@@ -2397,7 +2399,7 @@ final class GpuTerrain implements Disposable {
                 // corners, which a neighbour's edit can move, still need checking.
                 boolean same = before == tile;
                 if (!same && (before.blackIce() != tile.blackIce() || before.bare() != tile.bare()
-                      || before.barren() != tile.barren()
+                      || before.barren() != tile.barren() || before.deckMud() != tile.deckMud()
                       || before.ultraSublevel() != tile.ultraSublevel()
                       || !before.appearance().equals(tile.appearance()))) { changedTiles.add(tile.coords()); }
                 // Artwork is recomposed for dirtied chunks only, so a hex whose decal or tileset artwork changed is
@@ -3383,19 +3385,32 @@ final class GpuTerrain implements Disposable {
                 var deck = BoardBridge.deck(scene, tile);
                 bridges.put(tile.coords(), deck);
                 // A rock arch has no piers. A built deck's piers join its shape: drawn, shadowed and picked with it in every view.
+                // A deck's road is painted on its own sides; a clean deck shows its top (builtBridge, a rock arch's rock).
                 if (deck.natural()) {
-                    bridgeShapes.put(tile.coords(), BoardNaturalBridge.build(scene, tile, deck, lod, surfaces));
+                    var arch = BoardNaturalBridge.build(scene, tile, deck, lod, surfaces);
+                    bridgeShapes.put(tile.coords(), arch);
+                    if (deck.kind() == BoardRoad.Kind.NONE) { continue; }
+                    // A road on a rock arch lies on its top, as rails do.
+                    BoardRoad road = deck.road(tile.coords());
+                    for (var patch : GpuRoads.deckPatches(tile, deck, road)) {
+                        check.run();
+                        if (patch.shape().isEmpty()) { continue; }
+                        patches.add(new RoadPatch(patch, masks.share(GpuRoads.mask(road, patch)),
+                              GpuRoads.deck(patch, arch, 0), true));
+                    }
                     continue;
                 }
                 var footing = BoardBridgeFooting.build(scene, tile, lod, surfaces);
                 var shape = footing.withDeck(scene, tile, deck, lod, surfaces);
                 if (!shape.facets().isEmpty()) { bridgeShapes.put(tile.coords(), shape); }
-                BoardRoad road = footing.road(deck, tile.coords());
-                for (var patch : GpuRoads.deckPatches(tile, deck, road, footing)) {
+                if (deck.kind() == BoardRoad.Kind.NONE) { continue; }
+                var painted = footing.paint(deck);
+                BoardRoad road = painted.road(deck, tile.coords());
+                for (var patch : GpuRoads.deckPatches(tile, deck, road, painted)) {
                     check.run();
                     if (patch.shape().isEmpty()) { continue; }
                     patches.add(new RoadPatch(patch, masks.share(GpuRoads.mask(road, patch)),
-                          GpuRoads.deck(tile, feature, patch, footing, surfaces, shape), true));
+                          GpuRoads.deck(tile, feature, patch, painted, surfaces, shape), true));
                 }
             }
             if (!patches.isEmpty()) { roads.put(tile.coords(), patches); }
@@ -3855,7 +3870,7 @@ final class GpuTerrain implements Disposable {
             }
             if (bridge) {
                 var deck = prepared.bridges().get(tile.coords());
-                if (deck.natural()) { naturalBridge(solid, bridgeShape); }
+                if (deck.natural()) { naturalBridge(solid, bridgeShape, tile.deckMud()); }
                 else { builtBridge(solid, bridgeShape, deck, scene, tile); }
                 continue;
             }
@@ -4920,8 +4935,11 @@ final class GpuTerrain implements Disposable {
         for (BoardSurface.Face face : walls) { chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c()); }
     }
 
-    /** Use the ordinary terrain materials and chunk batches; the shell has no per-bridge GPU resource. */
-    private void naturalBridge(Layer solid, BoardBridge.Shape shape) {
+    /**
+     * Use the ordinary terrain materials and chunk batches; the shell has no per-bridge GPU resource. A muddy deck's
+     * ({@code mud}) top carries {@link #DECK_MUD_KIND}, which the sculpt shader shows as mud.
+     */
+    private void naturalBridge(Layer solid, BoardBridge.Shape shape, boolean mud) {
         float metre = BoardRelief.metres(1);
         var normals = wallNormals(shape.facets().stream().map(face ->
               new BoardSurface.Face(face.a(), face.b(), face.c(), BoardSurface.Finish.WALL, -1)).toList());
@@ -4935,7 +4953,7 @@ final class GpuTerrain implements Disposable {
                     float above = (p.z - shape.bounds().min.z) / metre;
                     float below = Math.max(0, shape.level() * BoardGeometry.level() - p.z) / metre;
                     var data = new Color(soffit ? .78f : 1, top || soffit ? (shape.level() + 64) / 255f : 1,
-                          top ? 0 : soffit ? 1 : .5f, top ? .6f : .55f);
+                          top ? mud ? DECK_MUD_KIND : 0 : soffit ? 1 : .5f, top ? .6f : .55f);
                     points[i++] = vertex(p, normals.get(p), top ? Math.max(.02f, 2.5f - below * 6) : above,
                           top ? 99 : below, data);
                 }
@@ -4944,13 +4962,19 @@ final class GpuTerrain implements Disposable {
         });
     }
 
-    /** Generate GPU batches from the same prepared bridge facets used for placement and picking. */
+    /**
+     * Generate GPU batches from the same prepared bridge facets used for placement and picking. A deck road over every
+     * exit paints the whole top, which then takes its material; any other top is bare concrete.
+     */
     private void builtBridge(Layer solid, BoardBridge.Shape shape, BoardBridge.Deck bridge,
           BoardScene scene, BoardScene.Tile tile) {
-        Material deck = roadMaterial(GpuRoads.texture(bridge.kind()).substring("roads/".length()), false);
-        deck.set(GpuIceShader.road(deck, scene, tile));
-        deck.set(new BridgeDeck());
         Material concrete = material(assets.material("terrain/surfaces/concrete"), false);
+        Material deck = concrete;
+        if (bridge.paved()) {
+            deck = roadMaterial(GpuRoads.texture(bridge.kind()).substring("roads/".length()), false);
+            deck.set(GpuIceShader.road(deck, scene, tile));
+            deck.set(new BridgeDeck());
+        }
         Material steel = bridge.truss() ? new Material(ColorAttribute.createDiffuse(Color.WHITE), new GpuLinearColors()) : null;
         bridgeFooting(solid, shape, deck, concrete, steel);
     }

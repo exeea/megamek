@@ -2,7 +2,9 @@
 package megamek.common.board;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import megamek.common.Hex;
 import megamek.common.game.IGame;
@@ -19,7 +21,8 @@ import megamek.common.units.VTOL;
  * leaves by ({@link BoardDecoration#connections()}, N=1 ... NW=32) and, only where it differs from the default layout of
  * those sides ({@link #pieces(int)}), the track pieces it lays between them ({@link BoardDecoration#tracks()}). Rails as
  * terrain ({@link Terrains#RAIL} on the ground, {@link Terrains#BRIDGE_RAIL} on a bridge deck, exits = sides) yield
- * derived markers, never stored ({@link #markers}); legacy conversions and the editor still store route markers.
+ * derived markers, never stored ({@link #markers}); the legacy conversion lays rails as terrain ({@link #lay}), the
+ * editor still stores route markers.
  * A hex may hold several markers of one kind, at different levels (routes crossing over each other), whose sides are
  * disjoint. A side joins the neighbour's marker of the same kind that has the opposite side, so parallel routes in
  * adjacent hexes stay apart and the kinds never join.
@@ -89,22 +92,37 @@ public final class RailRoute {
     /** A hex's markers of {@code kind}: the ones its rail terrain yields ({@link #derived}), then the stored ones in order. */
     public static List<BoardDecoration> markers(Hex hex, Kind kind) {
         if (hex == null) { return List.of(); }
-        List<BoardDecoration> result = kind == Kind.RAIL ? derived(hex) : new ArrayList<>();
+        List<BoardDecoration> result = kind == Kind.RAIL ? derived(hex, "") : new ArrayList<>();
         hex.getDecorations().stream().filter(object -> kind(object) == kind).forEach(result::add);
         return List.copyOf(result);
     }
 
     /**
-     * The markers a hex's rail terrain yields: its intact ground rail ({@link Terrains#RAIL}, id {@link #GROUND_RAIL}, on
-     * the ground) and its deck rail ({@link Terrains#BRIDGE_RAIL}, id {@link #DECK_RAIL}, on the bridge deck). Each leaves
-     * by its terrain's exits and lays the junction layout the hex's appearance stores for it ({@link HexAppearance#tracks})
-     * where that is a layout of them, else the default. A destroyed rail yields none.
+     * The markers a hex's rail terrain yields: its intact ground rail ({@link Terrains#RAIL}, id {@code prefix} +
+     * {@link #GROUND_RAIL}, on the ground) and its deck rail ({@link Terrains#BRIDGE_RAIL}, id {@code prefix} +
+     * {@link #DECK_RAIL}, on the bridge deck). Each leaves by its terrain's exits and lays the junction layout the hex's
+     * appearance stores for it ({@link HexAppearance#tracks}) where that is a layout of them, else the default. A
+     * destroyed rail yields none.
      */
-    private static List<BoardDecoration> derived(Hex hex) {
+    public static List<BoardDecoration> derived(Hex hex, String prefix) {
         List<BoardDecoration> result = new ArrayList<>(2);
-        derive(hex, Terrains.RAIL, GROUND_RAIL, "rail", BoardDecoration.Placement.ground(), result);
-        derive(hex, Terrains.BRIDGE_RAIL, DECK_RAIL, "bridgeRail", BoardDecoration.Placement.on("bridge", 0), result);
+        derive(hex, Terrains.RAIL, prefix + GROUND_RAIL, "rail", BoardDecoration.Placement.ground(), result);
+        derive(hex, Terrains.BRIDGE_RAIL, prefix + DECK_RAIL, "bridgeRail", BoardDecoration.Placement.on("bridge", 0), result);
         return result;
+    }
+
+    /**
+     * The one writer of a hex's rail: an intact rail with these sides on its ground ({@link Terrains#RAIL}) or on its
+     * bridge deck ({@code deck}, {@link Terrains#BRIDGE_RAIL}, whose sides the caller keeps within the bridge's exits),
+     * with its junction layout {@code tracks} on the rail's appearance, where it is not the default (0).
+     */
+    public static void lay(Hex hex, boolean deck, int sides, int tracks) {
+        hex.addTerrain(new Terrain(deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL, 1, true, sides));
+        Map<String, HexAppearance> appearance = new HashMap<>(hex.getAppearance());
+        HexAppearance layout = HexAppearance.tracks(tracks);
+        if (layout == null) { appearance.remove(deck ? "bridgeRail" : "rail"); }
+        else { appearance.put(deck ? "bridgeRail" : "rail", layout); }
+        hex.setAppearance(appearance);
     }
 
     private static void derive(Hex hex, int type, String id, String owner, BoardDecoration.Placement placement,

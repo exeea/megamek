@@ -101,7 +101,7 @@ class BoardBridgeSlopeTest {
             }
             var carriageway = road.footprint(-.1f);
             for (var patch : GpuRoads.deckPatches(tile, deck, road)) {
-                var paint = GpuRoads.deck(patch, shape);
+                var paint = GpuRoads.deck(patch, shape, GpuRoads.SURFACE_LIFT);
                 float offset = (patch.lift() + .01f - GpuRoads.SURFACE_LIFT) * BoardGeometry.hexScale();
                 for (var face : paint) {
                     var p = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1f / 3);
@@ -256,13 +256,16 @@ class BoardBridgeSlopeTest {
 
     static BoardScene scene(Coords center, int exits, boolean roads) {
         var route = new HashMap<Coords, BoardScene.Tile>();
-        route.put(center, bridge(center, -1, 3, exits));
+        // Roads meet the span, whose decks carry a paved road over their exits (as a legacy board's conversion writes).
+        java.util.function.UnaryOperator<BoardScene.Tile> paved = tile -> roads ? BoardBridgeMaterialsTest.withDeckRoad(tile,
+              BoardRoad.Kind.PAVED, BoardBridge.feature(tile).bridgeExits()) : tile;
+        route.put(center, paved.apply(bridge(center, -1, 3, exits)));
         for (int d = 0; d < 6; d++) {
             if ((exits & (1 << d)) == 0) { continue; }
             var at = center.translated(d);
             int straight = (1 << d) | (1 << ((d + 3) % 6));
             // Vary the supporting ground too: connectivity uses absolute deck elevation.
-            route.put(at, bridge(at, -2, 4 + step(d), straight));
+            route.put(at, paved.apply(bridge(at, -2, 4 + step(d), straight)));
             if (roads) {
                 at = at.translated(d);
                 route.put(at, BoardRoadTest.tile(at, BoardRoad.Kind.PAVED, straight, 2 + step(d), BoardScene.Surface.ROCK));

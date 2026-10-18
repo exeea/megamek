@@ -53,11 +53,14 @@ final class GpuBiomeSurface implements Disposable {
     int iceWidth() { return iced ? width : 0; }
     int iceHeight() { return iced ? height : 0; }
 
-    /** Whether a biome hex or liquids of two palettes are on the board: only then can the stencil change a fragment. */
+    /**
+     * Whether a biome hex, a muddy bridge deck (its mud cover, terrain-biome.glsl) or liquids of two palettes are on the
+     * board: only then can the stage change a fragment.
+     */
     static boolean active(BoardScene scene) {
         int palettes = 0;
         for (var tile : scene.tiles()) {
-            if (BoardBiome.kind(tile) != BoardScene.Biome.NONE) { return true; }
+            if (BoardBiome.kind(tile) != BoardScene.Biome.NONE || tile.deckMud()) { return true; }
             if (tile.liquid().present() && !tile.liquid().molten() && !tile.frozen()) {
                 palettes |= 1 << GpuWaterShader.palette(tile.liquid());
             }

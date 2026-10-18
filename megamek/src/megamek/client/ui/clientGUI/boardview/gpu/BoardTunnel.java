@@ -23,10 +23,10 @@ record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind ki
         if (BoardRoad.rendered(tile)) {
             entrances(scene, tile, tile.roadExits(), tile.elevation(), tile.road(), false, result);
         }
+        // A deck's road continues into the wall on its own sides.
         var feature = BoardBridge.feature(tile);
-        var kind = feature == null ? BoardRoad.Kind.NONE : BoardBridge.kind(scene, tile);
-        if (kind != BoardRoad.Kind.NONE) {
-            entrances(scene, tile, feature.bridgeExits(), tile.elevation() + feature.elevation(), kind, true, result);
+        if (feature != null && tile.deckRoad() != BoardRoad.Kind.NONE) {
+            entrances(scene, tile, tile.deckRoadExits(), tile.elevation() + feature.elevation(), tile.deckRoad(), true, result);
         }
         return List.copyOf(result);
     }

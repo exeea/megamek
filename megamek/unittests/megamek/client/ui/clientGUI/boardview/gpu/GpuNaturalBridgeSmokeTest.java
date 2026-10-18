@@ -137,9 +137,12 @@ class GpuNaturalBridgeSmokeTest {
                     frame.render(terrain, camera, scene);
                     int natural = sample(camera, at);
                     var approach = BoardRoadTest.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, 3, BoardScene.Surface.GRASS);
-                    // The road-attached span is built (a converted board stores it); the bare one stays natural.
-                    var edited = BoardBridgeTypeTest.typed(BoardNaturalBridgeTest.replace(scene, approach),
+                    // The road-attached span is built and carries the road over its exits (as a converted board stores
+                    // it); the bare one stays natural.
+                    var built = BoardBridgeTypeTest.typed(BoardNaturalBridgeTest.replace(scene, approach),
                           HexAppearance.BUILT_BRIDGE);
+                    var edited = BoardNaturalBridgeTest.replace(built,
+                          BoardBridgeMaterialsTest.withDeckRoad(built.tile(at), BoardRoad.Kind.PAVED, 9));
                     var footing = BoardBridgeFooting.build(edited, edited.tile(at), TerrainLod.FULL, new HashMap<>());
                     var gravelTip = BoardGeometry.center(at, 3).lerp(BoardGeometry.center(at.translated(3), 3), .5f)
                           .add(0, -footing.lengths().get(3) * BoardGeometry.hexScale() - BoardRelief.metres(5), 0);
