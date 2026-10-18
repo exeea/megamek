@@ -3475,6 +3475,12 @@ public class MoveStep implements Serializable {
             }
         } // End not-along-road
 
+        // Mud on a raised bridge deck (Hex#deckMud) costs a unit entering on that deck, along the bridge or not.
+        Terrain deckMud = destHex.deckMud(elevation);
+        if (deckMud != null) {
+            mp += deckMud.movementCost(getEntity());
+        }
+
         // non-WIGEs pay for elevation differences
         if ((nSrcEl != nDestEl) && (moveMode != EntityMovementMode.WIGE)) {
             int deltaElevation = Math.abs(nSrcEl - nDestEl);

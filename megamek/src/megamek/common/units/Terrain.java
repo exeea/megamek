@@ -758,7 +758,7 @@ public class Terrain implements Serializable {
             valid = false;
         } else if ((type == RAIL) && (level < 0 || level > 1)) {
             valid = false;
-        } else if ((type == BRIDGE_RAIL) && (level != 1)) {
+        } else if (((type == BRIDGE_RAIL) || (type == BRIDGE_MUD)) && (level != 1)) {
             valid = false;
         } else if ((type == BRIDGE_ROAD) && (level < 1 || level > 4)) {
             valid = false;

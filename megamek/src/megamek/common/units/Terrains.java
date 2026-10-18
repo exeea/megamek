@@ -221,6 +221,11 @@ public class Terrains implements Serializable {
      * exits, always specified, lie within the bridge's exits. The rules treat every deck as a road whatever it carries.
      */
     public static final int BRIDGE_ROAD = 64;
+    /**
+     * Mud (TO:AR p.48) on the hex's raised bridge deck, which rain puts on a CLEAR deck ({@link Hex#isClearDeck}); the
+     * hex's MUD is the ground's. Read through {@link Hex#deckMud}; it has no effect on a deck at the hex level.
+     */
+    public static final int BRIDGE_MUD = 65;
 
     /**
      * Keeps track of the different type of terrains that can have exits.
@@ -244,7 +249,7 @@ public class Terrains implements Serializable {
                                             "foliage_elev", "black_ice", "sky",
                                             "deployment_zone", "hazardous_liquid", "ultra_sublevel",
                                             "bridge_repaired", "industrial_elevator", "rail", "bridge_rail",
-                                            "bridge_road" };
+                                            "bridge_road", "bridge_mud" };
 
     /** Terrains in this set are hidden in the Editor, not saved to board files and handled internally. */
     public static final HashSet<Integer> AUTOMATIC = new HashSet<>(Arrays.asList(
@@ -447,6 +452,8 @@ public class Terrains implements Serializable {
                 return level == 0 ? "Destroyed rail" : "Rail";
             case BRIDGE_RAIL:
                 return "Rail on bridge";
+            case BRIDGE_MUD:
+                return "Mud (bridge deck)";
             case FIRE:
                 if (level == 1) {
                     return "Fire";

@@ -557,7 +557,8 @@ public final class BoardArtwork implements AutoCloseable {
     private static final int[] DROP_TERRAINS = { Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP,
           Terrains.INCLINE_BOTTOM, Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM };
 
-    private static final int[] BRIDGE_TERRAINS = { Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV };
+    private static final int[] BRIDGE_TERRAINS = { Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV,
+                                                   Terrains.BRIDGE_MUD };
 
     /** Each structure with the terrains describing it, any of which its tileset images may match. */
     private static final Map<Integer, int[]> STRUCTURE_TERRAINS = Map.of(

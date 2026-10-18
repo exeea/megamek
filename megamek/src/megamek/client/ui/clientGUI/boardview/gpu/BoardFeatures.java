@@ -85,7 +85,7 @@ final class BoardFeatures {
                       Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
                       Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.METAL_CONTENT,
                       Terrains.DEPLOYMENT_ZONE, Terrains.IMPASSABLE, Terrains.ULTRA_SUBLEVEL, Terrains.FIRE, Terrains.SMOKE,
-                      Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED,
+                      Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED, Terrains.BRIDGE_MUD,
                       Terrains.FIELDS, Terrains.SWAMP, Terrains.MUD, Terrains.ICE, Terrains.BLACK_ICE, Terrains.BLDG_BASE_COLLAPSED,
                       Terrains.ARMS, Terrains.LEGS, Terrains.WATER_FLUFF -> true;
                 case Terrains.MAGMA -> hex.terrainLevel(Terrains.MAGMA) == 1 || hex.terrainLevel(Terrains.MAGMA) == 2;

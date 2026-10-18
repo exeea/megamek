@@ -1600,8 +1600,12 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         } else if (appearance.hasChildren()) { detail.add(appearance).row(); }
         for (var field : definition.fields()) { if (!field.optional() || snapshot.property(field.terrain()) != null) { field(field); } }
         if (definition.id().equals("pavement")) { pavementEdges(); }
+        // Deck mud is offered only where it plays: on a natural raised deck (Hex#deckMud).
+        var deck = snapshot.property("bridge_elev");
+        boolean deckMud = Boolean.FALSE.equals(megamek.common.board.HexAppearance.bridgeBuilt(snapshot.appearance()))
+              && deck != null && deck.value() > 0;
         var optional = definition.fields().stream().filter(f -> f.optional() && !f.terrain().contains("fluff") && !f.terrain().equals("cliff_top")
-              && snapshot.property(f.terrain()) == null).toList();
+              && (deckMud || !f.terrain().equals("bridge_mud")) && snapshot.property(f.terrain()) == null).toList();
         if (!optional.isEmpty()) {
             choose(UiKit.text("BoardEditor.addProperty"), UiKit.text("BoardEditor.choose"), optional.stream().map(f -> new Option(f.label(), f.terrain())).toList(), key -> {
                 var field = optional.stream().filter(f -> f.terrain().equals(key)).findFirst().orElseThrow();

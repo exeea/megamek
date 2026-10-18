@@ -1416,6 +1416,13 @@ public class BoardUtilities {
                 Coords c = new Coords(x, y);
                 Hex hex = board.getHex(c);
 
+                // A CLEAR raised deck (Hex#isClearDeck) is clear ground of its own: every rain that muds clear ground
+                // muds it, whatever lies beneath (TO:AR p.48 and p.57).
+                if (weatherCond.isModerateRainOrHeavyRainOrGustingRainOrDownpourOrLightningStorm()
+                      && (hex.terrainLevel(Terrains.BRIDGE_ELEV) > 0) && hex.isClearDeck()) {
+                    hex.addTerrain(new Terrain(Terrains.BRIDGE_MUD, 1));
+                }
+
                 //moderate rain - mud in clear hexes (Hex#isClear), depth 0 water, and dirt roads
                 if (weatherCond.isModerateRainOrLightningStorm()) {
                     if (hex.isClear()

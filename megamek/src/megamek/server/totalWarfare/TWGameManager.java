@@ -31364,7 +31364,12 @@ public class TWGameManager extends AbstractGameManager {
             entity.addPilotingModifierForTerrain(rollTarget);
             // apart from swamp & liquid magma, -1 modifier
             Hex hex = game.getBoard().getHex(entity.getPosition());
-            hex.getUnstuckModifier(entity.getElevation(), rollTarget);
+            Terrain deckMud = hex.deckMud(entity.getElevation());
+            if (deckMud != null) {
+                deckMud.getUnstuckModifier(entity.getElevation(), rollTarget);
+            } else {
+                hex.getUnstuckModifier(entity.getElevation(), rollTarget);
+            }
             // okay, print the info
             r = new Report(2340);
             r.subject = entity.getId();

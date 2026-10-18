@@ -40,9 +40,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.stream.Stream;
 
 import megamek.common.GameBoardTestCase;
+import megamek.common.Hex;
+import megamek.common.board.Coords;
 import megamek.common.enums.MoveStepType;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.EquipmentTypeLookup;
+import megamek.common.rolls.TargetRoll;
 import megamek.common.units.*;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -77,6 +80,36 @@ public class BridgeTest extends GameBoardTestCase {
               hex 0103 0 "bridge:1:09;bridge_cf:250;bridge_elev:4" ""
               hex 0104 0 "bridge:1:09;bridge_cf:250;bridge_elev:4" ""
               hex 0105 4 "" ""
+              end"""
+        );
+
+        initializeBoard("BOARD_MUDDY_DECK", """
+              size 1 5
+              hex 0101 4 "" ""
+              hex 0102 0 "bridge:1:09;bridge_cf:250;bridge_elev:4;bridge_mud:1" ""
+              hex 0103 0 "bridge:1:09;bridge_cf:250;bridge_elev:4;bridge_mud:1" ""
+              hex 0104 0 "bridge:1:09;bridge_cf:250;bridge_elev:4;bridge_mud:1" ""
+              hex 0105 4 "" ""
+              end"""
+        );
+
+        initializeBoard("BOARD_DRY_DECK_OVER_MUD", """
+              size 1 5
+              hex 0101 4 "" ""
+              hex 0102 0 "mud:1;bridge:1:09;bridge_cf:250;bridge_elev:4" ""
+              hex 0103 0 "mud:1;bridge:1:09;bridge_cf:250;bridge_elev:4" ""
+              hex 0104 0 "mud:1;bridge:1:09;bridge_cf:250;bridge_elev:4" ""
+              hex 0105 4 "" ""
+              end"""
+        );
+
+        initializeBoard("BOARD_WALK_UNDER_MUDDY_DECK", """
+              size 1 5
+              hex 0101 0 "" ""
+              hex 0102 0 "" ""
+              hex 0103 0 "bridge:1;bridge_cf:250;bridge_elev:4;bridge_mud:1" ""
+              hex 0104 0 "" ""
+              hex 0105 0 "" ""
               end"""
         );
 
@@ -410,6 +443,43 @@ public class BridgeTest extends GameBoardTestCase {
               MoveStepType.FORWARDS);
         assertTrue(movePath.isMoveLegal());
         assertMovePathElevations(movePath, 0, 4, 4, 4, 0);
+    }
+
+    private MovePath crossing(String board, Entity entity, EntityMovementMode mode, boolean climb) {
+        setBoard(board);
+        return getMovePathFor(entity, mode, climb ? MoveStepType.CLIMB_MODE_ON : MoveStepType.CLIMB_MODE_OFF,
+              MoveStepType.FORWARDS, MoveStepType.FORWARDS, MoveStepType.FORWARDS, MoveStepType.FORWARDS);
+    }
+
+    /** Mud on a raised deck costs a unit crossing on the deck +1 MP per hex, as mud on the ground; a hover and a unit beneath pay nothing. */
+    @Test
+    void deckMudSlowsUnitsOnTheDeckOnly() {
+        assertEquals(crossing("BOARD_BRIDGE_BETWEEN_LAND", new Tank(), EntityMovementMode.TRACKED, true).getMpUsed() + 3,
+              crossing("BOARD_MUDDY_DECK", new Tank(), EntityMovementMode.TRACKED, true).getMpUsed());
+        assertEquals(crossing("BOARD_BRIDGE_BETWEEN_LAND", new BipedMek(), EntityMovementMode.BIPED, true).getMpUsed() + 3,
+              crossing("BOARD_MUDDY_DECK", new BipedMek(), EntityMovementMode.BIPED, true).getMpUsed());
+        assertEquals(crossing("BOARD_BRIDGE_BETWEEN_LAND", new Tank(), EntityMovementMode.HOVER, true).getMpUsed(),
+              crossing("BOARD_MUDDY_DECK", new Tank(), EntityMovementMode.HOVER, true).getMpUsed(), "a hover");
+        assertEquals(crossing("BOARD_WALK_UNDER_BRIDGE", new Tank(), EntityMovementMode.TRACKED, false).getMpUsed(),
+              crossing("BOARD_WALK_UNDER_MUDDY_DECK", new Tank(), EntityMovementMode.TRACKED, false).getMpUsed(),
+              "beneath the deck");
+    }
+
+    /** Whether {@code unit} crossing {@code board} rolls to avoid bogging down as it enters the first deck hex. */
+    private boolean bogsDownOnTheDeck(String board, Entity unit, EntityMovementMode mode) {
+        MoveStep onDeck = crossing(board, unit, mode, true).getStepVector().get(1);
+        assertEquals(4, onDeck.getElevation());
+        Hex hex = getGame().getBoard().getHex(onDeck.getPosition());
+        return unit.checkBogDown(onDeck, EntityMovementType.MOVE_WALK, hex, new Coords(0, 0), onDeck.getPosition(), 0,
+              onDeck.isPavementStep()).getValue() != TargetRoll.CHECK_FALSE;
+    }
+
+    /** A tank entering a muddy raised deck rolls to avoid bogging down; a Mek does not, nor does a tank on a dry deck over mud. */
+    @Test
+    void deckMudBogsDownTanksOnTheDeck() {
+        assertTrue(bogsDownOnTheDeck("BOARD_MUDDY_DECK", new Tank(), EntityMovementMode.TRACKED));
+        assertFalse(bogsDownOnTheDeck("BOARD_MUDDY_DECK", new BipedMek(), EntityMovementMode.BIPED));
+        assertFalse(bogsDownOnTheDeck("BOARD_DRY_DECK_OVER_MUD", new Tank(), EntityMovementMode.TRACKED));
     }
 
     @ParameterizedTest

@@ -40,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.Map;
 
 import megamek.common.Hex;
@@ -88,6 +89,32 @@ class BoardUtilitiesTest {
         assertTrue(board.getHex(5, 0).containsTerrain(Terrains.MUD), "depth-0 water beside a slope");
         assertFalse(board.getHex(5, 0).containsTerrain(Terrains.WATER), "the mud replaces the shallow water");
         assertTrue(board.getHex(6, 0).containsTerrain(Terrains.MUD), "an art token on a slope");
+    }
+
+    /**
+     * Every rain that muds clear ground muds a CLEAR raised deck ({@link Hex#isClearDeck}), whatever lies beneath; a
+     * built deck, a deck carrying a road and a deck at the hex's level (its mud is the ground's) stay dry.
+     */
+    @Test
+    void rainMudsClearRaisedDecks() {
+        for (Weather weather : List.of(Weather.MOD_RAIN, Weather.HEAVY_RAIN, Weather.DOWNPOUR, Weather.LIGHT_RAIN)) {
+            Board board = Board.createEmptyBoard(4, 1);
+            board.setHex(new Coords(0, 0), new Hex(0, "water:1;bridge:1:09;bridge_cf:40;bridge_elev:2", ""));
+            board.setHex(new Coords(1, 0), new Hex(0, "bridge:1:09;bridge_cf:40;bridge_elev:2", ""));
+            board.setHex(new Coords(2, 0), new Hex(0, "bridge:1:09;bridge_cf:40;bridge_elev:2;bridge_road:1:9", ""));
+            board.setHex(new Coords(3, 0), new Hex(0, "bridge:1:09;bridge_cf:40;bridge_elev:0", ""));
+            for (int x : new int[] { 0, 2, 3 }) {
+                board.getHex(x, 0).setAppearance(Map.of("bridge", HexAppearance.NATURAL_BRIDGE));
+            }
+
+            BoardUtilities.addWeatherConditions(board, weather, Wind.CALM);
+
+            assertEquals(weather != Weather.LIGHT_RAIN, board.getHex(0, 0).containsTerrain(Terrains.BRIDGE_MUD),
+                  weather + ": natural deck over water");
+            assertFalse(board.getHex(1, 0).containsTerrain(Terrains.BRIDGE_MUD), weather + ": built deck");
+            assertFalse(board.getHex(2, 0).containsTerrain(Terrains.BRIDGE_MUD), weather + ": deck carrying a road");
+            assertFalse(board.getHex(3, 0).containsTerrain(Terrains.BRIDGE_MUD), weather + ": deck at the hex's level");
+        }
     }
 
     @Test
