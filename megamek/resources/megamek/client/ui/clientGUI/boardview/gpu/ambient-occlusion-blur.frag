@@ -5,9 +5,10 @@
 // another surface, by camera distance, drops out. The second pass also applies the strength to the occlusion; the
 // contact shadow in B is averaged alike.
 layout(location = 0) out vec4 fragColor;
-uniform sampler2D u_occlusion; // R visibility, G camera distance, B contact visibility
+uniform sampler2D u_occlusion; // R visibility, G camera distance less its origin, B contact visibility
 uniform ivec2 u_direction;
-uniform vec3 u_blur; // world size of one scene pixel at camera distance d: x + y * d; the strength exponent
+// world size of one scene pixel at camera distance d: x + y * d (y is 0 where the origin is not); the strength exponent
+uniform vec3 u_blur;
 
 void main() {
     ivec2 centre = ivec2(gl_FragCoord.xy);

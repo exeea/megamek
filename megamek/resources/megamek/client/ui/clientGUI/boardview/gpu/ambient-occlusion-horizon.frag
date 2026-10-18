@@ -6,7 +6,7 @@
 // normal, which is reconstructed from depth. The slice rotation and step offsets follow a 4 by 4 pattern that
 // ambient-occlusion-blur.frag averages out. Contact shadows march a short way toward the sun through the same depth:
 // the small occluders the shadow map is too coarse for (a foot, a rock, a trunk's root). Output: R visibility,
-// G camera distance, B the sun's contact visibility (ambient-occlusion.glsl).
+// G camera distance less u_rangeOrigin, B the sun's contact visibility (ambient-occlusion.glsl).
 layout(location = 0) out vec4 fragColor;
 uniform sampler2D u_depth; // the scene's hardware depth, full resolution
 // CAMERA_DEPTH
@@ -14,6 +14,7 @@ uniform vec2 u_projectionScale; // projection M00, M11
 uniform vec2 u_radius; // world radius, the largest screen radius in scene pixels
 uniform vec4 u_contact; // the direction to the sun in view space; the march length in world units, 0 without a sun
 uniform float u_contactThickness; // world depth an occluder is taken to have behind its surface
+uniform float u_rangeOrigin; // subtracted from the stored distance: the orbit pivot's depth in orthographic views
 
 const int SLICES = 2;
 const int STEPS = 4;
@@ -24,6 +25,8 @@ const float HALF_PI = 1.57079633;
 const float PATTERN[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.);
 // The cleared depth: no surface drew there.
 const float SKY = 1.0;
+// The farthest stored distance: half floats end at 65504, and the far plane (the sky) lies beyond.
+const float FARTHEST = 60000.0;
 
 ivec2 last;
 
@@ -64,7 +67,7 @@ void main() {
     vec3 position = viewPosition(centre);
     float range = -position.z;
     if (depth >= SKY) {
-        fragColor = vec4(1.0, range, 1.0, 0.0);
+        fragColor = vec4(1.0, min(range - u_rangeOrigin, FARTHEST), 1.0, 0.0);
         return;
     }
     // The normal from the nearer neighbour on each axis, so a depth edge does not bend it.
@@ -129,5 +132,5 @@ void main() {
     float pixelSize = 2.0 * w / (u_projectionScale.y * float(last.y + 1));
     ivec2 phase = ivec2(gl_FragCoord.xy) & 3;
     float contact = contactShadow(position, normal, pixelSize, (PATTERN[phase.y * 4 + phase.x] + .5) / 16.0);
-    fragColor = vec4(visibility, range, contact, 0.0);
+    fragColor = vec4(visibility, min(range - u_rangeOrigin, FARTHEST), contact, 0.0);
 }

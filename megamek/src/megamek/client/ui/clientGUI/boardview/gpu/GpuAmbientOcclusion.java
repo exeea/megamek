@@ -66,6 +66,12 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
     private final float[] projectionDepth = new float[4];
     private float pixelBase;
     private float pixelSlope;
+    /**
+     * Subtracted from the camera distance the targets hold: the orbit pivot's depth in an orthographic view, whose camera
+     * stands thousands of units back, so the half floats keep the visible depths finely enough; 0 in perspective, where
+     * the depth tolerance grows with the distance.
+     */
+    private float rangeOrigin;
     private int revision;
 
     GpuAmbientOcclusion() { super(TYPE); }
@@ -121,6 +127,7 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
         float pixelScale = projection[Matrix4.M11] * depth.getHeight() / 2;
         pixelBase = projection[Matrix4.M33] / pixelScale;
         pixelSlope = -projection[Matrix4.M32] / pixelScale;
+        rangeOrigin = camera instanceof BoardProjectionCamera board && !board.perspective ? board.pivotDepth : 0;
         horizons.bind();
         Gdx.gl.glViewport(0, 0, width, height);
         horizon.bind();
@@ -136,6 +143,7 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
         if (lit) { toSun.set(light.direction).scl(-1).rot(camera.view).nor(); }
         horizon.setUniformf("u_contact", toSun.x, toSun.y, toSun.z, lit ? BoardRelief.metres(CONTACT_METRES) : 0);
         horizon.setUniformf("u_contactThickness", BoardRelief.metres(CONTACT_THICKNESS_METRES));
+        horizon.setUniformf("u_rangeOrigin", rangeOrigin);
         quad.render(horizon, GL20.GL_TRIANGLES);
         blur(blurred, horizons, 1, 0, 1, context);
         blur(horizons, blurred, 0, 1, strength, context);
@@ -162,8 +170,13 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
     /** The draws that read this frame's occlusion are done: the opaque scene and the units. Later draws read 1. */
     void end() { current = false; }
 
-    /** Native checks: the target holding the last occlusion (visibility, camera distance, contact visibility), or null. */
+    /**
+     * Native checks: the target holding the last occlusion (visibility, camera distance less {@link #rangeOrigin}, contact
+     * visibility), or null.
+     */
     FrameBuffer target() { return horizons; }
+
+    float rangeOrigin() { return rangeOrigin; }
 
     private Texture texture() { return current ? horizons.getColorBufferTexture() : fallback; }
 
@@ -212,7 +225,7 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
                 if (occlusion == null || occlusion == uploaded && occlusion.revision == uploadedRevision) { return; }
                 uploaded = occlusion;
                 uploadedRevision = occlusion.revision;
-                target.set(id, occlusion.pixelBase, occlusion.pixelSlope);
+                target.set(id, occlusion.pixelBase, occlusion.pixelSlope, occlusion.rangeOrigin);
             }
         });
     }
@@ -221,7 +234,7 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
     private void createPrograms() {
         try {
             quad = GpuAtmosphere.screenQuad();
-            fallback = new Texture(new GLOnlyTextureData(1, 1, 0, GL30.GL_RGBA32F, GL20.GL_RGBA, GL20.GL_FLOAT));
+            fallback = new Texture(new GLOnlyTextureData(1, 1, 0, GL30.GL_RGBA16F, GL20.GL_RGBA, GL20.GL_FLOAT));
             fallback.bind();
             var pixel = BufferUtils.newFloatBuffer(4);
             pixel.put(1).put(0).put(1).put(0).flip();
@@ -237,7 +250,7 @@ final class GpuAmbientOcclusion extends Attribute implements Disposable {
 
     private static FrameBuffer createTarget(int width, int height) {
         var builder = new GLFrameBuffer.FrameBufferBuilder(width, height);
-        builder.addFloatAttachment(GL30.GL_RGBA32F, GL20.GL_RGBA, GL20.GL_FLOAT, true);
+        builder.addFloatAttachment(GL30.GL_RGBA16F, GL20.GL_RGBA, GL20.GL_FLOAT, true);
         FrameBuffer result = builder.build();
         result.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
         result.getColorBufferTexture().setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);

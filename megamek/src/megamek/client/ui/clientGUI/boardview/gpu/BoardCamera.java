@@ -1338,6 +1338,7 @@ final class BoardCamera {
         // the viewport spans depth as well as width; a fixed eye distance clips its lower half when panning.
         float distance = camera.perspective ? camera.distance() : 10000
               + camera.viewportHeight * camera.zoom * .5f * camera.up.z / Math.max(.01f, -camera.direction.z);
+        camera.pivotDepth = distance;
         if (!firstPerson) {
             camera.position.set(camera.direction).scl(-distance).add(focus);
             camera.position.mulAdd(new Vector3(camera.direction).crs(camera.up).nor(), viewOffsetPixels * camera.zoom);

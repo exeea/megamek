@@ -8,6 +8,8 @@ import com.badlogic.gdx.math.Matrix4;
 final class BoardProjectionCamera extends Camera {
     public float zoom = 1;
     boolean perspective;
+    /** How far the orbit pivot lies ahead along the view; BoardCamera sets it as it places the camera. */
+    float pivotDepth;
     float fieldOfView = BoardCamera.DEFAULT_FIELD_OF_VIEW;
 
     /**

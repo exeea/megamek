@@ -105,7 +105,7 @@ class GpuAmbientOcclusionSmokeTest {
                       name + "-off.png"));
                 frame.setAmbientOcclusion(true, 1);
                 draw(terrain, frame, camera, scene, new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT, name + "-on.png"));
-                Visibility visibility = Visibility.read(frame.ambientOcclusion().target());
+                Visibility visibility = Visibility.read(frame.ambientOcclusion());
                 visibility.save(new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT, name + "-visibility.png"));
                 report.append(String.format(Locale.ROOT, "%s: pre-pass twin draws %d; visibility mean %.3f, 1st"
                             + " percentile %.3f%n", view.name(), terrain.prepassDraws(), visibility.mean(),
@@ -231,7 +231,8 @@ class GpuAmbientOcclusionSmokeTest {
 
     /** The occlusion target read back: visibility and camera distance per half-resolution texel. */
     private record Visibility(float[] values, int width, int height) {
-        static Visibility read(FrameBuffer target) {
+        static Visibility read(GpuAmbientOcclusion occlusion) {
+            FrameBuffer target = occlusion.target();
             assertTrue(target != null, "The occlusion was drawn");
             int width = target.getWidth(), height = target.getHeight();
             FloatBuffer buffer = BufferUtils.newFloatBuffer(width * height * 2);
@@ -241,6 +242,7 @@ class GpuAmbientOcclusionSmokeTest {
             FrameBuffer.unbind();
             float[] values = new float[buffer.capacity()];
             buffer.get(values);
+            for (int i = 1; i < values.length; i += 2) { values[i] += occlusion.rangeOrigin(); }
             return new Visibility(values, width, height);
         }
 
