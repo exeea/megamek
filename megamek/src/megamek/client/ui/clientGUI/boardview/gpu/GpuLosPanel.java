@@ -183,7 +183,7 @@ final class GpuLosPanel implements GpuHud.Component {
                         choices.cancel(); send(model -> model.select(first, choice.id()));
                     });
                 }
-                choices.header("Endpoint", "Select a visible unit or use manual heights").content(menu);
+                choices.header("Endpoint", "Select a visible unit or use manual heights").content(menu).openedFrom(unit);
                 choices.showAbove(unit, 0);
             });
             lock = ui.button("hud-icon", "unlock", null, null); lock.setName(id + "-lock");

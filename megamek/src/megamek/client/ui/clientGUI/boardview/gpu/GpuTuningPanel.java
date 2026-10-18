@@ -401,7 +401,7 @@ final class GpuTuningPanel implements GpuHud.Component {
                 choices.cancel();
             });
         }
-        choices.content(list);
+        choices.content(list).openedFrom(face);
         Vector2 corner = face.localToStageCoordinates(new Vector2());
         choices.showAt(corner.x, corner.y);
     }

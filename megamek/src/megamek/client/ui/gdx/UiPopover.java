@@ -18,7 +18,8 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
  * A popover (.panel.pop with its .hd): the opaque frame, at least 240 units wide, with an optional header of an
  * upper-case title over a muted subtitle, and its content. It opens at a point or above an anchor and stays 10
  * units inside its parent; a content taller than that scrolls. While open it gives its content the
- * stage's keyboard focus, and any press outside it closes it, as {@link #cancel} does. Its view adds it to a layer
+ * stage's keyboard focus, and any press outside it closes it, as {@link #cancel} does; a press on the control it was
+ * {@link #openedFrom opened from} does nothing else. Its view adds it to a layer
  * once; it starts closed. As in a desktop menu, it can open another popover as a submenu beside one of its items
  * ({@link #cascade}): the chain stays open while presses land in it.
  */
@@ -46,14 +47,26 @@ public final class UiPopover extends Table {
     private final Runnable dismissed;
     private Actor anchor;
     private float anchoredWidth;
-    /** Closes the popover on a press outside it and its submenus; on the stage's root while the popover is open. */
+    /** The control that opened it, such as a drop-down's face, or null. */
+    private Actor face;
+    /**
+     * Closes the popover on a press outside it and its submenus; on the stage's root while the popover is open. A press
+     * on its {@link #openedFrom face} goes no further, so its release does not open the popover again.
+     */
     private final InputListener outside = new InputListener() {
         @Override
         public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-            if (!holds(event.getTarget()) && (anchor == null || !event.getTarget().isDescendantOf(anchor))) {
-                cancel();
+            Actor target = event.getTarget();
+            if (holds(target) || anchor != null && target.isDescendantOf(anchor)) {
+                return false;
             }
-            return false;
+            boolean onFace = face != null && target.isDescendantOf(face);
+            cancel();
+            if (onFace) {
+                event.stop();
+            }
+            // Handled, neither that press nor its release reaches the board below.
+            return onFace;
         }
     };
     /** The submenu last opened beside one of its items; open or closed. */
@@ -125,6 +138,15 @@ public final class UiPopover extends Table {
             getStage().setKeyboardFocus(actor);
         }
         return relayout();
+    }
+
+    /**
+     * The control that opens it, such as a drop-down's face: while the popover is open, a press on the control only
+     * closes it, as a desktop drop-down's face does. Closing forgets it.
+     */
+    public UiPopover openedFrom(Actor control) {
+        face = control;
+        return this;
     }
 
     private UiPopover relayout() {
@@ -295,6 +317,7 @@ public final class UiPopover extends Table {
         }
         setVisible(false);
         anchor = null;
+        face = null;
         Stage stage = getStage();
         if (stage != null) {
             stage.removeCaptureListener(outside);

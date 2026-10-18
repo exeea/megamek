@@ -484,7 +484,7 @@ final class GpuContextMenu implements GpuHud.Component {
             int choice = index;
             item(list, choices.get(index), null, index == selected, true, () -> choose.accept(choice));
         }
-        popover.header(null, null).content(list);
+        popover.header(null, null).content(list).openedFrom(face);
         Vector2 corner = face.localToStageCoordinates(new Vector2());
         popover.showAt(corner.x, corner.y);
     }

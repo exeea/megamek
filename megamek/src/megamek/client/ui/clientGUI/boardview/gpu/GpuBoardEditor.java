@@ -908,7 +908,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             list.item(categoryName(id), null, id.equals(page.category()), false, true, () -> { choices.cancel(); show(new Page(id, null)); })
                   .setName("editor-category-item-" + id);
         }
-        choices.header(null, null).content(list);
+        choices.header(null, null).content(list).openedFrom(categoryFace);
         var corner = categoryFace.localToStageCoordinates(new com.badlogic.gdx.math.Vector2());
         choices.showAt(corner.x, corner.y - 2);
     }
@@ -2006,7 +2006,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             for (Option option : options) {
                 list.item(option.label(), null, null, false, true, () -> { choices.cancel(); face.setText(option.label()); commit.accept(option.id()); });
             }
-            choices.header(label, null).content(list); choices.showAbove(face, 0);
+            choices.header(label, null).content(list).openedFrom(face); choices.showAbove(face, 0);
         });
         return row;
     }
@@ -2302,7 +2302,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             }).setName("editor-settings-remove-" + id);
         }
         if (snapshot.boardComponents().isEmpty()) { list.item(UiKit.text("BoardEditor.none"), null, null, false, false, () -> { }); }
-        choices.header(UiKit.text("CommonMenuBar.boardRemove"), null).content(list); choices.showAbove(face, 0);
+        choices.header(UiKit.text("CommonMenuBar.boardRemove"), null).content(list).openedFrom(face);
+        choices.showAbove(face, 0);
     }
 
     /** A Settings button that sends a whole-board command; its message shows in the dialog's status line. */
