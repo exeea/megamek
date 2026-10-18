@@ -14,8 +14,9 @@ vec4 biomeTexel(float layer, vec2 uv, mat2 gradient) {
 vec4 biomePlanar(sampler2DArray maps, float map, MaterialProjection p, float mixer, bool normalMap) {
     float tile = u_biomeSoilTile;
     vec4 near = biomeTexel(maps, map, p.top / tile, p.topGradient / tile);
+    // Relief: the first repeat only.
+    if (normalMap) return vec4(mix(near.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail), near.a);
     vec4 far = biomeTexel(maps, map, TURN * p.top / (tile * 2.37) + .31, TURN * p.topGradient / (tile * 2.37));
-    if (normalMap) return planarNormal(near, far, mixer);
     vec4 pigment = mix(near, far, mixer);
     return farDetail > 0.0 ? mix(pigment,
           biomeTexel(maps, map, p.top / tile, p.topGradient * (4096.0 / tile)), farDetail) : pigment;
@@ -23,16 +24,6 @@ vec4 biomePlanar(sampler2DArray maps, float map, MaterialProjection p, float mix
 vec4 biomePlanar(float map, MaterialProjection p, float mixer, bool normalMap) {
     if (normalMap) return biomePlanar(u_terrainData, (map - 1.0) * .5, p, mixer, true);
     return biomePlanar(u_terrainLayers, map * .5, p, mixer, false);
-}
-float biomeRoughness(MaterialProjection p, float mixer, bool planar, float fallback) {
-    vec2 authored = u_sculptRoughness[int(u_biomeSoilLayer * .5)];
-    if (authored.y < 0.0) return authored.x >= 0.0 ? authored.x : fallback;
-    float top = biomePlanar(u_roughnessLayers, authored.y, p, mixer, false).r;
-    if (planar || p.lying >= 1.0) return top;
-    float tile = u_biomeSoilTile;
-    float steep = mix(biomeTexel(u_roughnessLayers, authored.y, p.y / tile, p.yGradient / tile).r,
-          biomeTexel(u_roughnessLayers, authored.y, p.x / tile, p.xGradient / tile).r, p.side);
-    return mix(steep, top, p.lying);
 }
 vec4 biomeSoil(MaterialProjection p, float mixer) {
     if (p.lying >= 1.0) return biomePlanar(u_biomeSoilLayer, p, mixer, false);
@@ -66,7 +57,7 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
     vec4 cover, fringe;
     float tundra;
     biomeCoverage(world, 14.0, length(abs(worldDx.xy) + abs(worldDy.xy)), cover, fringe, tundra);
-    if (!shore) { tundraSurface(world, face, tundra, color, normal, cavity, roughness, grass, bounce); }
+    if (!shore) { tundraSurface(world, face, tundra, color, normal, cavity, grass, bounce); }
     if (family(4.0)) return;
     cover.yzw *= min(3.0, 1.0 / max(dot(cover.yzw, vec3(1.0)), .0001));
     // Broad reach on level ground connects shore patches. On a draining face retain the graded coverage;
@@ -115,10 +106,6 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         float amount = materialWeights(vec4(1.0 - fringe.x, fringe.x, 0.0, 0.0),
               vec4(materialHeight, soil.a, 0.0, 0.0)).y;
         color = mix(color, mix(earth, crop, canopy * planted * .95), amount);
-        if (hasAuthoredRoughness(u_biomeSoilLayer)) {
-            roughness = mix(roughness, biomeRoughness(projection, broad, true, roughness),
-                  amount * (1.0 - canopy * planted * .95));
-        }
         if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
             vec3 soilNormal = upNormal(biomePlanar(u_biomeSoilLayer + 1.0, projection, broad, true).rgb, face);
             soilNormal = normalize(mix(face, soilNormal, terrainNormalDetail));
@@ -180,7 +167,6 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         // Saturated peat is porous and fibrous, not a continuous glossy water coating. Moss and duckweed
         // retain their rough surface; only the exposed pool mask below receives the water BRDF.
         float peatRoughness = mix(.80, .72, quick) + (grain - .5) * .06;
-        peatRoughness = biomeRoughness(projection, broad, false, peatRoughness);
         roughness = mix(roughness, mix(peatRoughness, .93, max(hummock, algae * water)), wetland);
         // Low hummocks alter the shading normal without moving the shared picking/support surface.
         float bumpT = clamp((wet - .45) / (.64 - .45), 0.0, 1.0);

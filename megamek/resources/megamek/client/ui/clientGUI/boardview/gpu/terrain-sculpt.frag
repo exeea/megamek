@@ -200,8 +200,9 @@ void main() {
     float shoreAbsorption = 0.0;
     float rainCover = step(0.0, response);
     bool natural = (ground || cliff || bedrock) && !family(4.0);
-    // Natural walls, banks (water banks too) and bedrock take the small cliff material (cliffMaterial, blendCliff).
-    // Volcanic programs keep their natural material on every face.
+    // Natural surfaces take the small cliff material: walls, banks (water banks too) and bedrock its side
+    // projections (blendCliff when blended), tops its top projection (blendCovers when blended). Volcanic programs
+    // keep their natural material on every face.
 #ifdef volcanicFlag
     bool rocky = false;
 #else
@@ -229,13 +230,13 @@ void main() {
                 coverEffects(materialCoverage, sediment, grass, sand, bounce, response, rainCover);
 #else
             {
-                TerrainMaterial material;
-                if (rocky) {
-                    material = cliffMaterial(rockProjection, world, face, foot, rim, rock, bed, broad, fine, region,
-                          sediment, sculptFamily, u_sculptTiles, u_sculptLayers);
-                } else {
-                    material = naturalMaterial(world, face, foot, rim, rock, bed, broad, fine, region, sediment);
-                }
+#ifdef volcanicFlag
+                TerrainMaterial material = crustOrBankMaterial(world, face);
+#else
+                // One material for tops and walls: tops read the top projection, walls, banks and bedrock the sides.
+                TerrainMaterial material = cliffMaterial(rockProjection, world, face, foot, rim, rock, bed, broad, fine,
+                      region, sediment, sculptFamily, u_sculptTiles, u_sculptLayers, rocky, false);
+#endif
 #endif
                 albedo = material.color;
                 normal = material.normal;
@@ -391,7 +392,8 @@ void main() {
             concreteSlab(world, worldDx, worldDy, face, projection, v_diffuseUV.x, v_diffuseUV.y,
                   albedo, normal, occlusion, cavity, roughness);
         }
-        // Natural materials fade within materialNormal and rockNormal; slab and rock kit paths share this final fade.
+        // Natural materials fade within rockNormal (materialNormal in volcanic programs); slab and rock kit paths share
+        // this final fade.
         // Vertex/contact occlusion remains separate, so losing fine pores does not remove cliff-foot shading.
         if (!natural && !plant && u_normalMaps > .5) {
             normal = normalize(mix(face, normal, terrainNormalDetail));
