@@ -89,7 +89,11 @@ class GpuTerrainNormalsSmokeTest {
                         GpuBoardTestUi.pressTuning(toggle);
                         assertFalse(tuning.normalMaps(), "The checkbox switches normal mapping off");
                         GpuBoardTestUi.pressTuning(tuning.defaults());
-                        assertTrue(tuning.normalMaps(), "Defaults restores normal mapping");
+                        assertFalse(tuning.normalMaps(), "Defaults leaves the saved Display choice alone");
+                        GpuBoardTestUi.pressTuning(toggle);
+                        assertTrue(tuning.normalMaps(), "The checkbox switches normal mapping on again");
+                        SwingUtilities.invokeAndWait(() -> { });
+                        assertTrue(megamek.client.ui.clientGUI.GUIPreferences.getInstance().getBoardNormalMaps(), "and saves it");
                         terrain = new GpuTerrain();
                         BoardCamera camera = new BoardCamera();
                         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());

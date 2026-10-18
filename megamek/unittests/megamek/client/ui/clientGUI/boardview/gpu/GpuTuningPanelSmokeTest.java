@@ -625,6 +625,18 @@ class GpuTuningPanelSmokeTest {
 
     @Test
     void everyModelControlHasItsControlAndTheBoardPageEditsTheModel() {
+        // Normal maps are a saved Display choice: start from on, whatever an earlier test left.
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        boolean savedNormalMaps = preferences.getBoardNormalMaps();
+        preferences.setBoardNormalMaps(true);
+        try {
+            everyModelControl();
+        } finally {
+            preferences.setBoardNormalMaps(savedNormalMaps);
+        }
+    }
+
+    private void everyModelControl() {
         GpuHudTestStage.run(harness -> {
             try (Hud hud = new Hud(harness)) {
                 hud.show();
@@ -663,12 +675,15 @@ class GpuTuningPanelSmokeTest {
                 assertEquals(.5f, geometry.gridShade(), NEAR);
                 assertEquals(.75f, geometry.multiHexUnitScale(), NEAR);
 
-                // Normal maps and VSync.
+                // Normal maps and VSync, on the Display page.
+                hud.click("tuning-display-tab");
                 assertTrue(hud.tuning.normalMaps());
                 hud.click("tuning-normal-maps");
                 assertFalse(hud.tuning.normalMaps(), "Normal maps off");
                 assertFalse(hud.<UiKit.Checkbox>find("tuning-normal-maps").isTicked());
-                hud.click("tuning-display-tab");
+                // The choice is saved: leave it on for the tests that follow in this process.
+                hud.click("tuning-normal-maps");
+                assertTrue(hud.tuning.normalMaps());
                 boolean vsync = hud.<CheckBox>model("tuning-vsync").isChecked();
                 hud.click("tuning-vsync");
                 assertEquals(!vsync, hud.<CheckBox>model("tuning-vsync").isChecked(), "VSync switched");

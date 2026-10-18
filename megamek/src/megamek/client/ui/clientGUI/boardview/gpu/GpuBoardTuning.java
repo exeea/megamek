@@ -218,7 +218,6 @@ final class GpuBoardTuning {
         rows.top().defaults().pad(0, 3, 0, 3);
         section(skin, "Geometry");
         geometry = controls(skin, KNOBS, this::applyGeometry, 0);
-        normalMaps = checkbox(skin, "Normal maps", "tuning-normal-maps");
         unitDisplayMode = choice(skin, "Unit display", "tuning-unit-display", UnitDisplayMode.values(), () -> { });
         unitDisplayMode.addListener(new TextTooltip("All Meeples: every unit uses an extruded artwork token. "
               + "Mek Meeples: only Meks use tokens; other units use 3D models. "
@@ -277,6 +276,18 @@ final class GpuBoardTuning {
                 boolean enabled = specularAntialiasing.isChecked();
                 GpuEnvironmentLighting.specularAntialiasing = enabled;
                 SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardSpecularAntiAliasing(enabled));
+            }
+        });
+        normalMaps = checkbox(skin, "Normal maps", "tuning-normal-maps");
+        // The saved choice (on until one is saved); like anti-aliasing, Defaults leaves it alone.
+        normalMaps.setChecked(GUIPreferences.getInstance().getBoardNormalMaps());
+        normalMaps.addListener(new TextTooltip("Shades surfaces with their materials' fine relief. Off is flatter and a"
+              + " little faster. The choice is saved for the next session.", skin, "menu"));
+        normalMaps.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                boolean enabled = normalMaps.isChecked();
+                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardNormalMaps(enabled));
             }
         });
         ambientOcclusion = checkbox(skin, "Ambient occlusion", "tuning-ambient-occlusion");
@@ -850,7 +861,6 @@ final class GpuBoardTuning {
         syncing = false;
         setValues(cameraFieldOfView, new float[] { BoardCamera.DEFAULT_FIELD_OF_VIEW });
         applyCamera();
-        normalMaps.setChecked(true);
         unitDisplayMode.setSelected(UnitDisplayMode.DEFAULT);
         grass.setChecked(true);
         waterEffects.setChecked(true);
