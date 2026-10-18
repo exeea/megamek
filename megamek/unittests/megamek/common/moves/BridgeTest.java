@@ -33,6 +33,8 @@
 
 package megamek.common.moves;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.stream.Stream;
@@ -128,6 +130,61 @@ public class BridgeTest extends GameBoardTestCase {
               hex 0105 0 "water:2" ""
               end"""
         );
+
+        // Bank roads beside decks (b13 ways): a deck within a level that exits back links; one two levels up, a deck
+        // without that exit and a road beneath a deck do not; a road with specified exits keeps them.
+        initializeBoard("BOARD_BANK_ROAD_ONTO_DECK", """
+              size 1 3
+              hex 0101 0 "road:1" ""
+              hex 0102 0 "water:1;bridge:1:09;bridge_cf:40;bridge_elev:1" ""
+              hex 0103 1 "road:1" ""
+              end"""
+        );
+
+        initializeBoard("BOARD_BANK_ROAD_UNLINKED", """
+              size 1 11
+              hex 0101 0 "road:1" ""
+              hex 0102 0 "water:2;bridge:1:09;bridge_cf:40;bridge_elev:2" ""
+              hex 0103 0 "" ""
+              hex 0104 0 "road:1" ""
+              hex 0105 0 "water:1;bridge:1:08;bridge_cf:40;bridge_elev:1" ""
+              hex 0106 0 "" ""
+              hex 0107 0 "road:1;bridge:1:09;bridge_cf:40;bridge_elev:4" ""
+              hex 0108 0 "bridge:1:09;bridge_cf:40;bridge_elev:1" ""
+              hex 0109 0 "" ""
+              hex 0110 0 "road:1:32" ""
+              hex 0111 0 "water:1;bridge:1:09;bridge_cf:40;bridge_elev:1" ""
+              end"""
+        );
+    }
+
+    @Test
+    void aBankRoadMeetsTheDeckThatLandsOnItsHex() {
+        var board = getBoard("BOARD_BANK_ROAD_ONTO_DECK");
+        assertEquals(8, board.getHex(0, 0).getTerrain(Terrains.ROAD).getExits(), "south onto the deck");
+        assertEquals(1, board.getHex(0, 2).getTerrain(Terrains.ROAD).getExits(), "north onto the deck, a level down");
+    }
+
+    @Test
+    void aBankRoadIgnoresADeckOutOfReachOrFacingAwayAndNeverLinksFromBeneath() {
+        var board = getBoard("BOARD_BANK_ROAD_UNLINKED");
+        assertEquals(0, board.getHex(0, 0).getTerrain(Terrains.ROAD).getExits(), "the deck is two levels up");
+        assertEquals(0, board.getHex(0, 3).getTerrain(Terrains.ROAD).getExits(), "the deck has no exit back");
+        assertFalse(board.getHex(0, 6).containsTerrainExit(Terrains.ROAD, 3), "the road runs beneath a deck");
+        assertEquals(32, board.getHex(0, 9).getTerrain(Terrains.ROAD).getExits(), "specified exits stay as drawn");
+    }
+
+    @Test
+    void aBankRoadDrivesOntoTheDeckAsARoad() {
+        setBoard("BOARD_BANK_ROAD_ONTO_DECK");
+        Tank tank = new Tank();
+        tank.setChassis("Wheeled Tank");
+        MovePath movePath = getMovePathFor(tank, EntityMovementMode.WHEELED,
+              MoveStepType.CLIMB_MODE_ON,
+              MoveStepType.FORWARDS);
+        assertTrue(movePath.isMoveLegal());
+        assertMovePathElevations(movePath, 0, 1);
+        assertTrue(movePath.getLastStep().isPavementStep(), "the bank road's exit makes the step onto the deck a road step");
     }
 
     public static Stream<Arguments> allGroundedEntityTypes() {

@@ -124,6 +124,22 @@ class HexClearTest {
         assertTrue(maglev.isClear());
     }
 
+    @Test
+    void railAndDeckWayTerrainCountAsTheirMarkersDo() {
+        assertFalse(hex("rail:1:09").isClear(), "an intact rail on the ground");
+        assertTrue(hex("rail:0:09").isClear(), "a destroyed rail converts to Clear (TO:AR p.62)");
+        Hex raised = hex("bridge:1:09;bridge_cf:40;bridge_elev:2;bridge_road:1:09;bridge_rail:1:09");
+        assertTrue(raised.isClear(), "a deck's road and rail leave the ground beneath clear");
+        for (String way : new String[] { "bridge_road:3:09", "bridge_rail:1:09" }) {
+            Hex natural = hex("bridge:1:09;bridge_cf:40;bridge_elev:2;" + way);
+            natural.setAppearance(Map.of("bridge", HexAppearance.NATURAL_BRIDGE));
+            assertFalse(natural.isClearDeck(), way + " touches the deck");
+        }
+        Hex implicit = hex("water:1;bridge:1:09;bridge_cf:40;bridge_elev:0;bridge_road:1:09");
+        implicit.setAppearance(Map.of("bridge", HexAppearance.IMPLICIT_BRIDGE));
+        assertFalse(implicit.isClearDeck(), "an implicit bridge is built");
+    }
+
     private static BoardDecoration marker(RailRoute.Kind kind, BoardDecoration.Placement placement, int sides) {
         return new BoardDecoration("route", "prop", kind.asset, null, 0, 0, 0, false, 1, placement, 0, false, 0, 0,
               null, false, sides);

@@ -210,10 +210,23 @@ public class Terrains implements Serializable {
     public static final int BRIDGE_REPAIRED = 60;
 
     /**
+     * A rail on the hex's ground, beneath any bridge (TO:AR p.49). Level 1 rail, 0 destroyed; its exits are its sides and
+     * are always specified, so parallel rails in adjacent hexes never join.
+     */
+    public static final int RAIL = 62;
+    /** A rail on the hex's bridge deck (level 1); its exits, always specified, lie within the bridge's exits. */
+    public static final int BRIDGE_RAIL = 63;
+    /**
+     * A road on the hex's bridge deck, {@link #ROAD}'s twin with its levels (1 paved, 2 alley, 3 dirt, 4 gravel); its
+     * exits, always specified, lie within the bridge's exits. The rules treat every deck as a road whatever it carries.
+     */
+    public static final int BRIDGE_ROAD = 64;
+
+    /**
      * Keeps track of the different type of terrains that can have exits.
      */
     public static final int[] exitableTerrains = { PAVEMENT, ROAD, BUILDING, FUEL_TANK, BRIDGE, WATER,
-                                                   INDUSTRIAL_ELEVATOR };
+                                                   INDUSTRIAL_ELEVATOR, RAIL, BRIDGE_RAIL, BRIDGE_ROAD };
 
     private static final String[] names = { "none", "woods", "water", "rough", "rubble", "jungle", "sand", "tundra",
                                             "magma", "planted_fields", "heavy_industrial", "space", "pavement", "road",
@@ -230,7 +243,8 @@ public class Terrains implements Serializable {
                                             "incline_top", "incline_bottom", "incline_high_top", "incline_high_bottom",
                                             "foliage_elev", "black_ice", "sky",
                                             "deployment_zone", "hazardous_liquid", "ultra_sublevel",
-                                            "bridge_repaired", "industrial_elevator" };
+                                            "bridge_repaired", "industrial_elevator", "rail", "bridge_rail",
+                                            "bridge_road" };
 
     /** Terrains in this set are hidden in the Editor, not saved to board files and handled internally. */
     public static final HashSet<Integer> AUTOMATIC = new HashSet<>(Arrays.asList(
@@ -427,6 +441,12 @@ public class Terrains implements Serializable {
                 return "Pavement";
             case ROAD:
                 return "Road";
+            case BRIDGE_ROAD:
+                return "Road on bridge";
+            case RAIL:
+                return level == 0 ? "Destroyed rail" : "Rail";
+            case BRIDGE_RAIL:
+                return "Rail on bridge";
             case FIRE:
                 if (level == 1) {
                     return "Fire";

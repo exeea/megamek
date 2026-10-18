@@ -9,12 +9,14 @@ import java.util.Set;
  * Immutable authored appearance for one terrain owner. Asset data stays in the shared content catalog. {@code colours}
  * replace a truss bridge's colour slot (its Body, as a placed object's colours do); only a truss stores them.
  * {@code rotation} turns a vegetation design clockwise, in 30-degree steps from 30 to 330 (a container yard's look,
- * {@link BoardEditorBlueprint.Skin}); 0 is no rotation and is stored as none.
+ * {@link BoardEditorBlueprint.Skin}); 0 is no rotation and is stored as none. {@code tracks} is a rail's junction layout
+ * where it differs from the default of its sides ({@link RailRoute#pieces(int)}): owners {@code "rail"} (the ground
+ * rail) and {@code "bridgeRail"} (the deck rail) only, made by {@link #tracks(int)}.
  */
 public record HexAppearance(String variant, String asset, String material, Double strength,
-      BoardDecoration.Colours colours, Integer rotation) implements Serializable {
+      BoardDecoration.Colours colours, Integer rotation, Integer tracks) implements Serializable {
     public static final Set<String> OWNERS = Set.of("ground", "road", "building", "pavement", "fuelTank",
-          "vegetation", "rough", "bridge");
+          "vegetation", "rough", "bridge", "rail", "bridgeRail");
     /**
      * A built bridge with concrete piers under the joints between its hexes, never at a hex centre (owner
      * {@code "bridge"}). Cosmetic, like the other bridge types: the 3D views draw them; rules and the 2D views ignore it.
@@ -30,6 +32,13 @@ public record HexAppearance(String variant, String asset, String material, Doubl
      */
     public static final HexAppearance TRUSS = new HexAppearance("bridge/truss", null, null, null);
     public static final HexAppearance TRUSS_PILLARS = new HexAppearance("bridge/truss-pillars", null, null, null);
+    /**
+     * An implicit bridge: the deck a road or rail makes for itself where nothing else carries it, over water or in the
+     * air, shaped exactly like its ways and gone with its last way ({@link BridgeSpan#carry}). It counts as built;
+     * {@link #IMPLICIT_PILLARS} has piers. A stored choice, never inferred.
+     */
+    public static final HexAppearance IMPLICIT_BRIDGE = new HexAppearance("bridge/implicit", null, null, null);
+    public static final HexAppearance IMPLICIT_PILLARS = new HexAppearance("bridge/implicit-pillars", null, null, null);
 
     /**
      * How a pavement hex's walls and banks follow the fitted concrete outline (owner {@code "pavement"}). Cosmetic, like
@@ -68,9 +77,34 @@ public record HexAppearance(String variant, String asset, String material, Doubl
         this(variant, asset, material, strength, colours, null);
     }
 
-    /** Whether a hex's appearance turns its bridge's piers ({@link #PILLARS}, {@link #TRUSS_PILLARS}) on. */
+    /** An appearance without a rail layout. */
+    public HexAppearance(String variant, String asset, String material, Double strength, BoardDecoration.Colours colours,
+          Integer rotation) {
+        this(variant, asset, material, strength, colours, rotation, null);
+    }
+
+    /** The rail appearance that stores the junction layout {@code tracks}; null (none) for the default layout, 0. */
+    public static HexAppearance tracks(int tracks) {
+        return tracks == 0 ? null : new HexAppearance("rail/layout", null, null, null, BoardDecoration.Colours.NONE, null, tracks);
+    }
+
+    /** The junction layout a hex's appearance stores for {@code owner} ({@code "rail"} or {@code "bridgeRail"}), else 0. */
+    public static int tracks(Map<String, HexAppearance> appearance, String owner) {
+        HexAppearance stored = appearance.get(owner);
+        return stored == null || stored.tracks() == null ? 0 : stored.tracks();
+    }
+
+    /**
+     * Whether a hex's appearance turns its bridge's piers ({@link #PILLARS}, {@link #TRUSS_PILLARS},
+     * {@link #IMPLICIT_PILLARS}) on.
+     */
     public static boolean pillars(Map<String, HexAppearance> appearance) {
-        return is(appearance, PILLARS) || is(appearance, TRUSS_PILLARS);
+        return is(appearance, PILLARS) || is(appearance, TRUSS_PILLARS) || is(appearance, IMPLICIT_PILLARS);
+    }
+
+    /** Whether a hex's appearance stores an implicit bridge ({@link #IMPLICIT_BRIDGE}, {@link #IMPLICIT_PILLARS}). */
+    public static boolean implicit(Map<String, HexAppearance> appearance) {
+        return is(appearance, IMPLICIT_BRIDGE) || is(appearance, IMPLICIT_PILLARS);
     }
 
     /** Whether a hex's appearance draws its built bridge as a truss ({@link #TRUSS}, {@link #TRUSS_PILLARS}). */
@@ -91,12 +125,12 @@ public record HexAppearance(String variant, String asset, String material, Doubl
     }
 
     /**
-     * The hex's stored bridge type: TRUE for built ({@link #BUILT_BRIDGE}, {@link #PILLARS}, {@link #TRUSS} or
-     * {@link #TRUSS_PILLARS}), FALSE for {@link #NATURAL_BRIDGE}, null when none is stored (the 3D board's legacy decode
-     * decides).
+     * The hex's stored bridge type: TRUE for built ({@link #BUILT_BRIDGE}, {@link #PILLARS}, {@link #TRUSS},
+     * {@link #TRUSS_PILLARS} or an implicit bridge), FALSE for {@link #NATURAL_BRIDGE}, null when none is stored (the 3D
+     * board's legacy decode decides).
      */
     public static Boolean bridgeBuilt(Map<String, HexAppearance> appearance) {
-        return pillars(appearance) || truss(appearance) || is(appearance, BUILT_BRIDGE) ? Boolean.TRUE
+        return pillars(appearance) || truss(appearance) || implicit(appearance) || is(appearance, BUILT_BRIDGE) ? Boolean.TRUE
               : is(appearance, NATURAL_BRIDGE) ? Boolean.FALSE : null;
     }
 
@@ -124,12 +158,16 @@ public record HexAppearance(String variant, String asset, String material, Doubl
         if (rotation != null && (variant == null || rotation < 0 || rotation >= 360 || rotation % 30 != 0)) {
             throw new IllegalArgumentException("A design's rotation is 30 to 330 degrees in 30-degree steps");
         }
+        if (tracks != null && (tracks <= 0 || tracks >= 1 << RailRoute.PIECES)) {
+            throw new IllegalArgumentException("A rail layout is a mask of track pieces; the default is stored as none");
+        }
     }
 
     public void validateOwner(String owner) {
         if (!OWNERS.contains(owner) || asset != null && !owner.equals("building")
               || material != null && !owner.equals("road") || strength != null && !owner.equals("ground")
-              || !colours.slots().isEmpty() && !owner.equals("bridge") || rotation != null && !owner.equals("vegetation")) {
+              || !colours.slots().isEmpty() && !owner.equals("bridge") || rotation != null && !owner.equals("vegetation")
+              || tracks != null && !owner.equals("rail") && !owner.equals("bridgeRail")) {
             throw new IllegalArgumentException("Appearance fields do not belong to " + owner);
         }
     }

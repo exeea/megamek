@@ -357,7 +357,7 @@ public record BoardDecoration(String id, String kind, String asset, String name,
               stretch, colours, RailRoute.flip(tracks, sides -> flipSides(sides, horizontal, vertical)), pillars);
     }
 
-    private static int flipSides(int sides, boolean horizontal, boolean vertical) {
+    static int flipSides(int sides, boolean horizontal, boolean vertical) {
         int result = 0;
         for (int side = 0; side < 6; side++) {
             if ((sides & 1 << side) == 0) { continue; }

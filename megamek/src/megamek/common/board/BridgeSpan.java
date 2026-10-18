@@ -4,6 +4,7 @@ package megamek.common.board;
 import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 import megamek.common.Hex;
+import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 
 /**
@@ -58,6 +60,54 @@ public final class BridgeSpan {
         return hex != null && next != null && hex.containsTerrain(Terrains.BRIDGE) && next.containsTerrain(Terrains.BRIDGE);
     }
 
+    /**
+     * The one writer of a hex's implicit bridge ({@link HexAppearance#IMPLICIT_BRIDGE}), which its deck ways
+     * ({@link Terrains#BRIDGE_ROAD}, {@link Terrains#BRIDGE_RAIL}) make for themselves where no bridge carries them:
+     * <ul>
+     * <li>deck ways and no bridge: an implicit bridge {@code elevation} above the hex, its weight and CF from
+     * {@code defaults} ({@code "bridge:1;bridge_cf:40"}), its exits specified as the union of its ways' sides;</li>
+     * <li>an implicit bridge: its exits become the union of its ways' sides, and it goes with its last way, as does its
+     * stored type;</li>
+     * <li>a drawn bridge (any other type, or none stored): nothing.</li>
+     * </ul>
+     * The caller puts the hex back on its board, which re-derives the neighbours' road links, and keeps decks out of
+     * building and fuel-tank hexes.
+     *
+     * @throws IllegalArgumentException when a new bridge is due and {@code defaults} lacks the weight or the CF
+     */
+    public static void carry(Hex hex, int elevation, String defaults) {
+        Terrain road = hex.getTerrain(Terrains.BRIDGE_ROAD), rail = hex.getTerrain(Terrains.BRIDGE_RAIL);
+        int sides = (road == null ? 0 : road.getExits()) | (rail == null ? 0 : rail.getExits());
+        boolean ways = road != null || rail != null;
+        if (!hex.hasBridge()) {
+            if (!ways) { return; }
+            Terrain weight = null, cf = null;
+            for (String token : defaults.split(";")) {
+                Terrain terrain = new Terrain(token);
+                if (terrain.getType() == Terrains.BRIDGE) { weight = terrain; }
+                if (terrain.getType() == Terrains.BRIDGE_CF) { cf = terrain; }
+            }
+            if (weight == null || cf == null) {
+                throw new IllegalArgumentException("An implicit bridge needs a weight and a CF: " + defaults);
+            }
+            hex.addTerrain(new Terrain(Terrains.BRIDGE, weight.getLevel(), true, sides));
+            hex.addTerrain(cf);
+            hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, elevation));
+            Map<String, HexAppearance> appearance = new HashMap<>(hex.getAppearance());
+            appearance.put("bridge", HexAppearance.IMPLICIT_BRIDGE);
+            hex.setAppearance(appearance);
+        } else if (HexAppearance.implicit(hex.getAppearance())) {
+            if (ways) {
+                hex.addTerrain(new Terrain(Terrains.BRIDGE, hex.terrainLevel(Terrains.BRIDGE), true, sides));
+            } else {
+                hex.removeBridge();
+                Map<String, HexAppearance> appearance = new HashMap<>(hex.getAppearance());
+                appearance.remove("bridge");
+                hex.setAppearance(appearance);
+            }
+        }
+    }
+
     /** The type the hexes of {@code span} store ({@link HexAppearance#bridgeBuilt}): built wins, null when none has one. */
     public static Boolean type(Function<Coords, Hex> hexes, List<Coords> span) {
         Boolean result = null;
@@ -85,9 +135,9 @@ public final class BridgeSpan {
      * The legacy decode of whether {@code span} (see {@link #of}) is built, the one rule of the legacy conversion, of the
      * 3D editor's typing of untyped bridges and of their render: a type stored on any of its hexes (built wins); else
      * built when one of its hexes has a road attached (ROAD on it at any level, or a deck end on a road hex), a rail or
-     * maglev (its art, FLUFF 10 or 9, or its route marker) on it or at a deck end, pillar art ({@code pillarArt}), PAVEMENT terrain (snow on it
-     * too) on it or at a deck end, or a BUILDING on it or beside it; otherwise natural. {@code hexes} is null off the
-     * board.
+     * maglev (its art, FLUFF 10 or 9, its terrain or its route marker) on it or at a deck end, pillar art
+     * ({@code pillarArt}), PAVEMENT terrain (snow on it too) on it or at a deck end, or a BUILDING on it or beside it;
+     * otherwise natural. {@code hexes} is null off the board.
      */
     public static boolean decode(Function<Coords, Hex> hexes, Predicate<Coords> pillarArt, List<Coords> span) {
         Boolean stored = type(hexes, span);
@@ -111,12 +161,13 @@ public final class BridgeSpan {
     }
 
     /**
-     * Pavement (under snow too), a building, or a rail or maglev: its art (FLUFF 10 or 9) or its route marker, which a
-     * {@code .board2} holds instead of the art. What a built bridge leads to.
+     * Pavement (under snow too), a building, or a rail or maglev: its art (FLUFF 10 or 9), its terrain or its route
+     * marker, which a {@code .board2} holds instead of the art. What a built bridge leads to.
      */
     private static boolean artificial(Hex hex) {
         int fluff = hex.containsTerrain(Terrains.FLUFF) ? hex.terrainLevel(Terrains.FLUFF) : -1;
-        return hex.containsAnyTerrainOf(Terrains.PAVEMENT, Terrains.BUILDING) || fluff == 9 || fluff == 10
+        return hex.containsAnyTerrainOf(Terrains.PAVEMENT, Terrains.BUILDING, Terrains.RAIL, Terrains.BRIDGE_RAIL)
+              || fluff == 9 || fluff == 10
               || hex.getDecorations().stream().anyMatch(RailRoute::isRoute);
     }
 

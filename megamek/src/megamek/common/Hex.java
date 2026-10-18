@@ -285,6 +285,14 @@ public class Hex implements Serializable {
                 cTerr.setExit(direction, true);
             }
 
+            // A ground road meets a bridge deck that lands on its hex (the deck exits back, within a level); never from
+            // beneath a deck.
+            if ((other != null) && (cTerr.getType() == Terrains.ROAD) && !containsTerrain(Terrains.BRIDGE)
+                  && other.containsTerrainExit(Terrains.BRIDGE, (direction + 3) % 6)
+                  && (Math.abs(other.getLevel() + other.terrainLevel(Terrains.BRIDGE_ELEV) - getLevel()) <= 1)) {
+                cTerr.setExit(direction, true);
+            }
+
             // buildings must have the same building class
             if ((other != null) && (cTerr.getType() == Terrains.BUILDING)
                   && (terrainLevel(Terrains.BLDG_CLASS) != other.terrainLevel(Terrains.BLDG_CLASS))) {
@@ -616,6 +624,17 @@ public class Hex implements Serializable {
     }
 
     /**
+     * Removes the hex's bridge deck with everything it carries: the bridge terrains, its field-repair badge and the road
+     * and rail on it. The ground and what lies on it stay. The one list of a deck's terrain, for a collapse and an erase.
+     */
+    public void removeBridge() {
+        for (int type : new int[] { Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED,
+                                    Terrains.BRIDGE_ROAD, Terrains.BRIDGE_RAIL }) {
+            removeTerrain(type);
+        }
+    }
+
+    /**
      * @return the level of the terrain specified, or Terrain.LEVEL_NONE if the terrain is not present in the hex
      */
     public int terrainLevel(int type) {
@@ -830,13 +849,15 @@ public class Hex implements Serializable {
     /**
      * Terrain types that never make a hex unclear ({@link #isClear}): art tokens (cleared rubble aside), automatic and
      * authored edge markers, lying limbs, metal content (sensors only), deployment zones, the woods' height helper, a
-     * malformed "none", and the bridge family: a bridge above the ground is judged by {@link #isClearDeck}.
+     * malformed "none", the bridge family with what its deck carries: a bridge above the ground is judged by
+     * {@link #isClearDeck}; and the ground rail, which counts while intact ({@link RailRoute#groundRail}).
      */
     private static final Set<Integer> NOT_CLEARING = Set.of(0, Terrains.FLUFF, Terrains.GROUND_FLUFF,
           Terrains.ROAD_FLUFF, Terrains.WATER_FLUFF, Terrains.BLDG_FLUFF, Terrains.ARMS, Terrains.LEGS,
           Terrains.METAL_CONTENT, Terrains.DEPLOYMENT_ZONE, Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM,
           Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM, Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM,
-          Terrains.FOLIAGE_ELEV, Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED);
+          Terrains.FOLIAGE_ELEV, Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED,
+          Terrains.BRIDGE_ROAD, Terrains.BRIDGE_RAIL, Terrains.RAIL);
 
     /**
      * Whether the hex's ground is CLEAR (the rules' "clear hex", e.g. TO:AR p.57 and p.61): it shows only basic ground.
@@ -858,11 +879,12 @@ public class Hex implements Serializable {
     }
 
     /**
-     * Whether the hex's bridge deck is CLEAR: a natural bridge ({@link HexAppearance#NATURAL_BRIDGE}) carrying no rail.
-     * A built deck never is; an untyped bridge is built, as the 3D board draws it.
+     * Whether the hex's bridge deck is CLEAR: a natural bridge ({@link HexAppearance#NATURAL_BRIDGE}) carrying no road
+     * and no rail. A built deck never is; an untyped bridge is built, as the 3D board draws it.
      */
     public boolean isClearDeck() {
-        return hasBridge() && HexAppearance.bridgeBuilt(getAppearance()) == Boolean.FALSE && !RailRoute.deckRail(this);
+        return hasBridge() && HexAppearance.bridgeBuilt(getAppearance()) == Boolean.FALSE
+              && !containsTerrain(Terrains.BRIDGE_ROAD) && !RailRoute.deckRail(this);
     }
 
     /** Determine whether a minefield of the given type can be placed here.
@@ -947,6 +969,22 @@ public class Hex implements Serializable {
               && !containsAllTerrainsOf(Terrains.BRIDGE, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_CF)) {
             newErrors.add("Incomplete Bridge! A hex with any bridge terrain must contain "
                   + "the bridge type, bridge elevation and the bridge CF.");
+        }
+
+        // A road or rail on a deck needs the bridge, and runs only along its exits. Automatic bridge exits follow the
+        // neighbours, so only specified ones can be checked here.
+        Terrain bridge = getTerrain(Terrains.BRIDGE);
+        for (int deckWay : new int[] { Terrains.BRIDGE_ROAD, Terrains.BRIDGE_RAIL }) {
+            Terrain way = getTerrain(deckWay);
+            if (way == null) {
+                continue;
+            }
+            String name = Terrains.getDisplayName(deckWay, way.getLevel());
+            if (bridge == null) {
+                newErrors.add(name + " needs a bridge in its hex.");
+            } else if (bridge.hasExitsSpecified() && ((way.getExits() & ~bridge.getExits() & 63) != 0)) {
+                newErrors.add(name + " leaves by a side the bridge has no exit to.");
+            }
         }
 
         // Fuel Tanks must have all of FUEL_TANK, _ELEV, _CF and _MAGN

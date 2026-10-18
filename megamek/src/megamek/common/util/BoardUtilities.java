@@ -52,6 +52,7 @@ import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BoardType;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
+import megamek.common.board.RailRoute;
 import megamek.common.compute.Compute;
 import megamek.common.enums.BuildingType;
 import megamek.common.loaders.MapSettings;
@@ -1704,19 +1705,23 @@ public class BoardUtilities {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 Hex hex = board.getHex(x, y).duplicate();
-                for (int type : new int[] { Terrains.ROAD, Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.BRIDGE, Terrains.CLIFF_TOP }) {
+                for (int type : new int[] { Terrains.ROAD, Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.BRIDGE, Terrains.CLIFF_TOP,
+                                            Terrains.RAIL, Terrains.BRIDGE_RAIL, Terrains.BRIDGE_ROAD }) {
                     Terrain terrain = hex.getTerrain(type);
                     // High values select legacy artwork. They must never be truncated as directional bits.
                     if (terrain != null && terrain.getExits() >= 0 && terrain.getExits() <= 63) { terrain.flipExits(horiz, vert); }
                 }
                 hex.setDecorations(hex.getDecorations().stream().map(object -> object.flip(horiz, vert)).toList());
-                HexAppearance look = hex.getAppearance().get("vegetation");
+                Map<String, HexAppearance> appearance = new HashMap<>(hex.getAppearance());
+                HexAppearance look = appearance.get("vegetation");
                 if (look != null) {
                     // A container yard look turns (and changes hands) with the sheet, as the objects do.
-                    Map<String, HexAppearance> appearance = new HashMap<>(hex.getAppearance());
                     appearance.put("vegetation", BoardEditorBlueprint.get().flipped(look, horiz, vert));
-                    hex.setAppearance(appearance);
                 }
+                // A rail's junction layout turns with its exits.
+                appearance.computeIfPresent("rail", (owner, rail) -> RailRoute.flip(rail, horiz, vert));
+                appearance.computeIfPresent("bridgeRail", (owner, rail) -> RailRoute.flip(rail, horiz, vert));
+                if (!appearance.equals(hex.getAppearance())) { hex.setAppearance(appearance); }
                 int nx = horiz ? width - x - 1 : x, ny = vert ? height - y - 1 : y;
                 transformed[ny * width + nx] = hex;
             }

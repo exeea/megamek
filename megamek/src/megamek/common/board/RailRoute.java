@@ -5,11 +5,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 import megamek.common.Hex;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 
 /**
- * The one route model of rails and maglev ({@link Kind}): cosmetic route markers at hex centres. A marker stores the
- * sides it leaves by ({@link BoardDecoration#connections()}, N=1 ... NW=32) and, only where it differs from the default
- * layout of those sides ({@link #pieces(int)}), the track pieces it lays between them ({@link BoardDecoration#tracks()}).
+ * The one route model of rails and maglev ({@link Kind}): route markers at hex centres. A marker holds the sides it
+ * leaves by ({@link BoardDecoration#connections()}, N=1 ... NW=32) and, only where it differs from the default layout of
+ * those sides ({@link #pieces(int)}), the track pieces it lays between them ({@link BoardDecoration#tracks()}). Rails as
+ * terrain ({@link Terrains#RAIL} on the ground, {@link Terrains#BRIDGE_RAIL} on a bridge deck, exits = sides) yield
+ * derived markers, never stored ({@link #markers}); legacy conversions and the editor still store route markers.
  * A hex may hold several markers of one kind, at different levels (routes crossing over each other), whose sides are
  * disjoint. A side joins the neighbour's marker of the same kind that has the opposite side, so parallel routes in
  * adjacent hexes stay apart and the kinds never join.
@@ -73,10 +77,37 @@ public final class RailRoute {
 
     public static boolean isRoute(BoardDecoration object) { return kind(object) != null; }
 
-    /** The hex's markers of {@code kind}, in stored order. */
+    /** The derived markers' ids: the rail on a hex's ground and the rail on its bridge deck. */
+    public static final String GROUND_RAIL = "rail", DECK_RAIL = "bridge-rail";
+
+    /** A hex's markers of {@code kind}: the ones its rail terrain yields ({@link #derived}), then the stored ones in order. */
     public static List<BoardDecoration> markers(Hex hex, Kind kind) {
         if (hex == null) { return List.of(); }
-        return hex.getDecorations().stream().filter(object -> kind(object) == kind).toList();
+        List<BoardDecoration> result = kind == Kind.RAIL ? derived(hex) : new ArrayList<>();
+        hex.getDecorations().stream().filter(object -> kind(object) == kind).forEach(result::add);
+        return List.copyOf(result);
+    }
+
+    /**
+     * The markers a hex's rail terrain yields: its intact ground rail ({@link Terrains#RAIL}, id {@link #GROUND_RAIL}, on
+     * the ground) and its deck rail ({@link Terrains#BRIDGE_RAIL}, id {@link #DECK_RAIL}, on the bridge deck). Each leaves
+     * by its terrain's exits and lays the junction layout the hex's appearance stores for it ({@link HexAppearance#tracks})
+     * where that is a layout of them, else the default. A destroyed rail yields none.
+     */
+    private static List<BoardDecoration> derived(Hex hex) {
+        List<BoardDecoration> result = new ArrayList<>(2);
+        derive(hex, Terrains.RAIL, GROUND_RAIL, "rail", BoardDecoration.Placement.ground(), result);
+        derive(hex, Terrains.BRIDGE_RAIL, DECK_RAIL, "bridgeRail", BoardDecoration.Placement.on("bridge", 0), result);
+        return result;
+    }
+
+    private static void derive(Hex hex, int type, String id, String owner, BoardDecoration.Placement placement,
+          List<BoardDecoration> result) {
+        Terrain rail = hex.getTerrain(type);
+        if (rail == null || rail.getLevel() <= 0) { return; }
+        int sides = rail.getExits() & 63, tracks = HexAppearance.tracks(hex.getAppearance(), owner);
+        result.add(new BoardDecoration(id, "prop", Kind.RAIL.asset, null, 0, 0, 0, false, 1, placement, 0, false, 0, 0,
+              null, false, sides, BoardDecoration.Stretch.NONE, BoardDecoration.Colours.NONE, valid(sides, tracks) ? tracks : 0));
     }
 
     /** The hex's first marker of {@code kind}, or null. */
@@ -114,14 +145,14 @@ public final class RailRoute {
     }
 
     /**
-     * Whether the hex holds a rail on its ground (a RAIL marker that does not ride a deck), which keeps the ground from
-     * being clear ({@link Hex#isClear}). Maglev never does. Rails as rules terrain (b13 item 4) replace this body.
+     * Whether the hex holds an intact rail on its ground (a RAIL marker that does not ride a deck), which keeps the ground
+     * from being clear ({@link Hex#isClear}). Maglev never does.
      */
     public static boolean groundRail(Hex hex) {
         return markers(hex, Kind.RAIL).stream().anyMatch(marker -> !onDeck(marker));
     }
 
-    /** Whether the hex's bridge deck carries a rail ({@link Hex#isClearDeck}); b13 item 4 replaces this body. */
+    /** Whether the hex's bridge deck carries a rail ({@link Hex#isClearDeck}). */
     public static boolean deckRail(Hex hex) {
         return markers(hex, Kind.RAIL).stream().anyMatch(RailRoute::onDeck);
     }
@@ -135,16 +166,17 @@ public final class RailRoute {
 
     /** The exits of the hex's bridge, 0 without one. */
     public static int bridgeExits(Hex hex) {
-        var bridge = hex.getTerrain(megamek.common.units.Terrains.BRIDGE);
+        var bridge = hex.getTerrain(Terrains.BRIDGE);
         return bridge == null ? 0 : bridge.getExits();
     }
 
     /**
-     * The sides of the hex's rail markers that lie on the ground: the road engine shapes and clears the ground for them
-     * as for a road with those exits.
+     * The sides of the hex's rails that lie on the ground, a destroyed rail's too: the road engine shapes and clears the
+     * ground for them as for a road with those exits.
      */
     public static int groundSides(Hex hex) {
-        int result = 0;
+        Terrain rail = hex == null ? null : hex.getTerrain(Terrains.RAIL);
+        int result = rail == null ? 0 : rail.getExits() & 63;
         for (var marker : markers(hex, Kind.RAIL)) {
             if (!onDeck(marker)) { result |= marker.connections(); }
         }
@@ -384,6 +416,12 @@ public final class RailRoute {
     /** Adds {@code layout} unless its tracks are listed already. */
     private static void add(List<Junction> layouts, Junction layout) {
         if (layouts.stream().noneMatch(listed -> listed.tracks() == layout.tracks())) { layouts.add(layout); }
+    }
+
+    /** A rail appearance's junction layout ({@link HexAppearance#tracks}) reflected as a board flip reflects its exits. */
+    public static HexAppearance flip(HexAppearance look, boolean horizontal, boolean vertical) {
+        return look.tracks() == null ? look
+              : HexAppearance.tracks(flip(look.tracks(), sides -> BoardDecoration.flipSides(sides, horizontal, vertical)));
     }
 
     /** {@code tracks} reflected as {@link BoardDecoration#flip} reflects the sides ({@code flipSides}). */

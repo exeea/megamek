@@ -243,6 +243,51 @@ class RailRouteTest {
     }
 
     /**
+     * Rail terrain yields markers, never stored: the intact ground rail on the ground, the deck rail on the bridge deck,
+     * each with its exits as sides and its stored junction layout where that fits them, before any stored marker.
+     */
+    @Test
+    void railTerrainYieldsDerivedMarkersBeforeTheStoredOnes() throws Exception {
+        int crossing = 1 | 1 << RailRoute.piece(2, 4);
+        var hex = new Hex(0, "rail:1:29;bridge:1:18;bridge_cf:40;bridge_elev:1;bridge_rail:1:18", "");
+        hex.setAppearance(Map.of("rail", HexAppearance.tracks(crossing), "bridgeRail", HexAppearance.tracks(crossing)));
+        var stored = marker(RailRoute.Kind.RAIL, "stored", 36, BoardDecoration.Placement.ground());
+        hex.setDecorations(List.of(stored));
+        var markers = RailRoute.markers(hex, RailRoute.Kind.RAIL);
+        assertEquals(List.of(RailRoute.GROUND_RAIL, RailRoute.DECK_RAIL, "stored"), markers.stream().map(BoardDecoration::id).toList());
+        var ground = markers.get(0);
+        var deck = markers.get(1);
+        assertFalse(RailRoute.onDeck(ground));
+        assertTrue(RailRoute.onDeck(deck));
+        assertEquals(29, ground.connections());
+        assertEquals(crossing, ground.tracks(), "the stored layout of its sides");
+        assertEquals(0, deck.tracks(), "a layout that does not fit the deck rail's sides lays the default");
+        assertTrue(RailRoute.groundRail(hex) && RailRoute.deckRail(hex));
+        assertEquals(29 | 36, RailRoute.groundSides(hex));
+        assertEquals(List.of(), RailRoute.markers(hex, RailRoute.Kind.MAGLEV));
+
+        var destroyed = new Hex(0, "rail:0:9", "");
+        assertEquals(List.of(), RailRoute.markers(destroyed, RailRoute.Kind.RAIL), "a destroyed rail draws no track");
+        assertFalse(RailRoute.groundRail(destroyed));
+        assertEquals(9, RailRoute.groundSides(destroyed), "its bed stays shaped");
+
+        var board = Board.createEmptyBoard(1, 1);
+        hex.setDecorations(List.of());
+        board.setHex(0, 0, hex);
+        var output = new java.io.ByteArrayOutputStream();
+        BoardFile.write(board, output);
+        String saved = output.toString(java.nio.charset.StandardCharsets.UTF_8);
+        var read = BoardFile.readNative(saved).getHex(0, 0);
+        assertEquals(hex.getAppearance(), read.getAppearance());
+        assertEquals(29, read.getTerrain(megamek.common.units.Terrains.RAIL).getExits());
+        assertEquals(markers.subList(0, 2), RailRoute.markers(read, RailRoute.Kind.RAIL));
+
+        assertNull(HexAppearance.tracks(0), "the default layout is stored as none");
+        assertThrows(IllegalArgumentException.class, () -> HexAppearance.tracks(1 << RailRoute.PIECES));
+        assertThrows(IllegalArgumentException.class, () -> HexAppearance.tracks(crossing).validateOwner("road"));
+    }
+
+    /**
      * Pillars belong to a maglev marker only (rails lie on their support), stay through every copy, are written only
      * when on, and apply to its connected run: through a junction, not to the maglev crossing it at another level.
      */
