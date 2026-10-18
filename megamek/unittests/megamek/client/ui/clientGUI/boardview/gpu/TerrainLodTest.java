@@ -179,33 +179,4 @@ class TerrainLodTest {
         assertEquals(TerrainLod.FULL, TerrainLod.select(200, TerrainLod.DISTANT));
         assertEquals(TerrainLod.DISTANT, TerrainLod.select(3, TerrainLod.FULL));
     }
-
-    @Test
-    void disablingDetailSelectionKeepsFullDetailWithoutInvalidatingTerrainShape() {
-        boolean previous = TerrainLod.enabled();
-        int revision = BoardGeometry.terrainRevision();
-        try {
-            TerrainLod.setEnabled(false);
-            assertEquals(TerrainLod.FULL, TerrainLod.select(1, null), "New terrain starts at full detail");
-            for (TerrainLod current : TerrainLod.values()) {
-                assertEquals(TerrainLod.FULL, TerrainLod.select(1, current), "Installed terrain refines to full detail");
-            }
-            TerrainLod.setEnabled(true);
-            assertEquals(TerrainLod.DISTANT, TerrainLod.select(1, TerrainLod.FULL));
-            assertEquals(revision, BoardGeometry.terrainRevision(), "The switch only changes render sampling");
-        } finally { TerrainLod.setEnabled(previous); }
-    }
-
-    @Test
-    void changingDetailThresholdsDoesNotInvalidateTerrainShape() {
-        var previous = TerrainLod.tuning();
-        int revision = BoardGeometry.terrainRevision();
-        try {
-            TerrainLod.tune(new TerrainLod.Tuning(80, 40));
-            assertEquals(TerrainLod.COARSE, TerrainLod.select(30, null));
-            assertEquals(revision, BoardGeometry.terrainRevision());
-        } finally {
-            TerrainLod.tune(previous);
-        }
-    }
 }

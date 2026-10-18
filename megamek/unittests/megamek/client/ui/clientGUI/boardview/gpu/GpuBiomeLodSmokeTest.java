@@ -31,7 +31,7 @@ class GpuBiomeLodSmokeTest {
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
         var original = BoardGeometry.tuning();
-        boolean enabled = TerrainLod.enabled();
+        var originalLod = TerrainLod.tuning();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 960);
         new Lwjgl3Application(new ApplicationAdapter() {
@@ -42,7 +42,7 @@ class GpuBiomeLodSmokeTest {
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
                     GpuRiverTerrainSmokeTest.tune(.94f, true);
-                    TerrainLod.setEnabled(false);
+                    TerrainLod.tune(new TerrainLod.Tuning(1, 1));
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     camera.setIsometric(true);
@@ -110,7 +110,7 @@ class GpuBiomeLodSmokeTest {
                     terrain.dispose();
                     frame.dispose();
                     BoardGeometry.tune(original);
-                    TerrainLod.setEnabled(enabled);
+                    TerrainLod.tune(originalLod);
                     Gdx.app.exit();
                 }
             }

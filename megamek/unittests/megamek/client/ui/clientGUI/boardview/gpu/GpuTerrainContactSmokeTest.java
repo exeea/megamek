@@ -33,7 +33,6 @@ class GpuTerrainContactSmokeTest {
         var failure = new AtomicReference<Throwable>();
         var original = BoardGeometry.tuning();
         var lodTuning = TerrainLod.tuning();
-        boolean lodEnabled = TerrainLod.enabled();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 960);
         new Lwjgl3Application(new ApplicationAdapter() {
@@ -45,7 +44,6 @@ class GpuTerrainContactSmokeTest {
                 int arrayHandle = 0;
                 try {
                     GpuRiverTerrainSmokeTest.tune(.94f, true);
-                    TerrainLod.setEnabled(true);
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     for (var lod : TerrainLod.values()) {
@@ -153,7 +151,6 @@ class GpuTerrainContactSmokeTest {
                     frame.dispose();
                     BoardGeometry.tune(original);
                     TerrainLod.tune(lodTuning);
-                    TerrainLod.setEnabled(lodEnabled);
                     Gdx.app.exit();
                 }
             }

@@ -17,29 +17,12 @@ import megamek.common.board.HexAppearance;
  * cached per scene, with the hexes whose placed objects pin them. No game state or GL objects.
  */
 final class BoardConcrete {
-    enum Mode { OFF, WATER_ONLY, EVERYWHERE }
-
-    static final Mode DEFAULT_MODE = Mode.EVERYWHERE;
-    private static Mode mode = DEFAULT_MODE;
-
-    static Mode mode() {
-        TerrainSettings settings = TerrainSettings.current();
-        return settings == null ? mode : settings.concrete();
-    }
-
-    static void tune(Mode next) {
-        if (next != mode) {
-            mode = java.util.Objects.requireNonNull(next);
-            BoardGeometry.terrainChanged();
-        }
-    }
-
     /** One immutable derived outline, shared by terrain and picking; no scene, artwork or GL resources are retained. */
     private record Cached(WeakReference<List<BoardScene.Tile>> tiles, int width, int height, float scale,
-          Mode mode, BoardConcrete shape) {
+          BoardConcrete shape) {
         boolean matches(BoardScene scene) {
             return tiles.get() == scene.tiles() && width == scene.width() && height == scene.height()
-                  && scale == BoardGeometry.hexScale() && mode == BoardConcrete.mode();
+                  && scale == BoardGeometry.hexScale();
         }
     }
     // Retain the displayed and pending outlines. A cache miss must not hold a monitor during board construction.
@@ -58,7 +41,7 @@ final class BoardConcrete {
         synchronized (BoardConcrete.class) {
             if (cached != null && cached.matches(scene)) { return cached.shape(); }
             previous = cached;
-            cached = new Cached(new WeakReference<>(scene.tiles()), scene.width(), scene.height(), BoardGeometry.hexScale(), mode(), shape);
+            cached = new Cached(new WeakReference<>(scene.tiles()), scene.width(), scene.height(), BoardGeometry.hexScale(), shape);
         }
         return shape;
     }
@@ -67,7 +50,7 @@ final class BoardConcrete {
     static BoardConcrete adopt(BoardScene scene, BoardConcrete shape) {
         synchronized (BoardConcrete.class) {
             previous = cached;
-            cached = new Cached(new WeakReference<>(scene.tiles()), scene.width(), scene.height(), BoardGeometry.hexScale(), mode(), shape);
+            cached = new Cached(new WeakReference<>(scene.tiles()), scene.width(), scene.height(), BoardGeometry.hexScale(), shape);
         }
         return shape;
     }
@@ -120,12 +103,6 @@ final class BoardConcrete {
     }
 
     private BoardConcrete(BoardScene scene) {
-        if (mode() == Mode.OFF) {
-            // An empty fit moves nothing.
-            fit = new ConcreteFit(0, 0, List.of(), BoardGeometry.hexScale(), false, Set.of());
-            cuts = List.of();
-            return;
-        }
         List<ConcreteFit.Cell> cells = new ArrayList<>(scene.tiles().size());
         for (BoardScene.Tile tile : scene.tiles()) { cells.add(cell(scene, tile)); }
         // A placed object keeps its hex's outline only where the fit moves a wall or bank into it. Pinning its hex can move
@@ -163,7 +140,7 @@ final class BoardConcrete {
     List<Cut> cuts() { return cuts; }
 
     private static ConcreteFit fit(BoardScene scene, List<ConcreteFit.Cell> cells, Set<Coords> pins) {
-        return new ConcreteFit(scene.width(), scene.height(), cells, BoardGeometry.hexScale(), mode() == Mode.EVERYWHERE, pins);
+        return new ConcreteFit(scene.width(), scene.height(), cells, BoardGeometry.hexScale(), true, pins);
     }
 
     /** What the fit reads of a tile: structures and ground drawn without the fitted relief keep their hex. */

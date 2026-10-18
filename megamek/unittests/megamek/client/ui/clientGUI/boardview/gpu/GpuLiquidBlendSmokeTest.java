@@ -41,7 +41,6 @@ class GpuLiquidBlendSmokeTest {
         var failure = new AtomicReference<Throwable>();
         var tuning = BoardGeometry.tuning();
         var lodTuning = TerrainLod.tuning();
-        boolean lodEnabled = TerrainLod.enabled();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 960);
         new Lwjgl3Application(new ApplicationAdapter() {
@@ -101,7 +100,6 @@ class GpuLiquidBlendSmokeTest {
                     camera.setIsometric(true);
                     camera.camera.zoom = .18f;
                     camera.center(BoardGeometry.center(CENTER, 0));
-                    TerrainLod.setEnabled(true);
                     for (var lod : TerrainLod.values()) {
                         TerrainLod.tune(switch (lod) {
                             case FULL -> new TerrainLod.Tuning(1, 1);
@@ -128,7 +126,6 @@ class GpuLiquidBlendSmokeTest {
                     terrain.dispose(); mask.dispose(); frame.dispose();
                     BoardGeometry.tune(tuning);
                     TerrainLod.tune(lodTuning);
-                    TerrainLod.setEnabled(lodEnabled);
                     Gdx.app.exit();
                 }
             }

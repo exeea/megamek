@@ -72,10 +72,9 @@ class GpuTerrainLodSmokeTest {
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
                 GpuTactical tactical = new GpuTactical(terrain::tacticalSurface);
-                boolean previousLod = TerrainLod.enabled();
+                var previousLod = TerrainLod.tuning();
                 var previousSettings = BoardGeometry.tuning();
                 try {
-                    TerrainLod.setEnabled(true);
                     verifiesPreparedWaterTextureUpload();
                     BoardScene scene = GpuTerrainReliefSmokeTest.scene(BoardScene.Surface.SAND);
                     Coords at = new Coords(4, 4);
@@ -114,13 +113,13 @@ class GpuTerrainLodSmokeTest {
                     assertEquals(TerrainLod.MEDIUM, firstLod(terrain));
                     assertSame(medium, terrain.tacticalSurface(at), "Returning to the previous tier reuses its installed geometry");
 
-                    // Toggling detail at a fixed camera uses the same incremental/cached path as zooming.
+                    // Pinning full detail at a fixed camera uses the same incremental/cached path as zooming.
                     int revision = BoardGeometry.terrainRevision();
-                    TerrainLod.setEnabled(false);
+                    TerrainLod.tune(new TerrainLod.Tuning(1, 1));
                     settle(terrain, tactical, scene, camera);
                     assertEquals(TerrainLod.FULL, firstLod(terrain));
                     assertSame(close, terrain.tacticalSurface(at));
-                    TerrainLod.setEnabled(true);
+                    TerrainLod.tune(TerrainLod.DEFAULTS);
                     settle(terrain, tactical, scene, camera);
                     assertEquals(TerrainLod.MEDIUM, firstLod(terrain));
                     assertSame(medium, terrain.tacticalSurface(at));
@@ -208,7 +207,7 @@ class GpuTerrainLodSmokeTest {
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
-                    TerrainLod.setEnabled(previousLod);
+                    TerrainLod.tune(previousLod);
                     BoardGeometry.tune(previousSettings);
                     tactical.dispose();
                     terrain.dispose();

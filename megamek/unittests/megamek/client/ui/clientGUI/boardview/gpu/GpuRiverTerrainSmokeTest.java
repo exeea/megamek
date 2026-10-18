@@ -119,10 +119,6 @@ class GpuRiverTerrainSmokeTest {
         boolean patterns = Boolean.getBoolean("megamek.gpu.river.coastPatterns");
         boolean paving = Boolean.getBoolean("megamek.gpu.river.paving");
         boolean pavedMap = Boolean.getBoolean("megamek.gpu.river.pavedMap");
-        BoardConcrete.Mode concreteMode = BoardConcrete.Mode.valueOf(System.getProperty("megamek.gpu.river.concreteMode",
-              (paving || pavedMap ? BoardConcrete.Mode.EVERYWHERE : BoardConcrete.DEFAULT_MODE).name()));
-        BoardConcrete.Mode originalConcrete = BoardConcrete.mode();
-        float width = Float.parseFloat(System.getProperty("megamek.gpu.river.width", "1"));
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
               "river-terrain");
         Files.createDirectories(output.toPath());
@@ -144,12 +140,10 @@ class GpuRiverTerrainSmokeTest {
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     for (String name : families.split(",")) {
                         BoardScene.Surface family = BoardScene.Surface.valueOf(name.trim().toUpperCase(Locale.ROOT));
-                        BoardConcrete.tune(concreteMode);
                         BoardScene scene = pavedMap ? pavedMapScene(Integer.getInteger("megamek.gpu.river.mapNumber", 1))
                               : paving ? pavedGroundScene()
                               : patterns ? coastPatternScene() : dock ? dockScene()
                               : quay ? quayScene(family) : drops ? dropScene(family) : map ? mapScene(family) : scene(family);
-                        setWidth(width);
                         long start = System.nanoTime();
                         tune(.8f, transitions);
                         terrain.update(scene);
@@ -175,7 +169,7 @@ class GpuRiverTerrainSmokeTest {
                             report.append(String.format(Locale.ROOT, "  %s: draws=%d vertices=%.0f%n", view.name(),
                                   profiler.getDrawCalls(), profiler.getVertexCount().total));
                             GpuReviewFrame.save(new File(output, family.name().toLowerCase(Locale.ROOT) + "-"
-                                  + view.name() + suffix + "-width" + Math.round(100 * width) + ".png"));
+                                  + view.name() + suffix + ".png"));
                         }
                     }
                     terrain.setClay(false);
@@ -186,7 +180,6 @@ class GpuRiverTerrainSmokeTest {
                 } finally {
                     BoardGeometry.tune(BoardGeometry.DEFAULTS);
                     BoardRelief.tune(BoardRelief.DEFAULTS);
-                    BoardConcrete.tune(originalConcrete);
                     frame.dispose();
                     terrain.dispose();
                     Gdx.app.exit();
@@ -200,14 +193,6 @@ class GpuRiverTerrainSmokeTest {
     static void tune(float grid, boolean transitions) {
         BoardGeometry.tune(new BoardGeometry.Tuning(1, .7f, 1, 18, grid, BoardGeometry.DEFAULT_MULTI_HEX_UNIT_SCALE,
               transitions, BoardGeometry.DEFAULT_PADDING));
-    }
-
-    static void setWidth(float width) {
-        var t = BoardRelief.tuning();
-        BoardRelief.tune(new BoardRelief.Tuning(t.shoreShift(), t.shoreRoom(), t.shoreReach(), t.shoreNarrow(),
-              t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(), t.wanderCell(),
-              t.shoreSpread(), t.landKeep(), t.shoreLip(), t.transition(), width,
-              t.cliffsIntoWater()));
     }
 
     /** A paved waterfront, including an inlet that must stay open and buildings whose foundations stay intact. */

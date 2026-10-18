@@ -141,11 +141,11 @@ class GpuShadingNormalSmokeTest {
               """ + source.substring(end);
         applySources(manager, Map.of("terrain-vegetation.frag", source), "blade-root-fields");
         var originalGeometry = BoardGeometry.tuning();
-        boolean originalLod = TerrainLod.enabled();
+        var originalLod = TerrainLod.tuning();
         var terrain = new GpuTerrain();
         try (var output = new GpuSceneTestOutput(128, 128)) {
             GpuRiverTerrainSmokeTest.tune(.94f, true);
-            TerrainLod.setEnabled(false);
+            TerrainLod.tune(new TerrainLod.Tuning(1, 1));
             terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0,
                   BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
             terrain.setGrass(true);
@@ -247,7 +247,7 @@ class GpuShadingNormalSmokeTest {
         } finally {
             try { terrain.dispose(); }
             finally {
-                BoardGeometry.tune(originalGeometry); TerrainLod.setEnabled(originalLod);
+                BoardGeometry.tune(originalGeometry); TerrainLod.tune(originalLod);
                 applySources(manager, Map.of(), "restore-blade-root");
             }
         }
@@ -1017,12 +1017,12 @@ class GpuShadingNormalSmokeTest {
               """ + source.substring(end);
         applySources(manager, Map.of("terrain-vegetation.frag", source), "actual-clump-diagnostics");
         var originalGeometry = BoardGeometry.tuning();
-        boolean originalLod = TerrainLod.enabled();
+        var originalLod = TerrainLod.tuning();
         var terrain = new GpuTerrain();
         var rows = new java.util.ArrayList<Object>();
         try (var output = new GpuSceneTestOutput(128, 128)) {
             GpuRiverTerrainSmokeTest.tune(.94f, true);
-            TerrainLod.setEnabled(false); // Same fully installed ground as the existing biome fixture.
+            TerrainLod.tune(new TerrainLod.Tuning(1, 1)); // Same fully installed ground as the existing biome fixture.
             terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0,
                   BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
             terrain.setGrass(true);
@@ -1136,7 +1136,7 @@ class GpuShadingNormalSmokeTest {
         } finally {
             try { terrain.dispose(); }
             finally {
-                BoardGeometry.tune(originalGeometry); TerrainLod.setEnabled(originalLod);
+                BoardGeometry.tune(originalGeometry); TerrainLod.tune(originalLod);
                 applySources(manager, Map.of(), "restore-clumps");
             }
         }

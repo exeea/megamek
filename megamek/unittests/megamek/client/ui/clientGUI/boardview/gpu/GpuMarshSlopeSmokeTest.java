@@ -71,7 +71,6 @@ class GpuMarshSlopeSmokeTest {
         camera.resize(960, 720);
         var geometry = BoardGeometry.tuning();
         var lod = TerrainLod.tuning();
-        boolean lodEnabled = TerrainLod.enabled();
         var report = new StringBuilder(Gdx.gl.glGetString(GL20.GL_RENDERER)
               + "\nFrozen scene, clock, weather and draw order; reference/current/current/reference.\n");
         if (timing) {
@@ -81,7 +80,6 @@ class GpuMarshSlopeSmokeTest {
         }
         try {
             GpuRiverTerrainSmokeTest.tune(.94f, true);
-            TerrainLod.setEnabled(true);
             // Shader recompilation must not reorder coplanar terrain by changing program identities.
             var sorter = ModelBatch.class.getDeclaredField("sorter");
             sorter.setAccessible(true);
@@ -152,7 +150,7 @@ class GpuMarshSlopeSmokeTest {
         } catch (Exception error) { throw new AssertionError(error); }
         finally {
             terrain.dispose(); frame.dispose();
-            BoardGeometry.tune(geometry); TerrainLod.tune(lod); TerrainLod.setEnabled(lodEnabled);
+            BoardGeometry.tune(geometry); TerrainLod.tune(lod);
         }
     }
 
@@ -196,7 +194,6 @@ class GpuMarshSlopeSmokeTest {
         var failure = new AtomicReference<Throwable>();
         var original = BoardGeometry.tuning();
         var originalLod = TerrainLod.tuning();
-        boolean enabled = TerrainLod.enabled();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 960);
         new Lwjgl3Application(new ApplicationAdapter() {
@@ -207,7 +204,6 @@ class GpuMarshSlopeSmokeTest {
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
                     GpuRiverTerrainSmokeTest.tune(.94f, true);
-                    TerrainLod.setEnabled(true);
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     for (String contact : new String[] { "connected", "downhill", "uphill" }) {
@@ -239,7 +235,6 @@ class GpuMarshSlopeSmokeTest {
                     terrain.dispose(); frame.dispose();
                     BoardGeometry.tune(original);
                     TerrainLod.tune(originalLod);
-                    TerrainLod.setEnabled(enabled);
                     Gdx.app.exit();
                 }
             }

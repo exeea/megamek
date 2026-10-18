@@ -32,9 +32,7 @@ class GpuSurfaceContactSmokeTest {
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
-                boolean previousLod = TerrainLod.enabled();
                 try {
-                    TerrainLod.setEnabled(true);
                     var output = new File(System.getProperty("megamek.gpu.screenshots"), "surface-contacts");
                     assertTrue(output.isDirectory() || output.mkdirs());
                     var camera = new BoardCamera();
@@ -66,7 +64,6 @@ class GpuSurfaceContactSmokeTest {
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
-                    TerrainLod.setEnabled(previousLod);
                     terrain.dispose();
                     frame.dispose();
                     Gdx.app.exit();

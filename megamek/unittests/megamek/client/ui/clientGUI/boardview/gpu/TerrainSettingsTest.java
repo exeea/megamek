@@ -64,7 +64,6 @@ class TerrainSettingsTest {
                 var g = original.geometry();
                 BoardGeometry.tune(new BoardGeometry.Tuning(g.hexScale() * 1.5f, g.unitScale(), g.unitHeightScale(),
                       g.levelHeight() + 4, g.gridShade(), g.multiHexUnitScale(), g.transitions(), g.padding()));
-                BoardConcrete.tune(BoardConcrete.Mode.OFF);
                 changed.countDown();
                 assertEquals(expected, future.get(30, TimeUnit.SECONDS));
                 assertNotEquals(expected, new BoardSurface(scene, tile, TerrainLod.COARSE).faces);
@@ -75,7 +74,6 @@ class TerrainSettingsTest {
             } finally {
                 changed.countDown();
                 BoardGeometry.tune(original.geometry());
-                BoardConcrete.tune(original.concrete());
             }
         }
     }

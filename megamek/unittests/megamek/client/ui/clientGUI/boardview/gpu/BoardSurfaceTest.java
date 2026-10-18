@@ -28,8 +28,7 @@ class BoardSurfaceTest {
         var original = TerrainSettings.capture();
         for (float scale : new float[] { .5f, 1, 2 }) {
             var settings = new TerrainSettings(new BoardGeometry.Tuning(scale, 1, 1, 18, .8f),
-                  original.relief(), original.water(), original.geology(), original.concrete(),
-                  original.revision(), original.terrainRevision());
+                  original.relief(), original.revision(), original.terrainRevision());
             try (var ignored = TerrainSettings.use(settings)) {
                 var ground = new BoardSurface.Face(new Vector3(0, 0, 3), new Vector3(2 * scale, 0, 3),
                       new Vector3(0, 2 * scale, 3), BoardSurface.Finish.BANK);
@@ -321,104 +320,6 @@ class BoardSurfaceTest {
     }
 
     @Test
-    void riverTuningChangesBothSidesOfTheOpeningInAnUnchangedScene() {
-        Coords center = new Coords(3, 3), north = center.translated(0);
-        BoardScene scene = sandScene(7, 0, Map.of(), Map.of(center, 1, north, 1, center.translated(3), 1), false);
-        var cache = new BoardSurface.Cache();
-        var original = BoardRelief.tuning();
-        BoardSurface before = cache.get(scene, scene.tile(center));
-        int edge = 1, otherEdge = 4, n = BoardSurface.SHORE_SEGMENTS;
-        float width = before.outline.get(edge * n).dst(before.outline.get((edge + 1) * n));
-        try {
-            BoardRelief.tune(new BoardRelief.Tuning(original.shoreShift(), original.shoreRoom(), original.shoreReach(),
-                  original.shoreNarrow(), original.shoreHard(), original.shorePool(), original.shoreIsle(),
-                  original.shoreBlend(), original.shoreWander(), original.wanderCell(), -15, original.landKeep(),
-                  original.shoreLip(), original.transition(),
-                  original.riverWidth(), original.cliffsIntoWater()));
-            BoardSurface narrow = cache.get(scene, scene.tile(center));
-            BoardSurface adjoining = cache.get(scene, scene.tile(north));
-            assertNotSame(before, narrow);
-            assertTrue(narrow.outline.get(edge * n).dst(narrow.outline.get((edge + 1) * n)) < width - 1,
-                  "Shore spread changes the river's width at the shared hex side");
-            for (int sample = 0; sample <= n; sample++) {
-                assertTrue(narrow.outline.get(edge * n + sample)
-                      .epsilonEquals(adjoining.outline.get((otherEdge + 1) * n - sample), .001f),
-                      "Both hexes must agree on the tuned mouth, sample " + sample);
-            }
-            BoardRelief.tune(original);
-            assertEquals(before.outline, cache.get(scene, scene.tile(center)).outline);
-        } finally {
-            BoardRelief.tune(original);
-        }
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = { false, true })
-    void waterTuningRequiresPositiveBankMargins(boolean wetMargin) {
-        var t = BoardSurface.DEFAULTS;
-        assertThrows(IllegalArgumentException.class, () -> new BoardSurface.Tuning(t.fallsOffBoard(),
-              t.bottomlessLevels(), wetMargin ? 0 : t.hug(), wetMargin ? t.beach() : 0, t.plungePool(),
-              t.shoreBank(), t.shoreRound(), t.mouthOpening(), t.plungeOpening(), t.lipJut(), t.fallLipWidth(),
-              t.fallLipDrop(), t.plateau(), t.lipDepth(), t.valley()));
-    }
-
-    @Test
-    void minimumWaterMarginsKeepPondBanksClosed() {
-        BoardSculptTest.withTransitions(true, () -> {
-            var t = BoardSurface.tuning();
-            try {
-                BoardSurface.tune(new BoardSurface.Tuning(t.fallsOffBoard(), t.bottomlessLevels(), .1f, 1,
-                      t.plungePool(), t.shoreBank(), t.shoreRound(), t.mouthOpening(), t.plungeOpening(),
-                      t.lipJut(), t.fallLipWidth(), t.fallLipDrop(), t.plateau(), t.lipDepth(), t.valley()));
-                Coords center = new Coords(3, 3);
-                BoardScene scene = sandScene(7, 1, Map.of(center, 0), Map.of(center, 1), false);
-                BoardSurface pond = new BoardSurface(scene, scene.tile(center));
-                for (int edge = 0; edge < 6; edge++) {
-                    assertFalse(pond.mouth(edge), "Dry land must remain a bank at minimum clearance");
-                }
-                assertTrue(pond.faces.stream().anyMatch(face -> face.finish() == BoardSurface.Finish.TOP),
-                      "The pond must keep its bank tops");
-                assertFalse(pond.waterFaces.isEmpty());
-                assertTrue(pond.waterfalls.isEmpty());
-            } finally {
-                BoardSurface.tune(t);
-            }
-        });
-    }
-
-    @Test
-    void waterTuningChangesFixedCornerMouthMargins() {
-        Coords center = new Coords(3, 3);
-        BoardScene scene = sandScene(7, 0, Map.of(),
-              Map.of(center, 1, center.translated(0), 1, center.translated(3), 1), false);
-        var cache = new BoardSurface.Cache();
-        var original = BoardSurface.tuning();
-        var relief = BoardRelief.tuning();
-        try {
-            // Keep the natural shoreline, but fix the corners so the mouth margin is the limiting factor.
-            BoardRelief.tune(new BoardRelief.Tuning(0, relief.shoreRoom(), relief.shoreReach(), relief.shoreNarrow(),
-                  relief.shoreHard(), relief.shorePool(), relief.shoreIsle(), relief.shoreBlend(), relief.shoreWander(),
-                  relief.wanderCell(), relief.shoreSpread(), relief.landKeep(), relief.shoreLip(), relief.transition(),
-                  relief.riverWidth(), relief.cliffsIntoWater()));
-            BoardSurface before = cache.get(scene, scene.tile(center));
-            int n = BoardSurface.SHORE_SEGMENTS;
-            float width = before.outline.get(n).dst(before.outline.get(2 * n));
-            BoardSurface.tune(new BoardSurface.Tuning(original.fallsOffBoard(), original.bottomlessLevels(), original.hug(),
-                  original.beach(), original.plungePool(), original.shoreBank(), original.shoreRound(), 0,
-                  original.plungeOpening(), original.lipJut(), original.fallLipWidth(), original.fallLipDrop(),
-                  original.plateau(), original.lipDepth(), original.valley()));
-            BoardSurface narrow = cache.get(scene, scene.tile(center));
-            assertNotSame(before, narrow);
-            assertTrue(narrow.outline.get(n).dst(narrow.outline.get(2 * n)) < width - 1,
-                  "Giving less beach back to the river narrows its opening: " + width + " -> "
-                        + narrow.outline.get(n).dst(narrow.outline.get(2 * n)));
-        } finally {
-            BoardSurface.tune(original);
-            BoardRelief.tune(relief);
-        }
-    }
-
-    @Test
     void straightRiversMeanderAsChannelsInsteadOfMakingAPool() {
         for (int direction = 0; direction < 6; direction++) {
             Coords center = new Coords(2, 2);
@@ -445,10 +346,11 @@ class BoardSurfaceTest {
             }
             assertTrue(mouthWidth > edgeWidth * 0.75f && mouthWidth < edgeWidth * 0.85f,
                   "The water uses most of the shared edge while leaving room for the sand fade");
-            // The centre retains the configured pool radius even where fixed banks make its mouths narrower.
-            // Elsewhere the river can meander and breathe, but must still stay a channel.
-            float widest = Math.max(mouthWidth * 1.6f, 2 * BoardRelief.tuning().shorePool() * BoardGeometry.HEX_SCALE);
-            assertTrue(max - min > mouthWidth * .99f && max - min <= widest + .01f * BoardGeometry.HEX_SCALE,
+            // The centre retains the pool radius even where fixed banks make its mouths narrower. Elsewhere the river
+            // can meander and breathe, but must still stay a channel; the shore search places each bank point to
+            // within a quarter unit.
+            float widest = Math.max(mouthWidth * 1.6f, 2 * BoardRelief.SHORE_POOL * BoardGeometry.HEX_SCALE);
+            assertTrue(max - min > mouthWidth * .99f && max - min <= widest + .5f * BoardGeometry.HEX_SCALE,
                   "The channel stays a channel: " + (max - min) + " across for a mouth of " + mouthWidth);
             for (Vector3 corner : List.of(a, b)) {
                 assertTrue(surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.TOP)

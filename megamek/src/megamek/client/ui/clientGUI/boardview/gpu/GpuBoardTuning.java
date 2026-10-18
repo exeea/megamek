@@ -15,8 +15,6 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.scenes.scene2d.Actor;
-import com.badlogic.gdx.scenes.scene2d.actions.DelayAction;
-import com.badlogic.gdx.scenes.scene2d.actions.RunnableAction;
 import com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -43,14 +41,13 @@ import megamek.common.planetaryConditions.AtmosphericTaint;
 final class GpuBoardTuning {
     private static final float SLIDER_WIDTH = 120;
     private static final float LABEL_WIDTH = 120;
-    private static final float SLIDER_DEBOUNCE_SECONDS = 0.25f;
 
     private record Knob(String name, float min, float max, float step, String format, String help) {
         Knob(String name, float min, float max, float step, String format) {
             this(name, min, max, step, format, "");
         }
     }
-    private record Control(Knob knob, Slider slider, Label reading, TextButton toggle, DelayAction applyDelay) { }
+    private record Control(Knob knob, Slider slider, Label reading, TextButton toggle) { }
 
     /** One row of the panel: the board value it drives, its range and how its reading is written. */
     private static final List<Knob> KNOBS = List.of(
@@ -134,22 +131,11 @@ final class GpuBoardTuning {
     /** The hex padding slider on the Terrain page; null while the panel builds the pages before it. */
     private List<Control> padding;
     private final CheckBox transitions;
-    private final List<Control> relief;
-    private final List<Control> water;
     private final CheckBox grass;
     private final CheckBox waterEffects;
-    private final CheckBox terrainLod;
-    private final List<Control> terrainDetail;
-    private final CheckBox objectLod;
-    private final List<Control> terrainWear;
-    private final CheckBox elevationGrading;
     private final Label terrainProgress;
     private int terrainPercent = -1;
-    private final SelectBox<String> concreteShapes;
-    private final CheckBox fallsOffBoard;
     private final CheckBox cliffsIntoWater;
-    private final SelectBox<String> geologyFamily;
-    private final List<Control> geology;
     private final List<Control> familySizes;
     private final CheckBox zoomScaling;
     private final List<Control> zoomScale;
@@ -622,55 +608,7 @@ final class GpuBoardTuning {
             }
         });
         padding = controls(skin, List.of(PADDING), this::applyGeometry, 0);
-        section(skin, "Surface appearance");
-        elevationGrading = checkbox(skin, "Elevation grading", "tuning-elevation-grading");
-        elevationGrading.addListener(new TextTooltip(
-              "Adds gentle color variation above and below level zero. Updates immediately.", skin, "menu"));
-        section(skin, "Surface weathering");
-        terrainWear = controls(skin, List.of(new Knob("Ambient wear", 0, 1, .01f, "%.2f",
-              "Natural surface weathering, including exposed mineral patches and worn cover. "
-                    + "0 disables it; 1 is full strength. Updates immediately. Combat scars are independent.")),
-              this::applyTerrainWear, 0);
-        section(skin, "Concrete shapes");
-        concreteShapes = choice(skin, "Rectangle fitting", "tuning-concrete-shapes",
-              new String[] { "None", "Water only", "Everywhere" }, this::applyConcreteShapes);
-        Label concreteHelp = new Label("None keeps sharp hex edges, including beside water. Water only makes docks and quays. "
-              + "Everywhere also fits concrete beside grass and other ground. Buildings keep their support.", skin, "small");
-        concreteHelp.setWrap(true);
-        rows.add(concreteHelp).colspan(3).minWidth(0).growX().padBottom(9).row();
-        section(skin, "River shape and land");
-        relief = controls(skin, List.of(
-              new Knob("River width (%)", 5, 100, 1, "%.0f%%",
-                    "Sets the width of the whole river. Deep water leaves room for units; depth-0 water can shrink to a tiny stream."),
-              new Knob("Shore spread", -20, 12, .5f, "%+.1f",
-                    "Moves the banks outward. Higher values make rivers and lakes wider; lower values leave more dry land."),
-              new Knob("Land retained", .5f, 1, .01f, "%.2f",
-                    "How much of each land hex stays dry. Higher values stop water from cutting as far into the land."),
-              new Knob("Corner shift limit", 0, 28, .5f, "%.1f",
-                    "How far water may reshape a land corner. Raise this to let the shoreline cross the hex outline more freely."),
-              new Knob("Shore room", 0, 16, .5f, "%.1f",
-                    "Extra dry space behind the bank on level ground. Raise this to give curved banks more room."),
-              new Knob("Shore reach", 64, 128, 1, "%.0f",
-                    "How much nearby terrain affects each stretch of shore. Higher values make broader, gentler curves."),
-              new Knob("Narrow channel pull", 0, 2, .05f, "%.2f",
-                    "Helps thin channels stay open and thin strips of land stay dry. Higher values protect both more strongly."),
-              new Knob("Hard ground pull", 1, 4, .1f, "%.1f",
-                    "How strongly roads and paving push water away. Higher values leave a wider gap beside fixed ground."),
-              new Knob("Pool radius", 8, 32, .5f, "%.1f",
-                    "Size of the pool around a water hex centre. Higher values widen ponds and the middle of rivers."),
-              new Knob("Island radius", 8, 32, .5f, "%.1f",
-                    "Dry space kept around a land hex centre. Higher values make islands and peninsulas broader."),
-              new Knob("Shore blend", 1, 20, .5f, "%.1f",
-                    "How gently ponds and islands join the rest of the shore. Higher values soften the joins."),
-              new Knob("Shore wander", 0, 16, .5f, "%.1f",
-                    "How much rivers wind from side to side and banks wander. Raise this for wavier streams; zero removes the extra wandering."),
-              new Knob("Wander length", 70, 280, 5, "%.0f",
-                    "Length of the bends along the shore. Higher values give longer, slower bends."),
-              new Knob("Shore lip", .5f, 10, .5f, "%.1f",
-                    "Width of the small slope from the dry bank down to the water. Higher values make that strip wider."),
-              new Knob("Transition room (m)", 0, 8, .1f, "%.1f",
-                    "Space used to join different ground heights. Higher values spread slopes out. Needs Hex transitions on and Hex padding off.")), this::applyRelief, 0, true);
-        section(skin, "Banks and river openings");
+        section(skin, "Water");
         cliffsIntoWater = checkbox(skin, "Cliffs directly into water", "tuning-cliffs-into-water");
         cliffsIntoWater.addListener(new TextTooltip("Keep more flat land above waterside cliffs and let their rock face "
               + "continue down to the riverbed, without a dry beach. Applies to drops of three or more levels, counting "
@@ -681,45 +619,6 @@ final class GpuBoardTuning {
                 if (!syncing) { applyRelief(); }
             }
         });
-        water = new ArrayList<>(controls(skin, List.of(
-              new Knob("Wet margin", .1f, 4, .1f, "%.1f",
-                    "Small gap between the water and a raised bank. Higher values pull the water farther from slopes and corners."),
-              new Knob("Beach width", 1, 12, .5f, "%.1f",
-                    "Dry strip beside cliffs or land below the river. Higher values make that strip wider."),
-              new Knob("Bank width", 1, 10, .5f, "%.1f",
-                    "Dry strip beside land at the same height as the water. Higher values make the river narrower there."),
-              new Knob("Bank rounding", 1, 12, .5f, "%.1f",
-                    "How much banks curve instead of following straight hex edges. Higher values make the curves rounder."),
-              new Knob("Mouth opening", 0, 12, .5f, "%.1f",
-                    "Extra river width where two water hexes meet. Higher values widen these joins, up to the available beach width."),
-              new Knob("Plunge opening", 0, 12, .5f, "%.1f",
-                    "Extra room for water entering a hex below a waterfall. Higher values widen that opening."),
-              new Knob("Bed slope share", .1f, .95f, .05f, "%.2f",
-                    "How far slopes reach into a river hex. Higher values leave less flat riverbed and make water descend more gradually between levels.")), this::applyWater, 0, true));
-        section(skin, "Waterfalls");
-        fallsOffBoard = checkbox(skin, "Waterfalls off board", "tuning-falls-off-board");
-        fallsOffBoard.addListener(new TextTooltip("Let rivers pour over the edge of the board instead of ending there.", skin, "menu"));
-        water.addAll(controls(skin, List.of(
-              new Knob("Off-board drop", 1, 8, .5f, "%.1f",
-                    "How many ground levels a waterfall falls past the board edge before fading away."),
-              new Knob("Plunge pool swell", 0, 12, .5f, "%.1f",
-                    "How much a pool widens below a waterfall. Zero removes the extra widening."),
-              new Knob("Lip variation", 0, 7, .5f, "%.1f",
-                    "How uneven the top edge of a waterfall looks. Zero gives an even edge."),
-              new Knob("Fall lip width", .005f, .1f, .005f, "%.3f",
-                    "How far the water bends out before falling. Higher values make a broader turn over the edge."),
-              new Knob("Fall lip drop", .1f, 1, .05f, "%.2f",
-                    "How much of the waterfall height is used for the bend at its top. Fall lip width limits its size."),
-              new Knob("Underwater ledge", 0, 4, .25f, "%.2f",
-                    "Water depth over the ledge at the top of a waterfall. Higher values make that ledge more deeply submerged."),
-              new Knob("Valley extension", 0, 14, .5f, "%.1f",
-                    "How far joined waterfalls reach out where they meet around an inside corner.")), this::applyWater, 0, true));
-        fallsOffBoard.addListener(new ChangeListener() {
-            @Override
-            public void changed(ChangeEvent event, Actor actor) {
-                if (!syncing) { applyWater(); }
-            }
-        });
         section(skin, "Terrain detail");
         grass = checkbox(skin, "Grass blades", "tuning-grass");
         grass.addListener(new TextTooltip("Show wind-blown grass blades on the ground. Uncheck to remove the blades.",
@@ -728,66 +627,6 @@ final class GpuBoardTuning {
         waterEffects.addListener(new TextTooltip("Animate water: waves, currents, foam, ripples, glitter and the "
               + "light patterns on riverbeds, with cloud reflections. Uncheck for calm water with simpler sunlight "
               + "reflection; sky reflection remains.", skin, "menu"));
-        terrainLod = checkbox(skin, "Terrain LoD", "tuning-terrain-lod");
-        terrainLod.addListener(new TextTooltip("Adjust terrain detail with zoom. Off keeps the full-detail mesh at every distance.",
-              skin, "menu"));
-        terrainLod.addListener(new ChangeListener() {
-            @Override
-            public void changed(ChangeEvent event, Actor actor) {
-                if (!syncing) {
-                    TerrainLod.setEnabled(terrainLod.isChecked());
-                    syncRelief();
-                }
-            }
-        });
-        terrainDetail = controls(skin, List.of(
-              new Knob("Full detail at (px)", 16, 256, 4, "%.0f",
-                    "LoD switches to the finest mesh when a hex reaches this width on screen. Lower values keep full detail farther away."),
-              new Knob("Medium detail at (px)", 4, 128, 2, "%.0f",
-                    "LoD switches to medium detail at this hex width on screen. Smaller hexes use coarser meshes; map size does not set quality.")),
-              this::applyRelief, 0, true);
-        objectLod = checkbox(skin, "Object LoD", "tuning-object-lod");
-        objectLod.addListener(new TextTooltip("Skip placed objects smaller than a quarter hex while a hex is narrower than "
-              + "12 px on screen; selected and hovered objects always show. Off draws every object at every zoom.", skin, "menu"));
-        section(skin, "Material geology");
-        geologyFamily = choice(skin, "Material", "tuning-geology-family",
-              new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Lunar", "Fungus",
-                    "Desert", "Mars", "Volcano", "Tropical" }, this::syncGeology);
-        geology = controls(skin, List.of(
-              new Knob("Joint width (m)", .25f, 20, .05f, "%.2f",
-                    "Width of the large rock blocks in a cliff. Higher values make broader blocks."),
-              new Knob("Joint height (m)", .25f, 20, .05f, "%.2f",
-                    "Height of the large rock blocks in a cliff. Higher values make taller blocks."),
-              new Knob("Joint relief (m)", 0, 3, .05f, "%.2f",
-                    "How far rock blocks stick out from the cliff. Zero makes the blocks flat."),
-              new Knob("Fractures (m)", 0, 3, .05f, "%.2f",
-                    "Depth of the cracks between rock blocks. Higher values make deeper cracks."),
-              new Knob("Strata relief (m)", 0, 2, .05f, "%.2f",
-                    "How far horizontal rock layers stick out. Higher values make the layers more pronounced."),
-              new Knob("Bedding (m)", .25f, 10, .05f, "%.2f",
-                    "Vertical distance between rock layers. Higher values make thicker layers."),
-              new Knob("Buttresses (m)", 0, 3, .05f, "%.2f",
-                    "Size of broad bulges along a cliff face. Higher values make those bulges larger."),
-              new Knob("Recess (m)", 0, 3, .05f, "%.2f",
-                    "How far the cliff face sits back beneath its top edge. Higher values make a deeper recess."),
-              new Knob("Ground relief (m)", 0, 2, .05f, "%.2f",
-                    "Unevenness of the ground above the cliffs. Zero makes that ground flat."),
-              new Knob("Caprock scale", 0, 2, .05f, "%.2f",
-                    "Size of the hard rock ledge at the top of a cliff. Zero removes the ledge."),
-              new Knob("Talus scale", 0, 2, .05f, "%.2f",
-                    "Size of the rubble slope at the foot of a cliff. Higher values spread it farther out."),
-              new Knob("Corner rounding", 0, .5f, .01f, "%.2f",
-                    "How rounded cliff corners look. Higher values soften sharp corners."),
-              new Knob("Soil jointing", 0, 1, .05f, "%.2f",
-                    "How much rock texture shows through low soil banks. Zero makes those banks smoother."),
-              new Knob("Bank lean", 0, 1, .01f, "%.2f",
-                    "How far a soil bank leans back as it rises. Higher values make a gentler slope."),
-              new Knob("Cast surface share", 0, 1, .05f, "%.2f",
-                    "How much fine weathering and fallen rock is suppressed. One keeps cast faces clean."),
-              new Knob("Loose stones / hex", 0, 6, .1f, "%.1f",
-                    "Average number of loose stones per open hex of this material. Stones need room and full or medium detail."),
-              new Knob("Low shrubs / hex", 0, 6, .1f, "%.1f",
-                    "Average number of small shrubs per open hex of this material. Shrubs need room and full or medium detail.")), this::applyGeology, 0, true);
         reloadAssets = new TextButton("Reload assets", skin, "menu-control");
         reloadAssets.setName("tuning-reload-assets");
         reloadAssets.setDisabled(source == null);
@@ -809,7 +648,7 @@ final class GpuBoardTuning {
         reset = new TextButton("Defaults", skin, "menu-control");
         reset.setName("tuning-defaults");
         reset.addListener(new TextTooltip("Restore all tabs: camera projection, geometry, render resolution, "
-              + "UI scale, terrain, water, geology, family sizes, visibility, light/fog effects, "
+              + "UI scale, terrain, water, family sizes, visibility, light/fog effects, "
               + "the game's current planetary conditions, and disable damage preview.",
               skin, "menu"));
         reset.setProgrammaticChangeEvents(false);
@@ -905,39 +744,17 @@ final class GpuBoardTuning {
     }
 
     private List<Control> controls(Skin skin, List<Knob> knobs, Runnable apply, int toggleCount) {
-        return controls(skin, knobs, apply, toggleCount, false);
-    }
-
-    private List<Control> controls(Skin skin, List<Knob> knobs, Runnable apply, int toggleCount, boolean debounce) {
         List<Control> result = new ArrayList<>();
         for (Knob knob : knobs) {
             Slider slider = new Slider(knob.min(), knob.max(), knob.step(), false, skin, "menu");
             slider.setName(knob.name());
             Label reading = new Label("", skin, "small");
             reading.setAlignment(Align.right);
-            // Unpooled actions belong to this control and can be restarted or cancelled during a sync.
-            DelayAction applyDelay = new DelayAction(SLIDER_DEBOUNCE_SECONDS);
-            RunnableAction applyAction = new RunnableAction();
-            applyAction.setRunnable(apply);
-            applyDelay.setAction(applyAction);
-            UiSliderInput keyboard = new UiSliderInput(slider, () -> {
-                if (!slider.isDragging() && slider.getActions().contains(applyDelay, true)) {
-                    slider.removeAction(applyDelay);
-                    apply.run();
-                }
-            });
+            new UiSliderInput(slider);
             slider.addListener(new ChangeListener() {
                 @Override
                 public void changed(ChangeEvent event, Actor actor) {
-                    slider.removeAction(applyDelay);
-                    if (syncing) { return; }
-                    if (debounce && (slider.isDragging() || keyboard.isRepeating())) {
-                        reading.setText(String.format(Locale.ROOT, knob.format(), slider.getValue()));
-                        applyDelay.restart();
-                        slider.addAction(applyDelay);
-                    } else {
-                        apply.run();
-                    }
+                    if (!syncing) { apply.run(); }
                 }
             });
             TextButton toggle = null;
@@ -953,7 +770,7 @@ final class GpuBoardTuning {
                     }
                 });
             }
-            result.add(new Control(knob, slider, reading, toggle, applyDelay));
+            result.add(new Control(knob, slider, reading, toggle));
             rows.add(toggle == null ? new Label(knob.name(), skin, "menu") : toggle).left().width(LABEL_WIDTH);
             rows.add(slider).minWidth(60).prefWidth(SLIDER_WIDTH).growX().height(20);
             rows.add(reading).width(38).right().row();
@@ -986,7 +803,7 @@ final class GpuBoardTuning {
         return atmospheric;
     }
 
-    /** The Terrain page's rows (terrain build progress, shapes, water, detail, geology): GpuTuningPanel's Terrain tab. */
+    /** The Terrain page's rows (terrain build progress, hex joins, water, detail): GpuTuningPanel's Terrain tab. */
     Table terrainRows() {
         return terrain;
     }
@@ -1037,9 +854,6 @@ final class GpuBoardTuning {
         setValues(cameraFieldOfView, new float[] { BoardCamera.DEFAULT_FIELD_OF_VIEW });
         applyCamera();
         normalMaps.setChecked(true);
-        elevationGrading.setChecked(GpuTerrain.DEFAULT_ELEVATION_GRADING);
-        setValues(terrainWear, new float[] { GpuTerrain.DEFAULT_TERRAIN_WEAR });
-        applyTerrainWear();
         unitDisplayMode.setSelected(UnitDisplayMode.DEFAULT);
         setValues(renderResolution, new float[] { 100 });
         applyRenderResolution();
@@ -1049,7 +863,6 @@ final class GpuBoardTuning {
         applyUiScale();
         grass.setChecked(true);
         waterEffects.setChecked(true);
-        objectLod.setChecked(true);
         boolean fixedSunKept = fixedSun.isChecked();
         BoardGeometry.Tuning defaults = BoardGeometry.DEFAULTS;
         float[] values = { defaults.hexScale(), defaults.unitScale(), defaults.unitHeightScale(),
@@ -1061,17 +874,7 @@ final class GpuBoardTuning {
         syncing = false;
         applyGeometry();
         BoardRelief.tune(BoardRelief.DEFAULTS);
-        TerrainLod.tune(TerrainLod.DEFAULTS);
-        TerrainLod.setEnabled(TerrainLod.DEFAULT_ENABLED);
-        BoardConcrete.tune(BoardConcrete.DEFAULT_MODE);
-        syncing = true;
-        concreteShapes.setSelectedIndex(BoardConcrete.mode().ordinal());
-        syncing = false;
-        BoardSurface.tune(BoardSurface.DEFAULTS);
-        BoardRelief.tuneGeology(BoardRelief.defaultGeology());
         syncRelief();
-        syncWater();
-        syncGeology();
         float[] familyDefaults = new float[familySizes.size()];
         for (int index = 0; index < familyDefaults.length; index++) {
             familyDefaults[index] = UnitFamilyScale.values()[index].defaultUnitScale;
@@ -1109,15 +912,9 @@ final class GpuBoardTuning {
     private void setValues(List<Control> controls, float[] values) {
         syncing = true;
         for (int index = 0; index < controls.size(); index++) {
-            Control control = controls.get(index);
-            control.slider().removeAction(control.applyDelay());
-            control.slider().setValue(values[index]);
+            controls.get(index).slider().setValue(values[index]);
         }
         syncing = false;
-    }
-
-    private void applyConcreteShapes() {
-        BoardConcrete.tune(BoardConcrete.Mode.values()[concreteShapes.getSelectedIndex()]);
     }
 
     BoardAtmosphere.Settings atmosphere() {
@@ -1283,18 +1080,6 @@ final class GpuBoardTuning {
               windowHeight));
     }
 
-    boolean elevationGrading() {
-        return elevationGrading.isChecked();
-    }
-
-    float terrainWear() {
-        return value(terrainWear, 0);
-    }
-
-    private void applyTerrainWear() {
-        updateReadings(terrainWear);
-    }
-
     UnitDisplayMode unitDisplayMode() {
         return unitDisplayMode.getSelected();
     }
@@ -1305,10 +1090,6 @@ final class GpuBoardTuning {
 
     boolean waterEffects() {
         return waterEffects.isChecked();
-    }
-
-    boolean objectLod() {
-        return objectLod.isChecked();
     }
 
     boolean fixedSun() {
@@ -1456,70 +1237,19 @@ final class GpuBoardTuning {
     }
 
     private void applyRelief() {
-        int full = Math.round(value(terrainDetail, 0));
-        TerrainLod.tune(new TerrainLod.Tuning(full, Math.min(full, Math.round(value(terrainDetail, 1)))));
-        BoardRelief.tune(new BoardRelief.Tuning(value(relief, 3), value(relief, 4), value(relief, 5), value(relief, 6),
-              value(relief, 7), value(relief, 8), value(relief, 9), value(relief, 10), value(relief, 11), value(relief, 12),
-              value(relief, 1), value(relief, 2), value(relief, 13), value(relief, 14),
-              value(relief, 0) / 100, cliffsIntoWater.isChecked()));
-        syncRelief();
+        BoardRelief.tune(new BoardRelief.Tuning(cliffsIntoWater.isChecked()));
     }
 
     private void syncRelief() {
-        BoardRelief.Tuning t = BoardRelief.tuning();
         syncing = true;
-        cliffsIntoWater.setChecked(t.cliffsIntoWater());
-        terrainLod.setChecked(TerrainLod.enabled());
+        cliffsIntoWater.setChecked(BoardRelief.tuning().cliffsIntoWater());
         syncing = false;
-        setValues(relief, new float[] { 100 * t.riverWidth(), t.shoreSpread(), t.landKeep(), t.shoreShift(), t.shoreRoom(), t.shoreReach(),
-              t.shoreNarrow(), t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(),
-              t.wanderCell(), t.shoreLip(), t.transition() });
-        setValues(terrainDetail, new float[] { TerrainLod.tuning().fullPixels(), TerrainLod.tuning().mediumPixels() });
-        for (Control control : terrainDetail) { control.slider().setDisabled(!TerrainLod.enabled()); }
-        updateReadings(relief);
-        updateReadings(terrainDetail);
     }
 
     void terrainProgress(int percent) {
         if (terrainPercent == percent) { return; }
         terrainPercent = percent;
         terrainProgress.setText(percent < 0 ? "" : Messages.getString("GpuBoard.preparingTerrain", percent));
-    }
-
-    private void applyWater() {
-        BoardSurface.tune(new BoardSurface.Tuning(fallsOffBoard.isChecked(), value(water, 7), value(water, 0),
-              value(water, 1), value(water, 8), value(water, 2), value(water, 3), value(water, 4), value(water, 5),
-              value(water, 9), value(water, 10), value(water, 11), value(water, 6), value(water, 12), value(water, 13)));
-        syncWater();
-    }
-
-    private void syncWater() {
-        BoardSurface.Tuning t = BoardSurface.tuning();
-        syncing = true;
-        fallsOffBoard.setChecked(t.fallsOffBoard());
-        syncing = false;
-        setValues(water, new float[] { t.hug(), t.beach(), t.shoreBank(), t.shoreRound(), t.mouthOpening(),
-              t.plungeOpening(), t.plateau(), t.bottomlessLevels(), t.plungePool(), t.lipJut(), t.fallLipWidth(),
-              t.fallLipDrop(), t.lipDepth(), t.valley() });
-        updateReadings(water);
-    }
-
-    private void applyGeology() {
-        List<BoardRelief.Geology> next = new ArrayList<>(BoardRelief.geology());
-        next.set(geologyFamily.getSelectedIndex(), new BoardRelief.Geology(value(geology, 0), value(geology, 1),
-              value(geology, 2), value(geology, 3), value(geology, 4), value(geology, 5), value(geology, 6),
-              value(geology, 7), value(geology, 8), value(geology, 9), value(geology, 10), value(geology, 11),
-              value(geology, 12), value(geology, 13), value(geology, 14), value(geology, 15), value(geology, 16)));
-        BoardRelief.tuneGeology(next);
-        updateReadings(geology);
-    }
-
-    private void syncGeology() {
-        BoardRelief.Geology g = BoardRelief.geology().get(geologyFamily.getSelectedIndex());
-        setValues(geology, new float[] { g.cellWidth(), g.cellHeight(), g.cells(), g.fractures(), g.strata(),
-              g.bedding(), g.buttress(), g.recess(), g.relief(), g.cap(), g.talus(), g.round(), g.bank(), g.lean(), g.cast(),
-              g.stones(), g.shrubs() });
-        updateReadings(geology);
     }
 
     private void applyFamilySizes() {

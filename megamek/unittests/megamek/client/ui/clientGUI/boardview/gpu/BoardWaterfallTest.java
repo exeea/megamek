@@ -321,38 +321,35 @@ class BoardWaterfallTest {
     void rockBehindTheCurtainBlocksRaysFromObliqueAngles() {
         var original = BoardRelief.tuning();
         try {
-            for (float width : new float[] { .05f, .5f, 1 }) {
-                GpuRiverTerrainSmokeTest.setWidth(width);
-                for (int direction = 0; direction < 6; direction++) {
-                    BoardScene scene = scene(direction, 1);
-                    BoardSurface upper = new BoardSurface(scene, scene.tile(new Coords(3, 3)));
-                    for (var face : upper.waterFaces) {
-                        // Collinear mouth samples can leave subpixel ears through float rounding.
-                        assertTrue(new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z
-                                    >= -.001f * BoardGeometry.HEX_SCALE * BoardGeometry.HEX_SCALE,
-                              "The upper pool must not fold over where its lip meets a bank: width " + width + ", direction " + direction);
-                    }
-                    var fall = upper.waterfalls.getFirst();
-                    var crest = upper.crest(fall);
-                    List<BoardSurface.Face> solid = new ArrayList<>(upper.walls(scene, BoardGeometry.floor(scene)));
-                    solid.addAll(upper.faces.stream().filter(f -> f.finish() != BoardSurface.Finish.OUTCROP).toList());
-                    // Avoid casting precisely along a triangle edge, where float ray tests can miss both faces.
-                    for (int column = 1; column < 23; column++) {
-                        float s = column / 23f;
-                        for (int row = 1; row < 13; row++) {
-                            Vector3 p = crest.point(s);
-                            p.z = fall.lowA() + (p.z - fall.lowA()) * row / 13;
-                            for (float angle : new float[] { -.7f, 0, .7f }) {
-                                Vector3 outward = crest.normal(s).mulAdd(crest.tangent(s), angle).nor();
-                                float reach = BoardGeometry.WIDTH * .4f;
-                                Ray ray = new Ray(new Vector3(p).mulAdd(outward, reach), new Vector3(outward).scl(-1));
-                                Vector3 hit = new Vector3();
-                                assertTrue(solid.stream().anyMatch(f -> Intersector.intersectRayTriangle(ray,
-                                            f.a(), f.b(), f.c(), hit) && hit.dst(ray.origin) < 2 * reach
-                                            && new Vector3(f.b()).sub(f.a()).crs(new Vector3(f.c()).sub(f.a()))
-                                                  .dot(ray.direction) < 0),
-                                      "Open cliff: width " + width + ", direction " + direction + ", at " + p + ", angle " + angle);
-                            }
+            for (int direction = 0; direction < 6; direction++) {
+                BoardScene scene = scene(direction, 1);
+                BoardSurface upper = new BoardSurface(scene, scene.tile(new Coords(3, 3)));
+                for (var face : upper.waterFaces) {
+                    // Collinear mouth samples can leave subpixel ears through float rounding.
+                    assertTrue(new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z
+                                >= -.001f * BoardGeometry.HEX_SCALE * BoardGeometry.HEX_SCALE,
+                          "The upper pool must not fold over where its lip meets a bank: direction " + direction);
+                }
+                var fall = upper.waterfalls.getFirst();
+                var crest = upper.crest(fall);
+                List<BoardSurface.Face> solid = new ArrayList<>(upper.walls(scene, BoardGeometry.floor(scene)));
+                solid.addAll(upper.faces.stream().filter(f -> f.finish() != BoardSurface.Finish.OUTCROP).toList());
+                // Avoid casting precisely along a triangle edge, where float ray tests can miss both faces.
+                for (int column = 1; column < 23; column++) {
+                    float s = column / 23f;
+                    for (int row = 1; row < 13; row++) {
+                        Vector3 p = crest.point(s);
+                        p.z = fall.lowA() + (p.z - fall.lowA()) * row / 13;
+                        for (float angle : new float[] { -.7f, 0, .7f }) {
+                            Vector3 outward = crest.normal(s).mulAdd(crest.tangent(s), angle).nor();
+                            float reach = BoardGeometry.WIDTH * .4f;
+                            Ray ray = new Ray(new Vector3(p).mulAdd(outward, reach), new Vector3(outward).scl(-1));
+                            Vector3 hit = new Vector3();
+                            assertTrue(solid.stream().anyMatch(f -> Intersector.intersectRayTriangle(ray,
+                                        f.a(), f.b(), f.c(), hit) && hit.dst(ray.origin) < 2 * reach
+                                        && new Vector3(f.b()).sub(f.a()).crs(new Vector3(f.c()).sub(f.a()))
+                                              .dot(ray.direction) < 0),
+                                  "Open cliff: direction " + direction + ", at " + p + ", angle " + angle);
                         }
                     }
                 }
@@ -364,7 +361,6 @@ class BoardWaterfallTest {
     void waterfallRocksKeepFoundationsAtEveryWaterDepth() {
         var original = BoardRelief.tuning();
         try {
-            GpuRiverTerrainSmokeTest.setWidth(.5f);
             for (int depth : new int[] { 0, 1, 3 }) {
                 BoardScene scene = scene(3, depth);
                 for (Coords coords : List.of(new Coords(3, 3), new Coords(3, 4))) {

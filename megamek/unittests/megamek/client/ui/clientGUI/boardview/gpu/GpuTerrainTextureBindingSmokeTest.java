@@ -113,7 +113,6 @@ class GpuTerrainTextureBindingSmokeTest {
             @Override
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
-                boolean previousLod = TerrainLod.enabled();
                 try {
                     List<BoardScene.Tile> tiles = new ArrayList<>();
                     BoardScene.Pixels ground = GpuTerrainReliefSmokeTest.scene(BoardScene.Surface.GRASS).tiles().getFirst().ground();
@@ -132,7 +131,6 @@ class GpuTerrainTextureBindingSmokeTest {
                     camera.resize(960, 720);
                     camera.setIsometric(true);
                     camera.fit(scene);
-                    TerrainLod.setEnabled(true);
                     terrain.update(scene, camera.camera);
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     terrain.animate(.37f, List.of());
@@ -164,7 +162,6 @@ class GpuTerrainTextureBindingSmokeTest {
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally {
-                    TerrainLod.setEnabled(previousLod);
                     terrain.dispose();
                     Gdx.app.exit();
                 }

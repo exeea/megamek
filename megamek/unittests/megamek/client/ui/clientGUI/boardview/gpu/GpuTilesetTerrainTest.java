@@ -51,26 +51,18 @@ class GpuTilesetTerrainTest {
 
     @Test
     void fittedConcreteKeepsEachHexsArtworkInsideItsHex() {
-        // A change of the fitting mode is a terrain revision (BoardGeometry.terrainChanged): GpuTerrain rebuilds every
-        // chunk, the Classic columns too.
         BoardScene scene = GpuRiverTerrainSmokeTest.dockScene();
-        BoardConcrete.Mode original = BoardConcrete.mode();
-        try {
-            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
-            BoardConcrete shape = BoardConcrete.of(scene);
-            for (var tile : scene.tiles()) {
-                Vector3 center = BoardGeometry.center(tile.coords(), 0);
-                for (int edge = 0; edge < 6; edge++) {
-                    for (float fraction : new float[] { .5f, 1 }) {
-                        Vector3 rendered = new Vector3(center).lerp(shape.corner(tile.coords(), edge), fraction);
-                        Vector3 source = new Vector3(center).lerp(BoardGeometry.corner(tile.coords(), 0, edge), fraction);
-                        assertTrue(source.epsilonEquals(GpuTilesetTerrain.artPoint(rendered, tile.coords(), shape), .002f),
-                              "Expanded water corners and narrowed concrete retain their own artwork: " + tile.coords());
-                    }
+        BoardConcrete shape = BoardConcrete.of(scene);
+        for (var tile : scene.tiles()) {
+            Vector3 center = BoardGeometry.center(tile.coords(), 0);
+            for (int edge = 0; edge < 6; edge++) {
+                for (float fraction : new float[] { .5f, 1 }) {
+                    Vector3 rendered = new Vector3(center).lerp(shape.corner(tile.coords(), edge), fraction);
+                    Vector3 source = new Vector3(center).lerp(BoardGeometry.corner(tile.coords(), 0, edge), fraction);
+                    assertTrue(source.epsilonEquals(GpuTilesetTerrain.artPoint(rendered, tile.coords(), shape), .002f),
+                          "Expanded water corners and narrowed concrete retain their own artwork: " + tile.coords());
                 }
             }
-        } finally {
-            BoardConcrete.tune(original);
         }
     }
 

@@ -1017,7 +1017,7 @@ final class GpuTerrain implements Disposable {
     private boolean vacuum;
     private float wetness;
     private float detailPixelsPerUnit = Float.NaN;
-    /** Tuning: small placed objects may hide when zoomed out ({@link TreeLod#SMALL_OBJECTS}). */
+    /** Small placed objects hide when zoomed out ({@link TreeLod#SMALL_OBJECTS}); only tests switch this off. */
     private boolean smallObjects = true;
     /** Derived per camera by updateDetail: this view skips small objects. Presentation only, never game state. */
     private boolean smallHidden;
@@ -2242,9 +2242,10 @@ final class GpuTerrain implements Disposable {
         groundDamage.impact(scene, impact, this::tacticalSurface, surfaceScars::add);
     }
 
-    /** Live material intensity, independent of combat history and terrain geometry. */
+    /** Test hook: material weathering intensity, independent of combat history and terrain geometry; the game keeps 1. */
     void setTerrainWear(float intensity) { terrainWear = MathUtils.clamp(intensity, 0f, 1f); }
 
+    /** Test hook: elevation grading, which the game keeps on. */
     void setElevationGrading(boolean enabled) { elevationGrading = enabled; }
 
     /**
@@ -3607,7 +3608,7 @@ final class GpuTerrain implements Disposable {
                     if (back != null) {
                         destination.add(back, mesh -> GpuWaterfall.sheet(mesh, surface, drop, chunk.waterField));
                     }
-                    if (spray != null && !surface.bottomless(drop)) {
+                    if (spray != null) {
                         destination.add(spray, mesh -> GpuWaterfall.spray(mesh, surface, drop));
                     }
                     // The fall lands out in the receiving hex and throws its spray up around there.
@@ -6898,8 +6899,8 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * Live Object LoD: whether objects under a quarter hex hide while a hex is under {@link TreeLod#SMALL_OBJECTS}
-     * pixels. A deliberate toggle redraws the shadows at once; a zoom crossing waits for the next redraw.
+     * Test hook for Object LoD, which the game keeps on: whether objects under a quarter hex hide while a hex is under
+     * {@link TreeLod#SMALL_OBJECTS} pixels. A switch redraws the shadows at once; a zoom crossing waits for the next redraw.
      */
     void setSmallObjects(boolean enabled) {
         if (smallObjects == enabled) { return; }

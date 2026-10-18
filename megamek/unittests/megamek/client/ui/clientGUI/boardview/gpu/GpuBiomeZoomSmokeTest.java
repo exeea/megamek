@@ -31,7 +31,6 @@ class GpuBiomeZoomSmokeTest {
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
         var original = BoardGeometry.tuning();
-        boolean enabled = TerrainLod.enabled();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 960);
         config.useVsync(false);
@@ -46,7 +45,6 @@ class GpuBiomeZoomSmokeTest {
                     recording.enable("jdk.GarbageCollection");
                     recording.start();
                     GpuRiverTerrainSmokeTest.tune(.94f, true);
-                    TerrainLod.setEnabled(true);
                     var report = new StringBuilder("24x24; native 1280x960; terrain LOD enabled; paced outside measurements\n");
                     report.append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append('\n');
                     for (var kind : List.of(BoardScene.Biome.NONE, BoardScene.Biome.FIELD, BoardScene.Biome.MARSH)) {
@@ -104,7 +102,6 @@ class GpuBiomeZoomSmokeTest {
                 finally {
                     frame.dispose();
                     BoardGeometry.tune(original);
-                    TerrainLod.setEnabled(enabled);
                     Gdx.app.exit();
                 }
             }

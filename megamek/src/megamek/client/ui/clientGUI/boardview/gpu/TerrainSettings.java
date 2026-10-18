@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinWorkerThread;
@@ -9,8 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /** Immutable presentation settings shared by a terrain build and the frames displaying its result. */
-record TerrainSettings(BoardGeometry.Tuning geometry, BoardRelief.Tuning relief, BoardSurface.Tuning water,
-      List<BoardRelief.Geology> geology, BoardConcrete.Mode concrete, int revision, int terrainRevision) {
+record TerrainSettings(BoardGeometry.Tuning geometry, BoardRelief.Tuning relief, int revision, int terrainRevision) {
     private static final ThreadLocal<TerrainSettings> CURRENT = new ThreadLocal<>();
     private static final AtomicInteger WORKERS = new AtomicInteger();
 
@@ -46,8 +44,8 @@ record TerrainSettings(BoardGeometry.Tuning geometry, BoardRelief.Tuning relief,
     /** Capture the controls, even when the caller is displaying an older, completed terrain revision. */
     static TerrainSettings capture() {
         try (Scope ignored = use(null)) {
-            return new TerrainSettings(BoardGeometry.tuning(), BoardRelief.tuning(), BoardSurface.tuning(),
-                  BoardRelief.geology(), BoardConcrete.mode(), BoardGeometry.revision(), BoardGeometry.terrainRevision());
+            return new TerrainSettings(BoardGeometry.tuning(), BoardRelief.tuning(), BoardGeometry.revision(),
+                  BoardGeometry.terrainRevision());
         }
     }
 

@@ -162,8 +162,6 @@ final class GpuWaterfall {
                 normal.set(alongPath).crs(alongMouth).nor();
                 data.r = Math.clamp((top - p.z) / height, 0, 1);
                 data.g = Math.min(freeA ? Math.min(1, s / FRAY) : 1, freeB ? Math.min(1, (1 - s) / FRAY) : 1);
-                // Off the board's edge nothing catches the fall: it frays away as it drops, like its free sides.
-                if (surface.bottomless(drop)) { data.g *= 1 - BoardRelief.smooth((data.r - .25f) / .7f); }
                 data.a = field == null ? 0 : field.agitation(p);
                 index[i][r] = mesh.vertex(new MeshPartBuilder.VertexInfo().setPos(p).setNor(normal)
                       .setUV(across[i], p.z / repeat).setCol(data));

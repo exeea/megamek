@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
@@ -175,111 +176,39 @@ class GpuBoardTuningSmokeTest {
             assertEquals(initial, tuning.atmosphere());
             assertEquals(defaultEffects, tuning.atmosphereOptions());
         } finally {
-            BoardConcrete.tune(BoardConcrete.DEFAULT_MODE);
             BoardRelief.tune(BoardRelief.DEFAULTS);
-            TerrainLod.tune(TerrainLod.DEFAULTS);
-            TerrainLod.setEnabled(TerrainLod.DEFAULT_ENABLED);
-            BoardSurface.tune(BoardSurface.DEFAULTS);
-            BoardRelief.tuneGeology(BoardRelief.defaultGeology());
             skin.dispose();
         }
     }
 
-    /** The Terrain page's rules on the model (GpuTuningPanelSmokeTest shows the page). */
+    /** The Terrain page's rules on the model (GpuTuningPanelSmokeTest shows the page): its five controls. */
     private static void checkTerrainControls(GpuBoardTuning tuning) {
-        CheckBox terrainLod = GpuBoardTestUi.tuning(tuning, "tuning-terrain-lod");
-        assertTrue(terrainLod.isChecked(), "Terrain LoD is on by default");
-        Slider fullDetail = GpuBoardTestUi.tuning(tuning, "Full detail at (px)");
-        Slider mediumDetail = GpuBoardTestUi.tuning(tuning, "Medium detail at (px)");
-        assertFalse(fullDetail.isDisabled());
-        assertFalse(mediumDetail.isDisabled());
-        int lodRevision = BoardGeometry.terrainRevision();
-        press(tuning, "tuning-terrain-lod");
-        assertFalse(TerrainLod.enabled());
-        assertTrue(fullDetail.isDisabled(), "LoD thresholds have no effect while full detail is forced");
-        assertTrue(mediumDetail.isDisabled());
-        assertEquals(TerrainLod.FULL, TerrainLod.select(1, TerrainLod.DISTANT));
-        assertEquals(lodRevision, BoardGeometry.terrainRevision(), "The checkbox must not trigger a whole-board rebuild");
+        List<String> controls = new ArrayList<>();
+        collectControls(tuning.terrainRows(), controls);
+        assertEquals(List.of("tuning-transitions", "Hex padding (m)", "tuning-cliffs-into-water", "tuning-grass",
+              "tuning-water-effects"), controls);
+        assertTerrainHelp(tuning, tuning.terrainRows());
         assertTrue(tuning.waterEffects(), "Water effects are on by default");
         press(tuning, "tuning-water-effects");
         assertFalse(tuning.waterEffects());
-        assertTrue(tuning.objectLod(), "Object LoD is on by default");
-        press(tuning, "tuning-object-lod");
-        assertFalse(tuning.objectLod());
-        int revision = BoardGeometry.revision();
-        SelectBox<String> concrete = GpuBoardTestUi.tuning(tuning, "tuning-concrete-shapes");
-        assertEquals(3, concrete.getItems().size);
-        concrete.setSelected("Everywhere");
-        assertEquals(BoardConcrete.Mode.EVERYWHERE, BoardConcrete.mode());
-        concrete.setSelected("None");
-        assertEquals(BoardConcrete.Mode.OFF, BoardConcrete.mode());
-        concrete.setSelected("Water only");
-        assertEquals(BoardConcrete.Mode.WATER_ONLY, BoardConcrete.mode());
-        assertTerrainHelp(tuning, tuning.terrainRows());
         CheckBox wetCliffs = GpuBoardTestUi.tuning(tuning, "tuning-cliffs-into-water");
         assertEquals(BoardRelief.DEFAULT_CLIFFS_INTO_WATER, wetCliffs.isChecked());
         int cliffRevision = BoardGeometry.revision();
         press(tuning, "tuning-cliffs-into-water");
         assertEquals(!BoardRelief.DEFAULT_CLIFFS_INTO_WATER, BoardRelief.tuning().cliffsIntoWater());
         assertTrue(BoardGeometry.revision() > cliffRevision, "Cliff edits invalidate terrain and unit support");
-        set(tuning, "River width (%)", 5);
-        assertEquals(.05f, BoardRelief.tuning().riverWidth(), .0001f);
-        set(tuning, "Shore spread", -12);
-        set(tuning, "Land retained", .85f);
-        assertEquals(-12, BoardRelief.tuning().shoreSpread());
-        assertEquals(.85f, BoardRelief.tuning().landKeep(), .0001f);
-        assertTrue(BoardGeometry.revision() > revision, "Terrain edits invalidate cached support and picking");
-        set(tuning, "Wet margin", 0);
-        assertEquals(.1f, BoardSurface.tuning().hug(), .0001f, "Banks require a positive wet margin");
-        assertEquals(.1f, GpuBoardTestUi.<Slider>tuning(tuning, "Wet margin").getValue(), .0001f);
-        set(tuning, "Beach width", 2);
-        set(tuning, "Mouth opening", 8);
-        assertEquals(2, BoardSurface.tuning().mouthOpening(), "The opening cannot remove more than its beach");
-        assertEquals(2, GpuBoardTestUi.<Slider>tuning(tuning, "Mouth opening").getValue());
-        press(tuning, "tuning-falls-off-board");
-        assertEquals(!BoardSurface.DEFAULTS.fallsOffBoard(), BoardSurface.tuning().fallsOffBoard());
-        SelectBox<String> family = GpuBoardTestUi.tuning(tuning, "tuning-geology-family");
-        family.setSelectedIndex(BoardScene.Surface.SAND.ordinal());
-        set(tuning, "Ground relief (m)", .2f);
-        set(tuning, "Loose stones / hex", 0);
-        set(tuning, "Low shrubs / hex", 2);
-        assertEquals(.2f, BoardRelief.geology().get(BoardScene.Surface.SAND.ordinal()).relief(), .0001f);
-        assertEquals(0, BoardRelief.geology().get(BoardScene.Surface.SAND.ordinal()).stones());
-        assertEquals(2, BoardRelief.geology().get(BoardScene.Surface.SAND.ordinal()).shrubs());
-        assertEquals(BoardRelief.defaultGeology().get(0), BoardRelief.geology().get(0),
-              "Editing sand does not change grass");
-        revision = BoardGeometry.revision();
-        family.setSelectedIndex(0);
-        family.setSelectedIndex(BoardScene.Surface.SAND.ordinal());
-        assertEquals(revision, BoardGeometry.revision(), "Browsing materials does not change their geometry");
-        assertEquals(.2f, GpuBoardTestUi.<Slider>tuning(tuning, "Ground relief (m)").getValue(), .0001f);
-        List<String> surfaceControls = List.of("Ground relief (m)", "Corner rounding", "Loose stones / hex",
-              "Low shrubs / hex");
-        assertEquals(BoardScene.Surface.values().length, family.getItems().size,
-              "Every surface family has its own geology; there is no separate bedrock entry");
-        for (BoardScene.Surface surface : BoardScene.Surface.values()) {
-            family.setSelectedIndex(surface.ordinal());
-            for (String name : surfaceControls) {
-                assertFalse(GpuBoardTestUi.<Slider>tuning(tuning, name).isDisabled(), name + " applies to " + surface);
-            }
-        }
-        assertEquals(revision, BoardGeometry.revision(), "Browsing every family leaves geometry unchanged");
-        family.setSelectedIndex(BoardScene.Surface.SAND.ordinal());
-        assertEquals(.2f, GpuBoardTestUi.<Slider>tuning(tuning, "Ground relief (m)").getValue(), .0001f);
         press(tuning, "tuning-defaults");
         assertEquals(BoardRelief.DEFAULTS, BoardRelief.tuning());
-        assertTrue(TerrainLod.enabled());
-        assertTrue(terrainLod.isChecked(), "Defaults restore the terrain LoD checkbox");
         assertTrue(tuning.waterEffects(), "Defaults turn water effects back on");
-        assertTrue(tuning.objectLod(), "Defaults turn Object LoD back on");
-        assertFalse(fullDetail.isDisabled());
-        assertFalse(mediumDetail.isDisabled());
-        assertEquals(TerrainLod.DEFAULTS, TerrainLod.tuning());
         assertEquals(BoardRelief.DEFAULT_CLIFFS_INTO_WATER, wetCliffs.isChecked());
-        assertEquals(BoardSurface.DEFAULTS, BoardSurface.tuning());
-        assertEquals(BoardConcrete.DEFAULT_MODE, BoardConcrete.mode());
-        assertEquals(BoardConcrete.DEFAULT_MODE.ordinal(), concrete.getSelectedIndex());
-        assertEquals(BoardRelief.defaultGeology(), BoardRelief.geology());
+    }
+
+    /** The names of a page's settings in order: checkboxes, sliders and choices, not its buttons. */
+    private static void collectControls(Group group, List<String> names) {
+        for (var actor : group.getChildren()) {
+            if (actor instanceof CheckBox || actor instanceof Slider || actor instanceof SelectBox) { names.add(actor.getName()); }
+            if (actor instanceof Group nested && !(actor instanceof CheckBox)) { collectControls(nested, names); }
+        }
     }
 
     private static void checkTerrainRendering(GpuBoardTuning tuning, BoardScene scene) {
@@ -289,7 +218,7 @@ class GpuBoardTuningSmokeTest {
         camera.fit(scene);
         try (var output = new GpuSceneTestOutput()) {
             int original = terrainPixels(output, terrain, camera, scene);
-            set(tuning, "Transition room (m)", 0);
+            set(tuning, "Hex padding (m)", 4);
             assertNotEquals(original, terrainPixels(output, terrain, camera, scene),
                   "Terrain sliders rebuild the rendered board even when its snapshot is unchanged");
             press(tuning, "tuning-defaults");

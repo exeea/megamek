@@ -429,42 +429,6 @@ class GpuTuningPanelSmokeTest {
     }
 
     @Test
-    void terrainAppearanceControlsUpdateImmediatelyAndDefaultsRestoreThem() {
-        GpuHudTestStage.run(harness -> {
-            try (Hud hud = new Hud(harness)) {
-                hud.show();
-                hud.click("tuning-button");
-                hud.click("tuning-terrain-tab");
-                assertTrue(hud.tuning.elevationGrading(), "Elevation grading starts enabled");
-                hud.click("tuning-elevation-grading");
-                assertFalse(hud.tuning.elevationGrading(), "The panel updates the render setting immediately");
-                hud.click("tuning-elevation-grading");
-                assertTrue(hud.tuning.elevationGrading());
-                hud.click("tuning-elevation-grading");
-                Slider slider = hud.find("Ambient wear");
-                assertEquals(0, slider.getMinValue(), NEAR);
-                assertEquals(1, slider.getMaxValue(), NEAR);
-                assertEquals(1, hud.tuning.terrainWear(), NEAR, "Full weathering by default");
-                for (float intensity : new float[] { 0, .25f, .5f, .75f, 1 }) {
-                    hud.drag("Ambient wear", intensity);
-                    assertEquals(intensity, hud.tuning.terrainWear(), NEAR, "The next frame reads the slider value");
-                    assertEquals(String.format(java.util.Locale.ROOT, "%.2f", intensity), reading(hud, "Ambient wear"));
-                }
-                hud.drag("Ambient wear", .35f);
-                for (int[] size : SIZES) {
-                    harness.size(size[0], size[1]);
-                    hud.resize();
-                    hud.capture("tuning-weathering-" + size[0] + "x" + size[1]);
-                }
-                hud.click("tuning-defaults");
-                assertEquals(1, hud.tuning.terrainWear(), NEAR);
-                assertEquals("1.00", reading(hud, "Ambient wear"));
-                assertTrue(hud.tuning.elevationGrading(), "Defaults restores the grading constant");
-            }
-        });
-    }
-
-    @Test
     void theUiScaleShowsTheSavedShareIsSavedOnceSetAndDefaultsRestoresIt() {
         GUIPreferences preferences = GUIPreferences.getInstance();
         float saved = preferences.getBoardUiScale();

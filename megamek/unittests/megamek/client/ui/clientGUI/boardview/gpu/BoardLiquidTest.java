@@ -116,7 +116,9 @@ class BoardLiquidTest {
         for (TerrainLod lod : TerrainLod.values()) {
             BoardSurface surface = new BoardSurface(scene, scene.tile(pool), lod);
             for (int direction = 0; direction < 6; direction++) {
-                Vector3 point = new Vector3(center).lerp(BoardGeometry.corner(pool, 0, direction), .2f);
+                // An isolated depth-0 pool reaches about a fifth of the way to its corners; its waterline moves a tenth
+                // of a unit with the shore search's precision, so the centre is sampled inside that.
+                Vector3 point = new Vector3(center).lerp(BoardGeometry.corner(pool, 0, direction), .15f);
                 float liquid = BoardSurface.sampleHeight(surface.waterFaces, point.x, point.y, Float.NaN);
                 assertTrue(Float.isFinite(liquid), pool + " pool must retain a visible center at " + lod);
                 assertTrue(BoardSurface.sampleHeight(surface.faces, point.x, point.y, Float.NEGATIVE_INFINITY) < liquid,

@@ -57,7 +57,6 @@ class GpuMarkingsSmokeTest {
     private static void checkPlaneUpdates() throws Exception {
         GpuTerrain terrain = new GpuTerrain();
         var original = TerrainLod.tuning();
-        boolean enabled = TerrainLod.enabled();
         try {
             // Full rebuilds and local elevation/water/ice edits must use the chunk being installed, not the old one.
             BoardScene scene = null;
@@ -70,13 +69,12 @@ class GpuMarkingsSmokeTest {
             BoardCamera camera = new BoardCamera();
             camera.resize(1000, 700);
             camera.fit(scene);
-            TerrainLod.setEnabled(false);
+            TerrainLod.tune(new TerrainLod.Tuning(1, 1));
             GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
             Object full = ((List<?>) field(terrain, "chunks")).getFirst();
             assertEquals(TerrainLod.FULL, field(full, "lod"));
             assertPlane(terrain, scene);
 
-            TerrainLod.setEnabled(true);
             TerrainLod.tune(new TerrainLod.Tuning(100_000, 100_000));
             GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
             assertEquals(TerrainLod.DISTANT, field(((List<?>) field(terrain, "chunks")).getFirst(), "lod"));
@@ -87,7 +85,7 @@ class GpuMarkingsSmokeTest {
             for (Object tile : ((Map<?, ?>) field(full, "tileMeshes")).values()) {
                 ((WeakReference<?>) field(tile, "support")).clear();
             }
-            TerrainLod.setEnabled(false);
+            TerrainLod.tune(new TerrainLod.Tuning(1, 1));
             GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
             assertSame(full, ((List<?>) field(terrain, "chunks")).getFirst(), "Returning to full detail reuses the cached chunk");
             assertPlane(terrain, scene);
@@ -95,7 +93,6 @@ class GpuMarkingsSmokeTest {
         } finally {
             terrain.dispose();
             TerrainLod.tune(original);
-            TerrainLod.setEnabled(enabled);
         }
     }
 

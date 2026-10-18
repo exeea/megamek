@@ -115,9 +115,6 @@ public final class UiSliderInput extends InputListener {
         return true;
     }
 
-    /** Whether a held arrow is editing the slider; owners can defer costly work until the edit finishes. */
-    public boolean isRepeating() { return heldKey != -1; }
-
     private void step() {
         changed |= slider.setValue(slider.getValue() + direction(heldKey) * slider.getStepSize());
     }

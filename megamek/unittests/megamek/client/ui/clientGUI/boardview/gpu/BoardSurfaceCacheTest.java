@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,37 +16,6 @@ import org.junit.jupiter.api.Test;
 
 class BoardSurfaceCacheTest {
     private static final Coords CENTER = new Coords(3, 3);
-
-    @Test
-    void geologyTuningUpdatesCliffsWithoutChangingTheBoardSnapshot() {
-        var original = BoardRelief.geology();
-        BoardScene scene = scene(0, 7, 7, true);
-        scene = replace(scene, shape(scene.tile(CENTER), 3, 0, BoardScene.Surface.GRASS));
-        BoardSurface.Cache cache = new BoardSurface.Cache();
-        BoardSurface first = cache.get(scene, scene.tile(CENTER));
-        float floor = BoardGeometry.floor(scene);
-        var before = first.walls(scene, floor);
-        assertTrue(!before.isEmpty(), "The fixture exercises a cliff affected by geology");
-        Vector3 center = BoardGeometry.center(CENTER, 3);
-        try {
-            var next = new ArrayList<>(original);
-            var g = next.get(BoardScene.Surface.GRASS.ordinal());
-            next.set(BoardScene.Surface.GRASS.ordinal(), new BoardRelief.Geology(g.cellWidth(), g.cellHeight(),
-                  g.cells(), g.fractures(), g.strata(), g.bedding(), g.buttress(), g.recess() + 1, g.relief(),
-                  g.cap(), g.talus(), g.round(), g.bank(), g.lean(), g.cast(), g.stones(), g.shrubs()));
-            BoardRelief.tuneGeology(next);
-            BoardSurface changed = cache.get(scene, scene.tile(CENTER));
-            assertNotSame(first, changed);
-            assertNotEquals(before, changed.walls(scene, floor), "Cliff geometry follows the tuned recess");
-            assertEquals(center.z, changed.height(center.x, center.y), .003f, "Geology keeps the playing height");
-            BoardRelief.tuneGeology(next);
-            assertSame(changed, cache.get(scene, scene.tile(CENTER)), "Unchanged tuning retains cached geometry");
-            BoardRelief.tuneGeology(original);
-            assertEquals(before, cache.get(scene, scene.tile(CENTER)).walls(scene, floor));
-        } finally {
-            BoardRelief.tuneGeology(original);
-        }
-    }
 
     @Test
     void artworkAndTacticalSnapshotsReuseTerrainAndItsCachedWalls() {

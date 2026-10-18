@@ -224,10 +224,6 @@ class GpuWireframeSmokeTest {
         var terrain = new GpuTerrain();
         var plain = new GpuTerrain();
         var wireframe = new GpuWireframe();
-        var geology = BoardRelief.geology();
-        var withoutCover = geology.stream().map(g -> new BoardRelief.Geology(g.cellWidth(), g.cellHeight(), g.cells(),
-              g.fractures(), g.strata(), g.bedding(), g.buttress(), g.recess(), g.relief(), g.cap(), g.talus(),
-              g.round(), g.bank(), g.lean(), g.cast(), 0, 0)).toList();
         var camera = new BoardCamera();
         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.setIsometric(true);
@@ -236,10 +232,7 @@ class GpuWireframeSmokeTest {
         try (var output = new GpuSceneTestOutput()) {
             for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.FUNGUS)) {
                 terrain.update(scatterScene(family, true));
-                try {
-                    BoardRelief.tuneGeology(withoutCover);
-                    plain.update(scatterScene(family, false));
-                } finally { BoardRelief.tuneGeology(geology); }
+                plain.update(scatterScene(family, false));
                 Pixmap shaded = scatterFrame(terrain, camera, null, output);
                 Pixmap bare = scatterFrame(plain, camera, null, output);
                 Pixmap expected = scatterFrame(plain, camera, wireframe, output);
@@ -255,7 +248,6 @@ class GpuWireframeSmokeTest {
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Scatter wireframe and shaded rendering");
         } finally {
-            BoardRelief.tuneGeology(geology);
             wireframe.dispose(); plain.dispose(); terrain.dispose();
         }
     }

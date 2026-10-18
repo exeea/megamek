@@ -542,7 +542,7 @@ class GpuCoverBenchmarkSmokeTest {
         for (TerrainLod lod : TerrainLod.values()) {
             text.append(String.format(Locale.ROOT, "%s %d (%d in view) ", lod, counts[lod.ordinal()], visible[lod.ordinal()]));
         }
-        return text.append(TerrainLod.enabled() ? "" : "[detail selection disabled]").append('\n').toString();
+        return text.append('\n').toString();
     }
 
     /** The cover hexes of one kind and, through the renderers' state, whether each visible one is drawn. */
