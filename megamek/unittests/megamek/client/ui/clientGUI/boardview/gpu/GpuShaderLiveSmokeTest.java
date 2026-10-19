@@ -131,7 +131,8 @@ class GpuShaderLiveSmokeTest {
                             capture();
                             units = ((GpuShaderProvider) ((ModelBatch) field(this, "unitBatch")).getShaderProvider()).active();
                             // A shared include prepares material replacements before the later composite fails.
-                            edit("light-model.glsl", light + "\n// live-editor-shared-include\n");
+                            // Compilation drops comments (GpuGlsl.withoutComments), so the edit is a define.
+                            edit("light-model.glsl", light + "\n#define LIVE_EDITOR_SHARED_INCLUDE\n");
                             edit("atmosphere-composite.frag", "#version 330 core\nthis is an unfinished edit");
                             step = 3;
                         } else if (step == 3 && editorStatus().startsWith("Preview unchanged")) {
@@ -149,7 +150,7 @@ class GpuShaderLiveSmokeTest {
                             var provider = (GpuShaderProvider) ((ModelBatch) field(this, "unitBatch")).getShaderProvider();
                             assertNotSame(units, provider.active());
                             assertTrue(provider.sources().stream().allMatch(source ->
-                                  source.fragment().contains("live-editor-shared-include")));
+                                  source.fragment().contains("LIVE_EDITOR_SHARED_INCLUDE")));
                             assertEquals(composite, GpuShaderSource.readDisk("atmosphere-composite.frag"));
                             checkInactiveEffect();
                             manager.run(() -> assertTrue(manager.apply(Map.of()).success()));
@@ -304,12 +305,13 @@ class GpuShaderLiveSmokeTest {
                 }
 
                 void checkInactiveEffect() {
+                    // The warm-up links every weapon and weather effect (GpuBattleView.warmUp); this board has no ocean.
                     manager.run(() -> {
-                        var result = manager.apply(Map.of("beams.frag", "invalid lazy effect"));
+                        var result = manager.apply(Map.of("ocean-initial.frag", "invalid lazy effect"));
                         assertTrue(result.success(), result.message());
                         ShaderProgram[] effect = new ShaderProgram[1];
-                        effect[0] = GpuShaderManager.program(() -> GpuGlsl.compile("beam fallback",
-                              GpuShaderSource.read("effects.vert"), GpuEffectBatch.fragment("beams.frag")), next -> effect[0] = next);
+                        effect[0] = GpuShaderManager.program(() -> GpuOcean.program("ocean-initial.frag"),
+                              next -> effect[0] = next);
                         assertTrue(effect[0].isCompiled(), "An inactive invalid draft falls back when first drawn");
                         assertFalse(effect[0].getFragmentShaderSource().contains("invalid lazy effect"));
                         GpuShaderManager.dispose(effect[0]);
