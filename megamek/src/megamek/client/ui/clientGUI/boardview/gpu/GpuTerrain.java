@@ -657,7 +657,7 @@ final class GpuTerrain implements Disposable {
             GpuLavaLighting.register(result);
             GpuAmbientOcclusion.register(result);
             GpuModelMaterial.register(result);
-            GpuTrafficSignal.register(result, () -> clock);
+            GpuModelLight.register(result, () -> clock);
             GpuBuildingCutaway.register(result);
             GpuSurfaceScars.register(result);
             GpuLiquidShader.register(result);

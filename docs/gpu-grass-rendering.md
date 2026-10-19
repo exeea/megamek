@@ -35,6 +35,13 @@ full-detail chunk (`GpuGroundCover.plant`), and the installed tile keeps them.
 Each instance stores position plus a stable sample rank. Density selects an
 ordered prefix by rank: existing roots do not move when density changes.
 
+Beside same-level open water, standing grass thins smoothly over the last three
+metres of dry land before the bare bank. Planting uses the nearest adjoining
+shore edge and the candidate's existing random chance, after the usual cover
+threshold, so the whole band fades rather than ending at another cutoff. Inland
+roots and surviving positions/ranks stay unchanged. This is CPU preparation only:
+the existing instance layout, blade shaders and draw passes are unchanged.
+
 No cover grows through paint. `BoardPlants` builds `BoardDecals.Opacity` once
 per hex from the decals painting its ground (each image's alpha at the decal's
 drawn transform, so a round emblem leaves no square bald patch) and from its

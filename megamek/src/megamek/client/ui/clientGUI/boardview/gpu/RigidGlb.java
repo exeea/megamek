@@ -398,7 +398,7 @@ final class RigidGlb {
     /**
      * {@code variant}, when not null, reads each material's {@code mmVariants.<variant>} extras instead of its own
      * values where they name them: {@code name}, {@code textures} by role ({@code baseColor}, {@code normal},
-     * {@code occlusion}), {@code colourScale} (linear factors on its triangles' vertex colours) and {@code colours}
+     * {@code occlusion}, {@code emissive}), {@code colourScale} (linear factors on its triangles' vertex colours) and {@code colours}
      * (its one primitive's linear vertex colours). The bare species' GLB carries them.
      */
     private static ModelData convert(FileHandle file, String id, Asset asset, List<NodeModel> roots, String variant) {
@@ -427,6 +427,11 @@ final class RigidGlb {
                 }
                 float[] color = material.getBaseColorFactor();
                 target.diffuse = new Color(color[0], color[1], color[2], color[3]);
+                float[] emission = material.getEmissiveFactor();
+                // glTF factors are linear. A texture still needs its default black factor, or it would glow on its own.
+                if (material.getEmissiveTexture() != null || emission[0] != 0 || emission[1] != 0 || emission[2] != 0) {
+                    target.emissive = new Color(emission[0], emission[1], emission[2], 1);
+                }
                 float roughness = material.getRoughnessFactor(), metallic = material.getMetallicFactor();
                 require(Float.isFinite(roughness) && roughness >= 0 && roughness <= 1
                       && Float.isFinite(metallic) && metallic >= 0 && metallic <= 1, "Invalid metallic-roughness factors");
@@ -439,16 +444,19 @@ final class RigidGlb {
                     surfaceMap = image.key();
                 }
                 result.surfaces.put(target.id, new Surface(roughness, metallic, surfaceMap));
-                for (int usage : new int[] { ModelTexture.USAGE_DIFFUSE, ModelTexture.USAGE_NORMAL, ModelTexture.USAGE_AMBIENT }) {
+                for (int usage : new int[] { ModelTexture.USAGE_DIFFUSE, ModelTexture.USAGE_NORMAL, ModelTexture.USAGE_AMBIENT,
+                      ModelTexture.USAGE_EMISSIVE }) {
                     var sourceTexture = switch (usage) {
                         case ModelTexture.USAGE_NORMAL -> material.getNormalTexture();
                         case ModelTexture.USAGE_AMBIENT -> material.getOcclusionTexture();
+                        case ModelTexture.USAGE_EMISSIVE -> material.getEmissiveTexture();
                         default -> material.getBaseColorTexture();
                     };
                     if (sourceTexture == null) { continue; }
                     Integer coordinate = switch (usage) {
                         case ModelTexture.USAGE_NORMAL -> material.getNormalTexcoord();
                         case ModelTexture.USAGE_AMBIENT -> material.getOcclusionTexcoord();
+                        case ModelTexture.USAGE_EMISSIVE -> material.getEmissiveTexcoord();
                         default -> material.getBaseColorTexcoord();
                     };
                     require(coordinate == null || coordinate == 0,
@@ -458,7 +466,12 @@ final class RigidGlb {
                     require(usage != ModelTexture.USAGE_AMBIENT || material.getOcclusionStrength() == 1,
                           "Bake occlusion strength into the map");
                     var image = asset.images().get(sourceTexture);
-                    String role = usage == ModelTexture.USAGE_NORMAL ? "normal" : usage == ModelTexture.USAGE_AMBIENT ? "occlusion" : "baseColor";
+                    String role = switch (usage) {
+                        case ModelTexture.USAGE_NORMAL -> "normal";
+                        case ModelTexture.USAGE_AMBIENT -> "occlusion";
+                        case ModelTexture.USAGE_EMISSIVE -> "emissive";
+                        default -> "baseColor";
+                    };
                     if (changes.get("textures") instanceof Map<?, ?> textures && textures.get(role) instanceof String uri) {
                         // The variant's image, sampled as the one it replaces.
                         String path = imagePath(file, asset.textureRoot(), uri).toString();

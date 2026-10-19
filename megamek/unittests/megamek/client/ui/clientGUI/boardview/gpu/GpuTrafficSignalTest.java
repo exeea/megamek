@@ -55,7 +55,7 @@ class GpuTrafficSignalTest {
             assertTrue(java.util.Arrays.stream(data.meshes.first().parts).anyMatch(part -> part.id.equals(asset + "/Amber")));
             var drawn = new Material(amber.id, ColorAttribute.createDiffuse(amber.diffuse));
             GpuTrafficSignal.mark("scenery/road/" + asset, drawn);
-            assertTrue(GpuTreeInstances.instancedMaterial(drawn).has(GpuTrafficSignal.TYPE), data.id);
+            assertTrue(GpuTreeInstances.instancedMaterial(drawn).has(GpuModelLight.TYPE), data.id);
         }
     }
 
@@ -82,9 +82,9 @@ class GpuTrafficSignalTest {
             assertEquals(true, detail.invoke(prop, level == 0 ? 200f : 20f));
             var selected = (ModelInstance) instance.get(prop);
             assertSame(levels.get(level), selected.model);
-            assertTrue(GpuTreeInstances.instancedMaterial(selected.getMaterial("Amber")).has(GpuTrafficSignal.TYPE));
+            assertTrue(GpuTreeInstances.instancedMaterial(selected.getMaterial("Amber")).has(GpuModelLight.TYPE));
             for (Model shared : levels) {
-                assertFalse(shared.getMaterial("Amber").has(GpuTrafficSignal.TYPE), "Both asset models remain immutable");
+                assertFalse(shared.getMaterial("Amber").has(GpuModelLight.TYPE), "Both asset models remain immutable");
             }
         }
     }
@@ -110,45 +110,45 @@ class GpuTrafficSignalTest {
         GpuTrafficSignal.mark("scenery/road/traffic-signal", placed);
         var cached = new Material(placed);
         var instanced = GpuTreeInstances.instancedMaterial(cached);
-        assertFalse(original.has(GpuTrafficSignal.TYPE), "The GLB library's material remains untouched");
-        assertTrue(cached.has(GpuTrafficSignal.TYPE));
-        assertTrue(instanced.has(GpuTrafficSignal.TYPE), "The actual instanced draw retains the animated lens marker");
+        assertFalse(original.has(GpuModelLight.TYPE), "The GLB library's material remains untouched");
+        assertTrue(cached.has(GpuModelLight.TYPE));
+        assertTrue(instanced.has(GpuModelLight.TYPE), "The actual instanced draw retains the animated lens marker");
         var another = GpuTreeInstances.instancedMaterial(new Material(placed));
         assertTrue(instanced.same(another, true), "All signal copies can share one instanced batch");
         assertEquals(instanced.hashCode(), another.hashCode());
         var gantry = new Material(original);
         GpuTrafficSignal.mark("scenery/road/traffic-signal-gantry", gantry);
-        assertTrue(GpuTreeInstances.instancedMaterial(gantry).has(GpuTrafficSignal.TYPE),
+        assertTrue(GpuTreeInstances.instancedMaterial(gantry).has(GpuModelLight.TYPE),
               "Overhead signal heads use the same amber animation as roadside poles");
         var red = new Material("Red");
         GpuTrafficSignal.mark("scenery/road/traffic-signal", red);
-        assertFalse(red.has(GpuTrafficSignal.TYPE));
+        assertFalse(red.has(GpuModelLight.TYPE));
         GpuTrafficSignal.mark("scenery/road/stop-sign", original);
-        assertFalse(original.has(GpuTrafficSignal.TYPE), "Other assets cannot animate merely by using the same material name");
+        assertFalse(original.has(GpuModelLight.TYPE), "Other assets cannot animate merely by using the same material name");
     }
 
     @Test void cachedDrawReadsBothHalvesOfTheSharedClockAndResetsForOrdinaryMaterials() {
         var shader = mock(DefaultShader.class);
         double[] seconds = { 0 };
-        GpuTrafficSignal.register(shader, () -> seconds[0]);
+        GpuModelLight.register(shader, () -> seconds[0]);
         var setter = ArgumentCaptor.forClass(BaseShader.Setter.class);
-        verify(shader).register(eq("u_trafficSignalPulse"), setter.capture());
+        verify(shader).register(eq("u_modelLight"), setter.capture());
         var target = mock(BaseShader.class);
         var lens = new Material("Amber");
         GpuTrafficSignal.mark("scenery/road/traffic-signal", lens);
         var draw = new Renderable();
         draw.material = GpuTreeInstances.instancedMaterial(lens);
         int initialHash = draw.material.hashCode();
-        for (double[] sample : new double[][] { { 0, 2 }, { .499, 2 }, { .5, 1 }, { .999, 1 }, { 1, 2 }, { 7.75, 1 } }) {
+        for (double[] sample : new double[][] { { 0, 1 }, { .499, 1 }, { .5, 0 }, { .999, 0 }, { 1, 1 }, { 7.75, 0 } }) {
             seconds[0] = sample[0];
             clearInvocations(target);
             setter.getValue().set(target, 4, draw, draw.material);
-            verify(target).set(4, (float) sample[1]);
+            verify(target).set(4, 1f, (float) sample[1], sample[1] == 0 ? .06f : 1f);
             assertEquals(initialHash, draw.material.hashCode(), "Time never invalidates the material-keyed instance cache");
         }
         draw.material = new Material("Housing");
         clearInvocations(target);
         setter.getValue().set(target, 4, draw, draw.material);
-        verify(target).set(4, 0f);
+        verify(target).set(4, 0f, 0f, 0f);
     }
 }

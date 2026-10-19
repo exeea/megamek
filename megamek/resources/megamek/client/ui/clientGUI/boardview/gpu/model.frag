@@ -33,9 +33,9 @@ uniform vec4 u_emissiveColor;
 #ifdef normalTextureFlag
 uniform sampler2D u_normalTexture;
 #endif
-// Zero is an ordinary model (also the default outside terrain); 1 is an unlit amber lens, 2 a lit one.
-// Warning lamps share the terrain's existing clock through this draw uniform.
-uniform float u_trafficSignalPulse;
+// Enabled, emission multiplier, diffuse multiplier. Zero leaves authored materials unchanged, including in renderers
+// that do not register this control. Light timing and intensity belong to the material's draw setter.
+uniform vec3 u_modelLight;
 
 void main() {
 #ifdef lightingFlag
@@ -72,10 +72,9 @@ void main() {
 #else
     vec4 emissive = vec4(0.0);
 #endif
-    if (u_trafficSignalPulse > 0.0) {
-        float pulse = u_trafficSignalPulse - 1.0;
-        emissive.rgb = max(emissive.rgb, diffuse.rgb) * pulse;
-        diffuse.rgb *= mix(0.06, 1.0, pulse);
+    if (u_modelLight.x > 0.0) {
+        emissive.rgb *= u_modelLight.y;
+        diffuse.rgb *= u_modelLight.z;
     }
 #ifdef lightingFlag
     fragColor.rgb = modelSurface(diffuse.rgb, emissive.rgb, modelShading, modelFace, modelView);

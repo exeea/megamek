@@ -384,7 +384,9 @@ Painted glass is always cold. Only nuclear severity heats the low-height fissure
 using the existing cooling clock; distant mip levels suppress these small details.
 A later nuke still restarts that shared clock. Any authored or nuclear scorch
 clears grass blades and bank turf, including the fading fringe. Both also remove
-decorative grass and shrub scatter through the existing chunk rebuild. Baked
+decorative grass and shrub scatter through the existing chunk rebuild. Affected
+presentation tiles also set the existing barren bit so independently generated
+field bushes cannot replace removed scatter; authoritative terrain is unchanged. Baked
 scatter is removed across each touched hex; blades and turf follow the precise
 mask. Rocks remain. Woods and jungle follow authoritative terrain conversion;
 biome crops and reeds retain their existing behavior.

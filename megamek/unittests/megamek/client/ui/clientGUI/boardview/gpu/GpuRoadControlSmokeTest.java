@@ -155,7 +155,7 @@ class GpuRoadControlSmokeTest {
             assertEquals(level, field(prop, "lod"), "The ordinary prop thresholds select the captured LOD");
             assertSame(levels.get(level), instance.model);
             assertNotNull(instance.getMaterial("Amber"));
-            assertTrue(instance.getMaterial("Amber").has(GpuTrafficSignal.TYPE));
+            assertTrue(instance.getMaterial("Amber").has(GpuModelLight.TYPE));
         }
     }
 

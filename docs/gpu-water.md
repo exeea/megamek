@@ -42,6 +42,28 @@ positions must agree between neighboring hexes, including across chunks. Shore
 queries can depend on the second ring of neighbors: an edit must invalidate
 those dependents as well as the changed hex.
 
+Corner displacement searches outward from the corner's own wet/dry state. A
+search starting at the far end can select the opposite concrete bank across a
+narrow channel and extend a natural peninsula into the water. At natural-bank
+joins with fixed cliff/quay endpoints, shoreline corrections taper within the
+actual relief boundary. That boundary is built once and reused for the top;
+using only the moved hex corners can fold the bank beneath adjacent grass.
+These corrections keep the existing shore samples and material/shader paths.
+
+Mouth tangent corrections retain ordinary bends through two bank widths, then
+smoothly limit the excess to one more width. An almost radial mouth tangent can
+otherwise extend a long pointed shelf into the channel below a raised bank.
+The bounded correction leaves shared mouth endpoints intact and reuses the
+existing radial trace and samples for the bank, bed, water and picking.
+
+At a level built bridge landing, road clearance lets the natural bank recede
+inland; the existing bridge footing extends onto that bank. Pinning the road's
+upper rim to the hex edge instead creates a thin grassy overhang beneath the
+deck. The exception is limited to the connected landing corridor at or below
+deck height. Other roads, higher cliffs, tunnels, natural bridges and unequal
+height approaches retain their clearance. Approach classification is cached
+while preparing the mesh and adds no rendering pass or shader work.
+
 Cliff classification includes the depth beneath the waterline. A bank two levels
 above water with a one-level-deep bed presents a three-level wall.
 `BoardRelief.DEFAULT_CLIFFS_INTO_WATER` controls whether detailed natural cliffs
@@ -66,6 +88,54 @@ share mouth profiles and slope beneath the surface toward their own depth anchor
 Picking and unit support use the canonical surface; `BoardGeometry.footprint`
 also accounts for displaced shore corners. A visible waterline change therefore
 needs corresponding footprint, support and field updates.
+
+Natural riverbanks reuse `BoardRiver`'s existing width-noise sample at a shorter
+world-space scale for small irregularities. The sample count, radius limits and
+shore mesh resolution stay unchanged. The same contour still supplies the bed,
+water, ice and picking geometry.
+
+Open-water banks grade down across their existing rows instead of keeping a flat
+shelf with a narrow drop at the water. Mouth stubs use the same grade on both
+sides of each hex seam. This changes vertex heights without adding rows or shore
+searches. Frozen-water banks use the same grade while their ice surface and
+support contour remain fixed; molten banks retain their former profile.
+
+`terrain-sculpt.frag` uses its existing broad/fine material fields to vary the
+soil/gravel margin above the waterline, with a narrower damp strip inside it.
+The material fade spans the full exposed bank with linear coverage, rather than
+stacked height smoothsteps that compress it into a sharp strip. Both effects
+fade below the dry rim to preserve the adjoining land's material. This
+uses the existing soil-contact and gravel material roles, so snow, dune sand and
+turf give way to exposed sediment before reaching the water. Exposed bank
+vertices retain their pool's water-height reference; actual submersion still
+controls water absorption. This adds no maps, passes or shoreline objects.
+At the outer edge, the original material slots remain in use until their weights
+fade to zero. On earth banks, cover then fades into soil before soil fades into
+gravel, avoiding a visible third role being discarded halfway through the
+transition. Grass and tropical turf finish fading into soil at 60% of the bank;
+gravel starts at 90%. Other covers retain their previous 90% soil transition.
+Rock cliffs keep their existing strongest-two-role selection. Mixed-cover
+draws also use the existing second role inside this narrow band to retain the fade.
+The two-role limit within each material is unchanged, although the band activates
+the existing second material lookup on more pixels. Exposed banks skip underwater
+tint and caustics calculations, whose contribution is zero above the waterline.
+
+Water-tagged ground stores its foot/rim distances in the wall-oriented order
+expected by the shore material. Converting dry ground must swap these channels;
+otherwise a slope's foot is shaded as a turf rim and produces a hard green strip.
+Drowned cliffs already use the wall order and keep it. Depth-zero ownership is
+encoded as `-1 - distance` in the second shore UV, then decoded before shading;
+this reuses the existing vertex layout. Desert and Mars depth-zero surfaces mix
+their original near-water sediment curve 50/50 with the broader deposit curve.
+Their deeper beds retain the existing deposit textures and treatment.
+
+Natural slopes facing water or dry land feather their shading normals into the shared ground at
+the foot and crest, using the existing 1.5-metre contact distance capped at half
+the exposed height. The submerged continuation can otherwise leave a steep
+normal at the exposed foot, creating a sharp turf/soil seam. Both sides of a
+wet/dry corner use the same feather so the grass/soil blend stays continuous.
+Concrete and cliff faces keep their existing treatment. This changes only
+the prepared vertex normals, not positions, triangle counts or picking geometry.
 
 ## Streams, falls and board edges
 
@@ -120,6 +190,13 @@ Clear, Mars, volcanic and hazardous water use palettes selected by
 inputs; ice and magma do not become ordinary water through that blend.
 `USE_PROCEDURAL_WATER` selects depth-derived appearance; the authored animation
 path is retained through `GpuLiquidShader`.
+
+Water retains its original added optical tint over the first 0.05 depth levels
+and minimum surface opacity over the first 0.1 levels. Depth-zero water has only
+about 0.056 levels over its bed, so a wider ramp makes it appear almost dry.
+The surface and submerged terrain share `waterTransmission`; the land-material
+fade does not increase water transparency. The existing depth field and opacity
+cap remain in use, with no extra texture lookups or CPU preparation.
 
 `GpuOcean` runs three 128×128 cascades over 250, 55 and 12.5 metre patches, side
 by side in one texture, so each transform stage is one draw for all of them: 16

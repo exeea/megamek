@@ -32,13 +32,68 @@ its side structure centered around the track. Oblique crossings keep their share
 neighbor-derived tangents, and tighter adjacent-exit turns keep their own layout.
 Three/four-way junctions retain their radial approaches and add the same broad curve
 at full carriageway width for every legal gentle pair of exits, including pairs used
-only by explicit rail layouts. Their approach markings and tyre wear stay unchanged.
+only by explicit rail layouts. Their tyre wear retains the radial approach courses.
 Rail and road use that same course before applying an authored beside-corridor offset.
 
 Roundabout approaches use a two-pixel fillet where they meet the circulating road.
 The closing operation erodes only exposed boundaries; internal seams between filled
 `Area` subpaths must not cut into the road and leave pointed kerbs. Generated bridge
 outlines follow this same footprint.
+
+### Junction controls
+
+Three/four-way paved junctions use solid crossing hubs and rounded inside corners.
+White stop bars cross each incoming right-hand lane before the shared turning area;
+yellow centre dashes stop before those bars. Unmarked roads and five/six-way
+roundabouts retain their existing marking policy. Road/rail corridors keep the bars
+out of the central railway median.
+
+The road brush and the ground/deck road inspector offer **Junction controls: Stops**,
+**Stops + traffic lights**, or **Stops + overhead traffic lights**. Stops uses an
+octagonal roadside STOP sign; traffic lights replace the sign with a three-aspect
+signal. The overhead option uses a curved metal mast arm carrying two overhead
+heads and a lower roadside repeater. All modes keep the stop bars.
+The choice belongs to the `road` or `bridgeRoad` appearance. Overhead traffic lights
+are the default and need no stored field; explicit alternatives store
+`trafficControl: stops` or `trafficControl: signals`. Material
+changes, copy/paste, layer moves, save/load and undo preserve that choice.
+
+Legacy `.board` crossings use the same gantry default. Native boards retain explicit
+authored choices; roads without one inherit the default. Controls are derived from the same
+approach geometry as the paint, use the existing ground/deck support and GLB prop
+pipeline, and disappear when a junction is removed. They are cosmetic terrain
+decorations, not stored or independently selectable objects.
+At a crowded road/rail junction, a pole is omitted if its roadside position has
+no room inside the owning hex; the stop bar remains. This prevents controls from
+standing beyond a bridge deck or on an unrelated neighbour's terrain.
+
+The Blender-authored assets are `scenery/road/traffic-signal.glb` and
+`scenery/road/stop-sign.glb` in mm-data. Each contains the existing `-lod0` and
+`-lod1` groups: detailed nearby models (416/96 triangles) and simple distant
+models (36/40 triangles), selected by the normal prop LOD system. Both signal
+levels flash yellow in out-of-service mode, with red and green off. This
+animation is cosmetic and does not change movement rules.
+
+`GpuTrafficSignal` selects the amber materials; `GpuModelLight` supplies reusable
+emission intensity, blink period (zero for steady light), and optional diffuse
+dimming while off. Its immutable attributes survive prop LOD switches and instance
+batching, while draw setters sample the existing terrain clock. `model.frag` only
+scales the material's authored emission and diffuse colour through `u_modelLight`;
+it contains no traffic-specific timing or colours. Ordinary materials retain their
+authored emission. These controls affect the visible material, not illumination of
+neighbouring surfaces.
+
+The overhead option adds `scenery/road/traffic-signal-gantry.glb`, also with native
+`-lod0`/`-lod1` groups (1,800/212 triangles) and the same animated `Amber` material. It is a single-footing
+cantilever: the origin is the supported roadside base, +Y faces waiting traffic,
+and +X reaches over the incoming lane. The near model includes the curved steel
+tube, base fixings, brackets and lamp visors; the far model keeps the arch and
+all three signal heads. The existing prop system owns placement, LOD and blinking.
+Placement keeps the authored proportions wherever both overhead heads fit the
+incoming lane. Limited horizontal fitting preserves the vertical vehicle clearance;
+if the lane or shoulder cannot accommodate the complete assembly, that approach
+uses the ordinary roadside light. Gantry footings must fit wholly on the owning
+hex's road shoulder, including on bridge decks.
 
 Rails share the carriageway (batch 10, docs/3d-board-editor.md): every shape and
 clearance site reads `wayExits` and `BoardRoad.carriageway` (a drawn road or a ground
@@ -258,6 +313,24 @@ replaces the concrete side faces it covers so the two materials do not fight at 
 Road-only five/six-way spans keep their raised roundabout island; a span carrying rail has
 an open center. The rail curves themselves remain the `RailRoute` courses.
 
+Middle and beside road/rail corridors share one centered, wide structural footprint.
+Moving the track beside the road changes the surface courses, not the position of the
+slab or its outside barriers. Ending a track beside a continuing road retains its buffer
+stop without building a separate enclosure. Wide ramp profiles include the outer
+shoulders; road paint, central ballast and yellow separators continue onto the bank ramp.
+At a taper, truss chords and braces follow the exposed boundary while posts retain
+structural panel spacing. Curvature subdivisions must not each add a full-height post:
+that closes the open truss into a dense red wall.
+Validated on 2026-10-19 with 137 focused geometry/paint tests and a native render/picking
+check covering concrete and truss ramps, both track placements, a rail terminus, and a
+narrow-road control. Captures and test reports are in
+`build/shader-audit/wide-bridge-20261019/`.
+The subsequent recheck passed 33 focused corridor, slope, footing and natural-bridge
+tests, plus three native smoke tests. Its nine wide-bridge views include reverse low
+angles, a diagonal beside-track ramp with swapped sides, a rail terminus and a bare
+roadless ramp. Natural mud joins and truss junctions were also recaptured under
+`build/shader-audit/bridge-recheck-20261019/`.
+
 `BoardBridgeSlope` places these local facets on the shared grade profile. Flat and graded
 spans both retain one complete `BoardBridge.Shape` in the prepared terrain snapshot;
 drawing, picking, rail placement and road paint consume those same facets. Geometry is
@@ -273,6 +346,20 @@ ends retain the ordinary material transition. At a bare bank, rails taper after 
 are supported and the material apron blends into the existing bank triangles, except on
 a bank drawn as pavement.
 The physical span remains opaque.
+
+A built bridge meeting a dry bank one level below its deck uses the same full solid
+ramp with or without a road or rail. The slope spans both hex insets; adding or
+removing road paint does not change its shape, picking or support. The bank terrain
+underneath stays intact. Natural spans and maglev guideways retain their own geometry.
+Ground-cover clearance includes the solid ramp from its inner inset through the bank
+landing, including the terminal model's actual outward width. It leaves the unsupported
+middle of a raised span available for vegetation underneath.
+This clearance fix passed 27 obstacle/footing tests and a native bare-ramp render/picking
+check on 2026-10-19. The final capture without vegetation penetrating the ramp is in
+`build/shader-audit/bridge-recheck-final-20261019/wide-bridges/`.
+The bridge regression suite (139 cases) and the native bare/road/bare edit check passed
+on 2026-10-19; the two bare captures were pixel-identical. Captures are under
+`build/shader-audit/bare-bridge-ramp-20261019/verified/bridge-slopes/`.
 
 Changing a road's kind, exits or supporting geometry must invalidate the ground and
 road masks together. Rail layout edits also rebuild the containing bridge's footprint and

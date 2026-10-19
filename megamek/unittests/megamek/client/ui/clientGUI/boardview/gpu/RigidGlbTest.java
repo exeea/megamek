@@ -3,7 +3,9 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,6 +18,8 @@ import java.nio.file.Path;
 import java.util.List;
 
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelTexture;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -296,6 +300,52 @@ class RigidGlbTest {
         var defaults = ((RigidGlb.Data) RigidGlb.load(file(document, false))).surfaces.get("paint");
         assertEquals(1, defaults.roughness());
         assertEquals(1, defaults.metallic());
+    }
+
+    @Test
+    void retainsLinearEmissionWithoutAddingItToOrdinaryMaterials() throws Exception {
+        var document = document();
+        assertNull(RigidGlb.load(file(document, false)).materials.first().emissive,
+              "A missing emissive factor is black and needs no material flag");
+        var material = (ObjectNode) document.get("materials").get(0);
+        material.putArray("emissiveFactor").add(.02).add(.18).add(.5);
+        var emission = RigidGlb.load(file(document, false)).materials.first().emissive;
+        assertNotNull(emission);
+        assertEquals(.02f, emission.r, 1e-7);
+        assertEquals(.18f, emission.g, 1e-7);
+        assertEquals(.5f, emission.b, 1e-7);
+        assertEquals(1f, emission.a);
+        material.putArray("emissiveFactor").add(0).add(0).add(0);
+        assertNull(RigidGlb.load(file(document, false)).materials.first().emissive);
+    }
+
+    @Test
+    void emissiveTexturesKeepTheirFactorAndShareImagesAcrossRolesAndLevels() throws Exception {
+        var document = levels();
+        document.putArray("images").addObject().put("uri", "lamp.png");
+        document.putArray("textures").addObject().put("source", 0);
+        Files.write(directory.resolve("lamp.png"), encodedImage("png"));
+        var material = (ObjectNode) document.get("materials").get(0);
+        ((ObjectNode) material.get("pbrMetallicRoughness")).putObject("baseColorTexture").put("index", 0);
+        var texture = material.putObject("emissiveTexture").put("index", 0);
+        material.putArray("emissiveFactor").add(.1).add(.25).add(.5);
+        var levels = RigidGlb.loadLods(file(document, false));
+        var near = (RigidGlb.Data) levels.getFirst();
+        var far = (RigidGlb.Data) levels.get(2);
+        var source = near.materials.first();
+        assertEquals(new Color(.1f, .25f, .5f, 1), source.emissive);
+        assertEquals(source.emissive, far.materials.first().emissive);
+        assertEquals(2, source.textures.size);
+        assertEquals(ModelTexture.USAGE_EMISSIVE, source.textures.get(1).usage);
+        assertEquals(source.textures.first().fileName, source.textures.get(1).fileName);
+        assertEquals(1, near.images.size(), "Base color and emission share one authored image");
+        String key = source.textures.get(1).fileName;
+        assertSame(near.images.get(key), far.images.get(key), "The library keeps ownership across LODs");
+        material.remove("emissiveFactor");
+        assertEquals(Color.BLACK, RigidGlb.loadLods(file(document, false)).getFirst().materials.first().emissive,
+              "A texture with glTF's default black factor must not emit light");
+        texture.put("texCoord", 1);
+        assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(file(document, false)));
     }
 
     @Test

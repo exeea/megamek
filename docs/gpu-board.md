@@ -22,6 +22,10 @@ without constructing the Legacy 2D viewport, and the native capture API (planar 
 tactical geometry, field of view, overlays, annotations) exists only on the state.
 Tests build a `BoardClientState` directly (`GpuBoardFixture`); a `BoardView` appears
 only in tests that exercise both renderers on the same state.
+Visual fixtures load map files through `BoardFile.loadSheet(file, false, true)`.
+In-memory legacy boards pass through `BoardSceneryLayouts.convert` before capture,
+including in `GpuBoardFixture`, so scenery and inferred bridge roads match gameplay.
+Native boards retain their authored contents through the same conversion boundary.
 
 The tactical and Free Flight cameras look at the same scene. `BoardCamera` handles
 movement and view selection; `BoardProjectionCamera` handles projection and

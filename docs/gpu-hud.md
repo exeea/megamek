@@ -266,6 +266,23 @@ the held nameplate key, the log's open state and the playback history. It is pre
   The dock's Replay and explicit Play transport still traverse the sequence. Historical review never sends a live
   movement-completed notification to the client.
 
+### Scheduled nuclear effects
+
+Scheduled `/nuke` strikes use `NUCLEAR_DETONATION` BEGIN/END packets around the server's existing damage resolution.
+`NuclearDetonation` carries the confirmed position, original ground level and four resolved statistics (damage,
+degradation, secondary radius and crater depth), supporting both stock and custom strikes without an invented attacker.
+Command coordinates are converted from one-based input to zero-based once; scheduling, blast resolution and incoming/hit
+markers all use that zero-based position. Weapon impacts remain on their existing resolved-attack path: captured ammo
+selects Davy Crockett type 1, Alamo type 2, Santa Ana type 3 or Peacemaker type 4, instead of treating every nuke as Davy Crockett.
+
+The client applies authoritative updates immediately. `GpuBoardSource` retains the preceding presentation only until END,
+then queues the detonation, one final terrain checkpoint and its visible casualty animations. `UnitPlayback` releases that
+checkpoint at flash contact and uses the existing blast, scorch and camera path; unchanged terrain still completes normally.
+If an update conceals a unit, visibility takes precedence: catch up first, discard consequences that could restore its
+identity (including carrier attachments), then play the public flash. Terrain can therefore already be converted in that
+exceptional case. Board changes clear retained blast effects. Scheduled detonations are live timeline events; this does not
+add a scheduled-strike replay card to the report log.
+
 ## 2. Input routing
 
 ### 2.1 Mouse
