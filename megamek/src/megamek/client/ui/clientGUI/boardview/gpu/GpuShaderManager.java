@@ -306,7 +306,9 @@ final class GpuShaderManager {
 
         void check(ShaderProgram next) {
             uniforms.forEach((name, input) -> {
-                if (next.hasUniform(name) && (input.type() != next.getUniformType(name)
+                // libGDX caches failed lookups too: hasUniform can be true with location -1 after BaseShader
+                // registers an input optimized out of a specialized program. Only active inputs have a layout.
+                if (next.getUniformLocation(name) >= 0 && (input.type() != next.getUniformType(name)
                       || input.size() != next.getUniformSize(name))) {
                     throw new IllegalArgumentException("Keep the renderer's uniform type and size: " + name);
                 }

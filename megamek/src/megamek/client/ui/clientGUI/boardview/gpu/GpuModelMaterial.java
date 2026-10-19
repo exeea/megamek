@@ -7,7 +7,6 @@ import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
-import com.badlogic.gdx.math.Matrix4;
 
 /** Authored glTF surface parameters. The model library owns the optional linear G-roughness/B-metalness map. */
 final class GpuModelMaterial extends Attribute {
@@ -41,19 +40,24 @@ final class GpuModelMaterial extends Attribute {
         });
         // A recolourable model's shared mesh drawn one by one (tilted or faded placements, hover copies, combat scars, the
         // side view): its placement's colours. Instanced batches carry them per instance instead (GpuTreeInstances).
-        shader.register("u_slotColours", new BaseShader.LocalSetter() {
+        shader.register("u_slotColours[0]", new BaseShader.LocalSetter() {
+            private final float[] linear = new float[12];
+
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 float[] colours = RigidGlb.slotColours(renderable.userData);
-                target.set(id, colours[0], colours[1], colours[2], colours[3]);
-            }
-        });
-        shader.register("u_modelView", new BaseShader.GlobalSetter() {
-            @Override
-            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                var camera = target.camera;
-                target.set(id, camera.direction.x, camera.direction.y, camera.direction.z,
-                      camera.projection.val[Matrix4.M33] == 0 ? 1f : 0f);
+                for (int slot = 0; slot < 4; slot++) {
+                    int at = slot * 3;
+                    if (colours[slot] < 0) {
+                        linear[at] = linear[at + 1] = linear[at + 2] = -1;
+                    } else {
+                        int rgb = (int) colours[slot];
+                        linear[at] = GpuColor.linear((rgb >> 16 & 255) / 255f);
+                        linear[at + 1] = GpuColor.linear((rgb >> 8 & 255) / 255f);
+                        linear[at + 2] = GpuColor.linear((rgb & 255) / 255f);
+                    }
+                }
+                target.program.setUniform3fv(target.loc(id), linear, 0, linear.length);
             }
         });
     }

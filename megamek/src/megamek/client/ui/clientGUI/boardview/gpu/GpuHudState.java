@@ -81,6 +81,11 @@ final class GpuHudState {
     /** The player picked the focus outside the local turn; the next C.5 event ends the pick. */
     private boolean picked;
     private GpuBattleStatus.Snapshot status;
+    /** Last status whose automatic selection has actually been presented; live turns may run ahead. */
+    private GpuBattleStatus.Snapshot focusStatus;
+    /** Last idle frame's unit context. Only presentation uses it; commands never execute from it. */
+    private GpuBoardSource.Frame selectionFrame;
+    private boolean concealedDuringPlayback;
     private GpuUnitRecord.Snapshot record;
     private boolean playbackBusy;
     private List<GpuBattleStatus.UnitStatus> presentedUnits = List.of();
@@ -134,18 +139,31 @@ final class GpuHudState {
         selectionCleared = false;
     }
 
-    /** In the local turn with the selection cleared: MegaMek's current unit stays its own, but no input reaches it. */
+    /** Unit commands wait for playback, or for the player to restore a cleared local selection. */
     boolean turnLocked(GpuBattleStatus.Snapshot status) {
-        return selectionCleared && status.myTurn();
+        return playbackBusy || selectionCleared && status.myTurn();
     }
 
     /**
      * The frame as the HUD and the board overlay present it. Outside the local turn there is no fire preview: no
      * to-hit badges or guides from the last own unit while another player moves or fires (the user's decision of
-     * 2026-10-03). While {@link #turnLocked} no unit acts either: no actor, no route or envelope, no fire orders or
-     * physical options, and no map menu (MegaMek builds it for its current unit).
+     * 2026-10-03). A cleared selection has no actor, route, orders or physical options. During playback the displayed
+     * unit context stays together, but no unit commands remain available. Chat and notifications stay live.
      */
     GpuBoardSource.Frame presented(GpuBoardSource.Frame frame) {
+        if (playbackBusy && selectionFrame != null) {
+            GpuHudData latest = frame.panels();
+            GpuHudData held = selectionFrame.panels();
+            GpuHudData shown = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
+                  GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, presentedRecord,
+                  selectionCleared || concealedDuringPlayback ? GpuFirePreview.Snapshot.NONE : held.preview(), latest.chat(), latest.toasts(),
+                  latest.los(), latest.players());
+            BoardScene scene = frame.scene() == null ? null : frame.scene().withPlaybackSelection(
+                  selectionCleared ? Entity.NONE : focus);
+            return new GpuBoardSource.Frame(scene, frame.timeline(), null, frame.globalCommands(), frame.tooltip(),
+                  frame.centerRequest(), frame.boardGeneration(), focus == Entity.NONE ? "" : selectionFrame.actorName(),
+                  frame.scenarioAtmosphere(), frame.reports(), focusStatus, shown);
+        }
         GpuBattleStatus.Snapshot status = frame.status();
         GpuHudData panels = frame.panels();
         boolean locked = turnLocked(status);
@@ -162,7 +180,9 @@ final class GpuHudState {
               locked ? GpuFireOrders.Snapshot.EMPTY : panels.fire(),
               locked ? GpuPhysicalOptions.Snapshot.EMPTY : panels.physical(), panels.record(),
               GpuFirePreview.Snapshot.NONE, panels.chat(), panels.toasts(), panels.los(), panels.players());
-        return new GpuBoardSource.Frame(frame.scene(), frame.timeline(), locked ? null : frame.context(),
+        BoardScene.Context context = frame.context();
+        return new GpuBoardSource.Frame(frame.scene(), frame.timeline(),
+              locked && context != null && !context.selectionCleared() ? null : context,
               frame.globalCommands(), frame.tooltip(), frame.centerRequest(), frame.boardGeneration(),
               locked ? "" : frame.actorName(), frame.scenarioAtmosphere(), frame.reports(),
               locked ? presentedStatus : status, shown);
@@ -205,19 +225,24 @@ final class GpuHudState {
      *       {@code Entity.NONE}
      */
     int update(GpuBattleStatus.Snapshot next, GpuUnitRecord.Snapshot nextRecord, boolean busy) {
-        if (next == status && nextRecord == record && busy == playbackBusy) {
+        if (next == status && nextRecord == record && busy == playbackBusy
+              && (nextRecord.unitId() != cardUnit() || nextRecord.unitId() == presentedRecord.unitId())) {
             return Entity.NONE;
         }
-        GpuBattleStatus.Snapshot previous = status == null ? GpuBattleStatus.Snapshot.EMPTY : status;
+        GpuBattleStatus.Snapshot previous = focusStatus == null ? GpuBattleStatus.Snapshot.EMPTY : focusStatus;
         status = next;
         record = nextRecord;
         playbackBusy = busy;
         if (!busy || presentedUnits.isEmpty()) {
             presentedUnits = next.units();
             presentedRecord = nextRecord;
-        } else if (nextRecord.unitId() != presentedRecord.unitId()) {
+        } else if (nextRecord.unitId() != presentedRecord.unitId() && nextRecord.unitId() == cardUnit()) {
             presentedRecord = nextRecord;
         }
+        if (busy && focusStatus != null) {
+            return Entity.NONE;
+        }
+        focusStatus = next;
         boolean phaseStart = next.round() != previous.round() || next.phase() != previous.phase();
         if (phaseStart) {
             boolean autoLog = next.phase().isReport() && !next.phase().isInitiativeReport();
@@ -230,6 +255,39 @@ final class GpuHudState {
             }
         }
         return updateFocus(previous, next, phaseStart);
+    }
+
+    /** Snapshot the unit context only at the queue's idle boundary, never at an intermediate action's contact. */
+    int update(GpuBoardSource.Frame frame, boolean busy) {
+        if (selectionFrame != null && selectionFrame.boardGeneration() != frame.boardGeneration()) {
+            selectionFrame = null;
+            focusStatus = null;
+            status = null;
+            presentedUnits = List.of();
+        }
+        if (!busy || selectionFrame == null) {
+            selectionFrame = frame;
+            concealedDuringPlayback = false;
+        }
+        int select = update(frame.status(), frame.panels().record(), busy);
+        for (BoardScene.Animation event : frame.timeline()) {
+            if (busy && event instanceof BoardScene.Concealed hidden && frame.scene() != null
+                  && hidden.boardId() == frame.scene().boardId()) {
+                // Visibility changes revoke retained identities immediately, even while other actions remain queued.
+                concealedDuringPlayback = true;
+                presentedUnits = presentedUnits.stream().filter(unit -> unit.id() != hidden.entityId()).toList();
+                if (presentedRecord.unitId() == hidden.entityId()) { presentedRecord = GpuUnitRecord.Snapshot.EMPTY; }
+                if (focus == hidden.entityId()) { focus = Entity.NONE; }
+                if (inspected == hidden.entityId()) { inspected = Entity.NONE; }
+                GpuBattleStatus.Snapshot held = focusStatus;
+                focusStatus = new GpuBattleStatus.Snapshot(held.round(), held.phase(), held.myTurn(), held.localPlayerId(),
+                      held.actorId() == hidden.entityId() ? Entity.NONE : held.actorId(), held.turns(), held.turnIndex(),
+                      presentedUnits, held.initiative(), held.turnOrderHidden(),
+                      held.links().stream().filter(link -> link.fromId() != hidden.entityId()
+                            && link.toId() != hidden.entityId()).toList(), GpuBattleStatus.Arc.NONE);
+            }
+        }
+        return select;
     }
 
     /**

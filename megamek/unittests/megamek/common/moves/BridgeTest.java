@@ -33,14 +33,19 @@
 
 package megamek.common.moves;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.stream.Stream;
 
 import megamek.common.GameBoardTestCase;
+import megamek.common.Hex;
+import megamek.common.board.Coords;
 import megamek.common.enums.MoveStepType;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.EquipmentTypeLookup;
+import megamek.common.rolls.TargetRoll;
 import megamek.common.units.*;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -75,6 +80,36 @@ public class BridgeTest extends GameBoardTestCase {
               hex 0103 0 "bridge:1:09;bridge_cf:250;bridge_elev:4" ""
               hex 0104 0 "bridge:1:09;bridge_cf:250;bridge_elev:4" ""
               hex 0105 4 "" ""
+              end"""
+        );
+
+        initializeBoard("BOARD_MUDDY_DECK", """
+              size 1 5
+              hex 0101 4 "" ""
+              hex 0102 0 "bridge:1:09;bridge_cf:250;bridge_elev:4;bridge_mud:1" ""
+              hex 0103 0 "bridge:1:09;bridge_cf:250;bridge_elev:4;bridge_mud:1" ""
+              hex 0104 0 "bridge:1:09;bridge_cf:250;bridge_elev:4;bridge_mud:1" ""
+              hex 0105 4 "" ""
+              end"""
+        );
+
+        initializeBoard("BOARD_DRY_DECK_OVER_MUD", """
+              size 1 5
+              hex 0101 4 "" ""
+              hex 0102 0 "mud:1;bridge:1:09;bridge_cf:250;bridge_elev:4" ""
+              hex 0103 0 "mud:1;bridge:1:09;bridge_cf:250;bridge_elev:4" ""
+              hex 0104 0 "mud:1;bridge:1:09;bridge_cf:250;bridge_elev:4" ""
+              hex 0105 4 "" ""
+              end"""
+        );
+
+        initializeBoard("BOARD_WALK_UNDER_MUDDY_DECK", """
+              size 1 5
+              hex 0101 0 "" ""
+              hex 0102 0 "" ""
+              hex 0103 0 "bridge:1;bridge_cf:250;bridge_elev:4;bridge_mud:1" ""
+              hex 0104 0 "" ""
+              hex 0105 0 "" ""
               end"""
         );
 
@@ -128,6 +163,61 @@ public class BridgeTest extends GameBoardTestCase {
               hex 0105 0 "water:2" ""
               end"""
         );
+
+        // Bank roads beside decks (b13 ways): a deck within a level that exits back links; one two levels up, a deck
+        // without that exit and a road beneath a deck do not; a road with specified exits keeps them.
+        initializeBoard("BOARD_BANK_ROAD_ONTO_DECK", """
+              size 1 3
+              hex 0101 0 "road:1" ""
+              hex 0102 0 "water:1;bridge:1:09;bridge_cf:40;bridge_elev:1" ""
+              hex 0103 1 "road:1" ""
+              end"""
+        );
+
+        initializeBoard("BOARD_BANK_ROAD_UNLINKED", """
+              size 1 11
+              hex 0101 0 "road:1" ""
+              hex 0102 0 "water:2;bridge:1:09;bridge_cf:40;bridge_elev:2" ""
+              hex 0103 0 "" ""
+              hex 0104 0 "road:1" ""
+              hex 0105 0 "water:1;bridge:1:08;bridge_cf:40;bridge_elev:1" ""
+              hex 0106 0 "" ""
+              hex 0107 0 "road:1;bridge:1:09;bridge_cf:40;bridge_elev:4" ""
+              hex 0108 0 "bridge:1:09;bridge_cf:40;bridge_elev:1" ""
+              hex 0109 0 "" ""
+              hex 0110 0 "road:1:32" ""
+              hex 0111 0 "water:1;bridge:1:09;bridge_cf:40;bridge_elev:1" ""
+              end"""
+        );
+    }
+
+    @Test
+    void aBankRoadMeetsTheDeckThatLandsOnItsHex() {
+        var board = getBoard("BOARD_BANK_ROAD_ONTO_DECK");
+        assertEquals(8, board.getHex(0, 0).getTerrain(Terrains.ROAD).getExits(), "south onto the deck");
+        assertEquals(1, board.getHex(0, 2).getTerrain(Terrains.ROAD).getExits(), "north onto the deck, a level down");
+    }
+
+    @Test
+    void aBankRoadIgnoresADeckOutOfReachOrFacingAwayAndNeverLinksFromBeneath() {
+        var board = getBoard("BOARD_BANK_ROAD_UNLINKED");
+        assertEquals(0, board.getHex(0, 0).getTerrain(Terrains.ROAD).getExits(), "the deck is two levels up");
+        assertEquals(0, board.getHex(0, 3).getTerrain(Terrains.ROAD).getExits(), "the deck has no exit back");
+        assertFalse(board.getHex(0, 6).containsTerrainExit(Terrains.ROAD, 3), "the road runs beneath a deck");
+        assertEquals(32, board.getHex(0, 9).getTerrain(Terrains.ROAD).getExits(), "specified exits stay as drawn");
+    }
+
+    @Test
+    void aBankRoadDrivesOntoTheDeckAsARoad() {
+        setBoard("BOARD_BANK_ROAD_ONTO_DECK");
+        Tank tank = new Tank();
+        tank.setChassis("Wheeled Tank");
+        MovePath movePath = getMovePathFor(tank, EntityMovementMode.WHEELED,
+              MoveStepType.CLIMB_MODE_ON,
+              MoveStepType.FORWARDS);
+        assertTrue(movePath.isMoveLegal());
+        assertMovePathElevations(movePath, 0, 1);
+        assertTrue(movePath.getLastStep().isPavementStep(), "the bank road's exit makes the step onto the deck a road step");
     }
 
     public static Stream<Arguments> allGroundedEntityTypes() {
@@ -353,6 +443,43 @@ public class BridgeTest extends GameBoardTestCase {
               MoveStepType.FORWARDS);
         assertTrue(movePath.isMoveLegal());
         assertMovePathElevations(movePath, 0, 4, 4, 4, 0);
+    }
+
+    private MovePath crossing(String board, Entity entity, EntityMovementMode mode, boolean climb) {
+        setBoard(board);
+        return getMovePathFor(entity, mode, climb ? MoveStepType.CLIMB_MODE_ON : MoveStepType.CLIMB_MODE_OFF,
+              MoveStepType.FORWARDS, MoveStepType.FORWARDS, MoveStepType.FORWARDS, MoveStepType.FORWARDS);
+    }
+
+    /** Mud on a raised deck costs a unit crossing on the deck +1 MP per hex, as mud on the ground; a hover and a unit beneath pay nothing. */
+    @Test
+    void deckMudSlowsUnitsOnTheDeckOnly() {
+        assertEquals(crossing("BOARD_BRIDGE_BETWEEN_LAND", new Tank(), EntityMovementMode.TRACKED, true).getMpUsed() + 3,
+              crossing("BOARD_MUDDY_DECK", new Tank(), EntityMovementMode.TRACKED, true).getMpUsed());
+        assertEquals(crossing("BOARD_BRIDGE_BETWEEN_LAND", new BipedMek(), EntityMovementMode.BIPED, true).getMpUsed() + 3,
+              crossing("BOARD_MUDDY_DECK", new BipedMek(), EntityMovementMode.BIPED, true).getMpUsed());
+        assertEquals(crossing("BOARD_BRIDGE_BETWEEN_LAND", new Tank(), EntityMovementMode.HOVER, true).getMpUsed(),
+              crossing("BOARD_MUDDY_DECK", new Tank(), EntityMovementMode.HOVER, true).getMpUsed(), "a hover");
+        assertEquals(crossing("BOARD_WALK_UNDER_BRIDGE", new Tank(), EntityMovementMode.TRACKED, false).getMpUsed(),
+              crossing("BOARD_WALK_UNDER_MUDDY_DECK", new Tank(), EntityMovementMode.TRACKED, false).getMpUsed(),
+              "beneath the deck");
+    }
+
+    /** Whether {@code unit} crossing {@code board} rolls to avoid bogging down as it enters the first deck hex. */
+    private boolean bogsDownOnTheDeck(String board, Entity unit, EntityMovementMode mode) {
+        MoveStep onDeck = crossing(board, unit, mode, true).getStepVector().get(1);
+        assertEquals(4, onDeck.getElevation());
+        Hex hex = getGame().getBoard().getHex(onDeck.getPosition());
+        return unit.checkBogDown(onDeck, EntityMovementType.MOVE_WALK, hex, new Coords(0, 0), onDeck.getPosition(), 0,
+              onDeck.isPavementStep()).getValue() != TargetRoll.CHECK_FALSE;
+    }
+
+    /** A tank entering a muddy raised deck rolls to avoid bogging down; a Mek does not, nor does a tank on a dry deck over mud. */
+    @Test
+    void deckMudBogsDownTanksOnTheDeck() {
+        assertTrue(bogsDownOnTheDeck("BOARD_MUDDY_DECK", new Tank(), EntityMovementMode.TRACKED));
+        assertFalse(bogsDownOnTheDeck("BOARD_MUDDY_DECK", new BipedMek(), EntityMovementMode.BIPED));
+        assertFalse(bogsDownOnTheDeck("BOARD_DRY_DECK_OVER_MUD", new Tank(), EntityMovementMode.TRACKED));
     }
 
     @ParameterizedTest

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -38,7 +39,7 @@ class GpuModelMaterialSmokeTest {
 
     @Test
     void boardCameraProjectionDeterminesWhetherViewRaysAreParallel() {
-        nativeCheck(() -> {
+        nativeCheck(output -> {
             var model = new ModelBuilder().createBox(120, 120, 4,
                   new Material(ColorAttribute.createDiffuse(.2f, .2f, .2f, 1), new GpuModelMaterial(.28f, 0, null)),
                   VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.TextureCoordinates);
@@ -59,7 +60,7 @@ class GpuModelMaterialSmokeTest {
                 for (boolean perspective : new boolean[] { false, true }) {
                     camera.perspective = perspective;
                     camera.update();
-                    draw(batch, object, camera, environment);
+                    draw(output, batch, object, camera, environment);
                     Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, SIZE, SIZE);
                     try {
                         int left = red(pixels.getPixel(SIZE / 2 - 45, SIZE / 2));
@@ -81,14 +82,29 @@ class GpuModelMaterialSmokeTest {
 
     @Test
     void geometryAndCloudShadowsAttenuateReflectionsWithoutDimmingEmission() {
-        nativeCheck(() -> {
+        nativeCheck(output -> {
             var model = new ModelBuilder().createBox(120, 120, 4,
                   new Material(ColorAttribute.createDiffuse(.2f, .2f, .2f, 1),
                         ColorAttribute.createEmissive(.1f, .1f, .1f, 1), new GpuModelMaterial(.28f, 0, null)),
                   VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.TextureCoordinates);
             var object = new ModelInstance(model);
             var batch = new ModelBatch(GpuUnitShader.provider());
-            Texture dark = texture(0x000000ff), clear = texture(0xffffffff), cloud = texture(0x404040ff);
+            var darkDepth = GpuShadowSmokeTest.constantDepth(0);
+            var clearDepth = GpuShadowSmokeTest.constantDepth(1);
+            var edgeDepth = GpuShadowSmokeTest.constantDepth(1);
+            Texture dark = darkDepth.getColorBufferTexture(), clear = clearDepth.getColorBufferTexture();
+            Texture cloud = texture(0x404040ff);
+            edgeDepth.begin();
+            try {
+                Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
+                Gdx.gl.glScissor(0, 0, 1, 2);
+                Gdx.gl.glClearDepthf(0);
+                Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+            } finally {
+                Gdx.gl.glClearDepthf(1);
+                Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+                edgeDepth.end();
+            }
             try {
                 for (boolean iso : new boolean[] { false, true }) {
                     var camera = camera(iso);
@@ -97,28 +113,41 @@ class GpuModelMaterialSmokeTest {
                     environment.add(new DirectionalLight().set(.2f, .2f, .2f,
                           -camera.direction.x, -camera.direction.y, camera.direction.z));
                     var depth = new TextureDescriptor<>(clear);
+                    var shadowProjection = new Matrix4().setToScaling(0, 0, 0);
                     environment.shadowMap = new ShadowMap() {
-                        private final Matrix4 projection = new Matrix4().setToScaling(0, 0, 0);
-
-                        @Override public Matrix4 getProjViewTrans() { return projection; }
+                        @Override public Matrix4 getProjViewTrans() { return shadowProjection; }
                         @Override public TextureDescriptor<Texture> getDepthMap() { return depth; }
                     };
-                    int lit = red(draw(batch, object, camera, environment));
+                    int lit = red(draw(output, batch, object, camera, environment));
+                    int centerPixel = (SIZE / 2 * SIZE + SIZE / 2) * 4;
+                    float litRadiance = output.linearPixels()[centerPixel];
                     depth.texture = dark;
-                    int shadowed = red(draw(batch, object, camera, environment));
+                    int shadowed = red(draw(output, batch, object, camera, environment));
+                    float shadowRadiance = output.linearPixels()[centerPixel];
                     assertEquals(26, shadowed, 1, "Geometry shadow removes diffuse and specular light, leaving emission");
+                    // Left texels block, right texels pass. The unchanged four taps at U=.125/.625 have
+                    // comparison weights 0/.75, so their mean is .375 (nearest sampling would give .5).
+                    depth.texture = edgeDepth.getColorBufferTexture();
+                    shadowProjection.setTranslation(-.25f, 0, 0);
+                    draw(output, batch, object, camera, environment);
+                    float filteredRadiance = output.linearPixels()[centerPixel];
+                    assertEquals(shadowRadiance + (litRadiance - shadowRadiance) * .375f, filteredRadiance,
+                          .002f * Math.max(litRadiance, .01f),
+                          "The real model provider filters hardware comparisons and leaves emission intact");
+                    shadowProjection.setTranslation(0, 0, 0);
                     depth.texture = clear;
                     var projection = new Matrix4().setToScaling(0, 0, 0).setTranslation(.5f, .5f, 0);
                     environment.set(new GpuCloudShadow(cloud, projection));
-                    int cloudy = red(draw(batch, object, camera, environment));
+                    int cloudy = red(draw(output, batch, object, camera, environment));
                     assertTrue(cloudy > shadowed + 15 && cloudy < lit - 20,
                           "Cloud transmission dims the direct highlight: " + lit + "/" + cloudy + "/" + shadowed);
                 }
                 assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
             } finally {
                 cloud.dispose();
-                clear.dispose();
-                dark.dispose();
+                edgeDepth.dispose();
+                clearDepth.dispose();
+                darkDepth.dispose();
                 batch.dispose();
                 model.dispose();
             }
@@ -127,14 +156,16 @@ class GpuModelMaterialSmokeTest {
 
     @Test
     void authoredSurfacesAndMapsControlLightingInTopAndIsometricViews() {
-        nativeCheck(() -> {
+        nativeCheck(output -> {
             var model = new ModelBuilder().createBox(120, 120, 4,
                   new Material(ColorAttribute.createDiffuse(new Color(.2f, .2f, .2f, 1))),
                   VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.TextureCoordinates);
             var object = new ModelInstance(model);
             var material = object.materials.first();
             var batch = new ModelBatch(GpuUnitShader.provider());
-            Texture packed = texture(0x188000ff), occlusion = texture(0x40ffffff), normal = texture(0xf080bfff);
+            // A 45-degree mapped normal stays in the view hemisphere in both mirrored orientations,
+            // including the 31-degree isometric view; handedness must not test back-facing BRDF rejection.
+            Texture packed = texture(0x188000ff), occlusion = texture(0x40ffffff), normal = texture(0xda80daff);
             try {
                 for (boolean iso : new boolean[] { false, true }) {
                     var camera = camera(iso);
@@ -144,22 +175,22 @@ class GpuModelMaterialSmokeTest {
                     environment.set(ColorAttribute.createAmbientLight(0, 0, 0, 1));
                     environment.add(sun);
                     material.set(new GpuModelMaterial(.28f, 0, null));
-                    int smooth = red(draw(batch, object, camera, environment));
+                    int smooth = red(draw(output, batch, object, camera, environment));
                     material.set(new GpuModelMaterial(.9f, 0, null));
-                    int rough = red(draw(batch, object, camera, environment));
+                    int rough = red(draw(output, batch, object, camera, environment));
                     assertTrue(smooth > rough + 30, "Roughness must broaden the sun highlight: " + smooth + "/" + rough);
 
                     material.set(new GpuModelMaterial(.5f, 1, packed));
-                    int mapped = draw(batch, object, camera, environment);
+                    int mapped = draw(output, batch, object, camera, environment);
                     material.set(new GpuModelMaterial(.5f * 128 / 255, 0, null));
-                    assertEquals(mapped, draw(batch, object, camera, environment),
+                    assertEquals(mapped, draw(output, batch, object, camera, environment),
                           "Packed G/B are linear multipliers; R must not change surface response");
 
                     material.set(ColorAttribute.createDiffuse(new Color(.8f, .25f, .08f, 1)),
                           new GpuModelMaterial(.45f, 0, null));
-                    int paint = draw(batch, object, camera, environment);
+                    int paint = draw(output, batch, object, camera, environment);
                     material.set(new GpuModelMaterial(.45f, 1, null));
-                    int metal = draw(batch, object, camera, environment);
+                    int metal = draw(output, batch, object, camera, environment);
                     assertTrue(red(metal) > green(metal) * 3, "Metal reflection must inherit the base color");
                     assertTrue((paint >>> 8 & 255) > (metal >>> 8 & 255) + 15,
                           "Dielectric highlights add neutral light even to the dark blue channel: " + paint + "/" + metal);
@@ -169,23 +200,23 @@ class GpuModelMaterialSmokeTest {
                     // Ambient occlusion attenuates indirect sky/ground, without painting dark spots over direct sunlight.
                     sun.set(0, 0, 0, 0, 0, -1);
                     environment.set(ColorAttribute.createAmbientLight(.6f, .6f, .6f, 1));
-                    int ambient = red(draw(batch, object, camera, environment));
+                    int ambient = red(draw(output, batch, object, camera, environment));
                     material.set(TextureAttribute.createAmbient(occlusion));
-                    int occluded = red(draw(batch, object, camera, environment));
+                    int occluded = red(draw(output, batch, object, camera, environment));
                     assertTrue(ambient > occluded + 25, "AO must attenuate ambient light");
                     environment.set(ColorAttribute.createAmbientLight(0, 0, 0, 1));
                     sun.set(.5f, .5f, .5f, 0, 0, -1);
-                    int directWithAo = draw(batch, object, camera, environment);
+                    int directWithAo = draw(output, batch, object, camera, environment);
                     material.remove(TextureAttribute.Ambient);
-                    assertEquals(directWithAo, draw(batch, object, camera, environment), "AO must leave direct light intact");
+                    assertEquals(directWithAo, draw(output, batch, object, camera, environment), "AO must leave direct light intact");
                     int flat = red(directWithAo);
                     material.set(TextureAttribute.createNormal(normal));
-                    int bumped = red(draw(batch, object, camera, environment));
+                    int bumped = red(draw(output, batch, object, camera, environment));
                     assertTrue(flat > bumped + 10, "The original-UV normal map must change light incidence: " + flat + "/" + bumped);
                     sun.set(.5f, .5f, .5f, -1, -1, -.4f);
-                    int originalUv = red(draw(batch, object, camera, environment));
+                    int originalUv = red(draw(output, batch, object, camera, environment));
                     mirrorUv(model);
-                    int mirroredUv = red(draw(batch, object, camera, environment));
+                    int mirroredUv = red(draw(output, batch, object, camera, environment));
                     assertTrue(Math.abs(originalUv - mirroredUv) > 25,
                           "Mirroring mesh U must reverse the mapped tangent direction: " + originalUv + "/" + mirroredUv);
                     mirrorUv(model);
@@ -194,9 +225,9 @@ class GpuModelMaterialSmokeTest {
                     // Translating a surface parallel to the image must not move its highlight in an orthographic view.
                     material.set(new GpuModelMaterial(.28f, 0, null));
                     sun.set(.2f, .2f, .2f, -camera.direction.x, -camera.direction.y, camera.direction.z);
-                    int center = draw(batch, object, camera, environment);
+                    int center = draw(output, batch, object, camera, environment);
                     object.transform.setToTranslation(25, 0, 0);
-                    assertEquals(center, draw(batch, object, camera, environment), "Orthographic rays remain parallel");
+                    assertEquals(center, draw(output, batch, object, camera, environment), "Orthographic rays remain parallel");
                     object.transform.idt();
                     System.out.printf("Model surfaces iso=%s: smooth=%d rough=%d ambient=%d AO=%d normal=%d/%d%n",
                           iso, smooth, rough, ambient, occluded, flat, bumped);
@@ -212,11 +243,15 @@ class GpuModelMaterialSmokeTest {
         });
     }
 
-    private static int draw(ModelBatch batch, ModelInstance object, Camera camera, Environment environment) {
+    private static int draw(GpuSceneTestOutput output, ModelBatch batch, ModelInstance object, Camera camera,
+          Environment environment) {
+        output.scene().begin();
+        Gdx.gl.glDepthMask(true);
         ScreenUtils.clear(0, 0, 0, 1, true);
         batch.begin(camera);
         batch.render(object, environment);
         batch.end();
+        output.display();
         Pixmap pixels = Pixmap.createFromFrameBuffer(SIZE / 2, SIZE / 2, 1, 1);
         try { return pixels.getPixel(0, 0); }
         finally { pixels.dispose(); }
@@ -255,7 +290,7 @@ class GpuModelMaterialSmokeTest {
         return camera;
     }
 
-    private static void nativeCheck(Runnable check) {
+    private static void nativeCheck(Consumer<GpuSceneTestOutput> check) {
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowSizeLimits(SIZE, SIZE, -1, -1);
@@ -263,7 +298,7 @@ class GpuModelMaterialSmokeTest {
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
-                try { check.run(); }
+                try (var output = new GpuSceneTestOutput(SIZE, SIZE)) { check.accept(output); }
                 catch (Throwable error) { failure.set(error); }
                 finally { Gdx.app.exit(); }
             }

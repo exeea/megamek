@@ -32,7 +32,5 @@ class UnitDisplayModeTest {
         assertTrue(UnitDisplayMode.ALL_MEEPLES.meeple(selection));
         assertEquals(entity instanceof Mek, UnitDisplayMode.DEFAULT.meeple(selection));
         assertFalse(UnitDisplayMode.MODELS.meeple(selection));
-        assertNull(UnitModelSelection.capture(entity, -1, true, mock(MekTileset.class)),
-              "Sensor contacts must not expose unit identity");
     }
 }

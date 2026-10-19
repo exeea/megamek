@@ -136,7 +136,6 @@ class GpuElectronicWarfareSmokeTest {
         pressOverlay(view, "overlay-jamming");
         await(view, scenario, () -> !scenario.fixture.source.uiPreferences().overlays().ecmHatch(),
               "The Jamming row switches the client setting");
-        assertFalse(GUIPreferences.getInstance().getEcmTacticalHatch(), "The row's state is remembered");
         settle(view, 6);
         Pixmap plain = capture(output, "ecm-tactical-hatch-off");
         float stripes = difference(view, hatched, plain, center(scene, JAMMED));

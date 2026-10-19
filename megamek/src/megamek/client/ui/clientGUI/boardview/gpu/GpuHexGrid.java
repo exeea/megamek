@@ -65,8 +65,7 @@ final class GpuHexGrid implements Disposable {
 
     GpuHexGrid() {
         shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU hex grid and ground layer",
-              GpuShaderSource.read("hex-grid.vert"), GpuShaderSource.read("hex-grid.frag")
-                    .replace("// TERRAIN_PATTERNS", GpuShaderSource.read("terrain-patterns.glsl"))), next -> shader = next);
+              GpuShaderSource.read("hex-grid.vert"), GpuShaderSource.read("hex-grid.frag")), next -> shader = next);
         hex = new GpuInstancedMesh(6, 12, new VertexAttributes(VertexAttribute.Position()));
         hex.setVertices(new float[] { .5f, 0, 0, .25f, .5f, 0, -.25f, .5f, 0,
               -.5f, 0, 0, -.25f, -.5f, 0, .25f, -.5f, 0 });
@@ -88,6 +87,12 @@ final class GpuHexGrid implements Disposable {
      */
     void render(BoardCamera camera, BoardScene scene, boolean columns, boolean tactical, GpuBattleStatus.Arc arc,
           boolean levelShading) {
+        render(camera, scene, columns, tactical, arc, levelShading, null);
+    }
+
+    /** The completed atmosphere is borrowed only by the display-space grid, never the tactical palette. */
+    void render(BoardCamera camera, BoardScene scene, boolean columns, boolean tactical, GpuBattleStatus.Arc arc,
+          boolean levelShading, GpuAtmosphere atmosphere) {
         boolean grid = BoardGeometry.tuning().gridShade() < 1;
         if (scene.tiles().isEmpty() || !tactical && (!grid || !columns && !camera.isTopDown())) {
             return;
@@ -113,6 +118,8 @@ final class GpuHexGrid implements Disposable {
               GL20.GL_ONE_MINUS_SRC_ALPHA);
         try {
             shader.bind();
+            shader.setUniformf("u_contrastEnabled", 0);
+            if (!tactical && atmosphere != null) { atmosphere.bindContrast(shader, 0); }
             shader.setUniformMatrix("u_projTrans", camera.camera.combined);
             shader.setUniformf("u_hexSize", BoardGeometry.width(), BoardGeometry.height(), BoardGeometry.level());
             shader.setUniformf("u_gridShade", grid ? BoardGeometry.tuning().gridShade() : 1);

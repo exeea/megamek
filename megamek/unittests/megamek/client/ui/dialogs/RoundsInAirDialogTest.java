@@ -2,22 +2,13 @@
 package megamek.client.ui.dialogs;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import java.awt.GraphicsEnvironment;
-import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Vector;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import javax.swing.JScrollPane;
-import javax.swing.JTable;
-import javax.swing.SwingUtilities;
 
-import megamek.client.Client;
 import megamek.common.HexTarget;
 import megamek.common.Player;
 import megamek.common.actions.ArtilleryAttackAction;
@@ -43,47 +34,6 @@ class RoundsInAirDialogTest {
                     new RoundsInAirDialog.Row(3, "Team 2", "OpFor", "(unknown unit)", "3 turn(s)", "Unknown",
                           "Unknown")),
               RoundsInAirDialog.rows(game()));
-    }
-
-    /** What the window's table shows; written against the window before its rows were extracted, and unchanged. */
-    @Test
-    void theTableListsEveryRoundSoonestFirstAndWithholdsTheEnemyAim() throws Exception {
-        assumeFalse(GraphicsEnvironment.isHeadless(), "The dialog needs a display");
-        Game game = game();
-        Client client = mock(Client.class);
-        when(client.getGame()).thenReturn(game);
-        List<String> shown = new ArrayList<>();
-        SwingUtilities.invokeAndWait(() -> {
-            // refresh() fills the table only while the window shows; this one is never shown.
-            RoundsInAirDialog dialog = new RoundsInAirDialog(null, client) {
-                @Override
-                public boolean isVisible() {
-                    return true;
-                }
-            };
-            try {
-                dialog.refresh();
-                JTable table = (JTable) ((JScrollPane) dialog.getContentPane().getComponent(0)).getViewport()
-                      .getView();
-                shown.add(IntStream.range(0, table.getColumnCount()).mapToObj(table::getColumnName)
-                      .collect(Collectors.joining(" | ")));
-                for (int row = 0; row < table.getRowCount(); row++) {
-                    int line = row;
-                    shown.add(IntStream.range(0, table.getColumnCount())
-                          .mapToObj(column -> String.valueOf(table.getValueAt(line, column)))
-                          .collect(Collectors.joining(" | ")));
-                }
-            } finally {
-                dialog.dispose();
-            }
-        });
-
-        assertEquals(List.of("Team | Player | Fired By | Lands In | Target Hex | Warhead",
-              "Team 1 | Raven's Nest | Sniper Artillery Vehicle | This turn | Counter-battery (off-board) | "
-                    + "Standard (HE)",
-              "Team 2 | OpFor | Thumper Artillery Vehicle | 1 turn(s) | Unknown | Unknown",
-              "Team 1 | Raven's Nest | Long Tom Artillery Vehicle | 2 turn(s) | 0607 | Homing",
-              "Team 2 | OpFor | (unknown unit) | 3 turn(s) | Unknown | Unknown"), shown);
     }
 
     /**

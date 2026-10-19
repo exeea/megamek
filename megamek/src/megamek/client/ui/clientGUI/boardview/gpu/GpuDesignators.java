@@ -58,6 +58,9 @@ final class GpuDesignators implements Disposable {
         beams.render(camera, 0);
     }
 
+    /** Links its program now (GpuBattleView's warm-up), not at the first designator in play. */
+    void prepare() { beams.prepare(); }
+
     @Override
     public void dispose() {
         beams.dispose();

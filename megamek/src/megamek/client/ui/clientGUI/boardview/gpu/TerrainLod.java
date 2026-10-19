@@ -11,7 +11,6 @@ enum TerrainLod {
     DISTANT(1, 6, false);
 
     static final int CHUNK_SIZE = 8;
-    static final boolean DEFAULT_ENABLED = true;
     private static final TerrainLod[] LEVELS = values();
     record Tuning(int fullPixels, int mediumPixels) {
         Tuning {
@@ -28,11 +27,8 @@ enum TerrainLod {
     }
     static final Tuning DEFAULTS = new Tuning(64, 24);
     private static Tuning tuning = DEFAULTS;
-    private static boolean enabled = DEFAULT_ENABLED;
     static Tuning tuning() { return tuning; }
-    static boolean enabled() { return enabled; }
-    static void setEnabled(boolean value) { enabled = value; }
-    /** Threshold changes select cached meshes; they do not change the terrain's shape or invalidate its geometry. */
+    /** Test hook. Threshold changes select cached meshes; they do not change the terrain's shape or invalidate its geometry. */
     static void tune(Tuning next) { tuning = next; }
     final int steps;
     final int rowStride;
@@ -46,7 +42,6 @@ enum TerrainLod {
 
     /** Nearest-point projected hex width, with separate refinement/coarsening thresholds to avoid oscillation. */
     static TerrainLod select(float pixels, TerrainLod current) {
-        if (!enabled) { return FULL; }
         int level = current == null ? 3 : current.ordinal();
         while (level > 0 && pixels >= tuning.threshold(level - 1) * (current == null ? 1 : 1.1f)) { level--; }
         while (level < 3 && pixels < tuning.threshold(level) * .9f) { level++; }

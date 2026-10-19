@@ -242,7 +242,7 @@ class GpuGameplayStateTest {
             next.setLocalPlayer(session.unit().getOwner());
             // Both tasks are already queued when the user changes the selected board. No capture has run yet.
             frame.scene().commands().getFirst().action().run();
-            session.source().click(new Coords(2, 2), false, InputEvent.CTRL_DOWN_MASK);
+            session.source().measure(new Coords(2, 2), InputEvent.ALT_DOWN_MASK, Float.NaN);
             when(session.state().getClientgui().getCurrentBoardState()).thenReturn(Optional.of(next));
             return next;
         });
@@ -251,15 +251,20 @@ class GpuGameplayStateTest {
                 assertEquals(0, clicks.get(), "A command from an unselected map must not invoke a phase action");
                 assertNull(session.state().getFirstLOS(), "A stale pick must not start measurement on the old board");
                 assertNull(replacement.getFirstLOS(), "A stale pick must not be redirected to the newly selected board");
+                assertEquals(0, session.source().los().capture().pending(), "A stale native pick is rejected too");
                 session.source().refresh();
+                assertEquals(0, session.source().takeFrame().panels().los().pending());
                 var current = session.source().takeFrame();
                 current.scene().commands().getFirst().action().run();
-                session.source().click(new Coords(2, 2), false, InputEvent.CTRL_DOWN_MASK);
+                session.source().measure(new Coords(2, 2), InputEvent.ALT_DOWN_MASK, Float.NaN);
                 return null;
             });
             onClient(() -> {
                 assertEquals(1, clicks.get(), "Fresh commands on the selected board remain usable");
-                assertEquals(new Coords(2, 2), replacement.getFirstLOS());
+                var measurement = session.source().takeFrame().panels().los();
+                assertEquals(new Coords(2, 2), measurement.start().coords());
+                assertEquals(InputEvent.ALT_DOWN_MASK, measurement.pending());
+                assertNull(replacement.getFirstLOS(), "Native LOS does not start the Legacy 2D tool");
                 return null;
             });
         } finally {

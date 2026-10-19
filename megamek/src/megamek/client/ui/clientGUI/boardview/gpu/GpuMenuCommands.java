@@ -18,6 +18,7 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.client.ui.util.KeyCommandBind;
 import org.apache.commons.text.StringEscapeUtils;
@@ -26,6 +27,9 @@ import org.apache.commons.text.StringEscapeUtils;
 final class GpuMenuCommands {
     private static final Set<String> MOVEMENT_COMMANDS = java.util.Arrays.stream(MoveCommand.values())
           .map(MoveCommand::getCmd).collect(java.util.stream.Collectors.toUnmodifiableSet());
+    /** The Swing menu's items the native windows leave out: the unit overview, and Swing's own GUI scale. */
+    private static final Set<String> SWING_ONLY = Set.of(ClientGUI.VIEW_UNIT_OVERVIEW, ClientGUI.VIEW_INC_GUI_SCALE,
+          ClientGUI.VIEW_DEC_GUI_SCALE);
     private final BooleanSupplier closed;
     private final Runnable changed;
     GpuMenuCommands(BooleanSupplier closed, Runnable changed) {
@@ -37,8 +41,7 @@ final class GpuMenuCommands {
     }
     static boolean menuShortcut(Container menu, KeyStroke key) {
         for (Component component : menu.getComponents()) {
-            if (!(component instanceof JMenuItem item) || !item.isVisible() || !item.isEnabled()
-                  || ClientGUI.VIEW_UNIT_OVERVIEW.equals(item.getActionCommand())) {
+            if (!(component instanceof JMenuItem item) || !item.isVisible() || !item.isEnabled() || swingOnly(item)) {
                 continue;
             }
             if (item instanceof JMenu group) {
@@ -57,8 +60,7 @@ final class GpuMenuCommands {
           List<String> parents) {
         List<BoardScene.Command> result = new ArrayList<>();
         for (Component component : menu.getComponents()) {
-            if (!(component instanceof JMenuItem item) || !item.isVisible()
-                  || ClientGUI.VIEW_UNIT_OVERVIEW.equals(item.getActionCommand())) {
+            if (!(component instanceof JMenuItem item) || !item.isVisible() || swingOnly(item)) {
                 continue;
             }
             String key = menuKey(item);
@@ -78,6 +80,10 @@ final class GpuMenuCommands {
             }));
         }
         return result;
+    }
+
+    private static boolean swingOnly(JMenuItem item) {
+        return SWING_ONLY.contains(Objects.toString(item.getActionCommand(), ""));
     }
 
     /** A menu item's key, "{action command}:{text}"; a menu command's id is its menu path of keys joined by "/". */
@@ -109,7 +115,8 @@ final class GpuMenuCommands {
                     || Set.of("fireTwist", "fireStrafe").contains(button.getActionCommand()), children,
               dispatch(action),
               accelerator == null ? "" : KeyCommandBind.getDesc(accelerator.getKeyCode(), accelerator.getModifiers()),
-              selected);
+              selected, button.getClientProperty(MapMenu.UNIT_ACTION_PROPERTY) instanceof MapMenu.UnitAction unitAction
+                    ? unitAction : null);
     }
 
     Runnable dispatch(Runnable action) {

@@ -16,6 +16,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import megamek.common.units.Terrains;
@@ -45,6 +46,7 @@ class GpuImpassableSmokeTest {
                 }
             }
             game.setBoard(new Board(9, 9, hexes));
+            BoardSceneryLayouts.convert(game.getBoard());
             var source = new GpuMapSource(game, null, null);
             try {
                 initial.set(source.takeFrame().scene());

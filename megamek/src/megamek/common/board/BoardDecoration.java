@@ -257,6 +257,28 @@ public record BoardDecoration(String id, String kind, String asset, String name,
         }
     }
 
+    /** How far apart (hex widths and heights) twins may stand ({@link #twin}): a 0.01 tolerance would join real pairs. */
+    public static final double TWIN_DISTANCE = 1e-3;
+
+    /**
+     * Whether {@code other} is an exact twin of this object, drawn the same in the same place, so one of them is a hidden
+     * copy: the same kind, art, name, colours, stretch, mirror, winter form, route sides and tracks, pillars, paint order,
+     * clipping and placement, its turn and tilts within 0.001 degrees, its scale within 1e-6 and its position within
+     * {@link #TWIN_DISTANCE}; id and group do not count. Both positions must be in the same frame (one hex's, or the
+     * board's).
+     */
+    public boolean twin(BoardDecoration other) {
+        return kind.equals(other.kind) && asset.equals(other.asset) && Objects.equals(name, other.name)
+              && colours.equals(other.colours) && stretch.equals(other.stretch) && mirror == other.mirror && bare == other.bare
+              && connections == other.connections && tracks == other.tracks && pillars == other.pillars
+              && drawOrder == other.drawOrder && clipToHex == other.clipToHex && placement.equals(other.placement)
+              && sameAngle(rotation, other.rotation) && sameAngle(rotationX, other.rotationX)
+              && sameAngle(rotationY, other.rotationY) && Math.abs(scale - other.scale) < 1e-6
+              && Math.abs(x - other.x) < TWIN_DISTANCE && Math.abs(y - other.y) < TWIN_DISTANCE;
+    }
+
+    private static boolean sameAngle(double a, double b) { return Math.abs(Math.IEEEremainder(a - b, 360)) < 1e-3; }
+
     /** A copy with a fresh ID that belongs to no group. */
     public BoardDecoration duplicate() {
         return new BoardDecoration(UUID.randomUUID().toString(), kind, asset, name, x, y, rotation, mirror,
@@ -335,7 +357,7 @@ public record BoardDecoration(String id, String kind, String asset, String name,
               stretch, colours, RailRoute.flip(tracks, sides -> flipSides(sides, horizontal, vertical)), pillars);
     }
 
-    private static int flipSides(int sides, boolean horizontal, boolean vertical) {
+    static int flipSides(int sides, boolean horizontal, boolean vertical) {
         int result = 0;
         for (int side = 0; side < 6; side++) {
             if ((sides & 1 << side) == 0) { continue; }

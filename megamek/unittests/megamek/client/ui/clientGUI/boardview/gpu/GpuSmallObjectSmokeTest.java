@@ -168,7 +168,7 @@ class GpuSmallObjectSmokeTest {
         assertEquals(shown, opaque(terrain, camera, profiler), "Coming from 14 px, a 12 px hex still shows them");
     }
 
-    /** A crossing alone keeps the shadow map; the next redraw applies the rule; the tuning toggle redraws at once. */
+    /** A crossing alone keeps the shadow map; the next redraw applies the rule. */
     private static void checkShadowRedraws(GpuTerrain terrain, BoardCamera camera, GLProfiler profiler, int cars) {
         zoom(camera, 16);
         terrain.render(camera.camera, false);
@@ -179,12 +179,6 @@ class GpuSmallObjectSmokeTest {
         terrain.render(camera.camera, false);
         assertEquals(0, count(profiler, () -> terrain.renderShadows(null, List.of())), "A crossing does not redraw the shadows");
         terrain.refreshShadows();
-        assertEquals(all - cars, count(profiler, () -> terrain.renderShadows(null, List.of())));
-        terrain.setSmallObjects(false);
-        terrain.render(camera.camera, false);
-        assertEquals(all, count(profiler, () -> terrain.renderShadows(null, List.of())), "Object LoD off redraws at once");
-        terrain.setSmallObjects(true);
-        terrain.render(camera.camera, false);
         assertEquals(all - cars, count(profiler, () -> terrain.renderShadows(null, List.of())));
     }
 
@@ -285,7 +279,7 @@ class GpuSmallObjectSmokeTest {
         throw new AssertionError("No car prop");
     }
 
-    /** Vertices the rule removes from the opaque pass at this zoom (Object LoD off minus on). */
+    /** Vertices the rule removes from the opaque pass at this zoom (the test hook's off minus on). */
     private static int hidden(GpuTerrain terrain, BoardCamera camera, GLProfiler profiler) {
         terrain.setSmallObjects(false);
         int all = opaque(terrain, camera, profiler);

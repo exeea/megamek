@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.Rectangle;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -21,15 +22,17 @@ interface BoardSource extends AutoCloseable {
     public record Bind(KeyCommandBind command, int keyCode, int modifiers, String text) { }
 
     /**
-     * Immutable preference snapshot published to the render thread: the existing preferences the native views read,
-     * whether the battle HUD shows its contacts panel, every key binding, MegaMek's sprint colour, the 3D board's
-     * graphics, MegaMek's jump colour and the overlay switches.
+     * Immutable preference snapshot published to the render thread: the 3D board's UI scale (the Tuning panel's share
+     * of the scale the window takes from the monitor and its size; Swing's GUI scale is Swing's alone), the existing
+     * preferences the native views read, whether the battle HUD shows its contacts panel, every key binding, the
+     * 3D board's graphics, MegaMek's movement colours and the overlay switches.
      */
     public record UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
           boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
-          List<Bind> binds, int moveSprintRgb, BoardGraphics graphics, int moveJumpRgb, Overlays overlays) {
+          List<Bind> binds, BoardGraphics graphics, Overlays overlays, Map<GpuMovePlan.Band, Integer> movementColors) {
         public UiPreferences {
             binds = List.copyOf(binds);
+            movementColors = Map.copyOf(movementColors);
         }
 
         /**
@@ -54,6 +57,25 @@ interface BoardSource extends AutoCloseable {
             }
         }
 
+        /** Captures the client's movement palette, with the supplied sprint and jump colours. */
+        public UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
+              boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
+              List<Bind> binds, int moveSprintRgb, BoardGraphics graphics, int moveJumpRgb, Overlays overlays) {
+            this(scale, reportKeywords, reportFilterKeywords, minimapEnabled, contactsEnabled, conditionsVisible,
+                  turnDetails, binds, graphics, overlays, Map.of(
+                        GpuMovePlan.Band.WALK, GUIPreferences.getInstance().getMoveDefaultColor().getRGB(),
+                        GpuMovePlan.Band.BACK, GUIPreferences.getInstance().getMoveBackColor().getRGB(),
+                        GpuMovePlan.Band.RUN, GUIPreferences.getInstance().getMoveRunColor().getRGB(),
+                        GpuMovePlan.Band.BOOST, GUIPreferences.getInstance().getMoveMASCColor().getRGB(),
+                        GpuMovePlan.Band.SPRINT, moveSprintRgb,
+                        GpuMovePlan.Band.JUMP, moveJumpRgb,
+                        GpuMovePlan.Band.ILLEGAL, GUIPreferences.getInstance().getMoveIllegalColor().getRGB()));
+        }
+
+        public int moveSprintRgb() {
+            return movementColors.get(GpuMovePlan.Band.SPRINT);
+        }
+
         /** Preferences with the overlays' defaults, as the tests that switch no overlay build them. */
         public UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
               boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
@@ -73,7 +95,7 @@ interface BoardSource extends AutoCloseable {
         static UiPreferences capture() {
             var preferences = PreferenceManager.getClientPreferences();
             GUIPreferences gui = GUIPreferences.getInstance();
-            return new UiPreferences(gui.getGUIScale(), preferences.getReportKeywords(),
+            return new UiPreferences(gui.getBoardUiScale(), preferences.getReportKeywords(),
                   preferences.getReportFilterKeywords(), gui.getMinimapEnabled(), gui.getGpuContactsEnabled(),
                   gui.getShowPlanetaryConditionsOverlay(), gui.getTurnDetailsOverlay(),
                   Stream.of(KeyCommandBind.values()).map(bind -> new Bind(bind, bind.key, bind.modifiers,
@@ -152,12 +174,16 @@ interface BoardSource extends AutoCloseable {
 
     // A map preview has no gameplay overlays, chat, selection, or editing input.
     default void setVisibleArea(Rectangle area) { }
-    /** The native window's size in its own units and in pixels. */
-    default void setViewport(int width, int height, int pixelWidth, int pixelHeight) { }
     default void key(int keyCode, boolean down, int modifiers) { }
     default void stopKeys() { }
     /** Full play needs its tactical artwork prepared before interactive frames; map-only views do not. */
     default boolean isGameplay() { return false; }
+    /**
+     * The game's units the last frame does not show on this board (not deployed, elsewhere or hidden), captured on
+     * Swing like its units: the view draws them behind its loading stage, so their models and programs are ready when
+     * they appear. None for map-only views.
+     */
+    default List<BoardScene.Unit> reserveUnits() { return List.of(); }
     /** Render-thread report about the timeline consumed with this frame; never a second animation clock. */
     default void playbackState(Frame frame, boolean busy) { }
     default boolean isEditor() { return false; }

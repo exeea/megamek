@@ -69,7 +69,7 @@ last frame.
 | others | tooltip, centring request, board generation, actor name, the scenario's atmosphere |
 
 Two channels sit outside the frame and are read without the source's monitor:
-- `uiPreferences` (`UiPreferences`): the GUI scale, report keywords, the minimap, planetary conditions and turn
+- `uiPreferences` (`UiPreferences`): the 3D UI scale (1.7), report keywords, the minimap, planetary conditions and turn
   details preferences, every key binding (`Bind`: command, key, modifiers, text), and the sprint colour. It is
   captured again at every capture and on preference events.
 - `dialog()`: the newest pending native dialog (1.6).
@@ -180,8 +180,13 @@ and `askForm`, and the facades `confirm`, `input`, `doAlertDialog` and `doYesNoD
 ### 1.7 `GpuHud`: stage, layers and frame order
 
 One stage unit is one CSS pixel of the hud-v3 design. `DisplayScale.calculate` sets the scale: the larger of the
-monitor's DPI scale and the window's resolution (window / 1600 x 1000), times the GUI scale preference, but never so
-large that 960 x 640 stage units do not fit. The native window cannot be smaller than 900 x 600 logical pixels.
+monitor's DPI scale and the window's resolution (window / 1600 x 1000), but never so large that 960 x 640 stage units
+do not fit, times the 3D UI scale. The 3D UI scale (`GUIPreferences.BOARD_UI_SCALE`, 50-100%, the Tuning panel's
+Display page) is a share of that scale, and of the board editor's own 1280 x 800 limit, so each step shows in every
+window; it is saved when the slider is released and reaches the layout through `UiPreferences.scale`. Swing's GUI
+scale is Swing's alone: the native windows neither follow it nor offer its menu commands, and its keys (Ctrl+NumPad
++/-) do nothing there. The board camera keeps its zoom relative to the HUD, so the board's apparent size follows the
+scale. The native window cannot be smaller than 900 x 600 logical pixels.
 
 | Metric (stage units) | W > 1500 | 1350 < W <= 1500 | W <= 1350 |
 | --- | --- | --- | --- |
@@ -230,6 +235,9 @@ the held nameplate key, the log's open state and the playback history. It is pre
   turn the focus is the actor; after it, the next candidate. When the local turn begins in MOVEMENT, FIRING or
   PHYSICAL and the focus can act, the HUD selects it once. A report phase has no candidates: the turns of the
   initiative report only list the round's order.
+  Automatic focus and turn changes wait for the shared animation queue and its final hold to finish, across all
+  phases. Incoming game packets remain authoritative; only their presentation waits. The previous unit's card,
+  preview and selection stay together, while unit commands are unavailable. Explicit inspection remains possible.
 - **Own units outside the local turn.** A click on an own unit (board, row or card) makes it the focus, shown and
   selected in mint; its menu's "Inspect" item only inspects it. Enemy units are inspected.
 - **Cleared selection.** The card's ✕, on the selected unit as on an inspected one, ends the inspection and clears
@@ -246,13 +254,17 @@ the held nameplate key, the log's open state and the playback history. It is pre
   player moves or fires: no to-hit badges or guides from the last own unit (the user's decision of 2026-10-03).
 - **Presented units.** While the playback still presents live events, every component shows the units and the record
   of the last status captured while the playback was idle, so armor and damage never run ahead of the animation.
-  Phase, turns and initiative are always the newest.
+  Unit context, phase and turn presentation share that boundary. Visibility revocations still remove concealed
+  identities immediately, and chat and notifications remain live.
 - **Log.** A closed log opens for the report phases after the initiative phase and closes again with the next phase
   that is not a report. A log the player opened stays open.
 - **Playback history.** `GpuBattleView` owns one `GpuPlaybackHistory` over its `UnitPlayback` and hands it to the
   HUD. The board feeds it; the dock's transport, the phase header's speeds, the log's cards and Replay, the playback keys and the
   board's pop-ups all act on it. A review presents a retained shot again and never applies an event, so damage, heat
   and ammunition stay as the client reports them. Live events that arrive during a review play after it, in order.
+  A report card's Replay plays only that event and keeps its actor inspected and its camera framing afterwards.
+  The dock's Replay and explicit Play transport still traverse the sequence. Historical review never sends a live
+  movement-completed notification to the client.
 
 ## 2. Input routing
 
@@ -612,8 +624,10 @@ the tileset columns, Enhanced the shaded 3D terrain), without the fluff that has
   focused enemy's rear arcs. Liquids lie a hair under their surface and the rest on a plane above the board, so a
   bridge deck covers the water fill.
 - **Terrain.** The 3D Graphics setting chooses the terrain, not the view ([GPU board](gpu-board.md#graphics-classic-and-enhanced)),
-  and `GpuTerrain.setFluffHidden` hides what has no gameplay value at draw time: trees, scatter, grass, building and
-  placed object models, decals and paint, scars, water, spores and geysers ([GPU board](gpu-board.md#tactical-view)).
+  and `GpuTerrain.setFluffHidden` hides what has no gameplay value at draw time: scatter trees, placed plants, grass,
+  building and placed object models, decals and paint, scars, water, spores and geysers
+  ([GPU board](gpu-board.md#tactical-view)). A woods cover keeps its trees and its skin (a container yard) under the
+  cover overlay.
   Picking is unchanged by that rule. The wireframe view and the Tactical View exclude each other: turning one on turns
   the other off. The minimap shows the tileset art.
 - **Board overlay.** One palette serves both views; the route's ghost is the translucent meeple, and the front arc and
@@ -753,7 +767,7 @@ the size), merged into the same font. Icons are Material Symbols Rounded glyphs 
    pages, icon sheet, every `hud-*` style; one theme per window) and `UiKit ui = new UiKit(theme.skin);` (it owns
    nothing).
 3. `Stage stage = new Stage(new ScreenViewport());` In `resize`: `float scale = DisplayScale.read(preference,
-   contentScale);` with the GUI scale preference captured on the EDT and the window's content scale (desktop:
+   contentScale);` with the window's own UI scale captured on the EDT and the window's content scale (desktop:
    `GpuDisplayScale.contentScale()`), then `((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / scale);
    stage.getViewport().update(width, height, true);`.
 4. Panels: `Table panel = ui.panel();` then `panel.add(ui.header(title, count, ui.closeButton(this::close)))`,
@@ -854,8 +868,8 @@ opening the other or bringing the 3D preview to the front (`GpuBoardWindow.updat
 the lobby window, not to the 2D preview, so each closes on its own; the lobby's end (Done, the game's start, leaving)
 closes both. Swing dialogs of a preview's owner that are open when the preview appears are kept above it, as those
 opened while it runs are, so the 2D preview is not hidden behind a maximized 3D preview; a raised dialog that closes is
-released. The 3D preview's own 2D Board command still switches: it closes the 3D preview and opens a separate 2D window
-of the same board.
+released. The 3D preview's View > Renderer > Legacy 2D still switches: it closes the 3D preview and opens a separate 2D
+window of the same board, whose Renderer menu returns to 3D.
 
 
 ## 10. The developer Tuning utility
@@ -865,17 +879,18 @@ A developer and tester tool, to be removed before release.
   preview and editor share Top view, Isometric view and Fit board controls and compact, 34-unit-high buttons.
   Fit board accounts for the current panel clearances. The gameplay right column starts one gap below the utility
   row and fills the available height; the phase header moves below that row when both cannot fit across the window. Tuning opens
-  at the same top, 360 wide and ending at least 70 above the bottom, with the pages Board, Atmosphere, Terrain and
-  Camera, and in its footer Defaults, Reload assets with its outcome, and Edit shaders (the GLSL editor).
+  at the same top, 360 wide and ending at least 70 above the bottom, with the pages Display, Board, Atmosphere, Terrain
+  and Camera, and in its footer Defaults, Reload assets with its outcome, and Edit shaders (the GLSL editor).
 - **Model:** `GpuBoardTuning` keeps every value as a Scene2D control that is never drawn; `GpuBattleView` reads the
   values from it. `GpuTuningPanel` mirrors the model's rows in the hud-v3 look, and an edit goes to the model's own
   control. Its tooltips are the model's texts; the row texts are English literals.
 
 | Page | Sections |
 | --- | --- |
-| Board | Geometry (with Normal maps and VSync), Unit family sizes, Zoom-out unit scaling, Route pulse (on/off, speed, intensity), Unit visibility, Outside field of view, Outside sensor range, Unit damage |
-| Atmosphere | Atmosphere presets with "Planetary conditions…" (the Swing editor), Lighting (time of day, exposure, moonlight, fixed sun), Planet properties, Clouds and ground air, Weather effects, Light and fog effects |
-| Terrain | Terrain build progress, concrete shapes, river shape and land, banks and river openings, waterfalls, terrain detail (grass blades, water effects, terrain LoD, object LoD), material geology |
+| Display | Display mode Windowed/Fullscreen, VSync, Render resolution 50-100% with its scene size, UI scale 50-100% (applied when the drag is released), Anti-aliasing Off/SMAA, Specular anti-aliasing, Normal maps (on until chosen), Ambient occlusion (off until chosen), the detected graphics and the Graphics card choice with its in-use and pending notes. Resolution, UI scale, both anti-aliasing choices, normal maps and ambient occlusion are saved across sessions; Defaults leaves the whole Display page alone |
+| Board | Geometry (with Unit display), Unit family sizes, Zoom-out unit scaling, Route pulse (on/off, speed, intensity), Unit visibility, Outside field of view, Outside sensor range, Unit damage |
+| Atmosphere | Atmosphere presets with "Planetary conditions…" (the Swing editor), Lighting (time of day, exposure, moonlight, fixed sun, the lighting environment and Show lighting sky, not saved, which shows the sky that lights the scene, or its image, as the backdrop), Planet properties, Clouds and ground air, Weather effects, Light and fog effects |
+| Terrain | Terrain build progress, Hex joins (Hex transitions, Hex padding), Water (Cliffs directly into water), Terrain detail (Grass blades, Water effects). Terrain and object detail levels are always on |
 | Camera | Fixed sun/moon, framing on selection, framing on movement (combat framing is the dock's Follow toggle); the model's camera rows: Free Flight, the thermal wireframe view, the Free Flight field of view |
 
 **Removing it before release:**

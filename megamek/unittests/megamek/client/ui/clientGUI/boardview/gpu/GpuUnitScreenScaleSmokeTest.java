@@ -23,7 +23,6 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
-import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.util.KeyCommandBind;
@@ -34,8 +33,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Zoom-out unit scaling (user decision 26) in the running 3D view and on the board-space harness: at or above the
  * threshold a unit keeps its size; zoomed out further it grows on every axis and keeps its size on screen, up to the
- * maximum; picking and its anchor follow the grown unit, the tuning controls change the growth live, and the Tactical
- * View's icons keep their size in the hex.
+ * maximum; picking and its anchor follow the grown unit, switching it off restores the size, and the Tactical View's
+ * icons keep their size in the hex.
  */
 @Tag("on-demand")
 class GpuUnitScreenScaleSmokeTest {
@@ -48,7 +47,7 @@ class GpuUnitScreenScaleSmokeTest {
     void zoomedOutUnitsGrowUniformlyKeepTheirSizeOnScreenAndStayPickable() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
-        float originalScale = preferences.getGUIScale();
+        float originalScale = preferences.getBoardUiScale();
         try (var fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
                 fixture.source.setVisibleArea(new Rectangle(0, 0, 16, 17));
@@ -63,7 +62,7 @@ class GpuUnitScreenScaleSmokeTest {
                     try {
                         // One logical HUD unit per window pixel, as in the 1920x1080 prototype captures.
                         float preference = .1f / DisplayScale.read(.1f, new GpuDisplayScale().contentScale());
-                        SwingUtilities.invokeAndWait(() -> preferences.setValue(GUIPreferences.GUI_SCALE, preference));
+                        SwingUtilities.invokeAndWait(() -> preferences.setBoardUiScale(preference));
                         view = new GpuBattleView(fixture.source);
                         view.create();
                         // The board arrives once its terrain is built behind the loading screen.
@@ -78,7 +77,7 @@ class GpuUnitScreenScaleSmokeTest {
                 }
             }, configuration);
         } finally {
-            SwingUtilities.invokeAndWait(() -> preferences.setValue(GUIPreferences.GUI_SCALE, originalScale));
+            SwingUtilities.invokeAndWait(() -> preferences.setBoardUiScale(originalScale));
         }
         assertNull(failure.get(), () -> String.valueOf(failure.get()));
     }
@@ -92,8 +91,6 @@ class GpuUnitScreenScaleSmokeTest {
         assertNotNull(model, "The own Atlas is a 3D model");
         // The board view's tuning model, whose controls the panel mirrors; the growth on, from its constants.
         CheckBox scaling = GpuBoardTestUi.tuning(view, "tuning-zoom-scaling");
-        Slider from = GpuBoardTestUi.tuning(view, "Threshold hex px");
-        Slider max = GpuBoardTestUi.tuning(view, "Max zoom-out scale");
         scaling.setChecked(true);
         float threshold = UnitScreenScale.THRESHOLD;
         float scale = (float) field(view, "layoutScale");
@@ -141,21 +138,6 @@ class GpuUnitScreenScaleSmokeTest {
         capture("unit-scale-zoomed-out-off.png");
         assertFalse(picksModel(view, grownPoint), "At its size the Atlas is not under that point");
         scaling.setChecked(true);
-
-        // The tuning controls change the growth on the next frame; Defaults restores the constants.
-        zoomTo(view, threshold / 1.5f, scale);
-        from.setValue(threshold / 2);
-        render(view);
-        assertEquals(size.x, model.transform.getScaleX(), NEAR * size.x, "Below a lower threshold: no growth yet");
-        from.setValue(2 * threshold);
-        render(view);
-        assertEquals(UnitScreenScale.MAX * size.x, model.transform.getScaleX(), NEAR * size.x, "A higher one");
-        max.setValue(1.25f);
-        render(view);
-        assertEquals(1.25f * size.x, model.transform.getScaleX(), NEAR * size.x, "A lower maximum");
-        GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(view, "tuning-defaults"));
-        render(view);
-        assertEquals(1.5f * size.x, model.transform.getScaleX(), NEAR * size.x, "Defaults restore the constants");
 
         // The Tactical View's units keep their share of the hex where the 3D view's units grow: the base spans its
         // hex at every zoom.

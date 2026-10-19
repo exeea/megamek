@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
@@ -28,12 +29,14 @@ class BoardLunarTest {
     private static final Coords ORIGIN = new Coords(0, 0);
     private static final BoardScene.Pixels PIXELS = new BoardScene.Pixels(
           new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
+    private static final Predicate<BoardRelief.Kind> STONES = kind -> kind == BoardRelief.Kind.ROCK;
+    private static final Predicate<BoardRelief.Kind> SHRUBS = kind -> kind != BoardRelief.Kind.ROCK;
 
     @ParameterizedTest
     @CsvSource({ "2, 1, 1", "0, 2, -2", "2, 2, 0", "-1, 2, -3", "2, 0, 2", "2, -1, 2" })
     void depthBecomesDryGroundForLabelsSupportAndPicking(int elevation, int depth, int expected) {
-        var original = tile(elevation, depth, BoardLiquid.WATER, BoardScene.Surface.GRASS, List.of());
-        var lunar = original.lunar();
+        var original = tile(elevation, depth, BoardLiquid.WATER, BoardScene.Surface.GRASS, List.of(), true);
+        var lunar = original.lunar(true);
         var scene = new BoardScene(0, 1, 1, List.of(lunar), List.of(), List.of(), -1, "", List.of());
         var surface = new BoardSurface(scene, lunar);
         var center = BoardGeometry.center(ORIGIN, expected);
@@ -46,7 +49,7 @@ class BoardLunarTest {
               lunar.text().stream().map(BoardHexText::text).toList());
         assertTrue(lunar.text().stream().allMatch(label -> label.baseline() == 66),
               "Without DEPTH and FOLIAGE the bed's height line settles on the bottom edge");
-        assertEquals(lunar, lunar.lunar(), "Repeated presentation must not lower the bed again");
+        assertEquals(lunar, lunar.lunar(true), "Repeated presentation must not lower the bed again");
         assertEquals(elevation, original.elevation());
         assertEquals(depth, original.waterDepth());
     }
@@ -59,14 +62,14 @@ class BoardLunarTest {
               new Font(Font.SANS_SERIF, Font.PLAIN, 10), -1, false, height);
         var original = new BoardScene.Tile(ORIGIN, elevation, depth, false, 0, BoardScene.Surface.ROCK,
               PIXELS, null, null, List.of(bridge), List.of(label));
-        var lunar = original.lunar();
+        var lunar = original.lunar(true);
         var raised = BoardBridge.feature(lunar);
         assertEquals(expectedHeight, raised.elevation());
         assertEquals(bridge.bridgeExits(), raised.bridgeExits());
         assertEquals(elevation + height, lunar.elevation() + raised.elevation());
         assertEquals(Messages.getString("BoardView1.HEIGHT") + " " + expectedHeight, lunar.text().getFirst().text());
         assertEquals(elevation + height, lunar.elevation() + lunar.text().getFirst().elevation());
-        assertEquals(lunar, lunar.lunar(), "Repeated presentation must not raise the bridge again");
+        assertEquals(lunar, lunar.lunar(true), "Repeated presentation must not raise the bridge again");
         assertEquals(height, BoardBridge.feature(original).elevation(), "The source bridge stays unchanged");
 
         var scene = new BoardScene(0, 1, 1, List.of(lunar), List.of(), List.of(), -1, "", List.of());
@@ -81,9 +84,9 @@ class BoardLunarTest {
     void spansOverDifferentDepthsKeepTheirConnectedDeckLevel() {
         var bridge = new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, 1, BoardScene.FeatureKind.PROP, 9);
         var deep = new BoardScene.Tile(ORIGIN, 0, 2, false, 0, BoardScene.Surface.ROCK,
-              PIXELS, null, null, List.of(bridge), List.of()).lunar();
+              PIXELS, null, null, List.of(bridge), List.of()).lunar(true);
         var shallow = new BoardScene.Tile(ORIGIN.translated(3), 0, 1, false, 0, BoardScene.Surface.ROCK,
-              PIXELS, null, null, List.of(bridge), List.of()).lunar();
+              PIXELS, null, null, List.of(bridge), List.of()).lunar(true);
         assertEquals(3, BoardBridge.feature(deep).elevation());
         assertEquals(2, BoardBridge.feature(shallow).elevation());
         assertTrue(BoardBridge.connected(deep, shallow, 3));
@@ -102,12 +105,23 @@ class BoardLunarTest {
             var labels = BoardHexText.capture(ORIGIN, hex, Board.createEmptyBoard(1, 1), 1, font, font, false, types,
                   false);
             var lunar = new BoardScene.Tile(ORIGIN, 0, 2, true, 0, BoardScene.Surface.ROCK, PIXELS, null, null,
-                  List.of(bridge), labels).lunar();
+                  List.of(bridge), labels).lunar(true);
             lines.put(types, lunar.text().stream().map(BoardHexText::text).toList());
             assertEquals(3, lunar.text().get(1).elevation(), "HEIGHT 3 or BRIDGE▲3 on the deck, as high as before");
-            assertEquals(lunar, lunar.lunar(), "Repeated presentation must not raise the bridge again");
+            assertEquals(lunar, lunar.lunar(true), "Repeated presentation must not raise the bridge again");
             assertEquals(66, lunar.text().stream().filter(label -> label.elevation() == 0)
                   .mapToInt(BoardHexText::baseline).max().orElse(0), "The ground lines still end on the bottom edge");
+            // In vacuum the frozen water keeps its depth, ICE and TORRENT, and the deck its height; the swamp, the
+            // woods and the snow go with the old surface.
+            var airless = new BoardScene.Tile(ORIGIN, 0, 2, true, 0, BoardScene.Surface.ROCK, PIXELS, null, null,
+                  List.of(bridge), labels).lunar(false);
+            assertEquals(labels.stream().map(BoardHexText::text)
+                        .filter(line -> !List.of("SWAMP", "HEAVY", "DEEP SNOW").contains(line)).toList(),
+                  airless.text().stream().map(BoardHexText::text).toList());
+            if (types) {
+                assertTrue(airless.text().stream().map(BoardHexText::text).toList()
+                      .containsAll(List.of("ICE", "TORRENT")));
+            }
         }
         // The deck keeps its absolute level with Hex Types off and on alike.
         assertEquals(List.of("SUBLEVEL 2", Messages.getString("BoardView1.HEIGHT") + " 3"), lines.get(false));
@@ -125,7 +139,7 @@ class BoardLunarTest {
               feature("rough/felled-trunk", BoardScene.FeatureKind.ROUGH), feature("field", BoardScene.FeatureKind.PROP));
         for (var kind : BoardLiquid.Kind.values()) {
             for (var family : BoardScene.Surface.values()) {
-                var lunar = tile(0, -1, new BoardLiquid(kind, "", 2), family, features).lunar();
+                var lunar = tile(0, -1, new BoardLiquid(kind, "", 2), family, features, true).lunar(true);
                 var scene = new BoardScene(0, 1, 1, List.of(lunar), List.of(), List.of(), -1, "", List.of());
                 assertEquals(BoardScene.Surface.LUNAR, lunar.surface());
                 assertTrue(lunar.detailedGround(), "The LUNAR material must replace captured ground artwork");
@@ -149,12 +163,54 @@ class BoardLunarTest {
     }
 
     @Test
+    void vacuumFreezesTheWaterKeepsTheMagmaAndWhatGravityHoldsButNothingGrows() {
+        var building = feature("building", BoardScene.FeatureKind.BUILDING);
+        var boulder = feature("rough-boulder", BoardScene.FeatureKind.BOULDER);
+        var stone = feature("scatter-rock", BoardScene.FeatureKind.SCATTER);
+        var features = List.of(building, boulder, feature("tree-oak", BoardScene.FeatureKind.TREE),
+              feature("foliage-temperate", BoardScene.FeatureKind.TREE),
+              feature("scatter-plant", BoardScene.FeatureKind.SCATTER), stone,
+              feature(BoardFungus.SCATTER.getFirst(), BoardScene.FeatureKind.SCATTER),
+              feature("rough/felled-trunk", BoardScene.FeatureKind.ROUGH), feature("field", BoardScene.FeatureKind.PROP));
+        for (var kind : BoardLiquid.Kind.values()) {
+            for (var family : BoardScene.Surface.values()) {
+                var liquid = new BoardLiquid(kind, "", 2);
+                int depth = liquid.present() && !liquid.molten() ? 2 : -1;
+                var original = tile(1, depth, liquid, family, features, false);
+                var airless = original.lunar(false);
+                var scene = new BoardScene(0, 1, 1, List.of(airless), List.of(), List.of(), -1, "", List.of());
+                assertEquals(BoardScene.Surface.LUNAR, airless.surface());
+                assertTrue(airless.detailedGround(), "The LUNAR material must replace captured ground artwork");
+                assertEquals(liquid, airless.liquid(), "Water freezes and magma stays");
+                assertEquals(depth >= 0, airless.frozen(), "Water and hazardous liquids freeze as ICE does");
+                assertEquals(original.elevation(), airless.elevation());
+                assertEquals(original.waterDepth(), airless.waterDepth());
+                assertFalse(airless.blackIce());
+                assertEquals(BoardScene.Biome.NONE, BoardBiome.kind(airless));
+                assertFalse(GpuGroundCover.grows(scene, airless));
+                assertFalse(airless.bare(), "Gravity holds loose stones");
+                assertTrue(airless.barren(), "Nothing grows, not even the relief's field shrubs");
+                assertEquals(!liquid.present() && !liquid.volcanic(), BoardScatter.allowed(airless),
+                      "Loose stones dress the dry ground");
+                assertEquals(List.of(building, boulder, stone), airless.features(),
+                      "Vegetation goes; boulders and loose stones stay");
+                assertEquals(original.text().stream().map(BoardHexText::text)
+                            .filter(line -> !line.equals(Messages.getString("BoardView1.LowFoliage"))).toList(),
+                      airless.text().stream().map(BoardHexText::text).toList(), "Only the vegetation's label goes");
+                assertNull(airless.tileset());
+                assertNull(airless.decals());
+                assertEquals(airless, airless.lunar(false), "Repeated presentation changes nothing");
+            }
+        }
+    }
+
+    @Test
     void roughBouldersBecomeFewerLargerOutcropsOnce() {
         var boulders = new ArrayList<BoardScene.Feature>();
         for (int i = 0; i < 9; i++) {
             boulders.add(new BoardScene.Feature("rough-boulder", i, -i, 40 * i, .8f, .3f, 0, BoardScene.FeatureKind.BOULDER));
         }
-        var lunar = tile(0, -1, BoardLiquid.NONE, BoardScene.Surface.GRASS, boulders).lunar();
+        var lunar = tile(0, -1, BoardLiquid.NONE, BoardScene.Surface.GRASS, boulders, true).lunar(true);
         assertEquals(3, lunar.features().size(), "Every third boulder of the spiral, from its centre, becomes bedrock");
         for (int i = 0; i < lunar.features().size(); i++) {
             var outcrop = lunar.features().get(i);
@@ -165,7 +221,9 @@ class BoardLunarTest {
             assertEquals(boulder.y(), outcrop.y());
             assertTrue(outcrop.scale() > boulder.scale() && outcrop.height() >= boulder.height());
         }
-        assertEquals(lunar, lunar.lunar(), "Repeated presentation must not thin the outcrops again");
+        assertEquals(lunar, lunar.lunar(true), "Repeated presentation must not thin the outcrops again");
+        assertEquals(boulders, tile(0, -1, BoardLiquid.NONE, BoardScene.Surface.GRASS, boulders, true).lunar(false)
+              .features(), "In vacuum gravity still holds every loose boulder");
     }
 
     @Test
@@ -173,28 +231,65 @@ class BoardLunarTest {
         // The relief dresses featureless open ground with field stones and shrubs. Stripping a meadow's captured
         // scatter must not hand the bare plain to that dressing, nor may a rocky plain's cached surface keep it.
         for (boolean meadow : new boolean[] { true, false }) {
-            var tiles = new ArrayList<BoardScene.Tile>();
-            for (int x = 0; x < 5; x++) {
-                for (int y = 0; y < 5; y++) {
-                    var coords = new Coords(x, y);
-                    tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0,
-                          meadow ? BoardScene.Surface.GRASS : BoardScene.Surface.ROCK, PIXELS, null, null, null, null,
-                          meadow ? BoardFeatures.capture(new Hex(0), coords, Map.of()) : List.of(), List.of(),
-                          BoardLiquid.NONE, null, true));
-                }
-            }
-            var plain = new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
+            var plain = meadow ? plain(BoardScene.Surface.GRASS, true, 5) : plain(BoardScene.Surface.ROCK, false, 5);
             var surfaces = new BoardSurface.Cache();
-            assertTrue(standing(plain, surfaces) > 0, "At one g featureless hexes carry field stones and shrubs");
-            assertEquals(0, standing(plain.withTiles(tiles.stream().map(BoardScene.Tile::lunar).toList()), surfaces),
+            assertTrue(standing(plain, surfaces, kind -> true) > 0,
+                  "At one g featureless hexes carry field stones and shrubs");
+            assertEquals(0, standing(lunar(plain, true), surfaces, kind -> true),
                   meadow ? "Stripped scatter leaves no field cover behind" : "Bare rock never reuses a one-g surface");
         }
     }
 
-    /** Faces standing on a flat plain without rough: its field stones and shrubs, which also carry units. */
-    private static long standing(BoardScene scene, BoardSurface.Cache surfaces) {
-        return scene.tiles().stream().mapToLong(tile -> surfaces.get(scene, tile).faces.stream()
-              .filter(face -> face.finish() == BoardSurface.Finish.OUTCROP).count()).sum();
+    @Test
+    void vacuumOpenGroundKeepsFieldStonesButGrowsNoShrubs() {
+        for (boolean meadow : new boolean[] { true, false }) {
+            var plain = meadow ? plain(BoardScene.Surface.GRASS, true, 5) : plain(BoardScene.Surface.ROCK, false, 5);
+            var airless = lunar(plain, false);
+            var surfaces = new BoardSurface.Cache();
+            assertTrue(standing(airless, surfaces, STONES) > 0, "Gravity holds the airless plain's loose stones");
+            assertEquals(0, standing(airless, surfaces, SHRUBS), "Nothing grows in vacuum");
+        }
+    }
+
+    @Test
+    void lunarGroundWithAirKeepsItsShrubs() {
+        var moon = plain(BoardScene.Surface.LUNAR, false, 8);
+        var surfaces = new BoardSurface.Cache();
+        assertTrue(standing(moon, surfaces, SHRUBS) > 0, "A lunar-theme map with air keeps its field shrubs");
+        var airless = lunar(moon, false);
+        assertEquals(standing(moon, surfaces, STONES), standing(airless, surfaces, STONES),
+              "Vacuum keeps the very same field stones");
+        assertEquals(0, standing(airless, surfaces, SHRUBS), "Vacuum takes only the shrubs");
+    }
+
+    /** A flat square plain of one ground family, featureless or with its captured scatter. */
+    private static BoardScene plain(BoardScene.Surface family, boolean scatter, int size) {
+        var tiles = new ArrayList<BoardScene.Tile>();
+        for (int x = 0; x < size; x++) {
+            for (int y = 0; y < size; y++) {
+                var coords = new Coords(x, y);
+                tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, PIXELS, null, null, null, null,
+                      scatter ? BoardFeatures.capture(new Hex(0), coords, Map.of()) : List.of(), List.of(),
+                      BoardLiquid.NONE, null, true));
+            }
+        }
+        return new BoardScene(0, size, size, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    private static BoardScene lunar(BoardScene scene, boolean weightless) {
+        return scene.withTiles(scene.tiles().stream().map(tile -> tile.lunar(weightless)).toList());
+    }
+
+    /**
+     * Faces standing on a flat plain without rough, of the given relief kinds: its field stones (ROCK) and shrubs
+     * (PLANT, LEAF), which also carry units.
+     */
+    private static long standing(BoardScene scene, BoardSurface.Cache surfaces, Predicate<BoardRelief.Kind> kinds) {
+        return scene.tiles().stream().mapToLong(tile -> {
+            var surface = surfaces.get(scene, tile);
+            return surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.OUTCROP
+                  && kinds.test(surface.relief.shade(face.a()).kind())).count();
+        }).sum();
     }
 
     private static BoardScene.Feature feature(String asset, BoardScene.FeatureKind kind) {
@@ -202,7 +297,7 @@ class BoardLunarTest {
     }
 
     private static BoardScene.Tile tile(int elevation, int depth, BoardLiquid liquid, BoardScene.Surface family,
-          List<BoardScene.Feature> features) {
+          List<BoardScene.Feature> features, boolean frozen) {
         var font = new Font(Font.SANS_SERIF, Font.PLAIN, 10);
         var labels = new ArrayList<BoardHexText>();
         // As BoardHexText.capture stacks them: the height line on top, then DEPTH, the last line on the bottom edge.
@@ -213,7 +308,7 @@ class BoardLunarTest {
             labels.add(new BoardHexText(Messages.getString("BoardView1.DEPTH") + " " + depth, 56, font, -1, false, 0));
         }
         labels.add(new BoardHexText(Messages.getString("BoardView1.LowFoliage"), 66, font, -1, false, 0));
-        return new BoardScene.Tile(ORIGIN, elevation, depth, true, 0, family, PIXELS, PIXELS, PIXELS, PIXELS,
+        return new BoardScene.Tile(ORIGIN, elevation, depth, frozen, 0, family, PIXELS, PIXELS, PIXELS, PIXELS,
               null, features, labels, liquid, PIXELS, false, BoardRoad.Kind.PAVED, BoardFireSmoke.NONE,
               BoardScene.Biome.MARSH, true, true);
     }

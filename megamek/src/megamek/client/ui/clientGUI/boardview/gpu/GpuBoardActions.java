@@ -253,12 +253,29 @@ final class GpuBoardActions {
 
     /** EDT: MegaMek's map menu at a hex, as commands that recheck the turn they were captured in. */
     List<BoardScene.Command> contextCommands(Coords coords) {
-        if (coords == null || !view.getBoard().contains(coords) || view.getClientgui() == null) {
+        return contextCommands(coords, Entity.NONE);
+    }
+
+    List<BoardScene.Command> contextCommands(Coords coords, int unitId) {
+        return contextCommands(coords, unitId, MapMenu.ContextTools.NONE);
+    }
+
+    List<BoardScene.Command> contextCommands(Coords coords, int unitId, MapMenu.ContextTools tools) {
+        if (view.getClientgui() == null) {
             return List.of();
         }
         Turn owner = turn();
-        Supplier<Container> menu = () -> new MapMenu(coords, view.getBoardId(), owner.panel(), view.getClientgui());
+        Supplier<Container> menu = () -> contextMenu(coords, unitId, owner.panel(), tools);
         return menuCommands(menu.get(), menu, owner);
+    }
+
+    private Container contextMenu(Coords coords, int unitId, JComponent phasePanel, MapMenu.ContextTools tools) {
+        if (unitId == Entity.NONE && (coords == null || !view.getBoard().contains(coords))) {
+            return new JPopupMenu();
+        }
+        Entity entity = view.game.getEntity(unitId);
+        int boardId = entity == null ? view.getBoardId() : entity.getBoardId();
+        return new MapMenu(coords, boardId, phasePanel, view.getClientgui(), unitId, tools);
     }
 
     List<BoardScene.Command> globalCommands() {

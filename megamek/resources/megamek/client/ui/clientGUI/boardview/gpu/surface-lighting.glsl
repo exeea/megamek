@@ -10,15 +10,13 @@ struct DirectionalLight {
 uniform DirectionalLight u_dirLights[numDirectionalLights];
 #endif
 #ifdef shadowMapFlag
-uniform sampler2D u_shadowTexture;
+uniform sampler2DShadow u_shadowTexture;
 uniform float u_shadowPCFOffset;
 uniform mat4 u_shadowMapProjViewTrans;
 in vec3 v_shadowMapUv;
 
 float shadowSample(vec2 offset) {
-    vec4 depthChannels = texture(u_shadowTexture, v_shadowMapUv.xy + offset);
-    float depth = dot(depthChannels, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
-    return step(v_shadowMapUv.z, depth);
+    return texture(u_shadowTexture, vec3(v_shadowMapUv.xy + offset, v_shadowMapUv.z));
 }
 #endif
 
@@ -41,19 +39,24 @@ vec3 sunOnGround() {
 
 // Sky light on a face along normal: the sky from above, the sunlit ground of this albedo from below. A cloud's shadow
 // over the face shades that ground too.
-vec3 skyLight(vec3 normal, vec3 groundAlbedo) {
+vec3 environmentGround(vec3 groundAlbedo) {
     vec3 ground = sunOnGround();
 #ifdef cloudShadowFlag
     ground *= cloudTransmission(v_cloudPosition);
 #endif
-    return hemisphere(surfaceAmbient(vec3(0.0, 0.0, 1.0)), ground, groundAlbedo, normal.z);
+    return groundAlbedo * (surfaceAmbient(vec3(0.0, 0.0, 1.0)) + ground);
+}
+
+vec3 skyLight(vec3 normal, vec3 groundAlbedo) {
+    // At roughness one the normalized GGX prefilter is the cosine convolution: irradiance divided by pi.
+    return environmentRadiance(normal, 1.0, environmentGround(groundAlbedo), surfaceAmbient(vec3(0.0, 0.0, 1.0)));
 }
 
 float surfaceVisibility() {
 #ifdef shadowMapFlag
     float offset = u_shadowPCFOffset;
-    return 0.25 * (shadowSample(vec2(offset, offset)) + shadowSample(vec2(-offset, offset))
-          + shadowSample(vec2(offset, -offset)) + shadowSample(vec2(-offset, -offset)));
+    return shadowVisibility(0.25 * (shadowSample(vec2(offset, offset)) + shadowSample(vec2(-offset, offset))
+          + shadowSample(vec2(offset, -offset)) + shadowSample(vec2(-offset, -offset))));
 #else
     return 1.0;
 #endif
@@ -81,7 +84,8 @@ float sculptShadow(vec3 normal, vec3 light) {
     vec4 lifted = u_shadowMapProjViewTrans * vec4(receiver, 1.0);
     vec3 shadowUv = lifted.xyz / lifted.w * .5 + .5;
     shadowUv.z = min(shadowUv.z, .998);
-    // Rotated 12-tap disk, fixed to world position so it does not crawl when the camera moves.
+    // Retain the world-fixed 12-tap disk. Each hardware lookup filters comparisons, not encoded depth.
+    // Its four neighboring texels share this tap's receiver depth; the outer disk retains plane correction.
     vec2 taps[12];
     taps[0] = vec2(-.326, -.406); taps[1] = vec2(-.840, -.074); taps[2] = vec2(-.696, .457);
     taps[3] = vec2(-.203, .621); taps[4] = vec2(.962, -.195); taps[5] = vec2(.473, -.480);
@@ -98,42 +102,72 @@ float sculptShadow(vec3 normal, vec3 light) {
     float lit = 0.0;
     for (int i = 0; i < 12; i++) {
         vec2 offset = rotation * taps[i] * radius;
-        vec4 depthChannels = texture(u_shadowTexture, shadowUv.xy + offset);
-        float depth = dot(depthChannels, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
         float receiver = shadowUv.z + clamp(dot(offset, slope), -.002, .002);
-        lit += step(receiver, depth);
+        lit += texture(u_shadowTexture, vec3(shadowUv.xy + offset, receiver));
     }
-    return lit / 12.0;
+    return shadowVisibility(lit / 12.0);
 #else
     return 1.0;
 #endif
 }
 
 // Shared dielectric response: callers can reuse their shadow sample for mapped leaves as well as opaque surfaces.
-float dielectricSheen(vec3 normal, vec3 light, vec3 view, float film, float roughness) {
-    float r = mix(clamp(roughness, .15, .98), .12, film);
-    return surfaceReflectance(normal, light, view, r, vec3(.04)).r;
+// The water film's smooth coat widens too: every lobe, budget and environment call takes the antialiased roughness.
+float dielectricRoughness(float film, float roughness) {
+    return antialiasedRoughness(mix(clamp(roughness < 0.0 ? .85 : roughness, MIN_ROUGHNESS, 1.0), .06,
+          clamp(film, 0.0, 1.0)), surfaceVariance);
 }
 
-void surfaceLighting(vec3 normal, float film, float roughness, out vec3 ambient, out vec3 direct, out vec3 sheen) {
-    ambient = skyLight(normal, GROUND_ALBEDO) + lavaIrradiance(v_cloudPosition, normal);
+vec3 dielectricF0(float film) { return vec3(mix(.04, .02037, clamp(film, 0.0, 1.0))); }
+
+float dielectricSheen(vec3 normal, vec3 light, vec3 view, float film, float roughness) {
+    return surfaceReflectance(normal, light, view, dielectricRoughness(film, roughness), dielectricF0(film)).r;
+}
+
+float dielectricDiffuse(vec3 normal, vec3 light, vec3 view, float film, float roughness) {
+    return diffuseReflectance(normal, light, view, dielectricRoughness(film, roughness), dielectricF0(film)).r;
+}
+
+float dielectricBudget(vec3 normal, vec3 view, float film, float roughness) {
+    return 1.0 - specularAlbedo(max(0.0, dot(normal, view)), dielectricRoughness(film, roughness), dielectricF0(film)).r;
+}
+
+vec3 surfaceEnvironment(vec3 normal, float film, float roughness, vec3 groundAlbedo) {
+    return environmentSpecular(normal, -viewDirection(), dielectricRoughness(film, roughness), dielectricF0(film),
+          environmentGround(groundAlbedo), surfaceAmbient(vec3(0.0, 0.0, 1.0)));
+}
+
+// Irradiance for scattering volumes and optical coats, before their own reflection/transmission split. Without local,
+// it leaves out the local lights, for water that walks them once with their reflection (lavaLighting).
+void incidentLighting(vec3 normal, bool local, out vec3 ambient, out vec3 direct) {
+    ambient = skyLight(normal, GROUND_ALBEDO);
+    if (local) ambient += lavaIrradiance(v_cloudPosition, normal);
+    direct = vec3(0.0);
+#if numDirectionalLights > 0
+    for (int i = 0; i < numDirectionalLights; i++) {
+        direct += u_dirLights[i].color * max(0.0, dot(normal, -u_dirLights[i].direction));
+    }
+#endif
+    direct *= surfaceVisibility();
+}
+
+void incidentLighting(vec3 normal, out vec3 ambient, out vec3 direct) {
+    incidentLighting(normal, true, ambient, direct);
+}
+
+void surfaceLighting(vec3 normal, vec3 face, float film, float roughness,
+      out vec3 ambient, out vec3 direct, out vec3 sheen) {
+    vec3 view = -viewDirection();
+    ambient = (skyLight(normal, GROUND_ALBEDO) + lavaIrradiance(v_cloudPosition, normal))
+          * dielectricBudget(normal, view, film, roughness);
     direct = vec3(0.0);
     sheen = vec3(0.0);
 #if numDirectionalLights > 0
-    vec3 view = -viewDirection();
     for (int i = 0; i < numDirectionalLights; i++) {
         vec3 light = -u_dirLights[i].direction;
-        float incidence = max(0.0, dot(normal, light));
-        direct += u_dirLights[i].color * incidence;
-        if (roughness >= 0.0 && incidence > 0.0) {
-            // Dielectric GGX for materials with authored roughness. Wet pores develop a smoother water film.
+        if (dot(face, light) > 0.0) {
+            direct += u_dirLights[i].color * dielectricDiffuse(normal, light, view, film, roughness);
             sheen += u_dirLights[i].color * dielectricSheen(normal, light, view, film, roughness);
-        } else if (film > 0.0 && incidence > 0.0) {
-            vec3 halfVector = normalize(light + view);
-            float exponent = mix(12.0, 96.0, film);
-            float fresnel = 0.02 + 0.98 * pow(1.0 - max(0.0, dot(view, halfVector)), 5.0);
-            float specular = pow(max(0.0, dot(normal, halfVector)), exponent) * (exponent + 2.0) / 8.0;
-            sheen += u_dirLights[i].color * incidence * film * fresnel * specular;
         }
     }
 #endif
@@ -144,7 +178,12 @@ void surfaceLighting(vec3 normal, float film, float roughness, out vec3 ambient,
 #endif
 }
 
-// Existing surfaces keep their established water-film response until they supply a roughness map.
+// A proxy canopy's card is not an opaque incident-light boundary. Its signed botanical cosine owns the lobes.
+void surfaceLighting(vec3 normal, float film, float roughness, out vec3 ambient, out vec3 direct, out vec3 sheen) {
+    surfaceLighting(normal, normal, film, roughness, ambient, direct, sheen);
+}
+
+// Materials without a roughness map use a matte dielectric, with the same water-film boundary.
 void surfaceLighting(vec3 normal, float film, out vec3 ambient, out vec3 direct, out vec3 sheen) {
     surfaceLighting(normal, film, -1.0, ambient, direct, sheen);
 }

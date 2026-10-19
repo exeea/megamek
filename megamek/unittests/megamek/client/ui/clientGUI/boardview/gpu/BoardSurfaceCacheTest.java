@@ -9,41 +9,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import org.junit.jupiter.api.Test;
 
 class BoardSurfaceCacheTest {
     private static final Coords CENTER = new Coords(3, 3);
-
-    @Test
-    void geologyTuningUpdatesSupportWithoutChangingTheBoardSnapshot() {
-        var original = BoardRelief.geology();
-        BoardScene scene = scene(0, 7, 7, true);
-        BoardSurface.Cache cache = new BoardSurface.Cache();
-        BoardSurface first = cache.get(scene, scene.tile(CENTER));
-        Vector3 edge = sharedEdge();
-        float before = first.height(edge.x, edge.y);
-        assertTrue(Math.abs(before) > .01f);
-        try {
-            var next = new ArrayList<>(original);
-            var g = next.get(BoardScene.Surface.GRASS.ordinal());
-            next.set(BoardScene.Surface.GRASS.ordinal(), new BoardRelief.Geology(g.cellWidth(), g.cellHeight(),
-                  g.cells(), g.fractures(), g.strata(), g.bedding(), g.buttress(), g.recess(), 0,
-                  g.cap(), g.talus(), g.round(), g.bank(), g.lean(), g.cast(), g.stones(), g.shrubs()));
-            BoardRelief.tuneGeology(next);
-            BoardSurface flat = cache.get(scene, scene.tile(CENTER));
-            assertNotSame(first, flat);
-            assertEquals(0, flat.height(edge.x, edge.y), .003f, "Support follows the tuned ground relief");
-            BoardRelief.tuneGeology(next);
-            assertSame(flat, cache.get(scene, scene.tile(CENTER)), "Unchanged tuning retains cached geometry");
-            BoardRelief.tuneGeology(original);
-            assertEquals(before, cache.get(scene, scene.tile(CENTER)).height(edge.x, edge.y), .003f);
-        } finally {
-            BoardRelief.tuneGeology(original);
-        }
-    }
 
     @Test
     void artworkAndTacticalSnapshotsReuseTerrainAndItsCachedWalls() {
@@ -69,16 +43,33 @@ class BoardSurfaceCacheTest {
         BoardSurface.Cache cache = new BoardSurface.Cache();
         BoardSurface first = cache.get(scene, scene.tile(CENTER));
         Vector3 edge = sharedEdge();
-        assertTrue(Math.abs(first.height(edge.x, edge.y)) > .01f, "Matching neighbors share sculpted landforms");
+        assertEquals(0, first.height(edge.x, edge.y), .003f, "Matching neighbors share the flat playing level");
         BoardScene.Tile neighbor = scene.tile(CENTER.translated(1));
         BoardScene edited = replace(scene, shape(neighbor, 0, 0, BoardScene.Surface.SAND));
 
         BoardSurface changed = cache.get(edited, edited.tile(CENTER));
         assertNotSame(first, changed);
-        // Different families at one level stay joined; both sides derive the same, re-blended edge relief.
+        // A material edit invalidates derived geometry while both flat tops keep their shared playing level.
         BoardSurface other = cache.get(edited, edited.tile(CENTER.translated(1)));
         assertEquals(changed.height(edge.x, edge.y), other.height(edge.x, edge.y), .003f,
               "A material boundary keeps one continuous surface");
+    }
+
+    @Test
+    void changingAnAdjacentNaturalSpanToBuiltRestoresTheBanksCliffRim() {
+        var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.SAND, false, false);
+        var span = BoardNaturalBridgeTest.CENTER;
+        var bank = span.translated(0);
+        var cache = new BoardSurface.Cache();
+        var supported = cache.get(scene, scene.tile(bank));
+        var retyped = BoardNaturalBridgeTest.replace(scene, BoardBridgeTypeTest.appearance(scene.tile(span),
+              Map.of("bridge", HexAppearance.BUILT_BRIDGE)));
+        assertEquals(scene.tile(span).features(), retyped.tile(span).features(),
+              "Changing construction family does not change the bridge terrain");
+        assertSame(scene.tile(bank), retyped.tile(bank), "Only the neighboring span was edited");
+        var cliff = cache.get(retyped, retyped.tile(bank));
+        assertNotSame(supported, cliff, "Natural approach normals must not survive replacing the rock span with a slab");
+        assertSame(cliff, cache.get(retyped, retyped.tile(bank)));
     }
 
     @Test
@@ -91,7 +82,7 @@ class BoardSurfaceCacheTest {
         BoardSurface first = cache.get(scene, scene.tile(CENTER));
         Vector3 edge = sharedEdge();
         assertEquals(0, BoardSurface.ramps(scene, scene.tile(neighbor)));
-        assertTrue(Math.abs(first.height(edge.x, edge.y)) > .01f);
+        assertEquals(0, first.height(edge.x, edge.y), .003f);
 
         BoardScene edited = replace(scene, shape(scene.tile(road), 1, 1 << 4, BoardScene.Surface.GRASS));
         assertSame(scene.tile(CENTER), edited.tile(CENTER));

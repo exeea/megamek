@@ -3,6 +3,9 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.BoardBridge.triangle;
 
+import java.awt.geom.Area;
+import java.awt.geom.Path2D;
+import java.awt.geom.PathIterator;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -27,6 +30,8 @@ final class BoardNaturalBridge {
         var center = BoardGeometry.center(tile.coords(), level);
         int exits = bridge.bridgeExits();
         float space = clearance(tile, center.z);
+        boolean[] levelBanks = new boolean[6];
+        var bankTops = new Path2D.Float();
         var outline = new ArrayList<Rim>();
         for (int d = 0; d < 6; d++) {
             var gate = BoardGeometry.center(tile.coords().translated(d), level).sub(center).scl(.5f);
@@ -39,8 +44,8 @@ final class BoardNaturalBridge {
             }
             var next = scene.tile(tile.coords().translated(d));
             boolean bank = BoardBridge.abutment(tile, next, d);
-            float width = BoardRelief.metres(BoardBridge.NATURAL_HALF_WIDTH) * (.96f + .08f * noise(center.x + gate.x, center.y + gate.y));
-            if (bank) { width *= 1.3f; }
+            float width = mouthWidth(center.x + gate.x, center.y + gate.y, bank);
+            levelBanks[d] = bank && next.elevation() == level;
             var across = new Vector3(-along.y, along.x, 0);
             var ground = bank ? surfaces.computeIfAbsent(next.coords(), c -> new BoardSurface(scene, next, lod)) : null;
             if (bank) {
@@ -49,6 +54,13 @@ final class BoardNaturalBridge {
                 gate.set(along).scl(Math.max(length + BoardRelief.metres(1), reach));
             }
             var contact = bank ? ground.foundation() : List.<BoardSurface.Face>of();
+            if (levelBanks[d]) {
+                for (var face : contact) {
+                    if (face.finish() == BoardSurface.Finish.TOP) {
+                        bankTops.append(footprint(face.a(), face.b(), face.c()), false);
+                    }
+                }
+            }
             // A straight two-corner mouth can miss a scalloped cliff between the corners. Fit the entire opening;
             // keep these contact samples at every LOD and never use a decorative boulder as the bank height.
             int sections = bank ? 4 : 1;
@@ -57,7 +69,7 @@ final class BoardNaturalBridge {
                 if (bank && BoardBridge.bank(tile, next, d)) {
                     float[] settled = ground.relief.settle(point.x, point.y, BoardRelief.metres(.7f));
                     point.set(settled[0], settled[1], BoardSurface.sampleHeight(contact, settled[0], settled[1],
-                          BoardGeometry.groundZ(next)) - BoardRelief.metres(.025f));
+                          BoardGeometry.groundZ(next)) - (levelBanks[d] ? 0 : BoardRelief.metres(.025f)));
                 } else if (BoardBridge.connected(tile, next, d)) {
                     point.z = BoardBridge.edgeElevation(tile, next, d) * BoardGeometry.level();
                 }
@@ -92,9 +104,12 @@ final class BoardNaturalBridge {
             for (int i = 0; i < rim.size(); i++) {
                 var edge = rim.get(i);
                 var point = new Vector3(center).lerp(edge.point(), t);
-                // Keep the centre at deck height and joined mouths at their shared height, with shallow cap erosion.
-                point.z -= Math.min(BoardRelief.metres(1.4f), space * .16f) * t * (1 - t)
-                      * (.3f + .7f * noise(point.x * .35f, point.y * .35f));
+                // A level bank and its passage share one planar cap. Eroding the approach below it exposes a
+                // cliff ledge at the real bank outline, even when the final mouth overlaps solid ground.
+                if (edge.exit() < 0 || !levelBanks[edge.exit()]) {
+                    point.z -= Math.min(BoardRelief.metres(1.4f), space * .16f) * t * (1 - t)
+                          * (.3f + .7f * noise(point.x * .35f, point.y * .35f));
+                }
                 if (edge.exit() < 0) {
                     point.z -= Math.min(BoardRelief.metres(1.3f), space * .16f) * t * t * (.6f + .4f * noise(point.x, point.y));
                 }
@@ -157,7 +172,76 @@ final class BoardNaturalBridge {
                 a = c; b = e;
             }
         }
-        return BoardBridge.shape(deck.surface(), level, facets);
+        return BoardBridge.shape(deck.surface(), level, outsideBanks(facets, new Area(bankTops)));
+    }
+
+    /** The bank owns its top. Keep the buried shell, but never submit two coplanar walking surfaces. */
+    private static List<Facet> outsideBanks(List<Facet> facets, Area banks) {
+        if (banks.isEmpty()) { return facets; }
+        var result = new ArrayList<Facet>(facets.size());
+        for (var face : facets) {
+            if (face.part() != Part.TOP && face.part() != Part.RIM) { result.add(face); continue; }
+            var path = footprint(face.a(), face.b(), face.c());
+            if (!banks.intersects(path.getBounds2D())) { result.add(face); continue; }
+            var remaining = new Area(path);
+            var overlap = new Area(remaining);
+            overlap.intersect(banks);
+            if (overlap.isEmpty()) { result.add(face); continue; }
+            remaining.subtract(banks);
+            for (var clipped : clippedTop(remaining)) {
+                for (var point : List.of(clipped.a(), clipped.b(), clipped.c())) {
+                    point.z = face.a().z - (face.normal().x * (point.x - face.a().x)
+                          + face.normal().y * (point.y - face.a().y)) / face.normal().z;
+                }
+                triangle(result, clipped.a(), clipped.b(), clipped.c(), face.part());
+            }
+        }
+        return result;
+    }
+
+    /** Ordinary bank cuts have one outline; keep its ears instead of splitting every triangle into horizontal strips. */
+    private static List<BoardSurface.Face> clippedTop(Area area) {
+        if (!area.isSingular()) {
+            return BoardTacticalGeometry.flat(area, -1).stream().map(face -> new BoardSurface.Face(
+                  face.a(), face.b(), face.c(), BoardSurface.Finish.TOP)).toList();
+        }
+        var contour = new ArrayList<Vector3>();
+        float[] point = new float[6];
+        for (var path = area.getPathIterator(null); !path.isDone(); path.next()) {
+            int type = path.currentSegment(point);
+            if (type == PathIterator.SEG_MOVETO || type == PathIterator.SEG_LINETO) {
+                contour.add(new Vector3(point[0], point[1], 0));
+            }
+        }
+        var result = new ArrayList<BoardSurface.Face>();
+        if (contour.size() >= 3) {
+            BoardSurface.polygon(contour.toArray(Vector3[]::new), BoardSurface.Finish.TOP, result);
+        }
+        return result;
+    }
+
+    private static Path2D footprint(Vector3 a, Vector3 b, Vector3 c) {
+        var path = new Path2D.Float();
+        path.moveTo(a.x, a.y); path.lineTo(b.x, b.y); path.lineTo(c.x, c.y); path.closePath();
+        return path;
+    }
+
+    private static float mouthWidth(float x, float y, boolean bank) {
+        return BoardRelief.metres(BoardBridge.NATURAL_HALF_WIDTH) * (.96f + .08f * noise(x, y)) * (bank ? 1.3f : 1);
+    }
+
+    /** A level natural passage supports the bank's rim; it is no longer an exposed rounded cliff there. */
+    static BoardBridge.Approach bankApproach(BoardScene scene, BoardScene.Tile bank, int direction) {
+        var span = scene.tile(bank.coords().translated(direction));
+        if (!BoardBridge.bank(span, bank, (direction + 3) % 6)
+              || BoardBridge.family(span) != BoardBridge.Family.NATURAL
+              || span.elevation() + BoardBridge.feature(span).elevation() != bank.elevation()) { return null; }
+        var center = BoardGeometry.center(bank.coords(), 0);
+        var along = BoardGeometry.center(span.coords(), 0).sub(center);
+        float width = mouthWidth(center.x + along.x * .5f, center.y + along.y * .5f, true);
+        along.nor();
+        return new BoardBridge.Approach(center.x, center.y, along.x, along.y, BoardGeometry.height(), width,
+              bank.elevation() * BoardGeometry.level(), false);
     }
 
     /** Round the exposed outline through its control points; mouths keep their exact shared contacts. */

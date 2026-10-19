@@ -52,6 +52,7 @@ import megamek.common.enums.BasementType;
 import megamek.common.enums.GamePhase;
 import megamek.common.enums.MoveStepType;
 import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.MiscType;
 import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.loaders.MekFileParser;
@@ -120,6 +121,76 @@ class GpuMovePlanTest {
     @AfterAll
     static void restoreDataDir() {
         Configuration.setDataDir(originalDataDir);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "CLMASC", "Supercharger", "both", "ISVTOLJetBooster" })
+    void onlyBoostedStepsChangeBandInPlottedAndHoverRoutes(String booster) throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            boolean jet = booster.equals("ISVTOLJetBooster");
+            Entity unit = new MekFileParser(new File("testresources/megamek/common/units/"
+                  + (jet ? "Cobra Transport VTOL.blk" : "Charger C.mtf"))).getEntity();
+            Coords start = new Coords(3, 16);
+            onSwing(() -> {
+                for (int y = 0; y <= start.getY(); y++) {
+                    moving.board.game.getBoard().setHex(new Coords(start.getX(), y), new Hex());
+                }
+                if (jet) {
+                    unit.addEquipment(EquipmentType.get(booster), Tank.LOC_BODY);
+                    unit.setElevation(1);
+                } else if (!booster.equals("both")) {
+                    unit.getMisc().stream().filter(mount -> mount.getType().hasFlag(MiscType.F_MASC)
+                          && !mount.getType().getInternalName().equals(booster))
+                          .forEach(mount -> mount.setModeImmediately("Off"));
+                }
+                return null;
+            });
+            select(moving, unit, 7, start);
+            GpuMovePlan plan = plan(moving);
+            int walk = unit.getWalkMP();
+            int run = unit.getRunMPWithoutMASC();
+            int boosted = unit.getRunMP();
+            assertTrue(boosted > run, "The fixture must require its booster beyond ordinary running");
+            Coords destination = start.translated(0, boosted);
+            hoverAfterCapture(moving.board.source, destination);
+            List<Step> preview = shown(moving).hover();
+            assertEquals(boosted, preview.size());
+            plan.planTo(destination, 0, false);
+            Snapshot plotted = shown(moving);
+            assertEquals(preview, plotted.route(), "Hover and plotted routes share the boost transition");
+            assertTrue(plotted.legal());
+            for (int i = 0; i < boosted; i++) {
+                assertEquals(i < walk ? Band.WALK : i < run ? Band.RUN : Band.BOOST,
+                      plotted.route().get(i).band(), "Band at MP " + (i + 1));
+            }
+            onSwing(() -> {
+                MovePath path = moving.display.getPlannedMovement();
+                assertEquals(!booster.equals("Supercharger"), path.getLastStep().isUsingMASC());
+                assertEquals(booster.equals("Supercharger") || booster.equals("both"),
+                      path.getLastStep().isUsingSupercharger());
+                path.addStep(MoveStepType.TURN_LEFT);
+                moving.display.plotPath(path);
+                return null;
+            });
+            assertEquals(Band.ILLEGAL, shown(moving).route().getLast().band(),
+                  "An illegal step must keep its illegal band even after a boosted section");
+        }
+    }
+
+    @Test
+    void backwardsStepsUseTheirOwnColorBand() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            plan(moving);
+            onSwing(() -> {
+                Coords behind = GpuMovementFixture.START.translated(3);
+                moving.board.game.getBoard().setHex(behind, new Hex());
+                MovePath path = new MovePath(moving.board.game, moving.unit).addStep(MoveStepType.BACKWARDS);
+                assertTrue(path.isMoveLegal());
+                moving.display.plotPath(path);
+                return null;
+            });
+            assertEquals(Band.BACK, shown(moving).route().getLast().band());
+        }
     }
 
     /** interaction-test.mjs 33-52: automatic walk and run, undo, explicit walk and back, a pin, its continuation, X. */

@@ -100,4 +100,7 @@ final class GpuFungus implements Disposable {
 
     @Override
     public void dispose() { mist.dispose(); visible.clear(); }
+
+    /** Links its program now (GpuTerrain.prepareEffects), not when spores first come into view. */
+    void prepare() { mist.prepare(); }
 }

@@ -44,7 +44,7 @@ class GpuAttachmentSmokeTest {
             @Override
             public void create() {
                 var library = new GpuUnitModels();
-                var batch = new ModelBatch();
+                var batch = new ModelBatch(GpuUnitShader.provider());
                 try { verify(library, batch); }
                 catch (Throwable error) { failure.set(error); }
                 finally { batch.dispose(); library.dispose(); Gdx.app.exit(); }
@@ -204,8 +204,10 @@ class GpuAttachmentSmokeTest {
         var host = new ModelInstance(hostModel.instance.model);
         var friendly = new ModelInstance(riderModel.instance.model);
         var enemy = new ModelInstance(swarmModel.instance.model);
-        friendly.materials.forEach(material -> material.set(ColorAttribute.createDiffuse(Color.SKY)));
-        enemy.materials.forEach(material -> material.set(ColorAttribute.createDiffuse(Color.SCARLET)));
+        friendly.materials.forEach(material -> material.set(ColorAttribute.createDiffuse(
+              GpuLinearColors.authored(material, Color.SKY))));
+        enemy.materials.forEach(material -> material.set(ColorAttribute.createDiffuse(
+              GpuLinearColors.authored(material, Color.SCARLET))));
         var hostAnimator = new UnitAnimator();
         var riderAnimator = new UnitAnimator();
         var swarmAnimator = new UnitAnimator();

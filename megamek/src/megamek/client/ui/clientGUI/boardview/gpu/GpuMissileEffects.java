@@ -372,12 +372,19 @@ final class GpuMissileEffects implements Disposable {
         offset = 0;
     }
 
+    /** Links its programs now (GpuBattleView's warm-up), not at the first launch in play. */
+    void prepare() {
+        exhaust.prepare();
+        if (mesh == null) { create(); }
+    }
+
     private void create() {
         body = template(MISSILE_MODEL);
         if (body.length == 0) { throw new IllegalArgumentException("Empty missile body"); }
         arrowIVBody = arrowIVTemplate();
         shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU missile",
-              GpuShaderSource.read("missile.vert"), GpuShaderSource.read("missile.frag")), next -> shader = next);
+                    GpuShaderSource.read("missile.vert"), GpuSceneRadiance.fragment(GpuShaderSource.read("missile.frag"))),
+              next -> shader = next);
         vertices = new float[Math.max(MISSILES_PER_BATCH * body.length, ARROW_IV_PER_BATCH * arrowIVBody.length)];
         mesh = new Mesh(false, vertices.length / STRIDE, 0, VertexAttribute.Position(), VertexAttribute.ColorUnpacked());
     }

@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.io.File;
-import java.nio.ByteOrder;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
@@ -21,53 +20,50 @@ final class GpuScatter {
     private static final int BORDER = 32;
     private static final int WIDTH = 2 * CELL;
     // The white fifth swatch preserves the bushes' authored bark and leaf colours; the sixth shares Mars cliff stone.
-    private static final String[] MATERIALS = { "sculpt/granite", "sculpt/earth", "sculpt/sandstone",
-          "foliage/fronds-palm", null, "sculpt/mars-bedrock", "sculpt/volcano-basalt" };
+    private static final String[] MATERIALS = { "terrain/surfaces/granite", "terrain/surfaces/earth", "terrain/surfaces/sandstone",
+          "vegetation/fronds-palm", null, "terrain/surfaces/mars-bedrock", "terrain/surfaces/volcano-basalt" };
     private static final int HEIGHT = (MATERIALS.length + 1) / 2 * CELL;
 
     private GpuScatter() { }
 
+    /** Decorative vegetation only; rocks and the game's woods/jungle are not scorch presentation. */
+    static boolean vegetation(BoardScene.Feature feature) {
+        return feature.kind() == BoardScene.FeatureKind.SCATTER && switch (feature.asset()) {
+            case "scatter-grass", "scatter-dry-grass", "scatter-plant" -> true;
+            default -> false;
+        };
+    }
+
     /** Uploaded once and owned by GpuAssets; source height/coverage alpha never makes scatter transparent. */
     static Texture atlas(File root) {
-        Pixmap atlas = new Pixmap(WIDTH, HEIGHT, Pixmap.Format.RGBA8888);
-        try {
-            atlas.setColor(Color.WHITE);
-            atlas.fill();
-            var pixels = atlas.getPixels().duplicate().order(ByteOrder.BIG_ENDIAN);
-            for (int index = 0; index < MATERIALS.length; index++) {
-                if (MATERIALS[index] == null) { continue; }
-                Pixmap tile = new Pixmap(CELL - 2 * BORDER, CELL - 2 * BORDER, Pixmap.Format.RGBA8888);
-                try {
-                    FileHandle file = new FileHandle(new File(root, "textures/" + MATERIALS[index] + ".png"));
-                    tile.setBlending(Pixmap.Blending.None);
-                    if (file.exists()) {
-                        Pixmap source = new Pixmap(file);
-                        try {
-                            tile.setFilter(Pixmap.Filter.BiLinear);
-                            tile.drawPixmap(source, 0, 0, source.getWidth(), source.getHeight(),
-                                  0, 0, tile.getWidth(), tile.getHeight());
-                        } finally { source.dispose(); }
-                    } else {
-                        tile.setColor(index == 3 ? Color.WHITE : Color.GRAY);
-                        tile.fill();
-                    }
-                    for (int y = 0; y < CELL; y++) {
-                        pixels.position(((index / 2 * CELL + y) * WIDTH + index % 2 * CELL) * Integer.BYTES);
-                        for (int x = 0; x < CELL; x++) {
-                            pixels.putInt(tile.getPixel(Math.clamp(x - BORDER, 0, tile.getWidth() - 1),
-                                  Math.clamp(y - BORDER, 0, tile.getHeight() - 1)) | 255);
-                        }
-                    }
-                } finally { tile.dispose(); }
+        var atlas = new GpuLinearImage(WIDTH, HEIGHT);
+        atlas.fill(1, 1, 1, 1);
+        int interior = CELL - 2 * BORDER;
+        for (int index = 0; index < MATERIALS.length; index++) {
+            if (MATERIALS[index] == null) { continue; }
+            FileHandle file = new FileHandle(new File(root, "textures/" + MATERIALS[index] + ".png"));
+            GpuLinearImage source;
+            if (file.exists()) {
+                Pixmap pixels = GpuColorTexture.decode(file);
+                try { source = new GpuLinearImage(pixels); }
+                finally { pixels.dispose(); }
+            } else {
+                source = new GpuLinearImage(1, 1);
+                float gray = index == 3 ? 1 : GpuColor.linear(Color.GRAY.r);
+                source.fill(gray, gray, gray, 1);
             }
-            Texture texture = new Texture(atlas, true);
-            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-            texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
-            // The 32-pixel extruded border still occupies a full texel at the last sampled mip level.
-            texture.bind();
-            Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAX_LEVEL, 5);
-            return texture;
-        } finally { atlas.dispose(); }
+            int x = index % 2 * CELL + BORDER, y = index / 2 * CELL + BORDER;
+            atlas.draw(source, 0, 0, source.width, source.height, x, y, interior, interior);
+            atlas.extrude(x, y, interior, interior, BORDER);
+        }
+        atlas.opaque();
+        Texture texture = atlas.texture(true);
+        texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+        texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
+        // The 32-pixel extruded border still occupies a full texel at the last sampled mip level.
+        texture.bind();
+        Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAX_LEVEL, 5);
+        return texture;
     }
 
     /** Tiny stones use only the scatter kit's eight-triangle meshes. */
@@ -98,10 +94,14 @@ final class GpuScatter {
               .rotate(Vector3.Z, feature.rotation())
               .scale(feature.scale() * BoardGeometry.hexScale(), feature.scale() * BoardGeometry.hexScale(),
                     feature.height() * BoardGeometry.level());
+        boolean stone = BoardScatter.stone(feature.asset());
         Color color = color(tile.surface(), feature.asset());
-        float shade = .88f + .24f * feature.rotation() / 360;
-        color.mul(shade, shade, shade, 1);
-        int material = feature.asset().equals("scatter-rock") || feature.asset().equals("scatter-slab")
+        float shade = 1;
+        if (!stone) {
+            shade = .88f + .24f * feature.rotation() / 360;
+            color.mul(shade, shade, shade, 1);
+        }
+        int material = stone
               ? switch (tile.surface()) {
                   case DIRT -> 1;
                   case SAND, DESERT -> 2;
@@ -142,33 +142,35 @@ final class GpuScatter {
               || surface.relief.obstructed(base, radius, high - low)) { return; }
         for (BoardShape.Polygon polygon : shape.polygons()) {
             Color tint = material == 4 ? new Color(polygon.color()).mul(shade, shade, shade, 1) : color;
-            triangle(mesh, polygon, transform, tint, material, shape.height());
+            triangle(mesh, polygon, transform, tint, material, shape.height(), surface);
         }
     }
 
     private static Color color(BoardScene.Surface surface, String asset) {
         if (asset.equals("scatter-dry-grass")) {
-            return new Color(.88f, .71f, .24f, 1);
+            return GpuColor.linear(.88f, .71f, .24f);
         }
         if (asset.equals("scatter-grass")) {
-            return surface == BoardScene.Surface.SAND ? new Color(.28f, .60f, .20f, 1)
-                  : new Color(.39f, .56f, .20f, 1);
+            return surface == BoardScene.Surface.SAND ? GpuColor.linear(.28f, .60f, .20f)
+                  : GpuColor.linear(.39f, .56f, .20f);
         }
-        // The atlas supplies the stone's colour; retain only a light biome tint in the vertices.
-        return switch (surface) {
-            case SAND, DESERT, DIRT, MARS -> new Color(.95f, .95f, .95f, 1);
-            case SNOW -> new Color(.95f, .98f, 1, 1);
-            case ROCK, LUNAR -> new Color(.95f, .94f, .91f, 1);
-            case VOLCANO -> new Color(.92f, .96f, 1, 1);
-            default -> new Color(.90f, .95f, .83f, 1);
-        };
+        // Stone maps supply their final pigment; white is the neutral texture multiplier.
+        return new Color(Color.WHITE);
     }
 
     private static void triangle(MeshPartBuilder mesh, BoardShape.Polygon polygon, Matrix4 transform, Color color,
-          int material, float height) {
+          int material, float height, BoardSurface surface) {
         Vector3[] points = polygon.points();
         Vector3 a = points[0].cpy().mul(transform), b = points[1].cpy().mul(transform), c = points[2].cpy().mul(transform);
         Vector3 normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).nor();
+        if (material == 4) {
+            var kind = BoardScatter.leaf(polygon.material()) ? BoardRelief.Kind.LEAF : BoardRelief.Kind.PLANT;
+            var shade = new BoardRelief.Shade(normal, kind, 1, surface.tile.elevation(), color.r, color.g, color.b);
+            mesh.triangle(GpuTerrain.sculptVertex(a, shade, Float.NaN, surface),
+                  GpuTerrain.sculptVertex(b, shade, Float.NaN, surface),
+                  GpuTerrain.sculptVertex(c, shade, Float.NaN, surface));
+            return;
+        }
         // Project in object space, so turning a stone also turns its grain. Each blade spans the foliage swatch.
         Vector3 face = polygon.normal();
         boolean top = material != 3 && Math.abs(face.z) >= Math.max(Math.abs(face.x), Math.abs(face.y));

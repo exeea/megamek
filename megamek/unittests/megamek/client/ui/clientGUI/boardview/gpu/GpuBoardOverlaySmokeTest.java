@@ -69,6 +69,78 @@ class GpuBoardOverlaySmokeTest {
           Function<BoardScene.Unit, ModelInstance> shown) { }
 
     @Test
+    void boostColorChangesOnlyBoostedSegmentsInBothViewsAndHoverPreviews() throws Exception {
+        Coords origin = new Coords(3, 7);
+        BoardScene scene;
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(Board.createEmptyBoard(7, 9))) {
+            scene = onSwing(() -> {
+                fixture.entity.setPosition(origin);
+                fixture.source.refresh();
+                return fixture.source.takeFrame().scene();
+            });
+        }
+        List<BoardSource.UiPreferences> colors = onSwing(() -> {
+            GUIPreferences gui = GUIPreferences.getInstance();
+            java.awt.Color saved = gui.getMoveMASCColor();
+            try {
+                gui.setMoveMASCColor(java.awt.Color.ORANGE);
+                BoardSource.UiPreferences orange = BoardSource.UiPreferences.capture();
+                gui.setMoveMASCColor(java.awt.Color.MAGENTA);
+                BoardSource.UiPreferences magenta = BoardSource.UiPreferences.capture();
+                assertEquals(java.awt.Color.MAGENTA.getRGB(), magenta.movementColors().get(GpuMovePlan.Band.BOOST));
+                return List.of(orange, magenta);
+            } finally {
+                gui.setMoveMASCColor(saved);
+            }
+        });
+        GpuHudTestStage.run(hud -> {
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            GpuBoardOverlay overlay = new GpuBoardOverlay();
+            List<Pixmap> images = new ArrayList<>();
+            try {
+                board.units = false;
+                List<GpuMovePlan.Step> route = List.of(
+                      step(scene, origin.translated(0, 1), 0, GpuMovePlan.Band.WALK),
+                      step(scene, origin.translated(0, 2), 0, GpuMovePlan.Band.RUN),
+                      step(scene, origin.translated(0, 3), 0, GpuMovePlan.Band.BOOST),
+                      step(scene, origin.translated(0, 4), 0, GpuMovePlan.Band.BOOST));
+                GpuMovePlan.Snapshot plotted = move(ATLAS, route, List.of(), List.of(), Map.of(), true);
+                GpuMovePlan.Snapshot hovered = withRoute(plotted, List.of(), route, true);
+                for (boolean tactical : List.of(false, true)) {
+                    frame(board, tactical, route.get(1).coords(), 150, 960, 540);
+                    for (GpuMovePlan.Snapshot plan : List.of(plotted, hovered)) {
+                        var captured = frame(scene, GpuHudFixtures.status(), panels(plan, GpuFireOrders.Snapshot.EMPTY));
+                        GpuHudState state = state(GpuHudFixtures.status());
+                        List<Pixmap> rendered = new ArrayList<>();
+                        long builds = overlay.builds();
+                        for (BoardSource.UiPreferences color : colors) {
+                            overlay.update(captured, view(tactical, null, Entity.NONE), color, state);
+                            board.draw(overlay::render);
+                            Pixmap picture = hud.captureBackBuffer("boost-route-" + tactical + "-"
+                                  + (plan == plotted ? "plotted" : "hover") + "-" + rendered.size());
+                            rendered.add(picture);
+                            images.add(picture);
+                        }
+                        assertEquals(builds + 2, overlay.builds(), "Changing boost color must rebuild the path");
+                        for (int i = 0; i < route.size(); i++) {
+                            Coords previous = i == 0 ? origin : route.get(i - 1).coords();
+                            Vector3 midpoint = lifted(scene, previous, .07f)
+                                  .lerp(lifted(scene, route.get(i).coords(), .07f), .5f);
+                            float changed = peak(rendered.getFirst(), rendered.getLast(), board.screen(midpoint), 8);
+                            assertTrue(i < 2 ? changed < 1 : changed > 20,
+                                  "Only boosted segments change color: segment " + i + ", difference " + changed);
+                        }
+                    }
+                }
+            } finally {
+                images.forEach(Pixmap::dispose);
+                overlay.dispose();
+                board.dispose();
+            }
+        });
+    }
+
+    @Test
     void floorRoutesAndMeepleGhostShowThroughOpaqueBuildingsInBothProjections() throws Exception {
         Coords origin = new Coords(3, 3);
         Coords adjacent = origin.translated(1);

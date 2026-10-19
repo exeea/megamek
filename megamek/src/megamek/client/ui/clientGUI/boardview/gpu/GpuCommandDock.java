@@ -671,10 +671,11 @@ final class GpuCommandDock implements GpuHud.Component {
             boolean explicit = move.explicit() && move.mode() == mode;
             button.pressed(explicit);
             button.setDisabled(mode == GpuMovePlan.Mode.JUMP && (unit == null || unit.jump() <= 0));
-            // While the planner chooses the mode, the route's last band is outlined (plan G2); run covers sprinting.
+            // The route's last band is outlined (plan G2); Run covers boosted running and sprinting.
             boolean auto = !move.explicit() && band != null && switch (mode) {
-                case WALK -> band == GpuMovePlan.Band.WALK;
-                case RUN -> band == GpuMovePlan.Band.RUN || band == GpuMovePlan.Band.SPRINT;
+                case WALK -> band == GpuMovePlan.Band.WALK || band == GpuMovePlan.Band.BACK;
+                case RUN -> band == GpuMovePlan.Band.RUN || band == GpuMovePlan.Band.BOOST
+                      || band == GpuMovePlan.Band.SPRINT;
                 default -> band == GpuMovePlan.Band.JUMP;
             };
             TextButton.TextButtonStyle style = auto ? autoStyle : plainStyle;

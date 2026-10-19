@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.lang.ref.Reference;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.Arrays;
@@ -116,15 +117,17 @@ final class GpuShaderValue {
             case MAT4 -> Gdx.gl.glUniformMatrix4fv(location, 1, false, data, 0);
             default -> {
                 FloatBuffer buffer = BufferUtils.newFloatBuffer(data.length); buffer.put(data).flip();
-                switch (type) {
-                    case MAT2X3 -> Gdx.gl30.glUniformMatrix2x3fv(location, 1, false, buffer);
-                    case MAT3X2 -> Gdx.gl30.glUniformMatrix3x2fv(location, 1, false, buffer);
-                    case MAT2X4 -> Gdx.gl30.glUniformMatrix2x4fv(location, 1, false, buffer);
-                    case MAT4X2 -> Gdx.gl30.glUniformMatrix4x2fv(location, 1, false, buffer);
-                    case MAT3X4 -> Gdx.gl30.glUniformMatrix3x4fv(location, 1, false, buffer);
-                    case MAT4X3 -> Gdx.gl30.glUniformMatrix4x3fv(location, 1, false, buffer);
-                    default -> throw new IllegalStateException("Unsupported float input");
-                }
+                try {
+                    switch (type) {
+                        case MAT2X3 -> Gdx.gl30.glUniformMatrix2x3fv(location, 1, false, buffer);
+                        case MAT3X2 -> Gdx.gl30.glUniformMatrix3x2fv(location, 1, false, buffer);
+                        case MAT2X4 -> Gdx.gl30.glUniformMatrix2x4fv(location, 1, false, buffer);
+                        case MAT4X2 -> Gdx.gl30.glUniformMatrix4x2fv(location, 1, false, buffer);
+                        case MAT3X4 -> Gdx.gl30.glUniformMatrix3x4fv(location, 1, false, buffer);
+                        case MAT4X3 -> Gdx.gl30.glUniformMatrix4x3fv(location, 1, false, buffer);
+                        default -> throw new IllegalStateException("Unsupported float input");
+                    }
+                } finally { Reference.reachabilityFence(buffer); }
             }
         }
     }

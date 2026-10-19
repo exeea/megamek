@@ -71,7 +71,7 @@ class GpuModularBuildingSmokeTest {
                 }
             }
             for (var node : data.nodes) { node.translation.add(900, -400, 257); }
-            return ModelTextures.create(data, textures, path -> { throw new AssertionError("Expected embedded textures"); });
+            return ModelTextures.create(data, textures, (path, color) -> { throw new AssertionError("Expected embedded textures"); });
         });
         try {
             var five = kit.assemble(5, 7);

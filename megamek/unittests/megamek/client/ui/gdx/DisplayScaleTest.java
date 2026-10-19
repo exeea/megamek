@@ -27,4 +27,12 @@ class DisplayScaleTest {
             assertTrue(size[1] / scale >= 639.99f);
         }
     }
+
+    @Test
+    void theUiScaleIsAShareOfTheScaleTheWindowFits() {
+        // 1280 x 800 at 200% fits only 1.25 of the monitor's 2: each share still shows.
+        assertEquals(1.25f, DisplayScale.calculate(1280, 800, 2, 1, 1));
+        assertEquals(1.125f, DisplayScale.calculate(1280, 800, 2, 1, .9f), 1e-6f);
+        assertEquals(.625f, DisplayScale.calculate(1280, 800, 2, 1, .5f));
+    }
 }

@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -32,7 +33,8 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
-import com.badlogic.gdx.utils.ScreenUtils;
+import com.badlogic.gdx.scenes.scene2d.ui.Slider;
+import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import jdk.jfr.Event;
 import jdk.jfr.Name;
 import jdk.jfr.StackTrace;
@@ -76,9 +78,10 @@ class GpuBoardPerformanceSmokeTest {
                 public void create() {
                     GpuTerrain terrain = new GpuTerrain();
                     GpuTactical tactical = new GpuTactical(terrain::tacticalSurface);
-                    BoardSurface.Tuning original = BoardSurface.tuning();
-                    try {
+                    BoardRelief.Tuning original = BoardRelief.tuning();
+                    try (var output = new GpuSceneTestOutput()) {
                         System.out.printf("PERF size=%d renderer=%s%n", size, Gdx.gl.glGetString(GL20.GL_RENDERER));
+                        System.out.println("PERF terrain frames include the final display conversion");
                         BoardScene scene = fixture.source.takeFrame().scene();
                         long start = System.nanoTime();
                         terrain.update(scene);
@@ -87,10 +90,10 @@ class GpuBoardPerformanceSmokeTest {
                         camera.resize(1280, 900);
                         camera.setIsometric(true);
                         camera.fit(scene);
-                        measure(terrain, camera, "overview");
+                        measure(output, terrain, camera, "overview");
                         camera.camera.zoom = .5f;
                         camera.center(BoardGeometry.center(new Coords(size / 2, size / 2), 0));
-                        measure(terrain, camera, "close");
+                        measure(output, terrain, camera, "close");
                         if (size <= 32 || Boolean.getBoolean("megamek.gpu.performanceDeployment")) {
                             start = System.nanoTime();
                             SwingUtilities.invokeAndWait(() -> {
@@ -110,34 +113,35 @@ class GpuBoardPerformanceSmokeTest {
                             tactical.update(deployment);
                             report("deployment-overlay", start);
                             reportOverlayCache(tactical);
-                            draw(terrain, camera);
+                            draw(output, terrain, camera);
                             start = System.nanoTime();
                             tactical.render(camera.camera, 0);
                             Gdx.gl.glFinish();
                             report("deployment-first-render", start);
                             reportMaskCache(tactical);
-                            File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
-                            output.mkdirs();
-                            GpuBoardTestUi.capture(new File(output, "performance-deployment.png"));
-                            measure(terrain, camera, "deployment-close", tactical);
+                            File screenshots = new File(System.getProperty("megamek.gpu.screenshots",
+                                  "build/gpu-board-review"));
+                            screenshots.mkdirs();
+                            GpuBoardTestUi.capture(new File(screenshots, "performance-deployment.png"));
+                            measure(output, terrain, camera, "deployment-close", tactical);
                             if (Boolean.getBoolean("megamek.gpu.performanceDeploymentOverview")) {
                                 float closeZoom = camera.camera.zoom;
                                 camera.fit(deployment);
-                                draw(terrain, camera);
-                                GpuBoardTestUi.capture(new File(output, "performance-overview-without-deployment.png"));
+                                draw(output, terrain, camera);
+                                GpuBoardTestUi.capture(new File(screenshots, "performance-overview-without-deployment.png"));
                                 start = System.nanoTime();
                                 tactical.render(camera.camera, 0);
                                 Gdx.gl.glFinish();
                                 report("deployment-overview-first-render", start);
                                 reportMaskCache(tactical);
-                                GpuBoardTestUi.capture(new File(output, "performance-deployment-overview.png"));
-                                measure(terrain, camera, "deployment-overview", tactical);
+                                GpuBoardTestUi.capture(new File(screenshots, "performance-deployment-overview.png"));
+                                measure(output, terrain, camera, "deployment-overview", tactical);
                                 if (Boolean.getBoolean("megamek.gpu.performanceDeploymentTopView")) {
                                     camera.setIsometric(false);
                                     camera.fit(deployment);
-                                    draw(terrain, camera);
+                                    draw(output, terrain, camera);
                                     tactical.render(camera.camera, 0);
-                                    GpuBoardTestUi.capture(new File(output, "performance-deployment-top.png"));
+                                    GpuBoardTestUi.capture(new File(screenshots, "performance-deployment-top.png"));
                                     camera.setIsometric(true);
                                 }
                                 camera.camera.zoom = closeZoom;
@@ -174,7 +178,7 @@ class GpuBoardPerformanceSmokeTest {
                         // The frame after each edit, for comparing an atlas or mesh change pixel for pixel.
                         File screens = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                         screens.mkdirs();
-                        draw(terrain, camera);
+                        draw(output, terrain, camera);
                         GpuBoardTestUi.capture(new File(screens, "performance-edit.png"));
                         // A planting edit changes trees but no ground, water, level, road or structure.
                         start = System.nanoTime();
@@ -190,14 +194,11 @@ class GpuBoardPerformanceSmokeTest {
                         start = System.nanoTime();
                         updateWithTimeline(terrain, scene, "woods-terrain");
                         report("woods-terrain", start);
-                        draw(terrain, camera);
+                        draw(output, terrain, camera);
                         GpuBoardTestUi.capture(new File(screens, "performance-woods.png"));
                         if (size <= 32) {
                             start = System.nanoTime();
-                            BoardSurface.tune(new BoardSurface.Tuning(original.fallsOffBoard(), original.bottomlessLevels(),
-                                  original.hug() + .1f, original.beach(), original.plungePool(), original.shoreBank(),
-                                  original.shoreRound(), original.mouthOpening(), original.plungeOpening(), original.lipJut(),
-                                  original.fallLipWidth(), original.fallLipDrop(), original.plateau(), original.lipDepth(), original.valley()));
+                            BoardRelief.tune(new BoardRelief.Tuning(!original.cliffsIntoWater()));
                             terrain.update(scene);
                             report("terrain-tuning", start);
                         }
@@ -205,7 +206,7 @@ class GpuBoardPerformanceSmokeTest {
                     } catch (Throwable error) {
                         failure.set(error);
                     } finally {
-                        BoardSurface.tune(original);
+                        BoardRelief.tune(original);
                         tactical.dispose();
                         terrain.dispose();
                         Gdx.app.exit();
@@ -255,8 +256,16 @@ class GpuBoardPerformanceSmokeTest {
         int warmupFrames = Integer.getInteger("megamek.gpu.performanceWarmupFrames", 15);
         int sampleFrames = Integer.getInteger("megamek.gpu.performanceSampleFrames", 30);
         boolean noFinish = Boolean.getBoolean("megamek.gpu.performanceNoFinish");
+        boolean fixedAtmosphere = Boolean.getBoolean("megamek.gpu.performanceFixedAtmosphere");
+        boolean pinnedSettings = Boolean.getBoolean("megamek.gpu.performancePinnedSettings");
+        int width = Integer.getInteger("megamek.gpu.performanceWidth", 1280);
+        int height = Integer.getInteger("megamek.gpu.performanceHeight", 900);
         if (warmupFrames < 2 || sampleFrames < 2) {
             throw new IllegalArgumentException("Performance scenarios need at least two warmup and sample frames");
+        }
+        int familyFrames = Integer.getInteger("megamek.gpu.performanceFamilyFrames", 0);
+        if (familyFrames != 0 && familyFrames < 16) {
+            throw new IllegalArgumentException("Family GPU attribution needs at least sixteen separate diagnostic frames");
         }
         int scenarioFrames = warmupFrames + sampleFrames;
         boolean comparePages = Boolean.getBoolean("megamek.gpu.performanceComparePages");
@@ -271,25 +280,41 @@ class GpuBoardPerformanceSmokeTest {
             throw new IllegalArgumentException("One comparison per run: the terrain pages or the graphics");
         }
         int variants = comparePages ? 2 : Math.max(1, graphics.size());
-        BoardGraphics savedGraphics = GUIPreferences.getInstance().getBoardGraphics();
+        var preferences = GUIPreferences.getInstance();
+        BoardGraphics savedGraphics = preferences.getBoardGraphics();
+        String savedAa = preferences.getBoardAntiAliasing();
+        boolean savedSpecularAa = preferences.getBoardSpecularAntiAliasing();
+        boolean savedAo = preferences.getBoardAmbientOcclusion();
+        float savedUiScale = preferences.getBoardUiScale();
+        float savedRenderScale = BoardCamera.renderScale;
+        boolean savedShaderAa = GpuEnvironmentLighting.specularAntialiasing;
+        Set<GpuTerrain.Prepass> savedPrepass = GpuTerrain.depthPrepass;
+        if (pinnedSettings) {
+            SwingUtilities.invokeAndWait(() -> {
+                preferences.setBoardAntiAliasing("OFF");
+                preferences.setBoardSpecularAntiAliasing(true);
+                preferences.setBoardAmbientOcclusion(false);
+                preferences.setBoardUiScale(1);
+            });
+            GpuTerrain.depthPrepass = EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
+                  GpuTerrain.Prepass.IMPOSTORS);
+        }
         if (!graphics.isEmpty()) { setGraphics(graphics.getFirst()); }
         long settleNanos = Integer.getInteger("megamek.gpu.performanceSettleSeconds", 180) * 1_000_000_000L;
         // The draw audit installs GL interceptors. Leave warmup after removing them before measuring frame pacing.
         int drawCountFrame = warmupFrames / 2;
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        boolean previousLod = TerrainLod.enabled();
-        TerrainLod.setEnabled(Boolean.parseBoolean(System.getProperty("megamek.gpu.performanceTerrainLod", "true")));
         phase("capture");
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board(size))) {
             if (Boolean.getBoolean("megamek.gpu.performanceFrozenCapture")) { stopTimer(fixture); }
             var config = GpuBoardWindow.configuration(Boolean.getBoolean("megamek.gpu.performanceVisible"));
-            config.setWindowedMode(Integer.getInteger("megamek.gpu.performanceWidth", 1280),
-                  Integer.getInteger("megamek.gpu.performanceHeight", 900));
+            config.setWindowedMode(width, height);
             config.useVsync(false);
             config.setForegroundFPS(0);
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
                 int frame;
                 GpuStageTimings timings;
+                GpuStageTimings total;
                 GLProfiler profiler;
                 GL20 rawGl20;
                 Input rawInput;
@@ -311,6 +336,8 @@ class GpuBoardPerformanceSmokeTest {
                 double detailSubmissionMaximum;
                 long stageStarted;
                 String currentStage;
+                BoardAtmosphere.Settings measuredAtmosphere;
+                BoardScene benchmarkScene;
                 @Override
                 boolean preparePlaybackCamera(UnitPlayback state, BoardScene scene) { return true; }
 
@@ -330,22 +357,40 @@ class GpuBoardPerformanceSmokeTest {
                                     "isTouched", "justTouched" -> false;
                               default -> method.invoke(rawInput, args);
                           });
-                    // Constructing the tuning UI restores defaults. Apply the benchmark choice after that reset,
-                    // before the first frame builds any terrain.
-                    TerrainLod.setEnabled(Boolean.parseBoolean(System.getProperty("megamek.gpu.performanceTerrainLod", "true")));
                     timings = new GpuStageTimings();
+                    total = new GpuStageTimings();
                     rawGl20 = Gdx.graphics.getGL20();
                     profiler = new GLProfiler(Gdx.graphics);
                     boardCamera.animateOnSelectionChange = false;
                     boardCamera.animateCombatPlayback = false;
                     boardCamera.animateOnMove = false;
                     BoardScene scene = fixture.source.takeFrame().scene();
+                    benchmarkScene = scene;
+                    String renderer = Gdx.gl.glGetString(GL20.GL_RENDERER);
+                    String expectedRenderer = System.getProperty("megamek.gpu.expectedRenderer", "").trim();
+                    assertTrue(renderer.toLowerCase(Locale.ROOT).contains(expectedRenderer.toLowerCase(Locale.ROOT)),
+                          () -> "Expected renderer containing '" + expectedRenderer + "', got " + renderer);
+                    assertEquals(width, Gdx.graphics.getBackBufferWidth(), "Requested physical framebuffer width");
+                    assertEquals(height, Gdx.graphics.getBackBufferHeight(), "Requested physical framebuffer height");
+                    var tuning = GpuBoardTestUi.tuning(this);
+                    if (pinnedSettings) {
+                        assertEquals(1, BoardCamera.renderScale);
+                        assertEquals(false, tuning.antiAliasing());
+                        assertEquals(true, GpuEnvironmentLighting.specularAntialiasing);
+                        assertEquals(false, tuning.ambientOcclusion());
+                        assertEquals(Set.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
+                              GpuTerrain.Prepass.IMPOSTORS), GpuTerrain.depthPrepass);
+                    }
+                    System.out.printf("PERF settings renderScale=%.2f specularAA=%s SMAA=%s AO=%s prepass=%s uiScale=%.2f%n",
+                          BoardCamera.renderScale, GpuEnvironmentLighting.specularAntialiasing, tuning.antiAliasing(),
+                          tuning.ambientOcclusion(), GpuTerrain.depthPrepass, preferences.getBoardUiScale());
+                    System.out.println("PERF total GPU is measured independently; stage percentiles must not be summed. "
+                          + "Animation/FFT is included in cutaways and light; serialized wall time is not pipelined FPS.");
                     System.out.printf("PERF full-view board=%dx%d framebuffer=%dx%d renderer=%s%n", scene.width(), scene.height(),
                           Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight(), Gdx.gl.glGetString(GL20.GL_RENDERER));
                     System.out.printf("PERF full-view warmup=%d samples=%d synchronization=%s%n",
                           warmupFrames, sampleFrames, noFinish ? "none" : "glFinish");
-                    System.out.printf("PERF terrainLoD=%s frozenCapture=%s%n", TerrainLod.enabled(),
-                          Boolean.getBoolean("megamek.gpu.performanceFrozenCapture"));
+                    System.out.printf("PERF frozenCapture=%s%n", Boolean.getBoolean("megamek.gpu.performanceFrozenCapture"));
                     System.out.printf("PERF graphics=%s%n", graphics.isEmpty()
                           ? List.of(GUIPreferences.getInstance().getBoardGraphics()) : graphics);
                 }
@@ -429,7 +474,13 @@ class GpuBoardPerformanceSmokeTest {
                             detailQuietFrames = 0;
                             detailSubmissions.clear();
                         }
-                        if (phase == warmupFrames) { phase(scenario + "-sample"); }
+                        if (phase == warmupFrames) {
+                            if (fixedAtmosphere) {
+                                assertEquals(measuredAtmosphere, GpuBoardTestUi.tuning(this).atmosphere());
+                                assertEquals(false, GpuBoardTestUi.tuning(this).fixedSun());
+                            }
+                            phase(scenario + "-sample");
+                        }
                         measuring = phase >= warmupFrames;
                         timingFrame = phase != drawCountFrame;
                         if (phase > warmupFrames) {
@@ -446,9 +497,29 @@ class GpuBoardPerformanceSmokeTest {
                         if (measuring) {
                             assertSame(rawGl20, Gdx.gl20, "Draw counting must not leave error-checking wrappers in timed frames");
                         }
-                        if (timingFrame) { timings.beginFrame(measuring); }
+                        if (timingFrame) {
+                            timings.beginFrame(measuring);
+                            total.beginFrame(measuring);
+                        }
                         long start = System.nanoTime();
+                        if (timingFrame) { total.stage("complete board view"); }
                         super.render();
+                        if (timingFrame) { total.stage(null); }
+                        if (fixedAtmosphere && measuredAtmosphere == null) {
+                            // The first frame has adopted the random scenario time; set the normal HUD control.
+                            var tuning = GpuBoardTestUi.tuning(this);
+                            Slider hour = GpuBoardTestUi.tuning(tuning, "Time of day");
+                            var clear = BoardAtmosphere.DEFAULTS;
+                            hour.setValue(clear.hour());
+                            // Apply even when the random minute already matched; retain the actual slider grid.
+                            hour.fire(new ChangeListener.ChangeEvent());
+                            tuning.setFixedSun(false);
+                            measuredAtmosphere = new BoardAtmosphere.Settings(hour.getValue(), clear.clouds(),
+                                  clear.fog(), clear.groundLayerHeight(), clear.haze(), clear.exposure());
+                            assertEquals(measuredAtmosphere, tuning.atmosphere(), "Expected the clear-day fixture");
+                            System.out.printf("PERF fixed atmosphere=%s options=%s%n",
+                                  measuredAtmosphere, tuning.atmosphereOptions());
+                        }
                         if (timingFrame) { timings.stage(null); }
                         long submitted = System.nanoTime();
                         if (!noFinish) { Gdx.gl.glFinish(); }
@@ -470,11 +541,13 @@ class GpuBoardPerformanceSmokeTest {
                         // three idle frames avoid mistaking the gap between two chunk jobs for completion.
                         // The moving scenario intentionally includes refinement during panning.
                         if (phase < drawCountFrame && shot != 2
-                              && (phase == 0 || detailFrames > 0 || detailPending(this))) {
-                            detailQuietFrames = detailPending(this) ? 0 : detailQuietFrames + 1;
+                              && (phase == 0 || detailFrames > 0 || detailPending(this, benchmarkScene))) {
+                            detailQuietFrames = detailPending(this, benchmarkScene) ? 0 : detailQuietFrames + 1;
                             detailFrames++;
                             detailSubmissions.add((submitted - start) / 1e6);
-                            assertTrue(System.nanoTime() - detailStarted < settleNanos, "Visible detail must settle");
+                            boolean withinDeadline = System.nanoTime() - detailStarted < settleNanos;
+                            if (!withinDeadline) { recordPendingDetail(this, benchmarkScene, boardCamera, scenario); }
+                            assertTrue(withinDeadline, "Visible detail must settle");
                             if (detailQuietFrames < 3) { return; }
                         }
                         if (detailFrames > 0) {
@@ -492,6 +565,8 @@ class GpuBoardPerformanceSmokeTest {
                         if (measuring) {
                             samples[phase - warmupFrames] = (System.nanoTime() - start) / 1e6;
                             submissions[phase - warmupFrames] = (submitted - start) / 1e6;
+                            assertTrue(terrain(this).ready(benchmarkScene),
+                                  "Measured frames must draw the ready board, not the loading stage");
                         }
                         if (phase == scenarioFrames - 1) {
                             phase(scenario + "-report");
@@ -514,9 +589,29 @@ class GpuBoardPerformanceSmokeTest {
                             // query objects across scenarios, avoiding another first-use driver stall at each zoom.
                             GpuBoardTestUi.capture(new File(output, "performance-full-" + scenario + ".png"));
                             StringBuilder report = new StringBuilder();
-                            timings.appendReport(report, scenario);
+                            total.appendReport(report, scenario + " total");
+                            timings.appendReport(report, scenario + " stages");
                             System.out.print(report);
+                            Files.writeString(new File(output, "performance-full-" + scenario + "-timings.txt").toPath(), report);
                             memory(this, scenario);
+                            if (familyFrames > 0 && shot != 2) {
+                                // No query wrappers, attribution work or readbacks enter the normal measured frames.
+                                measuring = false;
+                                timingFrame = false;
+                                try (var audit = new GpuDrawCallAudit(this, true)) {
+                                    drawAudit = audit;
+                                    for (int diagnostic = -3; diagnostic < familyFrames; diagnostic++) {
+                                        audit.beginTimingFrame();
+                                        super.render();
+                                        audit.endTimingFrame(diagnostic >= 0);
+                                        assertTrue(terrain(this).ready(benchmarkScene), "Family diagnostic draws the ready board");
+                                    }
+                                    String attribution = audit.timingReport(scenario);
+                                    System.out.print(attribution);
+                                    Files.writeString(new File(output, "performance-full-" + scenario + "-families.txt").toPath(),
+                                          attribution);
+                                } finally { drawAudit = null; }
+                            }
                             if (view == 2 && Boolean.getBoolean("megamek.gpu.performanceFarPan")) {
                                 // Extra visual regression capture, after all performance samples are complete.
                                 measuring = false;
@@ -543,13 +638,24 @@ class GpuBoardPerformanceSmokeTest {
                     if (drawAudit != null) { drawAudit.close(); }
                     if (profiler.isEnabled()) { GpuStageTimings.stopCounting(profiler, rawGl20); }
                     timings.close();
+                    total.close();
                     super.dispose();
                 }
 
             }, config);
         } finally {
-            TerrainLod.setEnabled(previousLod);
             setGraphics(savedGraphics);
+            if (pinnedSettings) {
+                SwingUtilities.invokeAndWait(() -> {
+                    preferences.setBoardAntiAliasing(savedAa);
+                    preferences.setBoardSpecularAntiAliasing(savedSpecularAa);
+                    preferences.setBoardAmbientOcclusion(savedAo);
+                    preferences.setBoardUiScale(savedUiScale);
+                });
+                BoardCamera.renderScale = savedRenderScale;
+                GpuEnvironmentLighting.specularAntialiasing = savedShaderAa;
+                GpuTerrain.depthPrepass = savedPrepass;
+            }
         }
         if (failure.get() != null) { throw new AssertionError("Full board rendering benchmark", failure.get()); }
     }
@@ -570,7 +676,6 @@ class GpuBoardPerformanceSmokeTest {
     @StackTrace(false)
     private static final class Phase extends Event {
         String phase;
-        boolean terrainLod;
     }
 
     @Name("megamek.GpuSlowStage")
@@ -583,9 +688,8 @@ class GpuBoardPerformanceSmokeTest {
     private static void phase(String name) {
         Phase event = new Phase();
         event.phase = name;
-        event.terrainLod = TerrainLod.enabled();
         event.commit();
-        System.out.printf("PERF phase=%s lod=%s at=%s%n", name, TerrainLod.enabled(), Instant.now());
+        System.out.printf("PERF phase=%s at=%s%n", name, Instant.now());
     }
 
     private static GpuTerrain terrain(GpuBattleView view) throws Exception {
@@ -603,17 +707,43 @@ class GpuBoardPerformanceSmokeTest {
         method.invoke(pages, enabled);
     }
 
-    private static boolean detailPending(GpuBattleView view) throws Exception {
-        for (String name : List.of("detailJob", "requested", "rebuild")) {
-            try {
-                var field = GpuTerrain.class.getDeclaredField(name);
-                field.setAccessible(true);
-                if (field.get(terrain(view)) != null) { return true; }
-            } catch (NoSuchFieldException ignored) {
-                // Frozen synchronous baselines only have the LoD job.
+    private static boolean detailPending(GpuBattleView view, BoardScene scene) throws Exception {
+        return terrain(view).busy() || !terrain(view).ready(scene);
+    }
+
+    /** Failure-only evidence from the same owners the loading stage waits for; no extra polling or rendering. */
+    private static void recordPendingDetail(GpuBattleView view, BoardScene scene, BoardCamera camera, String scenario)
+          throws Exception {
+        GpuTerrain terrain = terrain(view);
+        GpuFamilyPrograms families = terrain.familyPrograms();
+        var report = new StringBuilder("Visible detail deadline expired; original readiness assertion retained.\n")
+              .append("busy=").append(terrain.busy()).append(" ready=").append(terrain.ready(scene))
+              .append(" progress=").append(terrain.buildProgress()).append(" shaders=").append(terrain.shaderProgress())
+              .append("\ndetails=").append(terrain.buildDetails())
+              .append("\nfamily requested=").append(families.requested()).append(" ready=").append(families.ready().size())
+              .append(" built=").append(families.programs()).append(" pending=").append(families.pending())
+              .append(" building=").append(families.building());
+        for (String name : List.of("requested", "rebuild", "detailJob", "terrainMaterialPreparation")) {
+            var field = GpuTerrain.class.getDeclaredField(name);
+            field.setAccessible(true);
+            Object owner = field.get(terrain);
+            report.append('\n').append(name).append(" present=").append(owner != null);
+            if (owner instanceof GpuGlsl.Preparation preparation) { report.append(" linking=").append(preparation.linking()); }
+            if (name.equals("detailJob") && owner != null) {
+                for (String property : List.of("index", "lod", "rebuilding", "ready")) {
+                    var method = owner.getClass().getDeclaredMethod(property);
+                    method.setAccessible(true);
+                    report.append(' ').append(property).append('=').append(method.invoke(owner));
+                }
             }
         }
-        return false;
+        report.append("\ncamera zoom=").append(camera.camera.zoom).append(" focus=").append(camera.focus)
+              .append(" position=").append(camera.camera.position).append(" direction=").append(camera.camera.direction).append('\n');
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
+        output.mkdirs();
+        System.out.print(report);
+        Files.writeString(new File(output, "performance-full-" + scenario + "-settle-failure.txt").toPath(), report);
+        GpuBoardTestUi.capture(new File(output, "performance-full-" + scenario + "-settle-failure.png"));
     }
 
     private static void memory(GpuBattleView view, String scenario) throws Exception {
@@ -626,7 +756,6 @@ class GpuBoardPerformanceSmokeTest {
             level.setAccessible(true);
             levels.merge(level.get(chunk).toString(), 1, Integer::sum);
         }
-        if (!TerrainLod.enabled()) { assertEquals(Set.of("FULL"), levels.keySet()); }
         System.gc();
         var runtime = Runtime.getRuntime();
         System.out.printf("PERF full-%s heapAfterGc=%.1f MiB installed=%s%n", scenario,
@@ -732,23 +861,25 @@ class GpuBoardPerformanceSmokeTest {
               bytes / 1048576.0, arrays.size(), dependencies);
     }
 
-    private static void draw(GpuTerrain terrain, BoardCamera camera) {
+    private static void draw(GpuSceneTestOutput output, GpuTerrain terrain, BoardCamera camera) {
         terrain.animate(1 / 60f, List.of());
         terrain.renderShadows(camera.camera, List.of());
-        ScreenUtils.clear(.08f, .08f, .08f, 1, true);
+        output.begin(.08f, .08f, .08f, 1);
         terrain.render(camera.camera, false);
         terrain.renderTransparent(camera.camera);
+        output.display();
     }
 
-    private static void measure(GpuTerrain terrain, BoardCamera camera, String name) {
-        measure(terrain, camera, name, null);
+    private static void measure(GpuSceneTestOutput output, GpuTerrain terrain, BoardCamera camera, String name) {
+        measure(output, terrain, camera, name, null);
     }
 
-    private static void measure(GpuTerrain terrain, BoardCamera camera, String name, GpuTactical tactical) {
+    private static void measure(GpuSceneTestOutput output, GpuTerrain terrain, BoardCamera camera, String name,
+          GpuTactical tactical) {
         double[] samples = new double[20];
         for (int i = -10; i < samples.length; i++) {
             long start = System.nanoTime();
-            draw(terrain, camera);
+            draw(output, terrain, camera);
             if (tactical != null) { tactical.render(camera.camera, 0); }
             Gdx.gl.glFinish();
             if (i >= 0) { samples[i] = (System.nanoTime() - start) / 1e6; }
@@ -756,7 +887,7 @@ class GpuBoardPerformanceSmokeTest {
         GL20 rawGl20 = Gdx.gl20;
         GLProfiler profiler = new GLProfiler(Gdx.graphics);
         profiler.enable();
-        draw(terrain, camera);
+        draw(output, terrain, camera);
         if (tactical != null) { tactical.render(camera.camera, 0); }
         GpuStageTimings.stopCounting(profiler, rawGl20);
         Arrays.sort(samples);

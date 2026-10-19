@@ -56,41 +56,35 @@ class BoardRoadRampTest {
     @ParameterizedTest
     @ValueSource(ints = { 9, 31, 63 })
     void concreteKeepsLevelSlabsAndVerticalRetainingWallsOutsideItsRoads(int exits) {
-        var original = BoardConcrete.mode();
-        try {
-            for (var mode : BoardConcrete.Mode.values()) {
-                BoardConcrete.tune(mode);
-                var at = BoardRoadTest.CENTER;
-                var scene = concreteJunction(exits);
-                var surface = new BoardSurface(scene, scene.tile(at));
-                var center = BoardGeometry.center(at, 2);
-                var road = BoardRoad.clearance(at, exits);
-                float scale = BoardGeometry.hexScale();
-                for (float x = -35; x <= 35; x += 2) {
-                    for (float y = -30; y <= 30; y += 2) {
-                        float px = center.x + x * scale, py = center.y + y * scale;
-                        if (!BoardGeometry.contains(at, px, py) || road.distance(x, y) < BoardRoad.SHOULDER + .5f) { continue; }
-                        assertEquals(center.z, surface.height(px, py), .001f, "Concrete outside the ramp stays flat in " + mode);
-                    }
-                }
-                double area = 0;
-                for (var face : surface.faces) {
-                    float cross = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z;
-                    assertTrue(cross > 0, "Concrete top triangles cannot fold");
-                    area += cross / 2;
-                }
-                assertEquals(.75 * BoardGeometry.width() * BoardGeometry.height(), area, .1,
-                      "Flat slab and ramp must cover the hex exactly once");
-                assertTrue(!surface.retainingWalls.isEmpty());
-                for (var face : surface.retainingWalls) {
-                    var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
-                    assertEquals(0, normal.z, .0001f, "An engineered retaining wall stands vertically");
-                    for (var p : List.of(face.a(), face.b(), face.c())) {
-                        assertEquals(BoardRelief.Kind.CLIFF, surface.relief.shade(p).kind());
-                    }
-                }
+        var at = BoardRoadTest.CENTER;
+        var scene = concreteJunction(exits);
+        var surface = new BoardSurface(scene, scene.tile(at));
+        var center = BoardGeometry.center(at, 2);
+        var road = BoardRoad.clearance(at, exits);
+        float scale = BoardGeometry.hexScale();
+        for (float x = -35; x <= 35; x += 2) {
+            for (float y = -30; y <= 30; y += 2) {
+                float px = center.x + x * scale, py = center.y + y * scale;
+                if (!BoardGeometry.contains(at, px, py) || road.distance(x, y) < BoardRoad.SHOULDER + .5f) { continue; }
+                assertEquals(center.z, surface.height(px, py), .001f, "Concrete outside the ramp stays flat");
             }
-        } finally { BoardConcrete.tune(original); }
+        }
+        double area = 0;
+        for (var face : surface.faces) {
+            float cross = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z;
+            assertTrue(cross > 0, "Concrete top triangles cannot fold");
+            area += cross / 2;
+        }
+        assertEquals(.75 * BoardGeometry.width() * BoardGeometry.height(), area, .1,
+              "Flat slab and ramp must cover the hex exactly once");
+        assertTrue(!surface.retainingWalls.isEmpty());
+        for (var face : surface.retainingWalls) {
+            var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+            assertEquals(0, normal.z, .0001f, "An engineered retaining wall stands vertically");
+            for (var p : List.of(face.a(), face.b(), face.c())) {
+                assertEquals(BoardRelief.Kind.CLIFF, surface.relief.shade(p).kind());
+            }
+        }
     }
 
     static BoardScene concreteJunction(int exits) {

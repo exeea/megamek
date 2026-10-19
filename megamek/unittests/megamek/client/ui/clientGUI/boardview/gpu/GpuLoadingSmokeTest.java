@@ -20,6 +20,8 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -109,12 +111,23 @@ class GpuLoadingSmokeTest {
                                   loading.getRoot().<Label>findActor("board-loading-active").getText().toString());
                             assertEquals(Messages.getString("GpuBoard.loadingLegend.ready", ready, sections.states().size()),
                                   loading.getRoot().<Label>findActor("board-loading-ready").getText().toString());
+                            var shaders = terrain.shaderProgress();
+                            assertTrue(shaders.linked() >= 0 && shaders.linked() <= shaders.total(), shaders::toString);
+                            // The update plan and the first sections start before the first build's links, which can
+                            // hold a frame for seconds: those sections prepare on the workers meanwhile.
+                            assertTrue(restarted || started > 0 || shaders.total() == 0,
+                                  "Terrain programs must not link before the first sections start: " + shaders);
+                            assertEquals(shaders.linked() < shaders.total(),
+                                  loading.getRoot().findActor("board-loading-shaders").isVisible(),
+                                  "The shader bar shows exactly while programs are left to link");
                             assertTrue(overall.getText().toString().contains("%"));
                             assertFalse(details.getText().toString().contains("GpuBoard.loading"));
                             Group content = (Group) loading.getRoot().getChildren().first();
                             assertEquals(loading.getWidth(), content.getWidth(), .1f);
                             GpuBoardTestUi.assertHorizontalBounds(content, content);
                             assertTrue(details.getY() >= 0 && details.getTop() <= loading.getHeight());
+                            assertEquals(.06f * loading.getHeight(), details.getY(), .5f,
+                                  "The progress must keep the bottom of the screen");
                             assertTrue(grid.getY() >= 0 && grid.getTop() <= loading.getHeight());
                             boolean advancing = sections.states().contains(TerrainLoadProgress.SectionState.LOADING);
                             if (ready > 0 && advancing && !details.getText().isEmpty() && !captured) {
@@ -123,6 +136,7 @@ class GpuLoadingSmokeTest {
                                 assertTrue(output.isDirectory() || output.mkdirs());
                                 GpuReviewFrame.save(new File(output, "loading-honeycomb.png"));
                                 checkLoadingLayout(loading);
+                                checkShortWindow(loading, output);
                                 capturePreview(loading, output, 25, 25, "loading-honeycomb-625-preview.png");
                                 capturePreview(loading, output, 7, 88, "loading-honeycomb-tall-map-preview.png");
                                 capturePreview(loading, output, 88, 7, "loading-honeycomb-wide-map-preview.png");
@@ -137,6 +151,8 @@ class GpuLoadingSmokeTest {
                             }
                         } else if (frames() > 0 && !terrain.busy()) {
                             assertTrue(restarted && concurrent && partial && captured);
+                            var shaders = terrain.shaderProgress();
+                            assertEquals(shaders.total(), shaders.linked(), "The shader bar must finish before the board shows");
                             assertTrue(tasks.contains("surfaces") || tasks.contains("topography"), tasks.toString());
                             assertTrue(terrain.buildDetails().isEmpty());
                             assertEquals(-1, terrain.buildProgress());
@@ -161,6 +177,8 @@ class GpuLoadingSmokeTest {
         Label details = loading.getRoot().findActor("board-loading-details");
         Label legend = loading.getRoot().findActor("board-loading-ready");
         GpuLoadingGrid grid = loading.getRoot().findActor("board-loading-grid");
+        Actor shaders = loading.getRoot().findActor("board-loading-shaders");
+        boolean compiling = shaders.isVisible();
         float gridY = grid.getY(), gridHeight = grid.getHeight(), legendY = legend.getY();
         float detailsTop = details.getTop();
         String single = new TerrainLoadProgress.Status(1, 625,
@@ -170,6 +188,8 @@ class GpuLoadingSmokeTest {
             details.setText(text);
             for (String status : List.of("Preparing", "Preparing\nLoading terrain")) {
                 overall.setText(status);
+                // The shader bar appears and hides as programs link.
+                shaders.setVisible(!shaders.isVisible());
                 loading.draw();
                 assertEquals(gridY, grid.getY(), .1f, "Task changes must not move the grid");
                 assertEquals(gridHeight, grid.getHeight(), .1f, "Task changes must not resize the grid");
@@ -178,6 +198,28 @@ class GpuLoadingSmokeTest {
                 assertTrue(details.getY() >= 0 && details.getTop() <= loading.getHeight());
             }
         }
+        shaders.setVisible(compiling);
+    }
+
+    /** A short screen keeps the header and every task line on it; the honeycomb shrinks into the space between. */
+    private static void checkShortWindow(Stage loading, File output) {
+        var viewport = (ScreenViewport) loading.getViewport();
+        float unitsPerPixel = viewport.getUnitsPerPixel();
+        viewport.setUnitsPerPixel(400f / Gdx.graphics.getHeight());
+        viewport.update(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), true);
+        ScreenUtils.clear(.045f, .065f, .075f, 1);
+        loading.draw();
+        GpuLoadingGrid grid = loading.getRoot().findActor("board-loading-grid");
+        Label overall = loading.getRoot().findActor("board-loading-message");
+        Label legend = loading.getRoot().findActor("board-loading-ready");
+        Label details = loading.getRoot().findActor("board-loading-details");
+        assertTrue(grid.getHeight() > 0 && grid.getTop() <= overall.getY(), "The honeycomb must stay below the header");
+        assertTrue(legend.localToStageCoordinates(new Vector2(0, legend.getHeight())).y <= grid.getY(),
+              "The legend must stay below the honeycomb");
+        assertTrue(details.getY() >= 0 && overall.getTop() <= loading.getHeight(), "Every line must stay on screen");
+        GpuReviewFrame.save(new File(output, "loading-honeycomb-short.png"));
+        viewport.setUnitsPerPixel(unitsPerPixel);
+        viewport.update(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), true);
     }
 
     /** UI fixtures rendered through the actual loading layout; no large terrain build is simulated. */
@@ -193,6 +235,7 @@ class GpuLoadingSmokeTest {
         loading.getRoot().<Label>findActor("board-loading-waiting").setText(Messages.getString("GpuBoard.loadingLegend.waiting", count - ready - 4));
         loading.getRoot().<Label>findActor("board-loading-active").setText(Messages.getString("GpuBoard.loadingLegend.active", 4));
         loading.getRoot().<Label>findActor("board-loading-ready").setText(Messages.getString("GpuBoard.loadingLegend.ready", ready, count));
+        GpuBattleView.showShaders(loading.getRoot().findActor("board-loading-shaders"), new TerrainLoadProgress.Shaders(12, 40));
         loading.getRoot().<Label>findActor("board-loading-details").setText(String.join("\n",
               new TerrainLoadProgress.Status(ready + 1, count, new TerrainLoadProgress.Step("upload", 4, 7,
                     System.nanoTime() - 2_000_000_000L)).text(),

@@ -38,7 +38,7 @@ public record BoardHexText(String text, int baseline, Font font, int argb, boole
     private static final FontRenderContext MEASURE = new FontRenderContext(null, true, true);
     /** The type block's terrains after the cover, in the order of their lines: ground, liquids, modifiers, FIRE. */
     private static final int[] BELOW_COVER = { Terrains.ROUGH, Terrains.RUBBLE, Terrains.PAVEMENT, Terrains.SAND,
-          Terrains.MUD, Terrains.TUNDRA, Terrains.FIELDS, Terrains.SNOW, Terrains.ICE, Terrains.BLACK_ICE,
+          Terrains.MUD, Terrains.BRIDGE_MUD, Terrains.TUNDRA, Terrains.FIELDS, Terrains.SNOW, Terrains.ICE, Terrains.BLACK_ICE,
           Terrains.MAGMA, Terrains.RAPIDS, Terrains.HAZARDOUS_LIQUID, Terrains.GEYSER, Terrains.IMPASSABLE,
           Terrains.FORTIFIED, Terrains.SOLARIS_ELEVATOR, Terrains.INDUSTRIAL_ELEVATOR, Terrains.SPACE, Terrains.FIRE };
 

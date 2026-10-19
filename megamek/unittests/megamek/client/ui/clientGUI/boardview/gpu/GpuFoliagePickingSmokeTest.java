@@ -5,11 +5,13 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuMixedUnitBenchmarkSmo
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyFloat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.clearInvocations;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -49,11 +51,8 @@ class GpuFoliagePickingSmokeTest {
             when(source.uiPreferences()).thenAnswer(ignored -> fixture.source.uiPreferences());
             when(source.phaseStatus()).thenAnswer(ignored -> fixture.source.phaseStatus());
             when(source.takeFrame()).thenAnswer(ignored -> fixture.source.takeFrame());
-            doAnswer(invocation -> {
-                fixture.source.setViewport(invocation.getArgument(0), invocation.getArgument(1),
-                      invocation.getArgument(2), invocation.getArgument(3));
-                return null;
-            }).when(source).setViewport(anyInt(), anyInt(), anyInt(), anyInt());
+            // A mock's default methods return null; the editor view draws the trace overlay every frame.
+            when(source.trace()).thenReturn(GpuTraceOverlay.Settings.NONE);
             var config = GpuBoardWindow.configuration(false);
             config.setWindowedMode(1200, 900);
             new Lwjgl3Application(new GpuBattleView(source) {
@@ -125,12 +124,14 @@ class GpuFoliagePickingSmokeTest {
             clearInvocations(source);
             processor.mouseMoved(x, y);
             assertEquals(ground.coords(), field(view, "hovered"));
-            verify(source).setHover(ground.coords());
+            verify(source).setHover(eq(ground.coords()), anyFloat());
             if (source.isEditor()) {
                 processor.touchDown(x, y, 0, Input.Buttons.LEFT);
                 processor.touchDragged(x, y, 0);
                 processor.touchUp(x, y, 0, Input.Buttons.LEFT);
-                verify(source, times(2)).paintEditor(ground.coords(), 0, generation);
+                // The press's editor pointer event (BoardSource.editorPointer) lands on the hex behind the canopy.
+                verify(source).editorPointer(eq(ground.coords()), anyDouble(), anyDouble(), eq(false), isNull(),
+                      eq(false), any(), eq(false), eq(generation));
                 verify(source).endEditorStroke();
             } else {
                 // A map preview inspects the hex behind the canopy on a right click.

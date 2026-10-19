@@ -2,6 +2,8 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -11,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import com.badlogic.gdx.Gdx;
@@ -34,8 +37,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Lays the HUD out with stand-ins of the prototype's measured panel sizes (r1 section 2) in place of the components,
- * at the 900 x 600 window minimum, 1280 x 720 and 1920 x 1080. The panels a phase shows together never overlap, every
- * slot stays inside the window, and the slot maps are written, over shots 02 and 15 where the mock has that size.
+ * at the 900 x 600 window minimum, 1280 x 720 and 1920 x 1080. Panels never overlap each other; side panels may cover
+ * the full shortcut line. Slots stay inside the window, and maps are written over shots 02 and 15 at their sizes.
  */
 @Tag("on-demand")
 class GpuHudLayoutSmokeTest {
@@ -66,6 +69,10 @@ class GpuHudLayoutSmokeTest {
           "minimap", "contacts-panel", "weapons-panel", "log-panel", "solution-card", "command-dock",
           "chat-button", "chat-panel", "force-overview", "help-dialog", "menu-panel", "players-panel",
           "toast-stack");
+    /** The full-width shortcut line sits behind these side panels, which may cover it. */
+    private static final Set<String> HINT_COVERING_PANELS = Set.of("phase-header", "forces-panel", "unit-card",
+          "record-sheet", "utility-bar", "minimap", "contacts-panel", "weapons-panel", "solution-card", "log-panel",
+          "chat-button");
 
     @Test
     void slotsNeverOverlapAndStayInTheWindowAtTheReferenceSizes() {
@@ -124,10 +131,33 @@ class GpuHudLayoutSmokeTest {
             assertEquals(phaseTop, height - phase.y - phase.height, .5f);
             assertEquals(metrics.gap(), height - utilities.y - utilities.height, .5f);
             assertEquals(metrics.gap(), utilities.y - minimap.y - minimap.height, .5f);
+            Rectangle conditions = slots.get("conditions-card");
+            if (conditions != null) {
+                assertEquals(260, conditions.width, .5f, "Reference windows keep the conditions card usable");
+                if (conditions.x + conditions.width + 12 > utilities.x) {
+                    assertEquals(metrics.gap(), utilities.y - conditions.y - conditions.height, .5f,
+                          "Conditions move below the toolbar when there is no room beside it");
+                }
+            }
             Rectangle dock = slots.get("command-dock"), hint = slots.get("hint-line");
             assertEquals(metrics.gap(), dock.y, .5f);
             if (hint != null) {
                 assertEquals(12, hint.y - dock.y - dock.height, .5f, "shortcuts sit above the dock");
+                assertEquals(dock.x + dock.width / 2, hint.x + hint.width / 2, .5f,
+                      "The full shortcut line stays centred on the dock");
+                Actor hintActor = hud.stage.getRoot().findActor("hint-line");
+                Actor dockActor = hud.stage.getRoot().findActor("command-dock");
+                var hintSlot = (Container<?>) hintActor.getParent();
+                Actor hintLayer = hintSlot.getParent(), dockLayer = dockActor.getParent().getParent();
+                assertFalse(hintSlot.getClip(), "Side panels cover the hint; its slot does not crop it");
+                assertEquals(hintSlot.getPrefWidth(), hint.width, .5f, "Keep the complete shortcut line");
+                assertSame(hintLayer.getParent(), dockLayer.getParent());
+                assertTrue(hintLayer.getZIndex() < dockLayer.getZIndex(), "All panels draw above shortcuts");
+                if (layout.grid()) {
+                    assertTrue(shown.stream().filter(actor -> HINT_COVERING_PANELS.contains(actor.getName()))
+                          .map(GpuHudTestStage::bounds).anyMatch(hint::overlaps),
+                          "The long-line control must exercise actual panel coverage");
+                }
             }
         }
         System.out.println(name + " (stage " + hud.stage.getWidth() + " x " + hud.stage.getHeight() + "): " + slots);
@@ -136,6 +166,7 @@ class GpuHudLayoutSmokeTest {
                 harness.assertLayout(actor);
             } else {
                 harness.assertLayout(actor, shown.stream().filter(other -> other != actor)
+                      .filter(other -> !hintUnderSidePanel(actor, other))
                       .map(GpuHudTestStage::bounds).toArray(Rectangle[]::new));
             }
         }
@@ -190,7 +221,8 @@ class GpuHudLayoutSmokeTest {
             // Dock heights measured per variant: movement 174, weapons 158, initiative 116.
             case "command-dock" -> new float[] { metrics.dock(),
                   moving ? 174 : layout.phase() == GamePhase.FIRING ? 158 : 116 };
-            case "hint-line" -> new float[] { 590, 13 };
+            // The extras also exercise a long shortcut line partially covered by both side columns.
+            case "hint-line" -> new float[] { layout.grid() ? 1500 : 590, 13 };
             // Camera presets, labelled utilities, then icon-only Help and Menu.
             case "utility-bar" -> new float[] { 690, 34 };
             // Minimap: the prototype's 210 (180 at 800 or less), which its map fills inside the rails.
@@ -206,6 +238,11 @@ class GpuHudLayoutSmokeTest {
             case "toast-stack" -> new float[] { 420, 40 };
             default -> new float[] { 300, FILL };
         };
+    }
+
+    private static boolean hintUnderSidePanel(Actor first, Actor second) {
+        return first.getName().equals("hint-line") && HINT_COVERING_PANELS.contains(second.getName())
+              || second.getName().equals("hint-line") && HINT_COVERING_PANELS.contains(first.getName());
     }
 
     /**

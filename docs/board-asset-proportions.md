@@ -1,8 +1,8 @@
-# Building and bridge asset proportions
+# Building and bridge proportions
 
-These are the runtime dimensions of legacy structures and manufactured bridge
-assets. [Modular buildings](gpu-modular-buildings.md) describes the separate
-floor-kit contract. Board units are defined by `BoardGeometry`.
+These are the runtime dimensions of legacy structures and manufactured bridges.
+[Modular buildings](gpu-modular-buildings.md) describes the separate floor-kit
+contract. Board units are defined by `BoardGeometry`.
 
 ## Owners and coordinate contract
 
@@ -11,8 +11,8 @@ floor-kit contract. Board units are defined by `BoardGeometry`.
 | `BoardArtwork` | Resolve tileset artwork and its associated model reference. |
 | `GpuAssets` | Load/cache authored board models and fit legacy structures to their runtime dimensions. |
 | `BoardGeometry` | Convert game levels and model units to displayed board dimensions. |
-| `mm-data/tools/build_board_assets.py` | Build crops offline and delegate manufactured bridge generation. |
-| `BoardBridge`, `BoardBridgeFooting` | Select a span asset/material and fit terminal geometry to its banks. |
+| `BoardBridgeMesh`, `BoardBridgeTruss` | Generate manufactured spans from the live road and on-deck rail footprint. |
+| `BoardBridgeSlope`, `BoardBridgeFooting` | Grade the span and fit its bank landings and optional piers. |
 
 Legacy building GLBs use an 84-by-72 hex footprint, with ground at local Z=0 and
 roof at Z=18 in the renderer's Z-up convention. Files use glTF Y-up. This is one
@@ -26,38 +26,40 @@ their floor height to accommodate the roof cap.
 
 ## Manufactured bridges
 
-`BoardFeatures.capture` preserves a bridge's exit mask and elevation.
-`GpuAssets.model` loads its complete GLB; `GpuTerrain` places the model and
-includes its triangles in picking. `GpuRoads` shades the connected road surfaces,
-while `BoardSurface` grades the approach without raising the ground below the span.
+`BoardFeatures.capture` preserves a bridge's exit mask, elevation and appearance.
+During terrain chunk preparation, `BoardBridgeMesh` builds its slab and kerbs from
+`BoardRoad` and the actual on-deck `RailRoute` courses; `BoardBridgeTruss` adds the
+steel members for a truss design. All 64 exit masks use these same builders, and
+explicit rail junctions and stubs extend the supporting footprint where needed.
 
-There are 64 shapes, one for every six-bit exit mask. `bridge.glb` is the
-north/south straight span (mask 09); `bridges/bridge-exits-NN.glb` covers the
-other masks. Each has one LOD0 group. An exit pattern is not a detail level.
+The base carriageway is 15 model units wide. Deck Z=0 has a 1.5-unit slab below it;
+standard outside rails reach Z=2.5. A truss has a low steel fascia and members
+reaching Z=12.5. Board scale applies uniformly; terrain-level height controls
+placement elevation. Shapes meet the actual hex edges, including closed cuts
+where a truss member reaches an edge.
 
-The carriageway is 15 model units wide. Deck Z=0 has a 1.5-unit slab below it
-and outside rails reaching Z=2.5. Board scale applies uniformly; terrain-level
-height controls placement elevation. Shapes meet the actual hex edges.
+`BoardBridgeSlope` grades the generated facets. `GpuTerrain` retains the complete
+shape for drawing, picking, decals and rail placement, including flat spans.
+`GpuRoads` shades the connected road surfaces, while `BoardSurface` grades the
+approach without raising the ground below the span.
 
 Decks use the road system's material, world-space coordinates, wetness and surface
 clearance. Changing exit patterns must not rotate/restart the material at a join.
-Sides and undersides use shared concrete with repeating face UVs.
+Concrete sides and undersides use repeating face UVs; truss steel uses its span colour.
 Deck-family selection across a connected span is described in [roads](gpu-roads.md).
 
 Continuous decks have rails only on exposed outer boundaries, leaving exits open.
-Five/six-exit shapes use roundabouts with a full-width circulating carriageway and
-a smaller concrete island. Zero/single-exit shapes have closed terminal edges.
-The runtime can display authored masks even though construction/repair rules
-during play allow exactly two exits.
+Road-only five/six-exit shapes keep their roundabout's raised concrete island;
+an on-deck rail opens the centre so tracks remain supported and unobstructed.
+Zero/single-exit shapes have closed terminal edges. Rendering supports all masks
+even though construction/repair rules during play allow exactly two exits.
 
-## Editing the assets
+Span geometry is derived from the live footprint; there are no baked per-mask
+span assets or separate saved authoring outlines to update. Terminal and pier
+GLBs remain reusable details. See [bridge geometry](gpu-natural-bridges.md) for
+bank connections, truss colours and pier ownership.
 
-Authoring polygons live in `mm-data/tools/board-models/bridge-shapes.json`.
-From `mm-data`, run
-`blender --background --python tools/build_bridge_assets.py` to bake the GLBs;
-the main board builder delegates to this same script. Runtime loads those assets
-rather than regenerating their topology. If road width changes, update both the
-saved outlines and the approach/footing dimensions.
+## Editing building assets
 
 A legacy building is packaged with its original artwork:
 
@@ -66,7 +68,5 @@ building_hard_00.glb   # one-level mesh; processed roof texture embedded
 building_hard_00.png   # original building image, including alpha and shadow
 ```
 
-The footprint tool prepares roof inputs under `tools/board-models/roofs` and
-copies the original image beside the GLB. The exporter embeds the processed roof;
-shared facade textures remain external. The adjacent PNG is the original image,
+Each GLB embeds its processed roof; shared facade textures remain external. The adjacent PNG is the original image,
 not a separate processed roof texture.

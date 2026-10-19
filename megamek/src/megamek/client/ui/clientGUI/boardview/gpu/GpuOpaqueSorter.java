@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.IdentityHashMap;
 import java.util.Map;
+import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.g3d.Renderable;
@@ -15,11 +16,19 @@ import com.badlogic.gdx.utils.Array;
 final class GpuOpaqueSorter extends DefaultRenderableSorter {
     private boolean groupShaders = true;
     private final Map<Shader, Integer> shaderOrder = new IdentityHashMap<>();
+    private final Map<Shader, Integer> groupOrder = new IdentityHashMap<>();
+    private final Function<Shader, Shader> group;
+
+    GpuOpaqueSorter() { this(Function.identity()); }
+
+    /** Shaders with one {@code group} sort as one shader: their draws keep their mutual order and tie winners. */
+    GpuOpaqueSorter(Function<Shader, Shader> group) { this.group = group; }
 
     @Override
     public void sort(Camera camera, Array<Renderable> renderables) {
         groupShaders = true;
         shaderOrder.clear();
+        groupOrder.clear();
         for (Renderable renderable : renderables) {
             if (renderable.material.has(GpuGroundCover.Wind.TYPE)) {
                 // Grass intersects the ground at depth-buffer precision. Keep its original tie winners,
@@ -29,7 +38,8 @@ final class GpuOpaqueSorter extends DefaultRenderableSorter {
             }
             // Allocation identity used to reshuffle groups when programs were recreated, changing depth ties
             // and early depth rejection. Encounter order is stable for the same submitted scene.
-            shaderOrder.computeIfAbsent(renderable.shader, ignored -> shaderOrder.size());
+            shaderOrder.computeIfAbsent(renderable.shader,
+                  shader -> groupOrder.computeIfAbsent(group.apply(shader), ignored -> groupOrder.size()));
         }
         super.sort(camera, renderables);
     }

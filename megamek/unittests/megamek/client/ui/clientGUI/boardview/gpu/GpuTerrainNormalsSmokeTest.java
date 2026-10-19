@@ -28,8 +28,6 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -62,18 +60,16 @@ class GpuTerrainNormalsSmokeTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create(new Board(15, 9, hexes))) {
             SwingUtilities.invokeAndWait(fixture.source::refresh);
             BoardScene captured = fixture.source.takeFrame().scene();
-            // Exercise the retained artwork-atlas path. Physical base maps and living cover have their own native test.
+            // Isolate the retained artwork-atlas path. Current scenery conversion can put 3D objects on rubble,
+            // so omit features that would occlude the normal-map samples; physical models have their own native tests.
             List<BoardScene.Tile> atlasTiles = captured.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
                   tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(),
-                  tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(),
+                  tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), List.of(), tile.text(),
                   tile.liquid(), tile.tileset(), false)).toList();
             BoardScene scene = new BoardScene(0, 15, 9, atlasTiles, List.of(), List.of(), -1, "", List.of(),
                   new BoardScene.Light(30, -20));
             for (BoardScene.Tile tile : scene.tiles()) {
                 assertNotNull(tile.normals(), "Every captured ground image carries its pre-generated normal layer");
-                assertTrue(tile.features().stream().allMatch(feature -> feature.kind() == BoardScene.FeatureKind.SCATTER
-                            || feature.kind() == BoardScene.FeatureKind.BOULDER),
-                      "Ground detail consists of cosmetic scatter or rough boulders");
                 assertNull(tile.decals(), "Painted stones belong in the ground, not an overlay hiding its lighting");
             }
             var configuration = GpuBoardWindow.configuration(false);
@@ -82,17 +78,8 @@ class GpuTerrainNormalsSmokeTest {
                 @Override
                 public void create() {
                     GpuTerrain terrain = null;
-                    GpuBoardSkin skin = null;
-                    try {
+                    try (var outputFrame = new GpuSceneTestOutput()) {
                         checkAtlas();
-                        skin = new GpuBoardSkin();
-                        GpuBoardTuning tuning = new GpuBoardTuning(skin.skin);
-                        CheckBox toggle = GpuBoardTestUi.tuning(tuning, "tuning-normal-maps");
-                        assertTrue(tuning.normalMaps(), "Normal maps start enabled");
-                        GpuBoardTestUi.pressTuning(toggle);
-                        assertFalse(tuning.normalMaps(), "The checkbox switches normal mapping off");
-                        GpuBoardTestUi.pressTuning(tuning.defaults());
-                        assertTrue(tuning.normalMaps(), "Defaults restores normal mapping");
                         terrain = new GpuTerrain();
                         BoardCamera camera = new BoardCamera();
                         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -105,16 +92,14 @@ class GpuTerrainNormalsSmokeTest {
                             camera.camera.zoom = 0.2f;
                             camera.center(BoardGeometry.center(target, 0));
                             terrain.update(scene);
-                            int[] mapped = samples(terrain, camera, target);
-                            toggle.setChecked(false);
-                            terrain.setNormalMaps(tuning.normalMaps());
-                            int[] disabled = samples(terrain, camera, target);
-                            toggle.setChecked(true);
-                            terrain.setNormalMaps(tuning.normalMaps());
-                            assertArrayEquals(mapped, samples(terrain, camera, target),
+                            int[] mapped = samples(outputFrame, terrain, camera, target);
+                            terrain.setNormalMaps(false);
+                            int[] disabled = samples(outputFrame, terrain, camera, target);
+                            terrain.setNormalMaps(true);
+                            assertArrayEquals(mapped, samples(outputFrame, terrain, camera, target),
                                   "Re-enabling restores the same lighting without a scene or atlas update");
                             terrain.update(flat);
-                            int[] neutral = samples(terrain, camera, target);
+                            int[] neutral = samples(outputFrame, terrain, camera, target);
                             assertArrayEquals(neutral, disabled, "Disabling normals matches the flat map reference");
                             if (family == 3) {
                                 assertArrayEquals(neutral, mapped, "Pavement must retain exactly flat lighting");
@@ -130,19 +115,15 @@ class GpuTerrainNormalsSmokeTest {
                         }
                         terrain.update(scene);
                         terrain.renderShadows(List.of());
-                        preview(terrain, camera, true);
-                        toggle.setChecked(false);
-                        terrain.setNormalMaps(tuning.normalMaps());
-                        preview(terrain, camera, false);
+                        preview(outputFrame, terrain, camera, true);
+                        terrain.setNormalMaps(false);
+                        preview(outputFrame, terrain, camera, false);
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     } catch (Throwable error) {
                         failure.set(error);
                     } finally {
                         if (terrain != null) {
                             terrain.dispose();
-                        }
-                        if (skin != null) {
-                            skin.dispose();
                         }
                         Gdx.app.exit();
                     }
@@ -207,9 +188,10 @@ class GpuTerrainNormalsSmokeTest {
         return new BoardScene.Pixels(image);
     }
 
-    private static int[] samples(GpuTerrain terrain, BoardCamera camera, Coords target) {
-        ScreenUtils.clear(0.03f, 0.045f, 0.06f, 1, true);
+    private static int[] samples(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, Coords target) {
+        outputFrame.begin(0.03f, 0.045f, 0.06f, 1);
         terrain.render(camera.camera, false);
+        outputFrame.display();
         Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {
             int[] samples = new int[21 * 21];
@@ -226,10 +208,10 @@ class GpuTerrainNormalsSmokeTest {
         }
     }
 
-    private static void preview(GpuTerrain terrain, BoardCamera camera, boolean mapped) {
+    private static void preview(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, boolean mapped) {
         int width = Gdx.graphics.getWidth(), height = Gdx.graphics.getHeight();
         int panelWidth = width / 3, panelHeight = (height - 130) / 2;
-        ScreenUtils.clear(0.03f, 0.045f, 0.06f, 1, true);
+        outputFrame.begin(0.03f, 0.045f, 0.06f, 1);
         for (int row = 0; row < 2; row++) {
             for (int family = 0; family < 3; family++) {
                 HdpiUtils.glViewport(family * panelWidth + 8, row * (panelHeight + 35) + 15, panelWidth - 16, panelHeight);
@@ -241,6 +223,7 @@ class GpuTerrainNormalsSmokeTest {
             }
         }
         HdpiUtils.glViewport(0, 0, width, height);
+        outputFrame.display();
         SpriteBatch labels = new SpriteBatch();
         BitmapFont font = new BitmapFont();
         try {

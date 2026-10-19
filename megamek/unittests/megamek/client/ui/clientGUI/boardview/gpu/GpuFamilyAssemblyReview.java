@@ -15,7 +15,6 @@ import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalShadowLight;
@@ -255,7 +254,7 @@ final class GpuFamilyAssemblyReview {
             var picker = new UnitPicking();
             var camera = new BoardCamera();
             camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-            try {
+            try (var output = new GpuSceneTestOutput()) {
                 terrain.update(scene);
                 Vector3 ground = BoardGeometry.center(unit.location().coords(), unit.location().elevation());
                 for (boolean top : List.of(false, true)) {
@@ -275,13 +274,12 @@ final class GpuFamilyAssemblyReview {
                     var terrainHit = terrain.hit(scene, ray);
                     assertTrue(terrainHit == null || unitHit < terrainHit.distance(), "Hull is in front of the board");
                     terrain.renderShadows(camera.camera, List.of(model.instance));
-                    Gdx.gl.glViewport(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    Gdx.gl.glClearColor(.12f, .16f, .2f, 1);
-                    Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+                    output.begin(.12f, .16f, .2f, 1);
                     terrain.render(camera.camera, false);
                     batch.begin(camera.camera);
                     batch.render(model.instance, terrain.environment());
                     batch.end();
+                    output.display();
                     GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"),
                           "runtime-union-terrain-" + (top ? "top" : "isometric") + ".png"));
                 }
@@ -337,16 +335,24 @@ final class GpuFamilyAssemblyReview {
     }
 
     static long shadowChecksum(GpuTerrain terrain) {
+        var checksum = new java.util.zip.CRC32();
+        checksum.update(shadowDepth(terrain));
+        return checksum.getValue();
+    }
+
+    static byte[] shadowDepth(GpuTerrain terrain) {
         var buffer = ((DirectionalShadowLight) terrain.environment().shadowMap).getFrameBuffer();
         buffer.begin();
-        Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, buffer.getWidth(), buffer.getHeight());
-        try {
-            var checksum = new java.util.zip.CRC32();
-            checksum.update(pixels.getPixels());
-            return checksum.getValue();
-        } finally {
-            pixels.dispose();
-            buffer.end();
-        }
+        try { return depthPixels(buffer.getWidth(), buffer.getHeight()); }
+        finally { buffer.end(); }
+    }
+
+    /** Read the tested attachment itself, without color encoding or an extra sampling pass. */
+    static byte[] depthPixels(int width, int height) {
+        var pixels = com.badlogic.gdx.utils.BufferUtils.newByteBuffer(width * height * Integer.BYTES);
+        Gdx.gl.glReadPixels(0, 0, width, height, GL20.GL_DEPTH_COMPONENT, GL20.GL_UNSIGNED_INT, pixels);
+        byte[] bytes = new byte[pixels.capacity()];
+        pixels.get(bytes);
+        return bytes;
     }
 }

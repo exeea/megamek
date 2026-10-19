@@ -78,6 +78,8 @@ class GpuVerticalScarsSmokeTest {
             int[] clean = pixels();
             GpuReviewFrame.save(new File(output, "cliff-clean.png"));
             var report = new StringBuilder(Gdx.gl.glGetString(GL20.GL_RENDERER)).append("; 1200x900, deformed cliff\n");
+            var allocationReport = new File(output, "allocation.txt").toPath();
+            Files.writeString(allocationReport, report);
             GpuGroundDamage.Impact last = null;
             for (String[] sample : new String[][] {
                   { "ppc-blast", "ISPPC", "normal" }, { "ppc-gouge", "ISPPC", "grazing" },
@@ -101,8 +103,15 @@ class GpuVerticalScarsSmokeTest {
                 frame.render(terrain, camera, scene);
                 Gdx.gl.glFinish();
                 double creation = (System.nanoTime() - start) / 1e6;
+                float radius = last.radius(last.style(contact.surface().face()));
+                String allocation = sample[0] + ": tiles=" + terrain.surfaceScars().tileCount()
+                      + ", triangles=" + terrain.surfaceScars().triangleCount()
+                      + ", radiusMetres=" + radius / BoardRelief.metres(1)
+                      + ", tileMetres=" + terrain.groundDamage().tileWorldSize() / BoardRelief.metres(1)
+                      + ", point=" + contact.point() + "\n";
+                Files.writeString(allocationReport, allocation, java.nio.file.StandardOpenOption.APPEND);
                 assertTrue(terrain.surfaceScars().tileCount() > 0, sample[0] + " must allocate a wall receiver");
-                assertTrue(terrain.surfaceScars().tileCount() <= 16, sample[0] + " must only allocate nearby wall tiles");
+                var allocated = checkAllocation(terrain, last, normal(contact.surface().face()), allocationReport);
                 assertTrue(terrain.surfaceScars().triangleCount() > 2, "The patch must follow the deformed receiver");
                 for (int warmup = 0; warmup < 3; warmup++) { frame.render(terrain, camera, scene); }
                 int changed = differences(clean, pixels());
@@ -111,6 +120,14 @@ class GpuVerticalScarsSmokeTest {
                 report.append(sample[0]).append(": ").append(terrain.surfaceScars().tileCount()).append(" tiles, ")
                       .append(terrain.surfaceScars().triangleCount()).append(" triangles, ").append(changed)
                       .append(" changed pixels, first frame including projection/shader/upload ms=").append(creation).append('\n');
+                int allocatedLayers = terrain.groundDamage().tileCount();
+                int allocatedTriangles = terrain.surfaceScars().triangleCount();
+                // Repaint the identical brush through the real projection path, bypassing only event-key deduplication.
+                terrain.surfaceScars().add(last);
+                frame.render(terrain, camera, scene);
+                assertEquals(allocated, scarField(terrain.surfaceScars(), "tiles"), sample[0] + " must reuse page objects");
+                assertEquals(allocatedLayers, terrain.groundDamage().tileCount(), sample[0] + " must reuse image layers");
+                assertEquals(allocatedTriangles, terrain.surfaceScars().triangleCount(), sample[0] + " must reuse geometry");
             }
             int tiles = terrain.surfaceScars().tileCount(), triangles = terrain.surfaceScars().triangleCount();
             profiler.enable();
@@ -165,6 +182,92 @@ class GpuVerticalScarsSmokeTest {
         } finally { profiler.disable(); terrain.dispose(); frame.dispose(); }
     }
 
+    /** Inspect the actual sparse pages; a page count alone cannot bound a multi-owner, six-projection scar. */
+    private static java.util.Map<?, ?> checkAllocation(GpuTerrain terrain, GpuGroundDamage.Impact impact,
+          Vector3 normal, java.nio.file.Path report) throws Exception {
+        var pages = (java.util.Map<?, ?>) scarField(terrain.surfaceScars(), "tiles");
+        var layers = new java.util.HashSet<Integer>();
+        float size = terrain.groundDamage().tileWorldSize();
+        float radius = impact.radius(impact.style(normal));
+        var brush = terrain.groundDamage().brush(impact.style(normal), radius, impact.strength(), impact.key().hashCode());
+        assertNotNull(brush);
+        Vector3 along = impact.incoming().mulAdd(normal, -impact.incoming().dot(normal));
+        if (along.len2() < .000001f) { along = new Vector3(0, 0, 1).crs(normal); }
+        if (along.len2() < .000001f) { along.set(1, 0, 0); }
+        along.nor();
+        var basis = new Vector3[] { along, normal.cpy().crs(along).nor(), normal };
+        float[] half = { radius, radius * brush.aspect(), radius };
+        var center = new float[] { impact.point().x, impact.point().y, impact.point().z };
+        float epsilon = 32 * Math.ulp(Math.max(size, Math.max(Math.abs(center[0]),
+              Math.max(Math.abs(center[1]), Math.abs(center[2])))));
+        float texel = size / GpuGroundDamage.TILE_INTERIOR;
+        for (var entry : pages.entrySet().stream().sorted(java.util.Comparator.comparing(e -> e.getKey().toString())).toList()) {
+            Object key = entry.getKey(), page = entry.getValue();
+            assertEquals(key, scarField(page, "key"));
+            var owner = (GpuSurfaceScars.Receiver) scarField(key, "receiver");
+            assertEquals(owner.owner(), owner, "Mesh/material ranges must share their paint owner");
+            int signedAxis = (int) scarField(key, "axis"), axis = signedAxis % 3;
+            assertTrue(signedAxis >= 0 && signedAxis < 6, key.toString());
+            float[] base = { (int) scarField(key, "x") * size, (int) scarField(key, "y") * size,
+                  (int) scarField(key, "z") * size };
+            for (int k = 0; k < 3; k++) {
+                assertTrue(base[k] <= center[k] + radius + epsilon && base[k] + size >= center[k] - radius - epsilon,
+                      "A page cell must intersect the impact's local world bounds: " + key);
+            }
+            var image = (GpuGroundDamage.Tile) scarField(page, "image");
+            assertNotNull(image, key.toString());
+            assertTrue(layers.add(image.layer()), "Distinct pages must not alias one image layer: " + key);
+            int painted = 0;
+            int u = axis == 0 ? 1 : 0, v = axis == 2 ? 1 : 2;
+            float[] delta = new float[3];
+            for (int y = 0; y < GpuGroundDamage.TILE_SIZE; y++) for (int x = 0; x < GpuGroundDamage.TILE_SIZE; x++) {
+                if ((image.texels().get(y * GpuGroundDamage.TILE_SIZE + x) >>> 24) == 0) { continue; }
+                painted++;
+                delta[u] = base[u] + (x - GpuGroundDamage.TILE_BORDER + .5f) * texel - center[u];
+                delta[v] = base[v] + (y - GpuGroundDamage.TILE_BORDER + .5f) * texel - center[v];
+                // A projected texel must admit a depth inside both its bordered cell and the oriented brush prism.
+                float low = base[axis] - GpuGroundDamage.TILE_BORDER * texel - center[axis];
+                float high = base[axis] + size + GpuGroundDamage.TILE_BORDER * texel - center[axis];
+                for (int k = 0; k < 3; k++) {
+                    Vector3 b = basis[k];
+                    float slope = axis == 0 ? b.x : axis == 1 ? b.y : b.z;
+                    float fixed = b.x * delta[0] + b.y * delta[1] + b.z * delta[2];
+                    if (Math.abs(slope) < 1e-7f) {
+                        assertTrue(Math.abs(fixed) <= half[k] + epsilon, "Paint outside brush support: " + key);
+                    } else {
+                        float a = (-half[k] - epsilon - fixed) / slope, z = (half[k] + epsilon - fixed) / slope;
+                        low = Math.max(low, Math.min(a, z));
+                        high = Math.min(high, Math.max(a, z));
+                    }
+                }
+                assertTrue(low <= high + epsilon, "Paint outside brush/cell depth support: " + key + " texel " + x + "," + y);
+            }
+            assertTrue(painted > 0, "An allocated page must contain actual paint: " + key);
+            int triangles = (int) scarField(page, "triangles");
+            var bounds = (com.badlogic.gdx.math.collision.BoundingBox) scarField(page, "bounds");
+            if (triangles > 0) {
+                assertTrue(bounds.isValid(), key.toString());
+                float[] minimum = { bounds.min.x, bounds.min.y, bounds.min.z };
+                float[] maximum = { bounds.max.x, bounds.max.y, bounds.max.z };
+                for (int k = 0; k < 3; k++) {
+                    assertTrue(minimum[k] >= base[k] - epsilon && maximum[k] <= base[k] + size + epsilon,
+                          "Overlay geometry must stay in its keyed cell: " + key);
+                }
+            }
+            Files.writeString(report, "  " + key + ", layer=" + image.layer() + ", cell=" + Arrays.toString(base)
+                  + ", paintedTexels=" + painted + ", triangles=" + triangles + ", bounds=" + bounds + "\n",
+                  java.nio.file.StandardOpenOption.APPEND);
+        }
+        assertEquals(pages.size(), layers.size());
+        return java.util.Map.copyOf(pages);
+    }
+
+    private static Object scarField(Object owner, String name) throws ReflectiveOperationException {
+        var field = owner.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(owner);
+    }
+
     private static void reviewBuilding() throws Exception {
         var board = new Board(7, 7);
         for (int x = 0; x < 7; x++) for (int y = 0; y < 7; y++) { board.setHex(new Coords(x, y), new Hex(0)); }
@@ -196,9 +299,12 @@ class GpuVerticalScarsSmokeTest {
             var contact = mark.attack().landscapeContact(t -> origin.cpy().lerp(aim, (float) t), 1);
             assertNotNull(contact);
             assertEquals("building", contact.surface().receiver());
+            int programs = GpuShaderLoadSmokeTest.programs(terrain);
             terrain.impact(scene, new GpuGroundDamage.Impact(mark.attack(), "building", origin, contact.point(), mark.effect(), mark.shot()));
             for (int i = 0; i < 4; i++) { frame.render(terrain, camera, scene); }
             assertTrue(terrain.surfaceScars().tileCount() > 0, "A building wall must receive a scar");
+            assertEquals(programs, GpuShaderLoadSmokeTest.programs(terrain),
+                  "The scar draws with the wall's own program");
             assertTrue(differences(clean, pixels()) > 100, "The native model material must display the wall scar");
             GpuReviewFrame.save(new File(output, "building-ac20.png"));
             int masks = terrain.surfaceScars().tileCount();

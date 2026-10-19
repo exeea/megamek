@@ -394,6 +394,65 @@ class GpuPlaybackCameraTest {
     }
 
     @Test
+    void historicalAttackReviewKeepsItsFrameAfterCompletionUntilALaterLocateRequest() throws Exception {
+        var attacker = UnitPlaybackTest.unit(2, 2);
+        var target = UnitPlaybackTest.unit(1, 0);
+        var next = UnitPlaybackTest.unit(3, 11);
+        var shot = UnitPlaybackTest.attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
+        for (boolean isometric : List.of(false, true)) {
+            var view = view(isometric);
+            try {
+                var playback = playback(view);
+                var initial = scene(target.id(), target, attacker, next);
+                view.updateCameraFocus(initial, INITIAL_CENTER);
+                view.boardCamera.camera.zoom = .5f;
+                view.boardCamera.center(BoardGeometry.center(target.location().coords(), 0));
+                playback.review(shot);
+                playback.advance(0, UnitMotion.Speed.NORMAL, state -> view.preparePlaybackCamera(state, initial));
+                focus(view, playback, initial);
+                view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+                assertTrue(playback.reviewing());
+                BoardCameraFramingTest.assertVisible(view.boardCamera, 800, attacker);
+                BoardCameraFramingTest.assertVisible(view.boardCamera, 800, target);
+                var framed = view.boardCamera.focus.cpy();
+                var eye = view.boardCamera.camera.position.cpy();
+                var direction = view.boardCamera.camera.direction.cpy();
+                float zoom = view.boardCamera.camera.zoom;
+                var nextScreen = view.boardCamera.camera.project(BoardGeometry.center(next.location().coords(), 0),
+                      0, 0, 800, 600);
+                assertTrue(nextScreen.x < 0 || nextScreen.x > 800 || nextScreen.y < 0 || nextScreen.y > 600,
+                      "The next live selection must require a different frame, so keeping the review is observable");
+
+                var latest = scene(next.id(), target, attacker, next);
+                focus(view, playback, latest);
+                playback.advance(playback.attack().duration / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL,
+                      state -> view.preparePlaybackCamera(state, latest));
+                assertFalse(playback.reviewing());
+                assertFalse(playback.busy());
+                for (int idleFrame = 0; idleFrame < 3; idleFrame++) {
+                    focus(view, playback, latest);
+                    assertFalse(view.boardCamera.isFraming(), "A completed historical review must not locate the live selection");
+                    view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+                    assertEquals(framed, view.boardCamera.focus);
+                    assertEquals(eye, view.boardCamera.camera.position);
+                    assertEquals(direction, view.boardCamera.camera.direction);
+                    assertEquals(zoom, view.boardCamera.camera.zoom);
+                }
+
+                view.updateCameraFocus(latest, new BoardFocus(2, next.location().coords(), next.id()));
+                assertTrue(view.boardCamera.isFraming(), "A later explicit locate request still takes camera control");
+                assertEquals(framed, view.boardCamera.focus, "Explicit navigation retains its normal transition");
+                view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+                assertFalse(view.boardCamera.isFraming());
+                assertFalse(framed.epsilonEquals(view.boardCamera.focus, .001f));
+                BoardCameraFramingTest.assertVisible(view.boardCamera, 800, next);
+            } finally {
+                view.dispose();
+            }
+        }
+    }
+
+    @Test
     void skippingMovementDoesNotStartAnotherCameraMoveWhenSelectionHasNotChanged() throws Exception {
         var selected = UnitPlaybackTest.unit(1, 0);
         var enemy = movement(2, 7, 9);

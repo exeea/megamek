@@ -37,14 +37,14 @@ class GpuRoadBatchSmokeTest {
             @Override
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
-                boolean lod = TerrainLod.enabled();
+                var lod = TerrainLod.tuning();
                 var weather = new BoardAtmosphere.Settings(13, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT,
                       0, 0, BoardAtmosphere.Effects.NONE);
                 var frame = new GpuReviewFrame(weather);
                 GLProfiler profiler = new GLProfiler(Gdx.graphics);
                 GL20 raw = Gdx.gl20;
                 try {
-                    TerrainLod.setEnabled(false);
+                    TerrainLod.tune(new TerrainLod.Tuning(1, 1));
                     terrain.setGrass(false);
                     BoardCamera camera = new BoardCamera();
                     camera.resize(960, 720);
@@ -99,7 +99,7 @@ class GpuRoadBatchSmokeTest {
                 } catch (Throwable error) { failure.set(error); }
                 finally {
                     if (profiler.isEnabled()) { GpuStageTimings.stopCounting(profiler, raw); }
-                    terrain.dispose(); frame.dispose(); TerrainLod.setEnabled(lod); Gdx.app.exit();
+                    terrain.dispose(); frame.dispose(); TerrainLod.tune(lod); Gdx.app.exit();
                 }
             }
         }, config);

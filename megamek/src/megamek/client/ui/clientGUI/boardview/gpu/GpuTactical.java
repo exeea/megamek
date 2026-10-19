@@ -712,6 +712,13 @@ final class GpuTactical implements Disposable {
         return electronicWarfare;
     }
 
+    /** Links the hex mask and ECM programs now (GpuBattleView's warm-up), not when the first one shows. */
+    void prepare() {
+        hexMasks.prepare();
+        deploymentTint.prepare();
+        electronicWarfare.prepare();
+    }
+
     @Override
     public void dispose() {
         if (rulerShapes != null) { rulerShapes.dispose(); rulerShapes = null; }

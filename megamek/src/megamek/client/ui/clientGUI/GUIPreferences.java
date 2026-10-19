@@ -324,6 +324,18 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String GUI_SCALE = "GUIScale";
     public static final String BOARD_VIEW_3D = "BoardView3D";
     public static final String BOARD_VIEW_3D_GRAPHICS_CARD = "BoardView3DGraphicsCard";
+    /** The 3D board's anti-aliasing, a choice of its Tuning panel: OFF or SMAA. */
+    public static final String BOARD_ANTI_ALIASING = "BoardAntiAliasing";
+    /** Whether the 3D board widens highlights by the surface normal's variance over a pixel. */
+    public static final String BOARD_SPECULAR_ANTI_ALIASING = "BoardSpecularAntiAliasing";
+    /** Whether the 3D board shades surfaces with their materials' normal maps. */
+    public static final String BOARD_NORMAL_MAPS = "BoardNormalMaps";
+    /** Whether the 3D board darkens the sky light in creases by screen-space ambient occlusion. */
+    public static final String BOARD_AMBIENT_OCCLUSION = "BoardAmbientOcclusion";
+    /** The 3D board's UI scale, a choice of its Tuning panel: the share (0.5 to 1) of the scale the window sets. */
+    public static final String BOARD_UI_SCALE = "BoardUiScale";
+    /** The 3D board's render resolution, a choice of its Tuning panel: the share (0.5 to 1) of the window's pixels. */
+    public static final String BOARD_RENDER_RESOLUTION = "BoardRenderResolution";
     /** The 3D board's graphics, a {@link BoardGraphics} name. */
     public static final String BOARD_GRAPHICS = "BoardGraphics";
     /** The 3D board editor's Layers share of its right column; negative: their natural height. */
@@ -880,7 +892,13 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(CONSTRUCTOR_FACTOR_WARNING, true);
         store.setDefault(GUI_SCALE, 1);
         store.setDefault(BOARD_VIEW_3D, true);
-        store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "SYSTEM");
+        store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "DISCRETE");
+        store.setDefault(BOARD_ANTI_ALIASING, "OFF");
+        store.setDefault(BOARD_SPECULAR_ANTI_ALIASING, true);
+        store.setDefault(BOARD_NORMAL_MAPS, true);
+        store.setDefault(BOARD_AMBIENT_OCCLUSION, false);
+        store.setDefault(BOARD_UI_SCALE, 1f);
+        store.setDefault(BOARD_RENDER_RESOLUTION, 1f);
         store.setDefault(BOARD_GRAPHICS, BoardGraphics.ENHANCED.name());
         store.setDefault(BOARD_EDITOR_LAYERS_SPLIT, -1f);
         store.setDefault(BOARD_EDITOR_SIDE_VIEW, true);
@@ -1932,13 +1950,66 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setValue(BOARD_VIEW_3D, use3D);
     }
 
-    /** The graphics card the 3D board asks for on computers with two: SYSTEM, INTEGRATED or DISCRETE. */
+    /** The graphics card the 3D board asks for on computers with two: INTEGRATED or DISCRETE. */
     public String getBoardGraphicsCard() {
         return store.getString(BOARD_VIEW_3D_GRAPHICS_CARD);
     }
 
     public void setBoardGraphicsCard(String card) {
         store.setValue(BOARD_VIEW_3D_GRAPHICS_CARD, card);
+    }
+
+    /** The 3D board's anti-aliasing: OFF or SMAA. */
+    public String getBoardAntiAliasing() {
+        return store.getString(BOARD_ANTI_ALIASING);
+    }
+
+    public void setBoardAntiAliasing(String antiAliasing) {
+        store.setValue(BOARD_ANTI_ALIASING, antiAliasing);
+    }
+
+    /** Whether the 3D board's specular anti-aliasing is on. */
+    public boolean getBoardSpecularAntiAliasing() {
+        return store.getBoolean(BOARD_SPECULAR_ANTI_ALIASING);
+    }
+
+    public void setBoardSpecularAntiAliasing(boolean enabled) {
+        store.setValue(BOARD_SPECULAR_ANTI_ALIASING, enabled);
+    }
+
+    public boolean getBoardNormalMaps() {
+        return store.getBoolean(BOARD_NORMAL_MAPS);
+    }
+
+    public void setBoardNormalMaps(boolean enabled) {
+        store.setValue(BOARD_NORMAL_MAPS, enabled);
+    }
+
+    /** Whether the 3D board's ambient occlusion is on. */
+    public boolean getBoardAmbientOcclusion() {
+        return store.getBoolean(BOARD_AMBIENT_OCCLUSION);
+    }
+
+    public void setBoardAmbientOcclusion(boolean enabled) {
+        store.setValue(BOARD_AMBIENT_OCCLUSION, enabled);
+    }
+
+    /** The 3D board's UI scale: the share of the scale its window takes from the display and the window size. */
+    public float getBoardUiScale() {
+        return store.getFloat(BOARD_UI_SCALE);
+    }
+
+    public void setBoardUiScale(float scale) {
+        store.setValue(BOARD_UI_SCALE, scale);
+    }
+
+    /** The 3D board's render resolution: the share of the window's pixels its 3D scene renders. */
+    public float getBoardRenderResolution() {
+        return store.getFloat(BOARD_RENDER_RESOLUTION);
+    }
+
+    public void setBoardRenderResolution(float resolution) {
+        store.setValue(BOARD_RENDER_RESOLUTION, resolution);
     }
 
     /** Classic or Enhanced 3D graphics; unlike the graphics card, a change applies at once. */

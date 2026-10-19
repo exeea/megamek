@@ -1,5 +1,5 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-// Shared mapped normal, rain film and lighting for authored ground and road materials.
+// Shared mapped normal and rain film of authored ground and road materials, lit by shadeSurface.
 #if defined(normalTextureFlag) || defined(roadCoatFlag)
 // A normal map texel applied to the surface normal, when normal maps are on.
 vec3 mappedNormal(vec4 texel, float strength) {
@@ -29,24 +29,23 @@ float groundPuddle(float wet, float response) {
           * smoothstep(0.97, 0.999, v_normal.z) * u_rainDetail;
 }
 
-void groundFilm(inout vec3 albedo, inout vec3 normal, float puddle) {
+void groundFilm(inout vec3 normal, float puddle) {
     if (puddle > 0.0) {
-        albedo *= 1.0 - 0.18 * puddle;
         vec3 waterNormal = normalize(vec3(rainRipples(v_cloudPosition.xy * u_rainScale), 1.0));
         normal = normalize(mix(normal, waterNormal, puddle));
+        // A puddle lies flat over the relief.
+        surfaceVariance *= 1.0 - puddle;
     }
 }
 
-vec3 groundLighting(vec3 albedo, vec3 normal, float wet, float response, float puddle, float roughness, float occlusion) {
+vec3 groundLighting(vec3 albedo, vec3 normal, vec3 geometric, float wet, float response, float puddle, float roughness, float occlusion) {
+    albedo = materialReflectance(albedo);
 #ifdef lightingFlag
-    albedo = toLinear(albedo);
-    vec3 ambient, direct, sheen;
-    surfaceLighting(normal, wet * mix(response, 1.0, puddle), roughness, ambient, direct, sheen);
-    ambient *= occlusion;
-    albedo *= ambient + direct;
-    albedo += sheen;
-    albedo = toDisplay(albedo);
-    if (puddle > 0.0) { albedo = rainReflection(albedo, normal, puddle); }
+    normal = shadingNormal(normal, geometric, -viewDirection());
+    Surface ground = opaqueSurface(albedo, normal, geometric, roughness, wet * mix(response, 1.0, puddle),
+          surfaceVisibility());
+    ground.occlusion = ground.specularOcclusion = occlusion;
+    albedo = shadeSurface(ground);
 #endif
     return albedo;
 }

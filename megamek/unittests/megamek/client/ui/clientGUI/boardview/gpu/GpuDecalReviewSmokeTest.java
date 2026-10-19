@@ -265,6 +265,12 @@ class GpuDecalReviewSmokeTest {
               List.of(new Shot("overview", new Coords(19, 4), 1.65f, false))));
         views.put("emblems", new View(GpuLegacyImportSmokeTest.scene(emblems(emblems, true)), emblemShots));
         views.put("car-parks", new View(GpuLegacyImportSmokeTest.scene(carParks(parks)), parkShots));
+        views.put("level-crossing", new View(GpuLegacyImportSmokeTest.scene(
+              emblems(List.of("decal/rail/level-crossing"), true)), List.of(
+              new Shot("top", new Coords(1, 4), .45f, false),
+              new Shot("oblique", new Coords(1, 4), .45f, true),
+              new Shot("close", new Coords(1, 1), .06f, false),
+              new Shot("close-oblique", new Coords(1, 1), .06f, true))));
         views.put("template-imported", new View(GpuLegacyImportSmokeTest.scene(templateImported), templateShots));
         views.put("spaceport-imported", new View(GpuLegacyImportSmokeTest.scene(districtImported), districtShots));
         List<Shot> roadShots = new ArrayList<>(List.of(new Shot("overview", new Coords(PARK_HEXES.length, 1), 1, false),

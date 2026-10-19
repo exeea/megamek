@@ -15,7 +15,6 @@ import javax.imageio.ImageIO;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -26,9 +25,7 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.common.ResolvedAttack;
 import megamek.common.equipment.EquipmentType;
@@ -46,8 +43,8 @@ class GpuTagDesignatorSmokeTest {
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
-                FrameBuffer buffer = null;
-                var batch = new ModelBatch();
+                GpuSceneTestOutput buffer = null;
+                var batch = new ModelBatch(GpuUnitShader.provider());
                 Model groundModel = null;
                 try {
                     EquipmentType.initializeTypes();
@@ -55,7 +52,7 @@ class GpuTagDesignatorSmokeTest {
                     assertTrue(folder.isDirectory() || folder.mkdirs());
                     ImageIO.write(symbol(GpuMarkers.artwork(BoardMarker.Kind.TAGGED)), "png",
                           new File(folder, "tagged-marker-symbol.png"));
-                    buffer = GpuAtmosphere.buffer(SIZE, SIZE, true);
+                    buffer = new GpuSceneTestOutput(SIZE, SIZE);
                     groundModel = new ModelBuilder().createBox(4000, 4000, 1,
                           new Material(ColorAttribute.createDiffuse(.36f, .38f, .33f, 1)),
                           VertexAttributes.Usage.Position);
@@ -82,19 +79,19 @@ class GpuTagDesignatorSmokeTest {
                             int count = Math.round(shot.duration * 15);
                             for (int index = 0; index <= count; index++) {
                                 shot.seconds = Math.min(shot.duration, index / 15f);
-                                buffer.begin();
+                                buffer.begin(.62f, .66f, .72f, 1);
                                 try {
-                                    ScreenUtils.clear(new Color(.62f, .66f, .72f, 1), true);
                                     batch.begin(camera);
                                     batch.render(ground);
                                     batch.end();
                                     effects.update(List.of(shot), null, Map.of());
                                     effects.render(camera);
                                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                                    buffer.display();
                                     ImageIO.write(snapshot(), "png",
                                           new File(frames, String.format("frame-%03d.png", index)));
                                 } finally {
-                                    buffer.end();
+                                    buffer.pixels().end();
                                 }
                             }
                         } finally {
@@ -109,7 +106,7 @@ class GpuTagDesignatorSmokeTest {
                         groundModel.dispose();
                     }
                     if (buffer != null) {
-                        buffer.dispose();
+                        buffer.close();
                     }
                     Gdx.app.exit();
                 }

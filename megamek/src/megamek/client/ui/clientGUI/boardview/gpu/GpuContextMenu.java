@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.IntConsumer;
 import java.util.stream.IntStream;
@@ -15,13 +16,13 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay.FiringCommand;
-import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
@@ -38,7 +39,6 @@ import megamek.common.units.Entity;
 final class GpuContextMenu implements GpuHud.Component {
     /** The dock's More opens this far left of its button (app.js pop:more). */
     private static final float MORE_SHIFT = -150;
-    private static final String CENTER_CAMERA = "GpuBoard.hud.common.centerCamera";
     private static final String SEPARATOR = " \u00B7 ";
 
     private final UiKit ui;
@@ -59,8 +59,9 @@ final class GpuContextMenu implements GpuHud.Component {
     private UnitStatus menuUnit;
     /** Whether the open hex or unit menu lists MegaMek's map menu, which a later frame brings. */
     private boolean mapListed;
-    /** The units the open unit or hex menu's first items select or inspect ({@link #listed}); empty otherwise. */
-    private List<Integer> listed = List.of();
+    /** The published turn and board that own the open context menu; a change closes it before another actor can act. */
+    private GpuBattleStatus.Snapshot menuOwner;
+    private long menuBoardGeneration;
     /** The world height of the terrain the pointer hit where the open menu opened; NaN for none. */
     private float pointedZ = Float.NaN;
     /** The frame parts the open hex menu last showed; a capture publishes new ones. */
@@ -93,8 +94,15 @@ final class GpuContextMenu implements GpuHud.Component {
         this.inputs = inputs;
         if (!popover.isVisible()) {
             closed();
-        } else if (hex != null) {
-            showHex();
+        } else if (hex != null || menuUnit != null) {
+            GpuBattleStatus.Snapshot now = inputs.frame().status();
+            if (menuOwner != null && (menuOwner.round() != now.round() || menuOwner.phase() != now.phase()
+                  || menuOwner.myTurn() != now.myTurn() || menuOwner.turnIndex() != now.turnIndex()
+                  || menuOwner.actorId() != now.actorId() || menuBoardGeneration != inputs.frame().boardGeneration())) {
+                cancel();
+            } else {
+                showHex();
+            }
         }
     }
 
@@ -116,18 +124,17 @@ final class GpuContextMenu implements GpuHud.Component {
 
     /** Forgets a closed hex or unit menu and the hex context it asked the source for. */
     private void closed() {
-        menuUnit = null;
-        listed = List.of();
-        if (hex != null) {
+        if (hex != null || menuUnit != null) {
             hex = null;
+            menuUnit = null;
             source.inspect(null);
         }
+        menuOwner = null;
     }
 
     /**
      * Opens the menu of the unit, or of the hex without one, at stage point (x, y): an own or allied unit (M2), an
-     * identified enemy (M3), a sensor contact (M4) or the hex (M5). Each starts with an item for every unit in
-     * {@code coords} ({@link #unitEntries}).
+     * identified enemy (M3), a sensor contact (M4) or the hex (M5). Unit and game actions come from {@link MapMenu}.
      */
     void open(Coords coords, int unitId, float x, float y) {
         open(coords, unitId, x, y, Float.NaN);
@@ -147,163 +154,53 @@ final class GpuContextMenu implements GpuHud.Component {
         if (unit == null && (coords == null || inputs.frame().scene() == null)) {
             return;
         }
-        listed = listed(coords, unit);
+        menuOwner = inputs.frame().status();
+        menuBoardGeneration = inputs.frame().boardGeneration();
         if (unit == null) {
             hexMenu(coords);
         } else {
-            unitMenu(unit);
+            unitMenu(coords, unit);
         }
         popover.showAt(x, y);
     }
 
     /**
-     * A unit's menu: a sensor contact (M4), an identified enemy (M3) or an own or allied unit (M2), each ending with
-     * MegaMek's map menu of the unit's hex in sections, as the hex menu lists it, once the source captured that hex's
-     * context (the user's decision of 2026-10-11). So in every phase a gamemaster reaches the Gamemaster commands on a
-     * unit's hex, and the movement turn MegaMek's Charge and D.F.A. on an enemy's. Only for a unit on the shown board,
-     * the board the map menu is made for.
+     * A unit's header and the shared map menu, including roster units on another board or without a position.
      */
-    private void unitMenu(UnitStatus unit) {
-        BoardScene scene = inputs.frame().scene();
-        if (unit.position() != null && scene != null && unit.boardId() == scene.boardId()) {
-            menuUnit = unit;
-            hex = unit.position();
-            source.inspect(hex);
-            shownTooltip = null;
-            shownContext = null;
-        }
+    private void unitMenu(Coords coords, UnitStatus unit) {
+        menuUnit = unit;
+        hex = coords;
+        source.inspect(hex, unit.id(), state.turnLocked(inputs.frame().status()));
+        shownTooltip = null;
+        shownContext = null;
         if (unit.sensorContact()) {
             show(text("GpuBoard.hud.common.sensorContact"), unit.position() == null
                   ? text("GpuBoard.hud.common.unidentified")
-                  : text("GpuBoard.hud.context.unidentifiedHex", unit.position().getBoardNum()), unitItems(unit));
+                  : text("GpuBoard.hud.context.unidentifiedHex", unit.position().getBoardNum()), boardItems());
         } else if (unit.side() == GpuBattleStatus.Side.ENEMY) {
             int distance = distance(state.presented(acting()), unit);
             show(title(unit), distance < 0 ? text("GpuBoard.hud.context.visualContact")
-                  : text("GpuBoard.hud.context.visualContactHex", distance), unitItems(unit));
+                  : text("GpuBoard.hud.context.visualContactHex", distance), boardItems());
         } else {
             String subtitle = unit.side() != GpuBattleStatus.Side.OWN ? text("GpuBoard.hud.forces.allies", owner(unit))
                   : text(unit.done() ? "GpuBoard.hud.context.yourUnitActed" : "GpuBoard.hud.context.yourUnit");
-            show(title(unit), subtitle, unitItems(unit));
+            show(title(unit), subtitle, boardItems());
         }
     }
 
     /**
-     * The units of the hex the menu opened at, then the unit menu's own items, then MegaMek's map menu of its hex in
-     * sections once captured: last, so its late arrival moves no row under the pointer.
+     * The complete shared board menu. Wait for the capture before offering any
+     * actions, so late-arriving shared entries cannot replace an actionable row under the pointer.
      */
-    private UiMenuList unitItems(UnitStatus unit) {
+    private UiMenuList boardItems() {
         UiMenuList list = new UiMenuList(ui);
-        unitEntries(list);
-        if (unit.sensorContact()) {
-            contactItems(list, unit);
-        } else if (unit.side() == GpuBattleStatus.Side.ENEMY) {
-            enemyItems(list, unit);
-        } else {
-            friendlyItems(list, unit);
+        mapListed = context() != null;
+        if (!mapListed) {
+            item(list, text("UnitLoadingDialog.pleaseWait"), null, false, () -> { });
+            return list;
         }
-        if (menuUnit != null) {
-            List<BoardScene.Command> map = mapActions();
-            mapListed = !map.isEmpty();
-            sections(list, map);
-        }
+        sections(list, mapActions());
         return list;
-    }
-
-    /** M2: centre on it as its key does, and its record (2.2); {@link #unitEntries} selects or inspects it. */
-    private void friendlyItems(UiMenuList list, UnitStatus unit) {
-        int id = unit.id();
-        item(list, text(CENTER_CAMERA), GpuHintLine.key(inputs.preferences(), KeyCommandBind.CENTER_ON_SELECTED), true,
-              () -> source.locateUnit(id));
-        item(list, text("GpuBoard.hud.common.unitRecord"), null, true,
-              () -> GpuRecordSheet.showUnit(state, id, acting()));
-    }
-
-    /**
-     * M3: an identified enemy. While the local actor's orders can change, the attack items come first (an armed
-     * weapon, the target, primary, removal); then its record (design 2.2), centre and line of sight. The header gives
-     * the hex distance from the acting unit; {@link #unitEntries} inspects it.
-     */
-    private void enemyItems(UiMenuList list, UnitStatus unit) {
-        int id = unit.id();
-        TargetKey key = TargetKey.unit(id);
-        GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
-        if (fire.active() && fire.editable() && !unit.destroyed()) {
-            GpuFireOrders.WeaponRow armed = row(fire, state.armedWeapon);
-            if (armed != null) {
-                item(list, text("GpuBoard.hud.context.assignArmed", armed.name()), null, true,
-                      () -> focusTarget(source, state, key));
-            }
-            GpuFireOrders.Target target = fire.targets().stream().filter(candidate -> candidate.key().equals(key))
-                  .findFirst().orElse(null);
-            if (target == null) {
-                item(list, text("GpuBoard.hud.context.setTarget"), null, true, () -> focusTarget(source, state, key));
-            } else {
-                item(list, text("GpuBoard.hud.context.editAttacks"), null, true,
-                      () -> focusTarget(source, state, key));
-                if (!target.primary()) {
-                    item(list, text("GpuBoard.hud.context.makePrimary"), null, true,
-                          () -> source.fire().setPrimary(key));
-                }
-                item(list, text("GpuBoard.hud.context.removeTarget"), null, true,
-                      () -> source.fire().removeTarget(key));
-            }
-            list.separator();
-        }
-        item(list, text("GpuBoard.hud.common.unitRecord"), null, true,
-              () -> GpuRecordSheet.showUnit(state, id, acting()));
-        item(list, text(CENTER_CAMERA), null, true, () -> source.locateUnit(id));
-        lineOfSight(list, unit.position());
-    }
-
-    /**
-     * M4: a sensor contact, whose line of sight measures the bare hex, so its unit's height and cover stay hidden;
-     * {@link #unitEntries} inspects it.
-     */
-    private void contactItems(UiMenuList list, UnitStatus unit) {
-        item(list, text(CENTER_CAMERA), null, true, () -> source.locateUnit(unit.id()));
-        lineOfSight(list, unit.position());
-    }
-
-    /**
-     * The units a menu opened at {@code coords} lists first: those the board draws in that hex, in the board's order
-     * ({@link #stack}), and the menu's unit, also where the shown board does not draw it (a unit row's menu).
-     */
-    private List<Integer> listed(Coords coords, UnitStatus unit) {
-        BoardScene scene = inputs.frame().scene();
-        List<Integer> ids = new ArrayList<>(scene == null || unit != null && unit.boardId() != scene.boardId()
-              ? List.of() : stack(scene, coords));
-        if (unit != null && !ids.contains(unit.id())) {
-            ids.addFirst(unit.id());
-        }
-        return ids;
-    }
-
-    /**
-     * A unit or hex menu's first items, one per unit of its hex ({@link #listed}; the user's decision of
-     * 2026-10-11), then a separator: "Select" an own unit that can act now, as a left click does ({@link GpuHud#acts};
-     * off for the acting unit), and "Inspect" any other unit, which never changes the acting unit.
-     */
-    private void unitEntries(UiMenuList list) {
-        GpuBattleStatus.Snapshot status = inputs.frame().status();
-        int acting = acting();
-        boolean any = false;
-        for (int id : listed) {
-            UnitStatus unit = state.presented(id);
-            if (unit == null) {
-                continue;
-            }
-            any = true;
-            if (GpuHud.acts(status, unit)) {
-                item(list, text("GpuBoard.hud.context.selectNamed", title(unit)), null, id != acting,
-                      () -> select.accept(id));
-            } else {
-                item(list, unit.sensorContact() ? text("GpuBoard.hud.context.inspectSensorReturn")
-                      : text("GpuBoard.hud.context.inspectNamed", title(unit)), null, true, () -> state.inspected = id);
-            }
-        }
-        if (any) {
-            list.separator();
-        }
     }
 
     /**
@@ -327,37 +224,11 @@ final class GpuContextMenu implements GpuHud.Component {
      */
     private void hexMenu(Coords coords) {
         hex = coords;
-        source.inspect(coords);
+        source.inspect(coords, Entity.NONE, state.turnLocked(inputs.frame().status()));
         shownTooltip = null;
         shownContext = null;
-        popover.header(text("GpuBoard.hud.context.hex", coords.getBoardNum()), null).content(hexItems());
+        popover.header(text("GpuBoard.hud.context.hex", coords.getBoardNum()), null).content(boardItems());
         showHex();
-    }
-
-    /**
-     * The open hex menu's items: plan and pin in the local planning turn, centre, line of sight, and MegaMek's map menu
-     * once captured. The map menu's commands are listed in sections rather than behind a menu of menus (the user's
-     * decision of 2026-10-03).
-     */
-    private UiMenuList hexItems() {
-        Coords coords = hex;
-        UiMenuList list = new UiMenuList(ui);
-        unitEntries(list);
-        GpuMovePlan.Snapshot move = inputs.frame().panels().move();
-        if (GpuHud.planning(inputs)) {
-            int board = inputs.frame().scene().boardId();
-            item(list, text("GpuBoard.hud.context.planMove"), null, true,
-                  () -> source.moves().planTo(coords, board, false));
-            item(list, text("GpuBoard.hud.context.planPin"), text("GpuBoard.hud.mouse.ctrlClick"),
-                  move.mode() != GpuMovePlan.Mode.JUMP, () -> source.moves().planTo(coords, board, true));
-        }
-        item(list, text("GpuBoard.hud.context.centerHere"), null, true,
-              () -> source.command(() -> source.currentView().centerOnHex(coords)));
-        lineOfSight(list, coords);
-        List<BoardScene.Command> map = mapActions();
-        mapListed = !map.isEmpty();
-        sections(list, map);
-        return list;
     }
 
     /**
@@ -372,7 +243,7 @@ final class GpuContextMenu implements GpuHud.Component {
             if (group && !command.enabled()) {
                 continue;
             }
-            if (group || !loose) {
+            if (list.hasChildren() && (group || !loose)) {
                 list.separator();
             }
             loose = !group;
@@ -391,8 +262,8 @@ final class GpuContextMenu implements GpuHud.Component {
         if (tooltip != shownTooltip || context != shownContext) {
             shownTooltip = tooltip;
             shownContext = context;
-            if (!mapListed && inputs.frame().scene() != null && !mapActions().isEmpty()) {
-                popover.content(menuUnit == null ? hexItems() : unitItems(menuUnit));
+            if (!mapListed && context() != null) {
+                popover.content(boardItems());
             }
             if (menuUnit != null) {
                 return;
@@ -406,8 +277,16 @@ final class GpuContextMenu implements GpuHud.Component {
 
     /** MegaMek's map menu of the open hex (M10), once the source captured that hex's context. */
     private List<BoardScene.Command> mapActions() {
+        BoardScene.Context context = context();
+        return context == null ? List.of() : context.commands();
+    }
+
+    /** Match the requested hex, explicit unit and HUD selection state, even without a position. */
+    private BoardScene.Context context() {
         BoardScene.Context context = inputs.frame().context();
-        return context == null || !context.coords().equals(hex) ? List.of() : context.commands();
+        int unitId = menuUnit == null ? Entity.NONE : menuUnit.id();
+        return context != null && context.unitId() == unitId && Objects.equals(context.coords(), hex)
+              && context.selectionCleared() == state.turnLocked(inputs.frame().status()) ? context : null;
     }
 
     /**
@@ -605,7 +484,7 @@ final class GpuContextMenu implements GpuHud.Component {
             int choice = index;
             item(list, choices.get(index), null, index == selected, true, () -> choose.accept(choice));
         }
-        popover.header(null, null).content(list);
+        popover.header(null, null).content(list).openedFrom(face);
         Vector2 corner = face.localToStageCoordinates(new Vector2());
         popover.showAt(corner.x, corner.y);
     }
@@ -618,12 +497,58 @@ final class GpuContextMenu implements GpuHud.Component {
         for (BoardScene.Command command : commands) {
             String detail = shortcuts ? command.shortcut() : command.detail();
             if (command.children().isEmpty()) {
-                item(list, command.label(), detail, command.selected(), command.enabled(), command.action());
+                item(list, command.label(), detail, command.selected(), command.enabled(), () -> run(command));
             } else {
                 submenu(menu, list, command.label(), detail, command.selected(), command.enabled(),
                       (submenu, children) -> commands(submenu, children, command.children(), shortcuts));
             }
         }
+    }
+
+    /** Adapt shared unit actions to the HUD's existing controllers; labels and availability belong to MapMenu. */
+    private void run(BoardScene.Command command) {
+        MapMenu.UnitAction action = command.unitAction();
+        if (action == null) {
+            command.action().run();
+            return;
+        }
+        BoardScene.Context current = inputs.frame().context();
+        if (current == null || !available(current.commands(), command.id())) {
+            return;
+        }
+        UnitStatus unit = state.presented(action.entityId());
+        if (action.entityId() != Entity.NONE && unit == null) {
+            return;
+        }
+        switch (action.type()) {
+            case SELECT -> select.accept(unit.id());
+            case VIEW, INSPECT_SENSOR -> state.inspected = unit.id();
+            case READOUT -> {
+                if (!unit.sensorContact()) {
+                    GpuRecordSheet.showUnit(state, unit.id(), acting());
+                }
+            }
+            case TARGET -> {
+                if (inputs.frame().panels().fire().active()) {
+                    focusTarget(source, state, TargetKey.unit(unit.id()));
+                } else {
+                    command.action().run();
+                }
+            }
+            case CENTER_UNIT -> source.locateUnit(unit.id());
+            case CENTER_HEX -> source.command(() -> source.currentView().centerOnHex(action.location().coords()));
+            case LINE_OF_SIGHT -> source.los().lineOfSight(unit.id(), action.location().coords(), pointedZ);
+            case PLAN_MOVE -> source.moves().planTo(action.location().coords(), action.location().boardId(), false);
+            case PIN_MOVE -> source.moves().planTo(action.location().coords(), action.location().boardId(), true);
+            case MAKE_PRIMARY -> source.fire().setPrimary(TargetKey.unit(unit.id()));
+            case REMOVE_TARGET -> source.fire().removeTarget(TargetKey.unit(unit.id()));
+        }
+    }
+
+    /** Recheck the newest shared capture without moving menu rows while the pointer is over them. */
+    private static boolean available(List<BoardScene.Command> commands, String id) {
+        return commands.stream().anyMatch(command -> command.enabled()
+              && (command.id().equals(id) || available(command.children(), id)));
     }
 
     /**
@@ -658,26 +583,6 @@ final class GpuContextMenu implements GpuHud.Component {
     }
 
     /**
-     * "Line of sight from {acting}" (M8), which MegaMek's ruler measures and shows; never from outside the board or
-     * into its own hexes.
-     */
-    private void lineOfSight(UiMenuList list, Coords to) {
-        UnitStatus acting = state.presented(acting());
-        if (acting != null && acting.position() != null && to != null && !occupies(acting, to)) {
-            item(list, text("GpuBoard.hud.context.lineOfSight", name(acting)), null, true,
-                  () -> source.los().lineOfSight(acting.id(), to, pointedZ));
-        }
-    }
-
-    /** The unit stands in that hex: one of its drawn parts' hexes, or its position while the scene lacks it. */
-    private boolean occupies(UnitStatus unit, Coords coords) {
-        BoardScene scene = inputs.frame().scene();
-        List<Coords> hexes = scene == null ? List.of() : scene.units().stream().filter(drawn -> drawn.id() == unit.id())
-              .flatMap(drawn -> hexes(drawn).stream()).toList();
-        return hexes.isEmpty() ? coords.equals(unit.position()) : hexes.contains(coords);
-    }
-
-    /**
      * As a left click on the target in the local declaration (H15, H16): focus it, and assign the armed weapon to it
      * once.
      */
@@ -706,9 +611,10 @@ final class GpuContextMenu implements GpuHud.Component {
         popover.header(title, subtitle).content(list);
     }
 
-    /** The prototype's acting(): the acting unit during the local turn, otherwise the own focus unit (C.5). */
+    /** The acting or own focus unit (C.5), absent while the player has cleared the selection. */
     private int acting() {
-        return GpuHudKit.UnitRow.acting(inputs.frame().status(), state.focus());
+        return state.turnLocked(inputs.frame().status()) ? Entity.NONE
+              : GpuHudKit.UnitRow.acting(inputs.frame().status(), state.focus());
     }
 
     private static GpuFireOrders.WeaponRow row(GpuFireOrders.Snapshot fire, int eqNum) {
@@ -718,11 +624,6 @@ final class GpuContextMenu implements GpuHud.Component {
     /** The prototype's "{name} {variant}" header. */
     private static String title(UnitStatus unit) {
         return unit.chassis().isEmpty() ? unit.name() : (unit.chassis() + " " + unit.model()).strip();
-    }
-
-    /** A unit's short name, as its nameplate and card show it. */
-    private static String name(UnitStatus unit) {
-        return unit.chassis().isEmpty() ? unit.name() : unit.chassis();
     }
 
     /** The allied player's name, as the forces list groups allies, or the formation while the list lacks it. */

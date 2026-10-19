@@ -47,6 +47,7 @@ build/
 /megamek/mmconf/*.preferences
 /megamek/mmconf/searches/*.json
 /megamek/mmconf/recent-advanced-searches.json
+/megamek/mmconf/gpu-program-cache/
 
 # UserData
 megamek/userdata/**
@@ -85,6 +86,7 @@ equipment.txt
 /megamek/testresources/tmp/*
 !/megamek/testresources/tmp/.keep
 /megamek/resources/extraVersion.properties
+.lwjgl/
 
 /megamek/docs/README.md
 /megamek/docs/LICENSE*

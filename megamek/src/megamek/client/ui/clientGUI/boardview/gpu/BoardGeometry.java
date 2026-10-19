@@ -159,8 +159,11 @@ final class BoardGeometry {
         return corner(new Vector3(), coords, elevation, corner);
     }
 
-    private static final int[] CORNER_DX = { 2, 1, -1, -2, -1, 1 };
-    private static final int[] CORNER_DY = { 0, 1, 1, 0, -1, -1 };
+    /** A corner in model-local units, without a world-position or presentation-scale round trip. */
+    static Vector3 modelCorner(int corner) {
+        int k = Math.floorMod(corner, 6);
+        return new Vector3(HexTile.cornerOffsetX(k, TILE_WIDTH), HexTile.cornerOffsetY(k, TILE_HEIGHT), 0);
+    }
 
     /**
      * Corners lie on a lattice of quarter widths and half heights. Computing them from lattice indices gives every
@@ -168,12 +171,11 @@ final class BoardGeometry {
      */
     static Vector3 corner(Vector3 out, Coords coords, float elevation, int corner) {
         int k = Math.floorMod(corner, 6);
-        return out.set((3 * coords.getX() + 2 + CORNER_DX[k]) * (width() / 4),
-              (-(2 * coords.getY() + (coords.getX() & 1) + 1) + CORNER_DY[k]) * (height() / 2), elevation * level());
+        return out.set(HexTile.cornerX(coords, k, width()), HexTile.cornerY(coords, k, height()), elevation * level());
     }
 
     static int edgeDirection(int edge) {
-        return Math.floorMod(1 - edge, 6);
+        return HexTile.edgeDirection(edge);
     }
 
     /** Pulls a point toward a hex center inside the hex plane; the point keeps its elevation. */
@@ -215,28 +217,13 @@ final class BoardGeometry {
     }
 
     static boolean contains(Coords coords, float x, float y) {
-        return contains(coords.getX(), coords.getY(), x, y, width(), height());
-    }
-
-    /** The same footprint test with the board's dimensions read once by the caller. */
-    private static boolean contains(int column, int row, float x, float y, float width, float height) {
-        float dx = Math.abs(x - (column * width * 0.75f + width / 2));
-        float dy = Math.abs(y - -(row * height + (column & 1) * height / 2 + height / 2));
-        return dy <= height / 2 + 0.001f && (height / 2) * dx + (width / 4) * dy <= width * height / 4 + 0.001f;
+        return HexTile.contains(coords.getX(), coords.getY(), x, y, width(), height());
     }
 
     /** The hex whose footprint holds (x, y), or null off the board. */
     static BoardScene.Tile tile(BoardScene scene, float x, float y) {
-        float width = width(), height = height();
-        int column = (int) Math.floor(x / (width * .75f));
-        int row = (int) Math.floor(-y / height);
-        for (int cx = column - 1; cx <= column + 1; cx++) {
-            for (int cy = row - 1; cy <= row + 1; cy++) {
-                BoardScene.Tile tile = scene.tile(cx, cy);
-                if (tile != null && contains(cx, cy, x, y, width, height)) { return tile; }
-            }
-        }
-        return null;
+        int index = HexTile.at(x, y, width(), height(), scene.width(), scene.height());
+        return index < 0 ? null : scene.tiles().get(index);
     }
 
     record Hit(Coords coords, float distance, boolean hardSurface, String receiver, BoardSurface.Face face) {
@@ -391,7 +378,23 @@ final class BoardGeometry {
                     struck = face;
                 }
             }
-            for (BoardSurface.Side side : finished == null ? surface.waterfalls : finished.waterfalls()) {
+            if (tile.frozen()) {
+                // Installed pointer queries borrow the completed draw groups.
+                for (var fall : finished == null ? surface.frozenFalls() : finished.frozenFalls()) {
+                    for (BoardSurface.Face face : fall.faces()) {
+                        if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
+                              && nearer(ray.origin.dst2(hit), nearest, candidate.order(), nearestOrder)) {
+                            nearest = ray.origin.dst2(hit);
+                            nearestOrder = candidate.order();
+                            result = tile.coords();
+                            hardSurface = false;
+                            struck = face;
+                        }
+                    }
+                }
+            }
+            for (BoardSurface.Side side : tile.frozen() ? List.<BoardSurface.Side>of()
+                  : finished == null ? surface.waterfalls : finished.waterfalls()) {
                 Vector3 lowerA = new Vector3(side.a().x, side.a().y, side.lowA());
                 Vector3 lowerB = new Vector3(side.b().x, side.b().y, side.lowB());
                 float distance = Float.POSITIVE_INFINITY;

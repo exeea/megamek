@@ -12,6 +12,7 @@ import java.util.Map;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.BipedMek;
+import megamek.common.units.ConvInfantry;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -41,6 +42,18 @@ class BoardFeaturesTest {
         assertEquals(features, BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
               .filter(f -> f.decoration() != null).toList(), "Absolute objects remain available above a chasm");
     }
+    @Test
+    void aBridgeSpansAChasmOnTheHexLevel() {
+        Hex hex = new Hex(2);
+        hex.addTerrain(new Terrain(Terrains.ULTRA_SUBLEVEL, 1));
+        hex.addTerrain(new Terrain(Terrains.BRIDGE, 1, true, 9));
+        hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 1));
+        var bridges = BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
+              .filter(feature -> feature.asset().equals("bridge")).toList();
+        assertEquals(1, bridges.size(), "The deck spans the chasm");
+        assertEquals(1, bridges.getFirst().elevation(), .0001, "One level above the hex's level, not the pit's");
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { 1, 3, 7, 10 })
     void industrialHeightProvidesCoverWithoutOccupiableStoreys(int height) {
@@ -62,7 +75,9 @@ class BoardFeaturesTest {
         }
         hex.addTerrain(new Terrain(Terrains.BUILDING, 2));
         hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, 3));
-        assertTrue(unit.isElevationValid(1, hex), "A coexisting real building retains its authoritative floors");
+        assertTrue(unit.isElevationValid(3, hex), "A coexisting real building retains its roof");
+        assertTrue(new ConvInfantry().isElevationValid(1, hex),
+              "Infantry can occupy the coexisting building's interior floors");
         var mixed = BoardFeatures.capture(hex, coords, Map.of(Terrains.BUILDING, "building",
               Terrains.INDUSTRIAL, "industry"));
         assertTrue(mixed.stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING

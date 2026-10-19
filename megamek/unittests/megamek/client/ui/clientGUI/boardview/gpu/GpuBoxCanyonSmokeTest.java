@@ -17,6 +17,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -26,8 +27,7 @@ import org.junit.jupiter.api.Test;
 class GpuBoxCanyonSmokeTest {
     @Test
     void rendersConcavePlateausWithoutShadingSpokes() throws Exception {
-        Board board = new Board();
-        board.load(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"));
+        Board board = BoardFile.loadSheet(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"), false, true);
         BoardScene scene;
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
             SwingUtilities.invokeAndWait(fixture.source::refresh);

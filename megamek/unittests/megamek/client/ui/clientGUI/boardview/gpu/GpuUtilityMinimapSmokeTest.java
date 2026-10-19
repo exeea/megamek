@@ -21,7 +21,6 @@ import java.util.stream.Stream;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
@@ -127,7 +126,10 @@ class GpuUtilityMinimapSmokeTest {
             map.setPosition(width - metrics.gap() - metrics.right(), bar.getY() - metrics.gap() - map.getHeight());
             Table chip = (Table) utilities.chip();
             chip.pack();
-            chip.setPosition(Math.round((width - chip.getWidth()) / 2), height - 20 - chip.getHeight());
+            // As GpuHud places it: centred in the top row's room left of the utility bar.
+            float chipLeft = metrics.gap() + metrics.left();
+            float chipRight = bar.getX() - metrics.gap();
+            chip.setPosition(Math.round((chipLeft + chipRight - chip.getWidth()) / 2), height - 20 - chip.getHeight());
             var north = (com.badlogic.gdx.scenes.scene2d.ui.Container<?>) utilities.north();
             north.pack();
             north.setPosition(Math.round((width - north.getWidth()) / 2),
@@ -199,7 +201,7 @@ class GpuUtilityMinimapSmokeTest {
     }
 
     @Test
-    void theCommandsMoveOnlyTheCameraAndRunTheMenuItemAndTheMinimapShowsTheTileArt() throws Exception {
+    void theCommandsMoveOnlyTheCameraAndRunTheMenuItemAndTheMinimapShowsTheTerrainColours() throws Exception {
         BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
@@ -403,20 +405,13 @@ class GpuUtilityMinimapSmokeTest {
     }
 
     /**
-     * Each hex shows its art's colour, found through the minimap's own mapping: a press gives the ground point under
-     * the pointer. A hex without trees shows the mean of its tileset art; a hex with woods differs from it; a water
-     * hex shows the first frame of its water animation as the board decodes it, and a hazardous liquid's hex the same
-     * in the tint of the board's liquid material; a hex whose liquid art cannot be read shows its tileset art. The
-     * captures have no route or units, and the sampled hexes lie three hexes inside the board, clear of the frustum.
+     * Each hex shows its terrain's colour, found through the minimap's own mapping: a press gives the ground point
+     * under the pointer. An open hex shows {@link GpuMinimap#colour}; a hex with woods differs from it; a water hex
+     * shows water whatever art its liquid names, and a hazardous liquid's hex differs from water. The captures have no
+     * route or units, and the sampled hexes lie three hexes inside the board, clear of the frustum.
      */
     private static void checkTileColours(GpuHudTestStage hud, GpuBoardSpaceHarness board, Parts parts,
           BoardScene scene, GpuBattleStatus.Snapshot status) {
-        // The board's decoder, timed here before the minimap's first liquid.
-        long start = System.nanoTime();
-        GpuAssets.Animation<BoardScene.Pixels> water = GpuAssets.readWater(
-              GpuAssets.tilesetFile("saxarba/anim_water_1.gif"));
-        System.out.printf("GpuAssets.readWater(saxarba/anim_water_1.gif): %d frames in %.1f ms%n",
-              water.frames().size(), (System.nanoTime() - start) / 1e6);
         show(hud, board, parts, scene, withoutUnits(status), GpuMovePlan.Snapshot.EMPTY, false);
         Pixmap image = hud.capture("g4-minimap-colours");
         try {
@@ -435,20 +430,18 @@ class GpuUtilityMinimapSmokeTest {
             BoardScene.Tile wooded = inner.stream().filter(GpuUtilityMinimapSmokeTest::wooded).findFirst()
                   .orElseThrow();
             int openColour = sample(image, first, origin, scale, open.coords());
-            int expected = mean(open.tileset());
-            System.out.printf("Open hex %s: minimap #%08X, tileset art mean #%08X%n", open.coords(), openColour,
-                  expected);
+            int expected = GpuMinimap.colour(open);
+            System.out.printf("Open hex %s: minimap #%08X, terrain colour #%08X%n", open.coords(), openColour, expected);
             for (int shift : new int[] { 24, 16, 8 }) {
                 assertEquals(expected >>> shift & 255, openColour >>> shift & 255, 6,
-                      "A hex without trees shows its tileset art's mean colour");
+                      "A hex without trees shows its terrain's colour");
             }
             int woodedColour = sample(image, first, origin, scale, wooded.coords());
             System.out.printf("Wooded hex %s: minimap #%08X%n", wooded.coords(), woodedColour);
             assertNotEquals(openColour, woodedColour, "A wooded hex shows its trees");
 
-            // Three more bare hexes made depth-1 liquid: water shows the first frame of its water animation, not its
-            // ground; a hazardous liquid shows the same frame in the board's tint; a liquid that names art that does
-            // not exist keeps the ground.
+            // Three more bare hexes made depth-1 liquid: water shows water, also when its liquid names art that does
+            // not exist; a hazardous liquid differs from it.
             List<BoardScene.Tile> dry = inner.stream().filter(tile -> !tile.water()
                   && tile.coords().distance(open.coords()) >= 3).toList();
             BoardScene.Tile wet = dry.getFirst();
@@ -464,31 +457,29 @@ class GpuUtilityMinimapSmokeTest {
             Pixmap liquids = hud.capture("g4-minimap-water");
             try {
                 int waterColour = sample(liquids, first, origin, scale, wet.coords());
-                int waterArt = mean(water.frames().getFirst());
-                System.out.printf("Water hex %s: minimap #%08X, first water frame mean #%08X%n", wet.coords(),
-                      waterColour, waterArt);
+                int water = GpuMinimap.colour(tile(flooded, wet.coords()));
                 int hazardousColour = sample(liquids, first, origin, scale, hazardous.coords());
-                int tinted = Color.rgba8888(new Color(waterArt).mul(BoardLiquid.HAZARDOUS_TINT));
-                System.out.printf("Hazardous liquid hex %s: minimap #%08X, tinted water frame mean #%08X%n",
-                      hazardous.coords(), hazardousColour, tinted);
                 int unreadableColour = sample(liquids, first, origin, scale, unreadable.coords());
-                int art = mean(unreadable.tileset());
-                System.out.printf("Unreadable liquid hex %s: minimap #%08X, tileset art mean #%08X%n",
-                      unreadable.coords(), unreadableColour, art);
+                int missing = GpuMinimap.colour(tile(flooded, unreadable.coords()));
+                System.out.printf("Water hex %s: minimap #%08X, terrain colour #%08X; missing art #%08X; hazardous"
+                      + " #%08X%n", wet.coords(), waterColour, water, unreadableColour, hazardousColour);
+                assertEquals(water, missing, "The art a liquid names does not change its colour");
                 for (int shift : new int[] { 24, 16, 8 }) {
-                    assertEquals(waterArt >>> shift & 255, waterColour >>> shift & 255, 6,
-                          "The water hex shows its water art's mean colour");
-                    assertEquals(tinted >>> shift & 255, hazardousColour >>> shift & 255, 6,
-                          "The hazardous liquid's hex shows its water art in the board's tint");
-                    assertEquals(art >>> shift & 255, unreadableColour >>> shift & 255, 6,
-                          "A hex whose liquid art cannot be read shows its tileset art");
+                    assertEquals(water >>> shift & 255, waterColour >>> shift & 255, 6, "The water hex shows water");
+                    assertEquals(water >>> shift & 255, unreadableColour >>> shift & 255, 6,
+                          "A liquid naming missing art shows water");
                 }
+                assertNotEquals(waterColour, hazardousColour, "A hazardous liquid differs from water");
             } finally {
                 liquids.dispose();
             }
         } finally {
             image.dispose();
         }
+    }
+
+    private static BoardScene.Tile tile(BoardScene scene, Coords coords) {
+        return scene.tiles().stream().filter(tile -> tile.coords().equals(coords)).findFirst().orElseThrow();
     }
 
     private static boolean wooded(BoardScene.Tile tile) {
@@ -550,8 +541,7 @@ class GpuUtilityMinimapSmokeTest {
               text("GpuBoard.hud.mouse.ctrlClick"), text("GpuBoard.hud.hint.waypoint"),
               text("GpuBoard.hud.mouse.shiftClick"), text("GpuBoard.hud.hint.orientation"),
               text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.pan"),
-              text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit"), "WASD QE",
-              text("GpuBoard.hud.hint.camera")),
+              text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit")),
               GpuHintLine.items(planning));
         GpuHud.Inputs waiting = parts.update(scene, status(fixture, GamePhase.MOVEMENT, false, 6), move(),
               GpuReportLog.Snapshot.EMPTY, false, 1920, 1080);
@@ -660,24 +650,6 @@ class GpuUtilityMinimapSmokeTest {
         float x = pressed.x + (BoardGeometry.centerX(coords) - origin.x) * scale.x;
         float y = pressed.y + (BoardGeometry.centerY(coords) - origin.y) * scale.y;
         return image.getPixel(Math.round(x), Math.round(y));
-    }
-
-    /** The alpha-weighted mean colour of an image, opaque. */
-    private static int mean(BoardScene.Pixels pixels) {
-        double red = 0;
-        double green = 0;
-        double blue = 0;
-        double weight = 0;
-        for (int index = 0; index < pixels.width() * pixels.height(); index++) {
-            int rgba = pixels.rgba(index);
-            double alpha = (rgba & 255) / 255.0;
-            red += (rgba >>> 24) * alpha;
-            green += (rgba >>> 16 & 255) * alpha;
-            blue += (rgba >>> 8 & 255) * alpha;
-            weight += alpha;
-        }
-        return Color.rgba8888((float) (red / weight / 255), (float) (green / weight / 255),
-              (float) (blue / weight / 255), 1);
     }
 
     private static void click(GpuHudTestStage hud, String name) {

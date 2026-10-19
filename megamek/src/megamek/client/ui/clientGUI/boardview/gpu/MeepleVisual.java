@@ -58,9 +58,11 @@ final class MeepleVisual {
         sides.begin(attributes, GL20.GL_TRIANGLES);
         GpuCutout.extrude(pixels, region, Vector3.Zero, 1, HEIGHT, true, caps, sides);
         builder.part("cutout", caps.end(), GL20.GL_TRIANGLES,
-              new Material("meeple-artwork", TextureAttribute.createDiffuse(region.getTexture()), IntAttribute.createCullFace(GL20.GL_NONE)));
+              new Material("meeple-artwork", TextureAttribute.createDiffuse(region.getTexture()), new GpuLinearColors(),
+                    IntAttribute.createCullFace(GL20.GL_NONE)));
         builder.part("sides", sides.end(), GL20.GL_TRIANGLES,
-              new Material("paint", ColorAttribute.createDiffuse(GpuCutout.averageColor(pixels)), IntAttribute.createCullFace(GL20.GL_NONE)));
+              new Material("paint", ColorAttribute.createDiffuse(GpuCutout.averageColor(pixels)), new GpuLinearColors(),
+                    IntAttribute.createCullFace(GL20.GL_NONE)));
         return builder.end();
     }
 

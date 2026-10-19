@@ -95,7 +95,8 @@ final class GpuPropBatch implements Disposable {
         return value.bones == null && !value.meshPart.mesh.isInstanced()
               && value.meshPart.primitiveType == GL20.GL_TRIANGLES && value.meshPart.size > 0
               && value.meshPart.mesh.getNumIndices() > 0 && Arrays.equals(value.worldTransform.val, IDENTITY)
-              && (mask & ~(ColorAttribute.Diffuse | TextureAttribute.Diffuse | GpuModelMaterial.TYPE)) == 0;
+              && ((mask & ~(ColorAttribute.Diffuse | TextureAttribute.Diffuse | GpuModelMaterial.TYPE
+                    | GpuLinearColors.TYPE)) == 0 || GpuTerrain.batchableSculpt(value.material));
     }
 
     /** Chunk caches already contain world-space vertices. Copy them without normalizing their normals again. */

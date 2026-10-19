@@ -35,6 +35,8 @@ final class GpuMeshPage implements Disposable {
     }
 
     void add(Renderable part, boolean shown) {
+        // A material can finish without triangles. Its end-of-buffer offset is not a readable indexed range.
+        if (part.meshPart.size == 0) { return; }
         current.add(part);
         indices += part.meshPart.size;
         if (shown) { visible.add(part); visibleSet.add(part); }

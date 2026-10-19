@@ -58,6 +58,11 @@ final class BoardScatter {
         return shape("stone-" + BoardRocks.name(slab || BoardRocks.blocks(surface), variant));
     }
 
+    /** Captured scatter that is loose stone rather than grass, plants or fungi. */
+    static boolean stone(String asset) {
+        return asset.equals("scatter-rock") || asset.equals("scatter-slab");
+    }
+
     static BoardShape bush(BoardScene.Surface surface, int variant) {
         return shape("bush-" + ((surface == BoardScene.Surface.GRASS || surface == BoardScene.Surface.TROPICAL ? BUSHES / 2 : 0)
               + Math.floorMod(variant, BUSHES / 2)));
@@ -66,6 +71,14 @@ final class BoardScatter {
     /** The small scatter plant is its biome's first bush (the former plant meshes were byte-identical copies). */
     static BoardShape plant(BoardScene.Surface surface) {
         return bush(surface, 0);
+    }
+
+    /** Authored tissue identity shared by field shrubs and captured bushes; unknown roles remain opaque. */
+    static boolean leaf(String material) {
+        return switch (material) {
+            case "dry-leaf", "dry-tip", "green-leaf", "green-tip" -> true;
+            default -> false;
+        };
     }
 
     /** Bushes stand just above tall grass, with a level cap to keep unusually shallow boards readable. */
@@ -97,6 +110,7 @@ final class BoardScatter {
 
     /** Cosmetic clusters leave the unit centre clear; terrain updates never reshuffle neighboring details. */
     static void capture(Hex hex, Coords coords, List<BoardScene.Feature> result) {
+        boolean tundra = BoardFeatures.biome(hex) == BoardScene.Biome.TUNDRA;
         if (hex.containsTerrain(Terrains.WATER) && hex.terrainLevel(Terrains.WATER) > 0
               || hex.containsAnyTerrainOf(Terrains.ICE, Terrains.ROAD, Terrains.PAVEMENT,
               Terrains.BRIDGE, Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL, Terrains.FIELDS,
@@ -144,9 +158,12 @@ final class BoardScatter {
             }
             double angle = random.nextDouble() * Math.PI * 2;
             float radius = 16 + 12 * (float) Math.sqrt(random.nextFloat());
-            result.add(new BoardScene.Feature(asset, (float) Math.cos(angle) * radius,
+            var feature = new BoardScene.Feature(asset, (float) Math.cos(angle) * radius,
                   (float) Math.sin(angle) * radius, random.nextFloat() * 360, .7f + random.nextFloat() * .5f,
-                  .10f + random.nextFloat() * .13f, 0, BoardScene.FeatureKind.SCATTER));
+                  .10f + random.nextFloat() * .13f, 0, BoardScene.FeatureKind.SCATTER);
+            // Replace only tundra's plants with support-rooted dwarf shrubs. Consume the same random values so
+            // its loose rocks and slabs retain their original positions, sizes and rotations.
+            if (!tundra || stone(asset)) { result.add(feature); }
         }
     }
 }

@@ -109,6 +109,51 @@ class BoardTundraTest {
         }
     }
 
+    @Test
+    void dwarfShrubsAreSparseRootedWoodyAndOnlyAtFullDetail() {
+        var stones = List.of(new BoardScene.Feature("scatter-rock", 20, 0, 0, 1, .1f, 0,
+              BoardScene.FeatureKind.SCATTER));
+        var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, BoardScene.Biome.TUNDRA, 0)
+              .withFeatures(stones));
+        var counts = new java.util.HashSet<Integer>();
+        int woody = 0, leafy = 0;
+        for (int x = 2; x < 6; x++) for (int y = 2; y < 6; y++) {
+            var tile = scene.tile(new Coords(x, y));
+            var surface = new BoardSurface(scene, tile, TerrainLod.FULL);
+            var plants = shrubs(surface);
+            assertTrue(plants.size() <= 3 * 660, "At most three existing dry-kit shrubs per hex");
+            assertEquals(0, plants.size() % 660, "Keep complete authored shrubs, not partial faces");
+            counts.add(plants.size() / 660);
+            assertEquals(plants, shrubs(new BoardSurface(scene, tile, TerrainLod.FULL)),
+                  "Rebuilding the same support must not move the shrubs");
+            for (var face : plants) {
+                var shade = surface.relief.shade(face.a());
+                if (shade.kind() == BoardRelief.Kind.PLANT) { woody++; }
+                if (shade.kind() == BoardRelief.Kind.LEAF) { leafy++; }
+                for (var p : List.of(face.a(), face.b(), face.c())) {
+                    assertTrue(p.z >= -BoardRelief.metres(.01f) && p.z <= BoardRelief.metres(.75f),
+                          "Dwarf plants stay rooted and below 75 cm, without changing tile level");
+                    assertTrue(Math.hypot(p.x - BoardGeometry.centerX(tile.coords()),
+                                p.y - BoardGeometry.centerY(tile.coords())) >= BoardGeometry.width() * .2f,
+                          "Leave the existing unit standing area clear");
+                }
+            }
+            for (var lod : List.of(TerrainLod.MEDIUM, TerrainLod.COARSE, TerrainLod.DISTANT)) {
+                assertTrue(shrubs(new BoardSurface(scene, tile, lod)).isEmpty(),
+                      "Unresolved dwarf vegetation must not fill distant chunks");
+            }
+        }
+        assertTrue(counts.contains(0) && counts.stream().anyMatch(n -> n > 0), "Leave real open gaps between clumps");
+        assertTrue(woody > 0 && leafy > 0, "Authored woody branches and leaves both survive placement");
+    }
+
+    private static List<BoardSurface.Face> shrubs(BoardSurface surface) {
+        return surface.faces.stream().filter(face -> {
+            var shade = surface.relief.shade(face.a());
+            return shade != null && (shade.kind() == BoardRelief.Kind.PLANT || shade.kind() == BoardRelief.Kind.LEAF);
+        }).toList();
+    }
+
     static Board board(String theme, boolean tundra) {
         var board = Board.createEmptyBoard(8, 6);
         for (int x = 0; x < 8; x++) for (int y = 0; y < 6; y++) {

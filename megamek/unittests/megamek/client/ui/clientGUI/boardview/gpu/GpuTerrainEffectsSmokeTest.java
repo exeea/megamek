@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,8 +34,10 @@ import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
+import megamek.common.planetaryConditions.Atmosphere;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -43,19 +46,29 @@ import org.junit.jupiter.api.Test;
 class GpuTerrainEffectsSmokeTest {
     private static final int SIZE = 512;
     private static final Color BACKGROUND = new Color(.55f, .62f, .7f, 1);
+    // Match contrast()'s actual 8-bit display swatch through the production linear scene/display boundary.
+    private static final Color LINEAR_BACKGROUND = GpuColor.linear(new Color(Color.rgba8888(BACKGROUND)));
     private static final Vector3 LIGHT = new Vector3(-.3f, -.4f, -.85f).nor();
+    private static BufferedImage displayedBackground;
     private final File output = new File(System.getProperty("megamek.gpu.screenshots"), "fire-smoke");
 
     @Test
-    void persistentEffectsFollowTheBoardAndStayVisibleAtAllLods() {
+    void persistentEffectsFollowTheBoardAndStayVisibleAtAllLods() throws Exception {
+        boolean closure = Boolean.getBoolean("megamek.gpu.adaptationClosure");
+        BoardScene dome = closure ? GpuMagmaSmokeTest.domeScene() : null;
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
-        config.setWindowedMode(SIZE, SIZE);
+        config.setWindowedMode(closure ? 1280 : SIZE, closure ? 900 : SIZE);
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
                 try {
                     Files.createDirectories(output.toPath());
+                    if (closure) {
+                        reviewAdaptation(dome);
+                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                        return; // Explicit four-still review, not a pass of the default effect suite.
+                    }
                     verifyVolumes();
                     verifyRisingPlume();
                     verifyJoinedFields();
@@ -74,8 +87,8 @@ class GpuTerrainEffectsSmokeTest {
         var effects = new GpuTerrainEffects();
         var depth = new GpuEffectDepth();
         var surfaces = new BoardSurface.Cache();
-        FrameBuffer target = GpuAtmosphere.buffer(SIZE, SIZE, true);
-        ModelBatch batch = new ModelBatch();
+        var target = new GpuSceneTestOutput(SIZE, SIZE);
+        ModelBatch batch = new ModelBatch(GpuUnitShader.provider());
         var smoke = new BoardFireSmoke(0, 2);
         try {
             // Both staggered column parities, every shared edge, every LOD.
@@ -155,15 +168,15 @@ class GpuTerrainEffectsSmokeTest {
             var mixedLods = draw(target, effects, depth, surfaces, field, camera, null, batch);
             assertTrue(effects.lodCount(0) > 0 && effects.lodCount(1) > 0, "A perspective field spans LOD boundaries");
             save(mixedLods, "joined-perspective-mixed-lods");
-        } finally { effects.dispose(); depth.dispose(); target.dispose(); batch.dispose(); }
+        } finally { effects.dispose(); depth.dispose(); target.close(); batch.dispose(); }
     }
 
     private void verifyVolumes() throws Exception {
         var effects = new GpuTerrainEffects();
         var depth = new GpuEffectDepth();
         var surfaces = new BoardSurface.Cache();
-        FrameBuffer target = GpuAtmosphere.buffer(SIZE, SIZE, true);
-        ModelBatch batch = new ModelBatch();
+        var target = new GpuSceneTestOutput(SIZE, SIZE);
+        ModelBatch batch = new ModelBatch(GpuUnitShader.provider());
         Model wall = new ModelBuilder().createBox(280, 280, 2,
               new Material(ColorAttribute.createDiffuse(.1f, .2f, .3f, 1)), VertexAttributes.Usage.Position);
         var center = BoardGeometry.center(new Coords(0, 0), 0);
@@ -183,6 +196,17 @@ class GpuTerrainEffectsSmokeTest {
             assertTrue(warmth(burning) > warmth(cloudy) + 1000, "Fire has emissive warm cores");
             save(burning, "fire-top-lod0");
             save(cloudy, "smoke-top-lod0");
+            // All authored palettes at identical density, camera and paused time.
+            for (int smokeType : new int[] { megamek.server.SmokeCloud.SMOKE_LIGHT,
+                  megamek.server.SmokeCloud.SMOKE_GREEN, megamek.server.SmokeCloud.SMOKE_LI_LIGHT,
+                  megamek.server.SmokeCloud.SMOKE_CHAFF_LIGHT }) {
+                var coloured = scene(1, 1, new BoardFireSmoke(0, smokeType), false);
+                var palette = draw(target, effects, depth, surfaces, coloured, camera, null, batch);
+                assertTrue(different(empty, palette) > 1000, "Each smoke palette draws");
+                assertArrayEquals(pixels(palette), pixels(draw(target, effects, depth, surfaces, coloured, camera, null, batch)),
+                      "Paused palette output repeats exactly");
+                save(palette, "smoke-palette-" + smokeType);
+            }
             for (int lod = 0; lod < 3; lod++) {
                 camera = camera(center, new float[] { .3f, 1.5f, 4 }[lod], false);
                 var image = draw(target, effects, depth, surfaces, smoke, camera, null, batch);
@@ -209,14 +233,15 @@ class GpuTerrainEffectsSmokeTest {
             var partial = draw(target, effects, depth, surfaces, fire, camera, occluder, batch);
             var partialBase = draw(target, effects, depth, surfaces, clear, camera, occluder, batch);
             long uncovered = different(partial, partialBase);
-            assertTrue(uncovered > 500 && uncovered < different(burning, empty) * .8, "Partial depth clipping");
+            save(partial, "partial-occlusion");
+            assertTrue(uncovered > 500 && uncovered < different(burning, empty) * .8,
+                  "Partial depth clipping: uncovered=" + uncovered + ", full=" + different(burning, empty));
             for (int y = 0; y < SIZE; y++) {
                 for (int x = SIZE / 2 + 2; x < SIZE; x++) {
                     assertEquals(partialBase.getRGB(x, y), partial.getRGB(x, y),
                           "Depth-aware upsampling must not bleed through the wall");
                 }
             }
-            save(partial, "partial-occlusion");
             occluder.transform.setToTranslation(center.x, center.y, BoardGeometry.level() * 3);
             var aboveRoof = draw(target, effects, depth, surfaces, smoke, camera, occluder, batch);
             var roofOnly = draw(target, effects, depth, surfaces, clear, camera, occluder, batch);
@@ -249,7 +274,7 @@ class GpuTerrainEffectsSmokeTest {
             draw(target, effects, depth, surfaces, clear, camera, null, batch);
             assertEquals(0, effects.size(), "Removing smoke leaves no retained particles");
         } finally {
-            effects.dispose(); depth.dispose(); target.dispose(); wall.dispose(); batch.dispose();
+            effects.dispose(); depth.dispose(); target.close(); wall.dispose(); batch.dispose();
         }
     }
 
@@ -257,7 +282,7 @@ class GpuTerrainEffectsSmokeTest {
         var effects = new GpuTerrainEffects();
         var depth = new GpuEffectDepth();
         var surfaces = new BoardSurface.Cache();
-        FrameBuffer target = GpuAtmosphere.buffer(SIZE, SIZE, true);
+        var target = new GpuSceneTestOutput(SIZE, SIZE);
         Vector3 centre = BoardGeometry.center(new Coords(0, 0), 0);
         var smoke = scene(1, 1, new BoardFireSmoke(0, 2), false);
         var fire = scene(1, 1, new BoardFireSmoke(1, 0), false);
@@ -289,7 +314,7 @@ class GpuTerrainEffectsSmokeTest {
                       > bandContrast(image, camera, centre, 4, -drift) + 10, "The upper plume is downwind");
                 save(image, "rising-smoke-wind-" + direction);
             }
-        } finally { effects.dispose(); depth.dispose(); target.dispose(); }
+        } finally { effects.dispose(); depth.dispose(); target.close(); }
     }
 
     private static BoardProjectionCamera sideCamera(Vector3 centre, float zoom) {
@@ -428,22 +453,34 @@ class GpuTerrainEffectsSmokeTest {
         batch.end();
         terrain.renderTransparent(camera);
         depth.begin();
-        effects.render(camera, depth, atmosphere.particleLight(), atmosphere.lighting().direction());
+        effects.render(camera, depth, atmosphere.sceneParticleLight(), atmosphere.lighting().direction());
         atmosphere.end(camera, terrain, scene, 0);
         visibility.render(camera, units, atmosphere.depthTexture(), 0, intensity, 1, null, effects.opacityTexture());
         return capture(Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
     }
 
-    private static BufferedImage draw(FrameBuffer target, GpuTerrainEffects effects, GpuEffectDepth depth,
+    private static BufferedImage draw(GpuSceneTestOutput target, GpuTerrainEffects effects, GpuEffectDepth depth,
           BoardSurface.Cache surfaces, BoardScene scene, BoardProjectionCamera camera, ModelInstance wall, ModelBatch batch) {
         effects.update(scene, surfaces, BoardAtmosphere.Effects.NONE, 0);
-        target.begin();
-        ScreenUtils.clear(BACKGROUND.r, BACKGROUND.g, BACKGROUND.b, 1, true);
+        target.scene().begin();
+        // The previous display pass disables depth writes; a depth clear obeys that mask too.
+        Gdx.gl.glDepthMask(true);
+        ScreenUtils.clear(LINEAR_BACKGROUND.r * GpuSceneRadiance.SCALE,
+              LINEAR_BACKGROUND.g * GpuSceneRadiance.SCALE, LINEAR_BACKGROUND.b * GpuSceneRadiance.SCALE, 1, true);
+        if (displayedBackground == null || displayedBackground.getWidth() != target.scene().getWidth()
+              || displayedBackground.getHeight() != target.scene().getHeight()) {
+            // Contrast isolates the effect from the actual display transfer and rounding.
+            target.display();
+            displayedBackground = capture(target.scene().getWidth(), target.scene().getHeight());
+            target.scene().begin();
+            Gdx.gl.glDepthMask(true);
+        }
         if (wall != null) { batch.begin(camera); batch.render(wall); batch.end(); }
         depth.begin();
         effects.render(camera, depth, Color.WHITE, LIGHT);
-        var image = capture(target.getWidth(), target.getHeight());
-        target.end();
+        target.display();
+        var image = capture(target.scene().getWidth(), target.scene().getHeight());
+        FrameBuffer.unbind();
         return image;
     }
 
@@ -459,6 +496,158 @@ class GpuTerrainEffectsSmokeTest {
         } finally { pixels.dispose(); }
         return image;
     }
+
+    /** Appearance evidence only; the default fire/smoke numerical and performance checks stay separate. */
+    private void reviewAdaptation(BoardScene dome) throws Exception {
+        File directory = new File(output, "adaptation-closure");
+        Files.createDirectory(directory.toPath());
+        assertEquals(1280, Gdx.graphics.getBackBufferWidth());
+        assertEquals(900, Gdx.graphics.getBackBufferHeight());
+        assertEquals(null, System.getProperty("megamek.gpu.shaderAuditBaseline"), "Current source only");
+        String renderer = Gdx.gl.glGetString(GL20.GL_RENDERER);
+        assertTrue(renderer.toLowerCase(java.util.Locale.ROOT).contains(System.getProperty(
+              "megamek.gpu.expectedRenderer", "NVIDIA").toLowerCase(java.util.Locale.ROOT)), renderer);
+        var report = new StringBuilder("Appearance review only: four current-source full-composite stills.\n")
+              .append("GPU: ").append(renderer).append("\nOptions: ").append(GpuAtmosphere.Options.DEFAULTS)
+              .append("\nRaw values below are stored RGBA16F (RGB scale 1/32); depth is actual scene depth.\n")
+              .append("Vacuum moonless night retains the published stellar source; it is not zero source.\n");
+        try {
+            for (int sceneIndex = 0; sceneIndex < 2; sceneIndex++) {
+                boolean lava = sceneIndex == 0;
+                BoardScene board = lava ? dome : scene(6, 3, new BoardFireSmoke(1, 1), true);
+                var terrain = new GpuTerrain();
+                var effects = new GpuTerrainEffects();
+                var depth = new GpuEffectDepth();
+                var atmosphere = new GpuAtmosphere();
+                var weather = lava ? BoardAtmosphere.Effects.NONE : BoardFireSmokeTest.wind(.5f, 90);
+                var surfaces = new BoardSurface.Cache();
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    camera.setIsometric(true);
+                    camera.fit(board);
+                    if (!lava) { camera.camera.zoom = .9f; camera.update(); }
+                    float[] firstDepth = null;
+                    for (float hour : new float[] { 13, 0 }) {
+                        var settings = new BoardAtmosphere.Settings(hour, 0, 0, 2, 0, 0, weather,
+                              lava ? Atmosphere.VACUUM : Atmosphere.STANDARD, 25, false);
+                        atmosphere.configure(settings);
+                        atmosphere.updateLight(camera.camera);
+                        terrain.setAtmosphere(atmosphere.lighting());
+                        atmosphere.configureClouds(terrain, board);
+                        if (hour == 13) { terrain.update(board); }
+                        GpuTerrainLodSmokeTest.settle(terrain, null, board, camera);
+                        if (hour == 13) {
+                            terrain.animate(.5f, List.of());
+                            if (!lava) {
+                                for (int tick = 0; tick < 25; tick++) { effects.update(board, surfaces, weather, .1f); }
+                            }
+                        }
+                        float clock = (Float) closureField(terrain, "magmaClock");
+                        assertEquals(.5f, clock, 0, "The shared terrain clock remains fixed across lighting changes");
+                        var motion = (GpuTerrainEffects.Motion) closureField(effects, "motion");
+                        Vector3 offset = motion.offset.cpy();
+                        for (int warmup = 0; warmup < 3; warmup++) {
+                            drawClosure(terrain, effects, depth, atmosphere, board, camera, !lava);
+                        }
+                        String name = (lava ? "dome-vacuum-" : "fire-smoke-standard-")
+                              + (hour == 13 ? "day" : "moonless-night");
+                        ClosureFrame first = closureFrame(atmosphere);
+                        ImageIO.write(first.image(), "png", new File(directory, name + ".png"));
+                        drawClosure(terrain, effects, depth, atmosphere, board, camera, !lava);
+                        ClosureFrame repeat = closureFrame(atmosphere);
+                        assertArrayEquals(pixels(first.image()), pixels(repeat.image()), name + " frozen display");
+                        assertArrayEquals(first.raw(), repeat.raw(), 0, name + " frozen scene radiance");
+                        assertArrayEquals(first.depth(), repeat.depth(), 0, name + " frozen scene depth");
+                        if (firstDepth != null) { assertArrayEquals(firstDepth, first.depth(), 0, "Day/night geometry"); }
+                        firstDepth = first.depth();
+                        assertEquals(clock, (Float) closureField(terrain, "magmaClock"), 0, "Drawing keeps owning time");
+                        assertEquals(offset, motion.offset, "Drawing keeps the effect advection field");
+                        var light = atmosphere.lighting();
+                        report.append(name).append("\n  settings=").append(settings)
+                              .append("\n  camera=").append(Arrays.toString(camera.camera.combined.val))
+                              .append("\n  clock=").append(clock).append(" effectOffset=").append(offset)
+                              .append("\n  direct=").append(closureRgb(light.direct()))
+                              .append(" ambient=").append(closureRgb(light.ambient()))
+                              .append(" sky=").append(closureRgb(light.sky()))
+                              .append(" horizon=").append(closureRgb(light.horizon()))
+                              .append("\n  gain=").append(atmosphere.exposure())
+                              .append(" direction=").append(light.direction())
+                              .append(" particleLight=").append(closureRgb(atmosphere.sceneParticleLight()))
+                              .append("\n  finite=true exactRepeat=true comparedWithDayDepth=").append(hour == 0).append('\n');
+                        float maximum = 0;
+                        int occupied = 0;
+                        for (int pixel = 0; pixel < first.depth().length; pixel++) {
+                            if (first.depth()[pixel] < 1) { occupied++; }
+                            for (int channel = 0; channel < 3; channel++) {
+                                maximum = Math.max(maximum, first.raw()[pixel * 4 + channel]);
+                            }
+                        }
+                        report.append("  storedRgbMaximum=").append(maximum).append(" depthPixels=")
+                              .append(occupied).append('\n');
+                        assertTrue(occupied > 0, "Actual scene geometry must be captured");
+                    }
+                } finally { terrain.dispose(); effects.dispose(); depth.dispose(); atmosphere.dispose(); }
+            }
+            report.append("PASS: four captures, exact raw/display/depth repeats. Appearance review remains separate.\n");
+        } finally { Files.writeString(new File(directory, "review.txt").toPath(), report); }
+    }
+
+    private static void drawClosure(GpuTerrain terrain, GpuTerrainEffects effects, GpuEffectDepth depth,
+          GpuAtmosphere atmosphere, BoardScene board, BoardCamera camera, boolean fire) {
+        atmosphere.updateLight(camera.camera);
+        terrain.setAtmosphere(atmosphere.lighting());
+        terrain.renderShadows(camera.camera, List.of());
+        atmosphere.prepareClouds(terrain, board, 0);
+        atmosphere.begin(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), 0);
+        terrain.render(camera.camera, false);
+        terrain.renderTransparent(camera.camera);
+        if (fire) {
+            depth.begin();
+            effects.render(camera.camera, depth, atmosphere.sceneParticleLight(), atmosphere.lighting().direction());
+        }
+        atmosphere.renderWeather(camera.camera, board);
+        atmosphere.end(camera.camera, terrain, board, 0);
+    }
+
+    private record ClosureFrame(BufferedImage image, float[] raw, float[] depth) { }
+
+    private static ClosureFrame closureFrame(GpuAtmosphere atmosphere) throws Exception {
+        int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
+        BufferedImage image = capture(width, height);
+        var scene = (FrameBuffer) closureField(atmosphere, "sceneColor");
+        assertEquals(width, scene.getWidth()); assertEquals(height, scene.getHeight());
+        var viewport = BufferUtils.newIntBuffer(4);
+        Gdx.gl.glGetIntegerv(GL20.GL_VIEWPORT, viewport);
+        float[] raw = new float[width * height * 4], depth = new float[width * height];
+        var values = BufferUtils.newFloatBuffer(raw.length);
+        scene.begin();
+        try {
+            Gdx.gl.glReadPixels(0, 0, width, height, GL20.GL_RGBA, GL20.GL_FLOAT, values);
+            values.get(raw); values.clear();
+            Gdx.gl.glReadPixels(0, 0, width, height, GL20.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, values);
+            values.get(depth);
+            for (float value : raw) { assertTrue(Float.isFinite(value), "Finite raw RGBA16F"); }
+            for (float value : depth) {
+                assertTrue(Float.isFinite(value) && value >= 0 && value <= 1, "Finite normalized scene depth");
+            }
+        } finally {
+            scene.end();
+            Gdx.gl.glViewport(viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
+        }
+        return new ClosureFrame(image, raw, depth);
+    }
+
+    private static Object closureField(Object owner, String name) throws Exception {
+        var field = owner.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(owner);
+    }
+
+    private static String closureRgb(Color color) {
+        return color.r + "," + color.g + "," + color.b;
+    }
+
 
     private void reviewSurfaces() throws Exception {
         var terrain = new GpuTerrain();
@@ -488,7 +677,7 @@ class GpuTerrainEffectsSmokeTest {
                 terrain.render(camera.camera, false);
                 terrain.renderTransparent(camera.camera);
                 depth.begin();
-                effects.render(camera.camera, depth, atmosphere.particleLight(), atmosphere.lighting().direction());
+                effects.render(camera.camera, depth, atmosphere.sceneParticleLight(), atmosphere.lighting().direction());
                 atmosphere.end(camera.camera, terrain, scene, 0);
                 if (frame == 24) { GpuReviewFrame.save(new File(output, "board-surfaces.png")); }
             }
@@ -500,7 +689,7 @@ class GpuTerrainEffectsSmokeTest {
         var effects = new GpuTerrainEffects();
         var depth = new GpuEffectDepth();
         var surfaces = new BoardSurface.Cache();
-        FrameBuffer target = GpuAtmosphere.buffer(1920, 1080, true);
+        var target = new GpuSceneTestOutput(1920, 1080);
         StringBuilder report = new StringBuilder("GPU: " + Gdx.gl.glGetString(GL20.GL_RENDERER)
               + "\n1920x1080; effect only, including depth copy, half-resolution volume pass and upsampling.\n"
               + "20 warmup + 80 measured frames. No terrain, units, UI or readback in measured interval.\n");
@@ -514,14 +703,16 @@ class GpuTerrainEffectsSmokeTest {
                 effects.update(scene, surfaces, BoardFireSmokeTest.wind(.5f, 90), 0);
                 try (var timing = new GpuStageTimings()) {
                     for (int frame = 0; frame < 100; frame++) {
-                        target.begin();
-                        ScreenUtils.clear(.4f, .5f, .6f, 1, true);
+                        target.scene().begin();
+                        Gdx.gl.glDepthMask(true);
+                        ScreenUtils.clear(.4f * GpuSceneRadiance.SCALE, .5f * GpuSceneRadiance.SCALE,
+                              .6f * GpuSceneRadiance.SCALE, 1, true);
                         depth.begin();
                         if (frame >= 20) { timing.beginFrame(); timing.stage("fire-smoke"); }
                         effects.render(camera, depth, Color.WHITE, LIGHT);
                         if (frame >= 20) { timing.stage(null); }
                         Gdx.gl.glFinish();
-                        target.end();
+                        FrameBuffer.unbind();
                     }
                     report.append("lod").append(lod).append(": ").append(effects.visibleCount()).append(" visible / ")
                           .append(effects.size()).append(" total; ").append(effects.drawCalls()).append(" draw calls\n");
@@ -543,7 +734,7 @@ class GpuTerrainEffectsSmokeTest {
                 }
             }
             Files.writeString(new File(output, "timing.txt").toPath(), report);
-        } finally { effects.dispose(); depth.dispose(); target.dispose(); }
+        } finally { effects.dispose(); depth.dispose(); target.close(); }
     }
 
     private static BoardProjectionCamera camera(Vector3 center, float zoom, boolean perspective) {
@@ -580,11 +771,11 @@ class GpuTerrainEffectsSmokeTest {
     private static double contrast(BufferedImage image, BoardProjectionCamera camera, Vector3 world) {
         Vector3 screen = camera.project(world.cpy(), 0, 0, image.getWidth(), image.getHeight());
         int x = Math.round(screen.x), y = image.getHeight() - 1 - Math.round(screen.y);
-        int background = Color.rgb888(BACKGROUND);
         double difference = 0;
         for (int dy = -1; dy <= 1; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
                 int actual = image.getRGB(x + dx, y + dy);
+                int background = displayedBackground.getRGB(x + dx, y + dy);
                 for (int shift : new int[] { 0, 8, 16 }) {
                     difference += Math.abs(((actual >> shift) & 255) - ((background >> shift) & 255));
                 }

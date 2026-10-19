@@ -24,7 +24,6 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -41,11 +40,12 @@ class GpuTerrainReliefSmokeTest {
             @Override
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
-                try {
+                try (var outputFrame = new GpuSceneTestOutput()) {
                     File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                     assertTrue(output.isDirectory() || output.mkdirs());
                     StringBuilder timing = new StringBuilder(Gdx.gl.glGetString(GL20.GL_RENDERER))
-                          .append("\n1440x1080, terrain-only native frames; median of 12 synchronized samples after warmup.\n");
+                          .append("\n1440x1080, terrain plus display-conversion native frames; ")
+                          .append("median of 12 synchronized samples after warmup.\n");
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     BoardAtmosphere.Lighting daylight = new BoardAtmosphere.Lighting(new Vector3(-.8f, .45f, -.85f).nor(),
@@ -62,14 +62,14 @@ class GpuTerrainReliefSmokeTest {
                         camera.center(BoardGeometry.center(new Coords(4, 5), 1));
                         terrain.renderShadows(camera.camera, List.of());
                         // Finish progressive grass preparation so changes cannot be mistaken for animation.
-                        for (int warmup = 0; warmup < 12; warmup++) { frame(terrain, camera); }
-                        settleCover(terrain, camera);
+                        for (int warmup = 0; warmup < 12; warmup++) { frame(outputFrame, terrain, camera); }
+                        settleCover(outputFrame, terrain, camera);
                         GpuBoardTestUi.capture(new File(output, "terrain-" + family + "-iso.png"));
                         long[] times = new long[12];
                         for (int sample = 0; sample < times.length; sample++) {
                             Gdx.gl.glFinish();
                             long start = System.nanoTime();
-                            frame(terrain, camera);
+                            frame(outputFrame, terrain, camera);
                             Gdx.gl.glFinish();
                             times[sample] = System.nanoTime() - start;
                         }
@@ -77,7 +77,7 @@ class GpuTerrainReliefSmokeTest {
                         timing.append(family).append(": ").append(times[times.length / 2] / 1_000_000.0).append(" ms\n");
                         Pixmap before = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                         terrain.animate(.7f, List.of());
-                        frame(terrain, camera);
+                        frame(outputFrame, terrain, camera);
                         Pixmap after = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                         int changed = 0;
                         for (int y = 0; y < before.getHeight(); y += 3) {
@@ -87,21 +87,21 @@ class GpuTerrainReliefSmokeTest {
                         }
                         before.dispose(); after.dispose();
                         assertTrue(changed > 100, "Water and cover must animate: " + family);
-                        checkMaterialToggle(terrain, camera);
+                        checkMaterialToggle(outputFrame, terrain, camera);
                         if (family == BoardScene.Surface.GRASS) {
-                            checkWind(terrain, camera);
+                            checkWind(outputFrame, terrain, camera);
                             checkCoverCache(scene);
                         }
                         camera.setIsometric(false);
                         camera.center(BoardGeometry.center(new Coords(4, 4), 3));
                         terrain.renderShadows(camera.camera, List.of());
-                        settleCover(terrain, camera);
+                        settleCover(outputFrame, terrain, camera);
                         GpuBoardTestUi.capture(new File(output, "terrain-" + family + "-top.png"));
                         if (family == BoardScene.Surface.SAND) {
                             var shadows = terrain.environment().shadowMap;
                             terrain.environment().shadowMap = null;
                             try {
-                                frame(terrain, camera);
+                                frame(outputFrame, terrain, camera);
                                 GpuBoardTestUi.capture(new File(output, "terrain-SAND-top-no-shadows.png"));
                             } finally { terrain.environment().shadowMap = shadows; }
                         }
@@ -110,13 +110,13 @@ class GpuTerrainReliefSmokeTest {
                                   new Color(1, .77f, .53f, 1), new Color(.24f, .27f, .33f, 1), Color.BLACK,
                                   daylight.sky(), daylight.horizon(), Color.WHITE, 1, 1, true));
                             terrain.renderShadows(camera.camera, List.of());
-                            frame(terrain, camera);
+                            frame(outputFrame, terrain, camera);
                             GpuBoardTestUi.capture(new File(output, "terrain-GRASS-warm-top.png"));
                             terrain.setAtmosphere(daylight);
                         }
                         if (family == BoardScene.Surface.SAND || family == BoardScene.Surface.ROCK) {
                             terrain.setNormalMaps(false);
-                            frame(terrain, camera);
+                            frame(outputFrame, terrain, camera);
                             GpuBoardTestUi.capture(new File(output, "terrain-" + family + "-top-no-relief.png"));
                             terrain.setNormalMaps(true);
                         }
@@ -134,27 +134,28 @@ class GpuTerrainReliefSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Terrain relief rendering", failure.get()); }
     }
 
-    private static void frame(GpuTerrain terrain, BoardCamera camera) {
-        ScreenUtils.clear(.2f, .26f, .31f, 1, true);
+    private static void frame(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera) {
+        outputFrame.begin(.2f, .26f, .31f, 1);
         terrain.render(camera.camera, false);
         terrain.renderTransparent(camera.camera);
+        outputFrame.display();
     }
 
-    private static void settleCover(GpuTerrain terrain, BoardCamera camera) {
+    private static void settleCover(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera) {
         // Grass is planted with the terrain: once the terrain is installed, one frame shows it completely.
         long deadline = System.nanoTime() + 60_000_000_000L;
         while (terrain.refine(camera.camera) || terrain.busy()) {
             assertTrue(System.nanoTime() < deadline, "Terrain must settle before image comparisons");
         }
-        frame(terrain, camera);
+        frame(outputFrame, terrain, camera);
     }
 
-    private static void checkWind(GpuTerrain terrain, BoardCamera camera) {
+    private static void checkWind(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera) {
         terrain.setWind(BoardAtmosphere.Effects.NONE);
-        frame(terrain, camera);
+        frame(outputFrame, terrain, camera);
         Pixmap calm = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         terrain.setWind(new BoardAtmosphere.Effects(0, 0, 0, 0, 0, .85f, 115));
-        frame(terrain, camera);
+        frame(outputFrame, terrain, camera);
         Pixmap windy = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         try {
             Vector3 center = camera.camera.project(BoardGeometry.center(new Coords(4, 4), 3));
@@ -171,19 +172,19 @@ class GpuTerrainReliefSmokeTest {
         }
     }
 
-    private static void checkMaterialToggle(GpuTerrain terrain, BoardCamera camera) {
-        int[] mapped = groundSamples(terrain, camera);
+    private static void checkMaterialToggle(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera) {
+        int[] mapped = groundSamples(outputFrame, terrain, camera);
         terrain.setNormalMaps(false);
-        int[] flat = groundSamples(terrain, camera);
+        int[] flat = groundSamples(outputFrame, terrain, camera);
         terrain.setNormalMaps(true);
-        assertArrayEquals(mapped, groundSamples(terrain, camera), "Material toggle restores identical lighting");
+        assertArrayEquals(mapped, groundSamples(outputFrame, terrain, camera), "Material toggle restores identical lighting");
         int changed = 0;
         for (int i = 0; i < mapped.length; i++) { if (mapped[i] != flat[i]) { changed++; } }
         assertTrue(changed > 20, "Normal/height maps must change the actual ground surface");
     }
 
-    private static int[] groundSamples(GpuTerrain terrain, BoardCamera camera) {
-        frame(terrain, camera);
+    private static int[] groundSamples(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera) {
+        frame(outputFrame, terrain, camera);
         Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         try {
             Vector3 center = camera.camera.project(BoardGeometry.center(new Coords(4, 4), 3));

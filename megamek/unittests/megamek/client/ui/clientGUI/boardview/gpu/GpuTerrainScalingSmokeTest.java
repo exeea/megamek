@@ -40,6 +40,7 @@ import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.NumberUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -55,8 +56,7 @@ class GpuTerrainScalingSmokeTest {
     void measuresProjectedTerrainAndMaterialStateReuse() throws Exception {
         String path = System.getProperty("megamek.gpu.performanceBoard", "");
         assumeTrue(!path.isEmpty());
-        Board board = new Board();
-        board.load(new File(path));
+        Board board = BoardFile.loadSheet(new File(path), false, true);
         boolean cost = Boolean.getBoolean("megamek.gpu.performanceCost");
         int width = cost ? Integer.getInteger("megamek.gpu.performanceWidth", 2560) : 1280;
         int height = cost ? Integer.getInteger("megamek.gpu.performanceHeight", 1440) : 900;
@@ -74,7 +74,7 @@ class GpuTerrainScalingSmokeTest {
                 @Override
                 public void create() {
                     GpuTerrain terrain = new GpuTerrain();
-                    FrameBuffer target = new FrameBuffer(Pixmap.Format.RGBA8888, width, height, true);
+                    GpuSceneTestOutput target = new GpuSceneTestOutput(width, height);
                     try {
                         if (cost) { installCostProbe(terrain); }
                         BoardScene scene = fixture.source.takeFrame().scene();
@@ -121,11 +121,11 @@ class GpuTerrainScalingSmokeTest {
                             }
                             terrain.animate(0, List.of());
                             terrain.renderShadows(camera.camera, List.of());
-                            target.begin();
                             byte[] reference = null;
                             Long referenceIndices = null;
                             for (int round = 0; round < 2; round++) {
                                 for (boolean enabled : new boolean[] { false, true }) {
+                                    target.begin(.2f, .26f, .31f, 1);
                                     toggle.accept(enabled);
                                     double warmupMaximum = 0;
                                     for (int i = 0; i < 90; i++) {
@@ -168,6 +168,7 @@ class GpuTerrainScalingSmokeTest {
                                           indices[0], GpuDrawCallAudit.pageBytes(pages) / 1048576.0, warmupMaximum);
                                     if (referenceIndices == null) { referenceIndices = indices[0]; }
                                     else { assertEquals(referenceIndices.longValue(), indices[0], "Every triangle survives batching"); }
+                                    target.display();
                                     byte[] pixels = ScreenUtils.getFrameBufferPixels(0, 0, 1280, 900, false);
                                     if (reference == null) { reference = pixels; }
                                     else {
@@ -179,11 +180,11 @@ class GpuTerrainScalingSmokeTest {
                                     }
                                 }
                             }
-                            target.end();
+                            FrameBuffer.unbind();
                         }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     } catch (Throwable error) { failure.set(error); }
-                    finally { target.dispose(); terrain.dispose(); Gdx.app.exit(); }
+                    finally { target.close(); terrain.dispose(); Gdx.app.exit(); }
                 }
             }, config);
         }
@@ -228,14 +229,14 @@ class GpuTerrainScalingSmokeTest {
         }
     }
 
-    private static void measureCost(GpuTerrain terrain, BoardCamera camera, FrameBuffer target, String view) throws Exception {
-        target.begin();
+    private static void measureCost(GpuTerrain terrain, BoardCamera camera, GpuSceneTestOutput target, String view) throws Exception {
+        target.begin(.2f, .26f, .31f, 1);
         try (GpuStageTimings timings = new GpuStageTimings()) {
             for (int i = 0; i < 90; i++) { draw(terrain, camera); }
             for (String mode : new String[] { "full", "half-resolution", "flat-fragment", "full-repeat" }) {
                 costProbe(terrain, mode.equals("flat-fragment"));
                 int divisor = mode.equals("half-resolution") ? 2 : 1;
-                Gdx.gl.glViewport(0, 0, target.getWidth() / divisor, target.getHeight() / divisor);
+                Gdx.gl.glViewport(0, 0, target.scene().getWidth() / divisor, target.scene().getHeight() / divisor);
                 for (int i = 0; i < 270; i++) {
                     timings.beginFrame(i >= 90);
                     timings.stage("terrain");
@@ -255,7 +256,7 @@ class GpuTerrainScalingSmokeTest {
                 try {
                     draw(terrain, camera);
                     System.out.printf("COST draws=%d indices=%.0f viewport=%dx%d%n", profiler.getDrawCalls(),
-                          profiler.getVertexCount().total, target.getWidth() / divisor, target.getHeight() / divisor);
+                          profiler.getVertexCount().total, target.scene().getWidth() / divisor, target.scene().getHeight() / divisor);
                 } finally { GpuStageTimings.stopCounting(profiler, raw); }
             }
             var output = Gdx.files.absolute(new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
@@ -264,14 +265,15 @@ class GpuTerrainScalingSmokeTest {
             // Timings isolate opaque terrain; visual review must also include the water above its bed.
             draw(terrain, camera);
             terrain.renderTransparent(camera.camera);
-            Pixmap pixels = ScreenUtils.getFrameBufferPixmap(0, 0, target.getWidth(), target.getHeight());
+            target.display();
+            Pixmap pixels = ScreenUtils.getFrameBufferPixmap(0, 0, target.scene().getWidth(), target.scene().getHeight());
             try { PixmapIO.writePNG(output, pixels, -1, true); }
             finally { pixels.dispose(); }
-        } finally { costProbe(terrain, false); target.end(); }
+        } finally { costProbe(terrain, false); FrameBuffer.unbind(); }
     }
 
     /** Both shader versions render the very same installed meshes, textures, animation time and camera. */
-    private static void compareShaders(GpuTerrain terrain, BoardCamera camera, FrameBuffer target, String view) throws Exception {
+    private static void compareShaders(GpuTerrain terrain, BoardCamera camera, GpuSceneTestOutput target, String view) throws Exception {
         ModelBatch batch = (ModelBatch) field(terrain, "batch");
         var provider = batch.getShaderProvider();
         var config = (DefaultShader.Config) field(provider, "sculptShader");
@@ -288,9 +290,9 @@ class GpuTerrainScalingSmokeTest {
         sorterField.setAccessible(true);
         RenderableSorter sorter = batch.getRenderableSorter();
         byte[] referencePixels = null;
-        target.begin();
         try (GpuStageTimings timings = new GpuStageTimings()) {
             for (int mode = 0; mode < 4; mode++) {
+                target.begin(.2f, .26f, .31f, 1);
                 boolean changed = mode % 2 == 1;
                 Array<Shader> active = changed ? optimized : reference;
                 cache.clear(); cache.addAll(active);
@@ -311,7 +313,8 @@ class GpuTerrainScalingSmokeTest {
                 sorterField.set(batch, new DefaultRenderableSorter());
                 try { draw(terrain, camera); }
                 finally { sorterField.set(batch, sorter); }
-                byte[] pixels = ScreenUtils.getFrameBufferPixels(0, 0, target.getWidth(), target.getHeight(), false);
+                target.display();
+                byte[] pixels = ScreenUtils.getFrameBufferPixels(0, 0, target.scene().getWidth(), target.scene().getHeight(), false);
                 if (referencePixels == null) { referencePixels = pixels; }
                 long total = 0, different = 0;
                 int maximum = 0;
@@ -325,12 +328,12 @@ class GpuTerrainScalingSmokeTest {
                 var output = Gdx.files.absolute(new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
                       "shader-" + view + "-" + mode + ".png").getAbsolutePath());
                 output.parent().mkdirs();
-                Pixmap image = new Pixmap(target.getWidth(), target.getHeight(), Pixmap.Format.RGBA8888);
+                Pixmap image = new Pixmap(target.scene().getWidth(), target.scene().getHeight(), Pixmap.Format.RGBA8888);
                 try { image.getPixels().put(pixels); PixmapIO.writePNG(output, image, -1, true); }
                 finally { image.dispose(); }
             }
         } finally {
-            target.end();
+            FrameBuffer.unbind();
             config.fragmentShader = optimizedSource;
             cache.clear(); cache.addAll(optimized);
             for (Shader shader : reference) { shader.dispose(); }
@@ -391,7 +394,8 @@ class GpuTerrainScalingSmokeTest {
 
     private static void draw(GpuTerrain terrain, BoardCamera camera) {
         Gdx.gl.glDepthMask(true);
-        ScreenUtils.clear(.2f, .26f, .31f, 1, true);
+        ScreenUtils.clear(GpuColor.linear(.2f) * GpuSceneRadiance.SCALE,
+              GpuColor.linear(.26f) * GpuSceneRadiance.SCALE, GpuColor.linear(.31f) * GpuSceneRadiance.SCALE, 1, true);
         terrain.render(camera.camera, false);
     }
 }

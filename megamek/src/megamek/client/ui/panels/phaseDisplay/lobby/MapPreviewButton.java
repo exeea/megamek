@@ -50,17 +50,29 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.Serial;
+import java.text.ParseException;
+import java.util.Objects;
+import java.util.TreeSet;
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
 import javax.swing.JButton;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComponent;
+import javax.swing.JMenu;
+import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
+import javax.swing.JRadioButtonMenuItem;
+import javax.swing.JSpinner;
+import javax.swing.SpinnerNumberModel;
 import javax.swing.TransferHandler;
 
 import megamek.MMConstants;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.util.ScalingPopup;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Board;
+import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.loaders.MapSettings;
 import megamek.common.util.ImageUtil;
 import megamek.logging.MMLogger;
@@ -113,12 +125,16 @@ public class MapPreviewButton extends JButton {
 
     /**
      * Shows the button's right-click menu (checked on both press and release, as the popup trigger is
-     * platform-dependent). It offers rotating the board on this slot by 180 degrees.
+     * platform-dependent). Rotation, theme and level offset apply to this board slot.
      */
     private void maybeShowPopup(MouseEvent event) {
         if (!event.isPopupTrigger()) {
             return;
         }
+        createPopup().show(this, event.getX(), event.getY());
+    }
+
+    ScalingPopup createPopup() {
         boolean isRotated = boardName.startsWith(Board.BOARD_REQUEST_ROTATION);
         boolean isFixedBoard = !boardName.isBlank()
               && !boardName.startsWith(MapSettings.BOARD_GENERATED)
@@ -133,7 +149,66 @@ public class MapPreviewButton extends JButton {
 
         ScalingPopup popup = new ScalingPopup();
         popup.add(rotateItem);
-        popup.show(this, event.getX(), event.getY());
+        popup.add(themeMenu());
+        JMenuItem levelItem = new JMenuItem(Messages.getString("ChatLounge.MapPreviewButton.levelOffset"));
+        levelItem.setEnabled(!boardName.isBlank() && lobby.mapSettings.getMedium() != MapSettings.MEDIUM_SPACE);
+        levelItem.addActionListener(event -> editLevelOffset());
+        popup.add(levelItem);
+        return popup;
+    }
+
+    private void editLevelOffset() {
+        JSpinner spinner = new JSpinner(new SpinnerNumberModel(lobby.mapSettings.getBoardLevelOffset(index),
+              MapSettings.MIN_BOARD_LEVEL_OFFSET, MapSettings.MAX_BOARD_LEVEL_OFFSET, 1));
+        String title = Messages.getString("ChatLounge.MapPreviewButton.levelOffset");
+        Object[] content = { Messages.getString("ChatLounge.MapPreviewButton.levelOffsetHelp",
+              MapSettings.MIN_BOARD_LEVEL_OFFSET, MapSettings.MAX_BOARD_LEVEL_OFFSET), spinner };
+        Object[] options = { Messages.getString("Okay"),
+              Messages.getString("ChatLounge.MapPreviewButton.resetLevelOffset"), Messages.getString("Cancel") };
+        while (true) {
+            int choice = JOptionPane.showOptionDialog(this, content, title, JOptionPane.DEFAULT_OPTION,
+                  JOptionPane.PLAIN_MESSAGE, null, options, options[0]);
+            if (choice == 1) {
+                lobby.changeMapLevelOffset(index, 0);
+                return;
+            }
+            if (choice != 0) { return; }
+            try {
+                spinner.commitEdit();
+                lobby.changeMapLevelOffset(index, (Integer) spinner.getValue());
+                return;
+            } catch (ParseException ex) {
+                JOptionPane.showMessageDialog(this,
+                      Messages.getString("ChatLounge.MapPreviewButton.levelOffsetInvalid",
+                            MapSettings.MIN_BOARD_LEVEL_OFFSET, MapSettings.MAX_BOARD_LEVEL_OFFSET), title,
+                      JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+
+    private JMenu themeMenu() {
+        JMenu menu = new JMenu(Messages.getString("ChatLounge.MapPreviewButton.theme"));
+        menu.setEnabled(!boardName.isBlank() && lobby.mapSettings.getMedium() != MapSettings.MEDIUM_SPACE);
+        String selected = lobby.mapSettings.getBoardTheme(index);
+        ButtonGroup group = new ButtonGroup();
+        addThemeChoice(menu, group, Messages.getString("ChatLounge.MapPreviewButton.defaultTheme"), null, selected);
+        menu.addSeparator();
+        var themes = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
+        themes.add("grass");
+        BoardArtwork.themes().stream().filter(theme -> !theme.isBlank()).forEach(themes::add);
+        themes.addAll(BoardEditorBlueprint.get().specialThemes());
+        if (selected != null) { themes.add(selected); }
+        for (String theme : themes) {
+            addThemeChoice(menu, group, BoardEditorBlueprint.themeLabel(theme), theme, selected);
+        }
+        return menu;
+    }
+
+    private void addThemeChoice(JMenu menu, ButtonGroup group, String label, String theme, String selected) {
+        JRadioButtonMenuItem item = new JRadioButtonMenuItem(label, Objects.equals(theme, selected));
+        group.add(item);
+        menu.add(item);
+        item.addActionListener(event -> lobby.changeMapTheme(index, theme));
     }
 
     /** Replaces the board on this slot with its 180 degree rotated (or un-rotated) counterpart. */
@@ -247,6 +322,10 @@ public class MapPreviewButton extends JButton {
                 }
                 if (lobby.mapSettings.getMedium() != MapSettings.MEDIUM_SPACE) {
                     String text = cleanBoardName(getText(), lobby.mapSettings);
+                    String theme = lobby.mapSettings.getBoardTheme(index);
+                    if (theme != null) { text += " [" + theme + "]"; }
+                    int offset = lobby.mapSettings.getBoardLevelOffset(index);
+                    if (offset != 0) { text += " [" + (offset > 0 ? "+" : "") + offset + "]"; }
                     drawMinimapLabel(text, width, height, graphics, lobby.hasInvalidBoard(getText()));
                 }
                 graphics.dispose();

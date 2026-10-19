@@ -423,7 +423,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
 
     private JComboBox<String> tileSetChoice;
     private List<String> tileSets;
-    /** The 3D board's graphics, in {@link BoardGraphics} order; the labels are the 3D Graphics menu's. */
+    /** The 3D board's graphics, in {@link BoardGraphics} order; the labels are the Renderer menu's. */
     private final JComboBox<String> boardGraphicsChoice = new JComboBox<>(new String[] {
           Messages.getString("CommonMenuBar.viewGraphicsClassic"),
           Messages.getString("CommonMenuBar.viewGraphicsEnhanced") });

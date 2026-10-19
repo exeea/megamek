@@ -28,7 +28,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.g3d.utils.BaseShaderProvider;
 import com.badlogic.gdx.math.Vector3;
-import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
@@ -44,7 +44,6 @@ class GpuBiomeSmokeTest {
         var failure = new AtomicReference<Throwable>();
         var original = BoardGeometry.tuning();
         var originalLod = TerrainLod.tuning();
-        boolean enabled = TerrainLod.enabled();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 960);
         new Lwjgl3Application(new ApplicationAdapter() {
@@ -56,7 +55,6 @@ class GpuBiomeSmokeTest {
                 int maskHandle = 0, cropHandle = 0, sedgeHandle = 0;
                 try {
                     GpuRiverTerrainSmokeTest.tune(.94f, true);
-                    TerrainLod.setEnabled(true);
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
@@ -309,7 +307,6 @@ class GpuBiomeSmokeTest {
                     frame.dispose();
                     BoardGeometry.tune(original);
                     TerrainLod.tune(originalLod);
-                    TerrainLod.setEnabled(enabled);
                     Gdx.app.exit();
                 }
             }
@@ -323,6 +320,8 @@ class GpuBiomeSmokeTest {
      */
     @Test
     void cropRowsKeepTheirShapeAfterReedsAreDrawnFirst() throws Exception {
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "crop-order");
+        Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(800, 600);
@@ -339,17 +338,10 @@ class GpuBiomeSmokeTest {
                     camera.orbit(20, 50);
                     camera.camera.zoom = BoardGeometry.width() / 600;
                     camera.center(BoardGeometry.center(new Coords(4, 4), 0));
-                    alone = fields(null, frame, camera);
-                    afterReeds = fields(scene(BoardScene.Biome.MARSH), frame, camera);
-                    int changed = 0;
-                    for (int y = 0; y < alone.getHeight(); y++) {
-                        for (int x = 0; x < alone.getWidth(); x++) {
-                            int a = alone.getPixel(x, y), b = afterReeds.getPixel(x, y);
-                            for (int shift = 8; shift < 32; shift += 8) {
-                                if (Math.abs((a >>> shift & 255) - (b >>> shift & 255)) > 24) { changed++; break; }
-                            }
-                        }
-                    }
+                    alone = fields(null, frame, camera, output, "alone");
+                    afterReeds = fields(scene(BoardScene.Biome.MARSH), frame, camera, output, "after-reeds");
+                    int changed = changedPixels(alone, afterReeds);
+                    System.out.println("Crop order initial frames: " + changed + " pixels differ");
                     assertTrue(changed < alone.getWidth() * alone.getHeight() / 100,
                           "Crop rows must look the same whether or not reeds were drawn first: " + changed + " pixels differ");
                 } catch (Throwable error) { failure.set(error); }
@@ -365,14 +357,43 @@ class GpuBiomeSmokeTest {
     }
 
     /** The fields drawn by a new renderer, after an optional first scene; the caller owns the returned pixels. */
-    private static Pixmap fields(BoardScene first, GpuReviewFrame frame, BoardCamera camera) throws Exception {
+    private static Pixmap fields(BoardScene first, GpuReviewFrame frame, BoardCamera camera,
+          File output, String label) throws Exception {
         var terrain = new GpuTerrain();
         try {
             var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
             if (first != null) { settle(terrain, plants, frame, camera, first); }
-            settle(terrain, plants, frame, camera, scene(BoardScene.Biome.FIELD));
-            return Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+            var scene = scene(BoardScene.Biome.FIELD);
+            settle(terrain, plants, frame, camera, scene);
+            Pixmap initial = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+            try {
+                PixmapIO.writePNG(new FileHandle(new File(output, label + "-first.png")), initial, -1, true);
+                frame.render(terrain, camera, scene);
+                Pixmap repeat = Pixmap.createFromFrameBuffer(0, 0, initial.getWidth(), initial.getHeight());
+                try {
+                    PixmapIO.writePNG(new FileHandle(new File(output, label + "-repeat.png")), repeat, -1, true);
+                    System.out.println("Crop order " + label + " first/repeat: " + changedPixels(initial, repeat)
+                          + " pixels differ; uploads=" + plants.uploads());
+                } finally { repeat.dispose(); }
+                return initial;
+            } catch (Throwable failure) { initial.dispose(); throw failure; }
         } finally { terrain.dispose(); }
+    }
+
+    /** Same material difference threshold as the cross-order regression; alpha is not display colour. */
+    private static int changedPixels(Pixmap a, Pixmap b) {
+        assertEquals(a.getWidth(), b.getWidth());
+        assertEquals(a.getHeight(), b.getHeight());
+        int changed = 0;
+        for (int y = 0; y < a.getHeight(); y++) {
+            for (int x = 0; x < a.getWidth(); x++) {
+                int first = a.getPixel(x, y), second = b.getPixel(x, y);
+                for (int shift = 8; shift < 32; shift += 8) {
+                    if (Math.abs((first >>> shift & 255) - (second >>> shift & 255)) > 24) { changed++; break; }
+                }
+            }
+        }
+        return changed;
     }
 
     static void registeredCrops(Texture texture, File output) {
@@ -411,6 +432,7 @@ class GpuBiomeSmokeTest {
     private static void settle(GpuTerrain terrain, GpuBiomeVegetation plants, GpuReviewFrame frame,
           BoardCamera camera, BoardScene scene) throws Exception {
         terrain.update(scene, camera.camera);
+        frame.prepare(terrain, camera, scene);
         GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
         // Plants are installed with the terrain; the first frame after settling draws them all.
         frame.render(terrain, camera, scene);
@@ -422,8 +444,7 @@ class GpuBiomeSmokeTest {
     }
 
     private static BoardScene fireAndIce() {
-        var board = new Board();
-        board.load(new File("data/boards/unofficial/Drewbacca/16x17 Fire And Ice 2.board"));
+        var board = BoardFile.loadSheet(new File("data/boards/unofficial/Drewbacca/16x17 Fire And Ice 2.board"), false, true);
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < board.getWidth(); x++) {
             for (int y = 0; y < board.getHeight(); y++) {

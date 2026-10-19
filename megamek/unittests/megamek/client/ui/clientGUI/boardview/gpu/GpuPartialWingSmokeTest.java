@@ -49,7 +49,7 @@ class GpuPartialWingSmokeTest {
             @Override
             public void create() {
                 var library = new GpuUnitModels();
-                var batch = new ModelBatch();
+                var batch = new ModelBatch(GpuUnitShader.provider());
                 try {
                     EquipmentType.initializeTypes();
                     verifyAllBodies(library);
@@ -176,7 +176,7 @@ class GpuPartialWingSmokeTest {
             for (var instance : List.of(front, rear)) {
                 for (var material : instance.materials) {
                     if (material.id.equals("paint")) {
-                        material.set(ColorAttribute.createDiffuse(.74f, .84f, .58f, 1));
+                        material.set(ColorAttribute.createDiffuse(GpuColor.linear(.74f, .84f, .58f)));
                     }
                 }
             }

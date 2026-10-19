@@ -157,13 +157,8 @@ final class GpuHintLine implements GpuHud.Component {
                   key(preferences, KeyCommandBind.TACTICAL_OVERLAYS), text("GpuBoard.hud.hint.overlays"),
                   key(preferences, KeyCommandBind.TOGGLE_ISO), text("GpuBoard.hud.util.backTo3d")));
         } else {
-            String camera = key(preferences, KeyCommandBind.SCROLL_NORTH) + key(preferences, KeyCommandBind.SCROLL_WEST)
-                  + key(preferences, KeyCommandBind.SCROLL_SOUTH) + key(preferences, KeyCommandBind.SCROLL_EAST) + " "
-                  + key(preferences, KeyCommandBind.CAMERA_ROTATE_LEFT)
-                  + key(preferences, KeyCommandBind.CAMERA_ROTATE_RIGHT);
             items.addAll(List.of(text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.pan"),
-                  text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit"), camera,
-                  text("GpuBoard.hud.hint.camera")));
+                  text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit")));
         }
         return items;
     }

@@ -19,6 +19,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.PixmapPacker;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.glutils.PixmapTextureData;
 import com.badlogic.gdx.utils.Disposable;
 
 /** Shared atlas ownership. Pixel changes update existing slots without invalidating mesh UVs. */
@@ -45,7 +46,10 @@ final class GpuTextures<K> implements Disposable {
     /** The slots some key uses, by artwork. A slot whose last key moved on stays packed until the pages are rebuilt. */
     private final Map<Images, Entry> slots = new HashMap<>();
     private final Map<Texture, Texture> normals = new IdentityHashMap<>();
+    // PixmapPacker owns layout and CPU pixels only; each atlas owns its managed page textures.
+    private final Map<PixmapPacker.Page, Texture> pageTextures = new IdentityHashMap<>();
     private final boolean mipmaps;
+    private final boolean sceneColors;
     private PixmapPacker packer;
     private TextureAtlas atlas;
     private PixmapPacker normalPacker;
@@ -89,6 +93,7 @@ final class GpuTextures<K> implements Disposable {
         packer = null;
         normalAtlas = null;
         normalPacker = null;
+        pageTextures.clear();
         normals.clear();
         entries.clear();
         slots.clear();
@@ -102,7 +107,13 @@ final class GpuTextures<K> implements Disposable {
     }
 
     GpuTextures(boolean mipmaps) {
+        this(mipmaps, false);
+    }
+
+    /** Scene artwork samples linear RGB; UI artwork and masks retain their authored/data values. */
+    GpuTextures(boolean mipmaps, boolean sceneColors) {
         this.mipmaps = mipmaps;
+        this.sceneColors = sceneColors;
     }
 
     /** Returns true only when the atlas layout changes. Must run on the GL thread. */
@@ -208,8 +219,8 @@ final class GpuTextures<K> implements Disposable {
             }
         });
         if (!names.isEmpty()) {
-            atlas = atlas(packer, atlas);
-            if (normalMaps) { normalAtlas = atlas(normalPacker, normalAtlas); }
+            atlas = atlas(packer, atlas, names.values());
+            if (normalMaps) { normalAtlas = atlas(normalPacker, normalAtlas, names.values()); }
             names.forEach((pixels, name) -> index(pixels, name, atlas.findRegion(name),
                   normalMaps ? normalAtlas.findRegion(name) : null));
         }
@@ -287,17 +298,12 @@ final class GpuTextures<K> implements Disposable {
         for (Images images : changed.values()) {
             if (fresh.contains(images) && !names.containsKey(images)) { names.put(images, pack(images, normalMaps)); }
         }
-        boolean opened = names.values().stream().anyMatch(name -> packer.getPage(name).getTexture() == null);
-        if (opened) {
-            // A further page gets its texture from the atlas, which also refreshes the pages packed into here.
-            atlas = atlas(packer, atlas);
-            if (normalMaps) { normalAtlas = atlas(normalPacker, normalAtlas); }
+        if (!names.isEmpty()) {
+            atlas = atlas(packer, atlas, names.values());
+            if (normalMaps) { normalAtlas = atlas(normalPacker, normalAtlas, names.values()); }
         }
-        Set<Texture> updated = new HashSet<>();
-        names.forEach((pixels, name) -> index(pixels, name,
-              opened ? atlas.findRegion(name) : upload(packer, name, updated),
-              !normalMaps ? null : opened ? normalAtlas.findRegion(name) : upload(normalPacker, name, updated)));
-        if (mipmaps) { updated.forEach(GpuTextures::regenerateMipmaps); }
+        names.forEach((pixels, name) -> index(pixels, name, atlas.findRegion(name),
+              normalMaps ? normalAtlas.findRegion(name) : null));
         changed.forEach((key, images) -> {
             entries.get(key).users--;
             Entry entry = slots.get(images);
@@ -336,17 +342,40 @@ final class GpuTextures<K> implements Disposable {
         return (long) (pixels.color().width() + ATLAS_BLEED) * (pixels.color().height() + ATLAS_BLEED);
     }
 
-    private TextureAtlas atlas(PixmapPacker source, TextureAtlas result) {
+    private TextureAtlas atlas(PixmapPacker source, TextureAtlas result, Iterable<String> names) {
         if (result == null) { result = new TextureAtlas(); }
-        source.updateTextureAtlas(result, mipmaps ? Texture.TextureFilter.MipMapLinearLinear : Texture.TextureFilter.Linear,
-              Texture.TextureFilter.Linear, mipmaps);
-        if (mipmaps) {
-            for (Texture texture : result.getTextures()) {
+        Set<PixmapPacker.Page> created = new HashSet<>();
+        // All slots are packed already. Upload a new page once, directly in its final color/data format.
+        for (String name : names) {
+            var page = source.getPage(name);
+            if (pageTextures.containsKey(page)) { continue; }
+            Pixmap pixels = page.getPixmap();
+            Texture texture = new Texture(sceneColors && source == packer
+                  ? GpuColorTexture.data(pixels, mipmaps, true)
+                  : new PixmapTextureData(pixels, pixels.getFormat(), mipmaps, false, true));
+            result.getTextures().add(texture);
+            pageTextures.put(page, texture);
+            created.add(page);
+            texture.setFilter(mipmaps ? Texture.TextureFilter.MipMapLinearLinear : Texture.TextureFilter.Linear,
+                  Texture.TextureFilter.Linear);
+            if (mipmaps) {
                 texture.bind();
                 // Keep the sampling footprint inside the artwork margin and duplicated atlas border.
                 Gdx.gl.glTexParameterf(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAX_LEVEL, 2);
             }
         }
+        Set<Texture> updated = new HashSet<>();
+        for (String name : names) {
+            var page = source.getPage(name);
+            var rect = source.getRect(name).bounds;
+            Texture texture = pageTextures.get(page);
+            TextureRegion region = result.addRegion(name, texture, rect.x, rect.y, rect.width, rect.height);
+            if (!created.contains(page)) {
+                upload(page.getPixmap(), region);
+                updated.add(texture);
+            }
+        }
+        if (mipmaps) { updated.forEach(GpuTextures::regenerateMipmaps); }
         return result;
     }
 
@@ -370,16 +399,6 @@ final class GpuTextures<K> implements Disposable {
             pixmap.dispose();
         }
         upload(page, region);
-    }
-
-    /** The region of a slot packed into a page already on display, after uploading just that slot to its texture. */
-    private static TextureRegion upload(PixmapPacker source, String name, Set<Texture> updated) {
-        PixmapPacker.Page page = source.getPage(name);
-        PixmapPacker.Bounds rect = source.getRect(name).bounds;
-        TextureRegion region = new TextureRegion(page.getTexture(), rect.x, rect.y, rect.width, rect.height);
-        upload(page.getPixmap(), region);
-        updated.add(region.getTexture());
-        return region;
     }
 
     /** Uploads one slot and its duplicated border from the page's backing image; the rest of the page stays as it is. */
@@ -453,6 +472,7 @@ final class GpuTextures<K> implements Disposable {
             normalPacker.dispose();
             normalPacker = null;
         }
+        pageTextures.clear();
         normals.clear();
         entries.clear();
         slots.clear();

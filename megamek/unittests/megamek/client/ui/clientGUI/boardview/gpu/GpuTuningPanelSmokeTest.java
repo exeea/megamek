@@ -18,21 +18,29 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.Toolkit;
 import java.awt.event.AWTEventListener;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.WindowEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.JButton;
 import javax.swing.SwingUtilities;
 
+import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -42,25 +50,35 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.Pools;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.CancelAction;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.common.board.Board;
 import megamek.common.enums.GamePhase;
+import megamek.common.game.Game;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.AtmosphericTaint;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.lwjgl.glfw.GLFWNativeWin32;
+import org.lwjgl.system.windows.User32;
 
 /**
  * The developer tuning utility (C.1 G17) in the real HUD over a real {@link GpuBoardTuning} model: the utility ends the
  * utility row and opens the panel at its place, one dialog at a time; every control of the model's two pages has its
  * hud-v3 control on the panel, which edits the model, group by group, and shows the model's own changes; the Camera
- * page sets the fixed sun and the board camera's framing; Defaults restores both pages; "Planetary conditions…" opens
- * the existing Swing editor.
+ * page sets the fixed sun and the board camera's framing; the Display page's UI scale is saved; Defaults restores both
+ * pages and the UI scale; "Planetary conditions…" opens the existing Swing editor.
  */
 @Tag("on-demand")
 class GpuTuningPanelSmokeTest {
@@ -124,7 +142,10 @@ class GpuTuningPanelSmokeTest {
 
         /** The model's control of that name, on either of its pages. */
         <T extends Actor> T model(String name) {
-            T actor = tuning.boardRows().findActor(name);
+            T actor = tuning.displayRows().findActor(name);
+            if (actor == null) {
+                actor = tuning.boardRows().findActor(name);
+            }
             if (actor == null) {
                 actor = tuning.atmosphereRows().findActor(name);
             }
@@ -190,10 +211,13 @@ class GpuTuningPanelSmokeTest {
 
         /** Scrolls the page that holds the actor so that the actor shows. */
         private void reveal(Actor actor) {
+            // Dynamic notes can change the wrapped page height; settle layout before deriving scroll coordinates.
+            show();
             for (Group parent = actor.getParent(); parent != null; parent = parent.getParent()) {
                 if (parent instanceof ScrollPane page) {
                     Vector2 corner = actor.localToAscendantCoordinates(page.getActor(), new Vector2());
-                    page.scrollTo(corner.x, corner.y, actor.getWidth(), actor.getHeight());
+                    // Keep click targets away from the scroll viewport's clipped edge on long pages.
+                    page.scrollTo(corner.x, corner.y, actor.getWidth(), actor.getHeight(), false, true);
                     page.updateVisualScroll();
                     show();
                     return;
@@ -208,6 +232,130 @@ class GpuTuningPanelSmokeTest {
             hud.dispose();
             batch.dispose();
         }
+    }
+
+    @Test
+    void clickedSlidersTakeArrowKeysUntilAnotherControlOrTheBoardIsClicked() {
+        GpuHudTestStage.run(harness -> {
+            try (Hud hud = new Hud(harness)) {
+                hud.show();
+                hud.click("tuning-button");
+                hud.click("tuning-board-tab");
+                Slider slider = hud.find("Hex scale");
+                hud.click(slider);
+                assertSame(slider, hud.hud.stage.getKeyboardFocus());
+                float initial = slider.getValue();
+                for (int[] key : new int[][] {
+                      { Input.Keys.RIGHT, KeyEvent.VK_RIGHT, 1 }, { Input.Keys.LEFT, KeyEvent.VK_LEFT, -1 },
+                      { Input.Keys.UP, KeyEvent.VK_UP, 1 }, { Input.Keys.DOWN, KeyEvent.VK_DOWN, -1 } }) {
+                    float previous = slider.getValue();
+                    assertTrue(hud.hud.keyDown(key[0], key[1], 0), "The slider consumes the camera's arrow key");
+                    assertTrue(hud.hud.keyUp(key[0], key[1]));
+                    hud.show();
+                    assertEquals(previous + key[2] * slider.getStepSize(), slider.getValue(), NEAR);
+                    assertEquals(slider.getValue(), hud.<Slider>model("Hex scale").getValue(), NEAR);
+                }
+                assertEquals(initial, slider.getValue(), NEAR);
+
+                Slider other = hud.find("Unit scale");
+                hud.click(other);
+                assertSame(other, hud.hud.stage.getKeyboardFocus());
+                hud.click("tuning-fps");
+                assertFalse(slider.hasKeyboardFocus());
+                assertFalse(other.hasKeyboardFocus());
+                hud.click(slider);
+                hud.hud.stage.touchDown(20, 300, 0, Input.Buttons.LEFT);
+                hud.hud.stage.touchUp(20, 300, 0, Input.Buttons.LEFT);
+                assertNull(hud.hud.stage.getKeyboardFocus(), "A board click releases the slider");
+                assertFalse(hud.hud.stage.keyDown(Input.Keys.RIGHT));
+                assertEquals(initial, slider.getValue(), NEAR);
+
+                hud.click(slider);
+                hud.click("tuning-atmosphere-tab");
+                assertNull(hud.hud.stage.getKeyboardFocus(), "The old tab must not retain its slider's focus");
+                Slider clouds = hud.find("Cloud cover");
+                hud.click(clouds);
+                assertSame(clouds, hud.hud.stage.getKeyboardFocus());
+                hud.click("tuning-close");
+                assertNull(hud.hud.stage.getKeyboardFocus());
+            }
+        });
+    }
+
+    @Test
+    void heldArrowsRespectBoundsAndReleaseFocusWhenDisabledHiddenOrRemoved() {
+        GpuHudTestStage.run(harness -> {
+            try (Hud hud = new Hud(harness)) {
+                hud.show();
+                hud.click("tuning-button");
+                hud.click("tuning-board-tab");
+                Slider slider = hud.find("Hex scale");
+                Slider.SliderStyle normal = slider.getStyle();
+                int listeners = hud.hud.stage.getRoot().getCaptureListeners().size;
+                hud.click(slider);
+                assertSame(normal.knobOver, slider.getStyle().knob, "Keyboard focus highlights the handle");
+                Input original = Gdx.input;
+                Input keys = mock(Input.class);
+                when(keys.isKeyPressed(Input.Keys.RIGHT)).thenReturn(true);
+                try {
+                    Gdx.input = keys;
+                    float initial = slider.getValue();
+                    float step = slider.getStepSize();
+                    assertTrue(hud.hud.keyDown(Input.Keys.RIGHT, KeyEvent.VK_RIGHT, 0));
+                    assertEquals(initial + step, slider.getValue(), NEAR);
+                    hud.hud.stage.act(.15f);
+                    assertEquals(initial + step, slider.getValue(), NEAR, "Held keys wait before repeating");
+                    hud.hud.stage.act(.16f);
+                    assertEquals(initial + 2 * step, slider.getValue(), NEAR);
+                    hud.hud.stage.act(.05f);
+                    assertEquals(initial + 3 * step, slider.getValue(), NEAR);
+                    assertTrue(hud.hud.keyUp(Input.Keys.RIGHT, KeyEvent.VK_RIGHT));
+                    hud.hud.stage.act(1);
+                    assertEquals(initial + 3 * step, slider.getValue(), NEAR, "Release stops repetition");
+
+                    slider.setValue(slider.getMaxValue());
+                    assertTrue(hud.hud.keyDown(Input.Keys.RIGHT, KeyEvent.VK_RIGHT, 0));
+                    hud.hud.stage.act(.5f);
+                    hud.hud.keyUp(Input.Keys.RIGHT, KeyEvent.VK_RIGHT);
+                    assertEquals(slider.getMaxValue(), slider.getValue(), NEAR);
+                    slider.setValue(slider.getMinValue());
+                    assertTrue(hud.hud.keyDown(Input.Keys.LEFT, KeyEvent.VK_LEFT, 0));
+                    hud.hud.keyUp(Input.Keys.LEFT, KeyEvent.VK_LEFT);
+                    assertEquals(slider.getMinValue(), slider.getValue(), NEAR);
+
+                    hud.hud.keyDown(Input.Keys.RIGHT, KeyEvent.VK_RIGHT, 0);
+                    float beforeBlur = slider.getValue();
+                    hud.<Slider>model("Hex scale").setDisabled(true);
+                    hud.show();
+                    assertNull(hud.hud.stage.getKeyboardFocus());
+                    hud.hud.stage.act(1);
+                    assertEquals(beforeBlur, slider.getValue(), NEAR);
+                    hud.click(slider);
+                    assertNull(hud.hud.stage.getKeyboardFocus(), "Disabled sliders cannot take focus");
+                    hud.hud.keyUp(Input.Keys.RIGHT, KeyEvent.VK_RIGHT);
+                    assertSame(normal, slider.getStyle());
+                    assertEquals(listeners, hud.hud.stage.getRoot().getCaptureListeners().size);
+
+                    hud.<Slider>model("Hex scale").setDisabled(false);
+                    hud.click(slider);
+                    hud.hud.keyDown(Input.Keys.RIGHT, KeyEvent.VK_RIGHT, 0);
+                    beforeBlur = slider.getValue();
+                    hud.find("tuning-panel").setVisible(false);
+                    hud.hud.stage.act(1);
+                    assertNull(hud.hud.stage.getKeyboardFocus(), "Hidden panels release slider focus");
+                    assertEquals(beforeBlur, slider.getValue(), NEAR);
+                    hud.hud.keyUp(Input.Keys.RIGHT, KeyEvent.VK_RIGHT);
+                    assertSame(normal, slider.getStyle());
+
+                    hud.show();
+                    hud.click(slider);
+                    slider.remove();
+                    assertNull(hud.hud.stage.getKeyboardFocus());
+                    assertEquals(listeners, hud.hud.stage.getRoot().getCaptureListeners().size,
+                          "Removing a slider removes its stage listener too");
+                } finally { Gdx.input = original; }
+            }
+        });
     }
 
     @Test
@@ -239,6 +387,9 @@ class GpuTuningPanelSmokeTest {
                     hud.click(utility);
                     assertSame(GpuHudState.Dialog.TUNING, hud.hud.state.dialog);
                     assertTrue(utility.isChecked(), "the utility is pressed while the panel is open");
+                    // The panel keeps its last page when it closes, so it opens on Display only the first time.
+                    if (size == SIZES[0]) { assertTrue(hud.find("tuning-display").isVisible(), "the Display page is the first"); }
+                    hud.click("tuning-board-tab");
                     Rectangle panel = GpuHudTestStage.bounds(hud.find("tuning-frame"));
                     assertEquals(size[0] - metrics.gap(), panel.x + panel.width, .5f, "at the right gap " + at);
                     assertEquals(360, panel.width, .5f, at);
@@ -248,7 +399,7 @@ class GpuTuningPanelSmokeTest {
                     assertTrue(hud.<ScrollPane>find("tuning-board").isScrollY(), "and scrolls " + at);
                     assertTrue(hud.hits(panel.x + 3, panel.y + panel.height - 3), "the panel takes its presses");
                     assertFalse(hud.hits(size[0] / 2f, size[1] / 2f), "presses beside it reach the board");
-                    for (String page : List.of("tuning-board", "tuning-atmosphere", "tuning-camera")) {
+                    for (String page : List.of("tuning-display", "tuning-board", "tuning-atmosphere", "tuning-camera")) {
                         hud.click(page + "-tab");
                         GpuBoardTestUi.assertHorizontalBounds(hud.find("tuning-frame"), hud.find("tuning-frame"));
                     }
@@ -261,8 +412,11 @@ class GpuTuningPanelSmokeTest {
                     assertSame(GpuHudState.Dialog.HELP, hud.hud.state.dialog, "Help replaces the panel " + at);
                     assertFalse(hud.find("tuning-panel").isVisible());
                     assertFalse(utility.isChecked());
+                    // Help is modal: a press outside it, on the utility too, only dismisses it (UiModal).
                     hud.click(utility);
-                    assertSame(GpuHudState.Dialog.TUNING, hud.hud.state.dialog, "and the utility replaces Help");
+                    assertSame(GpuHudState.Dialog.NONE, hud.hud.state.dialog, "a press beside Help closes it " + at);
+                    hud.click(utility);
+                    assertSame(GpuHudState.Dialog.TUNING, hud.hud.state.dialog, "then the utility opens it " + at);
                     hud.key(KeyCommandBind.CANCEL);
                     assertSame(GpuHudState.Dialog.NONE, hud.hud.state.dialog, "Esc closes the panel " + at);
                     assertFalse(hud.find("tuning-panel").isVisible());
@@ -275,32 +429,198 @@ class GpuTuningPanelSmokeTest {
     }
 
     @Test
-    void ambientWearSliderUpdatesImmediatelyAndDefaultsRestoreFullIntensity() {
-        GpuHudTestStage.run(harness -> {
-            try (Hud hud = new Hud(harness)) {
-                hud.show();
-                hud.click("tuning-button");
-                hud.click("tuning-terrain-tab");
-                Slider slider = hud.find("Ambient wear");
-                assertEquals(0, slider.getMinValue(), NEAR);
-                assertEquals(1, slider.getMaxValue(), NEAR);
-                assertEquals(1, hud.tuning.terrainWear(), NEAR, "Full weathering by default");
-                for (float intensity : new float[] { 0, .25f, .5f, .75f, 1 }) {
-                    hud.drag("Ambient wear", intensity);
-                    assertEquals(intensity, hud.tuning.terrainWear(), NEAR, "The next frame reads the slider value");
-                    assertEquals(String.format(java.util.Locale.ROOT, "%.2f", intensity), reading(hud, "Ambient wear"));
+    void theUiScaleShowsTheSavedShareIsSavedOnceSetAndDefaultsLeavesIt() {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        float saved = preferences.getBoardUiScale();
+        try {
+            preferences.setBoardUiScale(.8f);
+            GpuHudTestStage.run(harness -> {
+                try (Hud hud = new Hud(harness)) {
+                    hud.show();
+                    hud.click("tuning-button");
+                    Slider slider = hud.find("tuning-ui-scale");
+                    assertEquals(50, slider.getMinValue(), NEAR);
+                    assertEquals(100, slider.getMaxValue(), NEAR, "only a reduction of the window's own scale");
+                    assertEquals(5, slider.getStepSize(), NEAR);
+                    assertEquals("80%", reading(hud, "tuning-ui-scale"), "the saved share");
+                    hud.drag("tuning-ui-scale", 65);
+                    assertEquals("65%", reading(hud, "tuning-ui-scale"));
+                    // The board view saves it each frame; the source publishes the saved share to the layout.
+                    hud.tuning.saveUiScale();
+                    SwingUtilities.invokeAndWait(() -> { });
+                    assertEquals(.65f, preferences.getBoardUiScale(), NEAR, "saved");
+                    hud.click("tuning-defaults");
+                    assertEquals("65%", reading(hud, "tuning-ui-scale"), "Defaults leaves the Display settings");
+                    hud.tuning.saveUiScale();
+                    SwingUtilities.invokeAndWait(() -> { });
+                    assertEquals(.65f, preferences.getBoardUiScale(), NEAR);
                 }
-                hud.drag("Ambient wear", .35f);
-                for (int[] size : SIZES) {
-                    harness.size(size[0], size[1]);
-                    hud.resize();
-                    hud.capture("tuning-weathering-" + size[0] + "x" + size[1]);
+            });
+        } finally {
+            preferences.setBoardUiScale(saved);
+        }
+    }
+
+    @Test
+    void theRenderResolutionShowsTheSavedShareIsSavedAndDefaultsLeavesIt() {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        float saved = preferences.getBoardRenderResolution();
+        try {
+            preferences.setBoardRenderResolution(.7f);
+            GpuHudTestStage.run(harness -> {
+                try (Hud hud = new Hud(harness)) {
+                    hud.show();
+                    hud.click("tuning-button");
+                    assertEquals("70%", reading(hud, "tuning-render-resolution"), "the saved share");
+                    assertEquals(.7f, BoardCamera.renderScale, NEAR);
+                    hud.drag("tuning-render-resolution", 50);
+                    SwingUtilities.invokeAndWait(() -> { });
+                    assertEquals(.5f, preferences.getBoardRenderResolution(), NEAR, "saved");
+                    hud.click("tuning-defaults");
+                    SwingUtilities.invokeAndWait(() -> { });
+                    assertEquals("50%", reading(hud, "tuning-render-resolution"), "Defaults leaves the Display settings");
+                    assertEquals(.5f, preferences.getBoardRenderResolution(), NEAR);
                 }
-                hud.click("tuning-defaults");
-                assertEquals(1, hud.tuning.terrainWear(), NEAR);
-                assertEquals("1.00", reading(hud, "Ambient wear"));
-            }
+            });
+        } finally {
+            preferences.setBoardRenderResolution(saved);
+            BoardCamera.renderScale = 1;
+        }
+    }
+
+    /**
+     * In the map preview or the board editor: Swing's GUI scale keys (Ctrl+NumPad +/-, and Ctrl+0) change neither
+     * Swing's GUI scale nor the 3D UI scale. Then the path a user takes, from Windows mouse messages through the
+     * window's own event loop: the Tuning utility, then a drag on the Display page's UI scale. While the button is held
+     * the HUD keeps its layout; once it is released the HUD lays out at that share of the scale it had, also in a
+     * window whose size limits that scale (the default 1280 x 800 on a high-DPI display).
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    @EnabledOnOs(OS.WINDOWS)
+    void theGuiScaleKeysDoNothingAndAMouseDragOnTheUiScaleRescalesTheHudOnRelease(boolean editing) throws Exception {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        float saved = preferences.getBoardUiScale();
+        float guiScale = preferences.getGUIScale();
+        FutureTask<GpuMapSource> setup = new FutureTask<>(() -> {
+            preferences.setBoardUiScale(1);
+            BoardEditorSession editor = editing ? new BoardEditorSession() : null;
+            Game game = editor == null ? new Game() : editor.game();
+            game.setBoard(Board.createEmptyBoard(9, 9));
+            return new GpuMapSource(game, null, editor, () -> { }, () -> { });
         });
+        SwingUtilities.invokeAndWait(setup);
+        GpuMapSource source = setup.get();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        try {
+            new Lwjgl3Application(new ApplicationAdapter() {
+                private GpuBattleView view;
+                private long window;
+                private int frame;
+                private float full;
+                private Slider slider;
+
+                @Override
+                public void create() {
+                    view = new GpuBattleView(source);
+                    view.create();
+                    GpuBoardTestUi.present(view);
+                    window = GLFWNativeWin32.glfwGetWin32Window(
+                          ((Lwjgl3Graphics) Gdx.graphics).getWindow().getWindowHandle());
+                }
+
+                @Override
+                public void resize(int width, int height) {
+                    view.resize(width, height);
+                }
+
+                /** The window's own loop: its events are polled, then each frame takes the next step. */
+                @Override
+                public void render() {
+                    try {
+                        view.render();
+                        Stage stage = GpuBoardTestUi.stage();
+                        int step = frame++;
+                        switch (step) {
+                            case 0 -> {
+                                full = stage.getWidth();
+                                GpuBoardTestUi.press(KeyCommandBind.INC_GUI_SCALE);
+                                GpuBoardTestUi.press(KeyCommandBind.DEC_GUI_SCALE);
+                                GpuBoardTestUi.press(KeyCommandBind.INC_GUI_SCALE);
+                                GpuBoardTestUi.withModifiers(InputEvent.CTRL_DOWN_MASK, () -> {
+                                    Gdx.input.getInputProcessor().keyDown(Input.Keys.NUM_0);
+                                    Gdx.input.getInputProcessor().keyUp(Input.Keys.NUM_0);
+                                });
+                            }
+                            case 2 -> {
+                                // Any change they made would have reached the Swing thread by now.
+                                SwingUtilities.invokeAndWait(() -> { });
+                                assertEquals(guiScale, preferences.getGUIScale(), "Swing's GUI scale is untouched");
+                                assertEquals(1, preferences.getBoardUiScale(), "so is the 3D UI scale");
+                                assertEquals(full, stage.getWidth(), .5f, "and the HUD's layout");
+                                Actor tune = stage.getRoot().findActor("tuning-button");
+                                Vector2 at = windowPoint(stage, tune, tune.getWidth() / 2, tune.getHeight() / 2);
+                                mouse(User32.WM_MOUSEMOVE, 0, at);
+                                mouse(User32.WM_LBUTTONDOWN, User32.MK_LBUTTON, at);
+                                mouse(User32.WM_LBUTTONUP, 0, at);
+                            }
+                            case 6 -> {
+                                slider = stage.getRoot().findActor("tuning-ui-scale");
+                                assertTrue(GpuBoardTestUi.shown(slider), "the Display page shows the UI scale");
+                                float middle = slider.getHeight() / 2;
+                                Vector2 start = windowPoint(stage, slider, slider.getWidth() - 1, middle);
+                                mouse(User32.WM_MOUSEMOVE, 0, start);
+                                mouse(User32.WM_LBUTTONDOWN, User32.MK_LBUTTON, start);
+                                mouse(User32.WM_MOUSEMOVE, User32.MK_LBUTTON, windowPoint(stage, slider, 0, middle));
+                            }
+                            case 10 -> {
+                                assertTrue(Gdx.input.isTouched(), "the button is held");
+                                assertEquals(50, slider.getValue(), NEAR, "the drag reached the minimum");
+                                assertEquals(full, stage.getWidth(), .5f, "the layout waits for the release");
+                                mouse(User32.WM_LBUTTONUP, 0, windowPoint(stage, slider, 0, slider.getHeight() / 2));
+                            }
+                            default -> {
+                                // Saved on release, the share reaches the layout through the Swing thread.
+                                if (step > 10 && (stage.getWidth() > full + 1 || step > 120)) {
+                                    assertFalse(Gdx.input.isTouched(), "the button is released");
+                                    assertEquals(.5f, preferences.getBoardUiScale(), NEAR, "the share is saved");
+                                    assertEquals(full / .5f, stage.getWidth(), 1, "the HUD lays out at half its scale");
+                                    assertEquals(guiScale, preferences.getGUIScale(), "Swing's GUI scale is untouched");
+                                    Gdx.app.exit();
+                                }
+                            }
+                        }
+                    } catch (Throwable error) {
+                        failure.set(error);
+                        Gdx.app.exit();
+                    }
+                }
+
+                @Override
+                public void dispose() {
+                    view.dispose();
+                }
+
+                /** Posts a mouse message at the window point, which the window's next event poll delivers. */
+                private void mouse(int message, int buttons, Vector2 at) {
+                    long position = ((long) Math.round(at.y) << 16) | (Math.round(at.x) & 0xFFFF);
+                    assertTrue(User32.PostMessage(window, message, buttons, position), "the window takes the message");
+                }
+            }, GpuBoardWindow.configuration(false));
+        } finally {
+            SwingUtilities.invokeAndWait(() -> {
+                source.close();
+                preferences.setBoardUiScale(saved);
+            });
+        }
+        if (failure.get() != null) {
+            throw new AssertionError(editing ? "UI scale in the editor" : "UI scale in the map preview", failure.get());
+        }
+    }
+
+    /** The window point (y down) of the point (x, y) of {@code actor}. */
+    private static Vector2 windowPoint(Stage stage, Actor actor, float x, float y) {
+        return stage.stageToScreenCoordinates(actor.localToStageCoordinates(new Vector2(x, y)));
     }
 
     @Test
@@ -310,14 +630,18 @@ class GpuTuningPanelSmokeTest {
                 hud.show();
                 hud.click("tuning-button");
                 // Every named control of both model pages, on the page's tab, and Defaults, by name and kind.
+                List<Actor> display = controls(hud.tuning.displayRows());
                 List<Actor> board = controls(hud.tuning.boardRows());
                 List<Actor> atmosphere = controls(hud.tuning.atmosphereRows());
                 hud.click("tuning-atmosphere-tab");
                 assertMirrored(hud, atmosphere);
+                hud.click("tuning-display-tab");
+                assertMirrored(hud, display);
                 hud.click("tuning-board-tab");
                 assertMirrored(hud, board);
                 assertMirrored(hud, List.of(hud.tuning.defaults()));
-                List<Actor> every = new ArrayList<>(board);
+                List<Actor> every = new ArrayList<>(display);
+                every.addAll(board);
                 every.addAll(atmosphere);
                 assertEquals(every.size(), every.stream().map(Actor::getName).distinct().count(),
                       "the model's control names are unique");
@@ -339,14 +663,12 @@ class GpuTuningPanelSmokeTest {
                 assertEquals(.5f, geometry.gridShade(), NEAR);
                 assertEquals(.75f, geometry.multiHexUnitScale(), NEAR);
 
-                // Normal maps and VSync.
-                assertTrue(hud.tuning.normalMaps());
-                hud.click("tuning-normal-maps");
-                assertFalse(hud.tuning.normalMaps(), "Normal maps off");
-                assertFalse(hud.<UiKit.Checkbox>find("tuning-normal-maps").isTicked());
+                // VSync, on the Display page.
+                hud.click("tuning-display-tab");
                 boolean vsync = hud.<CheckBox>model("tuning-vsync").isChecked();
                 hud.click("tuning-vsync");
                 assertEquals(!vsync, hud.<CheckBox>model("tuning-vsync").isChecked(), "VSync switched");
+                hud.click("tuning-board-tab");
 
                 // Unit family sizes.
                 for (UnitFamilyScale family : UnitFamilyScale.values()) {
@@ -475,6 +797,26 @@ class GpuTuningPanelSmokeTest {
                 assertEquals(12, hud.tuning.atmosphere().hour(), NEAR);
                 assertEquals(.5f, hud.tuning.atmosphere().exposure(), NEAR);
                 assertEquals("12:00", reading(hud, "Time of day"));
+                hud.drag("Shadows", 45);
+                hud.drag("Ambient light", 32);
+                hud.drag("Sky contribution", 60);
+                assertEquals(.45f, hud.tuning.atmosphereOptions().shadowStrength(), NEAR);
+                assertEquals(.32f, hud.tuning.atmosphereOptions().ambientShare(), NEAR);
+                assertEquals(.60f, hud.tuning.atmosphereOptions().skyContribution(), NEAR);
+                hud.drag("White balance", .5f);
+                hud.drag("Tint", -.25f);
+                hud.drag("Saturation", 1.5f);
+                hud.drag("Contrast", 1.2f);
+                var grade = hud.tuning.atmosphereOptions();
+                assertEquals(.5f, grade.whiteBalance(), NEAR);
+                assertEquals(-.25f, grade.tint(), NEAR);
+                assertEquals(1.5f, grade.saturation(), NEAR);
+                assertEquals(1.2f, grade.contrast(), NEAR);
+                assertEquals("+0.50", reading(hud, "White balance"));
+                assertEquals("-0.25", reading(hud, "Tint"));
+                assertEquals("1.50", reading(hud, "Saturation"));
+                assertEquals("1.20", reading(hud, "Contrast"));
+                hud.capture("tuning-color-controls");
                 boolean moonlight = hud.tuning.atmosphere().moonlight();
                 hud.click("tuning-moonlight");
                 assertEquals(!moonlight, hud.tuning.atmosphere().moonlight(), "Moonlight switched");
@@ -586,6 +928,10 @@ class GpuTuningPanelSmokeTest {
                 hud.click("tuning-defaults");
                 assertEquals(BoardAtmosphere.DEFAULTS, hud.tuning.atmosphere());
                 assertEquals(initialOptions, hud.tuning.atmosphereOptions());
+                assertEquals("+0.00", reading(hud, "White balance"));
+                assertEquals("+0.00", reading(hud, "Tint"));
+                assertEquals("1.00", reading(hud, "Saturation"));
+                assertEquals("1.00", reading(hud, "Contrast"));
                 assertEquals(BoardAtmosphere.DEFAULTS.clouds(), hud.<Slider>find("Cloud cover").getValue(), .01f);
             }
         });

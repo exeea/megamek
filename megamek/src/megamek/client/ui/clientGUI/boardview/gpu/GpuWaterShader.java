@@ -46,6 +46,8 @@ final class GpuWaterShader extends Attribute {
     private static final float CURRENT_RANGE = 1;
     /** Radius of the kernel that blends neighbouring currents and rapids, in hex widths. */
     private static final float BLEND_RADIUS = 0.9f;
+    /** A river's surface disturbance fades through connected still water over this many hexes. */
+    private static final int RIPPLE_REACH = 4;
     private static final int DETAIL_SIZE = 256;
 
     /**
@@ -81,9 +83,10 @@ final class GpuWaterShader extends Attribute {
         List<Coords> pools = new ArrayList<>(List.of(tile.coords()));
         for (int direction = 0; direction < 6; direction++) {
             BoardScene.Tile beside = scene.tile(tile.coords().translated(direction));
-            if (beside != null && beside.elevation() == tile.elevation() && !beside.frozen()
+            if (beside != null && beside.elevation() == tile.elevation()
                   && tile.liquid().connects(beside.liquid())) {
-                pools.add(beside.coords());
+                BoardSurface frozen = beside.frozen() ? surfaces.apply(beside.coords()) : null;
+                if (!beside.frozen() || frozen != null && !frozen.waterFaces.isEmpty()) { pools.add(beside.coords()); }
             }
         }
         Vector3 middle = BoardGeometry.center(tile.coords(), 0);
@@ -91,7 +94,7 @@ final class GpuWaterShader extends Attribute {
         for (Coords pool : pools) {
             for (int direction = 0; direction < 6; direction++) {
                 BoardSurface upper = surfaces.apply(pool.translated(direction));
-                if (upper == null) { continue; }
+                if (upper == null || upper.tile.frozen()) { continue; }
                 for (BoardSurface.Side fall : upper.waterfalls) {
                     Coords below = upper.tile.coords().translated(BoardGeometry.edgeDirection(fall.edge()));
                     if (!below.equals(pool)) { continue; }
@@ -412,6 +415,52 @@ final class GpuWaterShader extends Attribute {
     }
 
     /**
+     * Derived once per terrain update, before fields or meshes are built. Continue a river's small surface motion
+     * into connected still water, then dissipate it; do not give the whole lake a current. The existing field kernel
+     * blends these samples between hex centres. Routed currents and agitation stay intact, and no motion passes
+     * through land, ice, lava or a different surface elevation. This map belongs only to the renderer.
+     */
+    static Map<Coords, BoardFlow.Current> surfaceCurrents(BoardScene scene, Map<Coords, BoardFlow.Current> routed) {
+        var result = new HashMap<>(routed);
+        Map<Coords, BoardFlow.Current> frontier = new HashMap<>();
+        for (var entry : routed.entrySet()) {
+            var tile = scene.tile(entry.getKey());
+            if (tile == null || !tile.liquid().present() || tile.liquid().molten() || tile.frozen()) { continue; }
+            var current = entry.getValue();
+            float speed = (float) Math.hypot(current.u(), current.v() * BoardGeometry.height() / BoardGeometry.width());
+            if (speed == 0) { continue; }
+            // A falling approach may be fast, but it must not paint several lake tiles with rapids agitation.
+            float scale = Math.min(1, .1f / speed);
+            frontier.put(entry.getKey(), new BoardFlow.Current(current.u() * scale, current.v() * scale));
+        }
+        for (int distance = 1; distance < RIPPLE_REACH && !frontier.isEmpty(); distance++) {
+            var incoming = new HashMap<Coords, Vector3>();
+            for (var entry : frontier.entrySet()) {
+                var from = scene.tile(entry.getKey());
+                for (int direction = 0; direction < 6; direction++) {
+                    Coords at = entry.getKey().translated(direction);
+                    if (result.containsKey(at)) { continue; }
+                    var to = scene.tile(at);
+                    if (to == null || to.frozen() || to.elevation() != from.elevation()
+                          || !from.liquid().connects(to.liquid())) { continue; }
+                    var current = entry.getValue();
+                    incoming.computeIfAbsent(at, unused -> new Vector3()).add(current.u(), current.v(), 1);
+                }
+            }
+            frontier = new HashMap<>();
+            float t = distance / (float) RIPPLE_REACH;
+            float fade = (1 - t) * (1 - t) * (1 + 2 * t);
+            for (var entry : incoming.entrySet()) {
+                Vector3 sum = entry.getValue();
+                var carrier = new BoardFlow.Current(sum.x / sum.z, sum.y / sum.z);
+                frontier.put(entry.getKey(), carrier);
+                result.put(entry.getKey(), new BoardFlow.Current(carrier.u() * fade, carrier.v() * fade));
+            }
+        }
+        return Map.copyOf(result);
+    }
+
+    /**
      * One chunk's surface inputs on a world-aligned lattice shared by every chunk, so bilinear samples agree exactly
      * along chunk borders: R signed distance to the nearest bank (positive over water), G optical depth, BA current.
      * Built with the chunk's terrain and owned by it; nothing here changes per frame.
@@ -643,10 +692,13 @@ final class GpuWaterShader extends Attribute {
             if (pools.containsKey(coords)) { return pools.get(coords); }
             BoardScene.Tile tile = scene.tile(coords);
             Pool pool = null;
-            if (tile != null && tile.liquid().present() && tile.liquid().molten() == molten && !tile.frozen()) {
+            if (tile != null && tile.liquid().present() && tile.liquid().molten() == molten) {
                 BoardSurface surface = surfaces.get(coords);
-                pool = new Pool(surface == null ? new BoardSurface(scene, tile) : surface,
-                      currents.getOrDefault(coords, BoardFlow.Current.STILL));
+                if (surface == null) { surface = new BoardSurface(scene, tile); }
+                // Only actual liquid openings participate in a frozen tile; the remaining slab stays a bank.
+                if (!tile.frozen() || !surface.waterFaces.isEmpty()) {
+                    pool = new Pool(surface, currents.getOrDefault(coords, BoardFlow.Current.STILL));
+                }
             }
             pools.put(coords, pool);
             return pool;
@@ -800,6 +852,10 @@ final class GpuWaterShader extends Attribute {
                 if (face.finish() == BoardSurface.Finish.ICE || face.finish() == BoardSurface.Finish.DRESSING) { continue; }
                 waterline(segments, surface, face);
             }
+            if (surface.tile.frozen()) {
+                // Existing cut-edge skirts intersect the opening's water level: reuse those real ice banks.
+                for (BoardSurface.Face face : surface.iceBroken) { waterline(segments, surface, face); }
+            }
             for (BoardSurface.Face face : surface.cliffWater) {
                 for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
                     lowX = Math.min(lowX, p.x);
@@ -831,6 +887,9 @@ final class GpuWaterShader extends Attribute {
 
         boolean contains(float x, float y) {
             if (x < minX || x > maxX || y < minY || y > maxY) { return false; }
+            if (surface.tile.frozen()) {
+                return surface.waterFaces.stream().anyMatch(face -> Float.isFinite(face.height(x, y)));
+            }
             boolean inside = false;
             for (int i = 0, j = outline.length - 2; i < outline.length; j = i, i += 2) {
                 float xi = outline[i], yi = outline[i + 1], xj = outline[j], yj = outline[j + 1];

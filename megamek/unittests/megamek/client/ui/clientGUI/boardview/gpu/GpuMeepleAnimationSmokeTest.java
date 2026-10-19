@@ -268,13 +268,13 @@ class GpuMeepleAnimationSmokeTest {
     private static void verifyVisibleSmoke(ModelInstance instance, Vector3 position,
           GpuPlaybackReview.ReviewRenderer renderer, GpuJumpJets jets) {
         renderer.frame(List.of(instance), position, null, "meeple-jump-no-exhaust", 36);
-        renderer.buffer.begin();
+        renderer.output.pixels().begin();
         var before = Pixmap.createFromFrameBuffer(0, 0, 640, 480);
-        renderer.buffer.end();
+        renderer.output.pixels().end();
         renderer.frame(List.of(instance), position, null, jets, "meeple-jump", 36);
-        renderer.buffer.begin();
+        renderer.output.pixels().begin();
         var after = Pixmap.createFromFrameBuffer(0, 0, 640, 480);
-        renderer.buffer.end();
+        renderer.output.pixels().end();
         try {
             int smokePixels = 0, bodySmokePixels = 0;
             for (int y = 0; y < after.getHeight(); y++) {

@@ -8,12 +8,14 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -24,10 +26,8 @@ class BoardConcreteShoreTest {
     @ParameterizedTest
     @ValueSource(floats = { .5f, 1, 2 })
     void footprintDistancesFollowFittedGeometryAndLeaveUnmovedHexesAlone(float scale) {
-        BoardConcrete.Mode mode = BoardConcrete.mode();
         BoardGeometry.Tuning geometry = BoardGeometry.tuning();
         try {
-            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
             BoardGeometry.tune(new BoardGeometry.Tuning(scale, geometry.unitScale(), geometry.unitHeightScale(),
                   geometry.levelHeight(), geometry.gridShade()));
             for (int direction = 0; direction < 3; direction++) {
@@ -68,140 +68,239 @@ class BoardConcreteShoreTest {
                 }
                 assertTrue(moved > 0 && unmoved > 0);
             }
-            BoardConcrete.tune(BoardConcrete.Mode.OFF);
-            BoardScene scene = pavedPatch(0);
-            assertTrue(Float.isNaN(BoardConcrete.of(scene).distance(new Coords(8, 8), 0, 0)));
         } finally {
-            BoardConcrete.tune(mode);
             BoardGeometry.tune(geometry);
         }
     }
 
     @Test
-    void noneKeepsSharpHexEdgesAgainstWater() {
-        BoardConcrete.Mode original = BoardConcrete.mode();
-        try {
-            BoardConcrete.tune(BoardConcrete.Mode.OFF);
-            Set<Coords> land = Set.of(CENTER, CENTER.translated(0), CENTER.translated(1));
-            BoardScene scene = scene(land, BoardScene.Surface.CONCRETE, false);
-            for (BoardScene.Tile tile : scene.tiles()) {
-                if (tile.liquid().present() && tile.coords().distance(CENTER) > 2) { continue; }
-                BoardSurface surface = new BoardSurface(scene, tile);
-                if (!tile.liquid().present()) {
-                    for (int k = 0; k < 6; k++) {
-                        assertArrayEquals(new float[] { 0, 0 }, surface.relief.shoreShift(k), .001f);
-                    }
-                    assertStraightSamples(surface, tile.coords());
-                } else {
-                    for (int e = 0; e < 6; e++) {
-                        if (!land.contains(tile.coords().translated(BoardGeometry.edgeDirection(e)))) { continue; }
-                        Vector3 a = BoardGeometry.corner(tile.coords(), 0, e);
-                        Vector3 b = BoardGeometry.corner(tile.coords(), 0, e + 1);
-                        for (int s = 0; s < BoardSurface.SHORE_SEGMENTS; s++) {
-                            Vector3 expected = new Vector3(a).lerp(b, s / (float) BoardSurface.SHORE_SEGMENTS);
-                            Vector3 actual = surface.outline.get(e * BoardSurface.SHORE_SEGMENTS + s);
-                            assertEquals(expected.x, actual.x, .001f, "None follows the exact hex border beside water");
-                            assertEquals(expected.y, actual.y, .001f);
-                        }
-                    }
-                }
-                assertUnfolded(surface, "Sharp hex boundaries in None mode");
-            }
-        } finally { BoardConcrete.tune(original); }
-    }
-
-    @Test
     void broadConcretePatchesFitFourStraightSidesInAllOrientations() {
-        BoardConcrete.Mode original = BoardConcrete.mode();
-        try {
-            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
-            for (int direction = 0; direction < 3; direction++) {
-                BoardScene scene = pavedPatch(direction);
-                BoardConcrete shape = BoardConcrete.of(scene);
-                Coords origin = new Coords(8, 8);
-                Vector3 axis = BoardGeometry.center(origin.translated(direction), 0)
-                      .sub(BoardGeometry.center(origin, 0)).nor();
-                List<Vector3> points = new ArrayList<>();
-                for (BoardScene.Tile tile : scene.tiles()) {
-                    if (tile.surface() != BoardScene.Surface.CONCRETE) { continue; }
-                    for (int e = 0; e < 6; e++) {
-                        if (scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(e))).surface()
-                              == BoardScene.Surface.CONCRETE) { continue; }
-                        for (int k : new int[] { e, (e + 1) % 6 }) {
-                            Vector3 p = BoardGeometry.corner(tile.coords(), 0, k);
-                            var shift = shape.corners(tile.coords()).get(k);
-                            p.add(shift.x(), shift.y(), 0);
-                            points.add(new Vector3(p.x * axis.x + p.y * axis.y, -p.x * axis.y + p.y * axis.x, 0));
-                        }
+        for (int direction = 0; direction < 3; direction++) {
+            BoardScene scene = pavedPatch(direction);
+            BoardConcrete shape = BoardConcrete.of(scene);
+            Coords origin = new Coords(8, 8);
+            Vector3 axis = BoardGeometry.center(origin.translated(direction), 0)
+                  .sub(BoardGeometry.center(origin, 0)).nor();
+            List<Vector3> points = new ArrayList<>();
+            for (BoardScene.Tile tile : scene.tiles()) {
+                if (tile.surface() != BoardScene.Surface.CONCRETE) { continue; }
+                for (int e = 0; e < 6; e++) {
+                    if (scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(e))).surface()
+                          == BoardScene.Surface.CONCRETE) { continue; }
+                    for (int k : new int[] { e, (e + 1) % 6 }) {
+                        Vector3 p = BoardGeometry.corner(tile.coords(), 0, k);
+                        var shift = shape.corners(tile.coords()).get(k);
+                        p.add(shift.x(), shift.y(), 0);
+                        points.add(new Vector3(p.x * axis.x + p.y * axis.y, -p.x * axis.y + p.y * axis.x, 0));
                     }
                 }
-                float minX = Float.POSITIVE_INFINITY, maxX = Float.NEGATIVE_INFINITY;
-                float minY = Float.POSITIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
-                for (Vector3 p : points) {
-                    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
-                    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
-                }
-                int corners = 0;
-                for (Vector3 p : points) {
-                    boolean xSide = Math.min(Math.abs(p.x - minX), Math.abs(p.x - maxX)) < .003f;
-                    boolean ySide = Math.min(Math.abs(p.y - minY), Math.abs(p.y - maxY)) < .003f;
-                    assertTrue(xSide || ySide, "Every boundary point lies on the rectangle, orientation=" + direction);
-                    if (xSide && ySide) { corners |= 1 << ((Math.abs(p.x - minX) < .003f ? 0 : 1)
-                          + (Math.abs(p.y - minY) < .003f ? 0 : 2)); }
-                }
-                assertEquals(15, corners, "All four square corners are present");
             }
-        } finally { BoardConcrete.tune(original); }
+            float minX = Float.POSITIVE_INFINITY, maxX = Float.NEGATIVE_INFINITY;
+            float minY = Float.POSITIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
+            for (Vector3 p : points) {
+                minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+                minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+            }
+            int corners = 0;
+            for (Vector3 p : points) {
+                boolean xSide = Math.min(Math.abs(p.x - minX), Math.abs(p.x - maxX)) < .003f;
+                boolean ySide = Math.min(Math.abs(p.y - minY), Math.abs(p.y - maxY)) < .003f;
+                assertTrue(xSide || ySide, "Every boundary point lies on the rectangle, orientation=" + direction);
+                if (xSide && ySide) { corners |= 1 << ((Math.abs(p.x - minX) < .003f ? 0 : 1)
+                      + (Math.abs(p.y - minY) < .003f ? 0 : 2)); }
+            }
+            assertEquals(15, corners, "All four square corners are present");
+        }
     }
 
     /**
-     * A placed object keeps its hex's concrete outline only where its footprint reaches a wall the fit moves
-     * (b9-decisions C). On a raised patch, a car at the centre of a hex on the fitted side leaves the straight side as
-     * it is, and the same car on that hex's moved wall keeps the hex's original outline, as a structure does. On a
-     * patch level with the grass a moved edge only changes the ground beneath the car, so the fit stays straight.
+     * A placed object keeps its hex's concrete outline only where the fit moves a wall into it (b12 pin refinement). On a
+     * raised patch, a car at the centre of a hex on the fitted side leaves the straight side as it is; the same car in
+     * the band an inward-moved wall sweeps keeps the hex's original outline, as a structure does; a car on a wall the fit
+     * moves outward, away from it, does not. On a patch level with the grass a moved edge only changes the ground
+     * beneath the car, so the fit stays straight.
      */
     @Test
-    void aPlacedObjectKeepsItsHexOutlineOnlyWhereItReachesAMovedWall() {
-        BoardConcrete.Mode original = BoardConcrete.mode();
-        try {
-            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
-            for (int level : new int[] { 2, 0 }) {
-                BoardScene plain = pavedPatch(0, level, null, null);
-                BoardConcrete fit = BoardConcrete.of(plain);
-                // A hex on the fitted side and one of its moved edges toward the grass.
-                Coords at = null;
-                int edge = -1;
-                for (var tile : plain.tiles()) {
-                    for (int k = 0; k < 6 && at == null && tile.surface() == BoardScene.Surface.CONCRETE; k++) {
-                        var across = plain.tile(tile.coords().translated(BoardGeometry.edgeDirection(k)));
-                        boolean moved = !fit.corner(tile.coords(), k).equals(BoardGeometry.corner(tile.coords(), 0, k))
-                              || !fit.corner(tile.coords(), (k + 1) % 6).equals(BoardGeometry.corner(tile.coords(), 0, (k + 1) % 6));
-                        if (moved && across.surface() != BoardScene.Surface.CONCRETE) { at = tile.coords(); edge = k; }
-                    }
-                }
-                assertNotNull(at, "The patch has a fitted side");
-                // Inside the band the edge sweeps: halfway between the original and the fitted middle of the edge.
-                Vector3 centre = BoardGeometry.center(at, 0);
-                Vector3 middle = BoardGeometry.corner(at, 0, edge).add(BoardGeometry.corner(at, 0, (edge + 1) % 6)).scl(.5f);
-                Vector3 fitted = fit.corner(at, edge).add(fit.corner(at, (edge + 1) % 6)).scl(.5f);
-                Vector3 band = middle.lerp(fitted, .5f).sub(centre);
-                BoardConcrete onEdge = BoardConcrete.of(pavedPatch(0, level, at,
-                      car(band.x / BoardGeometry.width(), band.y / BoardGeometry.height())));
-                if (level == 0) {
-                    assertEquals(fit.corners(at), onEdge.corners(at), "A moved edge without a wall keeps the fit: " + at);
-                    continue;
-                }
-                BoardConcrete clear = BoardConcrete.of(pavedPatch(0, level, at, car(0, 0)));
-                for (var tile : plain.tiles()) {
-                    assertEquals(fit.corners(tile.coords()), clear.corners(tile.coords()),
-                          "A car clear of the moved walls keeps the fit straight: " + tile.coords());
-                }
-                for (var shift : onEdge.corners(at)) {
-                    assertEquals(0, Math.hypot(shift.x(), shift.y()), .001f, "A car on the moved wall keeps its hex: " + at);
-                }
-                assertNotEquals(fit.corners(at), onEdge.corners(at));
+    void aPlacedObjectKeepsItsHexOutlineOnlyWhereTheFitMovesAWallIntoIt() {
+        for (int level : new int[] { 2, 0 }) {
+            BoardScene plain = pavedPatch(0, level, null, List.of());
+            BoardConcrete fit = BoardConcrete.of(plain);
+            var side = fittedSide(plain, fit, Move.IN);
+            Coords at = side.at();
+            // Inside the band the edge sweeps: halfway between the original and the fitted middle of the edge.
+            Vector3 band = bandMiddle(fit, side, .5f);
+            BoardConcrete onEdge = BoardConcrete.of(pavedPatch(0, level, at,
+                  List.of(car(band.x / BoardGeometry.width(), band.y / BoardGeometry.height()))));
+            if (level == 0) {
+                assertEquals(fit.corners(at), onEdge.corners(at), "A moved edge without a wall keeps the fit: " + at);
+                continue;
             }
-        } finally { BoardConcrete.tune(original); }
+            BoardConcrete clear = BoardConcrete.of(pavedPatch(0, level, at, List.of(car(0, 0))));
+            for (var tile : plain.tiles()) {
+                assertEquals(fit.corners(tile.coords()), clear.corners(tile.coords()),
+                      "A car clear of the moved walls keeps the fit straight: " + tile.coords());
+            }
+            for (var shift : onEdge.corners(at)) {
+                assertEquals(0, Math.hypot(shift.x(), shift.y()), .001f, "A car on the moved wall keeps its hex: " + at);
+            }
+            assertNotEquals(fit.corners(at), onEdge.corners(at));
+            // Astride a wall the fit moves outward: the concrete grows away from the car, which keeps the fit.
+            var out = fittedSide(plain, fit, Move.OUT);
+            Vector3 edge = bandMiddle(fit, out, 0);
+            BoardConcrete astride = BoardConcrete.of(pavedPatch(0, level, out.at(),
+                  List.of(car(edge.x / BoardGeometry.width(), edge.y / BoardGeometry.height()))));
+            for (var tile : plain.tiles()) {
+                assertEquals(fit.corners(tile.coords()), astride.corners(tile.coords()),
+                      "A wall moved away from the car keeps the fit: " + tile.coords());
+            }
+        }
+    }
+
+    /**
+     * Only a cut of at least 4 px² inside the object's own hex counts: a small square in the band an inward-moved wall
+     * sweeps measures its own area and pins from 4 px²; where the fitted edge crosses the original one, a square on the
+     * half moved outward is not cut, one in the half moved inward is.
+     */
+    @Test
+    void theCutCountsTheSweptAreaInsideTheObjectsOwnHexFromFourSquarePixels() {
+        BoardScene plain = pavedPatch(0, 2, null, List.of());
+        BoardConcrete shape = BoardConcrete.of(plain);
+        var fit = shape.fit();
+        var in = fittedSide(plain, shape, Move.IN);
+        Vector3 band = bandMiddle(shape, in, .5f).add(BoardGeometry.center(in.at(), 0));
+        assertEquals(1.5f, fit.cut(square(band, 1.5f), in.at(), in.edge()), .01f);
+        assertFalse(fit.reaches(square(band, 1.5f), in.at()), "A touch of 1.5 px² does not pin");
+        assertTrue(fit.reaches(square(band, 6), in.at()), "6 px² in the band pins");
+        var cross = fittedSide(plain, shape, Move.CROSS);
+        Coords at = cross.at();
+        int k = cross.edge();
+        Vector3 a = BoardGeometry.corner(at, 0, k), b = BoardGeometry.corner(at, 0, (k + 1) % 6);
+        boolean firstIn = side(a, b, shape.corner(at, k)) > 0;
+        Vector3 inner = new Vector3(firstIn ? a : b).lerp(firstIn ? b : a, .1f);
+        Vector3 outer = new Vector3(firstIn ? b : a).lerp(firstIn ? a : b, .1f);
+        Vector3 inward = BoardGeometry.center(at, 0).sub(a.cpy().lerp(b, .5f)).nor();
+        assertEquals(0, fit.cut(square(outer.mulAdd(inward, 1.5f), 2), at, k), .001f, "The outward half cuts nothing");
+        assertTrue(fit.cut(square(inner.mulAdd(inward, 1.5f), 2), at, k) > 0, "The inward half cuts");
+    }
+
+    /**
+     * Edges Fitted: the car on the inward-moved wall leaves its hex fitted, and the fit lists it as cut. Edges Hex: an
+     * empty hex there keeps its outline while its neighbours stay fitted, and nothing is cut.
+     */
+    @Test
+    void fittedEdgesIgnoreTheCarAndListItAndHexEdgesKeepTheOutline() {
+        BoardScene plain = pavedPatch(0, 2, null, List.of());
+        BoardConcrete fit = BoardConcrete.of(plain);
+        var side = fittedSide(plain, fit, Move.IN);
+        Coords at = side.at();
+        Vector3 band = bandMiddle(fit, side, .5f);
+        var car = List.of(car(band.x / BoardGeometry.width(), band.y / BoardGeometry.height()));
+        BoardConcrete fitted = BoardConcrete.of(pavedPatch(0, 2, at, car, HexAppearance.Edges.FITTED));
+        for (var tile : plain.tiles()) {
+            assertEquals(fit.corners(tile.coords()), fitted.corners(tile.coords()), "Fitted ignores the car: " + tile.coords());
+        }
+        assertEquals(List.of(new BoardConcrete.Cut(at, "car", "scenery/vehicles/car")), fitted.cuts());
+        assertTrue(fit.cuts().isEmpty());
+        BoardConcrete hex = BoardConcrete.of(pavedPatch(0, 2, at, List.of(), HexAppearance.Edges.HEX));
+        for (var shift : hex.corners(at)) {
+            assertEquals(0, Math.hypot(shift.x(), shift.y()), .001f, "Hex keeps the hex's outline: " + at);
+        }
+        assertTrue(plain.tiles().stream().anyMatch(tile -> tile.coords().distance(at) == 1
+              && hex.corners(tile.coords()).stream().anyMatch(s -> s.x() != 0 || s.y() != 0)), "Its neighbours stay fitted");
+        assertTrue(hex.cuts().isEmpty());
+    }
+
+    /**
+     * The legacy conversion's fit, read from the hexes alone ({@link megamek.common.board.ConcreteFit#cells}), is the 3D
+     * board's fit of the captured scene: a paved quay with a pier over water, a road ramp onto the quay and a bridge.
+     */
+    @Test
+    void theConversionsFitFromTheHexesIsTheBoardsFit() {
+        var board = megamek.common.board.Board.createEmptyBoard(10, 8);
+        for (int x = 0; x < 10; x++) {
+            for (int y = 0; y < 8; y++) {
+                boolean quay = y <= 2 || x == 4 && y <= 5;
+                board.setHex(new Coords(x, y), new megamek.common.Hex(0, quay ? "pavement:1" : "water:1", ""));
+            }
+        }
+        board.setHex(new Coords(8, 0), new megamek.common.Hex(2, "road:1:09", ""));
+        board.setHex(new Coords(8, 1), new megamek.common.Hex(0, "pavement:1;road:1:09", ""));
+        board.setHex(new Coords(1, 3), new megamek.common.Hex(0, "water:1;bridge:1:09;bridge_cf:40;bridge_elev:1", ""));
+        var scene = new BoardScene(0, 10, 8, BoardTiles.captureAll(board), List.of(), List.of(), -1, "", List.of());
+        var client = BoardConcrete.of(scene);
+        var common = new megamek.common.board.ConcreteFit(10, 8, megamek.common.board.ConcreteFit.cells(board), 1, true, Set.of());
+        int moved = 0;
+        for (var tile : scene.tiles()) {
+            assertEquals(client.corners(tile.coords()), common.corners(tile.coords()), tile.coords().toString());
+            moved += client.corners(tile.coords()).stream().anyMatch(shift -> shift.x() != 0 || shift.y() != 0) ? 1 : 0;
+        }
+        assertTrue(moved > 10, "The quay and the pier are fitted: " + moved);
+    }
+
+    /**
+     * A container yard's rows are objects of its hex ({@link BoardFeatures#decorations}), so the one rule pins it: where a
+     * fitted wall moves into its containers, its hex keeps its outline; plain light woods there take the fit.
+     */
+    @Test
+    void aContainerYardKeepsItsHexOutlineWhereAMovedWallReachesItsContainers() {
+        BoardScene plain = pavedPatch(0, 2, null, List.of());
+        BoardConcrete fit = BoardConcrete.of(plain);
+        Coords at = fittedSide(plain, fit, Move.IN).at();
+        var yard = new megamek.common.Hex(0, "pavement:1;woods:1;foliage_elev:2", "");
+        yard.setAppearance(java.util.Map.of("vegetation",
+              new megamek.common.board.HexAppearance("woods/container-yard/rows", null, null, null)));
+        var woods = BoardFeatures.capture(new megamek.common.Hex(0, "pavement:1;woods:1;foliage_elev:2", ""), at, java.util.Map.of());
+        assertTrue(woods.stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.TREE));
+        assertEquals(fit.corners(at), BoardConcrete.of(pavedPatch(0, 2, at, woods)).corners(at), "Woods take the fit");
+        BoardConcrete pinned = BoardConcrete.of(pavedPatch(0, 2, at, BoardFeatures.decorations(yard, at)));
+        for (var shift : pinned.corners(at)) {
+            assertEquals(0, Math.hypot(shift.x(), shift.y()), .001f, "The yard keeps its hex: " + at);
+        }
+        assertNotEquals(fit.corners(at), pinned.corners(at));
+    }
+
+    /** A hex on the patch's fitted side and one of its edges toward the grass that the fit moves. */
+    private record Side(Coords at, int edge) { }
+
+    /** How the fit moves an edge: both corners into the hex, both out of it, or one each way (the edges cross). */
+    private enum Move { IN, OUT, CROSS }
+
+    private static Side fittedSide(BoardScene plain, BoardConcrete fit, Move move) {
+        for (var tile : plain.tiles()) {
+            for (int k = 0; k < 6 && tile.surface() == BoardScene.Surface.CONCRETE; k++) {
+                var across = plain.tile(tile.coords().translated(BoardGeometry.edgeDirection(k)));
+                if (across.surface() == BoardScene.Surface.CONCRETE) { continue; }
+                Vector3 a = BoardGeometry.corner(tile.coords(), 0, k), b = BoardGeometry.corner(tile.coords(), 0, (k + 1) % 6);
+                float first = side(a, b, fit.corner(tile.coords(), k)), second = side(a, b, fit.corner(tile.coords(), (k + 1) % 6));
+                Move found = first > .01f && second > .01f ? Move.IN : first < -.01f && second < -.01f ? Move.OUT
+                      : first * second < 0 ? Move.CROSS : null;
+                if (found == move) { return new Side(tile.coords(), k); }
+            }
+        }
+        throw new AssertionError("The patch has no fitted side moved " + move);
+    }
+
+    /** Positive where p lies inside the hex, left of its counter-clockwise edge a-b. */
+    private static float side(Vector3 a, Vector3 b, Vector3 p) {
+        return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    }
+
+    /** The point {@code t} of the way from the edge's original middle to its fitted middle, from the hex centre. */
+    private static Vector3 bandMiddle(BoardConcrete fit, Side side, float t) {
+        Coords at = side.at();
+        int edge = side.edge();
+        Vector3 middle = BoardGeometry.corner(at, 0, edge).add(BoardGeometry.corner(at, 0, (edge + 1) % 6)).scl(.5f);
+        Vector3 fitted = fit.corner(at, edge).add(fit.corner(at, (edge + 1) % 6)).scl(.5f);
+        return middle.lerp(fitted, t).sub(BoardGeometry.center(at, 0));
+    }
+
+    /** An axis-aligned square footprint of {@code area} px² centred on {@code c}, counter-clockwise. */
+    private static List<megamek.common.board.ConcreteFit.Point> square(Vector3 c, float area) {
+        float h = (float) Math.sqrt(area) / 2;
+        return List.of(new megamek.common.board.ConcreteFit.Point(c.x - h, c.y - h),
+              new megamek.common.board.ConcreteFit.Point(c.x + h, c.y - h),
+              new megamek.common.board.ConcreteFit.Point(c.x + h, c.y + h),
+              new megamek.common.board.ConcreteFit.Point(c.x - h, c.y + h));
     }
 
     /** A placed car at (x, y) hex widths/heights from its hex centre, as the scene captures a .board2 object. */
@@ -213,11 +312,18 @@ class BoardConcreteShoreTest {
     }
 
     private static BoardScene pavedPatch(int direction) {
-        return pavedPatch(direction, 0, null, null);
+        return pavedPatch(direction, 0, null, List.of());
     }
 
-    /** The patch's concrete stands at {@code level}; one hex may hold one placed object. */
-    private static BoardScene pavedPatch(int direction, int level, Coords objectAt, BoardScene.Feature object) {
+    /** The patch's concrete stands at {@code level}; one hex may hold features, such as a placed object. */
+    private static BoardScene pavedPatch(int direction, int level, Coords objectAt, List<BoardScene.Feature> features) {
+        return pavedPatch(direction, level, objectAt, features, HexAppearance.Edges.AUTO);
+    }
+
+    /** The same patch whose hex {@code objectAt} has pavement {@code edges}. */
+    private static BoardScene pavedPatch(int direction, int level, Coords objectAt, List<BoardScene.Feature> features,
+          HexAppearance.Edges edges) {
+        var appearance = edges == HexAppearance.Edges.AUTO ? Map.<String, HexAppearance>of() : Map.of("pavement", HexAppearance.of(edges));
         Coords origin = new Coords(8, 8);
         Vector3 center = BoardGeometry.center(origin, 0);
         Vector3 axis = BoardGeometry.center(origin.translated(direction), 0).sub(center).nor();
@@ -228,37 +334,14 @@ class BoardConcreteShoreTest {
                 Vector3 relative = BoardGeometry.center(at, 0).sub(center);
                 boolean land = Math.abs(relative.dot(axis)) <= 280 * BoardGeometry.HEX_SCALE
                       && Math.abs(relative.x * -axis.y + relative.y * axis.x) <= 85 * BoardGeometry.HEX_SCALE;
-                tiles.add(new BoardScene.Tile(at, land ? level : 0, -1, false, 0,
-                      land ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS, null, null, null, null, null,
-                      at.equals(objectAt) ? List.of(object) : List.of(), List.of(), BoardLiquid.NONE, null, true));
+                var surface = land ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS;
+                tiles.add(new BoardScene.Tile(at, land ? level : 0, -1, false, 0, surface, null, null, null, null, null,
+                      at.equals(objectAt) ? features : List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE,
+                      BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false, 0, false, BoardSurfaceBlend.solid(surface), null,
+                      false, null, null, at.equals(objectAt) ? appearance : Map.of(), null));
             }
         }
         return new BoardScene(0, 17, 17, tiles, List.of(), List.of(), -1, "", List.of());
-    }
-
-    @Test
-    void concreteModesSwitchBothGeometryAndCachedSupport() {
-        BoardConcrete.Mode original = BoardConcrete.mode();
-        BoardScene scene = GpuRiverTerrainSmokeTest.pavedGroundScene();
-        BoardSurface.Cache cache = new BoardSurface.Cache();
-        Coords at = new Coords(3, 4);
-        try {
-            BoardConcrete.tune(BoardConcrete.Mode.OFF);
-            BoardSurface off = cache.get(scene, scene.tile(at));
-            for (int k = 0; k < 6; k++) { assertArrayEquals(new float[] { 0, 0 }, off.relief.shoreShift(k), .001f); }
-            BoardConcrete.tune(BoardConcrete.Mode.WATER_ONLY);
-            BoardSurface waterOnly = cache.get(scene, scene.tile(at));
-            for (int k = 0; k < 6; k++) { assertArrayEquals(new float[] { 0, 0 }, waterOnly.relief.shoreShift(k), .001f); }
-            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
-            BoardSurface fitted = cache.get(scene, scene.tile(at));
-            assertNotSame(waterOnly, fitted, "Changing the scope invalidates picking and support as well as drawing");
-            float movement = 0;
-            for (int k = 0; k < 6; k++) { movement += moved(fitted, at, k).dst(BoardGeometry.corner(at, 0, k)); }
-            assertTrue(movement > 10 * BoardGeometry.HEX_SCALE, "A broad concrete patch beside grass becomes a rectangle");
-            BoardConcrete.tune(BoardConcrete.Mode.OFF);
-            BoardSurface restored = cache.get(scene, scene.tile(at));
-            for (int k = 0; k < 6; k++) { assertArrayEquals(off.relief.shoreShift(k), restored.relief.shoreShift(k), .001f); }
-        } finally { BoardConcrete.tune(original); }
     }
 
     @Test
@@ -339,22 +422,16 @@ class BoardConcreteShoreTest {
 
     @Test
     void isolatedConcreteAlwaysKeepsItsHexFootprint() {
-        BoardConcrete.Mode original = BoardConcrete.mode();
-        try {
-            for (BoardConcrete.Mode mode : BoardConcrete.Mode.values()) {
-                BoardConcrete.tune(mode);
-                for (boolean building : new boolean[] { false, true }) {
-                    BoardScene scene = scene(Set.of(CENTER), BoardScene.Surface.CONCRETE, building);
-                    BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
-                    for (int k = 0; k < 6; k++) {
-                        assertArrayEquals(new float[] { 0, 0 }, surface.relief.shoreShift(k), .001f,
-                              "Six water neighbours always leave a hexagonal platform: " + mode);
-                    }
-                    assertStraightSamples(surface, CENTER);
-                    assertUnfolded(surface, "Island platform");
-                }
+        for (boolean building : new boolean[] { false, true }) {
+            BoardScene scene = scene(Set.of(CENTER), BoardScene.Surface.CONCRETE, building);
+            BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
+            for (int k = 0; k < 6; k++) {
+                assertArrayEquals(new float[] { 0, 0 }, surface.relief.shoreShift(k), .001f,
+                      "Six water neighbours always leave a hexagonal platform");
             }
-        } finally { BoardConcrete.tune(original); }
+            assertStraightSamples(surface, CENTER);
+            assertUnfolded(surface, "Island platform");
+        }
     }
 
     @Test
@@ -381,142 +458,122 @@ class BoardConcreteShoreTest {
 
     @Test
     void concreteKeepsStraightEdgesBesideHigherAndLowerGround() {
-        BoardConcrete.Mode original = BoardConcrete.mode();
-        try {
-            BoardConcrete.tune(BoardConcrete.Mode.OFF);
-            for (int elevation : new int[] { -3, -1, 1, 3 }) {
-                List<BoardScene.Tile> tiles = new ArrayList<>();
-                for (int x = 0; x < 7; x++) {
-                    for (int y = 0; y < 7; y++) {
-                        Coords at = new Coords(x, y);
-                        boolean concrete = at.equals(CENTER);
-                        tiles.add(new BoardScene.Tile(at, concrete ? 0 : elevation, -1, false, 0,
-                              concrete ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS,
-                              null, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
-                    }
-                }
-                BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
-                BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
-                for (int e = 0; e < 6; e++) {
-                    Vector3 a = surface.relief.seam(e, e, 0), b = surface.relief.seam(e, e, 1);
-                    for (int i = 1; i < 12; i++) {
-                        assertEquals(0, distance(a, b, surface.relief.seam(e, e, i / 12f)), .002f,
-                              "Straight edge " + e + " beside level " + elevation);
-                    }
+        for (int elevation : new int[] { -3, -1, 1, 3 }) {
+            List<BoardScene.Tile> tiles = new ArrayList<>();
+            for (int x = 0; x < 7; x++) {
+                for (int y = 0; y < 7; y++) {
+                    Coords at = new Coords(x, y);
+                    boolean concrete = at.equals(CENTER);
+                    tiles.add(new BoardScene.Tile(at, concrete ? 0 : elevation, -1, false, 0,
+                          concrete ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS,
+                          null, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
                 }
             }
-        } finally { BoardConcrete.tune(original); }
+            BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+            BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
+            for (int e = 0; e < 6; e++) {
+                Vector3 a = surface.relief.seam(e, e, 0), b = surface.relief.seam(e, e, 1);
+                for (int i = 1; i < 12; i++) {
+                    assertEquals(0, distance(a, b, surface.relief.seam(e, e, i / 12f)), .002f,
+                          "Straight edge " + e + " beside level " + elevation);
+                }
+            }
+        }
     }
 
     @Test
     void concreteAroundAnEnclosedTerrainPatchHasThreeStraightSides() {
-        BoardConcrete.Mode original = BoardConcrete.mode();
-        try {
-            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
-            BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
-            Set<Coords> island = new HashSet<>();
-            var queue = new ArrayDeque<Coords>();
-            queue.add(new Coords(8, 9));
-            while (!queue.isEmpty()) {
-                Coords at = queue.remove();
-                if (!island.add(at)) { continue; }
-                for (int direction = 0; direction < 6; direction++) {
-                    Coords next = at.translated(direction);
-                    assertNotNull(scene.tile(next), "The terrain island stays enclosed");
-                    if (scene.tile(next).surface() != BoardScene.Surface.CONCRETE && !island.contains(next)) {
-                        queue.add(next);
-                    }
+        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+        Set<Coords> island = new HashSet<>();
+        var queue = new ArrayDeque<Coords>();
+        queue.add(new Coords(8, 9));
+        while (!queue.isEmpty()) {
+            Coords at = queue.remove();
+            if (!island.add(at)) { continue; }
+            for (int direction = 0; direction < 6; direction++) {
+                Coords next = at.translated(direction);
+                assertNotNull(scene.tile(next), "The terrain island stays enclosed");
+                if (scene.tile(next).surface() != BoardScene.Surface.CONCRETE && !island.contains(next)) {
+                    queue.add(next);
                 }
             }
-            var neighbors = new HashMap<Vector3, List<Vector3>>();
-            for (Coords at : island) {
-                BoardSurface surface = new BoardSurface(scene, scene.tile(at));
-                Vector3 center = BoardGeometry.center(at, 0);
-                assertTrue(Float.isFinite(BoardSurface.sampleHeight(surface.faces, center.x, center.y, Float.NaN)),
-                      "Fitting concrete leaves the enclosed terrain centres intact");
-                assertUnfolded(surface, "Fitted terrain island");
-                for (int edge = 0; edge < 6; edge++) {
-                    if (island.contains(at.translated(BoardGeometry.edgeDirection(edge)))) { continue; }
-                    Vector3 a = moved(surface, at, edge), b = moved(surface, at, (edge + 1) % 6);
-                    neighbors.computeIfAbsent(a, ignored -> new ArrayList<>()).add(b);
-                    neighbors.computeIfAbsent(b, ignored -> new ArrayList<>()).add(a);
-                }
+        }
+        var neighbors = new HashMap<Vector3, List<Vector3>>();
+        for (Coords at : island) {
+            BoardSurface surface = new BoardSurface(scene, scene.tile(at));
+            Vector3 center = BoardGeometry.center(at, 0);
+            assertTrue(Float.isFinite(BoardSurface.sampleHeight(surface.faces, center.x, center.y, Float.NaN)),
+                  "Fitting concrete leaves the enclosed terrain centres intact");
+            assertUnfolded(surface, "Fitted terrain island");
+            for (int edge = 0; edge < 6; edge++) {
+                if (island.contains(at.translated(BoardGeometry.edgeDirection(edge)))) { continue; }
+                Vector3 a = moved(surface, at, edge), b = moved(surface, at, (edge + 1) % 6);
+                neighbors.computeIfAbsent(a, ignored -> new ArrayList<>()).add(b);
+                neighbors.computeIfAbsent(b, ignored -> new ArrayList<>()).add(a);
             }
-            int turns = 0;
-            for (var entry : neighbors.entrySet()) {
-                assertEquals(2, entry.getValue().size(), "The island boundary is a closed loop");
-                Vector3 a = new Vector3(entry.getValue().getFirst()).sub(entry.getKey()).nor();
-                Vector3 b = new Vector3(entry.getValue().getLast()).sub(entry.getKey()).nor();
-                if (Math.abs(a.x * b.y - a.y * b.x) > .001f) { turns++; }
-            }
-            assertEquals(3, turns, "The triangular island has three straight sides without hex teeth");
-        } finally { BoardConcrete.tune(original); }
+        }
+        int turns = 0;
+        for (var entry : neighbors.entrySet()) {
+            assertEquals(2, entry.getValue().size(), "The island boundary is a closed loop");
+            Vector3 a = new Vector3(entry.getValue().getFirst()).sub(entry.getKey()).nor();
+            Vector3 b = new Vector3(entry.getValue().getLast()).sub(entry.getKey()).nor();
+            if (Math.abs(a.x * b.y - a.y * b.x) > .001f) { turns++; }
+        }
+        assertEquals(3, turns, "The triangular island has three straight sides without hex teeth");
     }
 
     @Test
     void broadJunctionExtendsItsDiagonalToTheVerticalSide() {
-        BoardConcrete.Mode original = BoardConcrete.mode();
-        try {
-            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
-            BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
-            Coords diagonal = new Coords(1, 1), vertical = new Coords(4, 1);
-            BoardSurface arm = new BoardSurface(scene, scene.tile(diagonal));
-            BoardSurface trunk = new BoardSurface(scene, scene.tile(vertical));
-            Vector3 a = moved(arm, diagonal, 1), b = moved(arm, diagonal, 2);
-            Vector3 c = moved(trunk, vertical, 3), d = moved(trunk, vertical, 4);
-            for (int[] vertex : new int[][] { { 2, 2, 0 }, { 2, 2, 1 }, { 2, 2, 2 }, { 3, 2, 1 }, { 4, 2, 2 } }) {
-                Coords at = new Coords(vertex[0], vertex[1]);
-                BoardSurface surface = new BoardSurface(scene, scene.tile(at));
-                Vector3 p = moved(surface, at, vertex[2]);
-                assertTrue(Math.min(distance(a, b, p), distance(c, d, p)) < .002f,
-                      "No extra flat section between the diagonal and vertical sides: " + at + " " + p);
-                assertStraightSamples(surface, at);
-            }
-        } finally { BoardConcrete.tune(original); }
+        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+        Coords diagonal = new Coords(1, 1), vertical = new Coords(4, 1);
+        BoardSurface arm = new BoardSurface(scene, scene.tile(diagonal));
+        BoardSurface trunk = new BoardSurface(scene, scene.tile(vertical));
+        Vector3 a = moved(arm, diagonal, 1), b = moved(arm, diagonal, 2);
+        Vector3 c = moved(trunk, vertical, 3), d = moved(trunk, vertical, 4);
+        for (int[] vertex : new int[][] { { 2, 2, 0 }, { 2, 2, 1 }, { 2, 2, 2 }, { 3, 2, 1 }, { 4, 2, 2 } }) {
+            Coords at = new Coords(vertex[0], vertex[1]);
+            BoardSurface surface = new BoardSurface(scene, scene.tile(at));
+            Vector3 p = moved(surface, at, vertex[2]);
+            assertTrue(Math.min(distance(a, b, p), distance(c, d, p)) < .002f,
+                  "No extra flat section between the diagonal and vertical sides: " + at + " " + p);
+            assertStraightSamples(surface, at);
+        }
     }
 
     @Test
     void longDiagonalOnAeroBaseTwoHasNoHexSteps() {
-        BoardConcrete.Mode original = BoardConcrete.mode();
-        try {
-            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
-            BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(2);
-            Coords first = new Coords(4, 11), last = new Coords(10, 14);
-            Vector3 a = moved(new BoardSurface(scene, scene.tile(first)), first, 2);
-            Vector3 b = moved(new BoardSurface(scene, scene.tile(last)), last, 0);
-            for (int x = 4; x <= 10; x += 2) {
-                Coords at = new Coords(x, 9 + x / 2);
-                BoardSurface surface = new BoardSurface(scene, scene.tile(at));
-                for (int k = 0; k <= 2; k++) {
-                    assertEquals(0, distance(a, b, moved(surface, at, k)), .003f,
-                          "The inner diagonal of the runway follows one straight line: " + at);
-                }
-                assertStraightSamples(surface, at);
-                assertUnfolded(surface, "Diagonal runway");
+        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(2);
+        Coords first = new Coords(4, 11), last = new Coords(10, 14);
+        Vector3 a = moved(new BoardSurface(scene, scene.tile(first)), first, 2);
+        Vector3 b = moved(new BoardSurface(scene, scene.tile(last)), last, 0);
+        for (int x = 4; x <= 10; x += 2) {
+            Coords at = new Coords(x, 9 + x / 2);
+            BoardSurface surface = new BoardSurface(scene, scene.tile(at));
+            for (int k = 0; k <= 2; k++) {
+                assertEquals(0, distance(a, b, moved(surface, at, k)), .003f,
+                      "The inner diagonal of the runway follows one straight line: " + at);
             }
-        } finally { BoardConcrete.tune(original); }
+            assertStraightSamples(surface, at);
+            assertUnfolded(surface, "Diagonal runway");
+        }
     }
 
     @Test
     void fittedAeroBasesKeepTerrainCentresAndUnfoldedMeshes() {
-        BoardConcrete.Mode original = BoardConcrete.mode();
-        try {
-            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
-            for (int number : new int[] { 1, 2 }) {
-                BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(number);
-                for (BoardScene.Tile tile : scene.tiles()) {
-                    BoardSurface surface = new BoardSurface(scene, tile);
-                    assertUnfolded(surface, "AeroBase " + number + " " + tile.coords());
-                    Vector3 center = BoardGeometry.center(tile.coords(), 0);
-                    for (int direction = 0; direction < 12; direction++) {
-                        float x = center.x + 12 * BoardGeometry.HEX_SCALE * (float) Math.cos(direction * Math.PI / 6);
-                        float y = center.y + 12 * BoardGeometry.HEX_SCALE * (float) Math.sin(direction * Math.PI / 6);
-                        assertTrue(Float.isFinite(BoardSurface.sampleHeight(surface.faces, x, y, Float.NaN)),
-                              "Each original terrain keeps room at its centre: " + tile.coords());
-                    }
+        for (int number : new int[] { 1, 2 }) {
+            BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(number);
+            for (BoardScene.Tile tile : scene.tiles()) {
+                BoardSurface surface = new BoardSurface(scene, tile);
+                assertUnfolded(surface, "AeroBase " + number + " " + tile.coords());
+                Vector3 center = BoardGeometry.center(tile.coords(), 0);
+                for (int direction = 0; direction < 12; direction++) {
+                    float x = center.x + 12 * BoardGeometry.HEX_SCALE * (float) Math.cos(direction * Math.PI / 6);
+                    float y = center.y + 12 * BoardGeometry.HEX_SCALE * (float) Math.sin(direction * Math.PI / 6);
+                    assertTrue(Float.isFinite(BoardSurface.sampleHeight(surface.faces, x, y, Float.NaN)),
+                          "Each original terrain keeps room at its centre: " + tile.coords());
                 }
             }
-        } finally { BoardConcrete.tune(original); }
+        }
     }
 
     @Test
@@ -574,22 +631,19 @@ class BoardConcreteShoreTest {
     void neighboringConcreteBanksFollowTheSameFittedEdgeAsTheLand() {
         var original = BoardRelief.tuning();
         try {
-            for (float width : new float[] { .05f, .5f, 1 }) {
-                GpuRiverTerrainSmokeTest.setWidth(width);
-                for (int direction = 0; direction < 6; direction++) {
-                    BoardScene scene = scene(Set.of(CENTER.translated(direction), CENTER.translated((direction + 1) % 6)),
-                          BoardScene.Surface.CONCRETE, false);
-                    BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
-                    int edge = Math.floorMod(-direction, 6), n = BoardSurface.SHORE_SEGMENTS;
-                    for (int e : new int[] { edge, (edge + 1) % 6 }) {
-                        for (int i = 0; i < n; i++) {
-                            Vector3 p = surface.outline.get(e * n + i), expected = surface.relief.seam(e, e, i / (float) n);
-                            assertEquals(expected.x, p.x, .002f, "Shared concrete shoreline, direction=" + direction);
-                            assertEquals(expected.y, p.y, .002f);
-                        }
+            for (int direction = 0; direction < 6; direction++) {
+                BoardScene scene = scene(Set.of(CENTER.translated(direction), CENTER.translated((direction + 1) % 6)),
+                      BoardScene.Surface.CONCRETE, false);
+                BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
+                int edge = Math.floorMod(-direction, 6), n = BoardSurface.SHORE_SEGMENTS;
+                for (int e : new int[] { edge, (edge + 1) % 6 }) {
+                    for (int i = 0; i < n; i++) {
+                        Vector3 p = surface.outline.get(e * n + i), expected = surface.relief.seam(e, e, i / (float) n);
+                        assertEquals(expected.x, p.x, .002f, "Shared concrete shoreline, direction=" + direction);
+                        assertEquals(expected.y, p.y, .002f);
                     }
-                    assertWaterCentre(surface);
                 }
+                assertWaterCentre(surface);
             }
         } finally {
             BoardRelief.tune(original);
@@ -616,6 +670,53 @@ class BoardConcreteShoreTest {
                 assertTrue(walls > 0, "Concrete owns a full underwater wall");
                 assertUnfolded(water, "Quay bed " + lod);
             }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(floats = { .5f, 1, 2 })
+    void naturalBanksStayVisibleWhenTheyTaperIntoAFixedQuay(float scale) {
+        var geometry = BoardGeometry.tuning();
+        var relief = BoardRelief.tuning();
+        try {
+            var defaults = BoardGeometry.DEFAULTS;
+            BoardGeometry.tune(new BoardGeometry.Tuning(scale, defaults.unitScale(), defaults.unitHeightScale(),
+                  defaults.levelHeight(), defaults.gridShade()));
+            BoardRelief.tune(BoardRelief.DEFAULTS);
+            BoardScene scene = BoardRiverTest.commCenterRiverScene();
+            Coords at = new Coords(4, 4);
+            BoardSurface water = new BoardSurface(scene, scene.tile(at));
+            BoardSurface grass = new BoardSurface(scene, scene.tile(new Coords(5, 3)));
+            Vector3 center = BoardGeometry.center(at, 0);
+            int count = BoardSurface.SHORE_SEGMENTS;
+            // Edge 0 is level natural ground, ending at the raised concrete quay on edge 1.
+            for (int i = 1; i < count; i++) {
+                Vector3 point = water.outline.get(i);
+                assertTrue(Float.isNaN(BoardSurface.sampleHeight(grass.faces, point.x, point.y, Float.NaN)),
+                      "The natural waterline stays inside its actual relief boundary, clear of the grass top");
+                Vector3 outward = new Vector3(point.x - center.x, point.y - center.y, 0).nor();
+                Vector3 bank = new Vector3(point).mulAdd(outward, .2f * scale);
+                assertTrue(Float.isNaN(BoardSurface.sampleHeight(grass.faces, bank.x, bank.y, Float.NaN)),
+                      "A visible strip of natural bank remains before the neighbouring grass");
+                float height = BoardSurface.sampleHeight(water.faces, bank.x, bank.y, Float.NaN);
+                assertTrue(height > point.z && height < 0,
+                      "The exposed bank rises from the water before meeting the fixed quay endpoint");
+            }
+            Vector3 a = water.relief.seam(1, 1, 0), b = water.relief.seam(1, 1, 1);
+            int walls = 0;
+            for (var face : water.faces) {
+                if (face.finish() != BoardSurface.Finish.WALL || face.landEdge() != 1) { continue; }
+                walls++;
+                for (Vector3 point : List.of(face.a(), face.b(), face.c())) {
+                    assertEquals(0, distance(a, b, point), .002f * scale,
+                          "Tapering the natural bank keeps the adjacent quay wall vertical");
+                }
+            }
+            assertTrue(walls > 0, "The concrete quay keeps its submerged wall");
+            assertUnfolded(water, "Natural bank beside a fixed quay");
+        } finally {
+            BoardRelief.tune(relief);
+            BoardGeometry.tune(geometry);
         }
     }
 

@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import com.badlogic.gdx.graphics.Camera;
@@ -33,7 +34,7 @@ import com.badlogic.gdx.utils.IntArray;
 final class GpuTerrainBatch implements RenderableSorter {
     private static final float[] IDENTITY = new Matrix4().val;
     private static final Renderable EMPTY = new Renderable();
-    private final GpuOpaqueSorter original = new GpuOpaqueSorter();
+    private final GpuOpaqueSorter original;
     private final Predicate<Material> terrain;
     private final Map<Material, Integer> materialIds = new IdentityHashMap<>();
     private final Map<Attributes, Integer> materialValues = new HashMap<>();
@@ -41,7 +42,13 @@ final class GpuTerrainBatch implements RenderableSorter {
     private final List<Group> groups = new ArrayList<>();
     private boolean enabled = true;
 
-    GpuTerrainBatch(Predicate<Material> terrain) { this.terrain = terrain; }
+    GpuTerrainBatch(Predicate<Material> terrain) { this(terrain, Function.identity()); }
+
+    /** {@code group} names the shader whose draws a shader's draws sort among (GpuOpaqueSorter). */
+    GpuTerrainBatch(Predicate<Material> terrain, Function<Shader, Shader> group) {
+        this.terrain = terrain;
+        original = new GpuOpaqueSorter(group);
+    }
 
     void setEnabled(boolean value) { enabled = value; }
 

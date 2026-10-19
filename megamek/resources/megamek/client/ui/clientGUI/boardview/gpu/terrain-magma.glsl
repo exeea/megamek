@@ -1,17 +1,19 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Shared volcanic material evaluation for liquid sheets and terrain-boundary palettes.
-// One set's aligned maps in one texture unit (GpuAssets.magma); macOS gives a shader stage only 16.
-uniform sampler2DArray u_magmaMaps;
-const float MAGMA_COLOR = 0.0;
+// One set's sRGB colour array and raw normal/surface/heat array (GpuAssets.magma).
+uniform sampler2DArray u_magmaColor, u_magmaMaps;
 const float MAGMA_NORMAL = 1.0;
 const float MAGMA_SURFACE = 2.0; // height, roughness, AO, relief UV / .1
-const float MAGMA_HEAT = 3.0;    // heat, signed flow XY, crack-wall glow
+const float MAGMA_HEAT = 3.0; // molten: linear emission RGB, original heat A; crust: heat R, crack glow A
+#ifdef magmaEmissionMapFlag
+uniform float u_magmaEmissionScale;
+#endif
 uniform sampler2D u_magmaField; // the lava's liquid field: R signed bank distance, BA world XY current
 uniform vec4 u_magmaFieldMap;   // world XY to field UV; zero without a field
 // Hex widths either side of a lava bank over which the melt chills into a skin and the cooled bank still glows.
 const float MAGMA_MARGIN = .08;
 struct Volcanic {
-    vec3 albedo;
+    vec3 albedo; // linear reflectance; the colour sampler decodes before filtering
     vec3 normal;
     vec4 surface;
     vec2 heat;
@@ -19,10 +21,13 @@ struct Volcanic {
 };
 
 vec2 magmaRelief(vec2 uv, vec2 dx, vec2 dy, vec4 surface, vec2 parallax);
+#ifndef magmaEmissionMapFlag
 vec3 magmaEmission(vec2 heat, float strength);
+#endif
 float magmaRepeatMetres();
+float magmaDistantRoughness();
 
-vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy) { return textureGrad(u_magmaMaps, vec3(uv, map), dx, dy); }
+vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy) { return textureGrad(u_magmaMaps, vec3(uv, map - 1.0), dx, dy); }
 
 vec4 magmaField(vec2 world) {
     return texture(u_magmaField, world * u_magmaFieldMap.xy + u_magmaFieldMap.zw);
@@ -32,13 +37,16 @@ vec4 magmaField(vec2 world) {
 float magmaShore(vec4 field) { return (field.r * 2.0 - 1.0) * .4; }
 
 // A cooled bank has lost most of its heat, but its fissures still glow where it meets the melt.
-float magmaBankHeat(vec2 position) {
-    float shore = u_magmaFieldMap.x > 0.0 ? magmaShore(magmaField(position)) : -.4;
+float magmaBankHeat(float shore) {
     return mix(.10, 1.0, 1.0 - smoothstep(0.0, MAGMA_MARGIN, -shore));
 }
 
-Volcanic magmaSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye) {
-    vec4 distantSurface = vec4(.5, .85, TERRAIN_DISTANT_CAVITY, 0.0);
+float magmaBankHeat(vec2 position) {
+    return magmaBankHeat(u_magmaFieldMap.x > 0.0 ? magmaShore(magmaField(position)) : -.4);
+}
+
+Volcanic magmaSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, bool relief) {
+    vec4 distantSurface = vec4(.5, magmaDistantRoughness(), TERRAIN_DISTANT_CAVITY, 0.0);
     vec4 surface = distantSurface;
     vec3 normal = vec3(0.0, 0.0, 1.0);
     if (terrainSurfaceDetail > 0.0) surface = magmaTexel(MAGMA_SURFACE, uv, dx, dy);
@@ -46,14 +54,24 @@ Volcanic magmaSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye) {
         // Relief and normals share the authored height, but vanish before distant shading skips their maps.
         vec2 parallax = eye.xy / max(abs(eye.z), .35) * surface.a * .1 * (12.0 / magmaRepeatMetres())
               * terrainNormalDetail;
-        uv = magmaRelief(uv, dx, dy, surface, parallax);
-        surface = magmaTexel(MAGMA_SURFACE, uv, dx, dy);
+        if (relief && dot(parallax, parallax) > 0.0) {
+            uv = magmaRelief(uv, dx, dy, surface, parallax);
+            surface = magmaTexel(MAGMA_SURFACE, uv, dx, dy);
+        }
         normal = mix(normal, (magmaTexel(MAGMA_NORMAL, uv, dx, dy).rgb * 255.0 - 128.0) / 127.0,
               terrainNormalDetail);
     }
     surface = mix(distantSurface, surface, terrainSurfaceDetail);
     vec4 heat = magmaTexel(MAGMA_HEAT, uv, dx, dy);
-    return Volcanic(magmaTexel(MAGMA_COLOR, uv, dx, dy).rgb, normal, surface, heat.ra, vec3(0.0));
+#ifdef magmaEmissionMapFlag
+    // PTEX owns the emitted spectrum and its coverage; one raw filtered sample supplies canonical radiance.
+    vec2 coverage = vec2(heat.a, 0.0);
+    vec3 emission = heat.rgb * u_magmaEmissionScale;
+#else
+    vec2 coverage = heat.ra;
+    vec3 emission = vec3(0.0);
+#endif
+    return Volcanic(textureGrad(u_magmaColor, vec3(uv, 0.0), dx, dy).rgb, normal, surface, coverage, emission);
 }
 
 Volcanic magmaMix(Volcanic a, Volcanic b, float weight) {
@@ -90,15 +108,26 @@ Volcanic magmaProjection(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec2 downhill) {
     // One coherent textured surface, with the existing normal, relief, heat and two-phase flow.
     return magmaPatch(uv, dx, dy, vec2(0.0), eye, downhill);
 }
-Volcanic magmaSurface(vec3 world, vec3 face, vec3 eye, vec3 uphill, float bank, vec4 waves) {
+// Capture the warped finite derivatives before any per-pixel palette coverage decision.
+struct MagmaProjection {
+    vec3 position, dx, dy;
+    mat3 domain;
+};
+
+MagmaProjection magmaProjectionFor(vec3 world) {
     vec3 position = world / magmaRepeatMetres();
+    mat3 domain = magmaDomain(position);
+    return MagmaProjection(position, dFdx(position), dFdy(position), domain);
+}
+
+Volcanic magmaSurface(MagmaProjection projection, vec3 face, vec3 eye, vec3 uphill, float bank, vec4 waves) {
+    vec3 position = projection.position, dx = projection.dx, dy = projection.dy;
     // Every projection shares one continuous domain. Transform directions and height gradients
     // with its Jacobian too, so texture bending cannot detach the relief or current from the colour.
-    mat3 domain = magmaDomain(position);
+    mat3 domain = projection.domain;
     vec3 textureEye = domain * eye, textureUphill = domain * uphill;
     // Smooth triplanar projection covers every slope orientation, including curved lava lips and vertical cuts.
-    // Derivatives are taken before the projection branches, retaining stable mip levels through their blends.
-    vec3 dx = dFdx(position), dy = dFdy(position);
+    // Prepared derivatives retain stable mip levels through projection and palette coverage branches.
     vec3 weights = pow(abs(face), vec3(4.0));
     weights /= dot(weights, vec3(1.0));
     vec3 pigment = vec3(0.0), gradient = vec3(0.0);
@@ -130,11 +159,18 @@ Volcanic magmaSurface(vec3 world, vec3 face, vec3 eye, vec3 uphill, float bank, 
     return Volcanic(pigment, normal, surface, heat, emission);
 }
 
+// Dedicated magma draws keep the same entry point; palette callers can share its prepared projection.
+Volcanic magmaSurface(vec3 world, vec3 face, vec3 eye, vec3 uphill, float bank, vec4 waves) {
+    return magmaSurface(magmaProjectionFor(world), face, eye, uphill, bank, waves);
+}
+
+#ifndef magmaEmissionMapFlag
 vec3 magmaEmission(vec2 heat, float strength) {
     // Emission is added AFTER sunlight, occlusion and cloud/geometry shadowing. Night never extinguishes heat.
-    // Molten boards retain HDR heat until the atmosphere composite; solid fissures stay dimmer.
+    // Each material variant supplies its fixed source radiance; shared display exposure remains downstream.
     vec3 hot = magmaHeatColor(heat.x);
     vec3 emission = hot * heat.x * strength;
-    vec3 crackGlow = vec3(.25, .022, .0015) * heat.y * strength * (1.0 - heat.x);
+    vec3 crackGlow = MAGMA_CRACK_RADIANCE * heat.y * strength * (1.0 - heat.x);
     return emission + crackGlow;
 }
+#endif

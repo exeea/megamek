@@ -390,7 +390,11 @@ final class GpuUnitBases implements Disposable {
 
     private void render(Camera camera, boolean bases) {
         if (placed.isEmpty()) { return; }
-        if (batch == null) { batch = new ModelBatch((sortCamera, renderables) -> { }); }
+        if (batch == null) {
+            // Bases and badges blend into the linear scene before its final display conversion.
+            batch = new ModelBatch(GpuShaderManager.provider("Unit bases", GpuUnitShader::provider),
+                  (sortCamera, renderables) -> { });
+        }
         float reach = BoardGeometry.height();
         batch.begin(camera);
         for (Shown entry : placed) {

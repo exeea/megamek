@@ -1,18 +1,31 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
+// COLOR_SPACE
 uniform float u_exposure;
 uniform float u_lightning;
 uniform vec3 u_tint;
 uniform float u_saturation;
+// User display adjustments. Zero offsets also keep isolated previews neutral without additional bindings.
+uniform vec3 u_whiteBalanceShift;
+uniform vec2 u_colorAdjust; // Saturation - 1, contrast - 1.
 
 // One highlight shoulder for every surface and the sky, replacing the plain clip (the user's decision of 2026-09-24):
 // the identity up to KNEE (display 202), so mid-tones and the tileset palette keep their authored values, then a
 // smooth roll-off towards white per channel, so bright orange sand turns cream instead of clipping flat. The floating
 // scene target preserves values above one: exposure can recover bright surface detail before this display conversion.
-// BoardAtmosphere already supplies adapted light; the composite applies only user EV compensation and lightning.
+// Sources remain canonical; the composite applies shared adaptation, user EV compensation and lightning.
 const float KNEE = 0.6;
 vec3 shoulder(vec3 c) {
     c = max(c, vec3(0.0));
     return min(c, vec3(KNEE)) + (1.0 - KNEE) * (1.0 - exp(-max(c - KNEE, vec3(0.0)) / (1.0 - KNEE)));
+}
+
+// The authored UI palette includes its historical gamma-2.2 EV/shoulder response. Map that display target
+// into the current scene's linear domain, undoing only our final shoulder so it is applied exactly once later.
+// This never transforms scene samples: surfaces, particles, weather and their alpha stay scene-linear.
+vec3 backdropRadiance(vec3 authored, float exposure) {
+    vec3 target = toLinear(pow(shoulder(pow(max(authored, vec3(0.0)), vec3(2.2)) * exposure), vec3(1.0 / 2.2)));
+    vec3 above = vec3(KNEE) - (1.0 - KNEE) * log(max((1.0 - target) / (1.0 - KNEE), vec3(1e-7)));
+    return mix(target, above, step(vec3(KNEE), target));
 }
 
 vec3 gradeScene(vec3 linear, float coverage) {
@@ -25,8 +38,11 @@ vec3 gradeScene(vec3 linear, float coverage) {
 }
 
 vec3 displayScene(vec3 linear) {
-    vec3 color = pow(shoulder(linear), vec3(1.0 / 2.2));
-    vec2 edge = (v_uv - 0.5) * 2.0;
-    color *= 1.0 - 0.09 * dot(edge, edge) * 0.5;
+    // Apply to the complete image, including sky, weather and emissive heat, after the scenario's night grade.
+    linear += linear * u_whiteBalanceShift;
+    float luminance = dot(linear, vec3(0.2126, 0.7152, 0.0722));
+    linear += (linear - vec3(luminance)) * u_colorAdjust.x;
+    vec3 color = toDisplay(shoulder(linear));
+    color = clamp(color + (color - 0.5) * u_colorAdjust.y, 0.0, 1.0);
     return color;
 }

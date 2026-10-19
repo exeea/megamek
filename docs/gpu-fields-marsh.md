@@ -27,8 +27,10 @@ Hummocks change shading normals, not physical terrain or the board's water flags
 Fields and reed marshes retain their theme's natural surface family, usually
 grass. Mud and quicksand classify as dirt. Cultivation fades before a steep face;
 the bank retains its grass/soil mantle and normal relief.
-`terrain-biome.glsl` borrows `textures/sculpt/earth.png` and
-`earth-normal.png` for soil color/height and normal/occlusion. Peat, moss,
+`terrain-biome.glsl` borrows `textures/terrain/surfaces/earth.png` and
+`earth-normal.png` for soil color/height and normal/occlusion. On horizontal surfaces,
+colour mixes two repeats of the earth map; relief reads only the first. Steep faces
+blend the two wall projections instead. Peat, moss,
 saturation and pools are procedural combinations of those shared materials.
 
 Land-owned and water-owned banks evaluate the same coverage and slope gate.
@@ -47,7 +49,7 @@ inputs. Ordinary family boundaries use [terrain contacts](gpu-terrain-contacts.m
 
 ## Plant assets and placement
 
-Runtime cutouts live in `mm-data/data/models/board/textures/foliage`:
+Runtime cutouts live in `mm-data/data/models/board/textures/vegetation`:
 
 | Files | Use |
 | --- | --- |

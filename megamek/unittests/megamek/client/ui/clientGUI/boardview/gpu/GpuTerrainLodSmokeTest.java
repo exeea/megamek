@@ -17,9 +17,9 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -72,10 +72,9 @@ class GpuTerrainLodSmokeTest {
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
                 GpuTactical tactical = new GpuTactical(terrain::tacticalSurface);
-                boolean previousLod = TerrainLod.enabled();
+                var previousLod = TerrainLod.tuning();
                 var previousSettings = BoardGeometry.tuning();
                 try {
-                    TerrainLod.setEnabled(true);
                     verifiesPreparedWaterTextureUpload();
                     BoardScene scene = GpuTerrainReliefSmokeTest.scene(BoardScene.Surface.SAND);
                     Coords at = new Coords(4, 4);
@@ -93,6 +92,13 @@ class GpuTerrainLodSmokeTest {
                     assertEquals(distant, terrain.tacticalSurface(at), "Cold queries must use the installed distant detail");
                     distant = terrain.tacticalSurface(at);
 
+                    // Only the previous tier of a chunk is cached. Refining to FULL passes through MEDIUM,
+                    // so test reuse between those adjacent tiers instead of assuming all old tiers survive.
+                    view(camera, 2.5f);
+                    settle(terrain, tactical, scene, camera);
+                    assertEquals(TerrainLod.MEDIUM, firstLod(terrain));
+                    var medium = terrain.tacticalSurface(at);
+
                     view(camera, .6f);
                     settle(terrain, tactical, scene, camera);
                     assertEquals(TerrainLod.FULL, firstLod(terrain));
@@ -102,23 +108,33 @@ class GpuTerrainLodSmokeTest {
                     assertTrue(!terrain.refine(camera.camera));
                     assertSame(close, terrain.tacticalSurface(at), "A settled camera must not rebuild meshes");
 
-                    view(camera, 30);
+                    view(camera, 2.5f);
                     settle(terrain, tactical, scene, camera);
-                    assertSame(distant, terrain.tacticalSurface(at), "Returning to cached detail reuses its installed geometry");
+                    assertEquals(TerrainLod.MEDIUM, firstLod(terrain));
+                    assertSame(medium, terrain.tacticalSurface(at), "Returning to the previous tier reuses its installed geometry");
 
-                    // Toggling detail at a fixed camera uses the same incremental/cached path as zooming.
+                    // Pinning full detail at a fixed camera uses the same incremental/cached path as zooming.
                     int revision = BoardGeometry.terrainRevision();
-                    TerrainLod.setEnabled(false);
+                    TerrainLod.tune(new TerrainLod.Tuning(1, 1));
                     settle(terrain, tactical, scene, camera);
                     assertEquals(TerrainLod.FULL, firstLod(terrain));
                     assertSame(close, terrain.tacticalSurface(at));
-                    TerrainLod.setEnabled(true);
+                    TerrainLod.tune(TerrainLod.DEFAULTS);
                     settle(terrain, tactical, scene, camera);
-                    assertSame(distant, terrain.tacticalSurface(at));
+                    assertEquals(TerrainLod.MEDIUM, firstLod(terrain));
+                    assertSame(medium, terrain.tacticalSurface(at));
                     assertEquals(revision, BoardGeometry.terrainRevision());
 
-                    // Request an uncached tier, then edit before that CPU preparation is installed.
-                    view(camera, 2.5f);
+                    // The original DISTANT tier was evicted by the intermediate refinement. Rebuilding it
+                    // must reproduce the same geometry, without pretending the old object is still cached.
+                    view(camera, 30);
+                    settle(terrain, tactical, scene, camera);
+                    assertEquals(TerrainLod.DISTANT, firstLod(terrain));
+                    assertNotSame(distant, terrain.tacticalSurface(at));
+                    assertEquals(distant, terrain.tacticalSurface(at), "Rebuilt distant geometry remains deterministic");
+
+                    // Request the uncached COARSE tier, then edit before that CPU preparation is installed.
+                    view(camera, 8);
                     terrain.refine(camera.camera);
                     assertTrue(field(terrain, "detailJob") != null);
                     List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
@@ -142,9 +158,12 @@ class GpuTerrainLodSmokeTest {
                     assertTrue(Math.abs(height - center.z) < BoardRelief.metres(.3f));
 
                     // Unit scale alone does not rebuild a board without fallen limb props.
+                    var unscaledSurface = terrain.tacticalSurface(at);
                     BoardGeometry.tune(new BoardGeometry.Tuning(1, 1.2f, 1, 18, .8f));
                     terrain.update(edited, camera.camera);
                     assertTrue(!terrain.busy());
+                    assertSame(unscaledSurface, terrain.tacticalSurface(at));
+                    assertEquals(BoardGeometry.tuning(), terrain.settings().geometry());
                     var oldSettings = terrain.settings();
                     var oldSurface = terrain.tacticalSurface(at);
                     BoardGeometry.tune(new BoardGeometry.Tuning(1.3f, 1.2f, 1, 24, .8f));
@@ -161,11 +180,34 @@ class GpuTerrainLodSmokeTest {
                     var hit = terrain.hit(edited, new com.badlogic.gdx.math.collision.Ray(
                           new Vector3(changedCenter).add(0, 0, 1000), new Vector3(0, 0, -1)));
                     assertEquals(at, hit.coords(), "Picking switches to the same published scale and height as terrain");
+
+                    // A fallen limb does use unit scale. Pending changes retain the displayed instance until
+                    // installation, and coalesce to the latest scale rather than losing its terrain update.
+                    List<BoardScene.Tile> limbTiles = new ArrayList<>(edited.tiles());
+                    BoardScene.Tile limbTile = edited.tile(at);
+                    limbTiles.set(limbTiles.indexOf(limbTile), limbTile.withFeatures(List.of(new BoardScene.Feature(
+                          "salvage/arm", 0, 0, 0, 1, 1, 0, BoardScene.FeatureKind.LIMB))));
+                    BoardScene withLimb = edited.withTiles(limbTiles);
+                    terrain.update(withLimb, camera.camera);
+                    settle(terrain, tactical, withLimb, camera);
+                    ModelInstance oldLimb = propAt(terrain, at);
+                    float oldLimbScale = oldLimb.transform.getScale(new Vector3()).x;
+                    BoardGeometry.tune(new BoardGeometry.Tuning(1.5f, 1.35f, 1, 27, .8f));
+                    terrain.update(withLimb, camera.camera);
+                    assertTrue(terrain.busy(), "Unit scaling must rebuild fallen limb props");
+                    assertSame(oldLimb, propAt(terrain, at), "A queued setting must not mutate the displayed limb");
+                    BoardGeometry.tune(new BoardGeometry.Tuning(1.5f, 1.5f, 1, 27, .8f));
+                    terrain.update(withLimb, camera.camera);
+                    settle(terrain, tactical, withLimb, camera);
+                    ModelInstance scaledLimb = propAt(terrain, at);
+                    assertNotSame(oldLimb, scaledLimb);
+                    assertEquals(1.5f / 1.2f, scaledLimb.transform.getScale(new Vector3()).x / oldLimbScale, .0001f);
+                    assertEquals(BoardGeometry.tuning(), terrain.settings().geometry());
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
-                    TerrainLod.setEnabled(previousLod);
+                    TerrainLod.tune(previousLod);
                     BoardGeometry.tune(previousSettings);
                     tactical.dispose();
                     terrain.dispose();
@@ -204,11 +246,11 @@ class GpuTerrainLodSmokeTest {
             maximum = Math.max(maximum, elapsed);
             if (changed) { System.out.printf("LOD install %.3f ms%n", elapsed); }
             if (tactical != null && terrain.ready(scene)) { tactical.update(terrain.presentation(scene), changed); }
-            if (!changed && !terrain.busy()) {
+            if (!changed && !terrain.busy() && terrain.ready(scene)) {
                 System.out.printf("LOD maximum render-thread handoff %.3f ms%n", maximum);
                 return;
             }
-            assertTrue(System.nanoTime() < deadline, "Visible terrain detail must settle");
+            assertTrue(System.nanoTime() < deadline, () -> "Visible terrain detail must settle: " + terrain.buildDetails());
             Thread.sleep(5);
         }
     }
@@ -223,14 +265,25 @@ class GpuTerrainLodSmokeTest {
         return field.get(owner);
     }
 
+    private static ModelInstance propAt(GpuTerrain terrain, Coords at) throws Exception {
+        for (Object chunk : (List<?>) field(terrain, "chunks")) {
+            for (Object prop : (List<?>) field(chunk, "props")) {
+                if (at.equals(field(prop, "coords"))) { return (ModelInstance) field(prop, "instance"); }
+            }
+        }
+        throw new AssertionError("Missing terrain prop at " + at);
+    }
+
     private static void capture(GpuTerrain terrain, BoardCamera camera, String name) throws Exception {
         terrain.renderShadows(camera.camera, List.of());
-        Gdx.gl.glDepthMask(true);
-        ScreenUtils.clear(.2f, .26f, .31f, 1, true);
-        terrain.render(camera.camera, false);
-        terrain.renderTransparent(camera.camera);
-        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
-        assertTrue(output.isDirectory() || output.mkdirs());
-        GpuBoardTestUi.capture(new File(output, name));
+        try (var outputFrame = new GpuSceneTestOutput()) {
+            outputFrame.begin(.2f, .26f, .31f, 1);
+            terrain.render(camera.camera, false);
+            terrain.renderTransparent(camera.camera);
+            outputFrame.display();
+            File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
+            assertTrue(output.isDirectory() || output.mkdirs());
+            GpuBoardTestUi.capture(new File(output, name));
+        }
     }
 }

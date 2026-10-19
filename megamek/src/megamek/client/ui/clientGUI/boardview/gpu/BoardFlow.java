@@ -168,13 +168,7 @@ final class BoardFlow {
         for (int distance = 0; distance < WATERFALL_APPROACH_HEXES; distance++) {
             Coords next = downstream.get(tile.coords());
             BoardScene.Tile target = next == null ? null : scene.tile(next);
-            if (target == null) {
-                // A river that runs out at the board's edge pours off it (BoardSurface.FALLS_OFF_THE_BOARD).
-                if (next != null && BoardSurface.tuning().fallsOffBoard()) {
-                    return 1 + 1.25f * (float) Math.sqrt(2) * (1 - distance / (float) WATERFALL_APPROACH_HEXES);
-                }
-                break;
-            }
+            if (target == null) { break; }
             int drop = tile.elevation() - target.elevation();
             if (drop > 0) {
                 // Sloping streams gather whitewater on their descent, not over the level approach (BoardSurface).

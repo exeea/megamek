@@ -4,6 +4,7 @@ layout(location = 0) out vec4 fragColor;
 in vec2 v_uv;
 in vec2 v_effect;
 // Kind: 0 smoke, 1 blue jet flame, 2+ turbulent fire (integer packet seed plus fractional age).
+// LIGHT_MODEL
 // PARTICLE_APPEARANCE
 
 void main() {

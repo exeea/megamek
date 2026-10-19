@@ -18,9 +18,21 @@ uniform float u_biomeLod;
 #endif
 
 void main() {
+    // An upward-biased normal approximates the many sunlit leaves in a tuft without black card-like speckles.
+    vec3 leaf = normalize(v_normal) * (gl_FrontFacing ? 1.0 : -1.0);
+    vec3 normal = normalize(mix(vec3(0.0, 0.0, 1.0), leaf, .45));
+#ifdef lightingFlag
+    // Actual grass blades keep this triangle frame; the flagged clump proxies select their virtual frame below.
+    vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
+    // Before the coverage discards below, like the face above.
+    surfaceVariance = normalVariance(dFdx(normal), dFdy(normal));
+#endif
 #ifdef bankTurfFlag
     vec4 plant = texture(u_diffuseTexture, v_diffuseUV, -.65);
+    vec2 turfUv = v_cloudPosition.xy * vec2(1.0, -1.0) / u_metre;
+    mat2 turfGradient = mat2(dFdx(turfUv), dFdy(turfUv));
 #endif
+    float roughness = .86;
 #if defined(biomeVegetationFlag) && defined(diffuseTextureFlag)
     // Sample before any coverage discard: neighbouring fragments must agree on derivatives during an LOD fade.
     vec4 plant;
@@ -59,30 +71,46 @@ void main() {
     float coverage = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(.06711056, .00583715))));
     if (coverage < v_coverFade.x || coverage >= v_coverFade.y) discard;
 #endif
-    // An upward-biased normal approximates the many sunlit leaves in a tuft without black card-like speckles.
-    vec3 leaf = normalize(v_normal) * (gl_FrontFacing ? 1.0 : -1.0);
-    vec3 normal = normalize(mix(vec3(0.0, 0.0, 1.0), leaf, .45));
-    vec3 albedo = v_color.rgb * (1.0 - u_wetness * .16);
+    vec3 albedo = v_color.rgb;
 #if (defined(biomeVegetationFlag) || defined(bankTurfFlag)) && defined(diffuseTextureFlag)
     // Opaque depth ownership avoids ordering halos between intersecting clumps; mipmaps filter distant leaves.
+#ifdef bankTurfFlag
+    plant.a *= 1.0 - scorchedGrass(v_cloudPosition.xy);
+#endif
     if (plant.a < .32) discard;
 #ifdef bankTurfFlag
-    albedo *= turfColor(plant.rgb);
+    albedo *= turfColor(plant.rgb, turfGradient, roughness);
 #else
     albedo *= plant.rgb;
 #endif
 #endif
-    albedo *= mix(.80, 1.06, v_coverData.y);
+    albedo = wetAlbedo(albedo, u_wetness * .25);
+    albedo = materialReflectance(albedo);
+#ifdef bankTurfFlag
+    // The draped turf follows its supporting bank's continuous height after artwork/vertex pigment gains.
+    albedo = levelGrade(albedo, v_cloudPosition.z / u_levelHeight);
+#endif
 #ifdef lightingFlag
-    albedo = toLinear(albedo);
-    vec3 ambient, direct, sheen;
-    // Dry blades have a broad, rough reflection; rain smooths the same dielectric response into brighter glints.
-    surfaceLighting(normal, .6 * u_wetness, .86, ambient, direct, sheen);
-    // Thin leaves transmit a little back light, while still receiving the world's shadows and cloud cover.
-    ambient += skyLight(-normal, GROUND_ALBEDO) * .15;
-    albedo *= ambient + direct;
-    albedo += sheen;
-    albedo = toDisplay(albedo);
+#if defined(biomeVegetationFlag) || defined(bankTurfFlag)
+    // The cutout contains a whole clump. Its existing aggregate normal is the represented material frame.
+    // Unflagged, individually curved grass blades retain their real triangle frame.
+    if (dot(normal, -viewDirection()) < 0.0) normal = -normal;
+    geometric = normal;
+#endif
+    normal = shadingNormal(normal, geometric, -viewDirection());
+    // Dry blades have a broad, rough reflection; rain smooths the same dielectric response into brighter glints. The
+    // blade's own normal decides its lit side.
+    Surface blade = opaqueSurface(albedo, normal, normal, roughness, .6 * u_wetness, surfaceVisibility());
+    // Thin leaves transmit part of their diffuse budget instead of adding another light source.
+    blade.front = vec3(.85);
+    blade.back = vec3(.15);
+#if !defined(biomeVegetationFlag) && !defined(bankTurfFlag)
+    // Root shelter reduces diffuse sky visibility, not authored pigment or direct light.
+    blade.occlusion = mix(.80, 1.0, clamp(v_coverData.y, 0.0, 1.0));
+#endif
+    // Reflected sky reaches a blade only above the sward around it.
+    blade.specularOcclusion = v_coverData.y;
+    albedo = shadeSurface(blade);
 #endif
     fragColor = vec4(albedo * terrainGrid(v_coverRoot * .2), 1.0);
 }

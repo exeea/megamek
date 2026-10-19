@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.lang.ref.Reference;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.Random;
@@ -170,7 +171,7 @@ final class GpuOcean implements Disposable {
      */
     void update(float time, Vector3 wind, float gravity) {
         if (!supported()) { return; }
-        if (gravity == 0) { dispose(); return; }
+        if (gravity == 0) { reset(); return; }
         if (this.gravity != gravity) {
             this.gravity = gravity;
             // Both the spectrum's amplitudes and its wave frequencies change with gravity.
@@ -199,22 +200,46 @@ final class GpuOcean implements Disposable {
         }
     }
 
-    private void create() {
-        spectrum = GpuShaderManager.program(() -> program("ocean-spectrum.frag"), next -> spectrum = next);
-        butterfly = GpuShaderManager.program(() -> program("ocean-fft.frag"), next -> butterfly = next);
-        finish = GpuShaderManager.program(() -> program(lava ? "ocean-lava-finish.frag" : "ocean-water-finish.frag"),
-              next -> finish = next);
-        // A live edit of the generator regenerates the spectrum, so the change shows at once.
-        if (!lava) {
-            seed = GpuShaderManager.program(() -> program("ocean-initial.frag"), next -> { seed = next; seeded = false; });
-            cover = GpuShaderManager.program(() -> program("ocean-foam.frag"), next -> cover = next);
+    /**
+     * Links the simulation's programs now, as the editor's warm-up does for liquids its board may not have yet (inside
+     * GpuGlsl.offscreen: they draw into framebuffer objects); the first update keeps them.
+     */
+    void prepare() {
+        if (!supported() || failed) { return; }
+        try { programs(); } catch (GdxRuntimeException error) {
+            failed = true;
+            Gdx.app.error("GpuOcean", "Wave simulation disabled", error);
+            dispose();
         }
+    }
+
+    private void programs() {
+        if (spectrum == null) { spectrum = GpuShaderManager.program(() -> program("ocean-spectrum.frag"), next -> spectrum = next); }
+        if (butterfly == null) { butterfly = GpuShaderManager.program(() -> program("ocean-fft.frag"), next -> butterfly = next); }
+        if (finish == null) {
+            finish = GpuShaderManager.program(() -> program(lava ? "ocean-lava-finish.frag" : "ocean-water-finish.frag"),
+                  next -> finish = next);
+        }
+        // A live edit of the generator regenerates the spectrum, so the change shows at once.
+        if (!lava && seed == null) {
+            seed = GpuShaderManager.program(() -> program("ocean-initial.frag"), next -> { seed = next; seeded = false; });
+        }
+        if (!lava && cover == null) { cover = GpuShaderManager.program(() -> program("ocean-foam.frag"), next -> cover = next); }
+    }
+
+    private void create() {
+        programs();
         quad = new Mesh(true, 4, 0, new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position"));
         quad.setVertices(new float[] { -1, -1, 1, -1, -1, 1, 1, 1 });
         for (int i = 0; i < (lava ? 1 : spectra.length); i++) { spectra[i] = floatTarget(SIZE * cascades, SIZE); }
         for (int i = 0; i < 2; i++) {
             work[i] = floatTarget(SIZE * cascades, SIZE);
-            if (!lava) { seeding[i] = floatTarget(1, 1); }
+            if (!lava) {
+                // This two-value feedback integrator needs small per-frame increments below half-float's ULP.
+                // Wave fields use half precision; retaining the controller's precision avoids a stalled cover error.
+                seeding[i] = new GLFrameBuffer.FrameBufferBuilder(1, 1)
+                      .addFloatAttachment(GL30.GL_RG32F, GL30.GL_RG, GL30.GL_FLOAT, true).build();
+            }
             var output = new GLFrameBuffer.FrameBufferBuilder(SIZE, SIZE);
             // Water: one shading target per cascade, then the longest cascade's displacement.
             for (int target = 0; target < (lava ? 1 : cascades + 1); target++) {
@@ -232,7 +257,9 @@ final class GpuOcean implements Disposable {
             spectra[0].getColorBufferTexture().bind(0);
             FloatBuffer buffer = BufferUtils.newFloatBuffer(SIZE * SIZE * 4);
             buffer.put(lavaSpectrum()).flip();
-            Gdx.gl.glTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 0, 0, SIZE, SIZE, GL20.GL_RGBA, GL20.GL_FLOAT, buffer);
+            try {
+                Gdx.gl.glTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 0, 0, SIZE, SIZE, GL20.GL_RGBA, GL20.GL_FLOAT, buffer);
+            } finally { Reference.reachabilityFence(buffer); }
         } else {
             gauss = Gdx.gl.glGenTexture();
             Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, gauss);
@@ -240,8 +267,10 @@ final class GpuOcean implements Disposable {
             Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MAG_FILTER, GL20.GL_NEAREST);
             FloatBuffer buffer = BufferUtils.newFloatBuffer(SIZE * cascades * SIZE * 2);
             buffer.put(deviates()).flip();
-            Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL30.GL_RG32F, SIZE * cascades, SIZE, 0, GL30.GL_RG,
-                  GL20.GL_FLOAT, buffer);
+            try {
+                Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL30.GL_RG32F, SIZE * cascades, SIZE, 0, GL30.GL_RG,
+                      GL20.GL_FLOAT, buffer);
+            } finally { Reference.reachabilityFence(buffer); }
         }
         // Foam starts seeding where it always used to; the cover moves it from there.
         for (FrameBuffer target : seeding) {
@@ -266,7 +295,7 @@ final class GpuOcean implements Disposable {
 
     private static FrameBuffer floatTarget(int width, int height) {
         return new GLFrameBuffer.FrameBufferBuilder(width, height)
-              .addFloatAttachment(GL30.GL_RGBA32F, GL30.GL_RGBA, GL30.GL_FLOAT, true).build();
+              .addFloatAttachment(GL30.GL_RGBA16F, GL30.GL_RGBA, GL30.GL_FLOAT, true).build();
     }
 
     static ShaderProgram program(String file) {
@@ -274,9 +303,7 @@ final class GpuOcean implements Disposable {
     }
 
     static String fragment(String file) {
-        String source = GpuShaderSource.read(file);
-        return source.contains("// OCEAN_FINISH")
-              ? source.replace("// OCEAN_FINISH", GpuShaderSource.read("ocean-finish.glsl")) : source;
+        return GpuShaderSource.read(file);
     }
 
     /**
@@ -302,13 +329,17 @@ final class GpuOcean implements Disposable {
     /**
      * The wind sea's JONSWAP peak angular frequency, its alpha, and the swell's alpha, for a strength from 0 to 1
      * and positive gravity in metres per second squared:
-     * fetch-limited (Hasselmann et al. 1973), never beyond a fully developed sea. Calm air still ripples; a full gale
+     * fetch-limited (Hasselmann et al. 1973), never beyond a fully developed sea. Calm air retains only swell; a full gale
      * (Beaufort 8) raises a steep, breaking sea with ~70 m peak waves at 1 g.
      */
     static float[] sea(float strength, float gravity) {
         float speed = 1.5f + 18.5f * strength;
         double peak = Math.max(22 * Math.cbrt(gravity * gravity / (speed * FETCH_METRES)), .855 * gravity / speed);
         double alpha = Math.max(.076 * Math.pow(speed * speed / (FETCH_METRES * gravity), .22), .0081);
+        // The minimum speed keeps the peak finite, but must not generate a wind sea in still air. Fade its power
+        // through light air; the shared spectrum transition lets existing chop die away when the wind stops.
+        float breeze = Math.clamp(strength / .15f, 0, 1);
+        alpha *= breeze * breeze * (3 - 2 * breeze);
         // The swell is 0.3 m high in calm and 0.45 m in a gale.
         return new float[] { (float) peak, (float) alpha, 5.6e-5f + 7e-5f * strength };
     }
@@ -581,6 +612,11 @@ final class GpuOcean implements Disposable {
             if (program != null) { GpuShaderManager.dispose(program); }
         }
         spectrum = butterfly = finish = seed = cover = null;
+        reset();
+    }
+
+    /** Release an absent liquid's simulation storage; its warmed programs remain for the next wet editor sample. */
+    void reset() {
         if (quad != null) { quad.dispose(); }
         quad = null;
         for (int i = 0; i < spectra.length; i++) {

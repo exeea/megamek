@@ -25,7 +25,8 @@ struct Crest {
 Crest crest(int cascade, float texel, float choppiness) {
     ivec2 at = ivec2(gl_FragCoord.xy);
     vec3 here = oceanSample(cascade, at).xyz; // height, displacement X, displacement Y
-    // Fourth-order central differences hold each band's shortest waves, five texels long, to within 5 %.
+    // Fourth-order central differences retain about 93% of a five-texel sinusoid's analytic derivative.
+    // The precision tests measure this stencil approximation separately from half-float rounding.
     vec3 dx = (8.0 * (oceanSample(cascade, at + ivec2(1, 0)).xyz - oceanSample(cascade, at - ivec2(1, 0)).xyz)
           - (oceanSample(cascade, at + ivec2(2, 0)).xyz - oceanSample(cascade, at - ivec2(2, 0)).xyz)) / (12.0 * texel);
     vec3 dy = (8.0 * (oceanSample(cascade, at + ivec2(0, 1)).xyz - oceanSample(cascade, at - ivec2(0, 1)).xyz)

@@ -23,6 +23,9 @@ final class GpuReviewFrame implements Disposable {
     private static final GpuAtmosphere.Options OPTIONS = new GpuAtmosphere.Options(GpuAtmosphere.Options.DEFAULTS.rays(),
           false, GpuClouds.MIN_SHADOW_STRENGTH, GpuClouds.MAX_SHADOW_STRENGTH, 0);
     private final GpuAtmosphere atmosphere = new GpuAtmosphere();
+    /** Off unless a review turns it on (setAmbientOcclusion), as on the board's Display page. */
+    private final GpuAmbientOcclusion ambientOcclusion = new GpuAmbientOcclusion();
+    private boolean occlusion;
 
     GpuReviewFrame(BoardAtmosphere.Settings settings) {
         atmosphere.setOptions(OPTIONS);
@@ -43,11 +46,23 @@ final class GpuReviewFrame implements Disposable {
         return atmosphere.depthTexture();
     }
 
+    /** Borrowed owner for post-composite overlay review; this frame retains its lifetime. */
+    GpuAtmosphere atmosphere() { return atmosphere; }
+
+    /** The board's ambient occlusion for the next frames; a switch rebuilds the terrain's programs (settle again). */
+    void setAmbientOcclusion(boolean enabled) {
+        occlusion = enabled;
+    }
+
+    /** Borrowed: the occlusion this frame draws with. */
+    GpuAmbientOcclusion ambientOcclusion() { return ambientOcclusion; }
+
     /** Loading must see the same shader flags as the eventual visible frame. */
     void prepare(GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
         atmosphere.updateLight(camera.camera);
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
+        ambientOcclusion.configure(terrain.environment(), occlusion);
     }
 
     /** One frame of the scene from the camera, lit, shadowed and composited as on the board. */
@@ -57,33 +72,49 @@ final class GpuReviewFrame implements Disposable {
 
     /** Hiding the water exposes the bed and bank joins for geometry reviews. */
     void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, boolean water) {
-        render(terrain, camera, scene, water, List.of(), null);
+        render(terrain, camera, scene, water, List.of(), null, 1);
     }
 
     /** Review standard unit/prop materials in the same lit scene target as the terrain. */
     void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, List<ModelInstance> objects, ModelBatch batch) {
-        render(terrain, camera, scene, true, objects, batch);
+        render(terrain, camera, scene, true, objects, batch, 1);
+    }
+
+    /** Exercise the window's existing render-resolution path without changing camera framing or display size. */
+    void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, float scale) {
+        render(terrain, camera, scene, true, List.of(), null, scale);
     }
 
     private void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, boolean water,
-          List<ModelInstance> objects, ModelBatch batch) {
+          List<ModelInstance> objects, ModelBatch batch, float scale) {
         prepare(terrain, camera, scene);
         terrain.renderShadows(camera.camera, objects);
         atmosphere.prepareClouds(terrain, scene, 0);
-        atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
-        terrain.render(camera.camera, false);
+        atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, scale, 0);
+        terrain.render(camera.camera, null,
+              () -> ambientOcclusion.render(camera.camera, terrain, atmosphere.depthTexture()));
         if (!objects.isEmpty()) {
             batch.begin(camera.camera);
             batch.render(objects, terrain.environment());
             batch.end();
         }
+        ambientOcclusion.end();
         if (water) { terrain.renderTransparent(camera.camera); }
-        atmosphere.end(camera.camera, terrain, scene, 0);
         atmosphere.renderWeather(camera.camera, scene);
+        atmosphere.end(camera.camera, terrain, scene, 0);
     }
 
     /** The same frame with its stages marked on a native benchmark's timings. */
     void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, GpuStageTimings timings) {
+        render(terrain, camera, scene, timings, 1, () -> terrain.render(camera.camera, false));
+    }
+
+    /**
+     * The timed frame at a render resolution {@code scale}, with the opaque stage's drawing given: a measurement marks its
+     * own stages in it or reads the scene target after it (the depth pre-pass tests).
+     */
+    void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, GpuStageTimings timings, float scale,
+          Runnable opaque) {
         timings.stage("light and shadows");
         atmosphere.updateLight(camera.camera);
         terrain.setAtmosphere(atmosphere.lighting());
@@ -91,14 +122,14 @@ final class GpuReviewFrame implements Disposable {
         timings.stage("clouds");
         atmosphere.prepareClouds(terrain, scene, 0);
         timings.stage("opaque terrain and plants");
-        atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
-        terrain.render(camera.camera, false);
+        atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, scale, 0);
+        opaque.run();
         timings.stage("transparent");
         terrain.renderTransparent(camera.camera);
-        timings.stage("atmosphere composite");
-        atmosphere.end(camera.camera, terrain, scene, 0);
         timings.stage("weather");
         atmosphere.renderWeather(camera.camera, scene);
+        timings.stage("atmosphere composite");
+        atmosphere.end(camera.camera, terrain, scene, 0);
         timings.stage(null);
     }
 
@@ -117,6 +148,7 @@ final class GpuReviewFrame implements Disposable {
 
     @Override
     public void dispose() {
+        ambientOcclusion.dispose();
         atmosphere.dispose();
     }
 }

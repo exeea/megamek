@@ -16,9 +16,10 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 /**
- * Batch 10: legacy rail art ({@code fluff:10:N}: hq_fluff rail00-63 and the level crossings rail_road01-06) converts
- * into rail route markers with the art's sides, on the ground or a bridge's deck; art without sides joins the rails
- * beside it. The game keeps the token for its 2D board; a written {@code .board2} holds none.
+ * Batch 10 and b13 ways: legacy rail art ({@code fluff:10:N}: hq_fluff rail00-63 and the level crossings rail_road01-06)
+ * converts into rail terrain with the art's sides, on the ground ({@code rail}) or a bridge's deck ({@code bridge_rail}),
+ * which yields the rail's route marker and draws its sprite in 2D, so the token goes; art without sides joins the rails
+ * beside it.
  */
 class BoardLegacyRailTest {
     private static final Coords AT = new Coords(2, 2);
@@ -40,27 +41,58 @@ class BoardLegacyRailTest {
     private static List<BoardDecoration> rails(Hex hex) { return RailRoute.markers(hex, RailRoute.Kind.RAIL); }
 
     @Test
-    void everyLegacyRailSpriteBecomesARailMarkerWithItsSidesAndLeavesNoToken() throws Exception {
+    void roadFollowingHairpinStubsAreDroppedOnlyByLegacyConversion() {
+        for (int sides : new int[] { 3, 7 }) {
+            Board board = board(Map.of(AT, "road:1:" + sides + ";fluff:10:" + sides));
+            BoardSceneryLayouts.convert(board);
+            int kept = sides & ~RailRoute.stranded(sides);
+            if (kept == 0) { assertFalse(board.getHex(AT).containsTerrain(Terrains.RAIL)); }
+            else { assertEquals(kept, board.getHex(AT).getTerrain(Terrains.RAIL).getExits()); }
+            assertTrue(board.getHex(AT).containsTerrain(Terrains.ROAD), "The road still follows its full hairpin");
+        }
+        Board offRoad = board(Map.of(AT, "road:1:9;fluff:10:3"));
+        BoardSceneryLayouts.convert(offRoad);
+        assertEquals(3, offRoad.getHex(AT).getTerrain(Terrains.RAIL).getExits(), "Unrelated rail stubs stay");
+        Board deck = board(Map.of(AT, "water:1;bridge:1:3;bridge_elev:1;bridge_cf:40;road:1:3;fluff:10:3"));
+        BoardSceneryLayouts.convert(deck);
+        assertEquals(3, deck.getHex(AT).getTerrain(Terrains.BRIDGE_RAIL).getExits(), "Deck rails are not dropped");
+    }
+
+    @Test
+    void everyLegacyRailSpriteBecomesRailTerrainWithItsSidesAndLeavesNoToken() throws Exception {
         for (int value = 1; value < 70; value++) {
             String terrain = "fluff:10:" + value;
             Board board = board(Map.of(AT, terrain));
             BoardSceneryLayouts.convert(board);
             Hex game = board.getHex(AT);
-            assertEquals(Map.of(Terrains.FLUFF, BoardSceneryLayouts.Taken.OBJECTS), BoardSceneryLayouts.takenTokens(game), terrain);
-            assertTrue(game.containsTerrain(Terrains.FLUFF), terrain + ": the game keeps the token for its 2D board");
+            assertFalse(game.containsTerrain(Terrains.FLUFF), terrain + ": the rail terrain draws the sprite in 2D");
+            var rail = game.getTerrain(Terrains.RAIL);
+            assertEquals(1, rail.getLevel(), terrain);
+            assertEquals(value < 64 ? value : CROSSINGS[value - 64], rail.getExits(), terrain);
+            assertTrue(game.getDecorations().stream().noneMatch(RailRoute::isRoute), terrain + ": no stored rail marker");
             var markers = rails(game);
-            assertEquals(1, markers.size(), terrain);
+            // The marker the terrain yields is, but for its id, the one the conversion stored before rails were terrain.
+            assertEquals(List.of(stored(value, BoardDecoration.Placement.ground(), RailRoute.GROUND_RAIL)), markers, terrain);
             var marker = markers.getFirst();
             assertEquals(value < 64 ? value : CROSSINGS[value - 64], marker.connections(), terrain);
             assertEquals(0, marker.tracks(), terrain + ": the default layout reproduces the sprite's gentle pieces");
-            assertEquals(BoardDecoration.Placement.ground(), marker.placement(), terrain);
-            assertEquals(0, marker.x(), 1e-9);
-            assertEquals(0, marker.y(), 1e-9);
             assertEquals(null, marker.group(), "A route marker is never a group member");
             Hex saved = written(board).getHex(AT);
-            assertFalse(saved.containsTerrain(Terrains.FLUFF), terrain + ": a .board2 holds no rail token");
+            assertEquals(String.valueOf(rail), String.valueOf(saved.getTerrain(Terrains.RAIL)), terrain);
             assertEquals(game.getDecorations(), saved.getDecorations(), terrain);
         }
+        Board bridge = board(Map.of(AT, "water:1;bridge:1:9;bridge_elev:1;bridge_cf:40;fluff:10:9"));
+        BoardSceneryLayouts.convert(bridge);
+        assertEquals(List.of(stored(9, BoardDecoration.Placement.on("bridge", 0), RailRoute.DECK_RAIL)),
+              rails(bridge.getHex(AT)), "A deck rail: the stored marker on its deck");
+    }
+
+    /** The route marker the conversion stored for rail art {@code fluff:10:value}: its layout row's, at {@code placement}. */
+    private static BoardDecoration stored(int value, BoardDecoration.Placement placement, String id) {
+        String art = value < 64 ? "scenery/hq_fluff/rail%02d".formatted(value) : "scenery/hq_fluff/rail_road%02d".formatted(value - 63);
+        var row = BoardSceneryLayouts.layout(art).decorations(AT, new Hex(0), () -> id, null, false).stream()
+              .filter(RailRoute::isRoute).findFirst().orElseThrow();
+        return row.transform(row.x(), row.y(), row.rotation(), row.mirror(), row.scale(), placement);
     }
 
     @Test
@@ -170,6 +202,7 @@ class BoardLegacyRailTest {
         for (int y = 1; y <= 4; y++) {
             var rail = rails(board.getHex(2, y));
             assertEquals(1, rail.size(), "row " + y);
+            assertEquals(9, board.getHex(2, y).getTerrain(Terrains.BRIDGE_RAIL).getExits(), "row " + y + ": a deck rail");
             assertEquals(9, rail.getFirst().connections(), "row " + y);
             assertEquals(BoardDecoration.Placement.on("bridge", 0), rail.getFirst().placement(), "row " + y);
             assertNotNull(RailRoute.joined(rail.getFirst(), 0, board.getHex(2, y - 1)), "row " + y + " joins the north");
@@ -194,7 +227,7 @@ class BoardLegacyRailTest {
         var rail = new BoardDecoration("r", "prop", RailRoute.Kind.RAIL.asset, null, 0, 0, 0, false, 1,
               BoardDecoration.Placement.on("bridge", 0), 0, false).withConnections(9);
         hex.addTerrain(new megamek.common.units.Terrain(Terrains.BRIDGE, 1, true, 9));
-        hex.setDecorations(List.of(rail));
+        RailRoute.lay(hex, true, 9, 0);
         var train = BoardSceneryLayouts.stamp("scenery/rail/train", hex, AT);
         assertFalse(train.isEmpty());
         for (var vehicle : train) {

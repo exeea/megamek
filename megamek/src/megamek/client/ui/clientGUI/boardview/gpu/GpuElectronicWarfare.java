@@ -198,7 +198,7 @@ final class GpuElectronicWarfare implements Disposable {
         hoverClock += step;
         selectionClock += step;
         if (cells == null) { return; }
-        if (shader == null) { shader = new FieldShader(); }
+        prepare();
         tacticalView = tactical;
         fieldsAll = fields;
         hatchAll = hatch;
@@ -284,6 +284,10 @@ final class GpuElectronicWarfare implements Disposable {
 
         @Override
         public void dispose() { GpuShaderManager.dispose(program); }
+    }
+
+    void prepare() {
+        if (shader == null) { shader = new FieldShader(); }
     }
 
     @Override

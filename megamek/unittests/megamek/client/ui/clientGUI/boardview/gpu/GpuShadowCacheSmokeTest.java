@@ -16,7 +16,6 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
@@ -28,17 +27,17 @@ import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Compare cached packed depth with the original full shadow pass, including removed and occluded units. */
+/** Compare cached hardware depth with the full shadow pass, including removed and occluded units. */
 @Tag("on-demand")
 class GpuShadowCacheSmokeTest {
     @Test
     void movingUnitsReuseStaticDepthAndInvalidationMatchesTheFullPass() throws Exception {
-        Board board = new Board();
-        board.load(new File("data/boards/Grasslands BattleMats/32x17 Grasslands A BattleMat.board"));
+        Board board = BoardFile.loadSheet(new File("data/boards/Grasslands BattleMats/32x17 Grasslands A BattleMat.board"), false, true);
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
             BoardScene scene = fixture.source.takeFrame().scene();
@@ -112,11 +111,13 @@ class GpuShadowCacheSmokeTest {
                 profiler.reset();
                 fullPass(terrain, units);
                 int full = profiler.getDrawCalls();
-                assertArrayEquals(depth(terrain), actual, "Packed depth must match the original full pass at step " + step);
+                assertArrayEquals(depth(terrain), actual, "Hardware depth must match the full pass at step " + step);
                 if (step < 3) {
                     assertTrue(cached < full / 2, "Unit motion must not redraw the static board: " + cached + " / " + full);
                 }
-                if (step == 4) { assertEquals(1, cached, "GLProfiler counts the framebuffer blit; removing the last unit needs only that copy"); }
+                if (step == 4) {
+                    assertEquals(0, cached, "Removing the last unit only blits depth, with no geometry draw or color draw-buffer call");
+                }
                 if (step >= 5) {
                     assertEquals(full, cached, "Camera, light and terrain changes must not pay an extra cache copy");
                 }
@@ -167,14 +168,5 @@ class GpuShadowCacheSmokeTest {
         finally { shadow.end(); }
     }
 
-    private static byte[] depth(GpuTerrain terrain) {
-        var shadow = (DirectionalShadowLight) terrain.environment().shadowMap;
-        shadow.getFrameBuffer().begin();
-        Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, GpuTerrain.SHADOW_RESOLUTION, GpuTerrain.SHADOW_RESOLUTION);
-        try {
-            byte[] bytes = new byte[pixels.getPixels().remaining()];
-            pixels.getPixels().get(bytes);
-            return bytes;
-        } finally { pixels.dispose(); shadow.getFrameBuffer().end(); }
-    }
+    private static byte[] depth(GpuTerrain terrain) { return GpuFamilyAssemblyReview.shadowDepth(terrain); }
 }

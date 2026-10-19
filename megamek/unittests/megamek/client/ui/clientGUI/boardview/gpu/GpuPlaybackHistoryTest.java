@@ -164,6 +164,75 @@ class GpuPlaybackHistoryTest {
     }
 
     @Test
+    void reportReplayPlaysOnlyTheSelectedShotAndCanRestartItWithoutCollapsingTheCard() {
+        Round round = new Round();
+        UnitPlayback playback = new UnitPlayback();
+        GpuPlaybackHistory history = new GpuPlaybackHistory(playback);
+        BoardScene after = scene(ATLAS, WARHAMMER, MARAUDER, TIMBER_WOLF, KING_CRAB_HIT);
+        play(history, round, after);
+        history.takeShown();
+        GpuPlaybackHistory.Step selected = history.played().getFirst();
+
+        history.replayStep(selected);
+        frame(history, List.of(), after, round.log,
+              new UnitAttack(round.atlas).contactSeconds / (2 * UnitMotion.Speed.NORMAL.rate));
+        assertTrue(playback.reviewing());
+        assertTrue(playback.attack().seconds > 0);
+        assertTrue(history.takeShown().isEmpty(), "The selected shot has not landed yet");
+        history.replayStep(selected);
+        assertSame(selected, history.current(), "Replay does not collapse an already selected card");
+        assertEquals(0, playback.attack().seconds, "Replay restarts the selected shot");
+        assertFalse(history.replaying(), "A report action never starts the sequence transport");
+
+        for (int frame = 0; frame < 100 && playback.reviewing(); frame++) {
+            frame(history, List.of(), after, round.log, .05);
+        }
+        assertFalse(playback.reviewing(), "The one retained shot completes");
+        frame(history, List.of(), after, round.log, 10);
+        assertSame(selected, history.current(), "Elapsed dwell time cannot advance to the next report");
+        assertEquals(List.of(selected), history.takeShown(), "Only the selected event pops up");
+        assertSame(after, playback.present(after), "Replay changes no live unit state");
+        assertEquals(ROUND_STEPS, names(history.played()));
+
+        // Explicit transport remains sequential even after a single-event report replay.
+        history.togglePaused();
+        assertTrue(history.replaying());
+        frame(history, List.of(), after, round.log, 10);
+        assertEquals("not fired 2", name(history.current()), "Play continues through the report");
+        history.replay(null);
+        assertEquals("1>7", name(history.current()), "Dock Replay still starts the full sequence");
+    }
+
+    @Test
+    void reportReplayOfCardOnlyEventsStopsTheSequenceAndKeepsTheSelectedCard() {
+        Round round = new Round();
+        UnitPlayback playback = new UnitPlayback();
+        GpuPlaybackHistory history = new GpuPlaybackHistory(playback);
+        BoardScene after = scene(ATLAS, WARHAMMER, MARAUDER, TIMBER_WOLF, KING_CRAB_HIT);
+        play(history, round, after);
+        // Put the PSR before the attacks, so an unwanted sequence replay would visibly move past it.
+        List<GpuReportLog.Entry> entries = new ArrayList<>(round.log.entries());
+        entries.addFirst(entries.removeLast());
+        GpuReportLog.Snapshot reports = log(entries, round.log.combat(), round.log.psr());
+        frame(history, List.of(), after, reports, 0);
+        GpuPlaybackHistory.Step roll = history.played().getFirst();
+        assertEquals("roll 7", name(roll));
+        GpuPlaybackHistory.Step notFired = history.played().stream()
+              .filter(step -> step.notFired() != null).findFirst().orElseThrow();
+        for (GpuPlaybackHistory.Step selected : List.of(roll, notFired)) {
+            history.replay(null);
+            assertTrue(history.replaying());
+            history.takeShown();
+            history.replayStep(selected);
+            assertFalse(history.replaying(), "The report action stops an existing full replay");
+            assertFalse(playback.reviewing(), "A card-only event invents no animation");
+            frame(history, List.of(), after, reports, 10);
+            assertSame(selected, history.current(), "Later report events do not play automatically");
+            assertEquals(List.of(selected), history.takeShown());
+        }
+    }
+
+    @Test
     void speedsPaceTheReviewedShotAndTheReplayAndSkipPresentsEverythingAtOnce() {
         Round round = new Round();
         UnitPlayback playback = new UnitPlayback();

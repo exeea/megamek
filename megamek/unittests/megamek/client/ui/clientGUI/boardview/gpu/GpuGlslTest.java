@@ -18,6 +18,13 @@ class GpuGlslTest {
     }
 
     @Test
+    void commentsGoBeforeTheKeyAndTheCompileWhileEveryLineKeepsItsNumber() {
+        String source = "// header\r\nfloat a; // tail\nfloat/* inline */b;\n/* two\nlines */float c;\n";
+        assertEquals("\r\nfloat a; \nfloat b;\n\nfloat c;\n", GpuGlsl.withoutComments(source));
+        assertEquals("float d = 4.0 / 2.0;", GpuGlsl.withoutComments("float d = 4.0 / 2.0;"), "A division stays");
+    }
+
+    @Test
     void shadersUseTheContextsOwnVersionBetweenTheBoardsLimits() {
         assertEquals(330, GpuGlsl.select(3, 3, GpuGlsl.MAXIMUM), "OpenGL 3.3, the least the board asks for");
         assertEquals(410, GpuGlsl.select(4, 1, GpuGlsl.MAXIMUM), "OpenGL 4.1, every Mac");

@@ -19,9 +19,21 @@ uniform float u_perspective;
 vec3 viewDirection() {
     return u_perspective > 0.5 ? normalize(v_cloudPosition - u_viewPosition) : u_viewDirection;
 }
-uniform vec3 u_rainSky;
+uniform vec3 u_rainSky;     // linear atmosphere radiance
 uniform vec3 u_rainHorizon;
 const int RAIN_IMPACT_LAYERS = 6;
+
+// Wet pigment: a susceptible fraction takes one additional internal scattering event.
+// This cheap two-path approximation acts on linear pigment, not incoming light or the water-film BRDF.
+// Susceptibility is an artistic material estimate, not a measured porosity or a gamma-space conversion.
+vec3 wetAlbedo(vec3 dry, float absorption) {
+    return dry * (1.0 - clamp(absorption, 0.0, 1.0) * (1.0 - clamp(dry, 0.0, 1.0)));
+}
+
+// The existing response measures surface water retention: loose absorbent ground retains less film.
+float groundAbsorption(float wet, float response) {
+    return clamp(wet, 0.0, 1.0) * mix(.5, .25, clamp(response, 0.0, 1.0));
+}
 
 vec3 rainHash(vec3 value) {
     value = fract(value * vec3(0.1031, 0.1030, 0.0973));
@@ -61,16 +73,4 @@ float rainPuddle(vec2 position, float wet, float response) {
           + texture(u_rainNoise, position / 24.0 + 0.37).r * 0.25;
     float threshold = mix(0.80, 0.34, wet * mix(0.35, 1.0, response));
     return smoothstep(threshold, threshold + 0.08, field) * wet;
-}
-
-vec3 rainReflection(vec3 ground, vec3 normal, float coverage) {
-    vec3 reflected = reflect(viewDirection(), normal);
-    float skyHeight = clamp(reflected.z, 0.0, 1.0);
-    // Broad, blurred sky variation. Uses the current atmosphere palette, not a second scene render.
-    float cloud = texture(u_rainNoise, reflected.xy * 0.11 + vec2(0.31, 0.57)).r;
-    vec3 sky = mix(u_rainHorizon, u_rainSky, sqrt(skyHeight)) * mix(0.8, 1.12, cloud);
-    float grazing = 1.0 - clamp(dot(-viewDirection(), normal), 0.0, 1.0);
-    // A small artistic floor keeps the soft reflection readable in the overhead board camera.
-    float fresnel = 0.12 + 0.55 * grazing * grazing * grazing * grazing * grazing;
-    return mix(ground, sky, coverage * fresnel);
 }

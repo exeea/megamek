@@ -19,6 +19,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -94,11 +95,9 @@ class GpuScenerySmokeTest {
             demolition.setHex(new Coords(type * 2, 6), new Hex(0, "pavement:1;ground_fluff:2000;fluff:" + (2000 + type), ""));
         }
         demolition.setHex(new Coords(6, 8), new Hex(0, "fortified:1", ""));
-        var fccw = new Board();
-        fccw.load(new File("data/boards/unofficial/Aokarasu/45x45 FCCW 4-1.board"));
+        var fccw = BoardFile.loadSheet(new File("data/boards/unofficial/Aokarasu/45x45 FCCW 4-1.board"), false, true);
         assertEquals(45, fccw.getWidth());
-        var fccwNoBasement = new Board();
-        fccwNoBasement.load(new File("data/boards/buildingsnobasement/45x45 FCCW 4-1 (No Basement).board"));
+        var fccwNoBasement = BoardFile.loadSheet(new File("data/boards/buildingsnobasement/45x45 FCCW 4-1 (No Basement).board"), false, true);
         assertEquals(45, fccwNoBasement.getWidth());
         var ledges = Board.createEmptyBoard(8, 7);
         for (int x = 0; x < 8; x++) for (int y = 0; y < 7; y++) {
@@ -127,8 +126,14 @@ class GpuScenerySmokeTest {
         };
         herd.apply(scenes.get(3), "horses1");
         herd.apply(scenes.get(3), "horses2");
-        assertEquals(48, scenes.get(4).tiles().stream().flatMap(t -> t.features().stream())
-              .map(BoardScene.Feature::asset).filter(a -> a.contains("scenery/seaport/gantry-crane-")).distinct().count());
+        // Each crane is its yard look's quay crane, its boom over the tip hex, which holds no object: the look draws the tip.
+        for (int i = 0; i < 48; i++) {
+            Coords base = new Coords(2 + i % 6 * 3, 2 + i / 6 * 3), tip = base.translated(headings[i / 12][i % 12 / 3]);
+            var crane = scenes.get(4).tile(base).features();
+            assertTrue(crane.stream().anyMatch(f -> f.asset().equals("scenery/seaport/yard/quay-crane")), "81:" + (i + 1));
+            assertTrue(crane.stream().anyMatch(f -> f.asset().equals("scenery/seaport/yard/crane-boom")), "81:" + (i + 1));
+            assertTrue(port.getHex(tip).getDecorations().isEmpty(), "The tip of 81:" + (i + 1));
+        }
         // ledge1 (fluff:8:0) decodes to the unrotated row of the canonical ledge.
         Predicate<BoardScene.Feature> ledge1 = f -> f.asset().equals("scenery/roofs/ledge") && f.rotation() == 0;
         assertEquals(11, scenes.get(7).tiles().stream().flatMap(t -> t.features().stream()).filter(ledge1).count());

@@ -26,6 +26,7 @@ import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.common.Hex;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.icons.Camouflage;
 import megamek.common.loaders.MekFileParser;
@@ -259,8 +260,7 @@ class GpuMixedUnitBenchmarkSmokeTest {
     }
 
     private static Board board() {
-        var sample = new Board();
-        sample.load(new File("data/boards/AGoAC Maps/16x17 Grassland 2.board"));
+        var sample = BoardFile.loadSheet(new File("data/boards/AGoAC Maps/16x17 Grassland 2.board"), false, true);
         Hex[] hexes = new Hex[32 * 34];
         for (int y = 0; y < 34; y++) {
             for (int x = 0; x < 32; x++) { hexes[y * 32 + x] = sample.getHex(x % 16, y % 17).duplicate(); }

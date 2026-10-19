@@ -13,6 +13,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
@@ -23,7 +25,13 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.ObjectMap;
+import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
+import megamek.common.board.Coords;
+import megamek.common.game.Game;
 import megamek.common.planetaryConditions.Fog;
 import megamek.common.planetaryConditions.Light;
 import megamek.common.planetaryConditions.Weather;
@@ -59,15 +67,33 @@ class GpuSamplerBudgetSmokeTest {
     void everyBattleViewProgramFitsMacTextureUnits() throws Exception {
         var over = new TreeMap<String, Integer>();
         var used = new TreeMap<String, Integer>();
+        BoardScene ice = GpuIceSmokeTest.scene(2), volcanicIce = volcanicIceScene();
         var failure = new AtomicReference<Throwable>();
+        boolean savedOcclusion = GUIPreferences.getInstance().getBoardAmbientOcclusion();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
                 try {
-                    for (Scene scene : SCENES) { review(scene, used, over); }
+                    System.out.println("Sampler audit GL_RENDERER=" + Gdx.gl.glGetString(GL20.GL_RENDERER)
+                          + "; GL_VERSION=" + Gdx.gl.glGetString(GL20.GL_VERSION));
+                    var limit = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder()).asIntBuffer();
+                    for (int name : new int[] {GL20.GL_MAX_TEXTURE_IMAGE_UNITS,
+                          GL20.GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, GL20.GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS}) {
+                        limit.clear();
+                        Gdx.gl.glGetIntegerv(name, limit);
+                        System.out.println("Texture limit 0x" + Integer.toHexString(name) + "=" + limit.get(0));
+                    }
+                    // Ambient occlusion off, then on: its sampler must fit too (GpuAmbientOcclusion.prefix).
+                    for (boolean occlusion : new boolean[] { false, true }) {
+                        GUIPreferences.getInstance().setBoardAmbientOcclusion(occlusion);
+                        for (Scene scene : SCENES) { review(scene, used, over); }
+                        reviewTerrain(ice, "GpuIceSmokeTest.scene(2)", occlusion, used, over);
+                        reviewTerrain(volcanicIce, "cooled crust / rock / frozen land", occlusion, used, over);
+                    }
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
+                    GUIPreferences.getInstance().setBoardAmbientOcclusion(savedOcclusion);
                     Gdx.app.exit();
                 }
             }
@@ -78,12 +104,27 @@ class GpuSamplerBudgetSmokeTest {
               .forEach(program -> System.out.println(program.getValue() + " " + program.getKey()));
         assertTrue(used.keySet().stream().anyMatch(program -> program.contains("volcanicFlag")),
               "Reach the volcanic terrain programs: " + used.keySet());
+        assertTrue(used.keySet().stream().anyMatch(program -> program.contains("ambientOcclusionFlag")),
+              "Reach the programs with ambient occlusion: " + used.keySet());
+        for (String feature : List.of("iceFlag", "roadCoatFlag", "u_roughnessLayers", "u_magmaMaps", "u_terrainData", "u_roadData", "u_environmentLut")) {
+            assertTrue(used.keySet().stream().anyMatch(program -> program.contains(feature)),
+                  "Reach the material-array consumer: " + feature);
+        }
+        // Individual ice and volcanic shaders are insufficient: this actual material must link both together.
+        var combined = used.entrySet().stream().filter(program -> program.getKey().contains("iceFlag")
+              && program.getKey().contains("volcanicFlag") && program.getKey().contains("u_terrainData")).toList();
+        assertTrue(!combined.isEmpty(), "Reach the combined sculpt ice/volcanic material: " + used.keySet());
+        for (var program : combined) {
+            for (String sampler : List.of("u_terrainLayers", "u_terrainData", "u_magmaColor", "u_magmaMaps",
+                  "u_iceColor", "u_iceMaps", "u_environmentLut")) {
+                assertTrue(program.getKey().contains(sampler), "Combined program must sample " + sampler + ": " + program);
+            }
+        }
         assertTrue(over.isEmpty(), "Programs over macOS's " + MAC_TEXTURE_UNITS + " texture units: " + over);
     }
 
     private static void review(Scene scene, Map<String, Integer> used, Map<String, Integer> over) throws Exception {
-        Board board = new Board();
-        board.load(new File("data/boards/" + scene.board()));
+        Board board = BoardFile.loadSheet(new File("data/boards/" + scene.board()), false, true);
         try (var fixture = GpuBoardFixture.create(board)) {
             SwingUtilities.invokeAndWait(() -> {
                 var conditions = fixture.game.getPlanetaryConditions();
@@ -105,6 +146,50 @@ class GpuSamplerBudgetSmokeTest {
             }
         } catch (Throwable error) {
             throw new AssertionError(scene.toString(), error);
+        }
+    }
+
+    /** A natural rock strip blends toward crust on one edge and carries its frozen neighbour's ice fringe. */
+    private static BoardScene volcanicIceScene() throws Exception {
+        var task = new FutureTask<BoardScene>(() -> {
+            var board = Board.createEmptyBoard(5, 3);
+            for (int x = 0; x < 5; x++) {
+                for (int y = 0; y < 3; y++) {
+                    board.setHex(new Coords(x, y), new Hex(0, x == 0 ? "magma:1" : x > 1 ? "ice:1" : "", "rock"));
+                }
+            }
+            var game = new Game();
+            BoardSceneryLayouts.convert(board);
+            game.setBoard(board);
+            try (var source = new GpuMapSource(game, null, null)) { return source.takeFrame().scene(); }
+        });
+        SwingUtilities.invokeAndWait(task);
+        return task.get();
+    }
+
+    /** Render the actual captured material combinations, rather than manufacturing shader defines. */
+    private static void reviewTerrain(BoardScene scene, String name, boolean occlusion, Map<String, Integer> used,
+          Map<String, Integer> over) throws Exception {
+        var terrain = new GpuTerrain();
+        var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, .5f, 0,
+              BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+        try {
+            var camera = new BoardCamera();
+            camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            camera.fit(scene);
+            frame.setAmbientOcclusion(occlusion);
+            frame.prepare(terrain, camera, scene);
+            terrain.update(scene);
+            long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(10);
+            while (terrain.refine(camera.camera) | terrain.busy()) {
+                assertTrue(System.nanoTime() < deadline, () -> "Sampler specimen must settle: " + terrain.buildDetails());
+                Thread.sleep(5);
+            }
+            frame.render(terrain, camera, scene);
+            scan(new Scene(name, Weather.CLEAR, Light.DAY, Fog.FOG_NONE), used, over);
+        } finally {
+            frame.dispose();
+            terrain.dispose();
         }
     }
 

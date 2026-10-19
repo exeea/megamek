@@ -15,7 +15,6 @@ import java.util.function.Supplier;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
@@ -24,8 +23,8 @@ import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
-import com.badlogic.gdx.graphics.g3d.utils.TextureDescriptor;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
 
 /** Road material masks on terrain or bridge decks; the supporting surfaces own their physical shape. */
@@ -101,22 +100,22 @@ final class GpuRoads {
      */
     static final class Coats extends Attribute {
         static final long TYPE = register("roadCoats");
-        final TextureDescriptor<TextureArray> roads, sculpt;
+        final GpuAssets.MaterialArrays roads, sculpt;
 
-        Coats(TextureArray roads, TextureArray sculpt) {
+        Coats(GpuAssets.MaterialArrays roads, GpuAssets.MaterialArrays sculpt) {
             super(TYPE);
-            this.roads = new TextureDescriptor<>(roads);
-            this.sculpt = new TextureDescriptor<>(sculpt);
+            this.roads = roads;
+            this.sculpt = sculpt;
         }
 
         @Override
-        public Coats copy() { return new Coats(roads.texture, sculpt.texture); }
+        public Coats copy() { return new Coats(roads, sculpt); }
 
         @Override
         public int compareTo(Attribute other) {
             if (type != other.type) { return Long.compare(type, other.type); }
-            int result = roads.compareTo(((Coats) other).roads);
-            return result != 0 ? result : sculpt.compareTo(((Coats) other).sculpt);
+            int result = Integer.compare(System.identityHashCode(roads), System.identityHashCode(((Coats) other).roads));
+            return result != 0 ? result : Integer.compare(System.identityHashCode(sculpt), System.identityHashCode(((Coats) other).sculpt));
         }
 
         @Override
@@ -209,8 +208,23 @@ final class GpuRoads {
         return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false);
     }
 
+    /** The authored material of this road layer's own paint; verges and neighbouring transition coats keep theirs. */
+    static String material(BoardScene.Tile tile, boolean deck, String texture) {
+        if (!texture.startsWith("roads/")) { return null; }
+        String base = texture.substring("roads/".length());
+        if (!texture.equals(texture(deck ? tile.deckRoad() : tile.road()))) { return base; }
+        var style = tile.appearance().get(deck ? "bridgeRoad" : "road");
+        if (style == null) { return base; }
+        var variant = BoardEditorBlueprint.get().variant(style.variant());
+        String authored = style.material() != null ? style.material() : variant == null ? "" : variant.material();
+        return authored.isBlank() ? base : authored;
+    }
+
+    /** The deck road's paint: its kind on its own sides ({@link BoardBridge.Deck#road}). */
     static List<Patch> deckPatches(BoardScene.Tile tile, BoardBridge.Deck deck, BoardRoad road) {
-        return patches(tile.coords(), tile.surface(), deck.kind(), deck.exits(), road, true);
+        // A rock arch carries ordinary ground paint, including loose shoulders and worn ends. Only a built deck
+        // clips them to its carriageway; the arch's own top facets already keep the paint off its sides.
+        return patches(tile.coords(), tile.surface(), deck.kind(), deck.roadExits(), road, !deck.natural());
     }
 
     /** A bare bank gets a grounded material apron after the solid deck and its tapered rails have ended. */
@@ -310,6 +324,14 @@ final class GpuRoads {
         }
         if (kind == BoardRoad.Kind.PAVED) {
             patches.add(markings(road, coords, exits));
+            Area stops = road.stopLines(exits);
+            if (!stops.isEmpty()) {
+                patches.add(new Patch(stops, "concrete", new Color(.96f, .96f, .92f, 1), 1.5f, .065f, null));
+            }
+            Area median = road.medianLines();
+            if (!median.isEmpty()) {
+                patches.add(new Patch(median, "concrete", new Color(.95f, .78f, .25f, 1), 1.5f, .065f, null));
+            }
         } else if (!paved) {
             Area tracks = road.tracks(exits);
             Area worn = new Area(tracks);
@@ -351,15 +373,19 @@ final class GpuRoads {
                   BoardGeometry.corner(tile.coords(), elevation, i + 1).add(0, 0, lift), -1));
         }
         if (footing != null) {
-            result.addAll(deck(patch, footing));
+            result.addAll(deck(patch, footing, SURFACE_LIFT));
         }
         return result;
     }
 
-    /** Sloped decks carry every coat on the same triangles as the structural surface. */
-    static List<BoardTacticalGeometry.Triangle> deck(Patch patch, BoardBridge.Shape shape) {
+    /**
+     * Every coat on the same triangles as the structural surface, the TOP facets of {@code shape}, whose top already
+     * stands {@code lift} (model px) above the deck's plane: a built deck's slab and sloped decks at the road lift, a rock
+     * arch's top at none.
+     */
+    static List<BoardTacticalGeometry.Triangle> deck(Patch patch, BoardBridge.Shape shape, float lift) {
         List<BoardTacticalGeometry.Triangle> result = new ArrayList<>();
-        float offset = (patch.lift() + .01f - SURFACE_LIFT) * BoardGeometry.hexScale();
+        float offset = (patch.lift() + .01f - lift) * BoardGeometry.hexScale();
         for (var face : shape.facets()) {
             if (face.part() != BoardBridge.Part.TOP) { continue; }
             result.add(new BoardTacticalGeometry.Triangle(new Vector3(face.a()).add(0, 0, offset),
@@ -370,7 +396,7 @@ final class GpuRoads {
 
     static List<BoardTacticalGeometry.Triangle> deck(BoardScene.Tile tile, BoardScene.Feature bridge, Patch patch,
           BoardBridgeFooting footing, Map<Coords, BoardSurface> surfaces, BoardBridge.Shape slope) {
-        var result = slope == null ? deck(tile, bridge, patch, footing.shape()) : deck(patch, slope);
+        var result = slope == null ? deck(tile, bridge, patch, footing.shape()) : deck(patch, slope, SURFACE_LIFT);
         for (int d = 0; d < 6; d++) {
             if ((footing.bareExits() & (1 << d)) == 0) { continue; }
             // Only the existing dry bank carries the apron. Never drape it onto the surface under the span.

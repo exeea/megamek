@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Material;
@@ -18,28 +17,23 @@ final class GpuMagmaShader extends Attribute {
     static final int CRUST = 0, LAVA = 1, FALL = 2, BANK = 3;
 
     private final int mode;
-    /** The set's colour, normal, surface and heat maps (GpuAssets.magma), bound as u_magmaMaps. */
-    private final TextureArray maps;
+    /** The set's colour array plus normal/surface/heat numerical array, owned by GpuAssets. */
+    private final GpuAssets.MaterialArrays maps;
+    private final float emissionScale;
     /** The lava's field: its currents and bank distance for the melt, and how close a cooled bank is to it. */
     private final GpuWaterShader.Field field;
 
-    private GpuMagmaShader(int mode, TextureArray maps, GpuWaterShader.Field field) {
+    private GpuMagmaShader(int mode, GpuAssets.MaterialArrays maps, GpuWaterShader.Field field, float emissionScale) {
         super(TYPE);
         this.mode = mode;
         this.maps = maps;
+        this.emissionScale = emissionScale;
         this.field = mode == CRUST ? null : field;
     }
 
-    GpuMagmaShader withField(GpuWaterShader.Field field) { return new GpuMagmaShader(mode, maps, field); }
+    GpuMagmaShader withField(GpuWaterShader.Field field) { return new GpuMagmaShader(mode, maps, field, emissionScale); }
 
     boolean flowing() { return mode == LAVA || mode == FALL; }
-
-    /** Both programs share texture projection; each owns its relief, advection and heat treatment. */
-    static String functions(boolean flowing) {
-        return (flowing ? GpuShaderSource.read("liquid-flow.glsl") : "")
-              + GpuShaderSource.read("terrain-magma.glsl").replace("// MAGMA_CONDITION",
-                    GpuShaderSource.read(flowing ? "magma-flow.glsl" : "magma-solid.glsl"));
-    }
 
     @Override
     public GpuMagmaShader copy() { return withField(field); }
@@ -61,15 +55,26 @@ final class GpuMagmaShader extends Attribute {
     static Material material(GpuAssets assets, int mode, GpuWaterShader.Field field) {
         var maps = assets.magma(mode == LAVA || mode == FALL);
         if (maps == null) { return null; }
-        return new Material("magma:" + mode, new GpuMagmaShader(mode, maps, field), IntAttribute.createCullFace(GL20.GL_NONE));
+        float emissionScale = mode == LAVA || mode == FALL ? assets.lavaEmission().scale() : 0;
+        return new Material("magma:" + mode, new GpuMagmaShader(mode, maps, field, emissionScale),
+              IntAttribute.createCullFace(GL20.GL_NONE));
     }
 
     static void register(DefaultShader shader, Texture fallback) {
-        shader.register("u_magmaMaps", new BaseShader.LocalSetter() {
+        for (boolean color : new boolean[] { true, false }) {
+            shader.register(color ? "u_magmaColor" : "u_magmaMaps", new BaseShader.LocalSetter() {
+                @Override
+                public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                    var magma = attributes.get(GpuMagmaShader.class, TYPE);
+                    if (magma != null) { target.set(id, color ? magma.maps.color() : magma.maps.data()); }
+                }
+            });
+        }
+        shader.register("u_magmaEmissionScale", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 var magma = attributes.get(GpuMagmaShader.class, TYPE);
-                if (magma != null) { target.set(id, magma.maps); }
+                if (magma != null) { target.set(id, magma.emissionScale); }
             }
         });
         shader.register("u_magmaMode", new BaseShader.LocalSetter() {

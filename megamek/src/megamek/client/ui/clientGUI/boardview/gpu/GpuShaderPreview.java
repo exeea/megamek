@@ -94,6 +94,8 @@ final class GpuShaderPreview implements Disposable {
 
     private final OrthographicCamera camera = new OrthographicCamera();
     private final Environment light = new Environment();
+    private final BoardAtmosphere.Lighting lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
+    private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
     private final GpuAttackEffects attacks = new GpuAttackEffects();
     private final GpuExplosionEffects artilleryVolumes = new GpuExplosionEffects();
     private final GpuArtilleryBlast artilleryBlast = new GpuArtilleryBlast();
@@ -105,6 +107,8 @@ final class GpuShaderPreview implements Disposable {
     private final ByteBuffer masks = BufferUtils.newByteBuffer(5);
     private final FloatBuffer floats = BufferUtils.newFloatBuffer(6);
     private FrameBuffer buffer;
+    private FrameBuffer sceneBuffer;
+    private GpuSceneDisplay display;
     private ModelBatch batch;
     private Model sphereModel, floorModel, sourceModel;
     private ModelInstance sphere, floor, source;
@@ -152,13 +156,18 @@ final class GpuShaderPreview implements Disposable {
                       ? attack.contactSeconds + seconds % (UnitAttack.RECOVERY_SECONDS + .15f)
                       : seconds % (attack.duration + .15f);
             }
-            buffer.bind();
+            sceneBuffer.bind();
             Gdx.gl.glViewport(0, 0, WIDTH, HEIGHT);
             Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
             Gdx.gl.glColorMask(true, true, true, true);
             Gdx.gl.glDepthMask(true);
-            ScreenUtils.clear(.055f, .065f, .085f, 1, true);
+            float exposure = lighting.adaptation();
+            float backdropScale = GpuSceneRadiance.SCALE / exposure;
+            ScreenUtils.clear(GpuColor.linear(.055f) * backdropScale,
+                  GpuColor.linear(.065f) * backdropScale,
+                  GpuColor.linear(.085f) * backdropScale, 1, true);
             positionCamera(settings);
+            GpuEnvironmentLighting.applyAntialiasing(light);
             batch.begin(camera);
             batch.render(floor, light);
             if (preset == Preset.MATERIAL) {
@@ -172,6 +181,7 @@ final class GpuShaderPreview implements Disposable {
             }
             batch.end();
             depth.begin();
+            String title = preset.title;
             if (preset == Preset.FIRE) {
                 if (groundFire == null) { groundFire = new GpuTerrainEffects(); }
                 groundFire.update(sampleScene, surfaces, BoardAtmosphere.Effects.NONE, settings.playing() ? dt * settings.speed() : 0);
@@ -190,20 +200,21 @@ final class GpuShaderPreview implements Disposable {
                     sampleParticles.ribbon(camera, particleOrigin, particleEnd, 7, 1, .85f);
                 }
                 sampleParticles.render(camera, preset == Preset.SMOKE ? sampleParticles.size() : 0);
-            } else if (preset.precipitation()) {
-                if (weather == null) { weather = new GpuWeatherParticles(); }
-                var effects = new BoardAtmosphere.Effects(preset == Preset.RAIN ? .7f : 0,
-                      preset == Preset.SNOW ? .7f : 0, preset == Preset.HAIL ? .7f : 0, 0, 0, .15f, 90);
-                weather.render(camera, sampleScene, effects, Color.WHITE, seconds);
             } else if (preset == Preset.ARTILLERY) {
-                GpuArtilleryBlast.Style style = renderArtillery(depth);
-                return new Frame(image(), preset.title + " (" + style + ") - drag to orbit - wheel to zoom", preset, seconds);
+                title += " (" + renderArtillery(depth) + ")";
             } else if (attack != null) {
                 attacks.update(attack, null, preset == Preset.EXPLOSION ? Map.of()
                       : Map.of("1:-1", source, "2:-1", sphere));
                 attacks.render(camera, depth);
             }
-            return new Frame(image(), preset.title + " · drag to orbit · wheel to zoom", preset, seconds);
+            if (preset.precipitation()) {
+                if (weather == null) { weather = new GpuWeatherParticles(); }
+                var effects = new BoardAtmosphere.Effects(preset == Preset.RAIN ? .7f : 0,
+                      preset == Preset.SNOW ? .7f : 0, preset == Preset.HAIL ? .7f : 0, 0, 0, .15f, 90);
+                weather.render(camera, sampleScene, effects, Color.WHITE, seconds);
+            }
+            display.render(sceneBuffer, buffer, exposure);
+            return new Frame(image(), title + " · drag to orbit · wheel to zoom", preset, seconds);
         } catch (RuntimeException error) {
             failure = error.toString();
             if (batch != null && batch.getCamera() != null) {
@@ -239,6 +250,8 @@ final class GpuShaderPreview implements Disposable {
 
     private void createStage() {
         buffer = GpuAtmosphere.buffer(WIDTH, HEIGHT, true);
+        sceneBuffer = GpuHeatGlow.buffer(WIDTH, HEIGHT, true);
+        display = new GpuSceneDisplay();
         batch = new ModelBatch(GpuShaderManager.provider("Preview material", GpuUnitShader::provider));
         Pixmap pixels = new Pixmap(32, 32, Pixmap.Format.RGBA8888);
         try {
@@ -247,7 +260,7 @@ final class GpuShaderPreview implements Disposable {
                     pixels.drawPixel(x, y, ((x / 8 + y / 8) & 1) == 0 ? 0xaeb7c5ff : 0x606b7bff);
                 }
             }
-            checker = new Texture(pixels);
+            checker = GpuColorTexture.create(pixels, false);
         } finally { pixels.dispose(); }
         checker.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
         var model = new ModelBuilder();
@@ -260,8 +273,10 @@ final class GpuShaderPreview implements Disposable {
         floor.transform.setToTranslation(0, 0, -1);
         source = new ModelInstance(sourceModel);
         light.clear();
-        light.set(ColorAttribute.createAmbientLight(.35f, .35f, .35f, 1));
-        light.add(new DirectionalLight().set(.9f, .85f, .78f, -.3f, .5f, -1));
+        environmentLighting.set(lighting);
+        light.set(environmentLighting);
+        light.set(ColorAttribute.createAmbientLight(lighting.ambient()));
+        light.add(new DirectionalLight().set(lighting.direct(), lighting.direction()));
         var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.DIRT,
               null, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, false,
               BoardRoad.Kind.NONE, new BoardFireSmoke(1, 0));
@@ -403,11 +418,14 @@ final class GpuShaderPreview implements Disposable {
         if (groundFire != null) { groundFire.dispose(); }
         if (weather != null) { weather.dispose(); }
         if (batch != null) { batch.dispose(); }
+        environmentLighting.dispose();
         if (sphereModel != null) { sphereModel.dispose(); }
         if (floorModel != null) { floorModel.dispose(); }
         if (sourceModel != null) { sourceModel.dispose(); }
         if (checker != null) { checker.dispose(); }
         if (buffer != null) { buffer.dispose(); }
+        if (sceneBuffer != null) { sceneBuffer.dispose(); sceneBuffer = null; }
+        if (display != null) { display.dispose(); display = null; }
         groundFire = null; weather = null; batch = null; checker = null; buffer = null;
         sphereModel = floorModel = sourceModel = null;
     }

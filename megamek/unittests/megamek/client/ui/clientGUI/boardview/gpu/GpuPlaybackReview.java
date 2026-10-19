@@ -23,7 +23,7 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.tileset.MekTileset;
@@ -442,9 +442,11 @@ final class GpuPlaybackReview {
         final OrthographicCamera camera = new OrthographicCamera(180, 135);
         final Vector3 viewOffset = new Vector3(95, -150, 105);
         final ModelBatch batch = new ModelBatch(GpuUnitShader.provider());
-        final ShapeRenderer lines = new ShapeRenderer();
+        final ShaderProgram lineShader = GpuGlsl.compile("Playback review lines", "",
+              GpuShaderSource.read("scene-lines.vert"), GpuShaderSource.read("scene-lines.frag"));
+        final ShapeRenderer lines = new ShapeRenderer(2000, lineShader);
         final Environment light = new Environment();
-        final FrameBuffer buffer = new FrameBuffer(Pixmap.Format.RGBA8888, 640, 480, true);
+        final GpuSceneTestOutput output = new GpuSceneTestOutput(640, 480);
         boolean topView;
 
         ReviewRenderer() {
@@ -459,15 +461,13 @@ final class GpuPlaybackReview {
         }
 
         void frame(List<ModelInstance> models, Vector3 origin, GpuAttackEffects effects, GpuJumpJets jets, String name, int frame) {
-            buffer.begin();
+            begin();
             camera.position.set(origin);
             if (topView) { camera.position.add(0, 0, 260); }
             else { camera.position.add(viewOffset); }
             camera.up.set(topView ? Vector3.Y : Vector3.Z);
             camera.lookAt(origin.x, origin.y, origin.z + 22);
             camera.update();
-            Gdx.gl.glClearColor(.15f, .19f, .23f, 1);
-            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
             Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
             lines.setProjectionMatrix(camera.combined);
             lines.begin(ShapeRenderer.ShapeType.Line);
@@ -489,19 +489,25 @@ final class GpuPlaybackReview {
             batch.end();
             if (effects != null) { effects.render(camera); }
             if (jets != null) { jets.render(camera); }
+            output.display();
             File output = new File(System.getProperty("megamek.gpu.screenshots"), "playback-" + name);
             assertTrue(output.isDirectory() || output.mkdirs());
             var pixels = Pixmap.createFromFrameBuffer(0, 0, 640, 480);
             PixmapIO.writePNG(new FileHandle(new File(output, String.format("%03d.png", frame))), pixels, -1, true);
             pixels.dispose();
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-            buffer.end();
+            this.output.pixels().end();
+        }
+
+        void begin() {
+            output.begin(.15f, .19f, .23f, 1);
         }
 
         @Override
         public void close() {
-            buffer.dispose();
+            output.close();
             lines.dispose();
+            lineShader.dispose();
             batch.dispose();
         }
     }

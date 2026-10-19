@@ -13,9 +13,9 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -95,6 +95,7 @@ class GpuAssetCatalogSmokeTest {
                     }
                 }
                 fixture.game.setBoard(new Board(8, 8, hexes));
+                BoardSceneryLayouts.convert(fixture.game.getBoard());
                 fixture.source.refresh();
             });
             BoardScene captured = fixture.source.takeFrame().scene();
@@ -102,6 +103,7 @@ class GpuAssetCatalogSmokeTest {
                   new BoardScene.Light(-24, -30));
             new Lwjgl3Application(new ApplicationAdapter() {
                 GpuTerrain terrain;
+                GpuSceneTestOutput outputFrame;
                 BoardCamera camera;
                 int frames;
 
@@ -109,6 +111,7 @@ class GpuAssetCatalogSmokeTest {
                 public void create() {
                     try {
                         terrain = new GpuTerrain();
+                        outputFrame = new GpuSceneTestOutput();
                         terrain.update(scene);
                         camera = new BoardCamera();
                         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -128,9 +131,10 @@ class GpuAssetCatalogSmokeTest {
                     try {
                         terrain.animate(1f / 60, List.of());
                         terrain.renderShadows(List.of());
-                        ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
+                        outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
                         terrain.render(camera.camera, false);
                         terrain.renderTransparent(camera.camera);
+                        outputFrame.display();
                         if (++frames == 4) {
                             File output = new File(System.getProperty("megamek.gpu.screenshots"));
                             GpuBoardTestUi.capture(new File(output, "asset-catalog.png"));
@@ -145,6 +149,7 @@ class GpuAssetCatalogSmokeTest {
 
                 @Override
                 public void dispose() {
+                    if (outputFrame != null) { outputFrame.close(); }
                     if (terrain != null) {
                         terrain.dispose();
                     }

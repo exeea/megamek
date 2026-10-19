@@ -36,7 +36,7 @@ class GpuUnitReviewsSmokeTest {
             @Override
             public void create() {
                 var library = new GpuUnitModels();
-                var batch = new ModelBatch();
+                var batch = new ModelBatch(GpuUnitShader.provider());
                 try {
                     assertAll("Unit model reviews",
                           () -> assertAll("A Mek swaps between its near and far bodies",

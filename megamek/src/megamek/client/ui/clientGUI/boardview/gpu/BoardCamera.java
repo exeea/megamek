@@ -94,6 +94,9 @@ final class BoardCamera {
     /** The 3D pose the Tactical View replaced; null while the 3D view is active. Render-thread state, never saved. */
     private Pose tacticalReturn;
     private boolean tacticalReturnFit;
+    /** The pose a look ({@link #look}) replaced; null otherwise. */
+    private Pose lookReturn;
+    private boolean lookReturnFit;
     private Pose framingStart;
     private Pose framingTarget;
     private float framingElapsed;
@@ -113,11 +116,21 @@ final class BoardCamera {
         camera.zoom = 1;
     }
 
-    /** Projected size at the orbit pivot, including framebuffer/display scaling. */
+    /**
+     * The 3D scene's render resolution, a share of the window's pixels; the tuning panel sets it for the window. The
+     * scene's pixel footprints ({@link #pixelsPerUnit}, detail and shader fades) count the scene's own pixels.
+     */
+    static float renderScale = 1;
+
+    /** Projected size at the orbit pivot in scene pixels, including framebuffer/display scaling. */
     static float pixelsPerUnit(Camera camera) {
-        float scale = Gdx.graphics == null ? 1
-              : Gdx.graphics.getBackBufferHeight() / (float) Math.max(1, Gdx.graphics.getHeight());
-        return scale / worldUnitsPerPixel(camera);
+        return scenePixelScale() / worldUnitsPerPixel(camera);
+    }
+
+    /** Scene pixels per logical window pixel: the display's framebuffer scaling times the render resolution. */
+    static float scenePixelScale() {
+        return Gdx.graphics == null ? 1
+              : Gdx.graphics.getBackBufferHeight() / (float) Math.max(1, Gdx.graphics.getHeight()) * renderScale;
     }
 
     static float worldUnitsPerPixel(Camera camera) {
@@ -127,9 +140,7 @@ final class BoardCamera {
     }
 
     static float pixelsPerUnit(Camera camera, Vector3 point) {
-        float scale = Gdx.graphics == null ? 1
-              : Gdx.graphics.getBackBufferHeight() / (float) Math.max(1, Gdx.graphics.getHeight());
-        return scale / worldUnitsPerPixel(camera, point);
+        return scenePixelScale() / worldUnitsPerPixel(camera, point);
     }
 
     /** World distance corresponding to one logical screen pixel at the supplied point's camera depth. */
@@ -379,11 +390,7 @@ final class BoardCamera {
             azimuth = 0;
             tilt = 0;
         } else {
-            focus.set(tacticalReturn.focus());
-            camera.zoom = tacticalReturn.zoom();
-            azimuth = tacticalReturn.azimuth();
-            tilt = tacticalReturn.tilt();
-            fitToWindow = tacticalReturnFit;
+            restore(tacticalReturn, tacticalReturnFit);
             tacticalReturn = null;
         }
         stopFraming();
@@ -394,6 +401,33 @@ final class BoardCamera {
         } else {
             update();
         }
+    }
+
+    /** A look at {@code position} at {@code zoom}, which {@link #endLook} undoes exactly (GpuBattleView's warm-up). */
+    void look(Vector3 position, float zoom) {
+        lookReturn = new Pose(focus.cpy(), camera.zoom, azimuth, tilt);
+        lookReturnFit = fitToWindow;
+        center(position);
+        camera.zoom = zoom;
+        update();
+    }
+
+    void endLook(BoardScene scene) {
+        restore(lookReturn, lookReturnFit);
+        lookReturn = null;
+        if (fitToWindow && scene != null) {
+            fit(scene);
+        } else {
+            update();
+        }
+    }
+
+    private void restore(Pose pose, boolean fit) {
+        focus.set(pose.focus());
+        camera.zoom = pose.zoom();
+        azimuth = pose.azimuth();
+        tilt = pose.tilt();
+        fitToWindow = fit;
     }
 
     /** A new board makes the saved 3D position meaningless: leaving the Tactical View then fits the new board. */
@@ -1304,6 +1338,7 @@ final class BoardCamera {
         // the viewport spans depth as well as width; a fixed eye distance clips its lower half when panning.
         float distance = camera.perspective ? camera.distance() : 10000
               + camera.viewportHeight * camera.zoom * .5f * camera.up.z / Math.max(.01f, -camera.direction.z);
+        camera.pivotDepth = distance;
         if (!firstPerson) {
             camera.position.set(camera.direction).scl(-distance).add(focus);
             camera.position.mulAdd(new Vector3(camera.direction).crs(camera.up).nor(), viewOffsetPixels * camera.zoom);

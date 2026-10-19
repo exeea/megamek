@@ -1,13 +1,20 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuShaderSource.replaceOnce;
+
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.Shader;
+import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.g3d.utils.DefaultShaderProvider;
+import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
+import com.badlogic.gdx.math.Matrix4;
 
 /** Unit paint, damage and imported surface lighting. The ModelBatch owns the provider and its shaders. */
 final class GpuUnitShader extends DefaultShader {
@@ -24,25 +31,69 @@ final class GpuUnitShader extends DefaultShader {
     private final int damageEnabled = register("u_damageEnabled");
     private final int damageOpacity = register("u_damageOpacity");
     private final int damageTransform = register("u_damageTransform");
+    private final boolean displayOutput;
 
-    private GpuUnitShader(Renderable renderable, Config config) {
-        super(renderable, config, GpuGlsl.compile("GPU unit material", GpuCloudShadow.prefix(renderable, config),
-              config.vertexShader, config.fragmentShader));
+    private GpuUnitShader(Renderable renderable, Config config, boolean displayOutput, boolean encodeOutput) {
+        super(renderable, config, GpuGlsl.compile("GPU unit material", GpuCloudShadow.prefix(renderable, config)
+                    + "#define sceneUnlitFlag\n" + (encodeOutput ? "#define displayOutputFlag\n" : ""),
+              config.vertexShader, displayOutput ? config.fragmentShader : GpuSceneRadiance.fragment(config.fragmentShader)));
+        this.displayOutput = displayOutput;
+        registerMaterialColors(this, true);
         GpuCloudShadow.register(this);
+        GpuEnvironmentLighting.register(this);
+        if (renderable.environment != null) {
+            var environment = renderable.environment.get(GpuEnvironmentLighting.class, GpuEnvironmentLighting.TYPE);
+            // Upload before render-time setters bind any material textures.
+            if (environment != null) { environment.texture(); }
+        }
         GpuLavaLighting.register(this);
+        GpuAmbientOcclusion.register(this);
         GpuModelMaterial.register(this);
         register("u_normalMaps", new BaseShader.GlobalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable part, Attributes attributes) { target.set(id, 1f); }
         });
+        // The shared light model's view (rain-surface.glsl viewDirection), as the terrain's programs set it.
+        register("u_viewDirection", new BaseShader.GlobalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
+                target.set(id, target.camera.direction);
+            }
+        });
+        register("u_viewPosition", new BaseShader.GlobalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
+                target.set(id, target.camera.position);
+            }
+        });
+        register("u_perspective", new BaseShader.GlobalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
+                target.set(id, target.camera.projection.val[Matrix4.M33] == 0 ? 1f : 0f);
+            }
+        });
     }
 
     static DefaultShaderProvider provider() {
+        return provider(false, false);
+    }
+
+    /** Model ghosts drawn over the finished scene share linear material evaluation, then encode for that target. */
+    static DefaultShaderProvider displayProvider() {
+        return provider(true, true);
+    }
+
+    /** Linear display light for a scoped sRGB target; neither scene storage scale nor a second encode. */
+    static DefaultShaderProvider linearDisplayProvider() {
+        return provider(true, false);
+    }
+
+    private static DefaultShaderProvider provider(boolean displayOutput, boolean encodeOutput) {
         return new DefaultShaderProvider(GpuCloudShadow.vertex(vertexSource(linearVertex(getDefaultVertexShader()))),
-              GpuCloudShadow.fragment(fragmentSource(linearFragment(getDefaultFragmentShader())), false)) {
+              GpuCloudShadow.fragment(fragmentSource(fragment()))) {
             @Override
             protected Shader createShader(Renderable renderable) {
-                return new GpuUnitShader(renderable, config);
+                return new GpuUnitShader(renderable, config, displayOutput, encodeOutput);
             }
         };
     }
@@ -59,14 +110,12 @@ final class GpuUnitShader extends DefaultShader {
     static String fragmentSource(String source) {
         String declarations = GpuShaderSource.read("unit-material.frag");
         source = replaceOnce(source, MAIN, declarations + "\n" + MAIN, "fragment");
-        String emissive = "#if defined(emissiveTextureFlag) && defined(emissiveColorFlag)";
-        return replaceOnce(source, emissive, "diffuse.rgb = unitOverlays(diffuse.rgb);\n" + emissive, "fragment");
+        return replaceOnce(source, "// unit-overlays", "diffuse.rgb = unitOverlays(diffuse.rgb);", "fragment");
     }
 
     /**
-     * libGDX's vertex lighting on the board's one light model (light-model.glsl): the ambient term becomes the sky
-     * above and the sunlit ground below, as on the terrain. Units, props, buildings and liquids share it. The sunlit
-     * ground's share also goes to v_groundBounce, so a cloud's shadow can dim it (GpuCloudShadow.fragment).
+     * libGDX's vertex stage with linear colours: units, props, buildings and liquids share it with the terrain. Its own
+     * per-vertex lighting is unused; the fragment stages light every surface (model.frag, shadeSurface).
      */
     static String linearVertex(String source) {
         source = GpuGlsl.libGdx(source, true);
@@ -76,43 +125,61 @@ final class GpuUnitShader extends DefaultShader {
         source = replaceOnce(source, MAIN,
               "#ifdef modelSurfaceFlag\nout vec2 v_modelUV;\n#endif\n" + MAIN
                     + "\n#ifdef modelSurfaceFlag\nv_modelUV = a_texCoord0;\n#endif\n", "vertex");
-        source = replaceOnce(source, MAIN, lightModel() + "\nout vec3 v_groundBounce;\n" + MAIN, "vertex");
+        source = replaceOnce(source, MAIN, GpuShaderSource.read("light-model.glsl") + "\n" + MAIN, "vertex");
         // A recolourable model's shared mesh takes its placement's colours before any lighting (RigidGlb.recolour).
         source = replaceOnce(source, MAIN, GpuShaderSource.read("model-colour-slots.glsl") + "\n" + MAIN, "vertex");
         String color = "v_color = a_color;";
-        source = replaceOnce(source, color, color
-              + "\n#ifdef colourSlotsFlag\nv_color.rgb = slotColour(a_color.rgb, a_colourSlot, u_slotColours);\n#endif\n", "vertex");
-        String ambient = "#endif // sphericalHarmonicsFlag";
-        return replaceOnce(source, ambient, ambient + "\n" + GpuShaderSource.read("linear-ambient.glsl") + "\n", "vertex");
+        return replaceOnce(source, color, color
+              + "\n#ifdef colourSlotsFlag\nv_color.rgb = slotColour(a_color.rgb, a_colourSlot, u_slotColours);\n#endif\n"
+              + "#if (defined(lightingFlag) || defined(sceneUnlitFlag) || defined(linearTextureFlag))"
+              + " && !defined(linearColorsFlag) && !defined(vertexDataFlag)\n"
+              + "v_color.rgb = toLinear(v_color.rgb);\n#endif\n", "vertex");
     }
 
     /**
-     * libGDX's lit fragment on the one light model: linear albedo times linear light, plus decoded emission, then
-     * one display encode. This matches the terrain's radiance sum. Unlit draws are untouched.
+     * Imported models' fragment stage (model.frag): linear albedo lit by the board's one light model, plus emission.
+     * Factors arrive from the material setters in the input domain used by this pass. Scene output stays linear.
+     * The unit provider also converts unlit scene materials; terrain's final tactical overlays
+     * retain display output because they do not set sceneUnlitFlag.
      */
-    static String linearFragment(String source) {
-        source = GpuGlsl.libGdx(source, false);
-        source = replaceOnce(source, MAIN, "// model-lighting-functions\n" + lightModel()
-              + GpuShaderSource.read("lava-lighting.glsl") + GpuShaderSource.read("model-surface.glsl") + "\n" + MAIN, "fragment");
-        String lit = "#if (!defined(lightingFlag))";
-        source = replaceOnce(source, lit, GpuShaderSource.read("linear-material.glsl")
-              + "\n#if defined(modelSurfaceFlag) && defined(lightingFlag)\n"
-              + "fragColor.rgb = modelSurface(diffuse.rgb, emissive.rgb);\n#elif (!defined(lightingFlag))", "fragment");
-        String fog = "#endif // end fogFlag";
-        return replaceOnce(source, fog, fog + "\n" + GpuShaderSource.read("linear-output.glsl") + "\n", "fragment");
+    static String fragment() {
+        return GpuShaderSource.modelLighting(GpuShaderSource.read("model.frag"));
     }
 
-    private static String lightModel() {
-        return GpuShaderSource.read("light-model.glsl");
+    /** Replace libGDX's factor setters before init; never mutate shared authored colors or vertex color metadata. */
+    static void registerMaterialColors(DefaultShader shader, boolean linearInputs) {
+        registerMaterialColor(shader, Inputs.diffuseColor, ColorAttribute.Diffuse, linearInputs);
+        registerMaterialColor(shader, Inputs.emissiveColor, ColorAttribute.Emissive, linearInputs);
+        registerMaterialColor(shader, Inputs.specularColor, ColorAttribute.Specular, linearInputs);
     }
 
-    static String replaceOnce(String source, String anchor, String replacement, String stage) {
-        int index = source.indexOf(anchor);
-        if (index < 0 || source.indexOf(anchor, index + anchor.length()) >= 0) {
-            throw new IllegalStateException("Incompatible libGDX unit " + stage
-                  + " shader: expected exactly one insertion point: " + anchor);
+    private static void registerMaterialColor(DefaultShader shader, BaseShader.Uniform input, long type,
+          boolean linearInputs) {
+        shader.register(input, new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
+                var color = attributes.get(ColorAttribute.class, type).color;
+                boolean decode = linearInputs && !part.material.has(GpuLinearColors.TYPE);
+                target.set(id, decode ? GpuColor.linear(color.r) : color.r,
+                      decode ? GpuColor.linear(color.g) : color.g,
+                      decode ? GpuColor.linear(color.b) : color.b, color.a);
+            }
+        });
+    }
+
+    @Override
+    protected void bindMaterial(Attributes attributes) {
+        super.bindMaterial(attributes);
+        if (!displayOutput) { bindSceneBlending(context, attributes); }
+    }
+
+    /** Scene alpha is coverage for uncovered sky and transparent exports, not another color channel. */
+    static void bindSceneBlending(RenderContext context, Attributes attributes) {
+        var blend = attributes.get(BlendingAttribute.class, BlendingAttribute.Type);
+        if (blend != null && blend.blended && blend.sourceFunction == GL20.GL_SRC_ALPHA
+              && blend.destFunction == GL20.GL_ONE_MINUS_SRC_ALPHA) {
+            context.setBlending(true, blend.sourceFunction, blend.destFunction, GL20.GL_ONE, blend.destFunction);
         }
-        return source.substring(0, index) + replacement + source.substring(index + anchor.length());
     }
 
     @Override

@@ -30,7 +30,6 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.RecentBoardList;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
@@ -119,8 +118,10 @@ final class GpuMapSource implements BoardSource {
             return;
         }
         uiPreferences = UiPreferences.capture();
-        // Tiles carry the art of both graphics: the next frame publishes the choice, and no hex is captured again.
-        if (GUIPreferences.BOARD_GRAPHICS.equals(event.getName())) { return; }
+        // Tiles carry the art of both graphics, and the UI scale changes no art: the next frame publishes the choice,
+        // and no hex is captured again.
+        if (GUIPreferences.BOARD_GRAPHICS.equals(event.getName())
+              || GUIPreferences.BOARD_UI_SCALE.equals(event.getName())) { return; }
         // Label/color preferences affect presentation only; interned terrain pixels and feature geometry are reused.
         dirtyAll();
     });
@@ -232,16 +233,19 @@ final class GpuMapSource implements BoardSource {
         // An unchanged editor state keeps its instance, so the views' identity checks mean a real change.
         var previous = publication == null ? null : publication.editor();
         var state = editor == null ? null : editor.snapshot();
-        publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, preview(state));
+        var projected = preview(state);
+        if (editor != null && state.activeBrush().way() && editorHover != null) {
+            editorBrush = new EditorBrush(hover, boardGeneration, editor.brush(hover), editor.wayHint(editorHover.coords(), shownPreview));
+        }
+        publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, projected);
     }
 
     /** Map workspaces expose their existing document and application actions without requiring a game client. */
     private List<BoardScene.Command> menuCommands() {
         List<BoardScene.Command> commands = new ArrayList<>();
-        if (requestLegacy2D != null) {
-            // A preview switches to its Legacy 2D board; the editor opens its live Legacy 2D Preview beside itself.
-            commands.add(menuCommand("viewLegacy2D", editor == null ? "CommonMenuBar.viewLegacy2D"
-                  : "BoardEditor.preview2D", requestLegacy2D));
+        if (editor != null && requestLegacy2D != null) {
+            // The editor opens its live Legacy 2D Preview beside itself; a preview switches through View > Renderer.
+            commands.add(menuCommand("boardPreview2D", "BoardEditor.preview2D", requestLegacy2D));
         }
         if (editor != null) {
             long generation = boardGeneration;
@@ -274,22 +278,10 @@ final class GpuMapSource implements BoardSource {
         commands.add(new BoardScene.Command("fileBoardPrint", Messages.getString("CommonMenuBar.PrintMenu"), "",
               !printing && !savingPrint && !choosingPrint, false, false, List.of(), () -> onSwing(this::choosePrint)));
         GUIPreferences gui = GUIPreferences.getInstance();
-        // The 3D board's graphics, as CommonMenuBar's 3D Graphics submenu; a choice applies at once.
-        BoardGraphics graphics = gui.getBoardGraphics();
-        BoardScene.Command boardGraphics = new BoardScene.Command("viewBoardGraphics",
-              Messages.getString("CommonMenuBar.viewBoardGraphics"), "", true, false, List.of(
-                    viewCommand(ClientGUI.VIEW_GRAPHICS_CLASSIC, null, graphics == BoardGraphics.CLASSIC,
-                          () -> gui.setBoardGraphics(BoardGraphics.CLASSIC)),
-                    viewCommand(ClientGUI.VIEW_GRAPHICS_ENHANCED, null, graphics == BoardGraphics.ENHANCED,
-                          () -> gui.setBoardGraphics(BoardGraphics.ENHANCED))), () -> { });
-        List<BoardScene.Command> view = new ArrayList<>(List.of(boardGraphics,
+        List<BoardScene.Command> view = new ArrayList<>(List.of(renderer(gui),
               viewCommand(ClientGUI.VIEW_TOGGLE_HEX_COORDS, editor == null ? KeyCommandBind.HEX_COORDS : null,
                     gui.getCoordsEnabled(), gui::toggleCoords),
-              viewCommand(ClientGUI.VIEW_TOGGLE_HEX_TYPES, null, gui.getHexTypesEnabled(), gui::toggleHexTypes),
-              viewCommand(ClientGUI.VIEW_INC_GUI_SCALE, KeyCommandBind.INC_GUI_SCALE, null,
-                    () -> CommonMenuBar.changeGUIScale(true)),
-              viewCommand(ClientGUI.VIEW_DEC_GUI_SCALE, KeyCommandBind.DEC_GUI_SCALE, null,
-                    () -> CommonMenuBar.changeGUIScale(false))));
+              viewCommand(ClientGUI.VIEW_TOGGLE_HEX_TYPES, null, gui.getHexTypesEnabled(), gui::toggleHexTypes)));
         if (editor != null) {
             // The editor's reference image over its top view (GpuTraceOverlay); its file, opacity, scale and position are
             // the Client Settings' Trace Overlay section.
@@ -303,6 +295,26 @@ final class GpuMapSource implements BoardSource {
         commands.add(menuCommand("helpAbout", "CommonMenuBar.helpAbout", () -> new MMAboutDialog(owner).show()));
         if (requestClose != null) { commands.add(menuCommand("close", "Close", requestClose)); }
         return List.copyOf(commands);
+    }
+
+    /**
+     * View > Renderer, as CommonMenuBar's Renderer submenu, with this window's 3D graphics checked: a preview's Legacy
+     * 2D closes it and shows its board in a Legacy 2D window; the editor draws only in 3D, so there it is unavailable
+     * (its Legacy 2D Preview opens beside it); Classic and Enhanced apply at once.
+     */
+    private BoardScene.Command renderer(GUIPreferences gui) {
+        BoardScene.Command legacy2D = editor == null && requestLegacy2D != null
+              ? viewCommand(ClientGUI.VIEW_LEGACY_2D, null, false, requestLegacy2D)
+              : new BoardScene.Command(ClientGUI.VIEW_LEGACY_2D, Messages.getString("CommonMenuBar.viewLegacy2D"),
+                    editor == null ? "" : Messages.getString("BoardEditor.noLegacy2D"), false, false, false, List.of(),
+                    () -> { }, "", false);
+        BoardGraphics graphics = gui.getBoardGraphics();
+        return new BoardScene.Command("viewRenderer", Messages.getString("CommonMenuBar.viewRenderer"), "", true, false,
+              List.of(legacy2D,
+                    viewCommand(ClientGUI.VIEW_GRAPHICS_CLASSIC, null, graphics == BoardGraphics.CLASSIC,
+                          () -> gui.setBoardGraphics(BoardGraphics.CLASSIC)),
+                    viewCommand(ClientGUI.VIEW_GRAPHICS_ENHANCED, null, graphics == BoardGraphics.ENHANCED,
+                          () -> gui.setBoardGraphics(BoardGraphics.ENHANCED))), () -> { });
     }
 
     /**
@@ -507,10 +519,6 @@ final class GpuMapSource implements BoardSource {
                 GUIPreferences.getInstance().toggleCoords();
             } else if (binds.contains(KeyCommandBind.LOS_SETTING)) {
                 changeRuler(boardGeneration, RulerModel::open);
-            } else if (binds.contains(KeyCommandBind.INC_GUI_SCALE)) {
-                CommonMenuBar.changeGUIScale(true);
-            } else if (binds.contains(KeyCommandBind.DEC_GUI_SCALE)) {
-                CommonMenuBar.changeGUIScale(false);
             } else if (editor != null && keyCode != KeyEvent.VK_SHIFT && keyCode != KeyEvent.VK_CONTROL
                   && keyCode != KeyEvent.VK_ALT && keyCode != KeyEvent.VK_META) {
                 finishEditorStroke();

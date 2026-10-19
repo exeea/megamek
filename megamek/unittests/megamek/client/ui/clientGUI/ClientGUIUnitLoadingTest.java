@@ -4,10 +4,13 @@ package megamek.client.ui.clientGUI;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,6 +24,7 @@ import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
 import megamek.client.ui.clientGUI.audio.SoundManager;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.dialogs.UnitLoadingDialog;
 import megamek.client.ui.dialogs.randomArmy.RandomArmyDialog;
 import megamek.client.ui.dialogs.unitSelectorDialogs.MegaMekUnitSelectorDialog;
@@ -49,7 +53,11 @@ class ClientGUIUnitLoadingTest {
                   var inspector = nativeBoard ? mockConstruction(UnitDisplayPanel.class) : null;
                   var inspectorDialog = nativeBoard ? mockConstruction(UnitDisplayDialog.class) : null;
                   var cacheAccess = mockStatic(MekSummaryCache.class);
-                  var application = mockStatic(MegaMekGUI.class)) {
+                  var application = mockStatic(MegaMekGUI.class);
+                  // Keep real Swing presentation, but prevent a GL thread from outliving gui.die() and opening a
+                  // failure dialog in later tests. This test exercises the routing, not native rendering.
+                  var boardWindow = mockStatic(GpuBoardWindow.class, call ->
+                        call.getMethod().getName().equals("open") ? null : call.callRealMethod())) {
                 MekSummaryCache cache = mock(MekSummaryCache.class);
                 cacheAccess.when(MekSummaryCache::getInstance).thenReturn(cache);
                 MegaMekController controller = new MegaMekController();
@@ -69,14 +77,15 @@ class ClientGUIUnitLoadingTest {
                 opened.set(gui);
                 try {
                     gui.initialize();
+                    boardWindow.verify(() -> GpuBoardWindow.open(eq(gui), any()), nativeBoard
+                          ? times(1) : never());
                     gui.switchPanel(GamePhase.LOUNGE);
+                    assertTrue(gui.getFrame().isShowing());
                     if (nativeBoard) {
                         gui.setUnitDisplayVisible(true);
                         assertTrue(inspector.constructed().isEmpty());
                         assertTrue(inspectorDialog.constructed().isEmpty());
-                        assertFalse(gui.getFrame().isShowing());
                     } else {
-                        assertTrue(gui.getFrame().isShowing());
                         UnitLoadingDialog progress = Arrays.stream(gui.getFrame().getOwnedWindows())
                               .filter(UnitLoadingDialog.class::isInstance)
                               .map(UnitLoadingDialog.class::cast)

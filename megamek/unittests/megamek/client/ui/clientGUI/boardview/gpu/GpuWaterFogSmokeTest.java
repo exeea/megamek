@@ -22,6 +22,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.lwjgl.opengl.GL11;
@@ -35,8 +36,7 @@ class GpuWaterFogSmokeTest {
     @Test
     void archipelagoShorelinesRemainInsideFogInBothProjections() throws Exception {
         assertTrue(output.isDirectory() || output.mkdirs());
-        Board board = new Board();
-        board.load(new File("data/boards/Map Set 7/16x17 Archipelago 1.board"));
+        Board board = BoardFile.loadSheet(new File("data/boards/Map Set 7/16x17 Archipelago 1.board"), false, true);
         assertEquals(16, board.getWidth());
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {

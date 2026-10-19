@@ -4,6 +4,7 @@ layout(location = 0) out vec4 fragColor;
 uniform vec4 u_centerRadius;
 // Normalized attack age, fire amount, optical density and stable event/packet seed.
 uniform vec4 u_effect;
+// LIGHT_MODEL
 uniform vec3 u_light;
 uniform vec3 u_sun;
 // Unit travel direction in XY and the board's normalized strength in Z.
@@ -98,9 +99,10 @@ void main() {
     float jitter = mix(0.25, 0.75, hash(vec3(gl_FragCoord.xy, u_effect.w)));
     float ember = u_look.y * 0.28;
     float cooling = u_effect.y * (1.0 - smoothstep(0.12 + ember, 0.68 + ember, u_effect.x));
-    vec3 litSmoke = mix(mix(vec3(0.44, 0.43, 0.41), vec3(0.17, 0.16, 0.155), u_look.x), vec3(0.4, 0.32, 0.23), u_look.z);
-    vec3 shadedSmoke = mix(mix(vec3(0.065, 0.07, 0.08), vec3(0.025, 0.024, 0.025), u_look.x),
-                           vec3(0.08, 0.06, 0.045), u_look.z);
+    vec3 litSmoke = mix(mix(toLinear(vec3(0.44, 0.43, 0.41)), toLinear(vec3(0.17, 0.16, 0.155)), u_look.x),
+                       toLinear(vec3(0.4, 0.32, 0.23)), u_look.z);
+    vec3 shadedSmoke = mix(mix(toLinear(vec3(0.065, 0.07, 0.08)), toLinear(vec3(0.025, 0.024, 0.025)), u_look.x),
+                           toLinear(vec3(0.08, 0.06, 0.045)), u_look.z);
     vec3 sun = normalize(volumeVector(u_sun));
     float transmission = 1.0;
     vec3 radiance = vec3(0.0);
@@ -114,12 +116,14 @@ void main() {
             float shadow = exp(-(medium(p + sun * 0.18).x + medium(p + sun * 0.4).x) * 1.7 * u_effect.z);
             vec3 smoke = mix(shadedSmoke, litSmoke, shadow) * u_light;
             float heat = cooling * mediumSample.y;
-            vec3 fire = mix(vec3(0.7, 0.018, 0.001), vec3(1.55, 0.38, 0.012), smoothstep(0.08, 0.5, heat));
-            fire = mix(fire, vec3(2.1, 1.65, 0.7), smoothstep(0.5, 0.95, heat));
+            // Decode palette stops, then apply linear emission strength independently of their colour.
+            vec3 fire = mix(toLinear(vec3(0.7, 0.018, 0.001)),
+                  1.55 * toLinear(vec3(1.0, 0.38 / 1.55, 0.012 / 1.55)), smoothstep(0.08, 0.5, heat));
+            fire = mix(fire, 2.1 * toLinear(vec3(1.0, 1.65 / 2.1, 0.7 / 2.1)), smoothstep(0.5, 0.95, heat));
             // Burning metal in a violent blast: small blinding pockets flicker through its fire.
             float pocket = smoothstep(0.78, 0.86, noise(p * 13.0 + vec3(u_effect.w * 3.1, 0.0, -u_effect.x * 9.0)));
-            fire += vec3(2.6, 2.3, 1.7) * pocket * u_look.w * smoothstep(0.2, 0.6, heat);
-            smoke += vec3(0.22, 0.045, 0.006) * cooling * mediumSample.y;
+            fire += 2.6 * toLinear(vec3(1.0, 2.3 / 2.6, 1.7 / 2.6)) * pocket * u_look.w * smoothstep(0.2, 0.6, heat);
+            smoke += toLinear(vec3(0.22, 0.045, 0.006)) * cooling * mediumSample.y;
             vec3 source = mix(smoke, fire, smoothstep(0.08, 0.5, heat));
             radiance += transmission * absorption * source;
             transmission *= 1.0 - absorption;

@@ -74,7 +74,7 @@ class LegacySceneryCorpusTest {
         // Batch-10 answer 7: maglev markers on Pillars, and those a row of pillar art lifted a level above the ground.
         int pillaredMaglevs = 0, raisedMaglevs = 0;
         // Rail: markers, those riding a bridge deck, and those storing tracks other than their sides' default.
-        int rails = 0, deckRails = 0, storedTracks = 0;
+        int rails = 0, deckRails = 0, storedTracks = 0, railTerrain = 0, deckRailTerrain = 0;
         // Car-park roads: lane roads by axis and their boards, roof (or other off-ground) car parks left without a road,
         // car parks keeping an authored road, and neighbour roads whose automatic exits were written out.
         Map<String, Integer> laneRoads = new TreeMap<>();
@@ -147,8 +147,13 @@ class LegacySceneryCorpusTest {
                 for (int x = 0; x < board.getWidth(); x++) {
                     var hex = board.getHex(x, y);
                     String where = file.getFileName() + " " + x + "," + y;
-                    // K: the tokens stay on the converted board, so the 2D views of a game still draw the old sprites.
-                    assertEquals(tokens.getOrDefault(new Coords(x, y), List.of()), tokens(hex), where + ": the tokens stay");
+                    // K: the tokens stay on the converted board, so the 2D views of a game still draw the old sprites; legacy
+                    // rail art becomes rail terrain, which draws its sprite (b13 ways).
+                    boolean laid = hex.containsAnyTerrainOf(Terrains.RAIL, Terrains.BRIDGE_RAIL);
+                    assertEquals(tokens.getOrDefault(new Coords(x, y), List.of()).stream()
+                          .filter(token -> !(laid && token.matches("fluff:10(:.*)?"))).toList(), tokens(hex), where + ": the tokens stay");
+                    if (hex.containsTerrain(Terrains.RAIL)) { railTerrain++; }
+                    if (hex.containsTerrain(Terrains.BRIDGE_RAIL)) { deckRailTerrain++; }
                     // K2: every 3D view draws the hex without its taken tokens, and that hex selects nothing the
                     // conversion took (its objects stand for it). Only a token can select taken art.
                     if (tokens.containsKey(new Coords(x, y))) {
@@ -163,7 +168,7 @@ class LegacySceneryCorpusTest {
                               file.getFileName() + " " + x + "," + y + ": no pillar objects on a bridge");
                     }
                     var vegetation = hex.getAppearance().get("vegetation");
-                    if (vegetation != null && BoardTreeDistribution.NO_TREES.equals(vegetation.variant())) { noTrees++; }
+                    if (BoardTreeDistribution.noTrees(hex)) { noTrees++; }
                     // Batch 10: the conversion takes every art token (objects, a design or nothing).
                     var taken = BoardSceneryLayouts.takenTokens(hex);
                     for (int type : ART) {
@@ -278,22 +283,32 @@ class LegacySceneryCorpusTest {
         assertEquals(Map.of(), untaken, "Batch 10: the conversion takes every legacy art token");
         designs.forEach((design, count) -> System.out.printf("CORPUS design %7d hexes  %s%n", count, design));
         families.forEach((family, count) -> System.out.printf("CORPUS batch-10 family %7d  %s%n", count, family));
-        assertEquals(new TreeMap<>(Map.of("building/legacy-art-N", 9_759, "building model (art the model was chosen beside)", 108,
-              "ground/blend/*", 6_705, "ground/quay-*", 66, "road/horizontal", 1_760, "road/rounded", 19_749,
-              "rough/felled-trees", 967, "rough/obstacles", 1_314, "woods/no-trees", 4_224, "woods/orchard", 4_291)), designs);
+        // Batch 12: the seaport yards and cranes are the container yard looks (rows, and the crane looks by boom side).
+        assertEquals(new TreeMap<>(Map.ofEntries(Map.entry("building/legacy-art-N", 9_759),
+              Map.entry("building model (art the model was chosen beside)", 108), Map.entry("ground/blend/*", 6_705),
+              Map.entry("ground/quay-*", 66), Map.entry("road/horizontal", 1_760), Map.entry("road/rounded", 19_749),
+              Map.entry("rough/felled-trees", 967), Map.entry("rough/obstacles", 1_314),
+              Map.entry("woods/container-yard/quay-crane", 193), Map.entry("woods/container-yard/quay-crane-mirrored", 212),
+              Map.entry("woods/container-yard/rows", 3_819), Map.entry("woods/orchard", 4_291))), designs);
+        // The 105 crane tips: the 61 a converted crane's boom reaches place nothing, the others are boom segments.
+        assertEquals(44, perAsset.get("scenery/seaport/yard/crane-boom"));
+        assertTrue(perAsset.keySet().stream().noneMatch(asset -> asset.startsWith("scenery/seaport/")
+              && !asset.equals("scenery/seaport/yard/crane-boom")), "No legacy seaport object: " + perAsset.keySet());
         assertEquals(new TreeMap<>(Map.ofEntries(Map.entry("decal/landing-pads clipped", 503),
               Map.entry("decal/landing-pads spanning", 85), Map.entry("decal/landing-pads/heli-pad", 978),
               Map.entry("decal/lettering", 327), Map.entry("decal/lettering painted", 68),
               Map.entry("decal/rail/level-crossing", 4), Map.entry("decal/runway", 4_525), Map.entry("decal/sport", 142),
-              Map.entry("scenery/rail/crossing-signal", 16), Map.entry("scenery/rail/route", 12_044),
-              Map.entry("scenery/roofs/landing-light", 4_443))), families);
+              Map.entry("scenery/rail/crossing-signal", 16), Map.entry("scenery/roofs/landing-light", 4_443))), families);
         System.out.printf("CORPUS rail markers=%d (on a bridge deck %d, storing tracks %d)%n", rails, deckRails, storedTracks);
         // Only rails with a side along their bridge ride its deck; the four that cross under one lie beneath it. 105 of
         // the 137 are the rail a rail bridge carries across its span (batch-10 answer 3), on 11 boards.
         assertEquals(137, deckRails);
         assertEquals(0, storedTracks);
+        // b13 ways: the 12,044 legacy rails are terrain, no stored marker.
+        assertEquals(11_907, railTerrain);
+        assertEquals(137, deckRailTerrain);
         receivers.forEach((receiver, count) -> System.out.printf("CORPUS receiver %7d objects  %s%n", count, receiver));
-        System.out.printf("CORPUS woods drawn without trees under converted art: %d hexes%n", noTrees);
+        System.out.printf("CORPUS woods drawn without trees (a container yard look): %d hexes%n", noTrees);
         // The shipped boards hold 23 complete 7-hex emblem sets and 226 one-hex variants (none incomplete).
         System.out.printf("CORPUS emblems: %d sets as one decal each, %d one-hex variants%n", emblemSets, emblemSingles);
         assertEquals(23, emblemSets);

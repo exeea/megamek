@@ -13,7 +13,10 @@ void waterHabitat(out vec4 habitat, out vec4 mixture) {
     if (dot(connected, vec4(1.0)) > .5) mixture = connected;
 }
 
-vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authored, WaterLighting illumination) {
+// The local lights complete illumination here, in the walk that also gives their reflection: a fall's sheet (sheet,
+// sheetRoughness) receives its own in sheetGlint.
+vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 tint, vec3 authored,
+      inout WaterLighting illumination, vec3 sheet, float sheetRoughness, out vec3 sheetGlint) {
     bool procedural = u_waterMaterial.y > 0.5;
     vec2 rest = v_cloudPosition.xy;
 #ifdef waterSurfaceFlag
@@ -35,7 +38,7 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     float depth = field.g * WATER_DEPTH_RANGE;
     float wetShore = falling ? 0.0 : clamp(dot(habitat.yzw, vec3(3.0)), 0.0, 1.0)
           * (1.0 - smoothstep(.12, .65, depth)) * mix(.45, 1.0, mixture.x);
-    vec2 current = (field.ba * 2.0 - 1.0) * effects;
+    vec2 current = waterSurfaceCurrent(field) * effects;
     float agitation = (falling ? v_color.a : v_color.r) * effects;
 
     // Broad noise, slow enough never to shear an advected pattern: G staggers the flow's restarts, B gathers
@@ -48,8 +51,11 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     // Foam grain and, in rapids, fine chop. A current advects them in two phases, each restarting only while
     // its weight is zero, however weak the current, so no restart ever shows; in still water both phases read
     // the same texels and nothing pulses. Samples stay outside non-uniform branches: mip selection stays defined.
-    float speed = length(current);
-    float flowing = smoothstep(0.004, 0.02, speed);
+    float flowing = waterFlowShare(current);
+    float level = smoothstep(.975, .995, surfaceNormal.z);
+    // The current already includes gradual shallow drag. Fade its detail out at the actual waterline without
+    // selecting a separate surface style for depth-zero hexes.
+    float running = flowing * level * smoothstep(0.0, 0.04, depth) * (1.0 - wetShore);
     LiquidFlow flow = liquidFlow(u_rainTime, FLOW_CYCLE, broad.g);
     float phase = flow.phase.x;
     float weightA = flow.weight.x, weightB = flow.weight.y;
@@ -60,33 +66,39 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     // Fixed in the world: the simulated cascades carry the wind's direction, and a detail map turning with the wind
     // would sweep across the whole board whenever it changed.
     mat2 crossing = CROSSING;
-    vec2 driftB = vec2(0.37, -0.29) * (u_rainTime * 0.03);
+    // Fine facets gently oscillate instead of transporting the lake along an arbitrary fixed bearing. River
+    // advection still comes from its current; the oscillation has bounded displacement and one shared clock.
+    vec2 driftB = vec2(sin(u_rainTime * .47), cos(u_rainTime * .31)) * .025;
     vec4 small = ((texture(u_waterDetail, crossing * advectedA * 3.8 + driftB) - 0.5) * weightA
           + (texture(u_waterDetail, crossing * advectedB * 3.8 + driftB) - 0.5) * weightB) * preserve;
     small.rg = small.rg * crossing;
-    // Rapids churn, and a river's broad flow, in larger patches than the fine surface grain, carried by the current
-    // alone: a drift fixed in the world would skew or cancel it. Still, agitated water (a lake's pouring lip) keeps a
-    // slow churn of its own in the same restarting phases, whose patterns never overlap, so it never pulses. Keep one
-    // clock and blend by agitation: multiplying time by local agitation would shear the texture at joins.
+    // Rapids churn in larger patches than ordinary current ripples, carried by the current alone. Still, agitated
+    // water (a lake's pouring lip) keeps a slow churn in the same restarting phases, whose patterns never overlap.
+    // Keep one clock and blend by agitation: multiplying time by local agitation would shear the texture at joins.
     vec2 stir = current + vec2(0.06, -0.06) * (1.0 - flowing);
     vec2 stirA = liquidFlowUv(position, stir, flow, 0, vec2(0.0), 0.0);
     vec2 stirB = liquidFlowUv(position, stir, flow, 1, vec2(0.0), 0.0) + 0.37;
-    vec4 rapidDetail = ((texture(u_waterDetail, crossing * stirA * 0.65) - 0.5) * weightA
-          + (texture(u_waterDetail, crossing * stirB * 0.65) - 0.5) * weightB)
-          * liquidFlowVariance(flow);
+    vec2 rapidA = crossing * stirA * 1.8, rapidB = crossing * stirB * 1.8;
+    // Capture the complete advected footprint before the spatial skip, including current and phase variation.
+    vec2 rapidDxA = dFdx(rapidA), rapidDyA = dFdy(rapidA);
+    vec2 rapidDxB = dFdx(rapidB), rapidDyB = dFdy(rapidB);
+    vec4 rapidDetail = vec4(0.0);
+    if (agitation > 0.0) {
+        rapidDetail = ((textureGrad(u_waterDetail, rapidA, rapidDxA, rapidDyA) - 0.5) * weightA
+              + (textureGrad(u_waterDetail, rapidB, rapidDxB, rapidDyB) - 0.5) * weightB)
+              * liquidFlowVariance(flow);
+    }
     rapidDetail.rg = rapidDetail.rg * crossing;
 
-    // Wind waves: three cascades of one simulated sea at the undisplaced position, so slopes, crest light and foam
-    // follow the displaced geometry exactly. Geometry dies out at a bank (water-waves.vert); the light over the
-    // shallows keeps a calmer share of the swell and all of its chop, so shallow water never turns to glass.
+    // Wind waves: three cascades of one simulated sea at the undisplaced position. The same local exposure shapes
+    // both geometry and shading; sheltered water must not regain an open sea's swell through a shading floor.
     vec4 fetchMetres = waterFetch(rest);
     vec3 energy = waterWaveEnergy(rest, field, fetchMetres);
     // Open water keeps this floor. Running water is too narrow for the wind to raise a sea on: a strong wind raises
     // only short steep chop there, the ripple band, carried along with its current below. A descent keeps its own
     // current-driven surface: its mesh normal, exactly up on level water, tilts from the lip.
     float openWater = smoothstep(0.0, 4.0, dot(fetchMetres, vec4(1.0)));
-    float level = smoothstep(.975, .995, surfaceNormal.z);
-    vec3 minimum = mix(vec3(.3, .7, .9) * openWater, vec3(0.0, 0.0, level), flowing);
+    vec3 minimum = mix(vec3(0.0, .08, .2) * openWater, vec3(0.0, 0.0, level), flowing);
     vec3 lit = max(energy, minimum * (smoothstep(0.0, .01, shore) * waterWindShare(field))) * effects;
     lit.yz *= mix(.75, 1.25, gust);
     vec4 swell = vec4(0.0), chop = vec4(0.0), ripple = vec4(0.0);
@@ -127,7 +139,7 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
         noise = small.b;
     } else {
         vec4 large = texture(u_waterDetail, crossing * position * 1.65 + vec2(u_rainTime * 0.018, 0.0)) - 0.5;
-        slope = large.rg * crossing * 0.5 * lit.x;
+        slope = large.rg * crossing * 0.5 * lit.x * smoothstep(0.0, .25, u_waterWind.z);
         broadSlope = slope;
         noise = large.b * 0.6 + small.b * 0.4;
     }
@@ -135,35 +147,45 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     float calmed = 1.0 - wetShore * mix(.75, .25, marshShare);
     slope *= calmed;
     broadSlope *= calmed;
-    // Running water shows its current in any light: the churn's broad faces take the sky and sun as a lake's waves
-    // do, a texture only the current moves, so no wind can make a river seem to run backwards. Descents keep their
-    // own look, and so do the depth-0 shallows.
-    float running = flowing * level * smoothstep(0.03, 0.10, speed) * smoothstep(0.06, 0.45, depth) * (1.0 - wetShore);
-    vec2 sheet = rapidDetail.rg * (running * churn);
-    broadSlope += sheet;
-    slope += sheet * 0.25;
     // Slopes are the surface's gradient: the normal leans away from the way the water rises.
-    // Level running water carries its own ripples downstream in place of the wind's (waterWindShare).
-    slope += (small.rg * (0.02 + 0.03 * u_waterWind.z + 0.05 * flowing * level) * detail
+    // Ordinary rivers carry the same fine facets as lakes, not a separate layer of enormous reflective faces.
+    // Their speed and strength ease into still water and over shallow shelves; coarse churn requires agitation.
+    slope += (small.rg * (0.004 + 0.046 * u_waterWind.z + 0.024 * running) * detail
           + rapidDetail.rg * (0.4 * agitation)) * effects;
-    vec3 ripples = rainRippleField(position) * effects;
+    vec3 ripples = effects > 0.0 ? rainRippleField(position) * effects : vec3(0.0);
     slope += ripples.xy;
 
     // Surf: the swell feels the bottom near a bank and rolls in as bands whose crests march shoreward, broken up
     // along the bank. The bank's direction comes from the field itself, so the surf turns with every bay.
-    vec2 fieldUV = rest * u_waterFieldMap.xy + u_waterFieldMap.zw;
-    vec2 seaward = vec2(texture(u_waterField, fieldUV + vec2(u_waterFieldMap.x * 3.0, 0.0)).r,
-          texture(u_waterField, fieldUV + vec2(0.0, u_waterFieldMap.y * 3.0)).r) - field.r;
-    seaward /= max(length(seaward), 1e-5);
-    // Surf needs open water to build over: a narrow pool or channel, whose far bank is close, stays without it.
-    float beyond = (texture(u_waterField, fieldUV + seaward * u_waterFieldMap.xy * (0.35 / u_rainScale)).r
-          * 2.0 - 1.0) * SHORE_RANGE;
-    // Nor do a current's banks: its water runs past them instead of rolling in.
-    float fetch = smoothstep(0.12, 0.25, beyond - shore) * (1.0 - flowing);
+    vec2 seaward = vec2(0.0);
+    float fetch = 0.0;
+    // Encoded bank distance cannot exceed SHORE_RANGE. Beyond this bound even the most open sample gives zero
+    // fetch, as does a full current. The field has one level, so explicit LOD keeps this spatial branch defined.
+    if (flowing < 1.0 && SHORE_RANGE - shore > 0.12) {
+        vec2 fieldUV = rest * u_waterFieldMap.xy + u_waterFieldMap.zw;
+        seaward = vec2(textureLod(u_waterField, fieldUV + vec2(u_waterFieldMap.x * 3.0, 0.0), 0.0).r,
+              textureLod(u_waterField, fieldUV + vec2(0.0, u_waterFieldMap.y * 3.0), 0.0).r) - field.r;
+        seaward /= max(length(seaward), 1e-5);
+        // Surf needs open water to build over; a narrow channel or current's bank stays without it.
+        float beyond = (textureLod(u_waterField,
+              fieldUV + seaward * u_waterFieldMap.xy * (0.35 / u_rainScale), 0.0).r * 2.0 - 1.0) * SHORE_RANGE;
+        fetch = smoothstep(0.12, 0.25, beyond - shore) * (1.0 - flowing);
+    }
     float nearBank = (1.0 - smoothstep(0.05, 0.28, shore)) * smoothstep(0.0, 0.01, shore) * fetch;
     float march = shore * 65.0 + u_rainTime * 1.6 + broad.r * 11.0 + gust * 5.0;
-    float surfEnergy = mix(.15, 1.0, u_waterWind.z) * fetch;
-    slope += seaward * (cos(march) * 0.2 * nearBank * surfEnergy * effects * (1.0 - wetShore * .9));
+    // Residual ocean swell still washes towards shore in calm air: a small, roughly eight-second wave. Available
+    // open water limits it in lakes and channels. Its phase stays on the shared clock as wind changes; mixing
+    // two fixed wave trains avoids the jumps and spatial shearing caused by multiplying time by local strength.
+    float openReach = max(max(fetchMetres.x, fetchMetres.y), max(fetchMetres.z, fetchMetres.w));
+    float swellWash = .08 * smoothstep(250.0, WATER_FETCH, openReach);
+    float swellMarch = shore * 22.0 + u_rainTime * .75 + broad.r * 3.0;
+    // Wind waves wash most strongly onto exposed shores. The gentle residual wash does not paint a foam rim;
+    // breaking crests, rapids, falls and unit contacts supply their own foam below.
+    vec2 waveDirection = u_waterWind.xy / max(length(u_waterWind.xy), .001);
+    float arriving = mix(.15, 1.0, max(dot(waveDirection, -seaward), 0.0));
+    float surfEnergy = u_waterWind.z * fetch * arriving;
+    float wash = cos(swellMarch) * swellWash * fetch + cos(march) * surfEnergy;
+    slope += seaward * (wash * 0.2 * nearBank * effects * (1.0 - wetShore * .9));
 
     float wading = waterUnitWakes(v_cloudPosition.xy, noise, effects, slope);
     WaterImpact landing = waterFallImpacts(position, shore, noise, phase, vec2(weightA, weightB), effects, slope);
@@ -199,7 +221,7 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
           * smoothstep(0.05, 0.3, agitation);
     // The foam round a unit breaks up like any other: dense where the water piles up, in drifts further out.
     float stirred = smoothstep(1.0 - 1.25 * wading, 1.15 - 1.25 * wading, grainy);
-    float foam = clamp(max(max(max(contact * .6, surf * mix(.35, .9, surfEnergy)), max(whitecap, stirred)),
+    float foam = clamp(max(max(max(contact * .6, surf * .9) * surfEnergy, max(whitecap, stirred)),
           max(rapids, impact)) * churn, 0.0, 1.0);
     // A thin wash over sand is mostly clear, with only a trace of foam. Use the actual water column so the
     // effect fades around emerging bars and rocks instead of painting the old hex-shaped shoreline white.
@@ -208,21 +230,22 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     foam *= foamWater * (1.0 - wetShore * .94);
 
     vec3 kept = waterTransmission(mixture, depth);
+    // One optical normal owns the Fresnel budget, direct glint and environment reflection.
+    normal = shadingNormal(normal, geometric, view);
     float facing = clamp(dot(normal, view), 0.0, 1.0);
-    // Air/water Fresnel: clear from above, reflective at grazing angles.
-    float fresnel = 0.02037 + 0.97963 * pow(1.0 - facing, 5.0);
-    vec3 reflected = reflect(viewDirection(), normal);
-    // A brighter band low in the sky, so waves reflecting lower show lighter.
-    vec3 sky = mix(u_rainHorizon * 1.15, u_rainSky, smoothstep(0.0, 1.0, reflected.z));
-#ifdef cloudShadowFlag
-    // The clouds overhead stand in the water: where the reflected ray meets the cloud base, the shadow atlas
-    // tells how much cloud there is.
-    if (reflected.z > 0.05) {
-        float base = -u_cloudProjection[3][2] / u_cloudProjection[2][2];
-        vec3 overhead = v_cloudPosition + reflected * ((base - v_cloudPosition.z) / reflected.z);
-        sky = mix(sky, illumination.whiteLight * 0.9, (1.0 - cloudTransmission(overhead)) * 0.8);
-    }
-#endif
+    // Pixel footprint broadens unresolved wave facets. The same roughness filters sky and directional reflection.
+    // The footprint filter is always on; specular anti-aliasing adds the mesh's own variance. The larger of the two
+    // widenings applies, so the water never widens twice and keeps its look with the setting off.
+    vec2 texels = fwidth(u_waterOceanScale.x > 0.0 ? rest * fineUV : position * 2.0) * OCEAN_SIZE;
+    float calm = clamp(0.16 + 0.04 * u_waterWind.z, 0.16, 0.45);
+    float footprint = clamp(calm + 0.06 * log2(1.0 + max(texels.x, texels.y)), 0.16, 0.45);
+    float roughness = max(footprint, antialiasedRoughness(calm, surfaceVariance));
+    roughness = mix(roughness, .45, falling ? 0.0 : min(length(surfaceNormal.xy) * 20.0, 1.0));
+    // Fires, lava, fungi and weapon fire light the water and glint on the same facets.
+    vec3 localGlint = waterLocalLighting(illumination, normal, view, roughness, falling, sheet, sheetRoughness,
+          sheetGlint);
+    float fresnel = specularAlbedo(facing, roughness, vec3(.02037)).r;
+    vec3 reflection = waterEnvironmentReflection(normal, view, roughness, illumination);
     vec3 glint = vec3(0.0);
     vec3 glow = vec3(0.0);
     vec3 facets = illumination.light;
@@ -240,52 +263,45 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     facets += illumination.sunlight * (max(dot(broadNormal, toSun), 0.0) - toSun.z) * 0.8;
     // The sun's glitter, from facets as rough as the waves a pixel averages: close up each wave flashes, far off
     // their spread becomes a broad path of glitter instead of aliasing into lines.
-    vec2 texels = fwidth(u_waterOceanScale.x > 0.0 ? rest * fineUV : position * 2.0) * OCEAN_SIZE;
-    float roughness = clamp(0.16 + 0.06 * log2(1.0 + max(texels.x, texels.y)) + 0.04 * u_waterWind.z, 0.16, 0.45);
     // Water running down a slope is broken: a descent spreads the sun's glitter instead of drawing it as a line along
     // its curve. The mesh normal is exactly up on level water, which keeps its sharp glint.
-    roughness = mix(roughness, .45, falling ? 0.0 : min(length(surfaceNormal.xy) * 20.0, 1.0));
-    float a2 = roughness * roughness * roughness * roughness;
-    vec3 halfway = normalize(view + toSun);
-    float schlick = 0.02 + 0.98 * pow(1.0 - clamp(dot(halfway, view), 0.0, 1.0), 5.0);
-    float nh = max(dot(normal, halfway), 0.0);
-    float spread = nh * nh * (a2 - 1.0) + 1.0;
-    glint = illumination.sunlight * schlick * a2 / (3.14159 * spread * spread) * step(0.0, dot(normal, toSun))
-          / (4.0 * max(facing, 0.1)) * 0.6 * effects;
+    glint = illumination.sunlight * float(dot(geometric, toSun) > 0.0)
+          * waterDirectReflection(normal, toSun, view, roughness);
     // Thin crests let the sun through, brightest when the viewer looks toward it: they glow turquoise like the
     // shallows. Light scattered inside the water lifts every crest a little even with the sun behind the viewer.
     float behind = max(dot(normalize(viewDirection().xy + 1e-5), normalize(toSun.xy + 1e-5)), 0.0);
     glow = waterShallows(mixture) * (illumination.sunlight * (0.15 + 0.85 * behind * behind) * 0.6
           + illumination.light * 0.25) * crest * effects;
 #endif
+    glint += localGlint;
     // The brighter side of the sky lights the faces tilted toward it, even overcast or seen from straight above.
     facets *= clamp(1.0 - dot(broadSlope, key) * 1.1, 0.6, 1.4);
     vec3 body;
     float bodyAlpha;
     if (procedural) {
-        // Physical absorption sets the in-scattered light; pale shallows keep a floor of turquoise. The opacity
-        // is capped, and the bed shaders take the rest of the absorption, so submerged units stay readable.
-        float column = max(1.0 - max(max(kept.r, kept.g), kept.b), 0.3 * smoothstep(0.0, 0.1, depth));
+        // The thin column of depth-zero water needs visible turquoise as well as absorption; ramp it within the
+        // shallows, not across whole game levels. The waterline still fades to clear. Cap opacity and let the bed
+        // take the rest of the absorption, so submerged units stay readable.
+        float column = max(1.0 - max(max(kept.r, kept.g), kept.b),
+              0.3 * smoothstep(0.0, 0.1, depth));
         // Deep water varies a little in tone over a few hexes, as depth and silt do, and troughs run darker than
         // the crests beside them.
         vec3 deep = scatter * mix(0.86, 1.12, broad.r) * mix(0.8, 1.15, crest);
         body = mix(waterShallows(mixture), deep, smoothstep(0.1, 1.6, depth)) * facets * column;
         bodyAlpha = min(column, WATER_MAX_OPACITY);
-        // A current carries clearer and siltier water past in its own colour: its flow shows under any light.
-        float clarity = 1.0 + rapidDetail.b * running;
+        // Only a trace of fine suspended variation: broad bright/dark patches would look like giant river waves.
+        float clarity = 1.0 + .08 * small.b * running;
         body *= clarity;
         bodyAlpha = min(bodyAlpha * clarity, WATER_MAX_OPACITY);
     } else {
         bodyAlpha = 1.0;
-        body = authored * tint * facets;
+        body = materialReflectance(authored * tint) * facets;
     }
     // Suspended peat/silt joins shallow marsh pools and bare mud to open water over several metres.
-    vec3 wetColor = mix(vec3(.105, .14, .072), vec3(.24, .195, .105),
+    vec3 wetColor = mix(toLinear(vec3(.105, .14, .072)), toLinear(vec3(.24, .195, .105)),
           clamp((habitat.z + habitat.w) / max(dot(habitat.yzw, vec3(1.0)), .0001), 0.0, 1.0));
     body = mix(body, wetColor * facets * bodyAlpha, wetShore);
     body += glow * max(bodyAlpha, 0.35) * (1.0 - wetShore);
-    // Wind-roughened faces scatter a soft image of the sky across the column: waves show under any light.
-    body += sky * (bodyAlpha * (1.0 - fresnel) * 0.15);
     // Raindrop rings: each crest and trough catches the light differently.
     body *= 1.0 + clamp(ripples.z, -1.0, 1.0) * 0.35;
     // Churning water carries air: paler and more opaque long before it breaks into foam; spray thrown up by a
@@ -295,12 +311,13 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     bodyAlpha = mix(bodyAlpha, 0.85, aerated);
     // The column thins to nothing at the bank, so water meets its shore without a drawn edge.
     float edge = smoothstep(0.0, 0.02, shore);
-    color = (body * (1.0 - fresnel) + sky * fresnel + glint * (1.0 - foam)) * edge;
+    color = (body * (1.0 - fresnel) + reflection + glint * (1.0 - foam)) * edge;
     alpha = (bodyAlpha * (1.0 - fresnel) + fresnel) * edge;
     // Foam is never flat white: thicker and thinner froth, and bubbles churning below a fall, whose freshly
     // aerated water glows brightest.
     float grain = mix(noise + 0.5, bubbles, boil);
-    color = mix(color, froth * illumination.whiteLight * ((0.78 + 0.34 * grain) * (1.0 + 0.25 * boil)), foam);
+    vec3 foamReflectance = materialReflectance(froth * ((0.78 + 0.34 * grain) * (1.0 + 0.25 * boil)));
+    color = mix(color, foamReflectance * illumination.whiteLight, foam);
     alpha = mix(alpha, 1.0, foam);
     float grid = terrainGrid(position);
     color *= grid;

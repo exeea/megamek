@@ -26,7 +26,6 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.badlogic.gdx.graphics.g3d.model.Node;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.tileset.MekTileset;
@@ -77,12 +76,8 @@ final class GpuVariantSheetReview {
         camera.lookAt(0, 0, Math.min(25, bounds.getHeight() * .6f));
         camera.update();
 
-        var target = new FrameBuffer(Pixmap.Format.RGBA8888, width, height, true);
-        target.begin();
-        try {
-            Gdx.gl.glViewport(0, 0, width, height);
-            Gdx.gl.glClearColor(.47f, .37f, .33f, 1);
-            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        try (var outputFrame = new GpuSceneTestOutput(width, height)) {
+            outputFrame.begin(.47f, .37f, .33f, 1);
             for (int index = 0; index < variants.size(); index++) {
                 // Cells run left to right from the top, under the heading band.
                 int left = (index % COLUMNS) * CELL;
@@ -93,7 +88,7 @@ final class GpuVariantSheetReview {
                 batch.render(variants.get(index).instance(), environment);
                 batch.end();
             }
-            Gdx.gl.glViewport(0, 0, width, height);
+            outputFrame.display();
             caption(variants, chassis, width, height, rows);
             Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, width, height);
             try {
@@ -103,9 +98,6 @@ final class GpuVariantSheetReview {
             } finally {
                 pixels.dispose();
             }
-        } finally {
-            target.end();
-            target.dispose();
         }
     }
 

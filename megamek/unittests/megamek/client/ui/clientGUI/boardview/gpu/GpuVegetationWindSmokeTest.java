@@ -203,6 +203,8 @@ class GpuVegetationWindSmokeTest {
                   gl_Position = pos;
               }
               """;
+        // Production vegetation inherits this boundary helper from the shared light model.
+        source = source.replace("void main() {", GpuShaderSource.read("color-space.glsl") + "\nvoid main() {");
         int shader = GL20.glCreateShader(GL20.GL_VERTEX_SHADER);
         GL20.glShaderSource(shader, grass ? GpuGroundCover.vertex(source) : GpuBiomeVegetation.vertex(source));
         GL20.glCompileShader(shader);

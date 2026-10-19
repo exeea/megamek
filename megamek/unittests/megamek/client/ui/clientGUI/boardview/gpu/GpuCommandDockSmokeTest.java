@@ -284,6 +284,12 @@ class GpuCommandDockSmokeTest {
             assertEquals("2 / 3 MP", label(dock, "dock-foot-bold"));
             assertEquals(" \u00B7 walk auto \u00B7 facing N \u00B7 heat +1", label(dock, "dock-foot"));
 
+            // Boosted running must still outline Run while the planner chooses the mode.
+            TextButton.TextButtonStyle automatic = walk.getStyle();
+            show(hud, dock, movement(plan(ATLAS, GpuMovePlan.Band.BOOST, 4, 6, "run", 0, 2, List.of()), ATLAS));
+            assertSame(automatic, run.getStyle());
+            assertNotSame(walk.getStyle(), run.getStyle());
+
             // Without a route Confirm is ghosted and DONE says how to go on instead of committing.
             ran.clear();
             show(hud, dock, movement(GpuMovePlan.Snapshot.EMPTY, ATLAS));

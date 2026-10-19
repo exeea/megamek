@@ -314,10 +314,14 @@ class BoardRoadTest {
         }
         var straightScene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
         var straight = BoardRoad.of(straightScene, straightScene.tile(CENTER)).markings(CENTER, 9);
-        // Avoid sampling exactly on a dash's float-rounded transverse boundary.
+        // The approach phase still agrees with the neighbouring road, but a controlled junction clears its hub.
         for (float y = -33.875f; y <= 34; y += .25f) {
-            assertEquals(straight.contains(0, y), paint.contains(0, y),
-                  "The main road's dash sequence must continue unchanged past an unmarked branch, y=" + y);
+            if (Math.abs(y) < 25) {
+                assertFalse(paint.contains(0, y), "No through dashes cross the junction's conflict area");
+            } else if (Math.abs(y) > 28) {
+                assertEquals(straight.contains(0, y), paint.contains(0, y),
+                      "The main road's approach dashes retain their border phase, y=" + y);
+            }
         }
     }
 
@@ -434,7 +438,9 @@ class BoardRoadTest {
         when(page.getHeight()).thenReturn(512);
         var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
         var road = BoardRoad.of(scene, scene.tile(CENTER));
-        var coats = new GpuRoads.Coats(mock(TextureArray.class), mock(TextureArray.class));
+        var maps = new GpuAssets.MaterialArrays(mock(TextureArray.class), mock(TextureArray.class));
+        var coats = new GpuRoads.Coats(maps,
+              new GpuAssets.MaterialArrays(mock(TextureArray.class), mock(TextureArray.class)));
         var patches = GpuRoads.patches(scene.tile(CENTER), road);
         List<Material> batches = new ArrayList<>();
         for (int i = 0; i < patches.size(); i++) {

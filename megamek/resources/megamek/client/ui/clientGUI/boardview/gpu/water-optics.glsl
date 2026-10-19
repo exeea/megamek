@@ -32,21 +32,23 @@ vec3 waterAbsorption(vec4 weights) {
 }
 vec3 waterAbsorption(float palette) { return waterAbsorption(waterPalette(palette)); }
 
-// Color of light scattered back out of a deep column lit by white light: clear water turns a deep navy.
+// Linear colour of light scattered back out of a deep column lit by white light. Decode the authored palette
+// before mixing its constituents; optical transmission and scattered light then share the scene's linear space.
 vec3 waterScatter(vec4 weights) {
-    return weights.x * vec3(.012, .13, .26) + weights.y * vec3(.46, .26, .10)
-          + weights.z * vec3(.40, .16, .065) + weights.w * vec3(.16, .24, .06);
+    return weights.x * toLinear(vec3(.012, .13, .26)) + weights.y * toLinear(vec3(.46, .26, .10))
+          + weights.z * toLinear(vec3(.40, .16, .065)) + weights.w * toLinear(vec3(.16, .24, .06));
 }
 vec3 waterScatter(float palette) { return waterScatter(waterPalette(palette)); }
 
 // Shallow water over a pale bed glows with the bed's light scattered back through it: clear water turquoise.
 vec3 waterShallows(vec4 weights) {
-    return weights.x * vec3(.08, .66, .62) + weights.y * vec3(.66, .44, .20)
-          + weights.z * vec3(.64, .30, .12) + weights.w * vec3(.30, .40, .14);
+    return weights.x * toLinear(vec3(.08, .66, .62)) + weights.y * toLinear(vec3(.66, .44, .20))
+          + weights.z * toLinear(vec3(.64, .30, .12)) + weights.w * toLinear(vec3(.30, .40, .14));
 }
 vec3 waterShallows(float palette) { return waterShallows(waterPalette(palette)); }
 
-// Even ankle-deep water reads as water: a shallow floor of optical depth, faded in from the water line itself.
+// Even depth-zero water has only about .056 levels over its bed. Build the tint within that thin column so it
+// still reads as water, while fading continuously to clear at the actual waterline. The bed shares this curve.
 vec3 waterTransmission(vec4 palette, float levels) {
     float optical = max(levels, 0.0) + 0.16 * smoothstep(0.0, 0.05, levels);
     return exp(-waterAbsorption(palette) * (optical * WATER_PATH));

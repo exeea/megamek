@@ -48,5 +48,8 @@ void main() {
         opticalDepth += cloudDensity(position) * stepLength * u_cloudWeather.z;
     }
     float transmission = mix(1.0, exp(-opticalDepth), u_shadowStrength);
-    fragColor = vec4(transmission, transmission, transmission, 1.0);
+    // G is uncapped vertical optical coverage for the reflected layer, estimated from this same sun column.
+    // R keeps the exact shadow contract; the shadow-opacity control does not change the reflected cloud shape.
+    float coverage = 1.0 - exp(-opticalDepth * max(u_sunDirection.z, 0.1));
+    fragColor = vec4(transmission, coverage, transmission, 1.0);
 }

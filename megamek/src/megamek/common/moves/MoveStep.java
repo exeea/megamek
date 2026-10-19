@@ -56,6 +56,7 @@ import megamek.common.board.BoardLocation;
 import megamek.common.board.BridgeConstruction;
 import megamek.common.board.Coords;
 import megamek.common.board.FloorTarget;
+import megamek.common.board.RailRoute;
 import megamek.common.compute.Compute;
 import megamek.common.enums.BuildingType;
 import megamek.common.enums.MPBoosters;
@@ -3404,7 +3405,13 @@ public class MoveStep implements Serializable {
             if ((moveMode != EntityMovementMode.BIPED_SWIM) &&
                 (moveMode != EntityMovementMode.QUAD_SWIM) &&
                 getClearance() == 0) {
-                mp += destHex.movementCost(getEntity());
+                // Along a TacOps rail, on the floor of both hexes, the step pays the rail's rough cost instead of the
+                // terrain (TO:AR p.49).
+                boolean alongRail = RailRoute.rules(game) && RailRoute.affects(en) && (prev.distance(getPosition()) == 1)
+                      && (prevEl == srcHex.floor() - srcHex.getLevel())
+                      && (elevation == destHex.floor() - destHex.getLevel())
+                      && RailRoute.along(srcHex, destHex, prev.direction(getPosition()));
+                mp += alongRail ? 1 : destHex.movementCost(getEntity());
             }
 
             // if this is an amphibious unit crossing water, increment movement cost by 1
@@ -3467,6 +3474,12 @@ public class MoveStep implements Serializable {
 
             }
         } // End not-along-road
+
+        // Mud on a raised bridge deck (Hex#deckMud) costs a unit entering on that deck, along the bridge or not.
+        Terrain deckMud = destHex.deckMud(elevation);
+        if (deckMud != null) {
+            mp += deckMud.movementCost(getEntity());
+        }
 
         // non-WIGEs pay for elevation differences
         if ((nSrcEl != nDestEl) && (moveMode != EntityMovementMode.WIGE)) {

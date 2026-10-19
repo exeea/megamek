@@ -61,10 +61,11 @@ class GpuVegetationLightingSmokeTest {
             fixture.terrain.update(grass);
             fixture.environment.get(DirectionalLightsAttribute.class, DirectionalLightsAttribute.Type).lights.first()
                   .set(.9f, .9f, .9f, -.3f, .4f, -1);
-            String lighting = GpuShaderSource.read("surface-lighting.glsl");
+            // Trees and grass take their sun reflection from shadeSurface (surface-shading.glsl).
+            String lighting = GpuShaderSource.read("surface-shading.glsl");
             String disabled = lighting.replace(
-                  "float dielectricSheen(vec3 normal, vec3 light, vec3 view, float film, float roughness) {",
-                  "float dielectricSheen(vec3 normal, vec3 light, vec3 view, float film, float roughness) { return 0.0;");
+                  "sheen = sun * surfaceReflectance(normal, light, view, roughness, f0) * multiscatter * s.cavity;",
+                  "sheen = vec3(0.0);");
             assertTrue(!lighting.equals(disabled));
             var missing = new ArrayList<String>();
             var root = BoardGeometry.center(new Coords(0, 0), 0);
@@ -78,7 +79,7 @@ class GpuVegetationLightingSmokeTest {
                         String name = species + (top ? "-top" : "-iso") + (wetness == 0 ? "-dry" : "-wet");
                         int[][] frames = new int[2][];
                         for (int variant = 0; variant < 2; variant++) {
-                            var result = manager.apply(variant == 0 ? Map.of() : Map.of("surface-lighting.glsl", disabled));
+                            var result = manager.apply(variant == 0 ? Map.of() : Map.of("surface-shading.glsl", disabled));
                             assertTrue(result.success(), result.message());
                             if (species.equals("grass")) {
                                 fixture.terrain.render(camera.camera, true);
@@ -125,32 +126,36 @@ class GpuVegetationLightingSmokeTest {
                             for (int level = 0; level < TreeLod.LEVELS; level++) {
                                 String name = species + "-lod" + level + (top ? "-top" : "-iso");
                                 fixture.lights.setFungus(List.of());
-                                fixture.lights.update(plain, camera.camera);
-                                int[] unlit = fixture.pixels(camera, stand, level);
-                                if (level == 0 || level == 3) { save(name + "-unlit"); }
-                                fixture.lights.update(lava, camera.camera);
-                                int[] molten = fixture.pixels(camera, stand, level);
+                                fixture.lights.update(plain);
+                                float[] unlit = fixture.radiance(camera, stand, level);
+                                if (level == 0 || level == 3) { fixture.saveDisplay(name + "-unlit"); }
+                                fixture.lights.update(lava);
+                                float[] molten = fixture.radiance(camera, stand, level);
+                                // The linear red the lava adds, for its calibration: in all, per covered pixel and at most.
+                                double added = red(molten) - red(unlit);
+                                System.out.printf(java.util.Locale.ROOT, "Lava red %s: %+.6g total, %+.6g per covered pixel,"
+                                      + " %+.6g peak%n", name, added, added / Math.max(1, coverage(unlit)), peakRed(unlit, molten));
                                 if (!top && level == 0) {
                                     assertTrue(red(molten) > red(unlit), name + ": nearby lava reaches the plant");
                                 }
-                                fixture.lights.update(scene(BoardLiquid.Kind.MAGMA, true), camera.camera);
-                                assertArrayEquals(unlit, fixture.pixels(camera, stand, level), name + ": hidden lava");
+                                fixture.lights.update(scene(BoardLiquid.Kind.MAGMA, true));
+                                assertArrayEquals(unlit, fixture.radiance(camera, stand, level), name + ": hidden lava");
                                 fixture.lights.setFungus(List.of(emitter));
-                                fixture.lights.update(plain, camera.camera);
-                                int[] lit = fixture.pixels(camera, stand, level);
-                                if (level == 0 || level == 3) { save(name + "-lit"); }
+                                fixture.lights.update(plain);
+                                float[] lit = fixture.radiance(camera, stand, level);
+                                if (level == 0 || level == 3) { fixture.saveDisplay(name + "-lit"); }
                                 assertTrue(red(lit) > red(unlit), name + ": nearby fungal light reaches the plant");
                                 assertEquals(coverage(unlit), coverage(lit), name + ": alpha coverage is unchanged");
-                                fixture.lights.update(hidden, camera.camera);
-                                assertArrayEquals(unlit, fixture.pixels(camera, stand, level), name + ": hidden fungi");
+                                fixture.lights.update(hidden);
+                                assertArrayEquals(unlit, fixture.radiance(camera, stand, level), name + ": hidden fungi");
                                 fixture.lights.setFungus(List.of());
-                                fixture.lights.update(plain, camera.camera);
-                                assertArrayEquals(unlit, fixture.pixels(camera, stand, level), name + ": removed fungi");
+                                fixture.lights.update(plain);
+                                assertArrayEquals(unlit, fixture.radiance(camera, stand, level), name + ": removed fungi");
                                 fixture.lights.setFungus(List.of(emitter));
-                                fixture.lights.update(plain, camera.camera);
-                                assertArrayEquals(lit, fixture.pixels(camera, stand, level), name + ": restored source");
+                                fixture.lights.update(plain);
+                                assertArrayEquals(lit, fixture.radiance(camera, stand, level), name + ": restored source");
                                 fixture.environment.remove(GpuLavaLighting.TYPE);
-                                assertArrayEquals(unlit, fixture.pixels(camera, stand, level), name + ": no light field");
+                                assertArrayEquals(unlit, fixture.radiance(camera, stand, level), name + ": no light field");
                                 fixture.environment.set(fixture.lights);
                             }
                         }
@@ -163,7 +168,7 @@ class GpuVegetationLightingSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Vegetation lighting", failure.get()); }
     }
 
-    /** Isolated foliage cost, not whole-game FPS: overlapping trees, zero emitters and the full shared light budget. */
+    /** Isolated foliage cost, not whole-game FPS: overlapping trees, zero emitters and 32 overlapping ones. */
     @Test
     @Tag("gpu-benchmark")
     void measuresDenseFoliageWithAndWithoutLocalLights() {
@@ -188,7 +193,7 @@ class GpuVegetationLightingSmokeTest {
                     for (int x = 0; x < 24; x++) for (int y = 0; y < 24; y++) {
                         stand.add("tree", new Matrix4().setToTranslation(x * 12, y * 12, 0));
                     }
-                    for (int i = 0; i < GpuLavaLighting.MAX_LIGHTS; i++) {
+                    for (int i = 0; i < 32; i++) {
                         emitters.add(new GpuLavaLighting.Source(0, new Vector3(40 + i % 8 * 28, 40 + i / 8 * 56, 20),
                               1, new Vector3(1.8f, .24f, .025f), 40));
                     }
@@ -205,7 +210,7 @@ class GpuVegetationLightingSmokeTest {
                     if (frame == 0) {
                         camera = camera(scenario < 2, new Vector3(138, 138, 15), .48f);
                         fixture.lights.setFungus(scenario % 2 == 0 ? List.of() : emitters);
-                        fixture.lights.update(board, camera.camera);
+                        fixture.lights.update(board);
                     }
                     timings.beginFrame(frame >= 120);
                     timings.stage("foliage");
@@ -237,8 +242,9 @@ class GpuVegetationLightingSmokeTest {
     private static final class Fixture implements AutoCloseable {
         private final GpuTerrain terrain = new GpuTerrain();
         private final GpuAssets assets = new GpuAssets();
-        private final GpuLavaLighting lights = new GpuLavaLighting();
+        private final GpuLavaLighting lights = new GpuLavaLighting(assets);
         private final Environment environment = new Environment();
+        private final GpuSceneTestOutput output = new GpuSceneTestOutput();
         private final ModelBatch batch;
         private final GpuTreeInstances instances;
 
@@ -259,8 +265,12 @@ class GpuVegetationLightingSmokeTest {
         }
 
         void draw(BoardCamera camera, GpuTreeInstances.Stand stand, int level) {
+            draw(camera, stand, level, () -> ScreenUtils.clear(0, 0, 0, 0, true));
+        }
+
+        private void draw(BoardCamera camera, GpuTreeInstances.Stand stand, int level, Runnable clearTarget) {
             terrain.render(camera.camera, true); // Advance the production shader's per-pass global cache.
-            ScreenUtils.clear(0, 0, 0, 0, true);
+            clearTarget.run();
             instances.begin(GpuTreeInstances.Pass.COLOUR);
             instances.add(stand, level, true);
             batch.begin(camera.camera);
@@ -273,8 +283,23 @@ class GpuVegetationLightingSmokeTest {
             return GpuVegetationLightingSmokeTest.pixels();
         }
 
+        /**
+         * Canonical linear radiance from the production HDR scene target. Local light too weak to change an 8-bit
+         * window pixel, such as molten lava's spill, still adds to it.
+         */
+        float[] radiance(BoardCamera camera, GpuTreeInstances.Stand stand, int level) {
+            draw(camera, stand, level, () -> output.begin(0, 0, 0, 0));
+            return output.linearPixels();
+        }
+
+        /** Saves the last {@link #radiance} frame through the production display conversion. */
+        void saveDisplay(String name) {
+            output.display();
+            save(name);
+        }
+
         @Override
-        public void close() { instances.dispose(); terrain.dispose(); assets.dispose(); }
+        public void close() { instances.dispose(); terrain.dispose(); assets.dispose(); output.close(); }
     }
 
     private static Lwjgl3ApplicationConfiguration configuration() {
@@ -314,6 +339,25 @@ class GpuVegetationLightingSmokeTest {
         long total = 0;
         for (int pixel : pixels) { total += pixel >>> 24; }
         return total;
+    }
+
+    private static double red(float[] radiance) {
+        double total = 0;
+        for (int i = 0; i < radiance.length; i += 4) { total += radiance[i]; }
+        return total;
+    }
+
+    private static int coverage(float[] radiance) {
+        int count = 0;
+        for (int i = 3; i < radiance.length; i += 4) { if (radiance[i] != 0) { count++; } }
+        return count;
+    }
+
+    /** The largest red increase of any pixel. */
+    private static double peakRed(float[] before, float[] after) {
+        double peak = 0;
+        for (int i = 0; i < before.length; i += 4) { peak = Math.max(peak, after[i] - before[i]); }
+        return peak;
     }
 
     private static int[] pixels() {

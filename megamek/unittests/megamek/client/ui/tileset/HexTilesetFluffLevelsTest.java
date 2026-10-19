@@ -38,13 +38,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.enums.BasementType;
@@ -52,7 +50,6 @@ import megamek.common.game.IGame;
 import megamek.common.units.IBuilding;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -68,14 +65,12 @@ import org.junit.jupiter.api.io.TempDir;
 class HexTilesetFluffLevelsTest {
 
     private static HexTileset tileset;
-    private static File originalDataDirectory;
 
     @TempDir
     private static Path dataDirectory;
 
     @BeforeAll
     static void beforeAll() throws IOException {
-        originalDataDirectory = Configuration.dataDir();
         Path hexes = dataDirectory.resolve("images").resolve("hexes");
         Files.createDirectories(hexes);
         Files.writeString(hexes.resolve("fluff.tileset"), """
@@ -88,17 +83,10 @@ class HexTilesetFluffLevelsTest {
               super * "bldg_fluff:*" "" "blank.png"
               base * "" "" "grass.png"
               """);
-        Configuration.setDataDir(dataDirectory.toFile());
-
         IGame game = mock(IGame.class);
         when(game.getBoard()).thenReturn(new Board(1, 1));
-        tileset = new HexTileset(game);
+        tileset = new HexTileset(game, hexes.toFile());
         tileset.loadFromFile("fluff.tileset");
-    }
-
-    @AfterAll
-    static void afterAll() {
-        Configuration.setDataDir(originalDataDirectory);
     }
 
     /** @return a hex holding the described building, the way the board would hold it */

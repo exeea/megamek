@@ -14,6 +14,7 @@ uniform float u_spread;
 in vec4 v_origin;
 in vec4 v_shape;
 in float v_lod;
+// LIGHT_MODEL
 
 // Same periodic, two-channel 3D lookup used by board clouds: one filtered fetch per octave.
 float noise(vec3 p) {
@@ -118,6 +119,7 @@ void main() {
     vec3 lightStep = u_sun * v_origin.w * 0.22;
     float transmission = 1.0;
     vec3 radiance = vec3(0.0);
+    vec3 smokeTint = toLinear(palette(v_shape.w));
     for (int i = 0; i < 24; i++) {
         if (float(i) >= steps || transmission < 0.025) break;
         float sampleIndex = float(i), start = nearT, end = farT, count = steps;
@@ -134,12 +136,15 @@ void main() {
         float absorption = 1.0 - exp(-density * stepSize / v_origin.w * 4.5);
         if (absorption < 0.0001) continue;
         float shadow = v_lod < 1.5 ? exp(-medium(p + lightStep).x * 3.0) : 0.6;
-        vec3 smoke = mix(vec3(0.065, 0.07, 0.075), vec3(0.48, 0.49, 0.50), shadow) * palette(v_shape.w) * u_light;
+        vec3 smoke = mix(toLinear(vec3(0.065, 0.07, 0.075)), toLinear(vec3(0.48, 0.49, 0.50)), shadow)
+              * smokeTint * u_light;
         float heat = sampleMedium.z;
-        vec3 fire = mix(vec3(0.85, 0.075, 0.003), vec3(1.65, 0.48, 0.018), smoothstep(0.05, 0.65, heat));
-        fire = mix(fire, vec3(1.9, 1.4, 0.48), smoothstep(0.6, 0.95, heat));
+        // Emission strengths remain linear; only the normalized authored colours are decoded.
+        vec3 fire = mix(toLinear(vec3(0.85, 0.075, 0.003)),
+              1.65 * toLinear(vec3(1.0, 0.48 / 1.65, 0.018 / 1.65)), smoothstep(0.05, 0.65, heat));
+        fire = mix(fire, 1.9 * toLinear(vec3(1.0, 1.4 / 1.9, 0.48 / 1.9)), smoothstep(0.6, 0.95, heat));
         // Local ember light within soot; no scene lights or extra shadow maps.
-        smoke += vec3(0.14, 0.025, 0.001) * sampleMedium.y;
+        smoke += toLinear(vec3(0.14, 0.025, 0.001)) * sampleMedium.y;
         vec3 source = mix(smoke, fire, sampleMedium.y / density);
         radiance += transmission * absorption * source;
         transmission *= 1.0 - absorption;

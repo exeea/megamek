@@ -24,19 +24,16 @@ class BoardWetCliffTest {
         try {
             tune(true);
             var scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
-            for (float width : new float[] { .05f, .5f, 1 }) {
-                GpuRiverTerrainSmokeTest.setWidth(width);
-                for (TerrainLod lod : TerrainLod.values()) {
-                    var surface = new BoardSurface(scene, scene.tile(new Coords(7, 14)), lod);
-                    Vector3 end = surface.waterBoundary(3).getFirst();
-                    float base = surface.tile.elevation() * BoardGeometry.LEVEL;
-                    assertTrue(surface.faces.stream()
-                                .filter(face -> face.finish() == BoardSurface.Finish.WALL && face.landEdge() == 2)
-                                .flatMap(face -> vertices(face).stream())
-                                .anyMatch(p -> Math.abs(p.z - base) < .001f
-                                      && Math.hypot(p.x - end.x, p.y - end.y) < .01f),
-                          "The beach must end at the actual cliff foot, without a projecting shelf: " + lod + ", " + width);
-                }
+            for (TerrainLod lod : TerrainLod.values()) {
+                var surface = new BoardSurface(scene, scene.tile(new Coords(7, 14)), lod);
+                Vector3 end = surface.waterBoundary(3).getFirst();
+                float base = surface.tile.elevation() * BoardGeometry.LEVEL;
+                assertTrue(surface.faces.stream()
+                            .filter(face -> face.finish() == BoardSurface.Finish.WALL && face.landEdge() == 2)
+                            .flatMap(face -> vertices(face).stream())
+                            .anyMatch(p -> Math.abs(p.z - base) < .001f
+                                  && Math.hypot(p.x - end.x, p.y - end.y) < .01f),
+                      "The beach must end at the actual cliff foot, without a projecting shelf: " + lod);
             }
         } finally {
             BoardRelief.tune(original);
@@ -138,10 +135,7 @@ class BoardWetCliffTest {
 
     static void tune(boolean enabled) {
         var t = BoardRelief.tuning();
-        BoardRelief.tune(new BoardRelief.Tuning(t.shoreShift(), t.shoreRoom(), t.shoreReach(), t.shoreNarrow(),
-              t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(), t.wanderCell(),
-              t.shoreSpread(), t.landKeep(), t.shoreLip(), t.transition(),
-              t.riverWidth(), enabled));
+        BoardRelief.tune(new BoardRelief.Tuning(enabled));
     }
 
     @Test

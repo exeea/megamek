@@ -63,9 +63,9 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
@@ -88,7 +88,6 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.invocation.Invocation;
 
 /**
@@ -118,7 +117,8 @@ class GpuHudRoutingSmokeTest {
           KeyCommandBind.ZOOM_OVERVIEW_TOGGLE);
 
     /** Who handles a key press; exactly one does. */
-    private enum Handler { HUD, CAMERA, SWING }
+    /** Who takes a key; NONE for Swing's GUI scale keys, which do nothing in the native window. */
+    private enum Handler { HUD, CAMERA, SWING, NONE }
 
     /** One phase of the local player's view: whose turn it is and whether the movement planner runs. */
     private record Scenario(String name, GamePhase phase, boolean myTurn, boolean planner) {
@@ -153,7 +153,8 @@ class GpuHudRoutingSmokeTest {
 
     /**
      * A1: for every phase and every default bind exactly one handler runs: the HUD (consumed, never forwarded and no
-     * camera move), the camera, or Swing (one press and one release, with the modifiers of the press). The phase
+     * camera move), the camera, or Swing (one press and one release, with the modifiers of the press); Swing's GUI scale
+     * keys reach none, as the GUI scale is Swing's alone. The phase
      * displays' own binds (TURN_*, UNDO_*, CANCEL, MOVE_*, TWIST_*) therefore never run twice, and Esc is withheld in
      * the phases whose CANCEL clears declared attacks.
      */
@@ -182,16 +183,20 @@ class GpuHudRoutingSmokeTest {
         run(routing -> {
             routing.show(SCENARIOS.get(2));
             routing.click(EMPTY_HEX, Input.Buttons.LEFT, 0, 0);
-            verify(routing.moves).planTo(EMPTY_HEX, 0, false);
-            // Shift released before the button still pins the waypoint, as at its press.
+            // With the surface height the pointer picked, which chooses a building's floor.
+            verify(routing.moves).planTo(eq(EMPTY_HEX), eq(0), eq(false), anyFloat());
+            // Ctrl pins the waypoint; Shift released before the button still turns the facing, as at its press
+            // (GpuHud.leftClick).
+            routing.click(OTHER_HEX, Input.Buttons.LEFT, InputEvent.CTRL_DOWN_MASK, InputEvent.CTRL_DOWN_MASK);
+            verify(routing.moves).planTo(eq(OTHER_HEX), eq(0), eq(true), anyFloat());
             routing.click(OTHER_HEX, Input.Buttons.LEFT, InputEvent.SHIFT_DOWN_MASK, 0);
-            verify(routing.moves).planTo(OTHER_HEX, 0, true);
+            verify(routing.moves).faceToward(OTHER_HEX, 0);
             routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
             assertEquals(FOE_ID, routing.hud.state.inspected, "An enemy is inspected, never planned to");
-            routing.click(EMPTY_HEX, Input.Buttons.LEFT, InputEvent.CTRL_DOWN_MASK, InputEvent.CTRL_DOWN_MASK);
-            // MegaMek's ruler, at the height the pointer shows (the user's decision of 2026-10-03).
-            verify(routing.source).measure(eq(EMPTY_HEX), eq(InputEvent.CTRL_DOWN_MASK), anyFloat());
-            verify(routing.moves, times(2)).planTo(any(), anyInt(), anyBoolean());
+            routing.click(EMPTY_HEX, Input.Buttons.LEFT, InputEvent.ALT_DOWN_MASK, InputEvent.ALT_DOWN_MASK);
+            // MegaMek's ruler on Alt (GpuBoardSource.isMeasurement), at the height the pointer shows.
+            verify(routing.source).measure(eq(EMPTY_HEX), eq(InputEvent.ALT_DOWN_MASK), anyFloat());
+            verify(routing.moves, times(2)).planTo(any(), anyInt(), anyBoolean(), anyFloat());
             clearInvocations(routing.moves);
             routing.click(EMPTY_HEX, Input.Buttons.RIGHT, 0, 0);
             assertTrue(shown(routing.find("context-menu-popover")), "A right click opens the context menu");
@@ -264,7 +269,7 @@ class GpuHudRoutingSmokeTest {
 
     /**
      * A2: the chat field takes the keys while it has the focus (the Enter that opens it types nothing, '1' sets no
-     * movement mode and W pans nothing), WASD and Q/E work with a dialog panel open, and a pending dialog takes every
+     * movement mode and W pans nothing), modal Help holds WASD and Q/E until it closes, and a pending dialog takes every
      * key but posts nothing except its own answer to Enter or Esc, while its scrim takes the presses and the wheel.
      */
     @Test
@@ -295,17 +300,21 @@ class GpuHudRoutingSmokeTest {
             routing.key(Input.Keys.NUM_1, 0);
             verify(routing.moves).setMode(GpuMovePlan.Mode.WALK);
 
-            // The camera keys with a dialog panel open, whose list has the focus.
+            // Help is modal (GpuHud.isModal): it holds the camera keys while open, and they work again once it closes.
             routing.hud.state.dialog = GpuHudState.Dialog.HELP;
             routing.view.render();
-            routing.hold(Input.Keys.W, () -> routing.advance(3, .1f));
-            assertFalse(focus.epsilonEquals(camera.focus, .001f), "W pans with Help open");
             float azimuth = camera.azimuth();
+            routing.hold(Input.Keys.W, () -> routing.advance(3, .1f));
             routing.hold(Input.Keys.E, () -> routing.advance(3, .1f));
-            assertEquals(27, turned(azimuth, camera.azimuth()), .01f, "E turns 90 degrees a second while held");
+            assertTrue(focus.epsilonEquals(camera.focus, .001f), "W pans nothing with Help open");
+            assertEquals(azimuth, camera.azimuth(), .001f, "nor does E turn");
             routing.key(Input.Keys.ESCAPE, 0);
             assertEquals(GpuHudState.Dialog.NONE, routing.hud.state.dialog, "One Esc closes Help from its list");
             assertNull(routing.hud.stage.getKeyboardFocus());
+            routing.hold(Input.Keys.W, () -> routing.advance(3, .1f));
+            assertFalse(focus.epsilonEquals(camera.focus, .001f), "W pans once Help is closed");
+            routing.hold(Input.Keys.E, () -> routing.advance(3, .1f));
+            assertEquals(27, turned(azimuth, camera.azimuth()), .01f, "E turns 90 degrees a second while held");
 
             // A pending dialog: no key acts, no press clicks, no wheel zooms, nothing is posted but its answer.
             camera.fit((BoardScene) field(routing.view, "scene"));
@@ -506,7 +515,7 @@ class GpuHudRoutingSmokeTest {
         ClientGUI gui = GpuDialogRoutingTest.routingClient();
         Client client = mock(Client.class);
         GUIPreferences preferences = GUIPreferences.getInstance();
-        float originalScale = preferences.getGUIScale();
+        float originalScale = preferences.getBoardUiScale();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             when(client.getGame()).thenReturn(fixture.game);
@@ -530,7 +539,7 @@ class GpuHudRoutingSmokeTest {
                             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures.
                             float preference = .1f / DisplayScale.read(.1f, new GpuDisplayScale().contentScale());
                             GpuDialogRoutingTest.onSwing(() -> {
-                                preferences.setValue(GUIPreferences.GUI_SCALE, preference);
+                                preferences.setBoardUiScale(preference);
                                 fixture.source.refresh();
                                 return null;
                             });
@@ -574,7 +583,7 @@ class GpuHudRoutingSmokeTest {
                 GpuDialogRoutingTest.dismiss();
                 GpuDialogRoutingTest.onSwing(() -> {
                     display.removeAllListeners();
-                    preferences.setValue(GUIPreferences.GUI_SCALE, originalScale);
+                    preferences.setBoardUiScale(originalScale);
                     return null;
                 });
             }
@@ -593,7 +602,7 @@ class GpuHudRoutingSmokeTest {
     @Test
     void theUnitSheetOpensFromTheBoardOverTheRealSource() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
-        float originalScale = preferences.getGUIScale();
+        float originalScale = preferences.getBoardUiScale();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Lwjgl3ApplicationConfiguration configuration = GpuBoardWindow.configuration(false);
@@ -607,7 +616,7 @@ class GpuHudRoutingSmokeTest {
                             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures.
                             float preference = .1f / DisplayScale.read(.1f, new GpuDisplayScale().contentScale());
                             GpuDialogRoutingTest.onSwing(() -> {
-                                preferences.setValue(GUIPreferences.GUI_SCALE, preference);
+                                preferences.setBoardUiScale(preference);
                                 fixture.source.setVisibleArea(new Rectangle(0, 0, 16, 17));
                                 fixture.source.refresh();
                                 return null;
@@ -656,7 +665,7 @@ class GpuHudRoutingSmokeTest {
                 }, configuration);
             } finally {
                 GpuDialogRoutingTest.onSwing(() -> {
-                    preferences.setValue(GUIPreferences.GUI_SCALE, originalScale);
+                    preferences.setBoardUiScale(originalScale);
                     return null;
                 });
             }
@@ -959,61 +968,6 @@ class GpuHudRoutingSmokeTest {
     }
 
     /**
-     * Item 33.4: the Contacts utility after Map shows and hides the contacts panel. It is pressed while the panel
-     * shows, which it does by default; its press switches the client's remembered preference on the Swing thread, as
-     * Map's does the minimap's, and the published preference hides or shows the panel.
-     */
-    @Test
-    void theContactsUtilitySwitchesTheRememberedContactsPanel() throws Exception {
-        run(routing -> {
-            routing.show(SCENARIOS.get(4));
-            Actor contacts = routing.find("contacts-panel");
-            UiButton utility = routing.find("utility-contacts");
-            List<String> row = new ArrayList<>();
-            ((Table) routing.find("utility-bar")).getChildren().forEach(child -> row.add(child.getName()));
-            assertEquals(List.of("utility-tactical", "utility-wireframe", "utility-map", "utility-contacts",
-                  "utility-log", "utility-help", "utility-menu"), row, "Contacts follows Map");
-            assertTrue(shown(contacts) && utility.isChecked(), "shown and pressed by default");
-            GUIPreferences preferences = GUIPreferences.getInstance();
-            boolean before = preferences.getGpuContactsEnabled();
-            clearInvocations(routing.source);
-            routing.press(utility);
-            ArgumentCaptor<Runnable> command = ArgumentCaptor.forClass(Runnable.class);
-            verify(routing.source).command(command.capture());
-            try {
-                boolean published = GpuDialogRoutingTest.onSwing(() -> {
-                    command.getValue().run();
-                    return GpuBoardSource.UiPreferences.capture().contactsEnabled();
-                });
-                assertEquals(!before, preferences.getGpuContactsEnabled(), "the press switches the preference");
-                assertEquals(!before, published, "which the source publishes");
-            } finally {
-                GpuDialogRoutingTest.onSwing(() -> {
-                    preferences.setValue(GUIPreferences.GPU_CONTACTS_ENABLED, before);
-                    return null;
-                });
-            }
-
-            GpuBoardSource.UiPreferences shown = routing.source.uiPreferences;
-            routing.source.uiPreferences = contacts(shown, false);
-            routing.view.render();
-            assertFalse(shown(contacts), "the published preference hides the panel");
-            assertFalse(utility.isChecked(), "and releases the utility");
-            routing.capture("ux2-contacts-hidden");
-            routing.source.uiPreferences = shown;
-            routing.view.render();
-            assertTrue(shown(contacts) && utility.isChecked(), "and shows it again");
-        });
-    }
-
-    /** The preferences with the contacts panel shown or hidden. */
-    private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
-        return new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(), p.reportFilterKeywords(),
-              p.minimapEnabled(), enabled, p.conditionsVisible(), p.turnDetails(), p.binds(),
-              p.moveSprintRgb(), BoardGraphics.ENHANCED);
-    }
-
-    /**
      * The one highlighted row of the shown forces and contacts lists is the unit's: its forces row, or for an enemy its
      * contacts row and its forces row while the forces list shows its contacts; the card shows the unit.
      */
@@ -1111,6 +1065,8 @@ class GpuHudRoutingSmokeTest {
             assertTrue(routing.hud.stage.getKeyboardFocus().isDescendantOf(routing.find("players-panel")));
             routing.key(Input.Keys.ESCAPE, 0);
             assertEquals(GpuHudState.Dialog.NONE, state.dialog, "one Esc closes the Players panel");
+            // The next frame lays out the closed dialog's backdrop, which takes presses until then.
+            routing.view.render();
             routing.press(routing.find("tuning-button"));
             routing.press(routing.find("tuning-atmosphere-tab"));
             routing.press(routing.find("tuning-atmosphere-pressure"));
@@ -1158,6 +1114,15 @@ class GpuHudRoutingSmokeTest {
             routing.click(FOE_HEX, Input.Buttons.RIGHT, 0, 0);
             Actor popover = routing.find("context-menu-popover");
             assertTrue(shown(popover), "the enemy's menu");
+            // Its actions are MegaMek's map menu, which the source captures for the clicked unit (GpuContextMenu).
+            GpuBoardSource.Frame open = routing.frame.get();
+            MapMenu.UnitAction center = new MapMenu.UnitAction(MapMenu.UnitActionType.CENTER_UNIT, FOE_ID);
+            routing.frame.set(new GpuBoardSource.Frame(open.scene(), open.timeline(), new BoardScene.Context(FOE_HEX,
+                  FOE_ID, List.of(new BoardScene.Command(center.type() + ":" + FOE_ID,
+                  Messages.getString("GpuBoard.hud.common.centerCamera"), "", true, false, false, List.of(), () -> { },
+                  "", null, center)), state.turnLocked(open.status())), open.globalCommands(), open.tooltip(),
+                  open.centerRequest(), open.boardGeneration(), open.actorName(), open.scenarioAtmosphere(),
+                  open.reports(), open.status(), open.panels()));
             routing.view.render();
             routing.capture("i1a2-context-menu-board");
             clearInvocations(routing.source, routing.moves);
@@ -1215,6 +1180,9 @@ class GpuHudRoutingSmokeTest {
         Set<KeyCommandBind> binds = key.binds();
         if (binds.stream().anyMatch(bind -> hudBind(scenario, bind, logOpen))) {
             return Handler.HUD;
+        }
+        if (binds.contains(KeyCommandBind.INC_GUI_SCALE) || binds.contains(KeyCommandBind.DEC_GUI_SCALE)) {
+            return Handler.NONE;
         }
         return binds.stream().anyMatch(CAMERA::contains) ? Handler.CAMERA : Handler.SWING;
     }
@@ -1488,6 +1456,9 @@ class GpuHudRoutingSmokeTest {
             if (acted[1]) {
                 assertTrue(forwarded.isEmpty(), name + ": the camera moved and Swing got it as well");
                 return Handler.CAMERA;
+            }
+            if (forwarded.isEmpty()) {
+                return Handler.NONE;
             }
             assertEquals(2, forwarded.size(), name + ": one press and one release reach Swing");
             verify(source).key(key.awt(), true, pressed);

@@ -499,7 +499,7 @@ class GpuLegacyArtReportSmokeTest {
             for (int line : lines) {
                 boolean maglev = maglevs.contains(line);
                 session.command(new Command(Action.ASSET, "", (maglev ? RailRoute.Kind.MAGLEV : RailRoute.Kind.RAIL).asset), null);
-                if (maglev) { session.command(new Command(Action.BRUSH_VALUE, "object:level", line >= 10 ? "2" : "1"), null); }
+                if (maglev) { session.command(new Command(Action.BRUSH_VALUE, "wayOffset", line >= 10 ? "2" : "1"), null); }
                 GpuEditorRailSmokeTest.stroke(session, GpuEditorRailSmokeTest.run(new Coords(column(line), 0), 3, height - 1));
             }
             for (int stamp = 0; stamp < stamps.length; stamp++) {
@@ -603,7 +603,7 @@ class GpuLegacyArtReportSmokeTest {
      * A tileset image, decoded: its file read again (the toolkit loads an animated GIF, as the landing pads are, lazily,
      * and draws nothing without an observer), else the image once loaded.
      */
-    private static Image loaded(HexTileset tileset, Image image) {
+    static Image loaded(HexTileset tileset, Image image) {
         String source = tileset.imageSource(image);
         if (!source.isEmpty()) {
             try {

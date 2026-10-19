@@ -218,7 +218,7 @@ class BoardFoliageTest {
                 assertEquals(material.id.equals("impostor") ? 1 : 3, material.textures.size);
                 for (var texture : material.textures) {
                     String file = texture.fileName.replace('\\', '/');
-                    assertTrue(file.contains("/textures/foliage/"), file);
+                    assertTrue(file.contains("/textures/vegetation/"), file);
                     var image = ((RigidGlb.Data) data).images.get(texture.fileName);
                     assertTrue(image != null && image.file() != null && Files.isRegularFile(Path.of(image.file())), file);
                 }
@@ -231,14 +231,14 @@ class BoardFoliageTest {
     }
 
     /**
-     * Impostor cards carry their plant's own colours: the detail texel times the display-space vertex colour, the
-     * albedo the foliage shader lights. The estimate weights the near mesh's faces by the area the three card views
-     * show; baking with linear vertex colours had left trees at a third to a half of it, dark green.
+     * Impostor cards carry their plant's own colours. Decode detail texels before multiplying the mesh's linear
+     * vertex colour, then display-encode the result to compare with the PNG atlas. The estimate weights the near
+     * mesh's faces by the area the three card views show.
      */
     @Test
     void impostorAtlasesHoldTheirPlantsColours() throws IOException {
         File root = new File(Configuration.dataDir(), "models/board");
-        File[] atlases = new File(root, "textures/foliage/impostors")
+        File[] atlases = new File(root, "textures/vegetation/impostors")
               .listFiles((folder, name) -> name.endsWith(".png"));
         assertTrue(atlases != null && atlases.length > 0);
         float[][] views = { { 0, -.866f, .5f }, { .866f, 0, .5f }, { 0, 0, 1 } };
@@ -259,7 +259,9 @@ class BoardFoliageTest {
                         for (int x = 0; x < texture.getWidth(); x++) {
                             int texel = texture.getRGB(x, y);
                             if (texel >>> 24 < 128) { continue; }
-                            for (int c = 0; c < 3; c++) { mean[c] += texel >> 16 - c * 8 & 255; }
+                            for (int c = 0; c < 3; c++) {
+                                mean[c] += GpuColor.linear((texel >> 16 - c * 8 & 255) / 255f);
+                            }
                             mean[3]++;
                         }
                     }
@@ -290,7 +292,9 @@ class BoardFoliageTest {
                     int texel = texture.getRGB(x, y);
                     for (int channel = 0; channel < 3; channel++) {
                         float colour = (v[a + 6 + channel] + v[b + 6 + channel] + v[c + 6 + channel]) / 3;
-                        expected[channel] += shown * (mean == null ? texel >> 16 - 8 * channel & 255 : mean[channel]) * colour;
+                        float sampled = mean == null ? GpuColor.linear((texel >> 16 - 8 * channel & 255) / 255f)
+                              : (float) mean[channel];
+                        expected[channel] += shown * 255 * GpuColor.display(sampled * colour);
                     }
                     weight += shown;
                 }

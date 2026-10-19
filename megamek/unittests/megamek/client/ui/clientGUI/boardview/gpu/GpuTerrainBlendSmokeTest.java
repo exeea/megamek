@@ -114,6 +114,14 @@ class GpuTerrainBlendSmokeTest {
             }
 
             private void compareRebuild(BoardScene scene, GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera) throws Exception {
+                // The edited renderer keeps its shadow projection while that still covers the board
+                // (GpuTerrain#canReuseShadowCamera), so it may still be fitted to an earlier scene, on another texel
+                // grid than a clean build's. A shadow pass under another sun drops that projection, so the next frame
+                // fits a new one to this board, as a clean build does.
+                terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(15, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
+                terrain.renderShadows(camera.camera, List.of());
+                frame.render(terrain, camera, scene);
                 byte[] edited = screen();
                 GpuReviewFrame.save(new File(output, "island-sand-edited.png"));
                 var fresh = new GpuTerrain();

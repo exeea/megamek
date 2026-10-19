@@ -36,6 +36,7 @@ import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
 import megamek.common.board.BoardIssue;
 import megamek.common.board.BoardSceneryLayouts;
+import megamek.common.board.BridgeSpan;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
@@ -107,7 +108,24 @@ public final class BoardEditorSession {
         /** Saves the board as a PNG image of its 2D tileset art, as the old editor's Save As Image did. */
         SAVE_IMAGE,
         /** Opens the document's saved file in the system's program for it (the old Open Board Source File). */
-        SOURCE_FILE
+        SOURCE_FILE,
+        /**
+         * Removes every identical copy ({@link BoardDecoration#twin}) the issues list reports, keeping the first object
+         * of each hex and its group. One undo step.
+         */
+        REMOVE_COPIES,
+        /**
+         * Turns the inspected hex's skin design ({@link BoardEditorBlueprint.Skin}, a container yard) of an owner (target)
+         * to a clockwise rotation (value, degrees, snapped to 30-degree steps). One undo step.
+         */
+        DESIGN_ROTATION,
+        /**
+         * Sets the inspected pavement hex's {@link HexAppearance.Edges} (value "auto", "fitted" or "hex"), stored as its
+         * pavement appearance (Auto as none). One undo step.
+         */
+        EDGES, WAY_LAYER, WAY_TRACKS, CORRIDOR,
+        /** Sets a road layer's cosmetic junction controls (target "road" or "bridgeRoad", value "stops", "signals" or "gantry"). */
+        TRAFFIC_CONTROL
     }
     /** Text values are parsed and validated here, never by a view that also owns game state. */
     public record Command(Action action, String target, String value) {
@@ -129,15 +147,31 @@ public final class BoardEditorSession {
      * whose {@code min} equals its {@code max} cannot be moved.
      */
     public record Level(String key, boolean object, double level, double min, double max, String receiver) { }
-    /** {@code clearOnly}: the old editor's "Only overwrite clear hexes" for Paint and Sculpt ({@link #brush(Coords)}). */
+    /**
+     * {@code clearOnly}: the old editor's "Only overwrite clear hexes" for Paint and Sculpt; {@code fill}: Paint fills the
+     * clicked hex's connected area instead of the radius (both {@link #brush(Coords)}).
+     */
     public record Brush(String key, String label, String component, int elevation, String theme,
           List<Property> properties, Map<String, HexAppearance> appearance, List<BoardDecoration> objects, Coords sampledHex,
           boolean elevationEnabled, boolean themeEnabled, boolean precision, boolean magnetic,
-          LevelSculpt.Mode sculpt, boolean slope, boolean clearOnly) {
+          LevelSculpt.Mode sculpt, boolean slope, boolean clearOnly, boolean fill,
+          boolean levelHeight, int heightOffset, boolean pillars) {
         /** A hex stamp's objects are contents of the stamp, not an individually placeable object brush. */
         public BoardDecoration object() { return sampledHex == null && !objects.isEmpty() ? objects.getFirst() : null; }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
+        /** Whether this is a Theme card's brush ({@link #THEME_BRUSH}). */
+        public boolean themeCard() { return key.startsWith(THEME_BRUSH); }
+        public boolean way() {
+            return sampledHex == null && (component.equals("road") || component.equals("bridge")
+                  || RailRoute.isRoute(object()));
+        }
     }
+    /**
+     * The key prefix of a Theme card's brush, "theme/" and its theme (CHOOSE_BRUSH with target "theme"): Paint gives each
+     * hex the theme and the Clear ground look (no ground design) and keeps everything else, ground terrain included; it
+     * has no Erase.
+     */
+    public static final String THEME_BRUSH = "theme/";
     private static Property property(List<Property> properties, String name) {
         return properties.stream().filter(p -> p.terrain().equals(name)).findFirst().orElse(null);
     }
@@ -149,14 +183,16 @@ public final class BoardEditorSession {
      * selected hex's heights, bottom to top. {@code tags} are the board's tags, sorted, and {@code roadsAutoExit} its
      * "exit roads to pavement" option; {@code boardComponents} are the blueprint components that the whole-board Remove
      * offers, those some hex holds ({@link #boardComponents()}). {@code drawsRoutes}: a Paint drag with the active brush
-     * draws a route by hand, built on its release ({@link #pointer}).
+     * draws a route by hand, built on its release ({@link #pointer}). {@code copies}: the identical copies the issues
+     * list reports, which {@link Action#REMOVE_COPIES} removes.
      */
     public record Snapshot(long revision, String title, boolean dirty, boolean canUndo, boolean canRedo,
           Tool tool, String component, String asset, int brush, Coords selected, int elevation, String theme,
           List<Property> properties, Map<String, HexAppearance> appearance, List<BoardDecoration> objects,
           String object, String message, int width, int height, Brush activeBrush, List<Selection> selection,
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<BoardIssue> issues,
-          List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents, boolean drawsRoutes) {
+          List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents, boolean drawsRoutes,
+          int copies) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
         public boolean arena() { return tags.contains(BoardClassifier.ARENA_TAG); }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -175,8 +211,8 @@ public final class BoardEditorSession {
      * shows too, where the pointer heads (batch 10), but a release does not build (else null).
      */
     public record Preview(Coords at, Map<Coords, Hex> before, Map<Coords, Hex> after, List<Coords> path, String notice,
-          Coords next) {
-        public static final Preview NONE = new Preview(null, Map.of(), Map.of(), List.of(), "", null);
+          Coords next, Map<Coords, WayLayer> layers) {
+        public static final Preview NONE = new Preview(null, Map.of(), Map.of(), List.of(), "", null, Map.of());
 
         /**
          * The hexes where the event leaves a rail or maglev with a side that ends in a stub and did not before: a turn
@@ -189,9 +225,9 @@ public final class BoardEditorSession {
             after.forEach((at, hex) -> {
                 Hex was = before.get(at);
                 int step = stepSide(at);
-                for (BoardDecoration marker : hex.getDecorations()) {
+                for (BoardDecoration marker : RailRoute.derived(hex, "")) {
                     if (!RailRoute.isRoute(marker)) { continue; }
-                    int had = was.getDecorations().stream().filter(old -> old.id().equals(marker.id()))
+                    int had = RailRoute.derived(was, "").stream().filter(old -> old.id().equals(marker.id()))
                           .mapToInt(old -> RailRoute.drawnSides(old, was)).findFirst().orElse(0);
                     int sides = RailRoute.drawnSides(marker, hex) & ~(step & ~had);
                     if ((RailRoute.stranded(sides) & ~RailRoute.stranded(had)) != 0) {
@@ -247,8 +283,12 @@ public final class BoardEditorSession {
     private record Edit(Map<Coords, Hex> before, Map<Coords, Hex> after, long beforeId, long afterId, Resize resize) {
         Edit(Map<Coords, Hex> before, Map<Coords, Hex> after, long beforeId, long afterId) { this(before, after, beforeId, afterId, null); }
     }
-    /** A route stroke in one hex: its marker's id, the side the stroke entered by (-1: it started here), its drawn pieces. */
-    private record RouteCell(String marker, int entered, int drawn) { }
+    public enum WaySurface { GROUND, DECK, NEW, REFUSED }
+    /** The one layer decision used by a route's write, preview, readout and eraser. */
+    public record WayLayer(WaySurface surface, int level, String notice) {
+        public boolean deck() { return surface == WaySurface.DECK || surface == WaySurface.NEW; }
+        public boolean refused() { return surface == WaySurface.REFUSED; }
+    }
     /** A resize's two boards and the import issues of each; its undo and redo install one of them as a whole. */
     private record Resize(Board before, Board after, List<BoardIssue> importsBefore, List<BoardIssue> importsAfter) { }
     private final Game game = new Game();
@@ -256,10 +296,11 @@ public final class BoardEditorSession {
     private final ArrayDeque<Edit> undo = new ArrayDeque<>(), redo = new ArrayDeque<>();
     private final Map<Coords, Hex> stroke = new LinkedHashMap<>();
     private final java.util.Set<Coords> painted = new java.util.HashSet<>();
-    /** A route stroke's hexes: the marker it draws on in each, the side it entered by and the pieces it drew there. */
-    private final Map<Coords, RouteCell> routeStroke = new java.util.HashMap<>();
-    /** The brush the current route stroke paints with ({@link #strokeBrush}). */
-    private BoardDecoration routeBrush;
+    private final Map<Coords, WayLayer> wayLayers = new LinkedHashMap<>();
+    /** Receivers observed by the pointer, retained when the hand-drawn path is replayed. */
+    private final Map<Coords, String> wayReceivers = new LinkedHashMap<>();
+    private boolean levelHeight, wayPillars;
+    private int wayOffset;
     /** Why the current route stroke left a hex or side out (it ends open there); shown until the next stroke. */
     private String strokeNotice = "";
     private Tool tool = Tool.SELECT;
@@ -273,6 +314,8 @@ public final class BoardEditorSession {
     private boolean magnetic = true;
     /** Paint and Sculpt leave every hex that holds terrain ({@link #overwrites}). */
     private boolean clearOnly;
+    /** Paint fills the clicked hex's connected area ({@link #fillArea}). */
+    private boolean fill;
     private final Set<Selection> selection = new LinkedHashSet<>();
     private final Map<Selection, BoardDecoration> movingObjects = new LinkedHashMap<>();
     /** A press on a member of a wholly selected group; the pointer release selects it alone unless the press dragged. */
@@ -325,6 +368,8 @@ public final class BoardEditorSession {
     private Map<Selection, BoardDecoration> groupBase = Map.of();
     /** Problems per hex, re-validated for the hexes of every committed edit, undo and redo; never during a stroke. */
     private final Map<Coords, List<BoardIssue>> issues = new java.util.HashMap<>();
+    /** The identical copies ({@link #stacks}) per hex that holds any, validated with {@link #issues}. */
+    private final Map<Coords, Integer> copies = new java.util.HashMap<>();
     private List<BoardIssue> issueList = List.of();
     /**
      * What the document's conversions (at open and at each edit's commit) could not decode exactly; each stays listed
@@ -347,6 +392,8 @@ public final class BoardEditorSession {
     private static final double HEADING = .2;
     /** How far from its centre towards its sides a hex's core reaches, as a share of the way ({@link #core}). */
     private static final double CORE = .6;
+    /** The MAGMA level of liquid magma, lava (1 is its crust). */
+    private static final int LAVA = 2;
 
     public BoardEditorSession() { this(BoardEditorBlueprint.get()); }
     public BoardEditorSession(BoardEditorBlueprint blueprint) {
@@ -376,7 +423,8 @@ public final class BoardEditorSession {
         Brush active = new Brush(brushKey, brushLabel, brushComponent, paintTemplate.getLevel(),
               paintTemplate.getTheme() == null ? "" : paintTemplate.getTheme(), properties(paintTemplate),
               paintTemplate.getAppearance(), paintTemplate.getDecorations(), sampledHex,
-              brushElevation, brushTheme, precision, magnetic, sculpt, slope, clearOnly);
+              brushElevation, brushTheme, precision, magnetic, sculpt, slope, clearOnly, fill,
+              levelHeight, wayOffset, wayPillars);
         BoardDecoration prototype = active.object();
         return new Snapshot(revision, title(), dirty(), !undo.isEmpty(), !redo.isEmpty(), tool, component,
               prototype == null ? "" : prototype.asset(), brush,
@@ -384,7 +432,8 @@ public final class BoardEditorSession {
               properties(hex), hex == null ? Map.of() : hex.getAppearance(), hex == null ? List.of() : contentsOrder(hex),
               selectedObject, message, board().getWidth(), board().getHeight(), active, List.copyOf(selection), movePreview(),
               selectionGroups(), groupSizes(hex), issueList, levels(hex), board().getTags().stream().sorted().toList(),
-              board().getRoadsAutoExit(), boardComponents(), drawsRoutes());
+              board().getRoadsAutoExit(), boardComponents(), drawsRoutes(),
+              copies.values().stream().mapToInt(Integer::intValue).sum());
     }
 
     /**
@@ -460,6 +509,16 @@ public final class BoardEditorSession {
         return Map.copyOf(sizes);
     }
 
+    /**
+     * A hex stamp of {@code hex} named {@code key}, as Use as brush makes one with level and theme: the Assets panel's
+     * category icons render through it.
+     */
+    public static Brush hexStamp(String key, Hex hex) {
+        return new Brush(key, key, "ground", hex.getLevel(), hex.getTheme() == null ? "" : hex.getTheme(), properties(hex),
+              hex.getAppearance(), hex.getDecorations(), new Coords(0, 0), true, true, false, false, LevelSculpt.Mode.RAISE,
+              true, false, false, false, 0, false);
+    }
+
     private static List<Property> properties(Hex hex) {
         List<Property> properties = new ArrayList<>();
         if (hex != null) {
@@ -500,7 +559,7 @@ public final class BoardEditorSession {
      * are reset and every hex is validated.
      */
     private void install(Board board) {
-        stroke.clear(); painted.clear(); routeStroke.clear(); routeBrush = null; strokeNotice = ""; drawing = null;
+        stroke.clear(); painted.clear(); wayLayers.clear(); wayReceivers.clear(); strokeNotice = ""; drawing = null;
         selected = null; selectedObject = ""; placed = false;
         selection.clear(); movingObjects.clear(); dragOrigin = moveTarget = null; pendingDrill = null;
         game.setBoard(board);
@@ -575,7 +634,7 @@ public final class BoardEditorSession {
                 case ADD_COMPONENT -> edit(hex -> addComponent(hex, blueprint.component(command.value())));
                 case REMOVE_COMPONENT -> {
                     var definition = blueprint.component(command.value());
-                    // Target "board": from every hex (Settings → Whole board → Remove), else from the selected hex.
+                    // Target "board": from every hex (Settings â†’ Whole board â†’ Remove), else from the selected hex.
                     if (!command.target().equals("board")) { edit(hex -> removeComponent(hex, definition)); }
                     else {
                         int changed = everyHex(hex -> removeComponent(hex, definition));
@@ -585,13 +644,17 @@ public final class BoardEditorSession {
                 }
                 case TERRAIN -> edit(hex -> setTerrain(hex, command.target(), Integer.parseInt(command.value())));
                 case REMOVE_TERRAIN -> edit(hex -> {
-                    hex.removeTerrain(Terrains.getType(command.value()));
+                    int type = Terrains.getType(command.value());
+                    if (type == Terrains.BRIDGE) { removeDeck(hex); } else { removeWay(hex, type); }
                     if (!hex.containsAnyTerrainOf(Terrains.WOODS, Terrains.JUNGLE)) { hex.removeTerrain(Terrains.FOLIAGE_ELEV); }
                 });
-                case EDGE -> edit(hex -> edge(hex, command.target(), Integer.parseInt(command.value())));
+                case EDGE -> editEdge(command.target(), Integer.parseInt(command.value()));
                 case AUTO_EDGES -> edit(hex -> {
                     Terrain old = hex.getTerrain(Terrains.getType(command.value()));
                     require(old != null && old.getExits() <= 63, Messages.getString("BoardEditor.legacyExits"));
+                    require(old.getType() != Terrains.BRIDGE && old.getType() != Terrains.BRIDGE_ROAD
+                          && old.getType() != Terrains.BRIDGE_RAIL && old.getType() != Terrains.RAIL,
+                          Messages.getString("BoardEditor.way.explicitExits"));
                     hex.addTerrain(new Terrain(old.getType(), old.getLevel()));
                 });
                 case ELEVATION -> edit(hex -> hex.setLevel(Integer.parseInt(command.value())));
@@ -620,7 +683,7 @@ public final class BoardEditorSession {
                     int value = Integer.parseInt(command.value());
                     require(command.target().equals("by") || command.target().equals("to"), "Move the board by or to a level.");
                     boolean to = command.target().equals("to");
-                    int changed = everyHex(hex -> shiftLevel(hex, to ? value - hex.getLevel() : value));
+                    int changed = everyHex(hex -> hex.shiftLevel(to ? value - hex.getLevel() : value));
                     message = changed == 0 ? Messages.getString("BoardEditor.nothingChanged") : to
                           ? Messages.getString("BoardEditor.boardLevelTo", value) : Messages.getString("BoardEditor.boardLevelBy", value);
                 }
@@ -647,6 +710,9 @@ public final class BoardEditorSession {
                     styles.put("ground", new HexAppearance(current.variant(), null, null, Double.parseDouble(command.value())));
                     hex.setAppearance(styles);
                 });
+                case DESIGN_ROTATION -> edit(hex -> rotate(hex, command.target(), command.value()));
+                case EDGES -> edit(hex -> setEdges(hex, command.value()));
+                case TRAFFIC_CONTROL -> edit(hex -> setTrafficControl(hex, command.target(), command.value()));
                 case ASSET -> {
                     var design = blueprint.asset(command.value()); require(design != null, "Unknown object design");
                     paintTemplate = new Hex(0); sampledHex = null;
@@ -660,6 +726,8 @@ public final class BoardEditorSession {
                                     megamek.common.board.RailRoute.Kind.of(design.id()) == megamek.common.board.RailRoute.Kind.MAGLEV ? 1 : 0), 0, false)
                               .withColours(design.colours())));
                     }
+                    levelHeight = false; wayOffset = RailRoute.Kind.of(design.id()) == RailRoute.Kind.MAGLEV ? 1 : 0;
+                    wayPillars = wayOffset > 0;
                     brushComponent = ""; brushKey = design.id(); brushLabel = design.label(); tool = Tool.PAINT;
                     message = "";
                 }
@@ -677,22 +745,30 @@ public final class BoardEditorSession {
                     }
                 }
                 case OBJECT_VALUE -> editObject(command.target(), command.value());
+                case WAY_LAYER -> edit(hex -> moveWay(hex, command.target(), command.value().equals("deck")));
+                case CORRIDOR -> corridor(command.target(), command.value());
+                case WAY_TRACKS -> edit(hex -> {
+                    boolean deck = command.target().equals("bridge_rail");
+                    int type = deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL;
+                    Terrain rail = hex.getTerrain(type);
+                    int tracks = Integer.parseInt(command.value());
+                    require(rail != null && RailRoute.valid(rail.getExits(), tracks), Messages.getString("BoardEditor.junctionInvalid"));
+                    RailRoute.lay(hex, deck, rail.getExits(), RailRoute.layout(rail.getExits(), tracks),
+                          rail.getLevel() == 2 ? RailRoute.Kind.MAGLEV : RailRoute.Kind.RAIL);
+                });
                 case HEIGHT -> height(command.target(), Double.parseDouble(command.value()));
                 case PLACE -> place(command.target(), command.value());
                 case PILLARS -> {
                     boolean on = Boolean.parseBoolean(command.value());
-                    var route = selected == null ? null : board().getHex(selected).getDecorations().stream()
-                          .filter(d -> d.id().equals(selectedObject) && RailRoute.isRoute(d)).findFirst().orElse(null);
-                    if (route != null) {
-                        // A maglev's Pillars, like a bridge's, apply to the whole connected route; rails lie on their support.
-                        require(RailRoute.kind(route) == RailRoute.Kind.MAGLEV, Messages.getString("BoardEditor.railNoPillars"));
-                        pillars(RailRoute.run(board()::getHex, selected, route), on);
-                    } else {
-                        requireBridge();
-                        var truss = spanTruss(selected);
-                        var type = HexAppearance.built(truss != null, on, truss);
-                        bridgeSpan(selected, current -> type);
-                    }
+                    requireBridge();
+                    var truss = spanTruss(selected);
+                    var type = HexAppearance.built(truss != null, on, truss);
+                    bridgeSpan(selected, current -> {
+                        if (current != null && HexAppearance.implicit(Map.of("bridge", current))) {
+                            return on ? HexAppearance.IMPLICIT_PILLARS : HexAppearance.IMPLICIT_BRIDGE;
+                        }
+                        return type;
+                    });
                     if (!continuousEdit) { finishStroke(); }
                 }
                 case BRIDGE_TYPE -> {
@@ -765,6 +841,7 @@ public final class BoardEditorSession {
                 case SAVE, SAVE_AS -> chooseSave(owner, command.action() == Action.SAVE_AS);
                 case SAVE_IMAGE -> chooseSaveImage(owner);
                 case SOURCE_FILE -> openSourceFile();
+                case REMOVE_COPIES -> removeCopies();
                 case NEW -> {
                     String[] size = command.value().split("[,x ]+");
                     require(size.length == 2, Messages.getString("BoardEditor.newSizeFormat"));
@@ -899,7 +976,7 @@ public final class BoardEditorSession {
 
     /**
      * Writes the board as the old editor's Save As Image did: {@link BoardArtwork#printable}, the 2D tileset art of every
-     * hex with its labels, one 84 × 72 tile per hex. Placed objects and decals are 3D art and do not show.
+     * hex with its labels, one 84 Ã— 72 tile per hex. Placed objects and decals are 3D art and do not show.
      */
     public void saveImage(Path file) throws IOException {
         finishStroke();
@@ -1004,7 +1081,7 @@ public final class BoardEditorSession {
     }
 
     /**
-     * The board settings that are no undo steps (Settings → Map's tags and roads option, Save's license header) stay as
+     * The board settings that are no undo steps (Settings â†’ Map's tags and roads option, Save's license header) stay as
      * they are now when a resize's undo or redo swaps in the other board.
      */
     private static void keepSettings(Board from, Board to) {
@@ -1024,9 +1101,13 @@ public final class BoardEditorSession {
         }
     }
 
-    /** The hexes a stroke at {@code center} changes, as its preview shows them: the radius, without those it may not overwrite. */
+    /**
+     * The hexes a stroke at {@code center} changes, as its preview shows them: the radius (with Fill, the connected area),
+     * without those it may not overwrite.
+     */
     public List<Coords> brush(Coords center) {
         if (center == null || !board().contains(center)) { return List.of(); }
+        if (fill && tool == Tool.PAINT) { return fillArea(center).stream().filter(this::overwrites).toList(); }
         List<Coords> result = new ArrayList<>();
         for (int x = Math.max(0, center.getX() - brush + 1); x <= Math.min(board().getWidth() - 1, center.getX() + brush - 1); x++) {
             for (int y = Math.max(0, center.getY() - brush + 1); y <= Math.min(board().getHeight() - 1, center.getY() + brush - 1); y++) {
@@ -1036,15 +1117,43 @@ public final class BoardEditorSession {
         return List.copyOf(result);
     }
 
-    /**
-     * The old editor's "Only overwrite clear hexes": while it is on, Paint and Sculpt change only hexes without terrain
-     * ({@link Hex#isClearHex}; their level and theme do not count). Select and Erase are not filtered.
-     */
-    private boolean overwrites(Coords at) {
-        return !clearOnly || tool != Tool.PAINT && tool != Tool.SCULPT || board().getHex(at).isClearHex();
+    /** The paint bucket's area: {@code center} and every hex joined to it through neighbours that match it ({@link #fillMatch}). */
+    private Set<Coords> fillArea(Coords center) {
+        Object match = fillMatch(board().getHex(center));
+        Set<Coords> area = new LinkedHashSet<>(List.of(center));
+        var open = new ArrayDeque<>(area);
+        while (!open.isEmpty()) {
+            Coords at = open.poll();
+            for (int direction = 0; direction < 6; direction++) {
+                Coords next = at.translated(direction);
+                if (board().contains(next) && !area.contains(next) && match.equals(fillMatch(board().getHex(next)))) {
+                    area.add(next); open.add(next);
+                }
+            }
+        }
+        return area;
     }
 
-    /** What a Sculpt click on {@code hexes} footprint hexes at {@code hover} does without Ctrl, e.g. "Raise · 7 hexes". */
+    /** What the paint bucket compares: level, theme and each terrain with its level (automatic markers do not count). */
+    private static Object fillMatch(Hex hex) {
+        Map<Integer, Integer> terrain = new LinkedHashMap<>();
+        for (int type : hex.getTerrainTypesSet()) {
+            if (!Terrains.AUTOMATIC.contains(type)) { terrain.put(type, hex.terrainLevel(type)); }
+        }
+        return List.of(hex.getLevel(), Objects.toString(hex.getTheme(), ""), terrain);
+    }
+
+    /**
+     * The old editor's "Only overwrite clear hexes": while it is on, Paint and Sculpt change only hexes without terrain
+     * (automatic markers, level and theme do not count; this is not the rules' {@link Hex#isClear}). Select and Erase
+     * are not filtered.
+     */
+    private boolean overwrites(Coords at) {
+        return !clearOnly || tool != Tool.PAINT && tool != Tool.SCULPT
+              || Terrains.AUTOMATIC.containsAll(board().getHex(at).getTerrainTypesSet());
+    }
+
+    /** What a Sculpt click on {@code hexes} footprint hexes at {@code hover} does without Ctrl, e.g. "Raise Â· 7 hexes". */
     public String sculptHint(Coords hover, int hexes) {
         if (tool != Tool.SCULPT || hover == null || !board().contains(hover)) { return ""; }
         if (sculpt == LevelSculpt.Mode.LEVEL) {
@@ -1078,7 +1187,7 @@ public final class BoardEditorSession {
     public void pointer(Coords at, double x, double y, boolean drag, String pickedObject, boolean additive, String receiver,
           boolean invert) {
         if (at == null || !board().contains(at)) { return; }
-        if (drawsRoutes()) { draw(at, x, y, drag); }
+        if (drawsRoutes()) { draw(at, x, y, drag, receiver); }
         else { event(at, x, y, drag, pickedObject, additive, receiver, invert); }
     }
 
@@ -1086,10 +1195,12 @@ public final class BoardEditorSession {
      * Whether a Paint drag with the active brush draws a route by hand: a rail or maglev brush, or the Road card (the user's
      * design of 2026-10-11). Erase, and every other brush, applies each event at once.
      */
-    private boolean drawsRoutes() {
-        if (tool != Tool.PAINT || sampledHex != null) { return false; }
-        var objects = paintTemplate.getDecorations();
-        return objects.isEmpty() ? brushComponent.equals("road") && stampLayout() == null : RailRoute.kind(objects.getFirst()) != null;
+    private boolean drawsRoutes() { return tool == Tool.PAINT && wayBrush(); }
+
+    private boolean wayBrush() {
+        return sampledHex == null && stampLayout() == null && (brushComponent.equals("road")
+              || brushComponent.equals("bridge") || !paintTemplate.getDecorations().isEmpty()
+              && RailRoute.isRoute(paintTemplate.getDecorations().getFirst()));
     }
 
     /**
@@ -1101,11 +1212,12 @@ public final class BoardEditorSession {
      * document is untouched until the release builds the route as one undo step ({@link #finishStroke}), so the user can
      * retrace to fix it first; {@link #preview} shows it meanwhile, and {@link #cancelStroke} drops it.
      */
-    private void draw(Coords at, double x, double y, boolean drag) {
+    private void draw(Coords at, double x, double y, boolean drag, String receiver) {
         RoutePath was = drawing;
         if (!drag || drawing == null) {
             // A press while a route is pending (no release in between) builds that one into the stroke first.
             buildDrawing();
+            wayReceivers.clear();
             drawing = RoutePath.start(at);
         } else {
             drawing = crossed(at);
@@ -1113,6 +1225,7 @@ public final class BoardEditorSession {
         }
         // The preview's heading is the pointer's movement since it took, or came back into, the path's last hex (heading).
         if (at.equals(drawing.end()) && (drawing != was || !at.equals(drawingAt))) { routeEntryX = x; routeEntryY = y; }
+        wayReceivers.put(at, receiver == null ? "ground" : receiver);
         drawingAt = at;
         if (drawing != was) { revision++; }
     }
@@ -1139,7 +1252,350 @@ public final class BoardEditorSession {
         if (drawing == null) { return; }
         List<Coords> hexes = drawing.hexes();
         drawing = null;
-        for (int i = 0; i < hexes.size(); i++) { event(hexes.get(i), 0, 0, i > 0, null, false, "ground", false); }
+        paintWays(hexes);
+    }
+
+    /** Picks the height and layer once. Dry ground following is deliberately allowed to climb arbitrary hills. */
+    private WayLayer wayLayer(Coords at, String receiver, WayLayer previous, int pressed, boolean bridge, boolean bank) {
+        Hex hex = board().getHex(at);
+        if (tool == Tool.PAINT && !overwrites(at)) { return refused(hex.getLevel(), "BoardEditor.way.clearOnly"); }
+        boolean dry = hex.terrainLevel(Terrains.WATER) < 1 || hex.containsTerrain(Terrains.MAGMA);
+        int ground = hex.getLevel();
+        int target = levelHeight ? pressed + wayOffset : wayOffset > 0 ? ground + wayOffset
+              : previous == null ? pressed : previous.level();
+        boolean up = levelHeight || wayOffset > 0 || previous != null && previous.deck();
+        boolean deck = hex.hasBridge();
+        int deckLevel = deck ? BridgeSpan.deck(hex) : ground;
+        if (bridge) {
+            if (bank && dry && !deck && Math.abs(ground - target) <= 1) {
+                return new WayLayer(WaySurface.GROUND, ground, "");
+            }
+            if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK)) {
+                return refused(target, "BoardEditor.way.structure");
+            }
+            if (deck && Math.abs(deckLevel - target) > 1) { return deckRefusal(at, deckLevel, target); }
+            if (ground > target) { return refused(target, "BoardEditor.way.rising"); }
+            return new WayLayer(deck ? WaySurface.DECK : WaySurface.NEW, deck ? deckLevel : target, "");
+        }
+        if (deck && Math.abs(deckLevel - target) <= 1 && ("bridge".equals(receiver) || up || !dry)) {
+            return new WayLayer(WaySurface.DECK, deckLevel, "");
+        }
+        if (dry && (levelHeight ? ground == target
+              : wayOffset == 0 && (!up || Math.abs(ground - target) <= 1))) {
+            String notice = deck && Math.abs(deckLevel - target) > 1
+                  ? Messages.getString("BoardEditor.way.outOfReach", deckLevel, ground) : "";
+            return new WayLayer(WaySurface.GROUND, ground, notice);
+        }
+        if (!levelHeight && wayOffset == 0 && !dry) { target = Math.max(target, ground); }
+        if (deck) { return deckRefusal(at, deckLevel, target); }
+        if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK)) {
+            return refused(target, "BoardEditor.way.structure");
+        }
+        if (!dry || ground < target) { return new WayLayer(WaySurface.NEW, target, ""); }
+        return refused(target, "BoardEditor.way.rising");
+    }
+
+    private static WayLayer refused(int level, String key) {
+        return new WayLayer(WaySurface.REFUSED, level, Messages.getString(key));
+    }
+
+    private static WayLayer deckRefusal(Coords at, int deck, int target) {
+        return new WayLayer(WaySurface.REFUSED, target, Messages.getString("BoardEditor.way.oneDeck", at.getBoardNum(), deck));
+    }
+
+    private int pressLevel(Coords at, String receiver) {
+        Hex hex = board().getHex(at);
+        return "bridge".equals(receiver) && hex.hasBridge() ? BridgeSpan.deck(hex) : hex.getLevel();
+    }
+
+    /** Bridge cards and every way replay the same path, with its actual pointer receivers and one undo boundary. */
+    private void paintWays(List<Coords> path) {
+        if (path.isEmpty()) { return; }
+        boolean bridge = brushComponent.equals("bridge");
+        int pressed = pressLevel(path.getFirst(), wayReceivers.get(path.getFirst()));
+        WayLayer previous = null;
+        wayLayers.clear();
+        for (int i = 0; i < path.size(); i++) {
+            Coords at = path.get(i);
+            WayLayer layer = wayLayer(at, wayReceivers.get(at), previous, pressed, bridge,
+                  path.size() > 1 && (i == 0 || i == path.size() - 1));
+            wayLayers.put(at, layer);
+            if (!layer.refused()) { previous = layer; }
+        }
+        // Ways may use only exits already drawn on an explicit bridge. Validate before writing either end.
+        for (int i = 0; i < path.size(); i++) {
+            Coords at = path.get(i);
+            WayLayer layer = wayLayers.get(at);
+            Hex hex = board().getHex(at);
+            if (bridge || !layer.deck() || !hex.hasBridge() || HexAppearance.implicit(hex.getAppearance())) { continue; }
+            for (int j : new int[] { i - 1, i + 1 }) {
+                if (j < 0 || j >= path.size()) { continue; }
+                Coords other = path.get(j);
+                WayLayer next = wayLayers.get(other);
+                if (next.refused() || at.distance(other) != 1 || Math.abs(layer.level() - next.level()) > 1) { continue; }
+                int side = at.direction(other);
+                if (!hex.containsTerrainExit(Terrains.BRIDGE, side)) {
+                    wayLayers.put(at, new WayLayer(WaySurface.REFUSED, layer.level(),
+                          Messages.getString("BoardEditor.way.missingExit", at.getBoardNum(), sideName(side))));
+                    break;
+                }
+            }
+        }
+        Hex continued = null;
+        int count = 0, made = 0, carried = 0;
+        for (int i = 0; i < path.size(); i++) {
+            Coords at = path.get(i);
+            WayLayer layer = wayLayers.get(at);
+            if (layer.refused()) { strokeNotice = layer.notice(); continue; }
+            Hex hex = board().getHex(at);
+            int sides = 0;
+            for (int j : new int[] { i - 1, i + 1 }) {
+                if (j < 0 || j >= path.size()) { continue; }
+                Coords other = path.get(j);
+                WayLayer next = wayLayers.get(other);
+                if (!next.refused() && at.distance(other) == 1
+                      && (!layer.deck() && !next.deck() || Math.abs(layer.level() - next.level()) <= 1)) {
+                    sides |= 1 << at.direction(other);
+                }
+            }
+            if (bridge && !layer.deck()) { continue; }
+            String defaults = continued != null ? "bridge:" + continued.terrainLevel(Terrains.BRIDGE)
+                  + ";bridge_cf:" + continued.terrainLevel(Terrains.BRIDGE_CF)
+                  : blueprint.component(brushComponent.equals("road") || bridge ? "bridge" : "ways").defaults();
+            boolean pillars = wayPillars || continued != null && HexAppearance.pillars(continued.getAppearance());
+            int exits = sides;
+            change(at, h -> {
+                if (bridge) { paintBridge(h, layer.level(), exits, pillars); }
+                else {
+                    paintWay(h, layer.deck(), exits);
+                    if (layer.deck()) {
+                        BridgeSpan.carry(h, layer.level() - h.getLevel(), defaults);
+                        if (pillars && HexAppearance.implicit(h.getAppearance())) { appearance(h, "bridge", HexAppearance.IMPLICIT_PILLARS); }
+                    }
+                }
+            });
+            if (layer.deck()) { continued = board().getHex(at); }
+            else { continued = null; }
+            count++;
+            if (layer.surface() == WaySurface.NEW) { made++; }
+            else if (layer.deck()) { carried++; }
+        }
+        selected = path.getLast(); selectedObject = "";
+        component = board().getHex(selected).hasBridge() && wayLayers.get(selected).deck() ? "bridge"
+              : brushComponent.equals("road") ? "road" : "ground";
+        selection.clear(); selection.add(new Selection(selected, ""));
+        message = strokeNotice.isEmpty() ? Messages.getString("BoardEditor.way.painted", brushLabel, count, made, carried) : strokeNotice;
+    }
+
+    private void paintBridge(Hex hex, int level, int sides, boolean pillars) {
+        int kept = hex.hasBridge() ? hex.getTerrain(Terrains.BRIDGE).getExits() : 0;
+        hex.addTerrain(new Terrain(Terrains.BRIDGE, paintTemplate.terrainLevel(Terrains.BRIDGE), true, kept | sides));
+        hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, paintTemplate.terrainLevel(Terrains.BRIDGE_CF)));
+        hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, level - hex.getLevel()));
+        HexAppearance type = paintTemplate.getAppearance().getOrDefault("bridge", HexAppearance.BUILT_BRIDGE);
+        boolean built = !Boolean.FALSE.equals(HexAppearance.bridgeBuilt(Map.of("bridge", type)));
+        appearance(hex, "bridge", built ? HexAppearance.built(HexAppearance.truss(Map.of("bridge", type)),
+              pillars || HexAppearance.pillars(hex.getAppearance()), type.colours()) : HexAppearance.NATURAL_BRIDGE);
+    }
+
+    private void paintWay(Hex hex, boolean deck, int sides) {
+        boolean road = brushComponent.equals("road");
+        int type = road ? deck ? Terrains.BRIDGE_ROAD : Terrains.ROAD : deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL;
+        Terrain old = hex.getTerrain(type);
+        int exits = sides | (old == null ? 0 : old.getExits());
+        if (road) {
+            hex.addTerrain(new Terrain(type, paintTemplate.terrainLevel(Terrains.ROAD), deck || old != null && old.hasExitsSpecified(), exits));
+            HexAppearance look = paintTemplate.getAppearance().get("road");
+            // Shape selectors belong to the ground; a deck keeps the chosen surface and junction controls.
+            appearance(hex, deck ? "bridgeRoad" : "road", deck ? roadSurface(look) : look);
+        } else {
+            String owner = deck ? "bridgeRail" : "rail";
+            int laid = old == null ? 0 : HexAppearance.tracks(hex.getAppearance(), owner);
+            if (old != null && laid == 0) { laid = RailRoute.pieces(old.getExits()); }
+            RailRoute.lay(hex, deck, exits, RailRoute.layout(exits, laid | RailRoute.pieces(sides)),
+                  RailRoute.kind(paintTemplate.getDecorations().getFirst()));
+        }
+    }
+
+    private static void appearance(Hex hex, String owner, HexAppearance value) {
+        var looks = new LinkedHashMap<>(hex.getAppearance());
+        if (value == null) { looks.remove(owner); } else { looks.put(owner, value); }
+        hex.setAppearance(looks);
+    }
+
+    /** A road moved to another height keeps its surface and controls; ground shape selectors do not move with it. */
+    private static HexAppearance roadSurface(HexAppearance look) {
+        if (look == null) { return null; }
+        HexAppearance surface = look.material() == null ? null : new HexAppearance(null, null, look.material(), null);
+        return HexAppearance.withTrafficControl(surface, look.trafficControl());
+    }
+
+    private static String wayOwner(int type) {
+        return switch (type) {
+            case Terrains.ROAD -> "road";
+            case Terrains.RAIL -> "rail";
+            case Terrains.BRIDGE_ROAD -> "bridgeRoad";
+            case Terrains.BRIDGE_RAIL -> "bridgeRail";
+            default -> "";
+        };
+    }
+
+    private static void removeWay(Hex hex, int type) {
+        hex.removeTerrain(type);
+        if (!wayOwner(type).isEmpty()) { appearance(hex, wayOwner(type), null); }
+    }
+
+    private static void removeDeck(Hex hex) {
+        hex.removeBridge();
+        appearance(hex, "bridge", null); appearance(hex, "bridgeRoad", null); appearance(hex, "bridgeRail", null);
+    }
+
+    /** An explicit layer correction, including a submerged way beneath a bridge. */
+    private static void moveWay(Hex hex, String name, boolean deck) {
+        int source = Terrains.getType(name);
+        require(source == Terrains.ROAD || source == Terrains.BRIDGE_ROAD
+              || source == Terrains.RAIL || source == Terrains.BRIDGE_RAIL, "Choose a road or rail.");
+        boolean road = source == Terrains.ROAD || source == Terrains.BRIDGE_ROAD;
+        int target = road ? deck ? Terrains.BRIDGE_ROAD : Terrains.ROAD : deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL;
+        if (source == target) { return; }
+        Terrain way = hex.getTerrain(source);
+        require(way != null, Messages.getString("BoardEditor.addTerrainFirst"));
+        require(!hex.containsTerrain(target), Messages.getString("BoardEditor.way.layerOccupied"));
+        require(!deck || hex.hasBridge(), Messages.getString("BoardEditor.addBridgeFirst"));
+        require(!deck || HexAppearance.implicit(hex.getAppearance())
+              || (way.getExits() & ~hex.getTerrain(Terrains.BRIDGE).getExits()) == 0,
+              Messages.getString("BoardEditor.way.exitOutside"));
+        HexAppearance look = hex.getAppearance().get(wayOwner(source));
+        removeWay(hex, source);
+        hex.addTerrain(new Terrain(target, way.getLevel(), true, way.getExits()));
+        appearance(hex, wayOwner(target), road ? roadSurface(look) : look);
+    }
+
+    /** One corridor run, one edit: middle, beside, or the other side. */
+    private void corridor(String owner, String choice) {
+        require(selected != null, Messages.getString("BoardEditor.selectHexFirst"));
+        require(owner.equals("rail") || owner.equals("bridgeRail"), "Choose a rail layer.");
+        boolean deck = owner.equals("bridgeRail");
+        Hex hex = board().getHex(selected);
+        BoardDecoration marker = RailRoute.derived(hex, "").stream().filter(route -> RailRoute.onDeck(route) == deck)
+              .findFirst().orElseThrow(() -> new IllegalArgumentException(Messages.getString("BoardEditor.addTerrainFirst")));
+        require(Set.of("middle", "beside", "swap").contains(choice), "Choose middle, beside or swap.");
+        var run = RailRoute.corridorRun(board()::getHex, selected, marker);
+        require(!run.isEmpty(), Messages.getString("BoardEditor.way.noCorridor"));
+        var sides = RailRoute.besideBits(board()::getHex, run, new RailRoute.Member(selected, marker));
+        for (var member : run) {
+            boolean onDeck = RailRoute.onDeck(member.marker());
+            change(member.at(), h -> {
+                int stored = HexAppearance.beside(h.getAppearance(), onDeck ? "bridgeRail" : "rail");
+                int value = choice.equals("middle") ? 0 : choice.equals("swap") && stored != 0
+                      ? stored ^ member.marker().connections() : sides.getOrDefault(member, 64);
+                RailRoute.beside(h, onDeck, value);
+            });
+        }
+        // Existing vehicles follow the moved centreline, as newly painted vehicles do.
+        for (var member : run) {
+            change(member.at(), h -> h.setDecorations(h.getDecorations().stream()
+                  .map(object -> RailRoute.vehicle(object.asset()) ? ride(member.at(), object) : object).toList()));
+        }
+        if (!continuousEdit) { finishStroke(); }
+    }
+
+    /** Erase follows the same pointer layer decision; a deck never takes the road or rail beneath it. */
+    private void eraseWay(Coords at, String receiver) {
+        if (!painted.add(at)) { return; }
+        Hex hex = board().getHex(at);
+        boolean bridge = brushComponent.equals("bridge");
+        wayReceivers.putIfAbsent(at, receiver == null ? "ground" : receiver);
+        Coords press = wayReceivers.keySet().iterator().next();
+        Hex first = stroke.getOrDefault(press, board().getHex(press));
+        int pressed = "bridge".equals(wayReceivers.get(press)) && first.hasBridge() ? BridgeSpan.deck(first) : first.getLevel();
+        WayLayer previous = wayLayers.get(routePaintFrom);
+        WayLayer layer = wayLayer(at, receiver, previous, pressed, false, false);
+        if (bridge && hex.hasBridge()) { layer = new WayLayer(WaySurface.DECK, BridgeSpan.deck(hex), ""); }
+        wayLayers.put(at, layer);
+        if (layer.refused()) { strokeNotice = layer.notice(); return; }
+        int type = bridge ? Terrains.BRIDGE : brushComponent.equals("road")
+              ? layer.deck() ? Terrains.BRIDGE_ROAD : Terrains.ROAD : layer.deck() ? Terrains.BRIDGE_RAIL : Terrains.RAIL;
+        if (!hex.containsTerrain(type)) { return; }
+        if ((type == Terrains.RAIL || type == Terrains.BRIDGE_RAIL)
+              && hex.terrainLevel(type) != (RailRoute.kind(paintTemplate.getDecorations().getFirst()) == RailRoute.Kind.MAGLEV ? 2 : 1)) { return; }
+        change(at, h -> { if (bridge) { removeDeck(h); } else { removeWay(h, type); } });
+        cutWayNeighbours(at, hex, type);
+        routePaintFrom = at;
+    }
+
+    /** Only the removed layer's neighbours lose their facing sides; automatic roads re-derive their own exits. */
+    private void cutWayNeighbours(Coords at, Hex before, int type) {
+        for (int d = 0; d < 6; d++) {
+            Coords next = at.translated(d);
+            Hex neighbour = board().getHex(next);
+            if (neighbour == null) { continue; }
+            int back = 1 << ((d + 3) % 6);
+            if (type == Terrains.RAIL || type == Terrains.BRIDGE_RAIL || type == Terrains.BRIDGE) {
+                boolean onDeck = type != Terrains.RAIL;
+                var oldRail = RailRoute.derived(before, "").stream().filter(route -> RailRoute.onDeck(route) == onDeck)
+                      .findFirst().orElse(null);
+                var joined = oldRail == null ? null : RailRoute.joined(before, oldRail, d, neighbour);
+                if (joined != null) {
+                    int sides = joined.connections() & ~back;
+                    change(next, h -> RailRoute.lay(h, RailRoute.onDeck(joined), sides,
+                          RailRoute.layout(sides, joined.tracks()), RailRoute.kind(joined)));
+                }
+                if (type != Terrains.BRIDGE) { continue; }
+            }
+            boolean deck = type == Terrains.BRIDGE || type == Terrains.BRIDGE_ROAD || type == Terrains.BRIDGE_RAIL;
+            if (deck && (!neighbour.hasBridge() || Math.abs(BridgeSpan.deck(before) - BridgeSpan.deck(neighbour)) > 1)) { continue; }
+            int[] types = type == Terrains.BRIDGE ? new int[] { Terrains.BRIDGE, Terrains.BRIDGE_ROAD, Terrains.BRIDGE_RAIL }
+                  : new int[] { type };
+            change(next, h -> {
+                for (int cut : types) {
+                    Terrain value = h.getTerrain(cut);
+                    if (value != null && (value.getExits() & back) != 0 && (cut != Terrains.ROAD || value.hasExitsSpecified())) {
+                        h.addTerrain(new Terrain(cut, value.getLevel(), true, value.getExits() & ~back));
+                        if (cut == Terrains.RAIL || cut == Terrains.BRIDGE_RAIL) {
+                            RailRoute.lay(h, cut == Terrains.BRIDGE_RAIL, value.getExits() & ~back,
+                                  RailRoute.layout(value.getExits() & ~back, HexAppearance.tracks(h.getAppearance(), wayOwner(cut))),
+                                  value.getLevel() == 2 ? RailRoute.Kind.MAGLEV : RailRoute.Kind.RAIL);
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    /** Reconcile implicit decks and freeze bridge exits only in the edit's footprint and its recorded neighbours. */
+    private void wayDecks() {
+        for (Coords at : List.copyOf(stroke.keySet())) {
+            Hex current = board().getHex(at), before = stroke.get(at);
+            if (before.hasBridge() && !current.hasBridge()) { cutWayNeighbours(at, before, Terrains.BRIDGE); }
+            for (int way : new int[] { Terrains.RAIL, Terrains.BRIDGE_ROAD, Terrains.BRIDGE_RAIL }) {
+                if (before.containsTerrain(way) && !current.containsTerrain(way)) { cutWayNeighbours(at, before, way); }
+            }
+            change(at, hex -> {
+                BridgeSpan.carry(hex, Math.max(0, hex.terrainLevel(Terrains.BRIDGE_ELEV)), blueprint.component("bridge").defaults());
+                Terrain bridge = hex.getTerrain(Terrains.BRIDGE);
+                if (bridge != null && !bridge.hasExitsSpecified()) {
+                    hex.addTerrain(new Terrain(Terrains.BRIDGE, bridge.getLevel(), true, bridge.getExits()));
+                }
+            });
+        }
+    }
+
+    /** The hovered route result, including whether erasing its way also removes an implicit deck. */
+    public String wayHint(Coords at, Preview result) {
+        if (!wayBrush() || at == null || !board().contains(at)) { return ""; }
+        WayLayer layer = result.layers().get(at);
+        if (layer == null) { return ""; }
+        if (layer.refused()) { return Messages.getString("BoardEditor.way.refused", layer.notice()); }
+        if (tool == Tool.ERASE && layer.deck() && !brushComponent.equals("bridge")) {
+            Hex hex = board().getHex(at);
+            int other = brushComponent.equals("road") ? Terrains.BRIDGE_RAIL : Terrains.BRIDGE_ROAD;
+            return Messages.getString(HexAppearance.implicit(hex.getAppearance()) && !hex.containsTerrain(other)
+                  ? "BoardEditor.way.eraseImplicit" : "BoardEditor.way.eraseExplicit", brushLabel);
+        }
+        if (!layer.notice().isEmpty()) { return layer.notice(); }
+        return Messages.getString(layer.surface() == WaySurface.GROUND ? "BoardEditor.way.ground"
+              : layer.surface() == WaySurface.NEW ? "BoardEditor.way.new" : "BoardEditor.way.deck", layer.level());
     }
 
     /**
@@ -1148,7 +1604,7 @@ public final class BoardEditorSession {
      */
     public void cancelStroke() {
         if (drawing == null) { return; }
-        drawing = null;
+        drawing = null; wayReceivers.clear();
         revision++;
     }
 
@@ -1176,6 +1632,11 @@ public final class BoardEditorSession {
                 // Slope steps neighbours too; with Only overwrite clear hexes, a neighbour holding terrain stays.
                 levels.keySet().removeIf(cell -> !overwrites(cell));
                 setLevels(levels);
+            } else if (wayBrush()) {
+                selected = at; selectedObject = ""; component = brushComponent.isEmpty() ? "ground" : brushComponent;
+                var cells = drag && routePaintFrom != null ? Coords.intervening(routePaintFrom, at) : List.of(at);
+                for (Coords cell : cells) { if (board().contains(cell)) { eraseWay(cell, cell.equals(at) ? receiver : "ground"); } }
+                notice = strokeNotice;
             } else if (sampledHex != null) {
                 selected = at; selectedObject = ""; component = brushComponent;
                 Hex sample = tool == Tool.ERASE ? new Hex(0) : paintTemplate;
@@ -1192,71 +1653,70 @@ public final class BoardEditorSession {
                 }
             } else if (!paintTemplate.getDecorations().isEmpty()) {
                 BoardDecoration prototype = paintTemplate.getDecorations().getFirst();
-                var routeKind = megamek.common.board.RailRoute.kind(prototype);
-                if (routeKind != null) {
-                    // Routes paint continuously, with one centred marker per hex and route and ordinary stroke history.
-                    // Consecutive hexes of one stroke join, so a parallel stroke stays apart; a stroke may start on a route
-                    // to extend it. Each hex lays the gentle piece between the sides the stroke entered and left it by.
-                    selected = at; selectedObject = "";
-                    if (!drag || routePaintFrom == null) { routeBrush = strokeBrush(at, prototype); }
-                    var routeCells = drag && routePaintFrom != null ? Coords.intervening(routePaintFrom, at) : List.of(at);
-                    Coords previousCell = null;
-                    for (Coords cell : routeCells) {
-                        if (!board().contains(cell)) { continue; }
-                        if (tool == Tool.ERASE) {
-                            if (painted.add(cell)) {
-                                // Erasing removes the brush's kind of route only, a maglev only within the brush's level band.
-                                change(cell, hex -> hex.setDecorations(hex.getDecorations().stream()
-                                      .filter(d -> RailRoute.kind(d) != routeKind || !inBand(hex, d, prototype)).toList()));
-                                unlinkRoutes(List.of(cell));
-                            }
-                            continue;
-                        }
-                        if (painted.add(cell)) { notice = routeMarker(cell, routeBrush, notice); }
-                        if (previousCell != null && previousCell.distance(cell) == 1) { notice = routeStep(previousCell, cell, notice); }
-                        previousCell = cell;
-                    }
-                    // The preview's heading is the pointer's movement from here (heading).
-                    if (!drag || !at.equals(routePaintFrom)) { routeEntryX = x; routeEntryY = y; }
-                    routePaintFrom = at;
-                    var drawn = routeStroke.get(at);
-                    selectedObject = drawn == null ? "" : drawn.marker();
-                } else if (tool == Tool.ERASE) {
+                if (tool == Tool.ERASE) {
                     selected = at; selectedObject = "";
                     for (Coords spot : brush(at)) {
                         if (painted.add(spot)) { change(spot, hex -> hex.setDecorations(hex.getDecorations().stream()
                               .filter(d -> !d.asset().equals(prototype.asset())).toList())); }
                     }
                 } else if (!placed) {
-                    selected = at;
                     BoardDecoration object = brushCopy(prototype, precision ? x : 0, precision ? y : 0, onSupport(board().getHex(at), receiver, prototype));
                     if (precision && magnetic) { object = BoardEditorSnapping.snap(board(), blueprint, at, object, Set.of()); }
                     object = ride(at, object);
-                    addObject(at, object); placed = true;
+                    Selection twin = addObject(at, object);
+                    // One object per press. A click where its twin stands selects that instead; a drag skips it silently.
+                    if (twin == null || !drag) { placed = true; }
+                    if (twin != null && !drag) { notice = selectPlaced(List.of(twin)); }
                 }
             } else if (stampLayout() != null) {
                 require(tool == Tool.PAINT, Messages.getString("BoardEditor.stampGroup"));
                 if (!placed) {
-                    List<Selection> members = new ArrayList<>();
                     var stamped = BoardSceneryLayouts.stamp(stampLayout(), board().getHex(at), at);
                     var riding = ride(at, stamped);
-                    // A train on a track places only the vehicles that fit; the notice says how many.
-                    long vehicles = stamped.stream().filter(member -> RailRoute.vehicle(member.asset())).count();
-                    long fitting = riding.stream().filter(member -> RailRoute.vehicle(member.getValue().asset())).count();
-                    if (fitting < vehicles) { notice = Messages.getString("BoardEditor.vehiclesPlaced", fitting, vehicles); }
-                    // Each member belongs to the stamp's hex, a vehicle that rides a route to the hex of the track it stands on.
-                    for (var member : riding) {
-                        change(member.getKey(), hex -> { var objects = new ArrayList<>(hex.getDecorations()); objects.add(member.getValue()); hex.setDecorations(objects); });
-                        members.add(new Selection(member.getKey(), member.getValue().id()));
+                    // All or nothing: a stamp whose every member has its twin in its hex is there already; a click selects
+                    // those twins, a drag skips them silently. Any other stamp is placed whole.
+                    var twins = riding.stream().map(member -> twin(member.getKey(), member.getValue())).toList();
+                    if (!twins.isEmpty() && twins.stream().allMatch(Objects::nonNull)) {
+                        if (!drag) { notice = selectPlaced(twins); placed = true; }
+                    } else {
+                        List<Selection> members = new ArrayList<>();
+                        // A train on a track places only the vehicles that fit; the notice says how many.
+                        long vehicles = stamped.stream().filter(member -> RailRoute.vehicle(member.asset())).count();
+                        long fitting = riding.stream().filter(member -> RailRoute.vehicle(member.getValue().asset())).count();
+                        if (fitting < vehicles) { notice = Messages.getString("BoardEditor.vehiclesPlaced", fitting, vehicles); }
+                        // Each member belongs to the stamp's hex, a vehicle that rides a route to the hex of the track it stands on.
+                        for (var member : riding) {
+                            change(member.getKey(), hex -> { var objects = new ArrayList<>(hex.getDecorations()); objects.add(member.getValue()); hex.setDecorations(objects); });
+                            members.add(new Selection(member.getKey(), member.getValue().id()));
+                        }
+                        selected = members.isEmpty() ? at : members.getFirst().coords();
+                        selectedObject = members.isEmpty() ? "" : members.getFirst().object(); placed = true;
+                        // The new stamp is selected as its whole group, so a later Select click and drag moves all of it.
+                        selection.clear();
+                        if (members.isEmpty()) { selection.add(new Selection(at, "")); }
+                        selection.addAll(members);
                     }
-                    selected = members.isEmpty() ? at : members.getFirst().coords();
-                    selectedObject = members.isEmpty() ? "" : members.getFirst().object(); placed = true;
-                    // The new stamp is selected as its whole group, so a later Select click and drag moves all of it.
-                    selection.clear();
-                    if (members.isEmpty()) { selection.add(new Selection(at, "")); }
-                    selection.addAll(members);
+                }
+            } else if (tool == Tool.PAINT && !brushHexes().isEmpty()) {
+                // A multi-hex blueprint (the DropShip), once per press: the clicked hex and its six neighbours each get the
+                // component's fields of their terrain, without its design; they keep their level, theme, ground and objects.
+                if (!placed) {
+                    placed = true; selected = at; selectedObject = ""; component = brushComponent;
+                    var definition = blueprint.component(brushComponent);
+                    Map<Coords, Hex> targets = new LinkedHashMap<>();
+                    targets.put(at, paintTemplate);
+                    brushHexes().forEach((direction, terrain) -> targets.put(at.translated(direction), new Hex(0, terrain, "")));
+                    require(targets.keySet().stream().allMatch(board()::contains), Messages.getString("BoardEditor.blueprintOffBoard"));
+                    targets.forEach((spot, template) -> change(spot, hex -> {
+                        paintFields(hex, template, definition);
+                        var styles = new LinkedHashMap<>(hex.getAppearance()); styles.remove(brushComponent); hex.setAppearance(styles);
+                    }));
+                    selection.clear(); selection.add(new Selection(at, ""));
                 }
             } else {
+                // A Theme card paints no ground field: the hex keeps its sand, mud, swamp and the rest.
+                boolean theme = brushKey.startsWith(THEME_BRUSH);
+                require(!theme || tool == Tool.PAINT, Messages.getString("BoardEditor.themeNoErase"));
                 selected = at; selectedObject = ""; component = brushComponent;
                 var definition = blueprint.component(brushComponent);
                 List<Coords> spots = new ArrayList<>();
@@ -1264,15 +1724,7 @@ public final class BoardEditorSession {
                     if (!painted.add(spot)) { continue; }
                     spots.add(spot);
                     change(spot, hex -> {
-                        for (var field : definition.fields()) {
-                            int type = Terrains.getType(field.terrain());
-                            Terrain value = paintTemplate.getTerrain(type);
-                            if (!definition.replaceExisting() && value == null) { continue; }
-                            // The Deployment zone card adds its zone, and Erase removes it; the hex keeps its other zones.
-                            if (type == Terrains.DEPLOYMENT_ZONE && value != null) { zones(hex, value.getExits(), tool != Tool.ERASE); }
-                            else if (tool == Tool.ERASE || value == null) { hex.removeTerrain(type); }
-                            else { hex.addTerrain(new Terrain(value)); }
-                        }
+                        if (!theme) { paintFields(hex, paintTemplate, definition); }
                         var styles = new LinkedHashMap<>(hex.getAppearance());
                         if (tool != Tool.ERASE && paintTemplate.getAppearance().containsKey(brushComponent)) {
                             // A Built or Truss bridge card keeps the hex's piers.
@@ -1286,21 +1738,10 @@ public final class BoardEditorSession {
                         }
                     });
                 }
-                // A bridge card's type and design are the choice for each whole span its stroke paints or joins.
-                Boolean built = HexAppearance.bridgeBuilt(paintTemplate.getAppearance());
-                if (tool == Tool.PAINT && brushComponent.equals("bridge") && built != null) {
-                    boolean truss = HexAppearance.truss(paintTemplate.getAppearance());
-                    // Each span once: typing a span types every hex of it, and spans follow the decks, not their type.
-                    Set<Coords> typed = new java.util.HashSet<>();
-                    for (Coords spot : spots) {
-                        if (typed.contains(spot)) { continue; }
-                        typeSpan(spot, built, truss);
-                        typed.addAll(structure(spot, Terrains.BRIDGE));
-                    }
-                }
+
             }
-            // A stamp keeps the whole group it selected above.
-            if (tool != Tool.SELECT && (tool == Tool.SCULPT || stampLayout() == null)) {
+            // What a press placed or found placed stays selected for its stroke: an object, a stamp's or a twin's group.
+            if (tool != Tool.SELECT && !placed) {
                 selection.clear();
                 if (selected != null) { selection.add(new Selection(selected, selectedObject)); }
             }
@@ -1363,16 +1804,17 @@ public final class BoardEditorSession {
         Coords event = target;
         List<Coords> drawn = events;
         String[] notice = { "" };
-        boolean hand = drawing != null;
+        Map<Coords, WayLayer> layers = new LinkedHashMap<>();
         dryRun = originals;
         try {
             board().quietly(() -> {
                 try {
                     // A route drawn by hand is built as its release builds it; any other event is the event itself.
-                    if (drawsRoutes()) { drawing = new RoutePath(drawn); drawPath(); }
+                    if (drawsRoutes()) { wayReceivers.put(at, support); drawing = new RoutePath(drawn); drawPath(); }
                     else { pointer(event, pointX, pointY, routing, null, false, support); }
                     if (!stroke.isEmpty()) { completeStroke(); }
-                    if (hand) { notice[0] = strokeNotice; }
+                    notice[0] = strokeNotice;
+                    layers.putAll(wayLayers);
                     originals.keySet().forEach(cell -> after.put(cell, board().getHex(cell).duplicate()));
                 } finally {
                     dryRun = null;
@@ -1390,9 +1832,9 @@ public final class BoardEditorSession {
             }
         });
         // A route drawn over track it does not change still shows its path.
-        preview = changed.isEmpty() && path.isEmpty() ? Preview.NONE : new Preview(target,
+        preview = changed.isEmpty() && path.isEmpty() && layers.isEmpty() ? Preview.NONE : new Preview(target,
               java.util.Collections.unmodifiableMap(before), java.util.Collections.unmodifiableMap(changed), path, notice[0],
-              step);
+              step, Map.copyOf(layers));
         previewFor = key;
         return preview;
     }
@@ -1432,14 +1874,14 @@ public final class BoardEditorSession {
 
     /** The session's stroke and selection state, which a preview's dry run changes and {@link #restore} puts back. */
     private record Saved(Coords selected, String selectedObject, String component, String message, String strokeNotice,
-          long revision, List<Selection> selection, Set<Coords> painted, Map<Coords, RouteCell> routeStroke,
-          BoardDecoration routeBrush, Coords routePaintFrom, double routeEntryX, double routeEntryY, boolean placed,
+          long revision, List<Selection> selection, Set<Coords> painted, Map<Coords, WayLayer> wayLayers,
+          Map<Coords, String> wayReceivers, Coords routePaintFrom, double routeEntryX, double routeEntryY, boolean placed,
           Map<Coords, Hex> stroke, List<BoardIssue> importIssues, RoutePath drawing) { }
 
     private Saved save() {
         // Hash copies, not Set.copyOf or Map.copyOf, whose probing is slow for runs of Coords (finishStroke).
         return new Saved(selected, selectedObject, component, message, strokeNotice, revision, new ArrayList<>(selection),
-              new java.util.HashSet<>(painted), new java.util.HashMap<>(routeStroke), routeBrush, routePaintFrom,
+              new java.util.HashSet<>(painted), new LinkedHashMap<>(wayLayers), new LinkedHashMap<>(wayReceivers), routePaintFrom,
               routeEntryX, routeEntryY, placed, new LinkedHashMap<>(stroke), importIssues, drawing);
     }
 
@@ -1448,26 +1890,14 @@ public final class BoardEditorSession {
         message = saved.message(); strokeNotice = saved.strokeNotice(); revision = saved.revision();
         selection.clear(); selection.addAll(saved.selection());
         painted.clear(); painted.addAll(saved.painted());
-        routeStroke.clear(); routeStroke.putAll(saved.routeStroke());
-        routeBrush = saved.routeBrush(); routePaintFrom = saved.routePaintFrom(); placed = saved.placed();
+        wayLayers.clear(); wayLayers.putAll(saved.wayLayers());
+        wayReceivers.clear(); wayReceivers.putAll(saved.wayReceivers());
+        routePaintFrom = saved.routePaintFrom(); placed = saved.placed();
         routeEntryX = saved.routeEntryX(); routeEntryY = saved.routeEntryY();
         stroke.clear(); stroke.putAll(saved.stroke());
         importIssues = saved.importIssues(); drawing = saved.drawing();
     }
 
-    /**
-     * The marker on {@code neighbor} (the hex in {@code direction}) that a side toggle of {@code route} sets or clears with
-     * it: when clearing, the one it joins; when setting, the one that already leaves back, else the one nearest its level.
-     */
-    private static BoardDecoration partner(BoardDecoration route, Hex hex, int direction, Hex neighbor, boolean on) {
-        if (!on) { return RailRoute.joined(route, direction, neighbor); }
-        var kind = RailRoute.kind(route);
-        var owner = RailRoute.owner(neighbor, kind, (direction + 3) % 6, null);
-        if (owner != null) { return owner; }
-        double level = route.placement().level(hex);
-        return RailRoute.markers(neighbor, kind).stream()
-              .min(Comparator.comparingDouble(marker -> Math.abs(marker.placement().level(neighbor) - level))).orElse(null);
-    }
 
     /**
      * A rail or maglev vehicle placed on a hex that holds a route of its kind rides it: onto the nearest point of the
@@ -1477,7 +1907,7 @@ public final class BoardEditorSession {
      */
     private BoardDecoration ride(Coords at, BoardDecoration object) {
         if (!RailRoute.vehicle(object.asset())) { return object; }
-        var track = track(board().getHex(at), object);
+        var track = track(at, object);
         if (track == null) { return object; }
         var spot = track.getValue();
         return object.transform(spot.x() / HexTile.WIDTH, spot.y() / HexTile.HEIGHT, spot.rotation(), object.mirror(),
@@ -1491,12 +1921,13 @@ public final class BoardEditorSession {
      * The route on {@code hex} that {@code vehicle} rides and its spot there, or null: the track that passes nearest it in
      * plan; of tracks as near (where maglevs cross), the one whose level is nearest the vehicle's.
      */
-    private static Map.Entry<BoardDecoration, RailRoute.Spot> track(Hex hex, BoardDecoration vehicle) {
+    private Map.Entry<BoardDecoration, RailRoute.Spot> track(Coords at, BoardDecoration vehicle) {
+        Hex hex = board().getHex(at);
         float x = (float) vehicle.x() * HexTile.WIDTH, y = (float) vehicle.y() * HexTile.HEIGHT;
         double level = vehicle.placement().level(hex), gap = Double.POSITIVE_INFINITY, rise = Double.POSITIVE_INFINITY;
         Map.Entry<BoardDecoration, RailRoute.Spot> result = null;
         for (var marker : RailRoute.markers(hex, RailRoute.rides(vehicle.asset()))) {
-            var spot = RailRoute.snap(hex, marker, x, y, (float) vehicle.rotation());
+            var spot = RailRoute.snap(hex, marker, x, y, (float) vehicle.rotation(), RailRoute.corridor(hex, at, board()::getHex, RailRoute.onDeck(marker)));
             double markerGap = Math.hypot(spot.x() - x, spot.y() - y), markerRise = Math.abs(marker.placement().level(hex) - level);
             if (markerGap < gap - SAME_SPOT || markerGap <= gap + SAME_SPOT && markerRise < rise) {
                 result = Map.entry(marker, spot);
@@ -1518,7 +1949,7 @@ public final class BoardEditorSession {
      */
     private List<Map.Entry<Coords, BoardDecoration>> ride(Coords at, List<BoardDecoration> members) {
         var first = members.stream().filter(member -> RailRoute.vehicle(member.asset())).findFirst().orElse(null);
-        var track = first == null ? null : track(board().getHex(at), first.transform(0, 0, 0, false, 1, first.placement()));
+        var track = first == null ? null : track(at, first.transform(0, 0, 0, false, 1, first.placement()));
         if (track == null) { return members.stream().map(member -> Map.entry(at, member)).toList(); }
         var route = track.getKey();
         var start = track.getValue();
@@ -1545,143 +1976,6 @@ public final class BoardEditorSession {
     /** How far (model px) a stamped vehicle's end may lie past the track's end and still fit: rounding only. */
     private static final float FITS = .01f;
 
-    /** Whether a route brush erases {@code marker} on {@code hex}: any rail, a maglev within a level of the brush's. */
-    private static boolean inBand(Hex hex, BoardDecoration marker, BoardDecoration brush) {
-        return RailRoute.kind(marker) == RailRoute.Kind.RAIL
-              || Math.abs(marker.placement().level(hex) - brush.placement().level(hex)) < 1;
-    }
-
-    /**
-     * Picks the marker a route stroke draws on in {@code cell} and records it ({@link #routeStroke}): the hex's rail,
-     * which keeps what carries it (a new one lies on the ground until its sides take it onto a deck, {@link #drawSide});
-     * or the hex's maglev within a level of the brush's, which takes the brush's level, others being routes that cross
-     * above or below. Else a new marker without sides; a hex holds at most three maglevs (each needs two of its six
-     * sides). Returns the stroke's notice, which says why a hex was left out.
-     */
-    private String routeMarker(Coords cell, BoardDecoration prototype, String notice) {
-        var kind = RailRoute.kind(prototype);
-        Hex hex = board().getHex(cell);
-        var markers = RailRoute.markers(hex, kind);
-        boolean rail = kind == RailRoute.Kind.RAIL;
-        var previous = markers.stream().filter(marker -> rail || inBand(hex, marker, prototype)).findFirst().orElse(null);
-        if (previous == null && markers.size() >= 3) { return Messages.getString("BoardEditor.routeFull"); }
-        var placement = !rail ? prototype.placement() : previous != null ? previous.placement() : BoardDecoration.Placement.ground();
-        // A new marker starts without sides, even from a sampled route; the stroke adds them.
-        var marker = (previous == null ? prototype.duplicate().withConnections(0) : previous).transform(0, 0, 0, false, 1, placement);
-        change(cell, h -> {
-            var objects = new ArrayList<>(h.getDecorations());
-            int index = previous == null ? -1 : objects.indexOf(previous);
-            if (index < 0) { objects.add(marker); } else { objects.set(index, marker); }
-            h.setDecorations(objects);
-        });
-        routeStroke.put(cell, new RouteCell(marker.id(), -1, 0));
-        return notice;
-    }
-
-    /**
-     * One step of a route stroke from {@code from} into the adjacent {@code to}: both markers take their shared side,
-     * unless another route of the kind owns it in either hex (this route then ends open there; the notice says which).
-     * The sides the stroke entered and leaves {@code from} by make the piece it draws there when they are a gentle pair;
-     * a 120-degree step draws none, so those sides end in stubs unless other pieces reach them.
-     */
-    private String routeStep(Coords from, Coords to, String notice) {
-        RouteCell exit = routeStroke.get(from), entry = routeStroke.get(to);
-        if (exit == null || entry == null) { return notice; }
-        int direction = from.direction(to), back = (direction + 3) % 6;
-        Hex fromHex = board().getHex(from), toHex = board().getHex(to);
-        var leaving = marker(fromHex, exit.marker());
-        var entering = marker(toHex, entry.marker());
-        var kind = RailRoute.kind(leaving);
-        var used = RailRoute.owner(fromHex, kind, direction, leaving);
-        if (used != null) { return Messages.getString("BoardEditor.routeSideUsed", sideName(direction), used.placement().level(fromHex)); }
-        used = RailRoute.owner(toHex, kind, back, entering);
-        if (used != null) { return Messages.getString("BoardEditor.routeSideUsed", sideName(back), used.placement().level(toHex)); }
-        int piece = exit.entered() < 0 ? -1 : RailRoute.piece(exit.entered(), direction);
-        exit = new RouteCell(exit.marker(), exit.entered(), piece < 0 ? exit.drawn() : exit.drawn() | 1 << piece);
-        entry = new RouteCell(entry.marker(), back, entry.drawn());
-        routeStroke.put(from, exit); routeStroke.put(to, entry);
-        drawSide(from, exit, direction);
-        drawSide(to, entry, back);
-        return notice;
-    }
-
-    /**
-     * Adds side {@code direction} to the stroke's marker in {@code cell} and lays its pieces: those it laid before the
-     * stroke and those the stroke drew through it ({@link RailRoute#layout}), never a 120-degree turn. A rail the stroke
-     * made rides the hex's bridge deck once one of its sides runs along the bridge ({@link RailRoute#alongDeck}), and
-     * lies beneath while none does, as the conversion decides; an existing rail keeps what carries it.
-     */
-    private void drawSide(Coords cell, RouteCell drawn, int direction) {
-        var before = stroke.getOrDefault(cell, board().getHex(cell)).getDecorations().stream()
-              .filter(d -> d.id().equals(drawn.marker())).findFirst();
-        int laid = before.map(d -> RailRoute.pieces(d, d.connections())).orElse(0);
-        change(cell, hex -> hex.setDecorations(hex.getDecorations().stream().map(d -> {
-            if (!d.id().equals(drawn.marker())) { return d; }
-            int sides = d.connections() | RailRoute.side(direction);
-            var next = d.withConnections(sides).withTracks(RailRoute.layout(sides, laid | drawn.drawn()));
-            if (before.isPresent() || RailRoute.kind(d) != RailRoute.Kind.RAIL) { return next; }
-            return next.transform(next.x(), next.y(), next.rotation(), next.mirror(), next.scale(),
-                  RailRoute.alongDeck(sides, RailRoute.bridgeExits(hex)) ? BoardDecoration.Placement.on("bridge", 0)
-                        : BoardDecoration.Placement.ground());
-        }).toList()));
-    }
-
-    /**
-     * A route stroke over several hexes drops each marker it made that it could not join: every
-     * side it tried there was refused, another route of its kind owning it at that level ({@link #routeStep}), so the
-     * marker would stand alone as a stub. A single click keeps its marker, which is how a route is started.
-     */
-    private void dropUnjoined() {
-        if (routeStroke.size() < 2) { return; }
-        routeStroke.forEach((cell, drawn) -> {
-            Hex before = stroke.get(cell);
-            boolean made = before == null || before.getDecorations().stream().noneMatch(d -> d.id().equals(drawn.marker()));
-            boolean alone = board().getHex(cell).getDecorations().stream()
-                  .anyMatch(d -> d.id().equals(drawn.marker()) && d.connections() == 0);
-            if (made && alone) {
-                change(cell, hex -> hex.setDecorations(hex.getDecorations().stream()
-                      .filter(d -> !d.id().equals(drawn.marker())).toList()));
-            }
-        });
-    }
-
-    /**
-     * A rail rides its bridge's deck only along it ({@link RailRoute#alongDeck}): a deck rail the stroke left without its
-     * bridge, or without a side along it (its sides or the bridge's exits edited), lies on the ground beneath.
-     */
-    private void railDecks() {
-        for (Coords at : List.copyOf(stroke.keySet())) {
-            int exits = RailRoute.bridgeExits(board().getHex(at));
-            java.util.function.Predicate<BoardDecoration> offDeck = d -> RailRoute.kind(d) == RailRoute.Kind.RAIL
-                  && RailRoute.onDeck(d) && !RailRoute.alongDeck(d.connections(), exits);
-            if (board().getHex(at).getDecorations().stream().noneMatch(offDeck)) { continue; }
-            change(at, hex -> hex.setDecorations(hex.getDecorations().stream().map(d -> !offDeck.test(d) ? d
-                  : d.transform(d.x(), d.y(), d.rotation(), d.mirror(), d.scale(), BoardDecoration.Placement.ground())).toList()));
-        }
-    }
-
-    /**
-     * The brush a route stroke that starts on {@code at} paints with: the armed one, but a maglev stroke that starts on a
-     * route's end (the hex's only maglev, leaving by one side) a level or more from the brush continues that route at its
-     * placement, since a stroke that starts on a route extends it (such as a converted maglev on the ground under the
-     * default brush, a level up). Anywhere else a maglev a level or more away is another route, crossed at the brush's
-     * level.
-     */
-    private BoardDecoration strokeBrush(Coords at, BoardDecoration prototype) {
-        Hex hex = board().getHex(at);
-        var markers = RailRoute.markers(hex, RailRoute.Kind.MAGLEV);
-        if (tool != Tool.PAINT || RailRoute.kind(prototype) != RailRoute.Kind.MAGLEV || markers.size() != 1
-              || Integer.bitCount(markers.getFirst().connections()) != 1 || inBand(hex, markers.getFirst(), prototype)) {
-            return prototype;
-        }
-        return prototype.transform(prototype.x(), prototype.y(), prototype.rotation(), prototype.mirror(), prototype.scale(),
-              markers.getFirst().placement());
-    }
-
-    private static BoardDecoration marker(Hex hex, String id) {
-        return hex.getDecorations().stream().filter(d -> d.id().equals(id)).findFirst().orElseThrow();
-    }
-
     /** A side's short name, N to NW. */
     private static String sideName(int direction) { return Messages.getString("BoardEditor.sides").split(",")[direction]; }
 
@@ -1694,9 +1988,13 @@ public final class BoardEditorSession {
      * toggles; Shift drags do nothing here (the view boxes them).
      */
     private void selectPointer(Coords at, double x, double y, boolean drag, String object, boolean additive) {
+        String pickedRoute = object;
+        var rail = RailRoute.derived(board().getHex(at), "").stream()
+              .filter(route -> route.id().equals(pickedRoute)).findFirst().orElse(null);
+        if (rail != null) { object = ""; }
         Selection hit = new Selection(at, object == null ? "" : object);
         // A board click selects the ground unless it hit an object; a prior Layers choice belongs to that inspection.
-        if (!drag && hit.object().isEmpty()) { component = "ground"; }
+        if (!drag && hit.object().isEmpty()) { component = rail != null && RailRoute.onDeck(rail) ? "bridge" : "ground"; }
         if (drag) { pendingDrill = null; }
         if (additive && drag) { return; }
         // Only presses need the group, so a drag's move events never consult the board's groups.
@@ -1769,19 +2067,44 @@ public final class BoardEditorSession {
         return prototype.duplicate().transform(x, y, prototype.rotation(), prototype.mirror(), prototype.scale(), placement);
     }
 
-    /** Adds a new object to the hex its anchor lies in, seen from {@code owner}, and makes it the selected object. */
-    private void addObject(Coords owner, BoardDecoration object) {
+    /**
+     * Adds a new object to the hex its anchor lies in, seen from {@code owner}, and makes it the selection; unless that hex
+     * holds its twin ({@link #twin}), a hidden copy: then it adds nothing and returns the twin.
+     */
+    private Selection addObject(Coords owner, BoardDecoration object) {
         var destination = positioned(owner, object);
-        selected = destination.getKey().coords();
+        Coords at = destination.getKey().coords();
         BoardDecoration placedObject = destination.getValue();
+        Selection twin = twin(at, placedObject);
+        if (twin != null) { return twin; }
+        selected = at;
         change(selected, hex -> { var objects = new ArrayList<>(hex.getDecorations()); objects.add(placedObject); hex.setDecorations(objects); });
         selectedObject = object.id();
+        selection.clear(); selection.add(new Selection(selected, selectedObject));
+        return null;
+    }
+
+    /** The object of the hex at {@code at} that {@code object} would be a twin of ({@link BoardDecoration#twin}), or null. */
+    private Selection twin(Coords at, BoardDecoration object) {
+        return board().getHex(at).getDecorations().stream().filter(object::twin).findFirst()
+              .map(found -> new Selection(at, found.id())).orElse(null);
+    }
+
+    /**
+     * Selects {@code twins}, the objects a placement found already placed, with their groups, as a Select click would;
+     * the tool stays. Returns the notice that says so.
+     */
+    private String selectPlaced(List<Selection> twins) {
+        selection.clear();
+        twins.forEach(twin -> selection.addAll(expand(twin)));
+        selected = twins.getFirst().coords(); selectedObject = twins.getFirst().object();
+        return Messages.getString("BoardEditor.alreadyPlaced");
     }
 
     /**
      * Puts a copy of the armed object brush at {@code value} "x,y,level" of the inspected hex (x and y in hex widths and
      * heights): on {@code receiver}'s surface, or at the fixed level when {@code receiver} is empty. One undo step; the
-     * new object becomes the selection.
+     * new object becomes the selection. Where its twin stands it adds nothing and selects the twin with its group.
      */
     private void place(String receiver, String value) {
         require(selected != null, Messages.getString("BoardEditor.selectHexFirst"));
@@ -1799,8 +2122,8 @@ public final class BoardEditorSession {
             require(supports(hex, receiver), Messages.getString("BoardEditor.nothingToPlaceOn"));
             placement = onSupport(hex, receiver, prototype);
         }
-        addObject(selected, brushCopy(prototype, Double.parseDouble(spot[0]), Double.parseDouble(spot[1]), placement));
-        selection.clear(); selection.add(new Selection(selected, selectedObject));
+        Selection twin = addObject(selected, brushCopy(prototype, Double.parseDouble(spot[0]), Double.parseDouble(spot[1]), placement));
+        if (twin != null) { message = selectPlaced(List.of(twin)); }
         finishStroke();
     }
 
@@ -1924,52 +2247,6 @@ public final class BoardEditorSession {
     }
 
     /**
-     * Before a stroke is committed, every bridge span it touched gets one type and design again
-     * ({@link HexAppearance#bridgeBuilt}, {@link megamek.common.board.BridgeSpan#truss}): an added, pasted or joined hex
-     * takes its span's, built where the span stores both or none (as the 3D board draws it), keeping its own piers.
-     */
-    private void typeBridges() {
-        Set<Coords> typed = new java.util.HashSet<>();
-        for (Coords at : List.copyOf(stroke.keySet())) {
-            if (typed.contains(at) || !board().getHex(at).containsTerrain(Terrains.BRIDGE)) { continue; }
-            List<Coords> span = structure(at, Terrains.BRIDGE);
-            typed.addAll(span);
-            boolean natural = Boolean.FALSE.equals(megamek.common.board.BridgeSpan.type(board()::getHex, span));
-            var truss = spanTruss(at);
-            bridgeSpan(at, current -> natural ? HexAppearance.NATURAL_BRIDGE : HexAppearance.built(truss != null, piers(current), truss));
-        }
-    }
-
-    /** Turns the Pillars toggle of every marker of a maglev {@code run} ({@link RailRoute#run}) on or off. */
-    private void pillars(List<RailRoute.Member> run, boolean on) {
-        Map<Coords, Set<String>> markers = new LinkedHashMap<>();
-        for (var member : run) {
-            if (member.marker().pillars() != on) {
-                markers.computeIfAbsent(member.at(), at -> new java.util.HashSet<>()).add(member.marker().id());
-            }
-        }
-        markers.forEach((at, ids) -> change(at, hex -> hex.setDecorations(hex.getDecorations().stream()
-              .map(d -> ids.contains(d.id()) ? d.withPillars(on) : d).toList())));
-    }
-
-    /**
-     * Keeps the Pillars of each maglev run the stroke touched uniform, as a bridge card's stroke keeps its span's piers
-     * ({@link #typeSpan}): a run with Pillars on any marker gets them on all, so a stroke that extends or joins a pillared
-     * route carries its pillars on.
-     */
-    private void pillarRuns() {
-        Set<String> seen = new java.util.HashSet<>();
-        for (Coords at : List.copyOf(stroke.keySet())) {
-            for (var marker : RailRoute.markers(board().getHex(at), RailRoute.Kind.MAGLEV)) {
-                if (seen.contains(at + "/" + marker.id())) { continue; }
-                var run = RailRoute.run(board()::getHex, at, marker);
-                run.forEach(member -> seen.add(member.at() + "/" + member.marker().id()));
-                if (run.stream().anyMatch(member -> member.marker().pillars())) { pillars(run, true); }
-            }
-        }
-    }
-
-    /**
      * The hexes of the structure at {@code start}: a bridge's {@link megamek.common.board.BridgeSpan}, the one span of
      * its type, piers and deck height; another structure's hexes reached through the exits of its {@code type} terrain.
      */
@@ -2035,20 +2312,17 @@ public final class BoardEditorSession {
         selectedObject = ""; selection.clear(); finishStroke();
     }
 
-    /** Sets or clears one side of the route marker {@code id} at {@code at}; its stored layout stays only while valid. */
-    private void routeSide(Coords at, String id, int direction, boolean on) {
-        int side = RailRoute.side(direction);
-        change(at, hex -> hex.setDecorations(hex.getDecorations().stream().map(d -> !d.id().equals(id) ? d
-              : d.withConnections(on ? d.connections() | side : d.connections() & ~side)).toList()));
-    }
-
-    /** Clears side {@code direction} of every route marker at {@code at} that no marker of the hex that way returns. */
+    /** Clears a moved route's sides that no route on the same layer returns. */
     private void unjoined(Coords at, int direction) {
         Hex hex = board().getHex(at), neighbor = board().getHex(at.translated(direction));
-        for (var route : hex.getDecorations()) {
-            if (RailRoute.isRoute(route) && (route.connections() & RailRoute.side(direction)) != 0
-                  && RailRoute.joined(route, direction, neighbor) == null) {
-                routeSide(at, route.id(), direction, false);
+        for (var route : RailRoute.derived(hex, "")) {
+            if ((route.connections() & RailRoute.side(direction)) != 0
+                  && RailRoute.joined(hex, route, direction, neighbor) == null) {
+                boolean deck = RailRoute.onDeck(route);
+                int sides = route.connections() & ~RailRoute.side(direction);
+                change(at, h -> {
+                    RailRoute.lay(h, deck, sides, RailRoute.layout(sides, route.tracks()), RailRoute.kind(route));
+                });
             }
         }
     }
@@ -2286,7 +2560,7 @@ public final class BoardEditorSession {
 
     /** Re-validates every hex, as after loading or creating a document. */
     void validateAll() {
-        issues.clear();
+        issues.clear(); copies.clear();
         List<Coords> cells = new ArrayList<>(board().getWidth() * board().getHeight());
         for (int y = 0; y < board().getHeight(); y++) {
             for (int x = 0; x < board().getWidth(); x++) { cells.add(new Coords(x, y)); }
@@ -2296,7 +2570,8 @@ public final class BoardEditorSession {
 
     /**
      * Re-validates {@code cells}: the game's own hex and building-exit rules ({@link Board#hexErrors}, the per-hex step
-     * of the board validation) and each placed object's art and support. Issues never block saving.
+     * of the board validation), each placed object's art and support, and identical copies ({@link #stacks}), one issue
+     * per copied object at that object. Issues never block saving.
      */
     private void validate(java.util.Collection<Coords> cells) {
         for (Coords at : cells) {
@@ -2313,6 +2588,13 @@ public final class BoardEditorSession {
                     found.add(new BoardIssue(at, object.id(), Messages.getString("BoardEditor.issueNoSupport", receiver.surface(), support)));
                 }
             }
+            int copied = 0;
+            for (List<BoardDecoration> stack : stacks(hex)) {
+                found.add(new BoardIssue(at, stack.getFirst().id(),
+                      Messages.getString("BoardEditor.issueCopies", stack.size() - 1, label(stack.getFirst()))));
+                copied += stack.size() - 1;
+            }
+            if (copied == 0) { copies.remove(at); } else { copies.put(at, copied); }
             if (found.isEmpty()) { issues.remove(at); } else { issues.put(at, List.copyOf(found)); }
         }
         var imported = importIssues.stream().filter(issue -> board().contains(issue.coords()) && board().getHex(issue.coords())
@@ -2320,6 +2602,51 @@ public final class BoardEditorSession {
         issueList = java.util.stream.Stream.concat(issues.values().stream().flatMap(List::stream), imported)
               .sorted(Comparator.comparingInt((BoardIssue issue) -> issue.coords().getX()).thenComparingInt(issue -> issue.coords().getY()))
               .toList();
+    }
+
+    /**
+     * The hex's identical copies: each object that has twins after it ({@link BoardDecoration#twin}), first, with them, in
+     * the hex's order; a copy counts with the first object it repeats. Grouped by asset and sorted by position, so a hex
+     * of thousands of copies stays fast.
+     */
+    private static List<List<BoardDecoration>> stacks(Hex hex) {
+        // Per asset, the stacks so far by their first object's x.
+        Map<String, java.util.TreeMap<Double, List<List<BoardDecoration>>>> firsts = new java.util.HashMap<>();
+        List<List<BoardDecoration>> stacks = new ArrayList<>();
+        for (BoardDecoration object : hex.getDecorations()) {
+            var byX = firsts.computeIfAbsent(object.asset(), asset -> new java.util.TreeMap<>());
+            var stack = byX.subMap(object.x() - BoardDecoration.TWIN_DISTANCE, true, object.x() + BoardDecoration.TWIN_DISTANCE, true)
+                  .values().stream().flatMap(List::stream).filter(candidate -> candidate.getFirst().twin(object)).findFirst();
+            if (stack.isPresent()) { stack.get().add(object); continue; }
+            List<BoardDecoration> started = new ArrayList<>(List.of(object));
+            byX.computeIfAbsent(object.x(), x -> new ArrayList<>()).add(started);
+            stacks.add(started);
+        }
+        return stacks.stream().filter(stack -> stack.size() > 1).toList();
+    }
+
+    /** An object as the issues list names it: its own name, else its palette entry's label, else its art. */
+    private String label(BoardDecoration object) {
+        var entry = blueprint.asset(object.asset());
+        return object.name() != null ? object.name() : entry != null ? entry.label() : object.asset();
+    }
+
+    /**
+     * Removes every identical copy ({@link #stacks}), keeping the first object of each stack, with its group, in one undo
+     * step; only the hexes the issues list reports copies in are visited.
+     */
+    private void removeCopies() {
+        int removed = copies.values().stream().mapToInt(Integer::intValue).sum();
+        for (Coords at : List.copyOf(copies.keySet())) {
+            change(at, hex -> {
+                Set<BoardDecoration> repeated = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+                stacks(hex).forEach(stack -> repeated.addAll(stack.subList(1, stack.size())));
+                hex.setDecorations(hex.getDecorations().stream().filter(object -> !repeated.contains(object)).toList());
+            });
+        }
+        finishStroke();
+        deselectRemoved();
+        message = removed == 0 ? Messages.getString("BoardEditor.nothingChanged") : Messages.getString("BoardEditor.copiesRemoved", removed);
     }
 
     /**
@@ -2375,35 +2702,8 @@ public final class BoardEditorSession {
 
     private void editObject(String property, String value) {
         require(selected != null, Messages.getString("BoardEditor.selectObjectFirst"));
-        if (property.equals("side")) {
-            // A route side toggles together with the neighbouring marker's opposite side, so the two join or part.
-            int direction = Integer.parseInt(value);
-            require(direction >= 0 && direction < 6, "Choose one of the six sides.");
-            Hex hex = board().getHex(selected);
-            var route = object(hex);
-            require(RailRoute.isRoute(route), Messages.getString("BoardEditor.routeOnly"));
-            boolean on = (route.connections() & RailRoute.side(direction)) == 0;
-            var used = on ? RailRoute.owner(hex, RailRoute.kind(route), direction, route) : null;
-            require(used == null, Messages.getString("BoardEditor.routeSideUsed", sideName(direction), used == null ? 0 : used.placement().level(hex)));
-            Coords neighbor = selected.translated(direction);
-            var partner = board().contains(neighbor) ? partner(route, hex, direction, board().getHex(neighbor), on) : null;
-            routeSide(selected, route.id(), direction, on);
-            if (partner != null) { routeSide(neighbor, partner.id(), (direction + 3) % 6, on); }
-            if (!continuousEdit) { finishStroke(); }
-            return;
-        }
-        if (property.equals("tracks")) {
-            // The junction card: which gentle pieces the route lays between its sides; the default is stored as none.
-            var route = object(board().getHex(selected));
-            require(RailRoute.isRoute(route), Messages.getString("BoardEditor.routeOnly"));
-            int tracks = Integer.parseInt(value);
-            require(RailRoute.valid(route.connections(), tracks), Messages.getString("BoardEditor.junctionInvalid"));
-            change(selected, hex -> hex.setDecorations(hex.getDecorations().stream()
-                  .map(d -> d.id().equals(route.id()) ? d.withTracks(tracks) : d).toList()));
-            if (!continuousEdit) { finishStroke(); }
-            return;
-        }
-        BoardDecoration next = objectValue(object(board().getHex(selected)), property, value);
+        BoardDecoration current = object(board().getHex(selected));
+        BoardDecoration next = property.equals("asset") ? familyMember(current, value) : objectValue(current, property, value);
         if (property.equals("offset") || property.equals("level")) {
             next = next.transform(next.x(), next.y(), next.rotation(), next.mirror(), next.scale(),
                   BoardEditorSnapping.clamp(board().getHex(selected), next.placement()));
@@ -2414,9 +2714,35 @@ public final class BoardEditorSession {
         if (!continuousEdit) { finishStroke(); }
     }
 
+    /**
+     * {@code object} as the member {@code key} of its palette family (Edit's Type row): the same object with the member's
+     * model. Its name is the member's label when the member is an alias (a pond), else its own unless that was the old
+     * alias's label; its colours are the member's when it defines some, else its own unless they were the old member's.
+     */
+    private BoardDecoration familyMember(BoardDecoration object, String key) {
+        var from = blueprint.assetOf(object);
+        var to = blueprint.asset(key);
+        var fromEntry = from == null ? null : blueprint.entry(from.id());
+        var toEntry = to == null ? null : blueprint.entry(key);
+        require(fromEntry != null && toEntry != null && blueprint.card(fromEntry) == blueprint.card(toEntry)
+              && blueprint.card(toEntry).picker() && to.layout() == null, Messages.getString("BoardEditor.familyMemberOnly"));
+        boolean fromAlias = !from.model().equals(from.id());
+        String name = !to.model().equals(to.id()) ? to.label() : fromAlias && from.label().equals(object.name()) ? null : object.name();
+        var colours = !to.colours().slots().isEmpty() ? to.colours()
+              : object.colours().equals(from.colours()) ? BoardDecoration.Colours.NONE : object.colours();
+        return new BoardDecoration(object.id(), object.kind(), to.model(), name, object.x(), object.y(), object.rotation(),
+              object.mirror(), object.scale(), object.placement(), object.drawOrder(), object.clipToHex(), object.rotationX(),
+              object.rotationY(), object.group(), object.bare(), object.connections(), object.stretch(), colours,
+              object.tracks(), object.pillars());
+    }
+
     private void setVariant(Hex hex, String owner, String value) {
         Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
-        if (value.isEmpty()) { styles.remove(owner); }
+        var control = HexAppearance.trafficControl(styles, owner);
+        if (value.isEmpty()) {
+            HexAppearance retained = HexAppearance.withTrafficControl(null, control);
+            if (retained == null) { styles.remove(owner); } else { styles.put(owner, retained); }
+        }
         else {
             var variant = blueprint.variant(value);
             require(variant != null && variant.owner().equals(owner), "Unknown appearance choice");
@@ -2433,34 +2759,88 @@ public final class BoardEditorSession {
                         setTerrain(hex, field.terrain(), compatible.getFirst().value());
                     }
                 }
-                styles.put(owner, new HexAppearance(current == null ? null : current.variant(),
-                      null, variant.material(), null));
+                styles.put(owner, HexAppearance.withTrafficControl(new HexAppearance(current == null ? null : current.variant(),
+                      null, variant.material(), null), control));
             } else {
-                styles.put(owner, new HexAppearance(variant.id(), null,
-                      current == null ? null : current.material(), variant.blend() ? .5 : null));
+                // Switching between skins keeps the look's rotation; any other design has none.
+                var was = current == null || current.variant() == null ? null : blueprint.variant(current.variant());
+                boolean skins = variant.skin() != null && was != null && was.skin() != null;
+                styles.put(owner, HexAppearance.withTrafficControl(new HexAppearance(variant.id(), null, current == null ? null : current.material(),
+                      variant.blend() ? .5 : null, BoardDecoration.Colours.NONE, skins ? current.rotation() : null), control));
             }
         }
         hex.setAppearance(styles);
     }
 
+    /**
+     * Turns {@code hex}'s skin design of {@code owner} ({@link BoardEditorBlueprint.Skin}) to {@code degrees} clockwise,
+     * snapped to a 30-degree step: the Edit panel's and the Brush's Rotation row.
+     */
+    private void rotate(Hex hex, String owner, String degrees) {
+        HexAppearance current = hex.getAppearance().get(owner);
+        var variant = current == null || current.variant() == null ? null : blueprint.variant(current.variant());
+        require(variant != null && variant.skin() != null, Messages.getString("BoardEditor.skinFirst"));
+        int rotation = Math.floorMod((int) Math.round(Double.parseDouble(degrees) / 30) * 30, 360);
+        Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
+        styles.put(owner, new HexAppearance(current.variant(), null, null, null, BoardDecoration.Colours.NONE, rotation));
+        hex.setAppearance(styles);
+    }
+
+    /**
+     * Gives a pavement hex its {@link HexAppearance.Edges} ({@code value} "auto", "fitted" or "hex"): the Edit panel's
+     * and the Brush's Edges row.
+     */
+    private void setEdges(Hex hex, String value) {
+        require(hex.containsTerrain(Terrains.PAVEMENT), Messages.getString("BoardEditor.pavementFirst"));
+        var edges = HexAppearance.Edges.valueOf(value.toUpperCase(java.util.Locale.ROOT));
+        Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
+        if (edges == HexAppearance.Edges.AUTO) { styles.remove("pavement"); } else { styles.put("pavement", HexAppearance.of(edges)); }
+        hex.setAppearance(styles);
+    }
+
+    private static void setTrafficControl(Hex hex, String owner, String value) {
+        require(owner.equals("road") || owner.equals("bridgeRoad"), "Choose a road layer.");
+        require(hex.containsTerrain(owner.equals("road") ? Terrains.ROAD : Terrains.BRIDGE_ROAD),
+              Messages.getString("BoardEditor.addTerrainFirst"));
+        var control = HexAppearance.TrafficControl.valueOf(value.toUpperCase(java.util.Locale.ROOT));
+        appearance(hex, owner, HexAppearance.withTrafficControl(hex.getAppearance().get(owner), control));
+    }
+
+    /** Arms a card: {@code owner}'s preset or design {@code key}, or for owner "theme" the Theme card of theme {@code key}. */
     private void chooseBrush(String owner, String key) {
+        if (owner.equals("theme")) {
+            require(!key.isBlank(), "Unknown brush choice");
+            paintTemplate = new Hex(0, "", key); sampledHex = null; brushComponent = "ground"; brushElevation = false; brushTheme = true;
+            brushKey = THEME_BRUSH + key; brushLabel = BoardEditorBlueprint.themeLabel(key);
+            tool = Tool.PAINT; message = "";
+            return;
+        }
         var definition = blueprint.component(owner);
         var preset = definition.presets().stream().filter(p -> p.id().equals(key)).findFirst().orElse(null);
         var variant = blueprint.variant(key);
         require(preset != null || variant != null && variant.owner().equals(owner) || key.isEmpty(), "Unknown brush choice");
-        Hex next = new Hex(0, preset == null ? definition.defaults() : preset.terrain(), paintTemplate.getTheme());
+        // A skin card paints the cover its look shows (Scattered containers: foliage).
+        Hex next = new Hex(0, preset != null ? preset.terrain() : variant != null && variant.skin() != null
+              ? variant.skin().terrain() : definition.defaults(), paintTemplate.getTheme());
         if (variant != null) { setVariant(next, owner, key); }
         applyChoiceMaterials(next, definition);
         paintTemplate = next; sampledHex = null; brushComponent = owner; brushElevation = false; brushTheme = false;
         brushKey = variant == null ? owner + "/" + key : key;
         brushLabel = preset != null ? preset.label() : variant != null ? variant.label() : definition.label();
+        levelHeight = owner.equals("bridge"); wayOffset = 0;
+        wayPillars = HexAppearance.pillars(next.getAppearance());
         tool = Tool.PAINT; message = "";
     }
 
     private void configureBrush(String target, String value) {
         Hex next = paintTemplate.duplicate();
-        if (target.startsWith("terrain:")) { setTerrain(next, target.substring(8), Integer.parseInt(value)); }
+        // An empty value removes an optional field the card offers (Water's Current: None).
+        if (target.startsWith("terrain:") && value.isEmpty()) { next.removeTerrain(Terrains.getType(target.substring(8))); }
+        else if (target.startsWith("terrain:")) { setTerrain(next, target.substring(8), Integer.parseInt(value)); }
         else if (target.startsWith("variant:")) { setVariant(next, target.substring(8), value); }
+        else if (target.startsWith("rotation:")) { rotate(next, target.substring(9), value); }
+        else if (target.equals("edges")) { setEdges(next, value); }
+        else if (target.equals("trafficControl")) { setTrafficControl(next, "road", value); }
         else if (target.startsWith("object:")) {
             require(!next.getDecorations().isEmpty(), Messages.getString("BoardEditor.chooseObjectBrush"));
             next.setDecorations(List.of(objectValue(next.getDecorations().getFirst(), target.substring(7), value)));
@@ -2473,6 +2853,15 @@ public final class BoardEditorSession {
         else if (target.equals("sculpt")) { sculpt = LevelSculpt.Mode.valueOf(value); }
         else if (target.equals("slope")) { slope = Boolean.parseBoolean(value); }
         else if (target.equals("clearOnly")) { clearOnly = Boolean.parseBoolean(value); }
+        else if (target.equals("fill")) { fill = Boolean.parseBoolean(value); }
+        else if (target.equals("wayHeight")) {
+            require(value.equals("follow") || value.equals("level"), "Choose Follow or Level.");
+            levelHeight = value.equals("level");
+        } else if (target.equals("wayOffset")) {
+            int offset = Integer.parseInt(value);
+            require(offset >= 0 && offset <= 50, "Height offset must be between 0 and 50.");
+            wayOffset = offset;
+        } else if (target.equals("wayPillars")) { wayPillars = Boolean.parseBoolean(value); }
         else if (target.equals("zone")) { setZones(next, zoneMask(value)); }
         else { throw new IllegalArgumentException("Unknown brush setting " + target); }
         paintTemplate = next;
@@ -2543,31 +2932,16 @@ public final class BoardEditorSession {
         }
         if (!changed.isEmpty()) { board().setHexes(changed); }
         finishStroke();
-        // A selected object the command removed is no longer selected.
+        deselectRemoved();
+        return changed.size();
+    }
+
+    /** A selected object the last command removed is no longer selected. */
+    private void deselectRemoved() {
         selection.removeIf(item -> !item.object().isEmpty() && decoration(item).isEmpty());
         if (selected != null && board().getHex(selected).getDecorations().stream().noneMatch(o -> o.id().equals(selectedObject))) {
             selectedObject = "";
         }
-        return changed.size();
-    }
-
-    /**
-     * Moves {@code hex} by {@code delta} levels with everything that stands at a fixed level in it: the hex level, the
-     * Solaris elevator's alternate level (an absolute level the elevator swaps with the hex's, see ElevatorProcessor) and
-     * every object placed at a fixed level (route markers, fixed props). Relative values stay: water depth, structure
-     * and bridge heights, industrial elevator shafts and objects on a surface.
-     */
-    private static void shiftLevel(Hex hex, int delta) {
-        if (delta == 0) { return; }
-        hex.setLevel(hex.getLevel() + delta);
-        Terrain elevator = hex.getTerrain(Terrains.SOLARIS_ELEVATOR);
-        if (elevator != null) {
-            hex.addTerrain(new Terrain(Terrains.SOLARIS_ELEVATOR, elevator.getLevel() + delta, elevator.hasExitsSpecified(),
-                  elevator.getExits()));
-        }
-        hex.setDecorations(hex.getDecorations().stream().map(object -> !object.placement().mode().equals("absolute") ? object
-              : object.transform(object.x(), object.y(), object.rotation(), object.mirror(), object.scale(),
-                    BoardDecoration.Placement.absolute(object.placement().level() + delta))).toList());
     }
 
     /**
@@ -2586,7 +2960,12 @@ public final class BoardEditorSession {
                 Terrain zones = hex.getTerrain(Terrains.DEPLOYMENT_ZONE), height = hex.getTerrain(Terrains.BRIDGE_ELEV);
                 boolean bridge = hex.containsTerrain(Terrains.BRIDGE) && height != null && hex.getLevel() + height.getLevel() >= surface;
                 for (var component : blueprint.components()) {
-                    if (!component.id().equals("water") && !(bridge && component.id().equals("bridge"))) { removeComponent(hex, component); }
+                    if (!component.id().equals("water") && !(bridge && (component.id().equals("bridge") || component.id().equals("ways")))) {
+                        removeComponent(hex, component);
+                    }
+                }
+                if (bridge) {
+                    removeWay(hex, Terrains.RAIL);
                 }
                 if (zones != null) { hex.addTerrain(zones); }
                 if (bridge) {
@@ -2599,6 +2978,43 @@ public final class BoardEditorSession {
             hex.addTerrain(new Terrain(Terrains.WATER, surface - hex.getLevel() + depth));
             hex.setLevel(surface);
         });
+    }
+
+    /**
+     * Paint or Erase of {@code definition}'s fields on {@code hex}, each as {@code template} holds it. Paint also gives a
+     * hex that lacks one the template's terrain outside those fields: a preset's own, as Hazardous liquid's water. Water
+     * and lava (liquid magma on the water's depth, {@link HexTile#liquid}) replace each other, and the hex shows the
+     * painted liquid: Lava makes the magma liquid and takes a hazardous liquid it would hide, Water takes any magma
+     * (crust hides water too), and the Water component's Erase takes liquid magma with the depth; crust stays.
+     */
+    private void paintFields(Hex hex, Hex template, BoardEditorBlueprint.Component definition) {
+        Set<Integer> fields = new java.util.HashSet<>();
+        for (var field : definition.fields()) {
+            int type = Terrains.getType(field.terrain());
+            fields.add(type);
+            Terrain value = template.getTerrain(type);
+            if (!definition.replaceExisting() && value == null) { continue; }
+            // The Deployment zone card adds its zone, and Erase removes it; the hex keeps its other zones.
+            if (type == Terrains.DEPLOYMENT_ZONE && value != null) { zones(hex, value.getExits(), tool != Tool.ERASE); }
+            else if (tool == Tool.ERASE || value == null) { hex.removeTerrain(type); }
+            else { hex.addTerrain(new Terrain(value)); }
+        }
+        if (definition.id().equals("water")) {
+            if (tool != Tool.ERASE && template.terrainLevel(Terrains.MAGMA) == LAVA) {
+                hex.addTerrain(new Terrain(Terrains.MAGMA, LAVA));
+                hex.removeTerrain(Terrains.HAZARDOUS_LIQUID);
+            } else if (tool != Tool.ERASE || hex.terrainLevel(Terrains.MAGMA) == LAVA) { hex.removeTerrain(Terrains.MAGMA); }
+        }
+        if (tool == Tool.ERASE) { return; }
+        for (int type : template.getTerrainTypes()) {
+            if (!fields.contains(type) && !hex.containsTerrain(type)) { hex.addTerrain(new Terrain(template.getTerrain(type))); }
+        }
+    }
+
+    /** The armed preset's other hexes by direction, when it is a multi-hex blueprint (the DropShip); none otherwise. */
+    private Map<Integer, String> brushHexes() {
+        var entry = sampledHex == null ? blueprint.entry(brushKey) : null;
+        return entry == null || entry.preset() == null ? Map.of() : entry.preset().hexes();
     }
 
     /**
@@ -2643,7 +3059,8 @@ public final class BoardEditorSession {
 
     /** Removes {@code definition}'s terrain fields and its appearance from {@code hex}; its objects stay. */
     private static void removeComponent(Hex hex, BoardEditorBlueprint.Component definition) {
-        definition.fields().forEach(field -> hex.removeTerrain(Terrains.getType(field.terrain())));
+        if (definition.id().equals("bridge")) { removeDeck(hex); return; }
+        definition.fields().forEach(field -> removeWay(hex, Terrains.getType(field.terrain())));
         var appearance = new LinkedHashMap<>(hex.getAppearance()); appearance.remove(definition.id()); hex.setAppearance(appearance);
     }
 
@@ -2725,20 +3142,17 @@ public final class BoardEditorSession {
             while (undo.size() > 200) { undo.removeLast(); }
             revision++;
         }
-        painted.clear(); routeStroke.clear(); placed = false; routePaintFrom = null; sculptLevel = null; groupBase = Map.of();
-        routeBrush = null; strokeNotice = "";
+        painted.clear(); wayLayers.clear(); wayReceivers.clear(); placed = false; routePaintFrom = null; sculptLevel = null; groupBase = Map.of();
+        strokeNotice = "";
     }
 
     /** What a stroke's commit ({@link #finishStroke}) runs before it records the stroke; a preview's dry run runs it too. */
     private void completeStroke() {
         // Reconcile after all stamped hexes are installed, so adjacent copies can keep their joined route sides.
         if (sampledHex != null && (tool == Tool.PAINT || tool == Tool.ERASE)) { keepJoinedSides(painted); }
-        dropUnjoined();
-        // Converted first, so pillar art typed on a bridge makes its whole span built below.
+        // Resolve any legacy tokens pasted by an older brush before reconciling the authored layers.
         convertTokens();
-        typeBridges();
-        pillarRuns();
-        railDecks();
+        wayDecks();
     }
 
     private void history(ArrayDeque<Edit> from, ArrayDeque<Edit> to, boolean forward) {
@@ -2770,6 +3184,12 @@ public final class BoardEditorSession {
         if (!definition.present().isEmpty() && definition.isPresent(name -> hex.containsTerrain(Terrains.getType(name)))) { return; }
         for (String token : definition.defaults().split(";")) {
             if (!token.isBlank()) { Terrain terrain = new Terrain(token); if (!hex.containsTerrain(terrain.getType())) { hex.addTerrain(terrain); } }
+        }
+        if (definition.id().equals("bridge")) {
+            require(!hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK), Messages.getString("BoardEditor.way.structure"));
+            Terrain bridge = hex.getTerrain(Terrains.BRIDGE);
+            hex.addTerrain(new Terrain(Terrains.BRIDGE, bridge.getLevel(), true, 0));
+            appearance(hex, "bridge", HexAppearance.BUILT_BRIDGE);
         }
         applyChoiceMaterials(hex, definition);
     }
@@ -2808,12 +3228,44 @@ public final class BoardEditorSession {
             for (var choice : field.choices()) {
                 if (choice.material().isEmpty() || hex.terrainLevel(Terrains.getType(field.terrain())) != choice.value()) { continue; }
                 var styles = new LinkedHashMap<>(hex.getAppearance());
-                var old = styles.get(owner.id());
-                styles.put(owner.id(), new HexAppearance(old == null ? null : old.variant(), old == null ? null : old.asset(),
-                      choice.material(), old == null ? null : old.strength()));
+                String key = field.terrain().equals("bridge_road") ? "bridgeRoad" : owner.id();
+                var old = styles.get(key);
+                styles.put(key, HexAppearance.withTrafficControl(new HexAppearance(old == null ? null : old.variant(), old == null ? null : old.asset(),
+                      choice.material(), old == null ? null : old.strength()), HexAppearance.trafficControl(styles, key)));
                 hex.setAppearance(styles);
             }
         }
+    }
+
+    private void editEdge(String name, int direction) {
+        require(selected != null, Messages.getString("BoardEditor.selectHexFirst"));
+        int type = Terrains.getType(name);
+        Hex before = board().getHex(selected);
+        BoardDecoration route = RailRoute.derived(before, "").stream()
+              .filter(value -> RailRoute.onDeck(value) == (type == Terrains.BRIDGE_RAIL)).findFirst().orElse(null);
+        change(selected, hex -> edge(hex, name, direction));
+        if ((type == Terrains.RAIL || type == Terrains.BRIDGE_RAIL) && route != null) {
+            Coords next = selected.translated(direction);
+            Hex neighbour = board().getHex(next);
+            if (neighbour != null) {
+                boolean on = board().getHex(selected).containsTerrainExit(type, direction);
+                int back = (direction + 3) % 6;
+                var partner = !on ? RailRoute.joined(before, route, direction, neighbour)
+                      : RailRoute.derived(neighbour, "").stream().filter(value -> RailRoute.kind(value) == RailRoute.kind(route))
+                            .filter(value -> Float.isFinite(RailRoute.joinScore(route, RailRoute.level(before, route),
+                                  value, RailRoute.level(neighbour, value))))
+                            .filter(value -> !RailRoute.onDeck(value) || HexAppearance.implicit(neighbour.getAppearance())
+                                  || neighbour.containsTerrainExit(Terrains.BRIDGE, back))
+                            .min(Comparator.comparingDouble(value -> RailRoute.joinScore(route, RailRoute.level(before, route),
+                                  value, RailRoute.level(neighbour, value)))).orElse(null);
+                if (partner != null) {
+                    int sides = on ? partner.connections() | 1 << back : partner.connections() & ~(1 << back);
+                    change(next, hex -> RailRoute.lay(hex, RailRoute.onDeck(partner), sides,
+                          RailRoute.layout(sides, partner.tracks()), RailRoute.kind(partner)));
+                }
+            }
+        }
+        if (!continuousEdit) { finishStroke(); }
     }
 
     private void edge(Hex hex, String name, int direction) {
@@ -2823,12 +3275,28 @@ public final class BoardEditorSession {
         require(old != null, Messages.getString("BoardEditor.addTerrainFirst"));
         require(old.getExits() >= 0 && old.getExits() <= 63, Messages.getString("BoardEditor.legacyEdgeMask"));
         int exits = old.getExits() ^ (1 << direction);
+        if (type == Terrains.BRIDGE && (exits & (1 << direction)) == 0) {
+            require(!hex.containsTerrainExit(Terrains.BRIDGE_ROAD, direction) && !hex.containsTerrainExit(Terrains.BRIDGE_RAIL, direction),
+                  Messages.getString("BoardEditor.way.exitUsed"));
+        }
+        if (type == Terrains.BRIDGE_ROAD || type == Terrains.BRIDGE_RAIL) {
+            require(hex.hasBridge() && (HexAppearance.implicit(hex.getAppearance())
+                  || (exits & ~hex.getTerrain(Terrains.BRIDGE).getExits()) == 0),
+                  Messages.getString("BoardEditor.way.exitOutside"));
+        }
         if (type == Terrains.CLIFF_TOP && (exits & (1 << direction)) != 0) {
             Hex neighbor = board().getHex(selected.translated(direction));
             require(hex.canHaveCliffTopTowards(neighbor), Messages.getString("BoardEditor.cliffEdgeDrop"));
         }
         if (type == Terrains.CLIFF_TOP && exits == 0) { hex.removeTerrain(type); }
-        else { hex.addTerrain(new Terrain(type, old.getLevel(), true, exits)); }
+        else {
+            hex.addTerrain(new Terrain(type, old.getLevel(), true, exits));
+            if (type == Terrains.RAIL || type == Terrains.BRIDGE_RAIL) {
+                RailRoute.lay(hex, type == Terrains.BRIDGE_RAIL, exits,
+                      RailRoute.layout(exits, HexAppearance.tracks(hex.getAppearance(), wayOwner(type))),
+                      old.getLevel() == 2 ? RailRoute.Kind.MAGLEV : RailRoute.Kind.RAIL);
+            }
+        }
     }
 
     private BoardDecoration object(Hex hex) {
@@ -2874,17 +3342,7 @@ public final class BoardEditorSession {
     }
 
     private BoardDecoration objectValue(BoardDecoration d, String property, String value) {
-        if (RailRoute.isRoute(d)) {
-            // A maglev holds a fixed level or a height above the ground; a rail lies on the ground or its bridge's deck.
-            boolean rail = RailRoute.kind(d) == RailRoute.Kind.RAIL;
-            require((rail ? Set.of("receiver", "name") : Set.of("level", "offset", "receiver", "name")).contains(property),
-                  Messages.getString("BoardEditor.routeCentred"));
-            if (property.equals("receiver")) {
-                require(rail ? value.equals("ground/top") || value.equals("bridge/deck") : value.equals("absolute") || value.equals("ground/top"),
-                      Messages.getString(rail ? "BoardEditor.railSupport" : "BoardEditor.maglevSupport"));
-                if (value.equals("bridge/deck")) { requireBridge(); }
-            }
-        }
+        require(!RailRoute.isRoute(d), Messages.getString("BoardEditor.routeExtend"));
         double x = d.x(), y = d.y(), rotation = d.rotation(), scale = d.scale();
         double rotationX = d.rotationX(), rotationY = d.rotationY();
         boolean clipToHex = d.clipToHex();

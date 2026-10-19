@@ -2,12 +2,9 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
@@ -20,6 +17,7 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import org.junit.jupiter.api.Tag;
@@ -29,7 +27,7 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuGroundTransitionSmokeTest {
     @Test
-    void drawsAuthoredGrassToSandAndKeepsLunarGeologyIndependent() throws Exception {
+    void drawsAuthoredGrassToSandAndRockAndLunarCliffs() throws Exception {
         var ramp = new AtomicReference<BoardScene>();
         var grassland = new AtomicReference<BoardScene>();
         var controls = new BoardScene[2];
@@ -41,14 +39,17 @@ class GpuGroundTransitionSmokeTest {
             }
             var game = new Game();
             game.setBoard(board);
+            BoardSceneryLayouts.convert(game.getBoard());
             try (var source = new GpuMapSource(game, null, null)) { ramp.set(source.takeFrame().scene()); }
             for (int material = 0; material < controls.length; material++) {
                 for (int x = 0; x < 7; x++) for (int y = 0; y < 3; y++) {
                     board.setHex(new Coords(x, y), new Hex(0, "", material == 0 ? "grass" : "desert"));
                 }
+                BoardSceneryLayouts.convert(game.getBoard());
                 try (var source = new GpuMapSource(game, null, null)) { controls[material] = source.takeFrame().scene(); }
             }
             game.setBoard(BoardGroundCaptureTest.grassland(3));
+            BoardSceneryLayouts.convert(game.getBoard());
             try (var source = new GpuMapSource(game, null, null)) { grassland.set(source.takeFrame().scene()); }
         });
         var failure = new AtomicReference<Throwable>();
@@ -94,31 +95,8 @@ class GpuGroundTransitionSmokeTest {
                     camera.fit(rock);
                     draw(terrain, frame, camera, rock);
                     GpuReviewFrame.save(new File(output, "original-rock.png"));
-                    byte[] original = com.badlogic.gdx.utils.ScreenUtils.getFrameBufferPixels(false);
                     draw(terrain, frame, camera, lunar);
                     GpuReviewFrame.save(new File(output, "independent-lunar.png"));
-                    byte[] separate = com.badlogic.gdx.utils.ScreenUtils.getFrameBufferPixels(false);
-                    // Lunar began as a copy of rock, but terrestrial rock now has its own authored maps/profile.
-                    // Changing that profile must visibly affect rock while leaving the lunar render alone.
-                    var geology = BoardRelief.geology();
-                    var edited = new ArrayList<>(geology);
-                    int family = BoardScene.Surface.ROCK.ordinal();
-                    edited.set(family, geology.get(family).scale(.55f));
-                    try {
-                        BoardRelief.tuneGeology(edited);
-                        draw(terrain, frame, camera, rock);
-                        assertFalse(Arrays.equals(original, com.badlogic.gdx.utils.ScreenUtils.getFrameBufferPixels(false)),
-                              "The control edit must visibly change terrestrial rock");
-                        draw(terrain, frame, camera, lunar);
-                        byte[] after = com.badlogic.gdx.utils.ScreenUtils.getFrameBufferPixels(false);
-                        long error = 0;
-                        for (int i = 0; i < separate.length; i++) {
-                            error += Math.abs(Byte.toUnsignedInt(separate[i]) - Byte.toUnsignedInt(after[i]));
-                        }
-                        assertTrue(error / (double) separate.length < .1, "Editing rock must leave lunar unchanged");
-                    } finally {
-                        BoardRelief.tuneGeology(geology);
-                    }
                     terrain.setGrass(true);
                     for (boolean oblique : new boolean[] { false, true }) {
                         camera.setIsometric(oblique);

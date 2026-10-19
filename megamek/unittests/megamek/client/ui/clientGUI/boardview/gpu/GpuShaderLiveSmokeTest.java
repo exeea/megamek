@@ -116,7 +116,9 @@ class GpuShaderLiveSmokeTest {
                             });
                             if (editor == null) { return; }
                             revision = manager.revision();
-                            edit("atmosphere-composite.frag", composite.replace("fragColor = vec4(color, 1.0);",
+                            String output = "fragColor = vec4(color, mix(1.0, coverage, u_transparentBackground));";
+                            assertTrue(composite.contains(output), "The live edit must change the current output statement");
+                            edit("atmosphere-composite.frag", composite.replace(output,
                                   "fragColor = vec4(0.85, 0.15, 0.65, 1.0);"));
                             step = 2;
                         } else if (step == 2 && manager.revision() > revision) {
@@ -307,7 +309,7 @@ class GpuShaderLiveSmokeTest {
                         assertTrue(result.success(), result.message());
                         ShaderProgram[] effect = new ShaderProgram[1];
                         effect[0] = GpuShaderManager.program(() -> GpuGlsl.compile("beam fallback",
-                              GpuShaderSource.read("effects.vert"), GpuShaderSource.read("beams.frag")), next -> effect[0] = next);
+                              GpuShaderSource.read("effects.vert"), GpuEffectBatch.fragment("beams.frag")), next -> effect[0] = next);
                         assertTrue(effect[0].isCompiled(), "An inactive invalid draft falls back when first drawn");
                         assertFalse(effect[0].getFragmentShaderSource().contains("invalid lazy effect"));
                         GpuShaderManager.dispose(effect[0]);

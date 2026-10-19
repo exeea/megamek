@@ -11,8 +11,8 @@ board terrain values, the old .board file format and the tileset file format.
 
     The Menu button at the top right has New, Open, Save, Save As, Save As
     Image, Recent Boards, Open Board Source File, Run Board Tagger, the Legacy
-    2D Preview (the board as the Legacy 2D board draws it), View (with 3D
-    Graphics and the Trace Overlay), Client Settings and Help. Help lists every key and mouse gesture
+    2D Preview (the board as the Legacy 2D board draws it), View (with the
+    Renderer and the Trace Overlay), Client Settings and Help. Help lists every key and mouse gesture
     of the editor.
 
     The editor saves boards as .board2 files. Opening an older .board file
@@ -29,6 +29,7 @@ board terrain values, the old .board file format and the tileset file format.
                         within the brush radius
     Left drag - select with a box, move the selection, or paint along the drag
     CTRL + mouse wheel - raise or lower the hovered hex
+    B + left mouse - use the clicked hex as the brush
     CTRL + Z / CTRL + Y - undo / redo
     CTRL + C / CTRL + V - copy and paste a hex (also between MegaMek windows)
     Right drag - move the view; mouse wheel - zoom

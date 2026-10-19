@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
@@ -17,6 +18,7 @@ import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
+import megamek.common.board.RailRoute;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -44,7 +46,12 @@ class GpuRoadSourceTest {
             var pavement = GpuRoads.patches(tile, road).stream()
                   .filter(p -> p.texture().equals("roads/asphalt") && !p.blended()).findFirst().orElseThrow();
             for (var lod : TerrainLod.values()) {
-                var triangles = GpuRoads.drape(tile, new BoardSurface(scene, tile, lod), pavement);
+                var surfaces = new HashMap<Coords, BoardSurface>();
+                surfaces.put(tile.coords(), new BoardSurface(scene, tile, lod));
+                var footing = BoardBridgeFooting.build(scene, bridge, lod, surfaces);
+                var triangles = GpuRoads.drape(tile, surfaces.get(tile.coords()), pavement);
+                // The bridge's bank landing spans any recessed shore before it meets the road carrier.
+                triangles.addAll(GpuRoads.deck(pavement, footing.shape(), GpuRoads.SURFACE_LIFT));
                 for (float lateral : new float[] { -7, -6, 0, 6, 7 }) {
                     for (float distance : new float[] { .05f, 1, 3, 6, 10 }) {
                         var point = new Vector3(gate).mulAdd(step, lateral).mulAdd(inward, distance);
@@ -52,11 +59,14 @@ class GpuRoadSourceTest {
                               (point.y - center.y) / BoardGeometry.hexScale()));
                         var ray = new Ray(new Vector3(point.x, point.y, 200), new Vector3(0, 0, -1));
                         var hit = new Vector3();
-                        assertTrue(triangles.stream().anyMatch(t -> Intersector.intersectRayTriangle(ray,
-                              t.a(), t.b(), t.c(), hit)),
+                        double height = triangles.stream().mapToDouble(t -> Intersector.intersectRayTriangle(ray,
+                              t.a(), t.b(), t.c(), hit) ? hit.z : Double.NEGATIVE_INFINITY).max().orElseThrow();
+                        assertTrue(Double.isFinite(height),
                               tile.coords().getBoardNum() + " " + lod + " road missing at " + point);
                         if (distance == .05f) {
-                            assertEquals(GpuRoads.SURFACE_LIFT, hit.z, .001f,
+                            // Deck coats sit .01 hex units above their structural landing to avoid z-fighting.
+                            float deckCoat = (pavement.lift() + .01f) * BoardGeometry.hexScale();
+                            assertEquals(deckCoat, height, .001f,
                                   tile.coords().getBoardNum() + " " + lod + " road must meet the level deck");
                         }
                     }
@@ -66,21 +76,21 @@ class GpuRoadSourceTest {
     }
 
     @Test
-    void lavaTubesBridgeFloorsUseNativeRockInsteadOfTheVioletLegacyTile() throws Exception {
+    void lavaTubesBridgeFloorsKeepTheNativeVolcanicGround() throws Exception {
         var scene = scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
         var bridges = scene.tiles().stream().filter(t -> t.features().stream().anyMatch(f -> f.asset().equals("bridge")))
               .toList();
         assertEquals(4, bridges.size());
         for (var tile : bridges) {
             assertTrue(tile.detailedGround(), "Native ground beneath bridge " + tile.coords().getBoardNum());
-            assertEquals(BoardScene.Surface.ROCK, tile.surface());
+            assertEquals(BoardScene.Surface.VOLCANO, tile.surface());
             assertFalse(tile.liquid().present());
             assertEquals(-2, tile.elevation());
         }
     }
 
     @Test
-    void minesCapturesEveryAuthoredRoadExitWithSandUnderTheCurves() throws Exception {
+    void minesCapturesEveryAuthoredRoadExitWithDesertGroundUnderTheCurves() throws Exception {
         Board board = new Board();
         board.load(new File("data/boards/Deserts/16x17 Mines 1.board"));
         BoardScene scene = minesScene();
@@ -93,7 +103,7 @@ class GpuRoadSourceTest {
             assertEquals(BoardRoad.Kind.PAVED, tile.road(), tile.coords().getBoardNum());
             assertEquals(hex.getTerrain(Terrains.ROAD).getExits(), tile.roadExits(), tile.coords().getBoardNum());
             assertTrue(BoardRoad.rendered(tile), "Native road including curved artwork: " + tile.coords().getBoardNum());
-            assertEquals(BoardScene.Surface.SAND, tile.surface(), "Desert ground: " + tile.coords().getBoardNum());
+            assertEquals(BoardScene.Surface.DESERT, tile.surface(), "Desert ground: " + tile.coords().getBoardNum());
         }
         assertEquals(30, roads);
         assertEquals(9, decorated);
@@ -176,6 +186,23 @@ class GpuRoadSourceTest {
         return scene.get();
     }
 
+    /** A destroyed rail ({@code rail:0}) draws no track and no buffer stop, but its bed stays shaped as the intact one's. */
+    @Test
+    void aDestroyedRailKeepsItsBedAndDrawsNoTrack() {
+        Coords at = new Coords(2, 2);
+        Board board = Board.createEmptyBoard(5, 5);
+        for (int level : new int[] { 1, 0 }) {
+            Hex hex = new Hex(0);
+            hex.addTerrain(new Terrain(Terrains.RAIL, level, true, 1));
+            board.setHex(at, hex);
+            var tile = new BoardScene(0, 5, 5, BoardTiles.captureAll(board), List.of(), List.of(), -1, "", List.of()).tile(at);
+            assertEquals(1, tile.wayExits(), "rail:" + level + ": the bed is shaped as a road with its exits");
+            long drawn = tile.features().stream().filter(f -> f.decoration() != null
+                  && (RailRoute.isRoute(f.decoration()) || f.asset().equals(RailRoute.BUFFER_STOP))).count();
+            assertEquals(level == 1 ? 2 : 0, drawn, "rail:" + level + ": the track and the buffer stop of its dead end");
+        }
+    }
+
     @Test
     void roadAppearanceSurvivesRecaptureAndChangesWithoutDependingOnTheLegacyImage() throws Exception {
         try (var fixture = GpuBoardFixture.create()) {
@@ -201,12 +228,15 @@ class GpuRoadSourceTest {
                 fixture.source.refresh();
                 var curve = fixture.source.takeFrame().scene().tile(at);
                 assertTrue(BoardRoad.rendered(curve));
-                assertEquals(BoardScene.Surface.SAND, curve.surface());
+                assertEquals(BoardScene.Surface.DESERT, curve.surface());
                 custom = custom.duplicate();
                 custom.addTerrain(new Terrain(Terrains.ROAD_FLUFF, 3));
                 fixture.game.getBoard().setHex(at, custom);
                 fixture.source.refresh();
-                assertFalse(BoardRoad.rendered(fixture.source.takeFrame().scene().tile(at)));
+                var decorated = fixture.source.takeFrame().scene().tile(at);
+                assertTrue(BoardRoad.rendered(decorated), "Cosmetic road artwork keeps the native carriageway");
+                assertEquals(BoardRoad.capture(custom), decorated.road());
+                assertEquals(custom.getTerrain(Terrains.ROAD).getExits(), decorated.roadExits());
                 fixture.game.getBoard().setHex(at, new Hex(0));
                 fixture.source.refresh();
                 assertEquals(BoardRoad.Kind.NONE, fixture.source.takeFrame().scene().tile(at).road());

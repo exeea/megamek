@@ -11,12 +11,19 @@ in float v_waterCrest;
 // water-pool-functions
 
 void main() {
+    // Capture before coverage rejection, shared by geometric facing and the reflected cloud-plane footprint.
+    waterPositionDx = dFdx(v_cloudPosition);
+    waterPositionDy = dFdy(v_cloudPosition);
+    vec3 geometric = visibleFace(waterPositionDx, waterPositionDy, -viewDirection());
+    vec3 face = normalize(v_normal);
+    surfaceVariance = normalVariance(dFdx(face), dFdy(face));
     if (waterHidden()) discard;
     vec4 habitat, mixture;
     waterHabitat(habitat, mixture);
     vec3 tint = waterTint(mixture);
     bool procedural = u_waterMaterial.y > 0.5;
     vec3 authored = procedural ? vec3(0.0) : texture(u_diffuseTexture, v_diffuseUV).rgb;
-    WaterLighting illumination = waterLighting();
-    waterOutput(waterPool(false, habitat, mixture, tint, authored, illumination));
+    WaterLighting illumination = waterLighting(false);
+    vec3 noSheet;
+    waterOutput(waterPool(false, geometric, habitat, mixture, tint, authored, illumination, face, 1.0, noSheet));
 }

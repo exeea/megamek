@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -148,17 +150,21 @@ class BoardScatterTest {
     }
 
     @Test
-    void tundraUsesDryTuftsInsteadOfLushPlants() {
-        Hex hex = new Hex(0);
-        hex.addTerrain(new Terrain(Terrains.TUNDRA, 1));
-        Set<String> shapes = new HashSet<>();
+    void tundraReplacesOnlyPlantsAndPreservesLooseStonePlacement() {
+        Hex plain = new Hex(0);
+        Hex tundra = new Hex(0);
+        tundra.addTerrain(new Terrain(Terrains.TUNDRA, 1));
+        int stones = 0;
         for (int x = 0; x < 16; x++) {
             for (int y = 0; y < 16; y++) {
-                scatter(hex, new Coords(x, y)).forEach(feature -> shapes.add(feature.asset()));
+                var coords = new Coords(x, y);
+                var expected = scatter(plain, coords).stream().filter(f -> BoardScatter.stone(f.asset())).toList();
+                var actual = scatter(tundra, coords);
+                assertEquals(expected, actual, "Keep loose stone positions, scales and rotations; replace only plants");
+                stones += actual.size();
             }
         }
-        assertEquals(BoardScatter.DENSITY_MULTIPLIER <= 0 ? Set.of()
-              : Set.of("scatter-dry-grass", "scatter-rock", "scatter-slab"), shapes);
+        assertTrue(stones > 0, "Retain the existing sparse rock and slab clusters");
     }
 
     @Test
@@ -199,32 +205,141 @@ class BoardScatterTest {
     }
 
     @Test
-    void marsStonesUseTheirOwnBedrockSwatchWithoutAnExtraRedTint() {
-        for (var family : List.of(BoardScene.Surface.MARS, BoardScene.Surface.DESERT, BoardScene.Surface.SAND)) {
+    void stoneAtlasPigmentSurvivesEveryThemeAndRotation() {
+        for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DIRT, BoardScene.Surface.SAND,
+              BoardScene.Surface.DESERT, BoardScene.Surface.ROCK, BoardScene.Surface.LUNAR,
+              BoardScene.Surface.MARS, BoardScene.Surface.SNOW, BoardScene.Surface.TROPICAL,
+              BoardScene.Surface.VOLCANO)) {
             var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, family,
                   null, null, null, List.of(), List.of());
             var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
             var surface = new BoardSurface(scene, tile);
-            for (String asset : List.of("scatter-rock", "scatter-slab")) {
+            for (int rotation : new int[] { 0, 137, 359 }) {
+                for (String asset : List.of("scatter-rock", "scatter-slab")) {
+                    var mesh = new MeshBuilder();
+                    mesh.begin(VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal
+                          | VertexAttributes.Usage.ColorUnpacked | VertexAttributes.Usage.TextureCoordinates, GL20.GL_TRIANGLES);
+                    GpuScatter.build(mesh, tile, surface, new BoardScene.Feature(asset, 0, 0, rotation, 1, .15f, 0,
+                          BoardScene.FeatureKind.SCATTER));
+                    assertEquals(24, mesh.getNumIndices(), "The material fix keeps the tiny eight-triangle stones");
+                    int stride = mesh.getAttributes().vertexSize / Float.BYTES;
+                    int uv = mesh.getAttributes().findByUsage(VertexAttributes.Usage.TextureCoordinates).offset / Float.BYTES;
+                    int color = mesh.getAttributes().findByUsage(VertexAttributes.Usage.ColorUnpacked).offset / Float.BYTES;
+                    float[] vertices = new float[mesh.getNumVertices() * stride];
+                    mesh.getVertices(vertices, 0);
+                    for (int i = 0; i < vertices.length; i += stride) {
+                        for (int channel = 0; channel < 4; channel++) {
+                            assertEquals(1, vertices[i + color + channel], 0,
+                                  "Final stone pigment/opacity must not depend on theme or rotation: "
+                                        + family + ", " + rotation + ", " + asset);
+                        }
+                        float u = vertices[i + uv], v = vertices[i + uv + 1];
+                        if (family == BoardScene.Surface.MARS) {
+                            assertTrue(u > .5f && u < 1 && v > .5f && v < .75f,
+                                  "Mars bedrock occupies the sixth swatch of the four-row atlas");
+                        } else if (family == BoardScene.Surface.SAND || family == BoardScene.Surface.DESERT) {
+                            assertTrue(u > 0 && u < .5f && v > .25f && v < .5f,
+                                  "Sandstone keeps the third swatch of the four-row atlas");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void bushTissueAndPigmentSurvivePlacementAndPackedVertices() throws Exception {
+        var place = BoardRelief.class.getDeclaredMethod("place", List.class, BoardShape.class, Vector3.class,
+              float.class, float.class, float.class, float.class, BoardRelief.Kind.class, int.class, boolean.class);
+        place.setAccessible(true);
+        var encode = GpuTerrain.class.getDeclaredMethod("sculptVertex", Vector3.class, BoardRelief.Shade.class,
+              float.class, BoardSurface.class);
+        encode.setAccessible(true);
+        for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DESERT)) {
+            var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, family,
+                  null, null, null, List.of(), List.of());
+            var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
+            var surface = new BoardSurface(scene, tile);
+            for (int variant = 0; variant < BoardScatter.BUSHES / 2; variant++) {
+                var authored = BoardScatter.bush(family, variant);
+                var polygons = new ArrayList<>(authored.polygons());
+                var sample = polygons.getLast();
+                polygons.add(new BoardShape.Polygon(sample.points(), sample.normal(), sample.color(), "unknown-tissue"));
+                var bush = new BoardShape(polygons, authored.height());
+                var faces = new ArrayList<BoardSurface.Face>();
+                // Exercise the real placement/packing path with an unobstructed known transform.
+                place.invoke(surface.relief, faces, bush, BoardGeometry.center(tile.coords(), 0), 0f,
+                      1f, 1f, 1f, BoardRelief.Kind.PLANT, -1, false);
+                assertEquals(polygons.size(), faces.size(), "Tissue tagging must not change the authored triangles");
+                Map<Set<Vector3>, Vector3> leafSides = new HashMap<>();
+                int leafFaces = 0, woodFaces = 0, reversePairs = 0;
+                for (int index = 0; index < polygons.size(); index++) {
+                    var polygon = polygons.get(index);
+                    boolean leaf = Set.of("dry-leaf", "dry-tip", "green-leaf", "green-tip").contains(polygon.material());
+                    var face = faces.get(index);
+                    for (var point : List.of(face.a(), face.b(), face.c())) {
+                        var shade = surface.relief.shade(point);
+                        assertEquals(leaf ? BoardRelief.Kind.LEAF : BoardRelief.Kind.PLANT, shade.kind(), polygon.material());
+                        assertEquals(polygon.color().r, shade.rim(), 0, "Keep authored red");
+                        assertEquals(polygon.color().g, shade.foot(), 0, "Keep authored green");
+                        assertEquals(polygon.color().b, shade.tint(), 0, "Keep authored blue");
+                        var vertex = (com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder.VertexInfo)
+                              encode.invoke(null, point, shade, Float.NaN, surface);
+                        int packed = Float.floatToRawIntBits(vertex.color.toFloatBits());
+                        float kind = (packed >>> 16 & 255) / 255f;
+                        assertTrue(kind >= .125f && kind < .375f, "Both tissues retain the existing plant material range");
+                        assertEquals(leaf, kind > .325f, "GPU tissue identity must survive packed byte quantization");
+                        assertEquals(polygon.color().r, vertex.uv.x, 0);
+                        assertEquals(polygon.color().g, vertex.uv.y, 0);
+                        assertEquals(polygon.color().b, vertex.color.a, 0);
+                    }
+                    if (leaf) {
+                        leafFaces++;
+                        var normal = surface.relief.shade(face.a()).normal();
+                        var previous = leafSides.putIfAbsent(Set.of(face.a(), face.b(), face.c()), normal);
+                        if (previous != null) {
+                            assertEquals(-1, previous.dot(normal), .00001f, "Both real sides retain opposite leaf normals");
+                            reversePairs++;
+                        }
+                    } else { woodFaces++; }
+                }
+                assertTrue(woodFaces > 1 && leafFaces > 0 && reversePairs > 0,
+                      "Exercise woody stems, both real leaf sides, and the opaque unknown-role fallback");
+            }
+        }
+    }
+
+    @Test
+    void capturedBushesPreserveTissueAndExistingPigmentVariation() {
+        for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DESERT)) {
+            var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, family,
+                  null, null, null, List.of(), List.of());
+            var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
+            var surface = new BoardSurface(scene, tile);
+            var polygons = BoardScatter.plant(family).polygons();
+            for (int rotation : new int[] { 0, 137, 359 }) {
                 var mesh = new MeshBuilder();
                 mesh.begin(VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal
                       | VertexAttributes.Usage.ColorUnpacked | VertexAttributes.Usage.TextureCoordinates, GL20.GL_TRIANGLES);
-                GpuScatter.build(mesh, tile, surface, new BoardScene.Feature(asset, 0, 0, 137, 1, .15f, 0,
+                GpuScatter.build(mesh, tile, surface, new BoardScene.Feature("scatter-plant", 0, 0, rotation, 1, .15f, 0,
                       BoardScene.FeatureKind.SCATTER));
-                assertEquals(24, mesh.getNumIndices(), "The material fix keeps the tiny eight-triangle stones");
+                assertEquals(polygons.size() * 3, mesh.getNumIndices(), "Tissue preserves all real leaf/stem faces");
                 int stride = mesh.getAttributes().vertexSize / Float.BYTES;
                 int uv = mesh.getAttributes().findByUsage(VertexAttributes.Usage.TextureCoordinates).offset / Float.BYTES;
                 int color = mesh.getAttributes().findByUsage(VertexAttributes.Usage.ColorUnpacked).offset / Float.BYTES;
                 float[] vertices = new float[mesh.getNumVertices() * stride];
-                mesh.getVertices(vertices, 0);
-                for (int i = 0; i < vertices.length; i += stride) {
-                    assertEquals(vertices[i + color], vertices[i + color + 1], .00001f, "Do not recolor the source stone");
-                    assertEquals(vertices[i + color], vertices[i + color + 2], .00001f);
-                    float u = vertices[i + uv], v = vertices[i + uv + 1];
-                    if (family == BoardScene.Surface.MARS) {
-                        assertTrue(u > .5f && u < 1 && v > 2f / 3 && v < 1, "Mars bedrock occupies the sixth swatch");
-                    } else {
-                        assertTrue(u > 0 && u < .5f && v > 1f / 3 && v < 2f / 3, "Sandstone keeps its existing swatch");
+                short[] indices = new short[mesh.getNumIndices()];
+                mesh.getVertices(vertices, 0); mesh.getIndices(indices, 0);
+                float variation = .88f + .24f * rotation / 360;
+                for (int polygon = 0; polygon < polygons.size(); polygon++) {
+                    var source = polygons.get(polygon);
+                    boolean leaf = Set.of("dry-leaf", "dry-tip", "green-leaf", "green-tip").contains(source.material());
+                    for (int corner = 0; corner < 3; corner++) {
+                        int offset = Short.toUnsignedInt(indices[polygon * 3 + corner]) * stride;
+                        assertEquals(leaf, vertices[offset + color + 2] > .325f);
+                        assertEquals(source.color().r * variation, vertices[offset + uv], .000001f);
+                        assertEquals(source.color().g * variation, vertices[offset + uv + 1], .000001f);
+                        assertEquals(source.color().b * variation, vertices[offset + color + 3], .000001f);
                     }
                 }
             }

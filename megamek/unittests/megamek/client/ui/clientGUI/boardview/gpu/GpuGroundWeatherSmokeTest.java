@@ -187,8 +187,8 @@ class GpuGroundWeatherSmokeTest {
                 Pixmap clear = frame(atmosphere, terrain, camera, scene, BoardAtmosphere.DEFAULTS, 0);
                 capture(atmosphere, terrain, camera, scene, sandSettings, 0);
                 profiler.reset();
-                atmosphere.end(camera.camera, terrain, scene, 0);
                 atmosphere.renderWeather(camera.camera, scene);
+                atmosphere.end(camera.camera, terrain, scene, 0);
                 assertEquals(1, profiler.getDrawCalls(), "Sand uses only the existing composite");
                 Pixmap dusty = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
                 var lighterSand = new BoardAtmosphere.Settings(13, 0, 0, 2.5f, 0, 0,
@@ -201,8 +201,8 @@ class GpuGroundWeatherSmokeTest {
                 Pixmap stationary = frame(atmosphere, terrain, camera, scene, fogSettings, 0);
                 for (int i = 0; i < 100; i++) { capture(atmosphere, terrain, camera, scene, fogSettings, 0.1f); }
                 profiler.reset();
-                atmosphere.end(camera.camera, terrain, scene, 0);
                 atmosphere.renderWeather(camera.camera, scene);
+                atmosphere.end(camera.camera, terrain, scene, 0);
                 assertEquals(2, profiler.getDrawCalls(), "Calm drift reuses the fog and composite passes");
                 Pixmap drifting = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
                 try {
@@ -377,8 +377,8 @@ class GpuGroundWeatherSmokeTest {
                         timing.beginFrame();
                         timing.stage(names[mode]);
                     }
-                    atmosphere.end(camera.camera, terrain, scene, 0);
                     atmosphere.renderWeather(camera.camera, scene);
+                    atmosphere.end(camera.camera, terrain, scene, 0);
                     if (frame >= 16) { timing.stage(null); }
                     Gdx.gl.glFinish();
                 }
@@ -402,8 +402,8 @@ class GpuGroundWeatherSmokeTest {
     private static Pixmap frame(GpuAtmosphere atmosphere, GpuTerrain terrain, BoardCamera camera, BoardScene scene,
           BoardAtmosphere.Settings settings, float delta) {
         capture(atmosphere, terrain, camera, scene, settings, delta);
-        atmosphere.end(camera.camera, terrain, scene, 0);
         atmosphere.renderWeather(camera.camera, scene);
+        atmosphere.end(camera.camera, terrain, scene, 0);
         return Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
     }
 

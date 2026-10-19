@@ -9608,16 +9608,18 @@ public abstract class Entity extends TurnOrdered
                                          int lastElev,
                                          boolean isPavementStep) {
         PilotingRollData roll = getBasePilotingRoll(moveType);
-        int bgMod = curHex.getBogDownModifier(getMovementMode(), this instanceof LargeSupportTank);
+        // On a muddy raised bridge deck (Hex#deckMud) the deck's mud bogs down, even on its road surface.
+        Terrain deckMud = curHex.deckMud(step.getElevation());
+        int bgMod = (deckMud != null) ? deckMud.getBogDownModifier(getMovementMode(), this instanceof LargeSupportTank)
+              : curHex.getBogDownModifier(getMovementMode(), this instanceof LargeSupportTank);
 
         // we check for bog down on entering a new hex or changing altitude but not if we're jumping, above the
-        // "ground" (meaning the bottom of the lake), not susceptible to bog down as per getBogDownModifier, and not
-        // on pavement
+        // "ground" (meaning the bottom of the lake) unless on a muddy deck, not susceptible to bog down as per
+        // getBogDownModifier, and not on pavement
         if ((!lastPos.equals(curPos) || (step.getElevation() != lastElev)) &&
             (bgMod != TargetRoll.AUTOMATIC_SUCCESS) &&
             (moveType != EntityMovementType.MOVE_JUMP) &&
-            (step.getElevation() == -curHex.depth()) &&
-            !isPavementStep) {
+            ((deckMud != null) || ((step.getElevation() == -curHex.depth()) && !isPavementStep))) {
 
             roll.append(new PilotingRollData(getId(), bgMod, "avoid bogging down"));
 
@@ -9629,7 +9631,11 @@ public abstract class Entity extends TurnOrdered
                 roll.addModifier(-1, "Swamp Beast");
             }
 
-            addPilotingModifierForTerrain(roll, curPos, step.getBoardId(), false);
+            if (deckMud != null) {
+                deckMud.applyPilotingModifier(getMovementMode(), roll, false);
+            } else {
+                addPilotingModifierForTerrain(roll, curPos, step.getBoardId(), false);
+            }
             adjustDifficultTerrainPSRModifier(roll);
         } else {
             roll.addModifier(TargetRoll.CHECK_FALSE,
@@ -13626,6 +13632,8 @@ public abstract class Entity extends TurnOrdered
                                               MoveStep step) {
         if (step.getElevation() <= 0) {
             addPilotingModifierForTerrain(roll, step.getPosition(), step.getBoardId());
+        } else {
+            addDeckMudModifier(roll, step.getPosition(), step.getBoardId(), step.getElevation());
         }
     }
 
@@ -13637,6 +13645,20 @@ public abstract class Entity extends TurnOrdered
     public void addPilotingModifierForTerrain(PilotingRollData roll) {
         if (getElevation() <= 0) {
             addPilotingModifierForTerrain(roll, getPosition(), getBoardId());
+        } else {
+            addDeckMudModifier(roll, getPosition(), getBoardId(), getElevation());
+        }
+    }
+
+    /** The PSR modifier of the mud on the raised bridge deck the unit stands on ({@link Hex#deckMud}), as on the ground. */
+    private void addDeckMudModifier(PilotingRollData roll, Coords c, int boardId, int elevation) {
+        if ((c == null) || (roll == null) || isOffBoard() || !isDeployed()) {
+            return;
+        }
+        Hex hex = game.getBoard(boardId).getHex(c);
+        Terrain mud = (hex == null) ? null : hex.deckMud(elevation);
+        if (mud != null) {
+            mud.applyPilotingModifier(getMovementMode(), roll, false);
         }
     }
 

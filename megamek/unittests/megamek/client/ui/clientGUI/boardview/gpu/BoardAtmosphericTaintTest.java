@@ -21,21 +21,37 @@ import org.junit.jupiter.params.provider.EnumSource;
 class BoardAtmosphericTaintTest {
     @ParameterizedTest
     @EnumSource(AtmosphericTaint.class)
-    void palettePreservesBrightnessAndSurfaceLightingAtEveryHour(AtmosphericTaint taint) {
+    void palettePreservesSourceEnergyAndSharedSkyLightingAtEveryHour(AtmosphericTaint taint)
+          throws ReflectiveOperationException {
         for (float clouds : new float[] { 0, 1 }) {
             for (int hour = 0; hour < 24; hour++) {
                 var clear = settings(hour, clouds, Atmosphere.STANDARD, AtmosphericTaint.BREATHABLE);
                 var tinted = settings(hour, clouds, Atmosphere.STANDARD, taint);
                 var before = BoardAtmosphere.lighting(clear);
+                var beforeEnergy = uncalibrated(clear, 0);
                 for (float strength : new float[] { 0, 0.001f, 1, 2, 10 }) {
                     var after = BoardAtmosphere.lighting(tinted, BoardAtmosphere.MOONLIGHT_SHADOW_CONTRAST, strength);
+                    var afterEnergy = uncalibrated(tinted, strength);
                     assertEquals(before.direction(), after.direction());
-                    assertSameColor(before.direct(), after.direct(), "Taint never changes the light");
-                    assertSameColor(before.ambient(), after.ambient(), "Taint never changes the light");
+                    assertSameColor(before.direct(), after.direct(), "Taint never changes the directional light");
+                    // Tainted incident sky supplies diffuse and reflected light. Its cosine integral remains
+                    // shared after the common white-point transform; the visible backdrop has its own presentation.
+                    Color sky = after.environmentSky(), horizon = after.environmentHorizon();
+                    assertEquals(.2f * horizon.r + .8f * sky.r, after.ambient().r, .000001f);
+                    assertEquals(.2f * horizon.g + .8f * sky.g, after.ambient().g, .000001f);
+                    assertEquals(.2f * horizon.b + .8f * sky.b, after.ambient().b, .000001f);
                     assertEquals(before.saturation(), after.saturation());
-                    assertBrightness(before.sky(), after.sky());
-                    assertBrightness(before.horizon(), after.horizon());
-                    assertLight(before.fog(), after.fog());
+                    // Palette energy is preserved before white-point gains act on its changing chromaticity.
+                    assertLight(beforeEnergy.ambient(), afterEnergy.ambient());
+                    assertLight(beforeEnergy.sky(), afterEnergy.sky());
+                    assertLight(beforeEnergy.horizon(), afterEnergy.horizon());
+                    assertLight(beforeEnergy.environmentSky(), afterEnergy.environmentSky());
+                    assertLight(beforeEnergy.environmentHorizon(), afterEnergy.environmentHorizon());
+                    assertLight(beforeEnergy.fog(), afterEnergy.fog());
+                    for (var color : new Color[] { after.ambient(), after.sky(), after.horizon(), after.fog(),
+                          after.environmentSky(), after.environmentHorizon() }) {
+                        assertRadiance(color);
+                    }
                     // The multiplicative grade may exceed one; its luminance must not change exposure.
                     assertEquals(luminance(before.tint()), luminance(after.tint()), 0.000001f);
                     float gradeShift = distance(before.tint(), after.tint());
@@ -159,17 +175,23 @@ class BoardAtmosphericTaintTest {
         return new BoardAtmosphere.Settings(hour, clouds, 0, 2, 0, 0, BoardAtmosphere.Effects.NONE, pressure, 25, true, taint);
     }
 
-    private static void assertBrightness(Color before, Color after) {
-        assertLight(before, after);
-        for (float channel : new float[] { after.r, after.g, after.b }) {
-            assertTrue(channel <= 1, "Display colors stay within the display range");
-        }
+    private static BoardAtmosphere.Lighting uncalibrated(BoardAtmosphere.Settings settings, float strength)
+          throws ReflectiveOperationException {
+        var lighting = BoardAtmosphere.class.getDeclaredMethod("lighting", BoardAtmosphere.Settings.class,
+              float.class, float.class, boolean.class);
+        lighting.setAccessible(true);
+        return (BoardAtmosphere.Lighting) lighting.invoke(null, settings,
+              BoardAtmosphere.MOONLIGHT_SHADOW_CONTRAST, strength, false);
     }
 
-    /** Fog is linear light and may exceed one; the palette only keeps its luminance. */
+    /** Linear radiance may exceed one; the palette keeps its source luminance. */
     private static void assertLight(Color before, Color after) {
         assertEquals(luminance(before), luminance(after), 0.000001f);
-        for (float channel : new float[] { after.r, after.g, after.b }) {
+        assertRadiance(after);
+    }
+
+    private static void assertRadiance(Color color) {
+        for (float channel : new float[] { color.r, color.g, color.b }) {
             assertTrue(Float.isFinite(channel) && channel >= 0);
         }
     }

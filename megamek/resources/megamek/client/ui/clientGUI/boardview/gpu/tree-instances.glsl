@@ -10,6 +10,7 @@ layout(location = 13) in vec4 a_instance2;
 // An impostor card's plant crown radius in model units; at this tree's scale it lifts the card's shadow lookup.
 uniform float u_impostorLift;
 out float v_impostorLift;
+out float v_impostorAspect;
 #endif
 
 vec3 instanceTurn(vec3 v) {
@@ -27,5 +28,8 @@ vec3 instancePosition(vec3 p) {
 }
 
 vec3 instanceNormal(vec3 n) {
+#ifdef impostorFlag
+    v_impostorAspect = a_instance0.w / a_instance1.z;
+#endif
     return normalize(instanceTurn(n / instanceScale()));
 }

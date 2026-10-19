@@ -1,0 +1,259 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.common.board;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Stream;
+
+import megamek.common.Configuration;
+import megamek.common.Hex;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+
+/**
+ * The Assets palette the shipped blueprint declares: categories of sections of cards, decals shown by purpose and again
+ * under Decals, merged presets whose levels stay reachable as Brush settings, and the building looks and blueprints.
+ */
+class BoardEditorBlueprintPaletteTest {
+    private static final BoardEditorBlueprint BLUEPRINT = BoardEditorBlueprint.get();
+
+    /** The presets merged into a kept card: deleted key, its terrain then, the card that reaches it now. */
+    private static final String[][] MERGED = {
+        { "ground/quicksand", "swamp:2", "ground/swamp" },
+        { "pavement/2", "pavement:2", "pavement/1" }, { "pavement/3", "pavement:3", "pavement/1" },
+        { "pavement/4", "pavement:4", "pavement/1" }, { "rough/2", "rough:2", "rough/1" },
+        { "rubble/rubble-medium", "rubble:2", "rubble/rubble-light" }, { "rubble/rubble-heavy", "rubble:3", "rubble/rubble-light" },
+        { "rubble/rubble-hardened", "rubble:4", "rubble/rubble-light" }, { "rubble/rubble-wall", "rubble:5", "rubble/rubble-light" },
+        { "rubble/rubble-ultra", "rubble:6", "rubble/rubble-light" },
+        { "vegetation/woods-2", "woods:2;foliage_elev:2", "vegetation/woods-1" },
+        { "vegetation/woods-3", "woods:3;foliage_elev:3", "vegetation/woods-1" },
+        { "vegetation/low-woods", "woods:1;foliage_elev:1", "vegetation/woods-1" },
+        { "vegetation/jungle-2", "jungle:2;foliage_elev:2", "vegetation/jungle-1" },
+        { "vegetation/jungle-3", "jungle:3;foliage_elev:3", "vegetation/jungle-1" },
+        { "vegetation/low-jungle", "jungle:1;foliage_elev:1", "vegetation/jungle-1" },
+        { "water/deep", "water:2", "water/shallow" }, { "water/rapids", "water:1;rapids:1", "water/shallow" },
+        { "water/torrent", "water:1;rapids:2", "water/shallow" },
+        { "road/2", "road:2", "road/1" }, { "road/3", "road:3", "road/1" }, { "road/4", "road:4", "road/1" },
+        { "weather/snow-deep", "snow:2", "weather/snow-thin" }, { "hazards/inferno", "fire:2", "hazards/fire" },
+        { "hazards/smoke-heavy", "smoke:2", "hazards/smoke-light" }, { "hazards/magma", "magma:2", "hazards/magma-crust" },
+        { "hazards/geyser-active", "geyser:2", "hazards/geyser-dormant" },
+        { "hazards/geyser-magma", "geyser:3", "hazards/geyser-dormant" },
+    };
+
+    @Test
+    void theShippedPaletteHasNineCategoriesAndShowsEveryEntryInEachOfItsSections() {
+        assertEquals(List.of("theme", "ground-water", "vegetation", "transportation", "buildings", "industry", "parks",
+              "hazards", "decals"), BLUEPRINT.categories().stream().map(BoardEditorBlueprint.Category::id).toList());
+        assertEquals(List.of("dirt", "rock"), BLUEPRINT.specialThemes());
+        for (var category : BLUEPRINT.categories()) {
+            assertNotNull(category.icon(), category.id());
+            assertTrue(category.themes() != null || !category.sections().isEmpty(), category.id());
+            category.sections().forEach(section -> assertFalse(section.cards().isEmpty(), "Empty section " + section.path()));
+        }
+        List<String> keys = new ArrayList<>();
+        BLUEPRINT.components().forEach(c -> c.presets().stream().filter(p -> !p.sections().isEmpty())
+              .forEach(p -> keys.add(c.id() + "/" + p.id())));
+        HexAppearance.OWNERS.forEach(owner -> BLUEPRINT.variants(owner).stream().filter(v -> !v.sections().isEmpty())
+              .forEach(v -> keys.add(v.id())));
+        BLUEPRINT.assets().stream().filter(a -> !a.sections().isEmpty()).forEach(a -> keys.add(a.id()));
+        for (String key : keys) {
+            var entry = BLUEPRINT.entry(key);
+            assertNotNull(entry, key);
+            var card = BLUEPRINT.card(entry);
+            assertTrue(card.members().contains(entry), key);
+            for (String path : entry.sections()) {
+                assertTrue(section(path).cards().contains(card), key + " shows in " + path);
+            }
+        }
+        assertNull(BLUEPRINT.entry("hex/sample"));
+        // An automatic building piece is no card: the 3D board picks it from weight and exits.
+        assertNull(BLUEPRINT.entry("buildings/saxarba/building_light/building_light_12"));
+    }
+
+    /** Ground & water's Liquids: the Water card and the Lava card, liquid magma on the water's depth. */
+    @Test
+    void theLiquidsSectionHoldsWaterAndLava() {
+        assertEquals(List.of("basic", "gameplay", "liquids"), BLUEPRINT.categories().get(1).sections().stream()
+              .map(BoardEditorBlueprint.Section::id).toList());
+        assertEquals(List.of("water/shallow", "water/magma"), section("ground-water/liquids").cards().stream()
+              .map(card -> card.members().getFirst().key()).toList());
+        Hex lava = new Hex(0, BLUEPRINT.entry("water/magma").preset().terrain(), "");
+        assertEquals("Lava", BLUEPRINT.entry("water/magma").label());
+        assertTrue(HexTile.liquid(lava) && lava.terrainLevel(Terrains.MAGMA) == 2 && lava.terrainLevel(Terrains.WATER) == 1);
+    }
+
+    @Test
+    void everyDecalIsListedUnderDecalsAndAtMostOnceMoreByItsPurpose() {
+        for (var decal : BLUEPRINT.assets().stream().filter(a -> !a.sections().isEmpty() && a.kind().equals("decal")).toList()) {
+            long underDecals = decal.sections().stream().filter(path -> path.startsWith("decals/")).count();
+            assertEquals(1, underDecals, decal.id() + " " + decal.sections());
+            assertTrue(decal.sections().size() <= 2, decal.id());
+        }
+        // The same entry in two places is one card (car-park bays: Vehicles and parking, and Decals).
+        var bays = BLUEPRINT.card(BLUEPRINT.entry("decal/car-park/straight-4"));
+        assertEquals("Car park bays", bays.label());
+        assertTrue(section("transportation/parking").cards().contains(bays) && section("decals/road").cards().contains(bays));
+    }
+
+    @Test
+    void aMergedPresetStaysReachableThroughTheBrushSettingsOfItsCard() {
+        for (String[] merged : MERGED) {
+            String owner = merged[0].substring(0, merged[0].indexOf('/'));
+            var component = BLUEPRINT.component(owner);
+            assertTrue(component.presets().stream().noneMatch(p -> (owner + "/" + p.id()).equals(merged[0])), merged[0]);
+            var kept = BLUEPRINT.entry(merged[2]).preset();
+            Hex before = new Hex(0, merged[1], ""), now = new Hex(0, kept.terrain(), "");
+            for (int type : before.getTerrainTypes()) {
+                assertTrue(component.fields().stream().anyMatch(f -> Terrains.getType(f.terrain()) == type), merged[0]);
+            }
+            for (var field : component.fields()) {
+                int type = Terrains.getType(field.terrain()), level = before.terrainLevel(type);
+                if (level == now.terrainLevel(type)) { continue; }
+                assertTrue(field.brush() || kept.settings().contains(field.terrain()), merged[0] + ": " + field.terrain());
+                if (level == Terrain.LEVEL_NONE || merged[0].equals("pavement/4")) { continue; } // Runway is Concrete's alias
+                assertTrue(field.choices().isEmpty() ? level >= field.min() && level <= field.max()
+                      : field.choices().stream().anyMatch(c -> c.value() == level), merged[0] + ": " + field.terrain());
+            }
+        }
+    }
+
+    /**
+     * The container yard (b12): one gallery of five looks, first in Industry > Seaport and third in Vegetation > Looks,
+     * beside the quay art and seven prop cards; the legacy seaport pieces leave the palette but keep their labels for old
+     * objects.
+     */
+    @Test
+    void theContainerYardIsOneGalleryInSeaportAndLooksBesideTheSeaportProps() {
+        var seaport = section("industry/seaport").cards();
+        assertEquals(List.of("Container yard", "Legacy quay art", "Container", "Quay crane", "Crane boom segment", "Yard gantry",
+              "Straddle carrier", "Reach stacker", "Yard truck"), seaport.stream().map(BoardEditorBlueprint.Card::label).toList());
+        var yard = seaport.getFirst();
+        assertTrue(yard.gallery());
+        assertEquals(5, yard.members().size());
+        assertTrue(yard.members().stream().allMatch(member -> member.variant().skin() != null && member.owner().equals("vegetation")));
+        assertEquals(yard, section("vegetation/looks").cards().get(2));
+        assertTrue(seaport.get(2).picker() && seaport.get(5).picker());
+        var old = BLUEPRINT.asset("scenery/seaport/containers-n-s-01");
+        assertTrue(old != null && old.sections().isEmpty() && old.family() == null, "Old objects keep their label off the palette");
+        // The Industry tile shows the gantry yard look turned across the view.
+        assertEquals(new HexAppearance("woods/container-yard/yard-gantry", null, null, null, BoardDecoration.Colours.NONE, 90),
+              BLUEPRINT.categories().stream().filter(c -> c.id().equals("industry")).findFirst().orElseThrow().icon()
+                    .getAppearance().get("vegetation"));
+    }
+
+    @Test
+    void theSealedDomeAndTankFarmLooksHaveAPieceForEveryWeightAndExits() {
+        assertEquals("buildings/saxarba/bsealed_medium/bsealed_medium_12",
+              BLUEPRINT.variant("building/sealed").model(new Hex(0, "building:2:12", "")));
+        assertEquals("", BLUEPRINT.variant("building/sealed").model(new Hex(0, "pavement:1", "")));
+        // The 3D board draws the look's piece, not the automatic building.
+        Hex sealed = new Hex(0, "building:2:12", "");
+        sealed.setAppearance(java.util.Map.of("building", new HexAppearance("building/sealed", null, null, null)));
+        assertEquals("buildings/saxarba/bsealed_medium/bsealed_medium_12", TilesetScenery.structureModels(sealed).get(Terrains.BUILDING));
+        for (String look : List.of("building/sealed", "building/tank-farm")) {
+            for (int weight = 1; weight <= 4; weight++) {
+                for (int exits = 0; exits < 64; exits++) {
+                    String model = BLUEPRINT.variant(look).model(new Hex(0, "building:" + weight + ":" + exits, ""));
+                    assertTrue(new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile(), look + ": " + model);
+                }
+            }
+        }
+    }
+
+    @Test
+    void theDropShipBlueprintPaintsTheSevenHexesOfTheShippedDropShip() throws IOException {
+        var entry = BLUEPRINT.entry("building/dropship");
+        assertTrue(entry.blueprint() && entry.sections().equals(List.of("buildings/blueprints")));
+        Board board = BoardFile.read(Configuration.boardsDir().toPath().resolve("unofficial/Radar/56x30 Repo man.board"), true);
+        Coords centre = new Coords(49, 8); // hex 5009
+        assertPaints(entry.preset().terrain(), board.getHex(centre));
+        assertEquals(6, entry.preset().hexes().size());
+        for (int direction = 0; direction < 6; direction++) {
+            assertPaints(entry.preset().hexes().get(direction), board.getHex(centre.translated(direction)));
+        }
+    }
+
+    /** Every terrain of {@code terrain} is on {@code hex} with its level and exits. */
+    private static void assertPaints(String terrain, Hex hex) {
+        Hex painted = new Hex(0, terrain, "");
+        for (int type : painted.getTerrainTypes()) {
+            assertEquals(painted.getTerrain(type).toString(), hex.getTerrain(type).toString(), terrain);
+        }
+    }
+
+    @Test
+    void everyDesignAndObjectOfTheShippedNativeBoardsResolves() throws IOException {
+        List<Path> files;
+        try (Stream<Path> walk = Files.walk(Configuration.boardsDir().toPath())) {
+            files = walk.filter(path -> BoardFile.isNativeName(path.toString())).toList();
+        }
+        assertFalse(files.isEmpty());
+        // A bridge's Pillars toggle is stored as a design of its own, with no blueprint variant.
+        var pillars = Set.of(HexAppearance.PILLARS.variant(), HexAppearance.TRUSS_PILLARS.variant());
+        for (Path file : files) {
+            Board board = BoardFile.read(file, true);
+            for (int y = 0; y < board.getHeight(); y++) {
+                for (int x = 0; x < board.getWidth(); x++) {
+                    Hex hex = board.getHex(x, y);
+                    hex.getAppearance().values().stream().filter(design -> design.variant() != null && !pillars.contains(design.variant()))
+                          .forEach(design -> assertNotNull(BLUEPRINT.variant(design.variant()), file + ": " + design.variant()));
+                    hex.getDecorations().forEach(object -> assertNotNull(BLUEPRINT.assetOf(object), file + ": " + object.asset()));
+                }
+            }
+        }
+    }
+
+    @Test
+    void aPlacedPondIsTheKidneyPondAliasOfItsPoolModel() {
+        var pond = BLUEPRINT.asset("scenery/parks/pond-1");
+        assertEquals(pond, BLUEPRINT.assetOf(placed(pond.model(), pond.label())));
+        assertEquals(BLUEPRINT.asset(pond.model()), BLUEPRINT.assetOf(placed(pond.model(), null)));
+    }
+
+    private static BoardDecoration placed(String asset, String name) {
+        return new BoardDecoration("o", "prop", asset, name, 0, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0);
+    }
+
+    /**
+     * An unknown section, a one-member family, a family across two sections, a key on the palette twice (a preset's
+     * "owner/id" and a variant id) and a setting that is no field of the preset's component.
+     */
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', quoteCharacter = '"', value = {
+        "Unknown palette section | 'assets': [{'id': 'tree', 'label': 'Tree', 'kind': 'prop', 'section': 'c/x'}]",
+        "Family F | 'assets': [{'id': 'tree', 'label': 'Tree', 'kind': 'prop', 'section': 'c/s', 'family': 'F'}]",
+        "Family F | 'assets': [{'id': 'tree', 'label': 'Tree', 'kind': 'prop', 'section': 'c/s', 'family': 'F'},"
+              + "{'id': 'pine', 'label': 'Pine', 'kind': 'prop', 'section': ['c/s', 'c/t'], 'family': 'F'}]",
+        "Duplicate palette entry | 'components': [{'id': 'ground', 'label': 'G', 'presets': [{'id': 'x', 'label': 'X',"
+              + " 'section': 'c/s'}]}], 'variants': [{'id': 'ground/x', 'label': 'X', 'owner': 'ground', 'section': 'c/s'}]",
+        "is no field | 'components': [{'id': 'ground', 'label': 'G', 'presets': [{'id': 'x', 'label': 'X', 'settings': ['water']}]}]",
+    })
+    void aBrokenPaletteIsRefused(String reason, String content, @TempDir Path directory) throws IOException {
+        Path file = Files.writeString(directory.resolve("blueprint.json"), ("{'format': 'megamek-editor-blueprint', 'version': 1,"
+              + " 'categories': [{'id': 'c', 'icon': {'theme': 'grass'}, 'sections': ['s', 't']}], " + content + "}")
+              .replace('\'', '"'));
+        var failure = assertThrows(IOException.class, () -> BoardEditorBlueprint.read(file));
+        assertTrue(failure.getMessage().contains(reason), failure.getMessage());
+    }
+
+    private static BoardEditorBlueprint.Section section(String path) {
+        return BLUEPRINT.categories().stream().flatMap(c -> c.sections().stream()).filter(s -> s.path().equals(path))
+              .findFirst().orElseThrow(() -> new AssertionError("No section " + path));
+    }
+}

@@ -1,29 +1,43 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Solid crust and cooled banks: occluding relief, stable plates and deep red fissures.
+// Retain the solid fissures' existing emission; the thermal calibration applies to liquid only.
+const vec3 MAGMA_CRACK_RADIANCE = vec3(.25, .022, .0015);
 float magmaRepeatMetres() { return 12.0; }
+float magmaDistantRoughness() { return .85; }
 vec2 magmaRelief(vec2 uv, vec2 dx, vec2 dy, vec4 surface, vec2 parallax) {
-    if (u_normalMaps > .5) {
-        uv += parallax * .5;
-        float layer = 1.0;
-        float previous = 1.0 - magmaTexel(MAGMA_SURFACE, uv, dx, dy).r;
-        for (int step = 0; step < 12; step++) {
-            uv -= parallax / 12.0;
-            layer -= 1.0 / 12.0;
-            float gap = layer - magmaTexel(MAGMA_SURFACE, uv, dx, dy).r;
-            if (gap <= 0.0) {
-                uv += parallax / 12.0 * (-gap / max(previous - gap, .0001));
-                break;
-            }
-            previous = gap;
+    // Measure the relief ray in screen pixels with the projection's full Jacobian. A grazing, anisotropic
+    // footprint must not lose its resolved direction merely because its other direction is strongly minified.
+    float layers = 12.0;
+    // The derivative matrix's Frobenius norm bounds its largest stretch. Beyond this cheap bound the ray
+    // spans at least six screen pixels, so it certainly needs the full budget; skip inversion on close crust.
+    if (dot(parallax, parallax) < 36.0 * (dot(dx, dx) + dot(dy, dy))) {
+        float determinant = abs(dx.x * dy.y - dx.y * dy.x);
+        vec2 projected = vec2(parallax.x * dy.y - parallax.y * dy.x, dx.x * parallax.y - dx.y * parallax.x);
+        float pixels = length(projected) / max(determinant, 1e-12);
+        // Below half a pixel, a single height offset carries the complete aligned material. Where relief is
+        // visible, march no farther than half a screen pixel per layer, up to the existing twelve-layer budget.
+        if (pixels <= .5) return uv - parallax * (surface.r - .5);
+        layers = clamp(ceil(pixels * 2.0), 2.0, 12.0);
+    }
+    vec2 stride = parallax / layers;
+    uv += parallax * .5;
+    float layer = 1.0;
+    float previous = 1.0 - magmaTexel(MAGMA_SURFACE, uv, dx, dy).r;
+    for (int step = 0; step < 12; step++) {
+        uv -= stride;
+        layer -= 1.0 / layers;
+        float gap = layer - magmaTexel(MAGMA_SURFACE, uv, dx, dy).r;
+        if (gap <= 0.0) {
+            uv += stride * (-gap / max(previous - gap, .0001));
+            break;
         }
-    } else {
-        uv -= parallax * (surface.r - .5);
+        previous = gap;
     }
     return uv;
 }
 
 Volcanic magmaPhaseSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec2 downhill, vec3 random) {
-    return magmaSample(uv, dx, dy, eye);
+    return magmaSample(uv, dx, dy, eye, true);
 }
 
 mat3 magmaDomain(inout vec3 position) {

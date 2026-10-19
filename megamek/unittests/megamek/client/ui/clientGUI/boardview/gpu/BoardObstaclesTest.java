@@ -14,6 +14,8 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
+import megamek.common.board.RailRoute;
 import org.junit.jupiter.api.Test;
 
 class BoardObstaclesTest {
@@ -78,6 +80,74 @@ class BoardObstaclesTest {
                 assertEquals(toggled, obstacles.obstructs(new Vector3(joint.x, joint.y, 0), .1f, 1), "At the joint");
                 assertFalse(obstacles.obstructs(BoardGeometry.center(at, 0), .1f, 1), "The ground under the beam");
             }
+        }
+    }
+
+    @Test
+    void lowerBareBankRampsClearTheirLandingWithoutClearingBeneathTheSuspendedSpan() {
+        var at = new Coords(4, 4);
+        float scale = BoardGeometry.hexScale();
+        for (int direction = 0; direction < 6; direction++) {
+            var bankAt = at.translated(direction);
+            var center = BoardGeometry.center(at, 0);
+            var bank = BoardGeometry.center(bankAt, 0);
+            var along = new Vector3(bank).sub(center).nor();
+            var across = new Vector3(-along.y, along.x, 0);
+            for (boolean wide : new boolean[] { false, true }) {
+                var scene = BoardBridgeSlopeTest.lowerBank(at, direction, false);
+                if (wide) {
+                    var t = scene.tile(at);
+                    int exits = (1 << direction) | (1 << ((direction + 3) % 6));
+                    var tile = new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(),
+                          t.surface(), t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(),
+                          t.features(), t.text(), t.liquid(), t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(),
+                          t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(), t.groundCover(), t.bridge(),
+                          t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), t.appearance(), t.cover(), t.barren(),
+                          t.deckRoad(), t.deckRoadExits(), t.deckMud(), t.railBed(), t.corridor(),
+                          new RailRoute.Corridor(exits, exits, 0));
+                    scene = BoardBridgeMaterialsTest.replace(scene, tile);
+                }
+                for (var owner : List.of(at, bankAt)) {
+                    var obstacles = new BoardObstacles(scene, scene.tile(owner));
+                    for (float t : new float[] { .3f, .4f, .65f, .8f, .92f }) {
+                        for (float side : new float[] { -1, 0, 1 }) {
+                            var root = new Vector3(center).lerp(bank, t).mulAdd(across, side * (wide ? 12 : 7) * scale);
+                            root.z = t < .5f ? -BoardGeometry.level() : 0;
+                            assertTrue(obstacles.obstructs(root, .1f * scale, .2f * scale),
+                                  "Even short grass clears the complete solid ramp: direction=" + direction + " wide=" + wide);
+                        }
+                    }
+                    float lane = wide ? BoardRoad.CORRIDOR_HALF : BoardRoad.Kind.PAVED.halfWidth;
+                    for (int side : new int[] { -1, 1 }) {
+                        var lip = new Vector3(center).lerp(bank, .8f)
+                              .mulAdd(across, side * (lane + BoardBridgeFooting.terminalWidth() - .05f) * scale);
+                        assertTrue(obstacles.obstructs(lip, 0, .2f * scale),
+                              "The authored terminal lip extends outside the ordinary shoulder");
+                    }
+                    assertFalse(obstacles.obstructs(BoardGeometry.center(at, -1), scale, 2 * scale),
+                          "Low vegetation beneath the level span remains visible");
+                    var suspended = new Vector3(center).lerp(bank, .15f);
+                    suspended.z = -BoardGeometry.level();
+                    assertFalse(obstacles.obstructs(suspended, scale, 2 * scale),
+                          "The solid reservation begins at the inset, not at the span centre");
+                    var beside = new Vector3(center).lerp(bank, .8f).mulAdd(across, 20 * scale);
+                    assertFalse(obstacles.obstructs(beside, scale, 2 * scale), "Free ground beside the ramp remains available");
+                }
+            }
+        }
+    }
+
+    @Test
+    void lowerBankClearanceDoesNotInventARampForNaturalOrHighSpans() {
+        var at = new Coords(4, 4);
+        var bankAt = at.translated(3);
+        var base = BoardBridgeSlopeTest.lowerBank(at, 3, false);
+        var natural = BoardBridgeTypeTest.typed(base, HexAppearance.NATURAL_BRIDGE);
+        var high = BoardBridgeMaterialsTest.replace(base, BoardBridgeSlopeTest.bridge(at, -1, 3, 9));
+        var root = BoardGeometry.center(at, 0).lerp(BoardGeometry.center(bankAt, 0), .8f);
+        for (var scene : List.of(natural, high)) {
+            assertFalse(new BoardObstacles(scene, scene.tile(bankAt)).obstructs(root, .1f, 1),
+                  "Only a built span with a real lower-bank ramp reserves its landing");
         }
     }
 

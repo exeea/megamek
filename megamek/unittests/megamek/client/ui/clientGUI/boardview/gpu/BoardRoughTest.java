@@ -3,17 +3,14 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
-import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
@@ -206,24 +203,8 @@ class BoardRoughTest {
     }
 
     private static List<BoardSurface.Face> bridgeDeck(int exits) {
-        File root = new File(Configuration.dataDir(), "models/board");
-        var file = new FileHandle(new File(root, BoardBridge.asset(exits) + ".glb"));
-        var data = RigidGlb.loadLods(file, root.toPath()).getFirst();
-        List<BoardSurface.Face> faces = new ArrayList<>();
-        // Board bridge nodes are identity transforms; use the same authored vertices as the renderer.
-        for (var mesh : data.meshes) {
-            for (var part : mesh.parts) {
-                for (int i = 0; i < part.indices.length; i += 3) {
-                    Vector3[] points = new Vector3[3];
-                    for (int p = 0; p < 3; p++) {
-                        int at = Short.toUnsignedInt(part.indices[i + p]) * RigidGlb.STRIDE;
-                        points[p] = new Vector3(mesh.vertices[at], mesh.vertices[at + 1], mesh.vertices[at + 2]);
-                    }
-                    faces.add(new BoardSurface.Face(points[0], points[1], points[2], BoardSurface.Finish.TOP));
-                }
-            }
-        }
-        return faces;
+        return BoardBridgeTest.facets(exits).stream().map(face ->
+              new BoardSurface.Face(face.a(), face.b(), face.c(), BoardSurface.Finish.TOP)).toList();
     }
 
     private static Hex hex(int fluff, int rough) {

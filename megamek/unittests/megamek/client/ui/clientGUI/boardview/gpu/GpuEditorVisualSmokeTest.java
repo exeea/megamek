@@ -73,8 +73,9 @@ class GpuEditorVisualSmokeTest {
                             if (!ready(gallery)) { return; }
                             List<Image> images = images(gallery).stream().filter(image -> image.getName() != null
                                   && image.getName().startsWith("editor-theme-preview-")).toList();
-                            assertEquals(8, images.size());
-                            assertEquals(8, images.stream().map(Image::getDrawable).distinct().count());
+                            // The tilesets' eight themes and the special Dirt and Rock.
+                            assertEquals(10, images.size());
+                            assertEquals(10, images.stream().map(Image::getDrawable).distinct().count());
                             var scroll = (com.badlogic.gdx.scenes.scene2d.ui.ScrollPane) root.findActor("editor-theme-scroll");
                             assertEquals(0, scroll.getMaxY(), .1f, "All terrain themes must fit without scrolling");
                             var stage = GpuBoardTestUi.stage();
@@ -119,7 +120,7 @@ class GpuEditorVisualSmokeTest {
                             Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE);
                             Gdx.input.getInputProcessor().keyUp(Input.Keys.ESCAPE);
                             assertFalse(root.findActor("editor-settings").isVisible());
-                            GpuBoardTestUi.category("Vehicles");
+                            GpuBoardTestUi.category("transportation");
                             ((TextField) root.findActor("editor-search")).setText("vehicles/car"); next();
                         } else if (step == 7) {
                             if (!ready(root.findActor("editor-library"))) { return; }

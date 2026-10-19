@@ -10,13 +10,12 @@ import megamek.common.board.Coords;
 
 /** Shared stream paths through connected water hexes. Only visual geometry; the board still supplies water depth. */
 final class BoardRiver {
-    private static final int STEPS = 12;
+    private static final int STEPS = 6;
     /** Perlin gradients here sum two unit offsets and the result is scaled by 1.4: no sample exceeds this. */
     private static final float MAX_GRADIENT = 2.8f;
     /** World units of slack for float rounding in a channel's bound before it may be skipped. */
     private static final float CLEARANCE_MARGIN = .05f;
     private final BoardScene scene;
-    private final BoardRelief.Tuning tuning;
     private final float scale = BoardGeometry.hexScale();
     private final float width = BoardGeometry.width(), height = BoardGeometry.height();
     private final Map<Coords, Sample> samples = new HashMap<>();
@@ -26,7 +25,7 @@ final class BoardRiver {
 
     private record Sample(float x, float y, boolean rounded, List<Channel> channels, List<float[]> lakes) { }
 
-    /** Endpoint properties belong to a whole channel, not each of its twelve line segments. */
+    /** Endpoint properties belong to a whole channel, not each of its six line segments. */
     private final class Channel {
         private final List<Span> spans;
         private final float depthA, depthB;
@@ -55,10 +54,9 @@ final class BoardRiver {
             maxX = right;
             minY = bottom;
             maxY = top;
-            // The radius grows with the wander and changes monotonically along the channel (the tuning keeps
-            // riverWidth within 0.05..1), so the endpoints at the largest wander bound every point of it; open water
-            // and special artwork add their own fixed caps.
-            float wanderBound = .3f * tuning.shoreWander() * MAX_GRADIENT;
+            // The radius grows with the wander and changes monotonically along the channel, so the endpoints at the
+            // largest wander bound every point of it; open water and special artwork add their own fixed caps.
+            float wanderBound = .3f * BoardRelief.SHORE_WANDER * MAX_GRADIENT;
             reach = Math.max(Math.max(radius(0, wanderBound), radius(1, wanderBound)), Math.max(72 * scale, width / 2));
         }
 
@@ -95,9 +93,8 @@ final class BoardRiver {
             // deep-water unit along the stream instead of making a fixed pool at every centre. Depth-zero reaches
             // have no unit-sized minimum; blend gently where a shallow reach meets deeper water.
             float minimum = BoardRelief.lerp(2, 12, deep);
-            float full = Math.max(minimum, tuning.shorePool() * (.55f + .45f * deep) + tuning.shoreSpread());
-            float radius = BoardRelief.lerp(minimum, full, (tuning.riverWidth() - .05f) / .95f);
-            radius = Math.max(minimum, radius + wander * tuning.riverWidth());
+            float full = Math.max(minimum, BoardRelief.SHORE_POOL * (.55f + .45f * deep) + BoardRelief.SHORE_SPREAD);
+            float radius = Math.max(minimum, full + wander);
             // Open water leaves room for the shared shore field to shape the lake's bank. Widen the approaching
             // stream gradually too: a large round cap at the lake's first centre would make a sharp inlet corner.
             float open = BoardRelief.lerp(broadA ? 1 : 0, broadB ? 1 : 0, smooth);
@@ -116,9 +113,8 @@ final class BoardRiver {
         }
     }
 
-    BoardRiver(BoardScene scene, BoardRelief.Tuning tuning) {
+    BoardRiver(BoardScene scene) {
         this.scene = scene;
-        this.tuning = tuning;
     }
 
     /** A coordinate-based query: adjoining meshes see the same paths, tangent directions and widths. */
@@ -129,8 +125,10 @@ final class BoardRiver {
     /** The caller intersects this union with its shore field, so larger values cannot change the shore. */
     float field(float x, float y, float limit) {
         float result = Float.NEGATIVE_INFINITY;
-        float cell = tuning.wanderCell() * scale;
-        float wander = .3f * tuning.shoreWander() * BoardRelief.gradient(x / cell + 3.1f, y / cell - 1.7f);
+        // The spline already meanders over several hexes. Reuse the width sample at a shorter scale for small,
+        // irregular bank scallops, without adding shore searches, noise evaluations or increasing mesh resolution.
+        float cell = .3f * BoardRelief.WANDER_CELL * scale;
+        float wander = .3f * BoardRelief.SHORE_WANDER * BoardRelief.gradient(x / cell + 3.1f, y / cell - 1.7f);
         window(x, y);
         // Round whole branches near confluences and tight bends, where their inner banks otherwise meet in a cusp.
         // Blending individual spline samples or straight reaches would inflate every channel.
@@ -140,7 +138,7 @@ final class BoardRiver {
             float distance = length(x - sample.x(), y - sample.y());
             round = Math.max(round, BoardRelief.smooth(1 - distance / (.8f * width)));
         }
-        round *= 2 * tuning.shoreBlend() * scale * Math.min(1, .3f + tuning.riverWidth());
+        round *= 2 * BoardRelief.SHORE_BLEND * scale;
         for (Sample sample : window) {
             List<Channel> channels = sample.channels();
             for (int i = 0; i < channels.size(); i++) {
@@ -227,14 +225,6 @@ final class BoardRiver {
             float ty = before == null ? by - ay : (by - BoardGeometry.centerY(before)) / 2;
             float ux = after == null ? bx - ax : (BoardGeometry.centerX(after) - ax) / 2;
             float uy = after == null ? by - ay : (BoardGeometry.centerY(after) - ay) / 2;
-            // Only very thin, depth-zero channels need their bend limited to remain visible from the centre used
-            // by the bed's radial mesh. Deep reaches have room to follow the neighbouring stream's full curve.
-            float bend = Math.max(Math.min(tile.waterDepth(), next.waterDepth()) > 0 ? 1 : 0,
-                  BoardRelief.smooth((tuning.riverWidth() - .05f) / .45f));
-            tx = BoardRelief.lerp(bx - ax, tx, bend);
-            ty = BoardRelief.lerp(by - ay, ty, bend);
-            ux = BoardRelief.lerp(bx - ax, ux, bend);
-            uy = BoardRelief.lerp(by - ay, uy, bend);
             boolean broad = water(tile(coords.translated((d + 1) % 6))) || water(tile(coords.translated((d + 5) % 6)));
             // Rotate the shared direction at each centre instead of moving the centre itself. The stream then
             // meanders through its hexes, and adjoining links use the same turn at their shared centre.
@@ -265,14 +255,10 @@ final class BoardRiver {
         return List.copyOf(result);
     }
 
-    /** Slow changes in direction, more visible in narrow streams; the world coordinates give both ends of a
-     * shared centre the same turn. Bound the turn so a thin channel stays visible from its centre. */
+    /** Slow changes in direction; the world coordinates give both ends of a shared centre the same turn. */
     private float meander(float x, float y) {
-        float cell = .5f * tuning.wanderCell() * scale;
-        float angle = 1.25f * (1 - .5f * tuning.riverWidth()) * tuning.shoreWander() / 8
-              * BoardRelief.gradient(x / cell + 2.3f, y / cell - 2.3f);
-        float limit = .3f + .4f * tuning.riverWidth();
-        return Math.clamp(angle, -limit, limit);
+        float cell = .5f * BoardRelief.WANDER_CELL * scale;
+        return Math.clamp(.625f * BoardRelief.gradient(x / cell + 2.3f, y / cell - 2.3f), -.7f, .7f);
     }
 
     /** The preceding/following hex of a stream; junctions keep their separate branches. */

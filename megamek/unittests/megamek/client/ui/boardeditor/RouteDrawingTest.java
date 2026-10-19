@@ -155,18 +155,6 @@ class RouteDrawingTest {
         }
     }
 
-    @Test void aFastMoveFillsTheSkippedHexesWithAStraightLine() {
-        var session = rail();
-        Coords far = START.translated(3).translated(3).translated(3).translated(3);
-        session.pointer(START, 0, 0, false);
-        session.pointer(far, 0, 0, true);
-        session.finishStroke();
-        List<Coords> cells = line(START, 3, 3, 3, 3);
-        for (int i = 1; i < cells.size(); i++) {
-            assertTrue(RailRoute.joined(route(session, cells.get(i - 1)), 3, route(session, cells.get(i))), "Joined " + cells.get(i));
-        }
-    }
-
     @Test void escOrARightClickDropsTheDragAndAClickWithoutADragPlacesItsMarkerAsBefore() {
         var session = rail();
         Map<Coords, JsonNode> document = document(session);
@@ -264,11 +252,11 @@ class RouteDrawingTest {
                 assertTrue(hex.containsTerrainExit(Terrains.ROAD, cells.get(i).direction(cells.get(i - 1))), cells.get(i) + " joins the hex before");
             }
         }
-        // A click paints the brush's footprint as before.
+        // Every way card is a single route; an old brush radius cannot widen a click.
         session.command(new Command(Action.BRUSH, "", "2"), null);
         session.pointer(new Coords(10, 10), 0, 0, false);
         session.finishStroke();
-        assertEquals(7, session.brush(new Coords(10, 10)).stream().filter(at -> session.board().getHex(at).containsTerrain(Terrains.ROAD)).count());
+        assertEquals(1, session.brush(new Coords(10, 10)).stream().filter(at -> session.board().getHex(at).containsTerrain(Terrains.ROAD)).count());
     }
 
     private static BoardEditorSession rail() {

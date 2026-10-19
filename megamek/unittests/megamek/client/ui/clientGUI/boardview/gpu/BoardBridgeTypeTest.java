@@ -212,22 +212,44 @@ class BoardBridgeTypeTest {
     @Test
     void theRenderDrawsTheStoredTypeAndAPlainBuiltDeckWithoutMarkings() {
         // A stored natural span keeps its rock arch between paved roads.
-        var paved = BoardBridgeMaterialsTest.straight(AT, 3, 1, BoardRoad.Kind.PAVED, BoardRoad.Kind.PAVED);
-        assertEquals(BoardRoad.Kind.PAVED, BoardBridge.kind(paved, paved.tile(AT)));
+        var paved = BoardBridgeMaterialsTest.straight(AT, 3, 1, BoardRoad.Kind.PAVED, BoardRoad.Kind.PAVED, BoardRoad.Kind.PAVED);
+        assertEquals(BoardRoad.Kind.PAVED, BoardBridge.deck(paved, paved.tile(AT)).kind());
         var natural = BoardNaturalBridgeTest.replace(paved, appearance(paved.tile(AT), Map.of("bridge", HexAppearance.NATURAL_BRIDGE)));
         assertTrue(BoardBridge.deck(natural, natural.tile(AT)).natural());
-        // A built span without a road is plain asphalt, unmarked; markings come with a paved road.
-        var bare = BoardBridgeMaterialsTest.straight(AT, 3, 1, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE);
-        assertEquals(BoardRoad.Kind.ALLEY, BoardBridge.deck(bare, bare.tile(AT)).kind(),
-              "An untyped span is built, as the editor's stroke types a new bridge");
-        var built = BoardNaturalBridgeTest.replace(bare, appearance(bare.tile(AT), Map.of("bridge", HexAppearance.BUILT_BRIDGE)));
-        var deck = BoardBridge.deck(built, built.tile(AT));
-        assertEquals(BoardRoad.Kind.ALLEY, deck.kind());
-        assertTrue(GpuRoads.deckPatches(built.tile(AT), deck, deck.road(AT)).stream()
+        // A built deck without a road is clean (bare concrete); an Alley road is plain asphalt, unmarked; markings come
+        // with a paved road.
+        var bare = BoardBridgeMaterialsTest.straight(AT, 3, 1, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE);
+        assertFalse(BoardBridge.deck(bare, bare.tile(AT)).natural(), "An untyped span is built, as the editor's stroke types a new bridge");
+        assertFalse(BoardBridge.deck(bare, bare.tile(AT)).paved());
+        var alley = BoardBridgeMaterialsTest.straight(AT, 3, 1, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE, BoardRoad.Kind.ALLEY);
+        var deck = BoardBridge.deck(alley, alley.tile(AT));
+        assertTrue(deck.paved());
+        assertTrue(GpuRoads.deckPatches(alley.tile(AT), deck, deck.road(AT)).stream()
               .noneMatch(p -> p.texture().equals("concrete") && !p.shape().isEmpty()), "No centre markings without a road");
         var marked = BoardBridge.deck(paved, paved.tile(AT));
         assertTrue(GpuRoads.deckPatches(paved.tile(AT), marked, marked.road(AT)).stream()
               .anyMatch(p -> p.texture().equals("concrete") && !p.shape().isEmpty()));
+    }
+
+    /**
+     * b13 ways: a look span (material, truss colours, truss joints) joins only decks of one family, natural, truss or
+     * standard: a natural arch continued by an implicit deck stays a rock arch, the implicit deck stays standard.
+     */
+    @Test
+    void lookSpansJoinOnlyDecksOfOneFamily() {
+        // A N-S run of decks a level up over water: natural, implicit (standard), truss, truss.
+        var types = List.of(HexAppearance.NATURAL_BRIDGE, HexAppearance.IMPLICIT_BRIDGE, HexAppearance.TRUSS, HexAppearance.TRUSS);
+        var scene = BoardSurfaceBlendTest.scene(at -> at.getX() == 4 && at.getY() >= 2 && at.getY() <= 5
+              ? deck(at, 9, true, 1, types.get(at.getY() - 2)) : BoardSurfaceBlendTest.tile(at, BoardScene.Surface.GRASS, 0, -1, 0));
+        var natural = BoardBridge.deck(scene, scene.tile(new Coords(4, 2)));
+        var implicit = BoardBridge.deck(scene, scene.tile(new Coords(4, 3)));
+        var truss = BoardBridge.deck(scene, scene.tile(new Coords(4, 4)));
+        assertTrue(BoardBridge.connected(scene.tile(new Coords(4, 2)), scene.tile(new Coords(4, 3)), 3), "One span for the rules");
+        assertTrue(natural.natural() && !implicit.natural(), "The rock arch beside an implicit deck");
+        assertFalse(implicit.truss(), "The truss colours stay on the truss decks");
+        assertTrue(truss.truss());
+        assertEquals(0, natural.joints() | implicit.joints(), "No truss joint across a family seam");
+        assertEquals(1 << 3, truss.joints(), "The truss continues into the truss deck south only");
     }
 
     @Test

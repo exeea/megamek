@@ -28,6 +28,8 @@ import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import org.junit.jupiter.api.Tag;
@@ -58,6 +60,7 @@ class GpuMapPreviewSmokeTest {
                 }
             }
             game.setBoard(new Board(9, 9, hexes));
+            BoardSceneryLayouts.convert(game.getBoard());
             source.set(new GpuMapSource(game, null, null));
         });
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
@@ -289,9 +292,9 @@ class GpuMapPreviewSmokeTest {
     void canyonLosCardLeavesTheRayClearInBothViewsAndWhenExpanded() throws Exception {
         AtomicReference<GpuMapSource> source = new AtomicReference<>();
         SwingUtilities.invokeAndWait(() -> {
-            Board board = new Board();
-            board.load(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"));
+            Board board = BoardFile.loadSheet(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"), false, true);
             Game game = new Game(); game.setBoard(board);
+            BoardSceneryLayouts.convert(game.getBoard());
             source.set(new GpuMapSource(game, null, null));
         });
         AtomicReference<Throwable> failure = new AtomicReference<>();

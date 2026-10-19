@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.nio.FloatBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -18,12 +19,14 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.BufferUtils;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.lwjgl.opengl.GL11C;
 
 @Tag("on-demand")
 class GpuRoadSmokeTest {
@@ -48,6 +51,7 @@ class GpuRoadSmokeTest {
                     camera.setIsometric(false);
                     camera.camera.zoom = 1;
                     camera.center(BoardGeometry.center(new Coords(7, 8), 0));
+                    frame.prepare(terrain, camera, scene);
                     terrain.update(scene, camera.camera);
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     terrain.animate(.5f, List.of());
@@ -91,10 +95,10 @@ class GpuRoadSmokeTest {
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, "mines-road-fluff-sand-oblique.png"));
-                    // This interior plateau fills the upper four fifths of the close view. Blue there is exposed sky,
-                    // not the board's outer silhouette: catch the actual corner holes from the Mines report.
+                    // This interior plateau fills the upper four fifths of the close view. Test actual scene
+                    // coverage there, independently of blue skylight on the concrete and terrain.
                     int height = Gdx.graphics.getBackBufferHeight();
-                    assertEquals(0, skyPixels(height / 5, height * 9 / 10),
+                    checkCoverage(frame, terrain, camera, scene, height / 5, height * 9 / 10, false,
                           "No sky may show through the Mines plateau, cliff feet or roadside slopes");
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
@@ -163,7 +167,11 @@ class GpuRoadSmokeTest {
                     camera.camera.zoom = .22f;
                     for (int rise : new int[] { 1, 2, 3 }) {
                         var scene = ramp(BoardRoad.Kind.PAVED, BoardScene.Surface.CONCRETE, rise);
+                        frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
+                        assertTrue(terrain.ready(scene), "Retaining-wall captures require the prepared material families");
+                        int[] roles = GpuTerrainPreparationSmokeTest.checkBlendedRoles(terrain, "concrete ramp " + rise);
+                        assertTrue(roles[4] > 0, "The road fixture must retain actual concrete cliff triangles");
                         terrain.animate(.5f, List.of());
                         camera.center(BoardGeometry.center(new Coords(4, 3), 0)
                               .lerp(BoardGeometry.center(new Coords(4, 4), rise), .5f));
@@ -175,13 +183,16 @@ class GpuRoadSmokeTest {
                     }
                     for (int exits : new int[] { 31, 63 }) {
                         var scene = BoardRoadRampTest.concreteJunction(exits);
+                        frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
+                        assertTrue(terrain.ready(scene), "Retaining-wall captures require the prepared material families");
+                        GpuTerrainPreparationSmokeTest.checkBlendedRoles(terrain, "concrete junction " + exits);
                         terrain.animate(.5f, List.of());
                         camera.camera.zoom = .21f;
                         camera.center(BoardGeometry.center(BoardRoadTest.CENTER, 2));
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "concrete-roundabout-" + exits + ".png"));
-                        assertEquals(0, skyPixels(0, Gdx.graphics.getBackBufferHeight(), true),
+                        checkCoverage(frame, terrain, camera, scene, 0, Gdx.graphics.getBackBufferHeight(), true,
                               "Open road gates cannot leave sky seams");
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -216,7 +227,9 @@ class GpuRoadSmokeTest {
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     var scene = roads(false);
+                    frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
+                    assertTrue(terrain.ready(scene), "Road materials settle with the visible lighting flags");
                     terrain.animate(.5f, List.of());
                     for (boolean oblique : new boolean[] { false, true }) {
                         camera.setIsometric(oblique);
@@ -240,7 +253,9 @@ class GpuRoadSmokeTest {
                     byte[] changed = screen();
                     var fresh = new GpuTerrain();
                     try {
+                        frame.prepare(fresh, camera, edited);
                         fresh.update(edited);
+                        assertTrue(fresh.ready(edited), "The clean-rebuild control uses the same prepared lighting");
                         fresh.animate(.5f, List.of());
                         frame.render(fresh, camera, edited);
                         byte[] rebuilt = screen();
@@ -460,29 +475,64 @@ class GpuRoadSmokeTest {
         }
     }
 
-    private static int skyPixels(int fromY, int toY) {
-        return skyPixels(fromY, toY, false);
+    /** The production atmosphere composite copies the scene hardware depth to the backbuffer. */
+    private static FloatBuffer sceneDepth() {
+        int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
+        FloatBuffer depth = BufferUtils.newFloatBuffer(width * height);
+        Gdx.gl.glReadPixels(0, 0, width, height, GL20.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, depth);
+        return depth;
     }
 
-    private static int skyPixels(int fromY, int toY, boolean connected) {
-        byte[] pixels = screen();
+    private static int uncoveredPixels(int fromY, int toY, boolean connected) {
+        FloatBuffer depth = sceneDepth();
         int width = Gdx.graphics.getBackBufferWidth(), holes = 0;
         int first = Math.max(fromY, 1), last = Math.min(toY, Gdx.graphics.getBackBufferHeight() - 1);
         for (int y = first; y < last; y++) {
             for (int x = 2; x < width - 2; x++) {
-                int index = (y * width + x) * 4;
-                // Concrete's baseline has isolated rasterization pinholes; connected sky pixels expose an open join.
-                if (sky(pixels, index) && (!connected || sky(pixels, index - 4) || sky(pixels, index + 4)
-                      || sky(pixels, index - width * 4) || sky(pixels, index + width * 4))) { holes++; }
+                int index = y * width + x;
+                float value = depth.get(index);
+                assertTrue(Float.isFinite(value) && value >= 0 && value <= 1, "Valid hardware depth");
+                // Keep the original scan window and connected-hole rule: this fixture allows isolated pinholes.
+                if (value == 1 && (!connected || depth.get(index - 1) == 1 || depth.get(index + 1) == 1
+                      || depth.get(index - width) == 1 || depth.get(index + width) == 1)) { holes++; }
             }
         }
         return holes;
     }
 
-    private static boolean sky(byte[] pixels, int index) {
-        int red = Byte.toUnsignedInt(pixels[index]), green = Byte.toUnsignedInt(pixels[index + 1]);
-        int blue = Byte.toUnsignedInt(pixels[index + 2]);
-        return blue > red + 35 && blue > green + 15;
+    private static void checkCoverage(GpuReviewFrame frame, GpuTerrain terrain, BoardCamera camera, BoardScene scene,
+          int fromY, int toY, boolean connected, String message) {
+        assertEquals(0, uncoveredPixels(fromY, toY, connected), message);
+        int x = Gdx.graphics.getBackBufferWidth() / 2, y = (fromY + toY) / 2;
+        FloatBuffer depth = sceneDepth();
+        int width = Gdx.graphics.getBackBufferWidth();
+        for (int dy = -1; dy <= 2; dy++) {
+            for (int dx = -1; dx <= 2; dx++) {
+                assertTrue(depth.get((y + dy) * width + x + dx) < 1, "Hole control starts on covered geometry");
+            }
+        }
+        // Erase precisely four occupied hardware-depth samples, without changing their RGB. A color detector
+        // cannot see this control; an occupancy detector must find the new connected 2x2 hole exactly.
+        boolean scissor = Gdx.gl.glIsEnabled(GL20.GL_SCISSOR_TEST);
+        boolean depthMask = GL11C.glGetBoolean(GL20.GL_DEPTH_WRITEMASK);
+        float clearDepth = GL11C.glGetFloat(GL20.GL_DEPTH_CLEAR_VALUE);
+        var box = BufferUtils.newIntBuffer(4);
+        Gdx.gl.glGetIntegerv(GL20.GL_SCISSOR_BOX, box);
+        try {
+            Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
+            Gdx.gl.glScissor(x, y, 2, 2);
+            Gdx.gl.glDepthMask(true);
+            Gdx.gl.glClearDepthf(1);
+            Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+            assertEquals(4, uncoveredPixels(fromY, toY, connected), "Detect the injected hardware-depth hole");
+        } finally {
+            Gdx.gl.glScissor(box.get(0), box.get(1), box.get(2), box.get(3));
+            if (!scissor) { Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST); }
+            Gdx.gl.glDepthMask(depthMask);
+            Gdx.gl.glClearDepthf(clearDepth);
+            frame.render(terrain, camera, scene);
+        }
+        assertEquals(0, uncoveredPixels(fromY, toY, connected), "A fresh production frame restores coverage");
     }
 
     private static byte[] screen() {

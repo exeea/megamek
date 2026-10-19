@@ -43,6 +43,7 @@ import java.util.Objects;
 
 import megamek.common.IndustrialElevator;
 import megamek.common.annotations.Nullable;
+import megamek.common.board.RailRoute;
 import megamek.common.equipment.MiscType;
 import megamek.common.options.OptionsConstants;
 import megamek.common.rolls.PilotingRollData;
@@ -114,8 +115,9 @@ public class Terrain implements Serializable {
         if (firstColon == lastColon) {
             level = levelFor(terrain.substring(firstColon + 1));
 
-            // Buildings *never* use implicit exits.
-            exitsSpecified = (type == BUILDING) || (type == FUEL_TANK);
+            // Buildings, rails and deck roads *never* use implicit exits.
+            exitsSpecified = (type == BUILDING) || (type == FUEL_TANK) || (type == RAIL) || (type == BRIDGE_RAIL)
+                  || (type == BRIDGE_ROAD);
         } else {
             level = levelFor(terrain.substring(firstColon + 1, lastColon));
             exitsSpecified = true;
@@ -614,6 +616,10 @@ public class Terrain implements Serializable {
                 } else {
                     return 0;
                 }
+            case RAIL:
+                // TacOps rails (TO:AR p.32): +1 MP for 'Meks and ground vehicles; a step along the rail pays it instead
+                // of the terrain (MoveStep).
+                return (level > 0) && RailRoute.affects(e) && RailRoute.rules(e.getGame()) ? 1 : 0;
             default:
                 return 0;
         }
@@ -749,6 +755,14 @@ public class Terrain implements Serializable {
         } else if ((type == BRIDGE_ELEV) && (level < 0)) {
             valid = false;
         } else if ((type == HAZARDOUS_LIQUID) && (level < 0 || level > 3)) {
+            valid = false;
+        } else if ((type == RAIL) && (level < 0 || level > 2)) {
+            valid = false;
+        } else if ((type == BRIDGE_RAIL) && (level < 1 || level > 2)) {
+            valid = false;
+        } else if ((type == BRIDGE_MUD) && (level != 1)) {
+            valid = false;
+        } else if ((type == BRIDGE_ROAD) && (level < 1 || level > 4)) {
             valid = false;
         }
 

@@ -222,7 +222,8 @@ final class GpuUnitModel implements Disposable {
             if (wrecked) {
                 material = UnitDamageDisplay.wrecked(material);
             } else if ("detail".equals(material.id)) {
-                material.set(ColorAttribute.createEmissive(lit ? .8f : 0, lit ? .75f : 0, lit ? .45f : 0, 1));
+                material.set(ColorAttribute.createEmissive(GpuLinearColors.authored(material,
+                      new com.badlogic.gdx.graphics.Color(lit ? .8f : 0, lit ? .75f : 0, lit ? .45f : 0, 1))));
             }
             part.material = material;
         }

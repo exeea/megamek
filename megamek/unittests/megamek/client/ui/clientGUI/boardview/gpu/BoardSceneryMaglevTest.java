@@ -23,13 +23,13 @@ import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.board.RailRoute;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 /** Legacy maglev decodes to route markers and separate pieces measured from its sprites; the palette keeps five entries. */
 class BoardSceneryMaglevTest {
-    private static final String GROUP = "Maglev and wagons";
     private static final String WAGON = "scenery/maglev/wagon", CAB = "scenery/maglev/cab", PLATFORM = "scenery/maglev/platform";
 
     /** What each legacy sprite shows: the route's sides, a platform, cab and wagon count, and parked cars. */
@@ -73,18 +73,19 @@ class BoardSceneryMaglevTest {
     @Test
     void thePaletteOffersBothRoutesInTransportAndTheRollingStockAndStampsWithoutDuplicateMeshes() {
         var blueprint = BoardEditorBlueprint.get();
-        // Maglev and Rail are two choices in Transport, beside the crossing signal and the level crossing.
-        var transport = blueprint.assets().stream().filter(asset -> asset.group().equals("Transport") && asset.palette())
-              .map(BoardEditorBlueprint.Asset::id).collect(Collectors.toSet());
-        assertTrue(transport.containsAll(Set.of(RailRoute.Kind.MAGLEV.asset, RailRoute.Kind.RAIL.asset,
-              "scenery/rail/crossing-signal", "decal/rail/level-crossing")), transport.toString());
-        var stock = blueprint.assets().stream().filter(asset -> asset.group().equals(GROUP) && asset.palette())
-              .map(BoardEditorBlueprint.Asset::id).collect(Collectors.toSet());
-        assertTrue(stock.containsAll(Set.of(PLATFORM, WAGON, CAB, "stamp/maglev-train", "stamp/maglev-colony-train",
-              "stamp/rail-train", "stamp/express-train", "stamp/colony-train", "scenery/rail/locomotive")), stock.toString());
-        assertTrue(stock.stream().noneMatch(id -> RailRoute.Kind.of(id) != null), "A route is a Transport choice");
-        assertTrue(blueprint.assets().stream().filter(asset -> asset.group().equals(GROUP)).allMatch(asset -> asset.snap() == null));
-        assertFalse(blueprint.asset("scenery/maglev/coupler").palette(), "The coupler comes with the train stamp");
+        // Maglev and Rail are two cards in Transportation's Rail and maglev section, beside the crossing signal, the level
+        // crossing and the station platform; the rolling stock has two sections and the train stamps are blueprints.
+        var rail = section(blueprint, "transportation/rail-maglev");
+        assertTrue(rail.containsAll(Set.of(RailRoute.Kind.MAGLEV.asset, RailRoute.Kind.RAIL.asset,
+              "scenery/rail/crossing-signal", "decal/rail/level-crossing", PLATFORM)), rail.toString());
+        var stock = new java.util.HashSet<>(section(blueprint, "transportation/maglev-stock"));
+        stock.addAll(section(blueprint, "transportation/rail-stock"));
+        assertTrue(stock.containsAll(Set.of(WAGON, CAB, "scenery/rail/locomotive")), stock.toString());
+        assertTrue(section(blueprint, "transportation/blueprints").containsAll(Set.of("stamp/maglev-train", "stamp/maglev-colony-train",
+              "stamp/rail-train", "stamp/express-train", "stamp/colony-train")));
+        assertTrue(stock.stream().noneMatch(id -> RailRoute.Kind.of(id) != null), "A route is a Rail and maglev card");
+        assertTrue(stock.stream().allMatch(id -> blueprint.asset(id).snap() == null));
+        assertTrue(blueprint.asset("scenery/maglev/coupler").sections().isEmpty(), "The coupler comes with the train stamp");
         var stamp = blueprint.asset("stamp/maglev-train");
         assertEquals("scenery/maglev/train", stamp.layout());
         assertTrue(Files.isRegularFile(Configuration.dataDir().toPath().resolve(stamp.thumbnail())), "Stamps use static thumbnails");
@@ -109,18 +110,22 @@ class BoardSceneryMaglevTest {
     }
 
     @Test
-    void importPlacesMarkersOutsideTheGroupsAndThePiecesRideTheRoute() {
+    void importWritesRailLayersAndThePiecesRideTheRoute() {
         Board board = Board.createEmptyBoard(6, 1);
         String[] hexes = { "fluff:9:7", "water:2;bridge:1:09;bridge_cf:40;bridge_elev:1;fluff:9:7", "water:1;fluff:9:7",
               "heavy_industrial:2;fluff:9:7", "building:2;bldg_elev:2;bldg_cf:50;fluff:9:3", "fluff:9:5" };
         for (int x = 0; x < hexes.length; x++) { board.setHex(new Coords(x, 0), new Hex(1, hexes[x], "")); }
         BoardSceneryLayouts.convert(board);
-        List<BoardDecoration.Placement> expected = List.of(BoardDecoration.Placement.ground(), BoardDecoration.Placement.absolute(2),
-              BoardDecoration.Placement.absolute(1), BoardDecoration.Placement.absolute(3), BoardDecoration.Placement.absolute(3),
+        List<BoardDecoration.Placement> expected = List.of(BoardDecoration.Placement.ground(), BoardDecoration.Placement.on("bridge", 0),
+              BoardDecoration.Placement.on("bridge", 0), BoardDecoration.Placement.on("bridge", 0), BoardDecoration.Placement.ground(),
               BoardDecoration.Placement.ground());
         for (int x = 0; x < hexes.length; x++) {
             Hex hex = board.getHex(x, 0);
-            assertTrue(hex.containsTerrain(Terrains.FLUFF), hexes[x] + ": the token stays for the 2D board");
+            assertTrue(hex.getDecorations().stream().noneMatch(RailRoute::isRoute), "Route markers are derived");
+            if (x == 4) {
+                assertNull(RailRoute.find(hex, RailRoute.Kind.MAGLEV), "A maglev over a building is omitted");
+                continue;
+            }
             var route = RailRoute.find(hex, RailRoute.Kind.MAGLEV);
             assertNotNull(route, hexes[x]);
             assertNull(route.group(), "A route marker is never a group member");
@@ -159,16 +164,17 @@ class BoardSceneryMaglevTest {
             board.setHex(new Coords(6, y), new Hex(0, "fluff:9:0", ""));
         }
         BoardSceneryLayouts.convert(board);
-        var raised = BoardDecoration.Placement.on("ground", 1);
+        var raised = BoardDecoration.Placement.on("bridge", 0);
         for (int y = 1; y <= 3; y++) {
             var deck = RailRoute.find(board.getHex(0, y), RailRoute.Kind.MAGLEV);
-            assertTrue(deck.pillars(), "the run over the deck, row " + y);
-            assertEquals(y == 2 ? BoardDecoration.Placement.absolute(2) : BoardDecoration.Placement.ground(), deck.placement());
-            assertFalse(RailRoute.find(board.getHex(6, y), RailRoute.Kind.MAGLEV).pillars(), "a run on the ground, row " + y);
+            assertEquals(y == 2, RailRoute.onDeck(deck), "Only the raised span is on a deck");
+            assertEquals(y == 2 ? BoardDecoration.Placement.on("bridge", 0) : BoardDecoration.Placement.ground(), deck.placement());
+            assertFalse(board.getHex(6, y).containsTerrain(Terrains.BRIDGE), "a run on the ground, row " + y);
             assertTrue(board.getHex(3, y).getDecorations().isEmpty(), "the pillar art places no pillars, row " + y);
             assertTrue(board.getHex(3, y).containsTerrain(Terrains.FLUFF), "its token stays for the 2D board");
             var line = RailRoute.find(board.getHex(4, y), RailRoute.Kind.MAGLEV);
-            assertTrue(line.pillars(), "the line beside the posts, row " + y);
+            assertTrue(HexAppearance.pillars(board.getHex(4, y).getAppearance()), "Bridge pillars carry the line, row " + y);
+            assertEquals(1, board.getHex(4, y).terrainLevel(Terrains.BRIDGE_ELEV));
             assertEquals(raised, line.placement(), "a level above the ground, row " + y);
         }
         for (var piece : board.getHex(4, 2).getDecorations()) {
@@ -189,7 +195,7 @@ class BoardSceneryMaglevTest {
         }
         for (int x : new int[] { 1, 3 }) {
             var line = RailRoute.find(ends.getHex(x, 1), RailRoute.Kind.MAGLEV);
-            assertFalse(line.pillars());
+            assertFalse(ends.getHex(x, 1).containsTerrain(Terrains.BRIDGE));
             assertEquals(BoardDecoration.Placement.ground(), line.placement());
         }
     }
@@ -203,7 +209,8 @@ class BoardSceneryMaglevTest {
         session.pointer(route.translated(0), 0, 0, false); session.pointer(route, 0, 0, true);
         session.pointer(route.translated(3), 0, 0, true); session.finishStroke();
         var marker = RailRoute.find(session.board().getHex(route), RailRoute.Kind.MAGLEV);
-        assertEquals(BoardDecoration.Placement.surface("ground", "top", 1), marker.placement(), "A painted route rides one level up");
+        assertEquals(BoardDecoration.Placement.on("bridge", 0), marker.placement(), "A painted route rides its new bridge");
+        assertEquals(1, session.board().getHex(route).terrainLevel(Terrains.BRIDGE_ELEV));
         send(session, megamek.client.ui.boardeditor.BoardEditorSession.Action.ASSET, "stamp/maglev-train");
         session.pointer(route, 0, 0, false); session.finishStroke();
         var train = session.board().getHex(route).getDecorations().stream().filter(object -> !RailRoute.isRoute(object)).toList();
@@ -286,6 +293,12 @@ class BoardSceneryMaglevTest {
     private static double dx(int direction) { return new double[] { 0, .75, .75, 0, -.75, -.75 }[direction]; }
 
     private static double dy(int direction) { return new double[] { 1, .5, -.5, -1, -.5, .5 }[direction]; }
+
+    /** The ids of the palette assets in the section at {@code path}. */
+    private static Set<String> section(BoardEditorBlueprint blueprint, String path) {
+        return blueprint.assets().stream().filter(asset -> asset.sections().contains(path))
+              .map(BoardEditorBlueprint.Asset::id).collect(Collectors.toSet());
+    }
 
     private static long count(List<BoardSceneryLayouts.Component> rows, String asset) {
         return rows.stream().filter(row -> row.asset().equals(asset)).count();

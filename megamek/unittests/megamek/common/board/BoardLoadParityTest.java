@@ -119,6 +119,15 @@ class BoardLoadParityTest {
         // The heli pad art: its pad decal and landing light, one group.
         assertEquals(List.of("scenery/roofs/landing-light", "decal/landing-pads/heli-pad"),
               board.getHex(8, 2).getDecorations().stream().map(BoardDecoration::asset).toList());
+        // The park by the pool: its tables stand clear of the fitted bank on every path; the pool's coping stays on it.
+        ConcreteFit fit = new ConcreteFit(board.getWidth(), board.getHeight(), ConcreteFit.cells(board), 1, true, java.util.Set.of());
+        Coords park = new Coords(2, 9), pool = new Coords(1, 9);
+        assertFalse(board.getHex(park).getDecorations().isEmpty());
+        for (var object : board.getHex(park).getDecorations()) {
+            assertFalse(fit.reaches(BoardModelBounds.footprint(park, object), park), object.id() + " stands clear of the bank");
+        }
+        var coping = board.getHex(pool).getDecorations().getFirst();
+        assertTrue(fit.reaches(BoardModelBounds.footprint(pool, coping), pool), "The coping stays on the bank");
     }
 
     @Test

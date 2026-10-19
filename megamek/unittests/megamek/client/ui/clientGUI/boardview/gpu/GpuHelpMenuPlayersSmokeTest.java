@@ -512,7 +512,6 @@ class GpuHelpMenuPlayersSmokeTest {
         return onSwing(() -> {
             CommonMenuBar menus = CommonMenuBar.getMenuBarForGame();
             menus.setPhase(GamePhase.MOVEMENT);
-            menus.setBoardView3D(true);
             menus.addActionListener(event -> ran.add(event.getActionCommand()));
             Client client = mock(Client.class);
             when(client.getGame()).thenReturn(fixture.game);

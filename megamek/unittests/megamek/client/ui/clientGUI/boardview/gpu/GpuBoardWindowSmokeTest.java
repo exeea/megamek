@@ -40,6 +40,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
@@ -63,6 +64,7 @@ import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.BoardViewsContainer;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
@@ -189,8 +191,9 @@ class GpuBoardWindowSmokeTest {
             });
         }
     }
+    /** {@code gpuChoice} and {@code legacy2DChoice} are View > Renderer's 3D (current graphics) and Legacy 2D items. */
     private record ClientWindow(JFrame frame, CommonMenuBar menus, BoardView view, JMenuItem gpuChoice,
-          UnitOverviewOverlay overview) { }
+          JMenuItem legacy2DChoice, UnitOverviewOverlay overview) { }
 
     private static int sidebarBorderColor(UnitOverviewOverlay overview, int index) {
         var graphics = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB).createGraphics();
@@ -524,7 +527,7 @@ class GpuBoardWindowSmokeTest {
                     return null;
                 });
                 await(() -> Gdx.app != null && Gdx.app != previous);
-                await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() >= 5));
+                awaitBoardFrames(5);
                 BoardSource preview = previewSource();
                 Application previewApplication = Gdx.app;
                 onSwing(() -> {
@@ -536,7 +539,7 @@ class GpuBoardWindowSmokeTest {
                 });
                 await(() -> GpuBoardWindow.isActiveFor(ui.view().getClientgui()));
                 await(() -> Gdx.app != null && Gdx.app != previewApplication);
-                await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() >= 5));
+                awaitBoardFrames(5);
                 assertTrue(preview.isClosed());
                 assertFalse(onSwing(() -> ui.frame().isVisible()));
                 assertSame(fixture.game, ((GpuBoardSource) previewSource()).currentView().game);
@@ -565,15 +568,25 @@ class GpuBoardWindowSmokeTest {
                 await(() -> previewSource() != null);
                 BoardSource source = previewSource();
                 await(() -> previewReady(source)); awaitNavigation();
+                // Each round opens a new window, whose View and Renderer groups start closed.
                 input(() -> GpuBoardTestUi.click("utility-menu"));
+                input(() -> GpuBoardTestUi.click("/view"));
+                input(() -> GpuBoardTestUi.click("/view/viewRenderer"));
                 captureMenu("preview-view-switch-menu.png");
-                onGl(() -> { GpuBoardTestUi.click("/viewLegacy2D"); return null; });
+                onGl(() -> { GpuBoardTestUi.click("/view/viewRenderer/viewLegacy2D"); return null; });
                 await(() -> onSwing(() -> mapWindow("board-preview-2d") != null));
                 assertTrue(source.isClosed());
                 JDialog legacy2D = onSwing(() -> (JDialog) mapWindow("board-preview-2d"));
-                captureLegacy2D(legacy2D, "preview-view-3d", "preview-view-switch-2d.png");
+                captureLegacy2D(legacy2D, "preview-renderer", "preview-view-switch-2d.png");
                 Application nativeView = Gdx.app;
-                onSwing(() -> { namedButton(legacy2D, "preview-view-3d").doClick(0); return null; });
+                String graphics = GUIPreferences.getInstance().getBoardGraphics() == BoardGraphics.CLASSIC
+                      ? ClientGUI.VIEW_GRAPHICS_CLASSIC : ClientGUI.VIEW_GRAPHICS_ENHANCED;
+                onSwing(() -> {
+                    JMenu renderer = (JMenu) namedButton(legacy2D, "preview-renderer");
+                    assertTrue(rendererItem(renderer, ClientGUI.VIEW_LEGACY_2D).isSelected());
+                    rendererItem(renderer, graphics).doClick(0);
+                    return null;
+                });
                 await(() -> Gdx.app != null && Gdx.app != nativeView);
                 await(() -> previewSource() != null);
                 BoardSource resumed = previewSource();
@@ -659,7 +672,7 @@ class GpuBoardWindowSmokeTest {
             BoardEditorSession session = (BoardEditorSession) editorField.get(source);
             await(() -> previewReady(source)); awaitNavigation();
             input(() -> GpuBoardTestUi.click("utility-menu"));
-            onGl(() -> { GpuBoardTestUi.click("/viewLegacy2D"); return null; });
+            onGl(() -> { GpuBoardTestUi.click("/boardPreview2D"); return null; });
             await(() -> onSwing(() -> mapWindow("board-editor-preview-2d") != null));
             JDialog preview = onSwing(() -> (JDialog) mapWindow("board-editor-preview-2d"));
             assertFalse(source.isClosed(), "The editor keeps running beside its 2D Preview");
@@ -688,7 +701,7 @@ class GpuBoardWindowSmokeTest {
 
             // A second request brings the same window to the front instead of opening another.
             input(() -> GpuBoardTestUi.click("utility-menu"));
-            onGl(() -> { GpuBoardTestUi.click("/viewLegacy2D"); return null; });
+            onGl(() -> { GpuBoardTestUi.click("/boardPreview2D"); return null; });
             onSwing(() -> null);
             assertEquals(1L, onSwing(() -> Arrays.stream(Window.getWindows())
                   .filter(window -> "board-editor-preview-2d".equals(window.getName()) && window.isDisplayable()).count()));
@@ -1148,7 +1161,7 @@ class GpuBoardWindowSmokeTest {
             ClientWindow ui = onSwing(() -> createClientWindow(fixture));
             Coords position = fixture.entity.getPosition();
             GUIPreferences preferences = GUIPreferences.getInstance();
-            float originalScale = preferences.getGUIScale();
+            float originalScale = preferences.getBoardUiScale();
             try {
                 onSwing(() -> {
                     ui.view().centerOnHex(position);
@@ -1189,7 +1202,7 @@ class GpuBoardWindowSmokeTest {
                 onSwing(() -> { probe.dispose(); return null; });
                 input(() -> ((Lwjgl3Graphics) Gdx.graphics).getWindow().restoreWindow());
                 for (int[] size : new int[][] { { 900, 600 }, { 2043, 1200 }, { 2560, 1600 }, { 3840, 2160 }, { 1280, 800 } }) {
-                    onSwing(() -> { preferences.setValue(GUIPreferences.GUI_SCALE, size[0] == 2560 ? 1.5f : 1f); return null; });
+                    onSwing(() -> { preferences.setBoardUiScale(size[0] == 2560 ? .5f : 1f); return null; });
                     input(() -> assertTrue(Gdx.graphics.setWindowedMode(size[0], size[1])));
                     long resizedFrame = onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames());
                     // Allow the EDT to publish the resized overlay and upload it on the render thread.
@@ -1240,6 +1253,12 @@ class GpuBoardWindowSmokeTest {
                 input(() -> GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.ViewMenu")));
                 captureMenu("menu-view.png");
                 onGl(() -> {
+                    // Swing's GUI scale is Swing's alone: the View menu leaves its commands out.
+                    List<String> texts = GpuBoardTestUi.texts(GpuBoardTestUi.stage().getRoot());
+                    assertTrue(texts.contains(Messages.getString("CommonMenuBar.viewZoomIn")), "View is open");
+                    for (String key : List.of("CommonMenuBar.viewIncGUIScale", "CommonMenuBar.viewDecGUIScale")) {
+                        assertFalse(texts.contains(Messages.getString(key)), key);
+                    }
                     GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
                     float before = battle.boardCamera.camera.zoom;
                     GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.viewZoomIn"));
@@ -1247,6 +1266,8 @@ class GpuBoardWindowSmokeTest {
                     return null;
                 });
                 input(() -> GpuBoardTestUi.click("utility-menu"));
+                // View is still open; its Renderer group opens in the next frame.
+                input(() -> GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.viewRenderer")));
                 onGl(() -> {
                     GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.viewLegacy2D"));
                     return null;
@@ -1256,13 +1277,13 @@ class GpuBoardWindowSmokeTest {
                 assertEquals(position, fixture.entity.getPosition());
 
                 assertFalse(preferences.getUse3DBoard(), "The last selected board is saved");
-                assertEquals(ClientGUI.VIEW_GPU_BOARD, ui.gpuChoice().getActionCommand());
+                assertTrue(onSwing(() -> ui.legacy2DChoice().isSelected()), "Renderer shows Legacy 2D");
                 // Reopen through the same menu. Client disposal must never bring the old frame back.
                 openNative(ui);
                 await(() -> onSwing(() -> !ui.frame().isVisible()));
                 awaitMaximizedWindow();
                 assertTrue(preferences.getUse3DBoard());
-                assertEquals(ClientGUI.VIEW_LEGACY_2D, ui.gpuChoice().getActionCommand());
+                assertTrue(onSwing(() -> ui.gpuChoice().isSelected()), "Renderer shows the 3D board's graphics");
                 onSwing(() -> {
                     GpuBoardWindow.closeFor(ui.view().getClientState());
                     ui.frame().dispose();
@@ -1277,7 +1298,7 @@ class GpuBoardWindowSmokeTest {
                 });
             } finally {
                 onSwing(() -> {
-                    preferences.setValue(GUIPreferences.GUI_SCALE, originalScale);
+                    preferences.setBoardUiScale(originalScale);
                     preferences.removePreferenceChangeListener(ui.overview());
                     GpuBoardWindow.closeFor(ui.view().getClientState());
                     ui.frame().dispose();
@@ -1380,12 +1401,12 @@ class GpuBoardWindowSmokeTest {
             return null;
         }).when(gui).centerOnHex(any());
         UnitOverviewOverlay overview = new UnitOverviewOverlay(gui);
+        // ClientGUI's board switch; the menu bar has saved the Renderer choice before.
         menus.addActionListener(event -> {
-            if (event.getActionCommand().equals(ClientGUI.VIEW_GPU_BOARD)) {
-                GUIPreferences.getInstance().setUse3DBoard(true);
+            if (event.getActionCommand().equals(ClientGUI.VIEW_GRAPHICS_CLASSIC)
+                  || event.getActionCommand().equals(ClientGUI.VIEW_GRAPHICS_ENHANCED)) {
                 GpuBoardWindow.open(fixture.view, () -> fixture.panel);
             } else if (event.getActionCommand().equals(ClientGUI.VIEW_LEGACY_2D)) {
-                GUIPreferences.getInstance().setUse3DBoard(false);
                 GpuBoardWindow.showLegacy2D(gui);
             }
         });
@@ -1395,11 +1416,21 @@ class GpuBoardWindowSmokeTest {
         JMenu viewMenu = (JMenu) java.util.Arrays.stream(menus.getComponents())
               .filter(component -> component instanceof JMenu menu
                     && menu.getText().equals(Messages.getString("CommonMenuBar.ViewMenu"))).findFirst().orElseThrow();
-        JMenuItem gpuChoice = java.util.Arrays.stream(viewMenu.getMenuComponents())
-              .filter(component -> component instanceof JMenuItem item
-                    && ClientGUI.VIEW_GPU_BOARD.equals(item.getActionCommand()))
+        JMenu rendererMenu = (JMenu) java.util.Arrays.stream(viewMenu.getMenuComponents())
+              .filter(component -> component instanceof JMenu menu
+                    && menu.getText().equals(Messages.getString("CommonMenuBar.viewRenderer"))).findFirst().orElseThrow();
+        // The 3D board in its current graphics, so a case does not change the saved graphics.
+        String graphics = GUIPreferences.getInstance().getBoardGraphics() == BoardGraphics.CLASSIC
+              ? ClientGUI.VIEW_GRAPHICS_CLASSIC : ClientGUI.VIEW_GRAPHICS_ENHANCED;
+        JMenuItem gpuChoice = rendererItem(rendererMenu, graphics);
+        return new ClientWindow(frame, menus, view, gpuChoice, rendererItem(rendererMenu, ClientGUI.VIEW_LEGACY_2D),
+              overview);
+    }
+
+    private static JMenuItem rendererItem(JMenu renderer, String command) {
+        return java.util.Arrays.stream(renderer.getMenuComponents())
+              .filter(component -> component instanceof JMenuItem item && command.equals(item.getActionCommand()))
               .map(JMenuItem.class::cast).findFirst().orElseThrow();
-        return new ClientWindow(frame, menus, view, gpuChoice, overview);
     }
 
     private static void openNative(ClientWindow ui) throws Exception {
@@ -1487,9 +1518,32 @@ class GpuBoardWindowSmokeTest {
     }
 
     private static void await(Callable<Boolean> condition) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(45);
+        await(45, () -> "Timed out waiting for the board window handoff", condition);
+    }
+
+    /**
+     * Waits until the active native window has drawn {@code count} frames of its board. They follow its loading screen,
+     * so this allows the loading time of {@link GpuBoardTestUi#present}, not a window handoff's, and a timeout names
+     * the loading state it stopped in.
+     */
+    private static void awaitBoardFrames(int count) throws Exception {
+        await(GpuBoardTestUi.LOADING_SECONDS, () -> "Timed out waiting for the board to load: " + loadingState(),
+              () -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() >= count));
+    }
+
+    /** The active native window's {@link GpuBoardTestUi#loadingState}, read on its GL thread. */
+    private static String loadingState() {
+        try {
+            return onGl(() -> GpuBoardTestUi.loadingState((GpuBattleView) Gdx.app.getApplicationListener()));
+        } catch (Exception failure) {
+            return "unavailable (" + failure + ")";
+        }
+    }
+
+    private static void await(int seconds, Supplier<String> timeout, Callable<Boolean> condition) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
         while (!condition.call()) {
-            assertTrue(System.nanoTime() < deadline, "Timed out waiting for the board window handoff");
+            assertTrue(System.nanoTime() < deadline, timeout);
             Thread.sleep(25);
         }
     }

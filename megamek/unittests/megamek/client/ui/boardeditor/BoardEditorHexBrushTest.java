@@ -122,6 +122,8 @@ class BoardEditorHexBrushTest {
         select(session, source); send(session, Action.SAMPLE, "", "");
         send(session, Action.ASSET, "", "scenery/vehicles/car");
         assertNull(session.snapshot().activeBrush().sampledHex());
+        // Turned, so it is no twin of the stamped car on the hex centre.
+        send(session, Action.BRUSH_VALUE, "object:rotation", "45");
         session.pointer(first, 0, 0, false); session.finishStroke();
         assertEquals(2, session.board().getHex(first).getDecorations().size());
         select(session, source); send(session, Action.SAMPLE, "", "");
@@ -136,10 +138,7 @@ class BoardEditorHexBrushTest {
 
     @Test void stampedRoutesKeepJoinedSidesAndErasingAStampIsUndoable() {
         var session = new BoardEditorSession();
-        var route = new BoardDecoration("route", "prop", RailRoute.Kind.MAGLEV.asset, null,
-              0, 0, 0, false, 1, BoardDecoration.Placement.surface("ground", "top", 1), 0)
-              .withConnections(RailRoute.side(0) | RailRoute.side(3));
-        session.board().getHex(source).setDecorations(List.of(route));
+        session.board().setHex(source, new Hex(0, "bridge:4:9;bridge_cf:650;bridge_elev:1;bridge_rail:2:9", ""));
         select(session, source); send(session, Action.SAMPLE, "", "");
         Coords joined = first.translated(3);
         session.pointer(first, 0, 0, false); session.pointer(joined, 0, 0, true); session.finishStroke();

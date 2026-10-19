@@ -2,17 +2,29 @@
 package megamek.common.board;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 
 import megamek.common.Hex;
+import megamek.common.game.IGame;
+import megamek.common.options.OptionsConstants;
+import megamek.common.units.Entity;
+import megamek.common.units.Mek;
+import megamek.common.units.Tank;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
+import megamek.common.units.VTOL;
 
 /**
- * The one route model of rails and maglev ({@link Kind}): cosmetic route markers at hex centres. A marker stores the
- * sides it leaves by ({@link BoardDecoration#connections()}, N=1 ... NW=32) and, only where it differs from the default
- * layout of those sides ({@link #pieces(int)}), the track pieces it lays between them ({@link BoardDecoration#tracks()}).
- * A hex may hold several markers of one kind, at different levels (routes crossing over each other), whose sides are
- * disjoint. A side joins the neighbour's marker of the same kind that has the opposite side, so parallel routes in
- * adjacent hexes stay apart and the kinds never join.
+ * The one route model of rails and maglev ({@link Kind}): route markers at hex centres. A marker holds the sides it
+ * leaves by ({@link BoardDecoration#connections()}, N=1 ... NW=32) and, only where it differs from the default layout of
+ * those sides ({@link #pieces(int)}), the track pieces it lays between them ({@link BoardDecoration#tracks()}). Rails as
+ * terrain ({@link Terrains#RAIL} on the ground, {@link Terrains#BRIDGE_RAIL} on a bridge deck, exits = sides) yield
+ * derived markers, never stored ({@link #markers}); the editor and legacy conversion share {@link #lay}.
+ * Each hex has at most one ground rail and one deck rail. A side joins the neighbour's reachable layer of the same
+ * kind with the opposite side, so parallel routes in adjacent hexes stay apart and the kinds never join.
  * <p>
  * Every piece is gentle: a straight between opposite sides or a 60-degree arc between sides two apart; no rail vehicle
  * takes the 120-degree turn between adjacent sides, so none is ever laid. A layout is a 9-bit piece mask: bit d (0-2) is
@@ -73,10 +85,79 @@ public final class RailRoute {
 
     public static boolean isRoute(BoardDecoration object) { return kind(object) != null; }
 
-    /** The hex's markers of {@code kind}, in stored order. */
+    /** The derived markers' ids: the rail on a hex's ground and the rail on its bridge deck. */
+    public static final String GROUND_RAIL = "rail", DECK_RAIL = "bridge-rail";
+
+    /** A hex's markers of {@code kind}, derived only from its ground and deck rail terrain. */
     public static List<BoardDecoration> markers(Hex hex, Kind kind) {
         if (hex == null) { return List.of(); }
-        return hex.getDecorations().stream().filter(object -> kind(object) == kind).toList();
+        return derived(hex, "").stream().filter(object -> kind(object) == kind).toList();
+    }
+
+    /**
+     * The markers a hex's rail terrain yields: its intact ground rail ({@link Terrains#RAIL}, id {@code prefix} +
+     * {@link #GROUND_RAIL}, on the ground) and its deck rail ({@link Terrains#BRIDGE_RAIL}, id {@code prefix} +
+     * {@link #DECK_RAIL}, on the bridge deck). Each leaves by its terrain's exits and lays the junction layout the hex's
+     * appearance stores for it ({@link HexAppearance#tracks}) where that is a layout of them, else the default. A
+     * destroyed rail yields none.
+     */
+    public static List<BoardDecoration> derived(Hex hex, String prefix) {
+        List<BoardDecoration> result = new ArrayList<>(2);
+        derive(hex, Terrains.RAIL, prefix + GROUND_RAIL, "rail", BoardDecoration.Placement.ground(), result);
+        derive(hex, Terrains.BRIDGE_RAIL, prefix + DECK_RAIL, "bridgeRail", BoardDecoration.Placement.on("bridge", 0), result);
+        return result;
+    }
+
+    /**
+     * The one writer of a hex's rail: an intact rail with these sides on its ground ({@link Terrains#RAIL}) or on its
+     * bridge deck ({@code deck}, {@link Terrains#BRIDGE_RAIL}, whose sides the caller keeps within the bridge's exits),
+     * with its junction layout {@code tracks} on the rail's appearance, where it is not the default (0).
+     */
+    public static void lay(Hex hex, boolean deck, int sides, int tracks) {
+        lay(hex, deck, sides, tracks, Kind.RAIL);
+    }
+
+    /** Lays either ordinary rail or maglev on its terrain layer, with the same junction appearance ownership. */
+    public static void lay(Hex hex, boolean deck, int sides, int tracks, Kind kind) {
+        hex.addTerrain(new Terrain(deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL, kind == Kind.MAGLEV ? 2 : 1, true, sides));
+        Map<String, HexAppearance> appearance = new HashMap<>(hex.getAppearance());
+        int beside = kind == Kind.MAGLEV ? 0 : HexAppearance.beside(appearance, deck ? "bridgeRail" : "rail");
+        HexAppearance layout = HexAppearance.rail(tracks, beside == 0 ? 0 : 64 | (beside & sides & 63));
+        if (layout == null) { appearance.remove(deck ? "bridgeRail" : "rail"); }
+        else { appearance.put(deck ? "bridgeRail" : "rail", layout); }
+        hex.setAppearance(appearance);
+    }
+
+    private static void derive(Hex hex, int type, String id, String owner, BoardDecoration.Placement placement,
+          List<BoardDecoration> result) {
+        Terrain rail = hex.getTerrain(type);
+        if (rail == null || rail.getLevel() <= 0) { return; }
+        int sides = rail.getExits() & 63, tracks = HexAppearance.tracks(hex.getAppearance(), owner);
+        Kind kind = rail.getLevel() == 2 ? Kind.MAGLEV : Kind.RAIL;
+        result.add(new BoardDecoration(id, "prop", kind.asset, null, 0, 0, 0, false, 1, placement, 0, false, 0, 0,
+              null, false, sides, BoardDecoration.Stretch.NONE, BoardDecoration.Colours.NONE, valid(sides, tracks) ? tracks : 0));
+    }
+
+    /** Whether TacOps rails are in play (TO:AR p.49). With the option off, rails are drawn and play as nothing. */
+    public static boolean rules(IGame game) {
+        return game != null && game.getOptions().booleanOption(OptionsConstants.ADVANCED_TAC_OPS_RAILS);
+    }
+
+    /** Whether a rail hinders {@code entity} (TO:AR p.49): 'Meks and ground vehicles; infantry, ProtoMeks and aircraft pass. */
+    public static boolean affects(Entity entity) {
+        return entity instanceof Mek || entity instanceof Tank && !(entity instanceof VTOL);
+    }
+
+    /** Whether the hex holds the rules' rail: an intact {@link Terrains#RAIL} on its ground (a destroyed one is clear). */
+    public static boolean intact(Hex hex) {
+        return hex != null && hex.terrainLevel(Terrains.RAIL) > 0;
+    }
+
+    /** Whether a step from {@code from} into the adjacent {@code to}, leaving by {@code direction}, follows an intact rail. */
+    public static boolean along(Hex from, Hex to, int direction) {
+        return intact(from) && intact(to) && from.terrainLevel(Terrains.RAIL) == to.terrainLevel(Terrains.RAIL)
+              && from.containsTerrainExit(Terrains.RAIL, direction)
+              && to.containsTerrainExit(Terrains.RAIL, (direction + 3) % 6);
     }
 
     /** The hex's first marker of {@code kind}, or null. */
@@ -107,10 +188,49 @@ public final class RailRoute {
               .findFirst().orElse(null);
     }
 
+    /** A joined rail on the same reachable layer; a ground continuation takes precedence over a bridge above it. */
+    public static BoardDecoration joined(Hex from, BoardDecoration route, int direction, Hex neighbour) {
+        BoardDecoration best = null;
+        float gap = Float.POSITIVE_INFINITY;
+        for (var other : markers(neighbour, kind(route))) {
+            if (!joined(route, direction, other)) { continue; }
+            float score = joinScore(route, level(from, route), other, level(neighbour, other));
+            if (score < gap) { best = other; gap = score; }
+        }
+        return best;
+    }
+
+    /** The shared selection rule for authoring and captured rendering; unreachable layers have infinite score. */
+    public static float joinScore(BoardDecoration route, float level, BoardDecoration other, float otherLevel) {
+        if (!onDeck(route) && !onDeck(other)) { return 0; }
+        float delta = Math.abs(level - otherLevel);
+        return delta > 1 ? Float.POSITIVE_INFINITY : delta + (onDeck(route) == onDeck(other) ? 0 : 2);
+    }
+
+    /** The rules surface a route rides, including its bridge rather than the ground beneath that bridge. */
+    public static float level(Hex hex, BoardDecoration marker) {
+        return (float) marker.placement().level(hex.getLevel(), receiver -> hex.getLevel()
+              + (receiver.equals("bridge") && hex.containsTerrain(Terrains.BRIDGE)
+                    ? hex.terrainLevel(Terrains.BRIDGE_ELEV) : 0));
+    }
+
     /** A rail marker on a bridge deck, which it rides; any other rail lies on the ground. */
     public static boolean onDeck(BoardDecoration marker) {
         var receiver = marker.placement().receiver();
         return receiver != null && receiver.terrain().equals("bridge");
+    }
+
+    /**
+     * Whether the hex holds intact rail terrain on its ground, including a ground-level maglev. A suspended maglev
+     * belongs to its deck and leaves the ground clear ({@link Hex#isClear}).
+     */
+    public static boolean groundRail(Hex hex) {
+        return intact(hex);
+    }
+
+    /** Whether the hex's bridge deck carries a rail ({@link Hex#isClearDeck}). */
+    public static boolean deckRail(Hex hex) {
+        return hex != null && hex.terrainLevel(Terrains.BRIDGE_RAIL) > 0;
     }
 
     /**
@@ -122,20 +242,183 @@ public final class RailRoute {
 
     /** The exits of the hex's bridge, 0 without one. */
     public static int bridgeExits(Hex hex) {
-        var bridge = hex.getTerrain(megamek.common.units.Terrains.BRIDGE);
+        var bridge = hex.getTerrain(Terrains.BRIDGE);
         return bridge == null ? 0 : bridge.getExits();
     }
 
     /**
-     * The sides of the hex's rail markers that lie on the ground: the road engine shapes and clears the ground for them
-     * as for a road with those exits.
+     * The sides of the hex's rails that lie on the ground, a destroyed rail's too: the road engine shapes and clears the
+     * ground for them as for a road with those exits.
      */
     public static int groundSides(Hex hex) {
-        int result = 0;
+        Terrain rail = hex == null ? null : hex.getTerrain(Terrains.RAIL);
+        int result = rail == null ? 0 : rail.getExits() & 63;
         for (var marker : markers(hex, Kind.RAIL)) {
             if (!onDeck(marker)) { result |= marker.connections(); }
         }
         return result;
+    }
+
+    // ---------------------------------------------------------------- road and rail corridors
+
+    /** Shared corridor borders; beside marks option A and right stores the physical side of its track there. */
+    public record Corridor(int sides, int beside, int right, int tracks) {
+        public static final Corridor NONE = new Corridor(0, 0, 0);
+
+        public Corridor(int sides, int beside, int right) { this(sides, beside, right, 0); }
+
+        /** Right of looking out through d. Opposite hexes use opposite signs for the same physical point. */
+        public float lateral(int d) {
+            return d < 0 || (beside & side(d)) == 0 ? 0 : ((right & side(d)) == 0 ? -1 : 1) * (d < 3 ? 1 : -1);
+        }
+
+        public int middle() { return sides & ~beside; }
+    }
+
+    /** Track offset from the corridor axis in option A, in model pixels. */
+    public static final float BESIDE_RAIL = 8.25f;
+
+    /** Rail sides that continue gently, with hairpin stubs excluded. */
+    public static int corridorSides(BoardDecoration marker, int bridgeExits) {
+        int sides = drawnSides(marker, bridgeExits);
+        return sides & ~stranded(sides);
+    }
+
+    private static int local(Hex hex, boolean deck) {
+        if (hex == null || hex.terrainLevel(deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL) != 1) { return 0; }
+        int roadType = deck ? Terrains.BRIDGE_ROAD : Terrains.ROAD;
+        Terrain road = hex.getTerrain(roadType);
+        if (road == null || (deck ? !hex.containsTerrain(Terrains.BRIDGE)
+              : !HexTile.road(hex) || hex.containsTerrain(Terrains.WATER) || Integer.bitCount(road.getExits() & 63) >= 5)) { return 0; }
+        Terrain rail = hex.getTerrain(deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL);
+        int sides = rail.getExits() & (deck ? bridgeExits(hex) : 63);
+        return road.getExits() & sides & ~stranded(sides) & 63;
+    }
+
+    /** The ground corridor of this hex, shared with neighbours (or continuing off the board). */
+    public static Corridor corridor(Hex hex, Coords at, Function<Coords, Hex> board) {
+        return corridor(hex, at, board, false);
+    }
+
+    /** One layer's corridor. Deck roads are local data; no span-wide decision or cache is needed. */
+    public static Corridor corridor(Hex hex, Coords at, Function<Coords, Hex> board, boolean deck) {
+        int local = local(hex, deck), sides = 0, beside = 0, right = 0;
+        if (local == 0) { return Corridor.NONE; }
+        BoardDecoration route = markers(hex, Kind.RAIL).stream().filter(m -> onDeck(m) == deck).findFirst().orElseThrow();
+        int stored = HexAppearance.beside(hex.getAppearance(), deck ? "bridgeRail" : "rail");
+        for (int d = 0; d < 6; d++) {
+            if ((local & side(d)) == 0) { continue; }
+            Hex next = board.apply(at.translated(d));
+            int opposite = (d + 3) % 6;
+            BoardDecoration otherRoute = next == null ? null : joined(hex, route, d, next);
+            boolean nextDeck = otherRoute != null && onDeck(otherRoute);
+            if (next != null && (otherRoute == null || (local(next, nextDeck) & side(opposite)) == 0
+                  || !route.equals(joined(next, otherRoute, opposite, hex)))) { continue; }
+            sides |= side(d);
+            int other = next == null ? stored : HexAppearance.beside(next.getAppearance(), nextDeck ? "bridgeRail" : "rail");
+            boolean bit = (stored & side(d)) != 0;
+            if (stored != 0 && other != 0 && (next == null || bit == ((other & side(opposite)) != 0))) {
+                beside |= side(d);
+                if (bit) { right |= side(d); }
+            }
+        }
+        return sides == 0 ? Corridor.NONE : new Corridor(sides, beside, right, route.tracks());
+    }
+
+    /** The connected corridor containing a selected derived rail, on either ground or deck. */
+    public static List<Member> corridorRun(Function<Coords, Hex> board, Coords at, BoardDecoration marker) {
+        if (kind(marker) != Kind.RAIL || corridor(board.apply(at), at, board, onDeck(marker)).sides() == 0) { return List.of(); }
+        List<Member> result = new ArrayList<>(List.of(new Member(at, marker)));
+        var found = new java.util.HashSet<>(result);
+        for (int index = 0; index < result.size(); index++) {
+            Member member = result.get(index);
+            Corridor c = corridor(board.apply(member.at()), member.at(), board, onDeck(member.marker()));
+            for (int d = 0; d < 6; d++) {
+                if ((c.sides() & side(d)) == 0) { continue; }
+                Coords next = member.at().translated(d);
+                var other = joined(board.apply(member.at()), member.marker(), d, board.apply(next));
+                if (other == null || (corridor(board.apply(next), next, board, onDeck(other)).sides() & side((d + 3) % 6)) == 0) { continue; }
+                var reached = new Member(next, other);
+                if (found.add(reached)) { result.add(reached); }
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    /** The beside-side bits of a whole run, propagated through its track pieces and across shared borders. */
+    public static Map<Member, Integer> besideBits(Function<Coords, Hex> board, List<Member> run, Member start) {
+        Map<Member, Integer> known = new HashMap<>(), right = new HashMap<>();
+        if (run.isEmpty()) { return Map.of(); }
+        Member first = run.contains(start) ? start : run.getFirst();
+        int sides = corridor(board.apply(first.at()), first.at(), board, onDeck(first.marker())).sides();
+        int d = Integer.numberOfTrailingZeros(sides);
+        int stored = HexAppearance.beside(board.apply(first.at()).getAppearance(), onDeck(first.marker()) ? "bridgeRail" : "rail");
+        known.put(first, side(d));
+        right.put(first, stored == 0 ? (d < 3 ? side(d) : 0) : stored & side(d));
+        Map<Coords, List<Member>> byHex = new HashMap<>();
+        for (Member member : run) { byHex.computeIfAbsent(member.at(), key -> new ArrayList<>()).add(member); }
+        var pending = new java.util.ArrayDeque<Member>();
+        pending.add(first);
+        while (!pending.isEmpty()) {
+            Member member = pending.removeFirst();
+            int mask = known.getOrDefault(member, 0), bits = right.getOrDefault(member, 0);
+            int tracks = pieces(member.marker(), drawnSides(member.marker(), board.apply(member.at())));
+            int before;
+            do {
+                before = mask;
+                for (int piece = 0; piece < PIECES; piece++) {
+                    if ((tracks & 1 << piece) == 0) { continue; }
+                    int pair = pieceSides(piece), a = Integer.numberOfTrailingZeros(pair), b = 31 - Integer.numberOfLeadingZeros(pair);
+                    if ((mask & side(a)) == 0 && (mask & side(b)) != 0) { int swap = a; a = b; b = swap; }
+                    if ((mask & side(a)) == 0 || (mask & side(b)) != 0) { continue; }
+                    boolean bit = ((bits & side(a)) != 0) != (a < 3 == b < 3);
+                    mask |= side(b);
+                    if (bit) { bits |= side(b); }
+                }
+            } while (before != mask);
+            known.put(member, mask); right.put(member, bits);
+            int shared = corridor(board.apply(member.at()), member.at(), board, onDeck(member.marker())).sides();
+            for (int exit = 0; exit < 6; exit++) {
+                if ((mask & shared & side(exit)) == 0) { continue; }
+                int opposite = (exit + 3) % 6;
+                BoardDecoration joined = joined(board.apply(member.at()), member.marker(), exit,
+                      board.apply(member.at().translated(exit)));
+                for (Member next : byHex.getOrDefault(member.at().translated(exit), List.of())) {
+                    if (!next.marker().equals(joined)) { continue; }
+                    int nextShared = corridor(board.apply(next.at()), next.at(), board, onDeck(next.marker())).sides();
+                    if ((nextShared & side(opposite)) == 0 || (known.getOrDefault(next, 0) & side(opposite)) != 0) { continue; }
+                    known.merge(next, side(opposite), (a, b) -> a | b);
+                    if ((bits & side(exit)) != 0) { right.merge(next, side(opposite), (a, b) -> a | b); }
+                    pending.add(next);
+                }
+            }
+            // Separate tracks at a crossing have an independent side, chosen in stable run/side order.
+            if (pending.isEmpty()) {
+                for (Member next : run) {
+                    int missing = corridor(board.apply(next.at()), next.at(), board, onDeck(next.marker())).sides()
+                          & ~known.getOrDefault(next, 0);
+                    if (missing == 0) { continue; }
+                    int exit = Integer.numberOfTrailingZeros(missing);
+                    known.merge(next, side(exit), (a, b) -> a | b);
+                    if (exit < 3) { right.merge(next, side(exit), (a, b) -> a | b); }
+                    pending.add(next);
+                    break;
+                }
+            }
+        }
+        Map<Member, Integer> result = new HashMap<>();
+        for (Member member : run) { result.put(member, 64 | (right.getOrDefault(member, 0) & member.marker().connections())); }
+        return Map.copyOf(result);
+    }
+
+    /** Write only the corridor choice, retaining this layer's authored junction. */
+    public static void beside(Hex hex, boolean deck, int value) {
+        String owner = deck ? "bridgeRail" : "rail";
+        Map<String, HexAppearance> looks = new HashMap<>(hex.getAppearance());
+        int sides = hex.getTerrain(deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL).getExits() & 63;
+        HexAppearance look = HexAppearance.rail(HexAppearance.tracks(looks, owner), value == 0 ? 0 : 64 | (value & sides));
+        if (look == null) { looks.remove(owner); } else { looks.put(owner, look); }
+        hex.setAppearance(looks);
     }
 
     /**
@@ -143,7 +426,7 @@ public final class RailRoute {
      * ({@code bridgeExits}), since a deck carries track only along itself.
      */
     public static int drawnSides(BoardDecoration marker, int bridgeExits) {
-        return kind(marker) == Kind.RAIL && onDeck(marker) ? marker.connections() & bridgeExits : marker.connections();
+        return onDeck(marker) ? marker.connections() & bridgeExits : marker.connections();
     }
 
     /** {@link #drawnSides(BoardDecoration, int)} of a marker on {@code hex}, from its bridge's exits. */
@@ -304,7 +587,7 @@ public final class RailRoute {
             for (int d = 0; d < 6; d++) {
                 Coords next = member.at().translated(d);
                 BoardDecoration other = (member.marker().connections() & side(d)) == 0 ? null
-                      : joined(member.marker(), d, board.apply(next));
+                      : joined(board.apply(member.at()), member.marker(), d, board.apply(next));
                 if (other != null && found.add(new Member(next, other))) { result.add(new Member(next, other)); }
             }
         }
@@ -373,6 +656,26 @@ public final class RailRoute {
         if (layouts.stream().noneMatch(listed -> listed.tracks() == layout.tracks())) { layouts.add(layout); }
     }
 
+    /** A rail appearance's junction layout ({@link HexAppearance#tracks}) reflected as a board flip reflects its exits. */
+    public static HexAppearance flip(HexAppearance look, boolean horizontal, boolean vertical) {
+        if (look.tracks() == null && look.beside() == null) { return look; }
+        return HexAppearance.rail(look.tracks() == null ? 0
+                    : flip(look.tracks(), sides -> BoardDecoration.flipSides(sides, horizontal, vertical)),
+              look.beside() == null ? 0 : flipBeside(look.beside(), horizontal, vertical));
+    }
+
+    /** Reflect the physical rail side as a board flip reflects its exits. */
+    public static int flipBeside(int value, boolean horizontal, boolean vertical) {
+        if (value == 0) { return 0; }
+        int result = 64;
+        for (int d = 0; d < 6; d++) {
+            boolean bit = (value & side(d)) != 0;
+            if (horizontal && d % 3 == 0 || vertical && d % 3 != 0) { bit = !bit; }
+            if (bit) { result |= BoardDecoration.flipSides(side(d), horizontal, vertical); }
+        }
+        return result;
+    }
+
     /** {@code tracks} reflected as {@link BoardDecoration#flip} reflects the sides ({@code flipSides}). */
     static int flip(int tracks, java.util.function.IntUnaryOperator flipSides) {
         int result = 0;
@@ -396,6 +699,22 @@ public final class RailRoute {
               (HexTile.centerY(next, HexTile.HEIGHT) - HexTile.centerY(origin, HexTile.HEIGHT)) / 2 };
     }
 
+    /**
+     * A lateral shift along the actual hex edge, {@code offset} model pixels right of the outward centre line.
+     * The 84x72 lattice is slightly non-regular: a plain perpendicular shift misses its diagonal borders, leaving
+     * one rail endpoint outside its supporting ground and making its height sampler fall back to the plateau.
+     */
+    public static float[] borderOffset(int direction, float offset) {
+        float[] at = border(direction);
+        float length = (float) Math.hypot(at[0], at[1]);
+        float x = at[1] / length * offset, y = -at[0] / length * offset;
+        int edge = Math.floorMod(1 - direction, 6), next = (edge + 1) % 6;
+        float nx = HexTile.cornerOffsetY(next, HexTile.HEIGHT) - HexTile.cornerOffsetY(edge, HexTile.HEIGHT);
+        float ny = HexTile.cornerOffsetX(edge, HexTile.WIDTH) - HexTile.cornerOffsetX(next, HexTile.WIDTH);
+        float along = (x * nx + y * ny) / (at[0] * nx + at[1] * ny);
+        return new float[] { x - at[0] * along, y - at[1] * along };
+    }
+
     /** How far the stub of a stranded side reaches in from its border. */
     public static float stub(int sides) { return Integer.bitCount(sides & 63) == 3 ? STUB_SHORT : STUB_LONG; }
 
@@ -405,6 +724,11 @@ public final class RailRoute {
      * track it closes and stands {@link #STOP_DEPTH} before the track's end.
      */
     public static List<Stop> stops(int sides) {
+        return stops(sides, Corridor.NONE);
+    }
+
+    /** Stops follow the same lateral placement as the track and its riders. */
+    public static List<Stop> stops(int sides, Corridor corridor) {
         sides &= 63;
         List<Stop> result = new ArrayList<>(2);
         if (sides == 0) {
@@ -421,7 +745,9 @@ public final class RailRoute {
             // From the border inwards: to the centre for a dead end, to the stub's end for a stranded side.
             float t = 1 - ((deadEnd ? length : stub(sides)) - STOP_DEPTH) / length;
             // The buffers (the model's +y) face the border the track comes from.
-            result.add(new Stop(edge[0] * t, edge[1] * t, (float) Math.toDegrees(Math.atan2(-edge[0], edge[1]))));
+            float offset = corridor.lateral(d) * BESIDE_RAIL;
+            result.add(new Stop(edge[0] * t + edge[1] / length * offset,
+                  edge[1] * t - edge[0] / length * offset, (float) Math.toDegrees(Math.atan2(-edge[0], edge[1]))));
         }
         return result;
     }
@@ -441,7 +767,34 @@ public final class RailRoute {
      * One centre line of a track in plan, model px from the hex centre (+y north): the course ({@link #course}) from
      * {@code a} to {@code b}, each end on the border of a side ({@code from}, {@code to}) or, -1, inside the hex.
      */
-    public record Line(int from, int to, float[] a, float[] b) { }
+    public record Line(int from, int to, float[] a, float[] b, float oa, float ob) {
+        public Line(int from, int to, float[] a, float[] b) { this(from, to, a, b, 0, 0); }
+
+        /** The course, with a smooth lateral shift whose end tangent stays perpendicular to the border. */
+        public float[] at(float t) {
+            float[] p = course(a[0], a[1], b[0], b[1], t);
+            if (oa == 0 && ob == 0) { return p; }
+            float u = 1 - t;
+            float da = -3 * u * u + 3 * HANDLE * (u * u - 2 * u * t);
+            float db = 3 * HANDLE * (2 * u * t - t * t) + 3 * t * t;
+            float dx = a[0] * da + b[0] * db, dy = a[1] * da + b[1] * db;
+            if (dx * dx + dy * dy < 1e-12f) { dx = b[0] - a[0]; dy = b[1] - a[1]; }
+            float length = (float) Math.hypot(dx, dy), offset = oa + t * t * (3 - 2 * t) * (ob - oa);
+            if (length > 1e-6f) { p[0] += dy / length * offset; p[1] -= dx / length * offset; }
+            float blend = t * t * (3 - 2 * t);
+            meetBorder(p, from, -oa, 1 - blend);
+            meetBorder(p, to, ob, blend);
+            return p;
+        }
+
+        private static void meetBorder(float[] point, int direction, float offset, float weight) {
+            if (direction < 0 || offset == 0 || weight == 0) { return; }
+            float[] edge = border(direction), shift = borderOffset(direction, offset);
+            float length = (float) Math.hypot(edge[0], edge[1]);
+            point[0] += weight * (shift[0] - edge[1] / length * offset);
+            point[1] += weight * (shift[1] + edge[0] / length * offset);
+        }
+    }
 
     /**
      * The centre lines of a track with these drawn {@code sides} and {@code pieces}, the one composition the builder
@@ -471,6 +824,18 @@ public final class RailRoute {
         return List.copyOf(result);
     }
 
+    /** Track courses shifted by the corridor's authored option A; option B retains the original axis. */
+    public static List<Line> lines(int sides, int pieces, Corridor corridor) {
+        if (corridor.beside() == 0) { return lines(sides, pieces); }
+        return lines(sides, pieces).stream().map(line -> {
+            float a = -corridor.lateral(line.from()) * BESIDE_RAIL;
+            float b = corridor.lateral(line.to()) * BESIDE_RAIL;
+            if (line.from() < 0) { a = b; }
+            if (line.to() < 0) { b = a; }
+            return new Line(line.from(), line.to(), line.a(), line.b(), a, b);
+        }).toList();
+    }
+
     // ---------------------------------------------------------------- what rides the track
 
     /** A point on a route's track, model px from its hex's centre (+y north), heading as an object's rotation there. */
@@ -486,13 +851,13 @@ public final class RailRoute {
     private static final int SAMPLES = 24;
 
     /** The centre lines ({@link #lines(int, int)}) of a marker's track on its drawn {@code sides}, a piece's course sampled. */
-    private static List<Track> tracks(BoardDecoration marker, int sides) {
+    private static List<Track> tracks(BoardDecoration marker, int sides, Corridor corridor) {
         List<Track> result = new ArrayList<>();
-        for (Line line : lines(sides, pieces(marker, sides & 63))) {
+        for (Line line : lines(sides, pieces(marker, sides & 63), corridor)) {
             int samples = line.from() >= 0 && line.to() >= 0 ? SAMPLES : 1;
             List<float[]> points = new ArrayList<>(samples + 1);
             for (int i = 0; i <= samples; i++) {
-                points.add(course(line.a()[0], line.a()[1], line.b()[0], line.b()[1], (float) i / samples));
+                points.add(line.at((float) i / samples));
             }
             result.add(new Track(points, line.from(), line.to()));
         }
@@ -546,7 +911,12 @@ public final class RailRoute {
      * track's two headings there the one nearer {@code rotation}: where a vehicle placed there stands.
      */
     public static Spot snap(Hex hex, BoardDecoration marker, float x, float y, float rotation) {
-        Place place = nearest(tracks(marker, drawnSides(marker, hex)), x, y);
+        return snap(hex, marker, x, y, rotation, Corridor.NONE);
+    }
+
+    /** The editor's snap with the same corridor captured by the renderer. */
+    public static Spot snap(Hex hex, BoardDecoration marker, float x, float y, float rotation, Corridor corridor) {
+        Place place = nearest(tracks(marker, drawnSides(marker, hex), corridor), x, y);
         float[] point = place.point();
         float along = heading(place.direction());
         return new Spot(point[0], point[1], normal(turn(along, rotation) <= 90 ? along : along + 180));
@@ -567,7 +937,8 @@ public final class RailRoute {
      */
     public static OnTrack follow(java.util.function.Function<Coords, Hex> board, Coords at, BoardDecoration marker,
           Spot start, float distance) {
-        Place place = nearest(tracks(marker, drawnSides(marker, board.apply(at))), start.x(), start.y());
+        Place place = nearest(tracks(marker, drawnSides(marker, board.apply(at)),
+              corridor(board.apply(at), at, board, onDeck(marker))), start.x(), start.y());
         float[] point = place.point(), direction = place.direction();
         // Forward along the line where it heads with the start, and the other way for a negative distance.
         boolean forward = turn(heading(direction), start.rotation()) <= 90 == distance >= 0;
@@ -594,8 +965,9 @@ public final class RailRoute {
             int side = forward ? line.to() : line.from();
             Coords neighbour = side < 0 ? null : here.translated(side);
             Hex hex = neighbour == null ? null : board.apply(neighbour);
-            BoardDecoration joined = hex == null ? null : joined(current, side, hex);
-            Track onward = joined == null ? null : onward(tracks(joined, drawnSides(joined, hex)), (side + 3) % 6);
+            BoardDecoration joined = hex == null ? null : joined(board.apply(here), current, side, hex);
+            Track onward = joined == null ? null : onward(tracks(joined, drawnSides(joined, hex),
+                  corridor(hex, neighbour, board, onDeck(joined))), (side + 3) % 6);
             if (onward == null) {
                 point = new float[] { point[0] + direction[0] * left, point[1] + direction[1] * left };
                 beyond = left;

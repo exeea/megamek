@@ -120,13 +120,19 @@ class GpuEditorBrushSmokeTest {
                                 GpuBoardTestUi.category("vegetation");
                             }
                             case 1 -> {
-                                assertNotNull(root.findActor("editor-library-vegetation/jungle-2"));
-                                GpuBoardTestUi.click("editor-library-vegetation/jungle-2");
+                                // One Jungle card; its density is the brush's Jungle row.
+                                assertNull(root.findActor("editor-library-vegetation/jungle-2"));
+                                GpuBoardTestUi.click("editor-library-vegetation/jungle-1");
                             }
                             case 2 -> {
+                                assertNotNull(((Group) root.findActor("editor-brush")).findActor("editor-brush-terrain:jungle"), "The density row");
+                                command(Action.BRUSH_VALUE, "terrain:jungle", "2");
+                            }
+                            case 3 -> {
                                 if (!previewsReady(root.findActor("editor-library"))) { return; }
                                 assertEquals(BoardEditorSession.Tool.PAINT, source.editorState().tool());
-                                assertEquals("vegetation/jungle-2", source.editorState().activeBrush().key());
+                                assertEquals("vegetation/jungle-1", source.editorState().activeBrush().key());
+                                assertEquals(2, source.editorState().activeBrush().property("jungle").value());
                                 assertEquals(owner, source.editorState().selected());
                                 assertFalse(source.editorState().dirty());
                                 assertTrue(root.findActor("editor-brush-").isDescendantOf(root.findActor("editor-brush")));
@@ -136,9 +142,8 @@ class GpuEditorBrushSmokeTest {
                                 GpuBoardTestUi.capture(new File(output, "editor-brush-vegetation.png"));
                                 boardCamera.pan(30, -20); boardCamera.zoom(.8f);
                                 cameraProjection = boardCamera.camera.combined.val.clone();
-                                GpuBoardTestUi.category("Vehicles");
+                                GpuBoardTestUi.category("transportation");
                             }
-                            case 3 -> GpuBoardTestUi.category("Vehicles");
                             case 4 -> {
                                 ((TextField) root.findActor("editor-search")).setText("vehicles/car");
                             }
@@ -203,8 +208,9 @@ class GpuEditorBrushSmokeTest {
                                       "The Brush panel shows for Paint, Sculpt and Erase only");
                                 GpuBoardTestUi.capture(new File(output, "editor-brush-compact.png"));
                                 command(Action.SELECT_OBJECT, "", "paint");
-                                String group = megamek.common.board.BoardEditorBlueprint.get().asset(source.editorState().objects().getFirst().asset()).group();
-                                GpuBoardTestUi.category(group);
+                                String section = megamek.common.board.BoardEditorBlueprint.get().asset(source.editorState().objects().getFirst().asset())
+                                      .sections().getFirst();
+                                GpuBoardTestUi.category(megamek.common.board.BoardEditorBlueprint.categoryOf(section));
                             }
                             case 14 -> {
                                 assertEquals(BoardEditorSession.Tool.SELECT, source.editorState().tool());

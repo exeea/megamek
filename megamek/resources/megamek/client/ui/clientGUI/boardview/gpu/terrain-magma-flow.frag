@@ -6,6 +6,7 @@ uniform float u_metre;
 uniform float u_normalMaps;
 // magma-flow-functions
 void main() {
+    vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
     vec3 face = normalize(v_normal);
     if (!gl_FrontFacing) face = -face;
     vec3 position = v_cloudPosition / u_metre;
@@ -27,5 +28,5 @@ void main() {
         position.xy -= waves.zw * .30 * bank;
     }
     Volcanic material = magmaSurface(position, face, eye, magmaDrift(face, current, bank, waves), bank, waves);
-    fragColor = magmaOutput(magmaChill(material, shore), bank, 1.0);
+    fragColor = magmaOutput(magmaChill(material, shore), geometric, bank, 1.0);
 }

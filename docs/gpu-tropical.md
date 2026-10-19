@@ -16,36 +16,28 @@ and tree LODs use the existing feature path in both camera views.
 hexes has `ground_fluff:1:3`: half tropical forest floor and half desert ground.
 Those proportions are retained by native material blending. SAND remains its
 separate surface cover; snow, pavement and magma keep their existing precedence.
-Tropical mixtures use the existing height-and-noise contacts to retain visible
-patches of forest litter among the other material. A whole-material color fade
-washed out the dark moss against bright desert ground. Other authored gradients
-keep their existing interpolation. Contacts between neighboring themes use the
+Tropical mixtures use the height-and-noise contacts to keep visible patches of
+forest litter among the other material; a whole-material color fade would wash out
+the dark moss against bright desert ground. Other authored gradients keep their
+existing interpolation. Contacts between neighboring themes use the
 shared wider, softened gradient. The tropical exception fades with its actual
 material contribution, rather than switching on for an entire triangle palette.
 
 Tropical terrain shares meadow soil-bank and granite-bedrock geometry. Its
-forest-floor albedo/height and normal/AO maps enter the existing sculpt texture
-array; dirt, soil mantle and bedrock maps are reused. No separate renderer,
-animation timeline or picking geometry is introduced.
+forest-floor albedo/height and normal/AO maps are layers of the shared sculpt
+texture array, alongside the dirt, soil mantle and bedrock maps it reuses. It has
+no separate renderer, animation timeline or picking geometry.
 
 ## Assets in mm-data
 
-- `tools/terrain-contact-sources/tropical-reference.png`: built-in ImageGen visual
-  reference based on the supplied Racice screenshot; not an engine capture.
-- `tools/terrain-contact-sources/tropical-ground.png`: forest-floor source.
-- `data/models/board/textures/sculpt/tropical-ground.png` and
+- `tools/materials/terrain/surfaces/tropical-ground/tropical-ground.ptex`: Material
+  Maker project and its `sources/` images. `python tools/materials/export.py`, run
+  from the mm-data root, exports it with the other projects.
+- `data/models/board/textures/terrain/surfaces/tropical-ground.png` and
   `tropical-ground-normal.png`: 512-pixel runtime maps, four-metre repeat.
 
-Rebuild and verify with the existing authoring pipeline:
-
-```shell
-python tools/prepare_terrain_contact.py --only tropical-ground
-python tools/prepare_terrain_contact.py --only tropical-ground --check
-```
-
 Normal relief is an artistic estimate from the generated source, not a measured
-scan. The concept is a visual target; runtime reuses the shipped low-poly palms,
-broadleaf trees and jungle foliage instead of reproducing every leaf in the image.
+scan.
 
 ## Verification
 

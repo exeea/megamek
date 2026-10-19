@@ -26,9 +26,8 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
 import megamek.common.equipment.EquipmentType;
 import org.junit.jupiter.api.Tag;
@@ -50,11 +49,13 @@ class GpuArrowIVSmokeTest {
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
-                FrameBuffer buffer = null;
+                GpuSceneTestOutput buffer = null;
                 var effects = new GpuAttackEffects();
                 try {
+                    File model = new File(Configuration.dataDir(), "models/effects/arrow-iv.glb");
+                    assertTrue(model.isFile(), "This authored-round fixture needs the incoming mm-data model: " + model);
                     EquipmentType.initializeTypes();
-                    buffer = GpuAtmosphere.buffer(SIZE, SIZE, true);
+                    buffer = new GpuSceneTestOutput(SIZE, SIZE);
                     var round = new ResolvedAttack.Shot("", Set.of("M_STANDARD"), true, false, 1, 1, true, null, null,
                           null, false, 20, false, false, false, null, 20);
                     var shot = GroundDamagePlaybackTest.shot("ISArrowIV", true, round);
@@ -112,7 +113,7 @@ class GpuArrowIVSmokeTest {
                 } finally {
                     effects.dispose();
                     if (buffer != null) {
-                        buffer.dispose();
+                        buffer.close();
                     }
                     Gdx.app.exit();
                 }
@@ -127,10 +128,10 @@ class GpuArrowIVSmokeTest {
      * Frames at 15 a second of a 20-hex Arrow IV flight's last stretch and what follows: the cluster burst or
      * minefield dispenser should open where the round is, and its spent body fall on to the ground and vanish.
      */
-    private static void reviewOpening(FrameBuffer buffer, String munition, File folder) throws java.io.IOException {
+    private static void reviewOpening(GpuSceneTestOutput buffer, String munition, File folder) throws java.io.IOException {
         assertTrue(folder.isDirectory() || folder.mkdirs());
         var effects = new GpuAttackEffects();
-        var batch = new ModelBatch();
+        var batch = new ModelBatch(GpuUnitShader.provider());
         Model groundModel = new ModelBuilder().createBox(20000, 20000, 1,
               new Material(ColorAttribute.createDiffuse(.36f, .38f, .33f, 1)), VertexAttributes.Usage.Position);
         try {
@@ -154,18 +155,18 @@ class GpuArrowIVSmokeTest {
             for (int index = 0; index < count; index++) {
                 float seconds = first + index / 15f;
                 effects.advance(1 / 15f);
-                buffer.begin();
+                buffer.begin(.62f, .66f, .72f, 1);
                 try {
-                    ScreenUtils.clear(new Color(.62f, .66f, .72f, 1), true);
                     batch.begin(camera);
                     batch.render(ground);
                     batch.end();
                     shot.seconds = Math.min(seconds, shot.duration);
                     effects.update(List.of(shot), null, Map.of());
                     effects.render(camera);
+                    buffer.display();
                     ImageIO.write(snapshot(), "png", new File(folder, String.format("frame-%03d.png", index)));
                 } finally {
-                    buffer.end();
+                    buffer.pixels().end();
                 }
             }
         } finally {
@@ -193,7 +194,7 @@ class GpuArrowIVSmokeTest {
         return camera;
     }
 
-    private static BufferedImage frame(FrameBuffer buffer, GpuAttackEffects effects, UnitAttack shot,
+    private static BufferedImage frame(GpuSceneTestOutput buffer, GpuAttackEffects effects, UnitAttack shot,
           PerspectiveCamera camera, float seconds) {
         return frame(buffer, effects, shot, camera, seconds, DAY);
     }
@@ -213,18 +214,18 @@ class GpuArrowIVSmokeTest {
         return count;
     }
 
-    private static BufferedImage frame(FrameBuffer buffer, GpuAttackEffects effects, UnitAttack shot,
+    private static BufferedImage frame(GpuSceneTestOutput buffer, GpuAttackEffects effects, UnitAttack shot,
           PerspectiveCamera camera, float seconds, Color sky) {
-        buffer.begin();
+        buffer.begin(sky.r, sky.g, sky.b, sky.a);
         try {
-            ScreenUtils.clear(sky, true);
             shot.seconds = seconds;
             effects.update(List.of(shot), null, Map.of());
             effects.render(camera);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            buffer.display();
             return snapshot();
         } finally {
-            buffer.end();
+            buffer.pixels().end();
         }
     }
 

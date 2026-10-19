@@ -93,7 +93,7 @@ final class GpuMarkers implements Disposable {
     private static final int ART_SIZE = 96;
     private static final Font LABEL_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 16);
 
-    private final GpuTextures<BoardMarker.Kind> textures = new GpuTextures<>(true);
+    private final GpuTextures<BoardMarker.Kind> textures = new GpuTextures<>(true, true);
     private final Map<BoardMarker.Kind, GpuUnitModel> models = new EnumMap<>(BoardMarker.Kind.class);
     private final Map<BoardMarker, ModelInstance> locations = new LinkedHashMap<>();
     private final GpuTextures<String> labelTextures = new GpuTextures<>();
@@ -117,7 +117,8 @@ final class GpuMarkers implements Disposable {
             GpuUnitModel model = new GpuUnitModel(symbol(pixels, textures.region(kind)));
             tint(model.instance, kind.rgb());
             // Instance materials are copies. Future instances (including sensors) need the same default tint.
-            model.instance.model.materials.forEach(material -> material.set(ColorAttribute.createDiffuse(color(kind.rgb()))));
+            model.instance.model.materials.forEach(material -> material.set(
+                  ColorAttribute.createDiffuse(GpuLinearColors.authored(material, color(kind.rgb())))));
             models.put(kind, model);
         });
     }
@@ -138,9 +139,10 @@ final class GpuMarkers implements Disposable {
         builder.begin();
         var caps = builder.part("symbol", GL20.GL_TRIANGLES,
               VertexAttributes.Usage.Position | VertexAttributes.Usage.TextureCoordinates | VertexAttributes.Usage.Normal,
-              new Material(TextureAttribute.createDiffuse(region.getTexture()), IntAttribute.createCullFace(GL20.GL_NONE)));
+              new Material(TextureAttribute.createDiffuse(region.getTexture()), new GpuLinearColors(), IntAttribute.createCullFace(GL20.GL_NONE)));
         var sides = builder.part("edge", GL20.GL_TRIANGLES, VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal,
-              new Material(ColorAttribute.createDiffuse(GpuCutout.averageColor(pixels)), IntAttribute.createCullFace(GL20.GL_NONE)));
+              new Material(ColorAttribute.createDiffuse(GpuCutout.averageColor(pixels)), new GpuLinearColors(),
+                    IntAttribute.createCullFace(GL20.GL_NONE)));
         GpuCutout.extrude(pixels, region, Vector3.Zero, 1, 1, true, caps, sides);
         return builder.end();
     }
@@ -345,7 +347,7 @@ final class GpuMarkers implements Disposable {
 
     private static void tint(ModelInstance instance, int rgb) {
         Color color = color(rgb);
-        instance.materials.forEach(material -> material.set(ColorAttribute.createDiffuse(color)));
+        instance.materials.forEach(material -> material.set(ColorAttribute.createDiffuse(GpuLinearColors.authored(material, color))));
         instance.userData = color;
     }
 

@@ -20,6 +20,7 @@ import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.loaders.MapSettings;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -30,6 +31,39 @@ import org.junit.jupiter.api.io.TempDir;
 class BoardEditorSessionTest {
     @TempDir Path directory;
     private final Coords at = new Coords(1, 1);
+
+    @Test void junctionControlsSurviveRoadDesignChangesAndAreUndoableAndSaved() throws Exception {
+        var session = session();
+        send(session, Action.ADD_COMPONENT, "", "road");
+        assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(session.board().getHex(at).getAppearance(), "road"));
+        send(session, Action.TRAFFIC_CONTROL, "road", "signals");
+        send(session, Action.VARIANT, "road", "road/rounded");
+        send(session, Action.TERRAIN, "road", "4");
+        send(session, Action.VARIANT, "road", "road/material/gravel");
+        var road = session.board().getHex(at).getAppearance().get("road");
+        assertEquals(HexAppearance.TrafficControl.SIGNALS, road.trafficControl());
+        assertEquals("road/rounded", road.variant());
+        assertEquals("gravel", road.material());
+        send(session, Action.TRAFFIC_CONTROL, "road", "gantry");
+        var gantry = HexAppearance.withTrafficControl(road, HexAppearance.TrafficControl.GANTRY);
+        assertEquals(gantry, session.board().getHex(at).getAppearance().get("road"));
+        send(session, Action.UNDO, "", "");
+        assertEquals(road, session.board().getHex(at).getAppearance().get("road"));
+        send(session, Action.REDO, "", "");
+        send(session, Action.TRAFFIC_CONTROL, "road", "stops");
+        assertEquals(HexAppearance.TrafficControl.STOPS, HexAppearance.trafficControl(session.board().getHex(at).getAppearance(), "road"));
+        Path stopsFile = directory.resolve("road-stops.board2"); session.save(stopsFile);
+        assertEquals(HexAppearance.TrafficControl.STOPS, HexAppearance.trafficControl(BoardFile.read(stopsFile).getHex(at).getAppearance(), "road"));
+        send(session, Action.UNDO, "", "");
+        assertEquals(gantry, session.board().getHex(at).getAppearance().get("road"));
+        Path file = directory.resolve("road-controls.board2"); session.save(file);
+        assertEquals(gantry, BoardFile.read(file).getHex(at).getAppearance().get("road"));
+        send(session, Action.VARIANT, "road", "");
+        assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(session.board().getHex(at).getAppearance(), "road"),
+              "Resetting the road design keeps its independent junction controls");
+        send(session, Action.REMOVE_COMPONENT, "", "road");
+        assertFalse(session.board().getHex(at).getAppearance().containsKey("road"));
+    }
 
     @Test void boardSettingsRemainUnsavedAcrossHexUndoAndSaveTogether() throws Exception {
         var session = session();
@@ -294,7 +328,9 @@ class BoardEditorSessionTest {
 
     @Test void choosingAndConfiguringABrushDoesNotReadOrChangeTheInspectedHex() {
         var session = session();
-        send(session, Action.CHOOSE_BRUSH, "vegetation", "jungle-3");
+        send(session, Action.CHOOSE_BRUSH, "vegetation", "jungle-1");
+        send(session, Action.BRUSH_VALUE, "terrain:jungle", "3");
+        send(session, Action.BRUSH_VALUE, "terrain:foliage_elev", "3");
         assertEquals(BoardEditorSession.Tool.PAINT, session.snapshot().tool());
         assertFalse(session.dirty()); assertFalse(session.board().getHex(at).containsTerrain(Terrains.JUNGLE));
         send(session, Action.TOOL, "", "SELECT");
@@ -314,7 +350,7 @@ class BoardEditorSessionTest {
         assertEquals(75, session.snapshot().objects().getFirst().rotation());
         send(session, Action.OBJECT_VALUE, "scale", ".5");
         assertEquals(1.5, session.snapshot().activeBrush().object().scale(), "An inspector edit cannot silently change the brush");
-        send(session, Action.CHOOSE_BRUSH, "road", "3");
+        send(session, Action.CHOOSE_BRUSH, "road", "1");
         assertNull(session.snapshot().activeBrush().object(), "Terrain replaces the object brush instead of leaving a second active brush");
     }
 
@@ -520,7 +556,8 @@ class BoardEditorSessionTest {
     @Test void roadChoicesAlwaysCarryTheirDefinedFinishAndRemovingAnotherObjectKeepsSelection() {
         var session = session();
         for (var choice : BoardEditorBlueprint.get().component("road").fields().getFirst().choices()) {
-            send(session, Action.CHOOSE_BRUSH, "road", Integer.toString(choice.value()));
+            send(session, Action.CHOOSE_BRUSH, "road", "1");
+            send(session, Action.BRUSH_VALUE, "terrain:road", Integer.toString(choice.value()));
             session.pointer(at, 0, 0, false); session.finishStroke();
             assertEquals(choice.material(), session.board().getHex(at).getAppearance().get("road").material());
             assertEquals(choice.value(), session.board().getHex(at).terrainLevel(Terrains.ROAD));
@@ -530,7 +567,8 @@ class BoardEditorSessionTest {
         send(session, Action.VARIANT, "road", "road/material/dirt");
         assertEquals(3, session.board().getHex(at).terrainLevel(Terrains.ROAD));
         send(session, Action.ASSET, "", "birch-young"); session.pointer(at, 0, 0, false); session.finishStroke();
-        String first = session.snapshot().object(); session.pointer(at, 0, 0, false); session.finishStroke();
+        String first = session.snapshot().object();
+        send(session, Action.BRUSH_VALUE, "object:rotation", "90"); session.pointer(at, 0, 0, false); session.finishStroke();
         String second = session.snapshot().object(); send(session, Action.REMOVE_OBJECT, first, "");
         assertEquals(second, session.snapshot().object()); assertEquals(1, session.snapshot().objects().size());
     }
@@ -1223,7 +1261,8 @@ class BoardEditorSessionTest {
         assertEquals(Messages.getString("BoardEditor.tagAutomatic"), session.snapshot().message());
         assertEquals(List.of("Hills of Home"), session.snapshot().tags(), "Automatic tags come only from the tagger's rule");
         session.board().addTag("Stale (Auto)");
-        send(session, Action.CHOOSE_BRUSH, "vegetation", "woods-2");
+        send(session, Action.CHOOSE_BRUSH, "vegetation", "woods-1");
+        send(session, Action.BRUSH_VALUE, "terrain:woods", "2");
         send(session, Action.BRUSH, "", "4");
         session.pointer(new Coords(8, 8), 0, 0, false); session.finishStroke();
         send(session, Action.BOARD, "autotags", "");
@@ -1735,6 +1774,25 @@ class BoardEditorSessionTest {
         assertEquals(List.of(house), session.brush(house), "Switched off, the building's hex is in the footprint again");
     }
 
+    /** Fill area: a Paint click covers the clicked hex's connected area of the same level and terrain, as one undo step. */
+    @Test void fillPaintsTheConnectedAreaOnly() {
+        var session = session();
+        Coords centre = new Coords(5, 5), water = centre.translated(2), outside = centre.translated(0).translated(0);
+        session.board().setHex(centre, new Hex(2));
+        for (int direction = 0; direction < 6; direction++) { session.board().setHex(centre.translated(direction), new Hex(2)); }
+        session.board().setHex(water, new Hex(2, "water:1", ""));
+        send(session, Action.CHOOSE_BRUSH, "vegetation", "woods-1");
+        send(session, Action.BRUSH_VALUE, "fill", "true");
+        assertEquals(6, session.brush(centre).size(), "The level 2 hexes without the water");
+        session.pointer(centre, 0, 0, false); session.finishStroke();
+        assertTrue(session.board().getHex(centre.translated(5)).containsTerrain(Terrains.WOODS));
+        assertFalse(session.board().getHex(water).containsTerrain(Terrains.WOODS));
+        assertFalse(session.board().getHex(outside).containsTerrain(Terrains.WOODS), "Level 0 is another area");
+        send(session, Action.UNDO, "", "");
+        assertFalse(session.board().getHex(centre).containsTerrain(Terrains.WOODS));
+        assertFalse(session.board().getHex(centre.translated(5)).containsTerrain(Terrains.WOODS));
+    }
+
     /**
      * Copy also puts the hex as text on the clipboard, so another window's session pastes it with its level, theme,
      * terrain and objects (as new objects); the old editor's text format pastes too, and text that is no hex leaves
@@ -1783,6 +1841,116 @@ class BoardEditorSessionTest {
         fresh.textClipboard(clipboard);
         send(fresh, Action.PASTE, "", "");
         assertEquals("Copy a hex first", fresh.snapshot().message());
+    }
+
+    /**
+     * A container yard card paints one look and one rotation on every hex of a stroke, its cover included (Scattered:
+     * foliage); the Brush's and the Edit panel's Rotation each turn it in one undo step; switching between yards keeps the
+     * rotation, another look drops it, and removing the vegetation drops the look.
+     */
+    @Test void aContainerYardStrokePaintsOneLookAndRotationAndItsRotationRowsTurnIt() {
+        var session = session();
+        String rows = "woods/container-yard/rows", crane = "woods/container-yard/quay-crane";
+        send(session, Action.CHOOSE_BRUSH, "vegetation", rows);
+        send(session, Action.BRUSH_VALUE, "rotation:vegetation", "60");
+        send(session, Action.BRUSH, "", "2");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        var turned = new megamek.common.board.HexAppearance(rows, null, null, null, BoardDecoration.Colours.NONE, 60);
+        List<Coords> painted = session.brush(at);
+        assertEquals(7, painted.size());
+        for (Coords hex : painted) {
+            assertEquals(turned, session.board().getHex(hex).getAppearance().get("vegetation"), hex.toString());
+            assertEquals(1, session.board().getHex(hex).terrainLevel(Terrains.WOODS));
+            assertEquals(2, session.board().getHex(hex).terrainLevel(Terrains.FOLIAGE_ELEV));
+        }
+        send(session, Action.UNDO, "", "");
+        assertTrue(painted.stream().allMatch(hex -> session.board().getHex(hex).getAppearance().isEmpty()), "One undo step");
+        send(session, Action.REDO, "", "");
+        // The Edit panel's Rotation (typed values snap to the 30-degree steps), one undo step.
+        send(session, Action.TOOL, "", "SELECT"); session.pointer(at, 0, 0, false); session.finishStroke();
+        send(session, Action.DESIGN_ROTATION, "vegetation", "100");
+        assertEquals(90, session.board().getHex(at).getAppearance().get("vegetation").rotation());
+        send(session, Action.UNDO, "", "");
+        assertEquals(60, session.board().getHex(at).getAppearance().get("vegetation").rotation());
+        // Another yard keeps the rotation; another look has none.
+        send(session, Action.VARIANT, "vegetation", crane);
+        assertEquals(new megamek.common.board.HexAppearance(crane, null, null, null, BoardDecoration.Colours.NONE, 60),
+              session.board().getHex(at).getAppearance().get("vegetation"));
+        send(session, Action.VARIANT, "vegetation", "woods/orchard");
+        assertNull(session.board().getHex(at).getAppearance().get("vegetation").rotation());
+        send(session, Action.DESIGN_ROTATION, "vegetation", "30");
+        assertEquals(Messages.getString("BoardEditor.skinFirst"), session.snapshot().message());
+        send(session, Action.VARIANT, "vegetation", crane);
+        send(session, Action.REMOVE_COMPONENT, "", "vegetation");
+        assertTrue(session.board().getHex(at).getAppearance().isEmpty(), "The look leaves with its woods");
+        // The Scattered card paints the foliage cover its look shows.
+        send(session, Action.CHOOSE_BRUSH, "vegetation", "woods/container-yard/scattered");
+        send(session, Action.BRUSH, "", "1");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        assertEquals(1, session.board().getHex(at).terrainLevel(Terrains.FOLIAGE_ELEV));
+        assertEquals("woods/container-yard/scattered", session.board().getHex(at).getAppearance().get("vegetation").variant());
+    }
+
+    /**
+     * Pavement Edges: the Brush's Edges paints Fitted on every hex of a stroke and Auto clears it; the Edit panel's row
+     * sets Hex in one undo step and is refused on a hex without pavement; a saved .board2 keeps Hex.
+     */
+    @Test void pavementEdgesArePaintedSetInTheEditRowAndSaved() throws Exception {
+        var session = session();
+        send(session, Action.EDGES, "", "fitted");
+        assertEquals(Messages.getString("BoardEditor.pavementFirst"), session.snapshot().message());
+        assertTrue(session.board().getHex(at).getAppearance().isEmpty());
+        send(session, Action.CHOOSE_BRUSH, "pavement", "1");
+        send(session, Action.BRUSH_VALUE, "edges", "fitted");
+        send(session, Action.BRUSH, "", "2");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        List<Coords> painted = session.brush(at);
+        assertEquals(7, painted.size());
+        for (Coords hex : painted) {
+            assertEquals(megamek.common.board.HexAppearance.EDGES_FITTED, session.board().getHex(hex).getAppearance().get("pavement"));
+            assertTrue(session.board().getHex(hex).containsTerrain(Terrains.PAVEMENT));
+        }
+        send(session, Action.BRUSH_VALUE, "edges", "auto");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        assertTrue(painted.stream().allMatch(hex -> session.board().getHex(hex).getAppearance().isEmpty()), "Auto is stored as none");
+        send(session, Action.TOOL, "", "SELECT"); session.pointer(at, 0, 0, false); session.finishStroke();
+        send(session, Action.EDGES, "", "hex");
+        assertEquals(megamek.common.board.HexAppearance.Edges.HEX,
+              megamek.common.board.HexAppearance.edges(session.board().getHex(at).getAppearance()));
+        send(session, Action.UNDO, "", "");
+        assertTrue(session.board().getHex(at).getAppearance().isEmpty(), "One undo step");
+        send(session, Action.REDO, "", "");
+        Path file = directory.resolve("edges.board2"); session.save(file);
+        assertEquals(megamek.common.board.HexAppearance.EDGES_HEX, BoardFile.read(file).getHex(at).getAppearance().get("pavement"));
+    }
+
+    /**
+     * Scorched ground: a member of its card paints, the Brush's Severity switches the level, Erase takes it off, the Edit
+     * row sets it in one undo step and a saved .board2 keeps it; it is a look, so the ground stays CLEAR.
+     */
+    @Test void scorchedGroundIsPaintedErasedSetInEditAndSaved() throws Exception {
+        var session = session();
+        send(session, Action.CHOOSE_BRUSH, "scorch", "scorch/charred");
+        send(session, Action.BRUSH_VALUE, "variant:scorch", "scorch/ash");
+        send(session, Action.BRUSH, "", "2");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        List<Coords> painted = session.brush(at);
+        assertEquals(7, painted.size());
+        for (Coords hex : painted) {
+            assertEquals(.62f, megamek.common.board.HexAppearance.scorch(session.board().getHex(hex).getAppearance()));
+            assertTrue(session.board().getHex(hex).isClear());
+        }
+        send(session, Action.TOOL, "", "ERASE");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        assertTrue(painted.stream().allMatch(hex -> session.board().getHex(hex).getAppearance().isEmpty()));
+        send(session, Action.TOOL, "", "SELECT"); session.pointer(at, 0, 0, false); session.finishStroke();
+        send(session, Action.VARIANT, "scorch", "scorch/glass");
+        assertEquals(1f, megamek.common.board.HexAppearance.scorch(session.board().getHex(at).getAppearance()));
+        send(session, Action.UNDO, "", "");
+        assertTrue(session.board().getHex(at).getAppearance().isEmpty(), "One undo step");
+        send(session, Action.REDO, "", "");
+        Path file = directory.resolve("scorch.board2"); session.save(file);
+        assertEquals("scorch/glass", BoardFile.read(file).getHex(at).getAppearance().get("scorch").variant());
     }
 
     private static String text(java.awt.datatransfer.Clipboard clipboard) throws Exception {

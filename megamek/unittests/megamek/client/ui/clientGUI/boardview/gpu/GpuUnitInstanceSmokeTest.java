@@ -58,7 +58,8 @@ class GpuUnitInstanceSmokeTest {
                                 for (boolean top : List.of(false, true)) {
                                     renderer.topView = top;
                                     renderer.frame(List.of(merged), new Vector3(), null, "depth-equivalence", id);
-                                    renderer.buffer.begin();
+                                    // Packed depth is numerical RGBA8 data; do not pass it through HDR/display conversion.
+                                    renderer.output.pixels().begin();
                                     Gdx.gl.glDepthMask(true);
                                     Gdx.gl.glClearColor(1, 1, 1, 1);
                                     Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
@@ -80,7 +81,7 @@ class GpuUnitInstanceSmokeTest {
                                     var after = Pixmap.createFromFrameBuffer(0, 0, 640, 480);
                                     try { compareDepth(before, after, file + " damage " + damaged + " twist " + twist + " top " + top); }
                                     finally { before.dispose(); after.dispose(); }
-                                    renderer.buffer.end();
+                                    renderer.output.pixels().end();
                                 }
                             }
                         }

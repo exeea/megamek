@@ -33,8 +33,8 @@ uniform vec4 u_roadProfile;
 #ifdef roadCoatFlag
 // Every coat of a chunk in one draw. Road maps: colour, normal and surface per material; sculpt maps: colour and
 // normal per material. Each coat's own choice, finish and wet response come from its vertices (GpuRoads#coat).
-uniform sampler2DArray u_roadMaps;
-uniform sampler2DArray u_sculptMaps;
+uniform sampler2DArray u_roadColors, u_roadData;
+uniform sampler2DArray u_sculptColors, u_sculptData;
 flat in vec4 v_roadCoat;
 #endif
 
@@ -74,8 +74,8 @@ RoadMaps roadMaps() {
 
 vec4 roadAlbedo(RoadMaps m, vec2 uv) {
 #ifdef roadCoatFlag
-    return m.mapped ? texture(u_roadMaps, vec3(uv, float(m.maps * 3)))
-          : texture(u_sculptMaps, vec3(uv, float((m.maps - 3) * 2)));
+    return m.mapped ? texture(u_roadColors, vec3(uv, float(m.maps)))
+          : texture(u_sculptColors, vec3(uv, float(m.maps - 3)));
 #else
     return texture(u_diffuseTexture, uv);
 #endif
@@ -84,7 +84,7 @@ vec4 roadAlbedo(RoadMaps m, vec2 uv) {
 // Only a surface with maps has one; see RoadMaps.mapped.
 vec4 roadSurface(RoadMaps m, vec2 uv) {
 #ifdef roadCoatFlag
-    return texture(u_roadMaps, vec3(uv, float(m.maps * 3 + 2)));
+    return texture(u_roadData, vec3(uv, float(m.maps * 2 + 1)));
 #elif defined(roadMapsFlag)
     return texture(u_roadSurface, uv);
 #else
@@ -94,8 +94,8 @@ vec4 roadSurface(RoadMaps m, vec2 uv) {
 
 vec3 roadNormal(RoadMaps m, vec2 uv, float strength) {
 #ifdef roadCoatFlag
-    return mappedNormal(m.mapped ? texture(u_roadMaps, vec3(uv, float(m.maps * 3 + 1)))
-          : texture(u_sculptMaps, vec3(uv, float((m.maps - 3) * 2 + 1))), strength);
+    return mappedNormal(m.mapped ? texture(u_roadData, vec3(uv, float(m.maps * 2)))
+          : texture(u_sculptData, vec3(uv, float(m.maps - 3))), strength);
 #else
     return groundNormal(uv, strength);
 #endif
@@ -110,21 +110,34 @@ vec4 roadProfile() {
 }
 
 void main() {
-    RoadMaps m = roadMaps();
-    vec4 roadColor = v_color;
-#ifdef roadMaskFlag
-    vec2 maskUV = v_roadMaskUV;
-    if (any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0)))) { discard; }
-    roadColor = texture(u_roadMask, v_roadMaskRegion.xy + maskUV * v_roadMaskRegion.zw);
-    if (roadColor.a < .002) { discard; }
-#endif
+    vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
+    // Before the mask's discard, like the face above.
+    vec3 face = normalize(v_normal);
+    surfaceVariance = normalVariance(dFdx(face), dFdy(face));
     vec2 uv = v_diffuseUV;
 #ifdef bridgeDeckFlag
     // A rotated bridge shares the adjacent road's scale, orientation and texture phase.
     uv = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_worldMetre;
 #endif
+#ifdef roadCoatFlag
+    mat2 roadGradient = mat2(dFdx(uv), dFdy(uv));
+#endif
+    RoadMaps m = roadMaps();
+    vec4 roadColor = v_color;
+#ifdef roadMaskFlag
+    vec2 maskUV = v_roadMaskUV;
+    roadColor = texture(u_roadMask, v_roadMaskRegion.xy + maskUV * v_roadMaskRegion.zw);
+    // Keep neighboring lanes through material filtering, edge fwidth and shadow receiver derivatives.
+    bool roadHidden = any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0)))
+          || roadColor.a < .002;
+#endif
     vec3 tint = roadColor.rgb;
     if (m.mapped && (m.transition > .5 || m.transition < -1.5)) { tint = vec3(1.0); }
+#ifdef roadMaskFlag
+    // Ordinary masks repeat one authored tint at every texel, including transparent borders, so filtering cannot
+    // change it. Their shared atlas also holds join coordinates and wheel directions, which must remain data.
+    else { tint = toLinear(tint); }
+#endif
     vec3 albedo = roadAlbedo(m, uv).rgb * tint;
     vec4 properties = m.mapped ? roadSurface(m, uv) : vec4(.5);
     float roadCoverage = 1.0;
@@ -182,14 +195,14 @@ void main() {
     // Only exposed, upward-facing ground receives liquid water. No accumulation or terrain-rule changes.
     float wet = u_wetness * step(0.0, m.response) * smoothstep(0.2, 0.8, v_normal.z);
     float response = max(0.0, m.response);
-    albedo *= 1.0 - wet * mix(0.175, 0.10, response); // This is the darkening of the terrain (the mix(min, max, ...))
+    float absorption = groundAbsorption(wet, response);
     float soilBasins = 0.0;
     if (m.soil) {
         // Compact soil holds patchy mud and shallow water; the basins stay put as rainfall changes.
         soilBasins = texture(u_rainNoise, uv / 22.0).r * .7
               + texture(u_rainNoise, uv / 7.0 + .37).g * .3;
         float mud = wet * smoothstep(.24, .68, soilBasins);
-        albedo *= 1.0 - .30 * mud;
+        absorption = max(absorption, .7 * mud);
         properties.g = mix(properties.g, .55, mud);
     }
     float puddle = groundPuddle(wet, response);
@@ -201,9 +214,14 @@ void main() {
             puddle = max(puddle, basinWater * wet * smoothstep(.98, .999, v_normal.z) * u_rainDetail);
         }
     }
-    groundFilm(albedo, normal, puddle);
-    albedo = m.mapped ? groundLighting(albedo, normal, wet, response, puddle, properties.g, mix(1.0, properties.b, .7))
-          : groundLighting(albedo, normal, wet, response, puddle, -1.0, 1.0);
+    albedo = wetAlbedo(albedo, absorption);
+    groundFilm(normal, puddle);
+    float roughness = m.mapped ? properties.g : -1.0;
+#ifdef roadCoatFlag
+    if (!m.mapped) roughness = authoredRoughness(float((m.maps - 3) * 2), uv, roadGradient, roughness);
+#endif
+    albedo = groundLighting(albedo, normal, geometric, wet, response, puddle, roughness,
+          m.mapped ? mix(1.0, properties.b, .7) : 1.0);
 #ifdef roadFlag
     // The road's outer strip carries coverage. World-anchored grain breaks up its dusty verge.
     float grain = m.mapped ? properties.r : roadAlbedo(m, uv * 2.3).r;
@@ -232,5 +250,8 @@ void main() {
     fragColor = vec4(albedo, alpha);
 #else
     fragColor = vec4(albedo, 1.0);
+#endif
+#ifdef roadMaskFlag
+    if (roadHidden) discard;
 #endif
 }

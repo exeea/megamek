@@ -9,7 +9,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -19,9 +18,6 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
-import megamek.common.Hex;
-import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -29,59 +25,6 @@ import org.junit.jupiter.api.Test;
 /** Legacy cliff-edge color patterns preserve the ground's existing normal atlas. */
 @Tag("on-demand")
 class GpuRimMaterialSmokeTest {
-    @Test
-    void rendersTwoAndThreeLevelCliffsWithTheShippedGroundArtwork() throws Exception {
-        Hex[] hexes = new Hex[7 * 3];
-        for (int y = 0; y < 3; y++) {
-            for (int x = 0; x < 7; x++) {
-                Hex hex = new Hex(y == 1 && x == 2 ? 2 : y == 1 && x == 4 ? 3 : 0);
-                hex.setTheme("grass");
-                hexes[y * 7 + x] = hex;
-            }
-        }
-        AtomicReference<Throwable> failure = new AtomicReference<>();
-        try (GpuBoardFixture fixture = GpuBoardFixture.create(new Board(7, 3, hexes))) {
-            SwingUtilities.invokeAndWait(fixture.source::refresh);
-            BoardScene scene = fixture.source.takeFrame().scene();
-            new Lwjgl3Application(new ApplicationAdapter() {
-                @Override
-                public void create() {
-                    GpuTerrain terrain = new GpuTerrain();
-                    try {
-                        terrain.update(scene);
-                        BoardCamera camera = new BoardCamera();
-                        camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                        camera.fit(scene);
-                        camera.camera.zoom *= 0.85f;
-                        camera.center(BoardGeometry.center(new Coords(3, 1), 1));
-                        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
-                        assertTrue(output.isDirectory() || output.mkdirs());
-                        for (boolean isometric : new boolean[] { false, true }) {
-                            camera.setIsometric(isometric);
-                            for (int direction = 0; direction < 2; direction++) {
-                                terrain.setAtmosphere(new BoardAtmosphere.Lighting(
-                                      new Vector3(direction == 0 ? -1 : 1, -0.4f, -0.7f).nor(),
-                                      new Color(0.75f, 0.71f, 0.65f, 1), new Color(0.3f, 0.32f, 0.36f, 1),
-                                      Color.BLACK, Color.BLACK, Color.BLACK, Color.WHITE, 1, 1, true));
-                                terrain.renderShadows(camera.camera, List.of());
-                                samples(terrain, camera, List.of());
-                                GpuBoardTestUi.capture(new File(output, "cliff-edges-" + (isometric ? "iso" : "top")
-                                      + "-light-" + direction + ".png"));
-                            }
-                        }
-                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-                    } catch (Throwable error) {
-                        failure.set(error);
-                    } finally {
-                        terrain.dispose();
-                        Gdx.app.exit();
-                    }
-                }
-            }, GpuBoardWindow.configuration(false));
-        }
-        if (failure.get() != null) { throw new AssertionError("Cliff-edge artwork rendering", failure.get()); }
-    }
-
     @Test
     void bothCliffPatternsKeepFlatNormalsUnderOpposingLightsWithoutExtraDraws() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
@@ -122,7 +65,7 @@ class GpuRimMaterialSmokeTest {
         }
         BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
         GpuTerrain terrain = new GpuTerrain();
-        try {
+        try (var outputFrame = new GpuSceneTestOutput()) {
             terrain.update(scene);
             BoardCamera camera = new BoardCamera();
             camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -158,11 +101,11 @@ class GpuRimMaterialSmokeTest {
                     profiler.enable();
                     try {
                         terrain.setNormalMaps(false);
-                        int[] flatLight = samples(terrain, camera, probes);
+                        int[] flatLight = samples(outputFrame, terrain, camera, probes);
                         int draws = profiler.getDrawCalls();
                         profiler.reset();
                         terrain.setNormalMaps(true);
-                        int[] light = samples(terrain, camera, probes);
+                        int[] light = samples(outputFrame, terrain, camera, probes);
                         assertEquals(draws, profiler.getDrawCalls(), "Rim color uses the existing terrain draws");
                         for (int index = 0; index < probes.size(); index++) {
                             assertEquals(flatLight[index] >>> 24, light[index] >>> 24, 2,
@@ -181,9 +124,10 @@ class GpuRimMaterialSmokeTest {
         }
     }
 
-    private static int[] samples(GpuTerrain terrain, BoardCamera camera, List<Vector3> probes) {
-        ScreenUtils.clear(0.03f, 0.045f, 0.06f, 1, true);
+    private static int[] samples(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera, List<Vector3> probes) {
+        outputFrame.begin(0.03f, 0.045f, 0.06f, 1);
         terrain.render(camera.camera, false);
+        outputFrame.display();
         Pixmap image = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {
             int[] result = new int[probes.size()];

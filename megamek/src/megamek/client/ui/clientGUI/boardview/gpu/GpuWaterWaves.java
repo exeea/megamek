@@ -126,8 +126,7 @@ final class GpuWaterWaves {
     private static float cross(Vector3 a, Vector3 b, Vector3 c) { return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); }
 
     static String vertex(String source) {
-        String waves = GpuShaderSource.read("water-waves.vert")
-              .replace("// water-wave-functions", GpuShaderSource.read("water-wave.glsl"));
+        String waves = GpuShaderSource.read("water-waves.vert");
         return source.replace("void main() {", waves + "\nvoid main() {")
               .replace("gl_Position = u_projViewTrans * pos;", "waterDisplace(pos);\ngl_Position = u_projViewTrans * pos;");
     }

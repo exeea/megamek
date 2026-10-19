@@ -159,8 +159,10 @@ final class GpuMapHud implements GpuBoardHud {
 
     @Override
     public void resize(int width, int height, float displayScale) {
-        // Keep the complete editing workspace usable when a large desktop UI scale meets a smaller window.
-        scale = editor == null ? displayScale : Math.min(displayScale, Math.min(width / 1280f, height / 800f));
+        // Keep the complete editing workspace usable when a large desktop UI scale meets a smaller window. The Tuning
+        // panel's UI scale, already a share of displayScale, is a share of that limit too, so each of its steps shows.
+        scale = editor == null ? displayScale
+              : Math.min(displayScale, Math.min(width / 1280f, height / 800f) * source.uiPreferences().scale());
         ((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / scale);
         stage.getViewport().update(width, height, true);
         metrics = GpuHud.Metrics.of(stage.getWidth(), stage.getHeight());
@@ -216,6 +218,8 @@ final class GpuMapHud implements GpuBoardHud {
         occupied.add(new com.badlogic.gdx.math.Rectangle(bounds.x, bounds.y, utilityRow.getWidth(), utilityRow.getHeight()));
         losPanel.update(new GpuHud.Inputs(frame, view, dialog, preferences, metrics, occupied));
     }
+
+    boolean prepare() { return editor == null || editor.prepare(scene); }
 
     boolean measuring() { return losPanel.pending(); }
 
@@ -350,10 +354,10 @@ final class GpuMapHud implements GpuBoardHud {
         // A tree that holds the keyboard focus (Layers, after a click on a row) takes its navigation keys.
         if (stage.getKeyboardFocus() instanceof megamek.client.ui.gdx.UiTree && stage.keyDown(key)) { return true; }
         if (key == Input.Keys.ESCAPE && editor != null && editor.escape()) { return true; }
-        // Bare tool keys win inside the editor only; a map preview keeps Z for its overview.
-        if (editor != null && modifiers == 0 && editor.toolKey(key)) { return true; }
+        // Bare tool keys win inside the editor only; B waits for a picker click without ending a stroke.
+        if (editor != null && modifiers == 0 && (key == Input.Keys.B || editor.toolKey(key))) { return true; }
         if (state.dialog == Dialog.NONE) {
-            return key == Input.Keys.ESCAPE && losPanel.cancel();
+            return key == Input.Keys.ESCAPE && (losPanel.cancel() || editor != null && editor.escapeAssets());
         }
         if (key == Input.Keys.ESCAPE) {
             state.dialog = Dialog.NONE;

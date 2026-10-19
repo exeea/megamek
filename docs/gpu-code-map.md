@@ -32,7 +32,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `BoardGeometry` | Defines board/world coordinate conversion, shared geometry queries and picking bounds. |
 | `BoardSurface` | Owns a hex's finished ground, ramps, banks and beds used by rendering and support queries. |
 | `BoardRelief` | Computes canonical shared corners, cliff profiles, transition bands, shores and decorative rock placement. |
-| `BoardConcrete` | Fits constructed slabs and their boundary joins to adjoining terrain. |
+| `BoardConcrete` | Caches the scene's fitted concrete outline (`common/board/ConcreteFit`, which the legacy conversion reads too), shared with adjoining terrain, and pins the hexes of placed objects it would cut. |
 | `BoardRampMesh` | Removes redundant ramp samples while retaining boundary vertices and bounded height error. |
 | `BoardRim` | Builds CPU cliff-rim shading masks, for the 3D tops and the Classic columns, during bounded terrain preparation. |
 
@@ -40,12 +40,14 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 
 | Code | What it does |
 | --- | --- |
-| `BoardRoad` | Computes road footprints, joins, material-transition controls and clearance; physical heights come from the supporting surface. Its carriageway (`carriageway`, `way`, `clearance`, read through `BoardScene.Tile.wayExits`: road and ground-rail exits) is also what shapes and clears the ground under a rail, so rails follow the ground and its ramps as roads do; paint stays road-only. |
+| `BoardRoad` | Shared ground/deck road and rail footprints, corridor A/B widths, shifted unpaved wear, crossing insets, joins and clearance. Physical heights come from the same supporting surface used for geometry and picking. |
 | `BoardRail` | The one builder of both route kinds (`common/board/RailRoute`, MAGLEV and RAIL): each hex's gentle pieces (straights and 60-degree arcs), stranded stubs and dead ends as `RailRoute.lines` composes them, along `RailRoute.course`; the maglev beam at its Hermite levels, the rail's generated ballast, sleepers and rails draped on the faces road paint lies on or on the drawn deck (`BoardBridge.drawnTop`), only the rails on a drawn road; `railTop` stands rail rolling stock and buffer stops on that drawn rail top (model px, added in `GpuTerrain.decorationHeight`). `joint` gives the beam's underside on a shared edge for maglev piers; `flat` draws the palette card and the junction card's layouts. |
 | `GpuRoads` | Turns footprints into material masks/atlases carried by existing terrain or bridge triangles. |
-| `BoardBridge` | Follows span connectivity; draws each span's stored type (built or natural; an untyped span draws built, the conversion types every loaded bridge) and a built deck's surface from its approach roads. |
-| `BoardBridgeFooting` | Extends manufactured slab/rails until their bank ends have actual terrain support; the one pier implementation (room rule, joint frame, footing sample, liquid sink, stretched shaft, LoD), parameterised by its kit and the underside it carries: deck piers under the joints of a built span whose Pillars toggle is on (`bridges/bridge-pier.glb`), slim piers under the joints of a maglev route whose Pillars are on (`bridges/maglev-pier.glb`, up to the beam's underside from `BoardRail.joint`). |
-| `BoardBridgeSlope` | Fits authored slabs and rails to connected decks one level apart; shares facets with paint and picking. |
+| `BoardBridge` | Reads stored built, natural or implicit deck types and the hex's own deck ways. Legacy conversion infers old art once; native decks are read as authored. An implicit maglev-only deck uses the beam as its support/picking surface. |
+| `BoardBridgeFooting` | Shared bridge bank support and joint-pier placement, including corridor width. Bridge appearance owns Pillars; a maglev-only implicit deck uses the slim maglev kit and beam underside, ordinary built decks use the bridge pier kit. |
+| `BoardBridgeMesh` | Generates manufactured slabs and kerbs from the live road and on-deck rail footprint during chunk preparation. |
+| `BoardBridgeTruss` | Generates continuous steel chords, support panels and joined or terminal ends along the manufactured carriageway boundary. |
+| `BoardBridgeSlope` | Grades generated slabs and rails to connected decks one level apart; shares complete flat and sloped shapes with drawing, paint and picking. |
 | `BoardNaturalBridge` | Builds hollow rock spans, bank contacts and underpass geometry. |
 | `BoardTunnel` | Detects cosmetic portals at eligible cliff-facing road/deck exits and supplies their placement. |
 | `BoardRocks`, `BoardShape` | Load reusable rock/scatter CPU mesh data; shape loading is separate from placement policy. |
@@ -201,7 +203,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `boardview/BoardArtwork` | Paints terrain artwork from the 3D tileset's resolved layers (`TilesetScenery`) and maps selected tileset art to native assets; also serves printable board output. |
 | `common/board/BoardSceneryLayouts` | The one legacy conversion (`convert`, image-free, run where a board is loaded: `BoardFile.loadSheet`, old saves, previews, the editor), the post-combine seam pass (`joinSheets`), the one statement of what is taken (`takenTokens`: objects, a design or nothing, for every legacy art token), the taken-token strip (`withoutTakenTokens`) and the editor's stamps. |
 | `common/board/TilesetMatcher`, `TilesetScenery` | Text-only tileset matching shared by the 2D tileset and the 3D artwork; the one "taken" predicate (`TilesetScenery.Layer.taken`); designed layers in tileset order (`appearanceLayers`). |
-| `common/board/RailRoute` | The one route model of maglev and rail markers: kinds, sides (`connections`), the gentle pieces and stored `tracks` of a hex, stranded stubs and buffer stops, joins (several markers per hex own disjoint sides), the connected run (`run`, the Pillars span), the composition of a hex's centre lines (`lines`, shared by the builder and the riders) and the course in plan, the deck rule (`alongDeck`: a rail rides a deck only along it) and the riding of rolling stock (`snap`, `follow`, which also names the marker and hex reached, `ride`). |
+| `common/board/RailRoute` | Terrain-backed ground/deck rail and maglev, the shared writer, gentle pieces, junction layouts and buffer stops. Layer-aware joins and corridor courses serve both rendering and editor snapping/riders; road and rail logic never reads stored route objects. |
 | `tileset/HexTileset` | The 2D tileset's images; the game's (with a game) matches a hex's designs as the tokens they stand for (`BoardEditorBlueprint.artwork`), so the 2D board of a `.board2` draws building art, transitions, kerbs, orchards and rough. |
 | `common/board/BridgeSpan` | The span unit of bridges and the one bridge-type decode the conversion stores. |
 | `boardview/BoardTactical`, `BoardGlyphContext`, `UnitAnnotations` | Carry client-derived tactical shapes and annotation content into renderer-specific presentation. |

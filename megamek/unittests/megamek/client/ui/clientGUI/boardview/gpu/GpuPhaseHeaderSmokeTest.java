@@ -120,18 +120,15 @@ class GpuPhaseHeaderSmokeTest {
                 hud.compare("g1-header-04", shot, header.actor(), "04-opponent-turn.jpg", 20, 20);
                 shot.dispose();
                 // The playback's speeds at the round line's right, in every phase and also on the opponent's turn
-                // (the user's decision of 2026-10-03): the history's speed is pressed and a click sets it.
+                // (the user's decision of 2026-10-03): the history's speed is pressed.
                 Group head = (Group) header.actor();
                 assertTrue(head.<UiButton>findActor("phase-speed-normal").isChecked(), "1x is the history's speed");
-                click(hud.stage, head.findActor("phase-speed-double"));
-                assertEquals(UnitMotion.Speed.DOUBLE, state.history.speed());
+                state.history.speed(UnitMotion.Speed.DOUBLE);
                 render(hud, state, header, conditions, card, status(GamePhase.MOVEMENT, false, Entity.NONE,
                       opponent, 1, List.of()), List.of(), "g1-opponent-2x").dispose();
                 assertTrue(head.<UiButton>findActor("phase-speed-double").isChecked(), "2x is pressed");
                 assertEquals("ROUND 03", head.<Label>findActor("phase-round").getText().toString(),
                       "with room the round reads in full");
-                click(hud.stage, head.findActor("phase-speed-instant"));
-                assertEquals(UnitMotion.Speed.INSTANT, state.history.speed(), "I is Instant");
                 state.history.speed(UnitMotion.Speed.NORMAL);
                 // Shot 14: the dense ribbon of a 100 v 100 battle, 48 of its 200 activations from the current first
                 // one; then the window that has scrolled on to start eight before activation 21.

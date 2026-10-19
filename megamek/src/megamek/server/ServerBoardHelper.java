@@ -125,10 +125,8 @@ public class ServerBoardHelper {
         mapSettings.replaceBoardWithRandom(MapSettings.BOARD_SURPRISE);
         Board[] sheetBoards = new Board[mapSettings.getMapWidth() * mapSettings.getMapHeight()];
 
-        var boardsIterator = mapSettings.getBoardsSelectedVector().iterator();
-        int i = 0;
-        while (boardsIterator.hasNext()) {
-            String name = boardsIterator.next();
+        for (int i = 0; i < sheetBoards.length; i++) {
+            String name = mapSettings.getBoardsSelectedVector().get(i);
 
             if (name == null || name.isEmpty()) {
                 continue;
@@ -158,7 +156,7 @@ public class ServerBoardHelper {
                 File file = new MegaMekFile(Configuration.boardsDir(), BoardFile.fileName(name)).getFile();
                 sheetBoards[i] = BoardFile.loadSheet(file, flipBoard, !onlyFixedBoards);
             }
-            i++;
+            mapSettings.applyBoardOverrides(sheetBoards[i], i);
         }
 
         Board finalBoard;

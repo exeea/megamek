@@ -60,7 +60,7 @@ class GpuShaderCoreSmokeTest {
 
     private void checkPrograms() throws Exception {
         String vertexPrefix = ShaderProgram.prependVertexCode, fragmentPrefix = ShaderProgram.prependFragmentCode;
-        for (String fragment : List.of("particles", "beams", "projectiles", "water-splash")) {
+        for (String fragment : List.of("particles", "beams", "projectiles", "water-splash", "geyser-spray", "fungus-spores")) {
             compile("effects", fragment);
         }
         for (String pair : List.of("explosion", "missile", "terrain-effects", "hex-mask", "ecm-field")) {
@@ -102,7 +102,9 @@ class GpuShaderCoreSmokeTest {
             for (Path path : vertices) {
                 String vertex = Files.readString(path);
                 String fragment = Files.readString(path.resolveSibling(path.getFileName().toString().replace(".vert", ".frag")));
-                assertFalse(legacy.matcher(vertex + fragment).find(), path.toString());
+                // GLSL comments may describe an attribute without using the removed language keyword.
+                String code = (vertex + "\n" + fragment).replaceAll("(?s)/\\*.*?\\*/|//[^\\r\\n]*", "");
+                assertFalse(legacy.matcher(code).find(), path.toString());
                 var program = new ShaderProgram(vertex, fragment);
                 try { assertTrue(program.isCompiled(), path + ": " + program.getLog()); }
                 finally { program.dispose(); }

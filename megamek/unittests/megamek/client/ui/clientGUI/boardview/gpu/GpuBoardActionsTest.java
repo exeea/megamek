@@ -20,29 +20,33 @@ import java.util.List;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
-import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.Player;
+import megamek.common.board.Board;
+import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.GameTurn;
+import megamek.common.options.OptionsConstants;
 import megamek.common.units.BipedMek;
 import megamek.common.units.Entity;
 import megamek.common.units.Targetable;
 import org.junit.jupiter.api.Test;
 
 class GpuBoardActionsTest {
-    private record Controls(GpuBoardActions actions, FiringDisplay phase, UnitDisplayState weapons, Entity target) { }
+    private record Controls(GpuBoardActions actions, FiringDisplay phase, UnitDisplayState weapons,
+          Entity target, ClientGUI gui) { }
 
     @Test
     void presentationTextDecodesHtmlEntitiesWithoutRemovingLiteralComparisons() {
@@ -54,7 +58,7 @@ class GpuBoardActionsTest {
     }
 
     @Test
-    void globalBoardSwitchSurvivesPhaseChangesAndStillChecksLiveMenuAvailability() throws Exception {
+    void globalMenuItemSurvivesPhaseChangesAndStillChecksLiveMenuAvailability() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             AtomicInteger clicks = new AtomicInteger();
             AtomicReference<CommonMenuBar> menus = new AtomicReference<>();
@@ -62,7 +66,6 @@ class GpuBoardActionsTest {
             SwingUtilities.invokeAndWait(() -> {
                 menus.set(CommonMenuBar.getMenuBarForGame());
                 menus.get().setPhase(GamePhase.MOVEMENT);
-                menus.get().setBoardView3D(true);
                 menus.get().addActionListener(event -> clicks.incrementAndGet());
                 ClientGUI gui = mock(ClientGUI.class);
                 when(gui.getMenuBar()).thenReturn(menus.get());
@@ -73,12 +76,13 @@ class GpuBoardActionsTest {
                 menus.get().setPhase(GamePhase.MOVEMENT_REPORT);
             });
             try {
-                find(commands.get(), Messages.getString("CommonMenuBar.viewLegacy2D")).action().run();
+                // Player Settings is available during a game, not in the lobby.
+                find(commands.get(), Messages.getString("CommonMenuBar.viewPlayerSettings")).action().run();
                 SwingUtilities.invokeAndWait(() -> { });
                 assertEquals(1, clicks.get(),
-                      "Returning to Legacy 2D is a global action, independent of the old phase");
+                      "A menu bar item is a global action, independent of the old phase");
                 SwingUtilities.invokeAndWait(() -> menus.get().setPhase(GamePhase.LOUNGE));
-                find(commands.get(), Messages.getString("CommonMenuBar.viewLegacy2D")).action().run();
+                find(commands.get(), Messages.getString("CommonMenuBar.viewPlayerSettings")).action().run();
                 SwingUtilities.invokeAndWait(() -> { });
                 assertEquals(1, clicks.get(), "An unavailable global menu item must not execute a stale callback");
             } finally {
@@ -113,111 +117,6 @@ class GpuBoardActionsTest {
         }
     }
 
-    /**
-     * The View menu's 3D Graphics submenu, as the GPU Menu panel captures it: its two radio items show the preference,
-     * a choice sets it, and a change made elsewhere (Client Settings, a preview's menu) moves the selection too.
-     */
-    @Test
-    void theGraphicsChoiceIsARadioGroupOverTheSharedPreference() throws Exception {
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        BoardGraphics saved = preferences.getBoardGraphics();
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            AtomicReference<CommonMenuBar> menus = new AtomicReference<>();
-            AtomicReference<GpuBoardActions> actions = new AtomicReference<>();
-            SwingUtilities.invokeAndWait(() -> {
-                preferences.setBoardGraphics(BoardGraphics.ENHANCED);
-                menus.set(CommonMenuBar.getMenuBarForGame());
-                ClientGUI gui = mock(ClientGUI.class);
-                when(gui.getMenuBar()).thenReturn(menus.get());
-                BoardClientState view = spy(fixture.view);
-                doReturn(gui).when(view).getClientgui();
-                actions.set(new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { }));
-            });
-            try {
-                assertEquals(List.of(false, true), graphicsSelection(actions.get()));
-                BoardScene.Command classic = GpuBoardActions.menuItem(capture(actions.get()),
-                      ClientGUI.VIEW_GRAPHICS_CLASSIC);
-                assertEquals(Messages.getString("CommonMenuBar.viewGraphicsClassic"), classic.label());
-                classic.action().run();
-                SwingUtilities.invokeAndWait(() -> { });
-                assertEquals(BoardGraphics.CLASSIC, preferences.getBoardGraphics());
-                assertEquals(List.of(true, false), graphicsSelection(actions.get()));
-                SwingUtilities.invokeAndWait(() -> preferences.setBoardGraphics(BoardGraphics.ENHANCED));
-                assertEquals(List.of(false, true), graphicsSelection(actions.get()));
-            } finally {
-                SwingUtilities.invokeAndWait(() -> {
-                    menus.get().die();
-                    preferences.setBoardGraphics(saved);
-                });
-            }
-        }
-    }
-
-    /**
-     * View > Hex Types, right after Hex Coords in the game's menu as the GPU Menu panel captures it (which the Overlays
-     * panel's Type row runs): the item shows the one client setting, running it switches the setting, and a change
-     * made elsewhere moves the selection too.
-     */
-    @Test
-    void theHexTypesItemFollowsHexCoordsAndSwitchesTheOneSetting() throws Exception {
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        boolean saved = preferences.getHexTypesEnabled();
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            AtomicReference<CommonMenuBar> menus = new AtomicReference<>();
-            AtomicReference<GpuBoardActions> actions = new AtomicReference<>();
-            SwingUtilities.invokeAndWait(() -> {
-                if (preferences.getHexTypesEnabled()) { preferences.toggleHexTypes(); }
-                menus.set(CommonMenuBar.getMenuBarForGame());
-                menus.get().setPhase(GamePhase.MOVEMENT);
-                ClientGUI gui = mock(ClientGUI.class);
-                when(gui.getMenuBar()).thenReturn(menus.get());
-                BoardClientState view = spy(fixture.view);
-                doReturn(gui).when(view).getClientgui();
-                actions.set(new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { }));
-            });
-            try {
-                List<BoardScene.Command> commands = capture(actions.get());
-                BoardScene.Command coords = GpuBoardActions.menuItem(commands, ClientGUI.VIEW_TOGGLE_HEX_COORDS);
-                BoardScene.Command types = GpuBoardActions.menuItem(commands, ClientGUI.VIEW_TOGGLE_HEX_TYPES);
-                assertEquals(Messages.getString("CommonMenuBar.viewToggleHexTypes"), types.label());
-                List<String> view = commands.stream().filter(menu -> menu.children().contains(coords)).findFirst()
-                      .orElseThrow().children().stream().map(BoardScene.Command::id).toList();
-                assertEquals(view.indexOf(coords.id()) + 1, view.indexOf(types.id()), "right after Hex Coords");
-                assertEquals(Boolean.FALSE, types.selected());
-                assertTrue(types.enabled());
-                types.action().run();
-                SwingUtilities.invokeAndWait(() -> { });
-                assertTrue(preferences.getHexTypesEnabled(), "the item switches the client setting");
-                assertEquals(Boolean.TRUE, hexTypes(actions.get()).selected());
-                SwingUtilities.invokeAndWait(preferences::toggleHexTypes);
-                assertEquals(Boolean.FALSE, hexTypes(actions.get()).selected(), "and follows it");
-            } finally {
-                SwingUtilities.invokeAndWait(() -> {
-                    menus.get().die();
-                    if (preferences.getHexTypesEnabled() != saved) { preferences.toggleHexTypes(); }
-                });
-            }
-        }
-    }
-
-    private static BoardScene.Command hexTypes(GpuBoardActions actions) throws Exception {
-        return GpuBoardActions.menuItem(capture(actions), ClientGUI.VIEW_TOGGLE_HEX_TYPES);
-    }
-
-    /** Whether the Classic and the Enhanced item are selected, in a fresh capture. */
-    private static List<Boolean> graphicsSelection(GpuBoardActions actions) throws Exception {
-        List<BoardScene.Command> commands = capture(actions);
-        return List.of(GpuBoardActions.menuItem(commands, ClientGUI.VIEW_GRAPHICS_CLASSIC).selected(),
-              GpuBoardActions.menuItem(commands, ClientGUI.VIEW_GRAPHICS_ENHANCED).selected());
-    }
-
-    /** The menu bar as the GPU Menu panel captures it, on the EDT. */
-    private static List<BoardScene.Command> capture(GpuBoardActions actions) throws Exception {
-        FutureTask<List<BoardScene.Command>> capture = new FutureTask<>(actions::globalCommands);
-        SwingUtilities.invokeAndWait(capture);
-        return capture.get();
-    }
-
     @Test
     void stackedTargetsStayDistinctAndAStaleChoiceCannotRevealAHiddenUnit() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -242,6 +141,247 @@ class GpuBoardActionsTest {
             SwingUtilities.invokeAndWait(() -> menu.set(controls.actions().contextCommands(controls.target().getPosition())));
             verify(controls.phase(), never()).target(any());
             assertEquals(1, flatten(menu.get()).stream().filter(command -> command.id().contains("E|")).count());
+        }
+    }
+
+    @Test
+    void explicitRosterUnitUsesItsBoardAndNeedsNoHexForViewing() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Controls controls = controls(fixture);
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.game.setBoard(1, Board.createEmptyBoard(32, 32));
+                controls.target().setBoardId(1);
+                controls.target().setPosition(new Coords(30, 30));
+                List<BoardScene.Command> onBoard = flatten(controls.actions().contextCommands(
+                      controls.target().getPosition(), controls.target().getId()));
+                assertTrue(onBoard.stream().anyMatch(command -> command.unitAction() != null
+                      && command.unitAction().type() == MapMenu.UnitActionType.TARGET),
+                      "The roster unit's board supplies its hex, even outside the displayed board");
+
+                List<BoardScene.Command> roster = flatten(controls.actions().contextCommands(null, controls.target().getId()));
+                List<MapMenu.UnitAction> actions = roster.stream().map(BoardScene.Command::unitAction)
+                      .filter(action -> action != null && (action.type() == MapMenu.UnitActionType.VIEW
+                            || action.type() == MapMenu.UnitActionType.READOUT)).toList();
+                assertEquals(List.of(new MapMenu.UnitAction(MapMenu.UnitActionType.VIEW, controls.target().getId()),
+                            new MapMenu.UnitAction(MapMenu.UnitActionType.READOUT, controls.target().getId())), actions);
+                assertTrue(roster.stream().filter(command -> command.children().isEmpty())
+                      .allMatch(command -> command.unitAction() != null),
+                      "A roster request without coordinates adds no hex actions");
+            });
+        }
+    }
+
+    @Test
+    void explicitSensorAndHiddenUnitsKeepHexActionsWithoutRevealingIdentity() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Controls controls = controls(fixture);
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_DOUBLE_BLIND).setValue(true);
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS).setValue(true);
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_HIDDEN_UNITS).setValue(true);
+                controls.target().clearSeenBy();
+                controls.target().addBeenDetectedBy(fixture.player);
+                List<BoardScene.Command> sensor = controls.actions().contextCommands(
+                      controls.target().getPosition(), controls.target().getId());
+                assertEquals(List.of(MapMenu.UnitActionType.INSPECT_SENSOR, MapMenu.UnitActionType.CENTER_UNIT),
+                      flatten(sensor).stream().map(BoardScene.Command::unitAction)
+                            .filter(action -> action != null && action.entityId() == controls.target().getId())
+                            .map(MapMenu.UnitAction::type).toList());
+                assertFalse(find(sensor, "Fire").enabled(), "The shared hex's phase actions remain available");
+
+                controls.target().addBeenSeenBy(fixture.player);
+                controls.target().setHidden(true);
+                List<BoardScene.Command> hidden = controls.actions().contextCommands(
+                      controls.target().getPosition(), controls.target().getId());
+                assertTrue(flatten(hidden).stream().noneMatch(command -> command.unitAction() != null
+                      && command.unitAction().entityId() == controls.target().getId()));
+                assertFalse(find(hidden, "Fire").enabled());
+                assertTrue(controls.actions().contextCommands(null, controls.target().getId()).isEmpty());
+            });
+        }
+    }
+
+    @Test
+    void sensorInspectionActionShowsOnlyAnonymousContactInformation() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Controls controls = controls(fixture);
+            AtomicReference<BoardScene.Command> inspect = new AtomicReference<>();
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_DOUBLE_BLIND).setValue(true);
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS).setValue(true);
+                controls.target().clearSeenBy();
+                controls.target().addBeenDetectedBy(fixture.player);
+                inspect.set(flatten(controls.actions().contextCommands(controls.target().getPosition(),
+                      controls.target().getId())).stream().filter(command -> command.unitAction() != null
+                      && command.unitAction().type() == MapMenu.UnitActionType.INSPECT_SENSOR)
+                      .findFirst().orElseThrow());
+            });
+
+            inspect.get().action().run();
+            SwingUtilities.invokeAndWait(() -> { });
+
+            verify(controls.gui()).doAlertDialog(Messages.getString("GpuBoard.hud.common.sensorContact"),
+                  Messages.getString("GpuBoard.hud.context.unidentifiedHex",
+                        controls.target().getPosition().getBoardNum()),
+                  JOptionPane.INFORMATION_MESSAGE);
+            verify(controls.gui(), never()).inspectUnit(controls.target().getId());
+            verify(controls.weapons(), never()).displayEntity(any());
+        }
+    }
+
+    @Test
+    void identifiedAlliesRemainInspectableWithoutPersonalVisualContact() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Controls controls = controls(fixture);
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_DOUBLE_BLIND).setValue(true);
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_TEAM_VISION).setValue(false);
+                Player ally = new Player(3, "Ally");
+                ally.setTeam(fixture.player.getTeam());
+                fixture.game.addPlayer(ally.getId(), ally);
+                controls.target().setOwner(ally);
+                controls.target().clearSeenBy();
+                assertFalse(controls.target().hasSeenEntity(fixture.player), "The player has no personal sighting");
+
+                List<MapMenu.UnitActionType> actions = unitActionTypes(controls.actions().contextCommands(
+                      controls.target().getPosition(), controls.target().getId()), controls.target().getId());
+                assertTrue(actions.containsAll(List.of(MapMenu.UnitActionType.VIEW, MapMenu.UnitActionType.READOUT,
+                      MapMenu.UnitActionType.CENTER_UNIT)), "The board identifies allied units without team vision");
+                assertFalse(actions.contains(MapMenu.UnitActionType.INSPECT_SENSOR));
+            });
+        }
+    }
+
+    @Test
+    void sensorsDetectAllMakesDetectedUnitsInspectableWithoutVisualContact() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Controls controls = controls(fixture);
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_DOUBLE_BLIND).setValue(true);
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS).setValue(true);
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_SENSORS_DETECT_ALL).setValue(true);
+                controls.target().clearSeenBy();
+                controls.target().addBeenDetectedBy(fixture.player);
+                assertFalse(controls.target().hasSeenEntity(fixture.player), "Detection is not a visual sighting");
+
+                List<MapMenu.UnitActionType> actions = unitActionTypes(controls.actions().contextCommands(
+                      controls.target().getPosition(), controls.target().getId()), controls.target().getId());
+                assertTrue(actions.containsAll(List.of(MapMenu.UnitActionType.VIEW, MapMenu.UnitActionType.READOUT,
+                      MapMenu.UnitActionType.CENTER_UNIT)), "Detect-all sensors identify detected units");
+                assertFalse(actions.contains(MapMenu.UnitActionType.INSPECT_SENSOR));
+            });
+        }
+    }
+
+    @Test
+    void everyStackedSensorContactHasOneAnonymousInspectionEntry() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Controls controls = controls(fixture);
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_DOUBLE_BLIND).setValue(true);
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS).setValue(true);
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_HIDDEN_UNITS).setValue(true);
+                controls.target().clearSeenBy();
+                controls.target().addBeenDetectedBy(fixture.player);
+                for (int id : List.of(43, 44, 45)) {
+                    Entity other = new BipedMek();
+                    other.setId(id);
+                    other.setChassis("Private identity " + id);
+                    other.setOwner(controls.target().getOwner());
+                    other.setPosition(controls.target().getPosition());
+                    other.setDeployed(true);
+                    fixture.game.addEntity(other, false);
+                    other.addBeenDetectedBy(fixture.player);
+                    if (id == 44) {
+                        other.setHidden(true);
+                    } else if (id == 45) {
+                        other.addBeenSeenBy(fixture.player);
+                    }
+                }
+
+                for (int explicit : List.of(Entity.NONE, controls.target().getId(), 45)) {
+                    List<BoardScene.Command> commands = flatten(controls.actions().contextCommands(
+                          controls.target().getPosition(), explicit));
+                    List<BoardScene.Command> sensors = commands.stream().filter(command -> command.unitAction() != null
+                          && command.unitAction().type() == MapMenu.UnitActionType.INSPECT_SENSOR).toList();
+                    assertEquals(List.of(42, 43), sensors.stream().map(command -> command.unitAction().entityId())
+                          .sorted().toList(), "Hex, sensor and identified-unit menus cover the same contacts once");
+                    assertTrue(sensors.stream().allMatch(command -> command.label().equals(
+                          Messages.getString("GpuBoard.hud.context.inspectSensorReturn"))));
+                    for (int sensorId : List.of(42, 43)) {
+                        assertTrue(unitActionTypes(commands, sensorId).stream().allMatch(type ->
+                              type == MapMenu.UnitActionType.INSPECT_SENSOR
+                                    || type == MapMenu.UnitActionType.CENTER_UNIT),
+                              "Anonymous contacts expose no identity-bearing unit actions");
+                    }
+                    assertTrue(unitActionTypes(commands, 44).isEmpty(), "Hidden contacts stay absent");
+                }
+            });
+        }
+    }
+
+    @Test
+    void clearedSelectionOffersReselectionWithoutActorCommands() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Controls controls = controls(fixture);
+            SwingUtilities.invokeAndWait(() -> {
+                List<BoardScene.Command> commands = flatten(controls.actions().contextCommands(
+                      fixture.entity.getPosition(), fixture.entity.getId(), MapMenu.ContextTools.NO_SELECTION));
+                BoardScene.Command select = commands.stream().filter(command -> command.unitAction() != null
+                      && command.unitAction().type() == MapMenu.UnitActionType.SELECT
+                      && command.unitAction().entityId() == fixture.entity.getId()).findFirst().orElseThrow();
+                assertTrue(select.enabled(), "The still-current game actor can restore a cleared HUD selection");
+                assertTrue(unitActionTypes(commands, fixture.entity.getId()).containsAll(List.of(
+                      MapMenu.UnitActionType.VIEW, MapMenu.UnitActionType.READOUT,
+                      MapMenu.UnitActionType.CENTER_UNIT)));
+                assertTrue(commands.stream().noneMatch(command -> List.of("Fire", "Skip", "Alpha Strike")
+                      .contains(command.label())), "Commands that act for the cleared selection remain absent");
+                assertTrue(commands.stream().map(BoardScene.Command::unitAction).filter(action -> action != null)
+                      .noneMatch(action -> List.of(MapMenu.UnitActionType.TARGET, MapMenu.UnitActionType.LINE_OF_SIGHT,
+                            MapMenu.UnitActionType.PLAN_MOVE, MapMenu.UnitActionType.PIN_MOVE,
+                            MapMenu.UnitActionType.MAKE_PRIMARY, MapMenu.UnitActionType.REMOVE_TARGET)
+                            .contains(action.type())));
+            });
+        }
+    }
+
+    private static List<MapMenu.UnitActionType> unitActionTypes(List<BoardScene.Command> commands, int entityId) {
+        return flatten(commands).stream().map(BoardScene.Command::unitAction)
+              .filter(action -> action != null && action.entityId() == entityId).map(MapMenu.UnitAction::type).toList();
+    }
+
+    @Test
+    void editorCapabilitiesBecomeSharedCommandsWithTheirBoardLocations() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Controls controls = controls(fixture);
+            SwingUtilities.invokeAndWait(() -> {
+                Coords hex = new Coords(3, 4);
+                List<BoardScene.Command> movement = flatten(controls.actions().contextCommands(hex, Entity.NONE,
+                      new MapMenu.ContextTools(true, false, fixture.entity.getId(), false, false)));
+                BoardScene.Command plan = movement.stream().filter(command -> command.unitAction() != null
+                      && command.unitAction().type() == MapMenu.UnitActionType.PLAN_MOVE).findFirst().orElseThrow();
+                BoardScene.Command pin = movement.stream().filter(command -> command.unitAction() != null
+                      && command.unitAction().type() == MapMenu.UnitActionType.PIN_MOVE).findFirst().orElseThrow();
+                assertTrue(plan.enabled());
+                assertFalse(pin.enabled(), "Jump planning cannot pin an intermediate waypoint");
+                assertEquals(BoardLocation.of(hex, fixture.view.getBoardId()), plan.unitAction().location());
+                assertEquals(plan.unitAction().location(), pin.unitAction().location());
+                assertTrue(flatten(controls.actions().contextCommands(hex, Entity.NONE,
+                      new MapMenu.ContextTools(false, false, Entity.NONE, false, false))).stream()
+                      .noneMatch(command -> command.unitAction() != null
+                            && command.unitAction().type() == MapMenu.UnitActionType.LINE_OF_SIGHT),
+                      "No measuring actor is invented when the source has no own focus or local actor");
+
+                List<MapMenu.UnitAction> orders = flatten(controls.actions().contextCommands(null,
+                      controls.target().getId(), new MapMenu.ContextTools(false, false, fixture.entity.getId(), true, true)))
+                      .stream().map(BoardScene.Command::unitAction)
+                      .filter(action -> action != null && (action.type() == MapMenu.UnitActionType.MAKE_PRIMARY
+                            || action.type() == MapMenu.UnitActionType.REMOVE_TARGET)).toList();
+                assertEquals(List.of(MapMenu.UnitActionType.MAKE_PRIMARY, MapMenu.UnitActionType.REMOVE_TARGET),
+                      orders.stream().map(MapMenu.UnitAction::type).toList());
+                assertTrue(orders.stream().allMatch(action -> action.entityId() == controls.target().getId()
+                      && action.location().equals(controls.target().getBoardLocation())));
+            });
         }
     }
 
@@ -288,7 +428,7 @@ class GpuBoardActionsTest {
                 return null;
             }).when(phase).target(any());
             when(phase.isFireAllowed()).thenReturn(true);
-            return new Controls(new GpuBoardActions(view, () -> phase, () -> false, () -> { }), phase, weapons, target);
+            return new Controls(new GpuBoardActions(view, () -> phase, () -> false, () -> { }), phase, weapons, target, gui);
         });
         SwingUtilities.invokeAndWait(task);
         return task.get();

@@ -168,7 +168,7 @@ cache until renderer disposal; no additional unit meshes or full-screen buffers 
 
 ## Graphics: Classic and Enhanced
 
-The 3D Graphics setting (View > 3D Graphics, Client Settings; `GUIPreferences.BOARD_GRAPHICS`, published to the render
+The 3D Graphics setting (View > Renderer > Classic or Enhanced, Client Settings; `GUIPreferences.BOARD_GRAPHICS`, published to the render
 thread as `BoardSource.UiPreferences.graphics`) chooses what `GpuTerrain` builds. `GpuBattleView` calls
 `GpuTerrain.setColumns(graphics == CLASSIC)` before each `update`, so a game saved as Classic never builds the 3D terrain
 first. Enhanced, the default, builds the 3D relief, water and lava fields, trees, scatter, ground cover, biomes and every

@@ -387,6 +387,7 @@ public final class BoardArtwork implements AutoCloseable {
                 flat.removeTerrain(terrain);
             }
             for (int terrain : TilesetScenery.SCENERY_TERRAINS) { flat.removeTerrain(terrain); }
+            for (int terrain : RAIL_TERRAINS) { flat.removeTerrain(terrain); }
             BufferedImage full = drawDecals(flat);
             BufferedImage tilesetDecals = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
             BufferedImage tilesetScenery = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
@@ -471,18 +472,20 @@ public final class BoardArtwork implements AutoCloseable {
     /**
      * The hex's Saxarba art, as the Tactical View shows it: its base, its supers and its orthographic images, without
      * the incline and cliff edges, which the view's BoardRim shades from the levels instead, without the bridge, which
-     * it lays on the deck, and without structures or scenery. Scenery retains its original selected artwork in a
-     * separate overlay, so both views can put it on roofs and lakebeds instead of baking it into the column top.
+     * it lays on the deck, and without rails (their track is drawn), structures or scenery. Scenery retains its original
+     * selected artwork in a separate overlay, so both views can put it on roofs and lakebeds instead of baking it into the
+     * column top.
      * Pavement uses its full variant: the shared concrete geometry supplies its outline in both GPU views.
      * Water also fills its footprint: a painted shore on the lakebed would duplicate the column's bank wall.
-     * Where the woods design draws no trees ({@link BoardTreeDistribution#noTrees}, the 3D woods' rule) there is no woods
-     * sprite either, as the old tileset's seaport supers replaced it.
+     * Where the woods design draws no trees ({@link BoardTreeDistribution#noTrees}, the 3D woods' rule: No trees or a
+     * container yard's skin) there is no woods sprite either.
      */
     private BufferedImage drawTileset(Hex source, Map<Integer, String> structures, Set<String> placedSources) {
         Hex hex = source.duplicate();
         for (int terrain : DROP_TERRAINS) { hex.removeTerrain(terrain); }
         if (BoardTreeDistribution.noTrees(hex)) { BoardTreeDistribution.TREE_TERRAINS.forEach(hex::removeTerrain); }
         for (int terrain : BRIDGE_TERRAINS) { hex.removeTerrain(terrain); }
+        for (int terrain : RAIL_TERRAINS) { hex.removeTerrain(terrain); }
         for (int structure : structures.keySet()) {
             for (int terrain : STRUCTURE_TERRAINS.get(structure)) { hex.removeTerrain(terrain); }
         }
@@ -557,7 +560,11 @@ public final class BoardArtwork implements AutoCloseable {
     private static final int[] DROP_TERRAINS = { Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP,
           Terrains.INCLINE_BOTTOM, Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM };
 
-    private static final int[] BRIDGE_TERRAINS = { Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV };
+    private static final int[] BRIDGE_TERRAINS = { Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV,
+                                                   Terrains.BRIDGE_MUD, Terrains.BRIDGE_ROAD };
+
+    /** Rails: the 3D views draw their track (BoardRail), which their tileset sprites would duplicate. */
+    private static final int[] RAIL_TERRAINS = { Terrains.RAIL, Terrains.BRIDGE_RAIL };
 
     /** Each structure with the terrains describing it, any of which its tileset images may match. */
     private static final Map<Integer, int[]> STRUCTURE_TERRAINS = Map.of(

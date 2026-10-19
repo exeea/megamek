@@ -47,6 +47,7 @@ import megamek.common.OffBoardDirection;
 import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.board.RailRoute;
 import megamek.common.compute.Compute;
 import megamek.common.enums.MoveStepType;
 import megamek.common.equipment.EquipmentType;
@@ -621,6 +622,10 @@ public interface IAero {
             if (hex == null) {
                 continue;
             }
+            // An intact TacOps rail (TO:AR p.32), also in a road or pavement hex.
+            if (RailRoute.rules(((Entity) this).getGame()) && RailRoute.intact(hex)) {
+                terrains.add(List.of(Terrains.RAIL, 1));
+            }
             if (hex.hasPavementOrRoad()) {
                 if (hex.containsTerrain(Terrains.ROAD)) { //Check for dirt or gravel road, they're harder to land on
                     if (Terrains.landingModifier(Terrains.ROAD, hex.terrainLevel(Terrains.ROAD)) > 0) {
@@ -633,7 +638,7 @@ public interface IAero {
                 clear = true;
             }
             for (int terrain : hex.getTerrainTypes()) {
-                if ((terrain == Terrains.WATER) && hex.containsTerrain(Terrains.ICE)) {
+                if (((terrain == Terrains.WATER) && hex.containsTerrain(Terrains.ICE)) || (terrain == Terrains.RAIL)) {
                     continue;
                 }
                 if (Terrains.landingModifier(terrain, hex.terrainLevel(terrain)) > 0) {

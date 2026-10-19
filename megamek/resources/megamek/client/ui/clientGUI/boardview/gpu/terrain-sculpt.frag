@@ -1,28 +1,45 @@
 #version 330 core
+#define SCORCH_IN_MATERIAL
 layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Sculpted tops, cliffs and the rock kit. Geometry supplies the landforms; this shader layers each surface family's
 // four materials (ground, debris, wall, mantle), mapped in world space, and lights them with the board's one light
-// model (light-model.glsl, surface-lighting.glsl): linear albedo times linear light, encoded for display like every
-// other lit surface, so the atmosphere composite grades and tones the whole frame once.
-in vec2 v_diffuseUV;   // ground: rim / foot distance (drowned cliff: height above bed / foot distance);
+// model (shadeSurface, surface-shading.glsl): linear albedo times linear light. Scene radiance stays linear
+// through blending and atmosphere; the final composite tones and encodes the whole frame once.
+in vec2 v_diffuseUV;   // dry ground: rim / foot distance; water-tagged ground: foot / rim distance;
+                            // drowned cliff: height above bed / foot distance;
+                            // depth-zero water tags encode the second distance as -1 - distance;
                             // cliff: height above foot / depth below rim; rock: above root
-                            // / below top. All in metres. Plants: authored red / green.
+                            // / below top. All in metres. Wet rock: above root / pigment variation.
+                            // Plants: authored red / green.
 in vec3 v_normal;
-in vec4 v_color;       // r: occlusion. g: game level (+64)/255, or for cliffs how much rock the face is (0
-                            // bank, 1 cliff). b: kind (0 ground, .3 plant, .45 panel, .5 cliff, .6 abyss wall, .75 tree pit, 1 rock). a: bed
+in vec4 v_color;       // r: occlusion (mud-draining shell: local drop / 8 m). g: game level (+64)/255, or for cliffs how much rock the face is (0
+                            // bank, 1 cliff). b: kind (0 ground, .1 a natural bridge's muddy deck top
+                            // (GpuTerrain.naturalBridge), .3 plant, .45 panel, .5 cliff (byte 140: mud-draining shell), .6 abyss wall, .75 tree pit,
+                            // 1 rock). a: bed
                             // hardness (cliff), authored blue (plant), variation (rock, a pit's earth below .5; its kerb is 1),
                             // nearest step height (.3 + .1 per level, dry ground), or below .25 on a water hex's banks
                             // and bed its water's palette and that height packed (GpuTerrain.shoreTint).
                             // Panels use alpha for a fixed texture azimuth, independent of the lighting normal.
-// Every family's maps, interleaved: colour/height at a map's layer and normal/AO at the next (GpuAssets.sculptArray).
+// Aligned colour/height and normal/AO arrays; semantic IDs are mapped by the sampling helpers.
+#define TERRAIN_LAYERS_DECLARED
 uniform sampler2DArray u_terrainLayers;
+uniform sampler2DArray u_terrainData;
 uniform vec4 u_sculptLayers; // this family's colour/height layers: ground, debris, wall, mantle; normal/AO one up
 uniform vec4 u_sculptTiles; // metres per repeat: ground, debris, wall, mantle
+uniform vec2 u_treePitMaterial; // authored mulch colour layer and metres per repeat
+uniform vec2 u_scorchedMaterial; // colour/height layer and metres per repeat; data packs normal XY, roughness, AO
 uniform float u_metre;      // world units per metre
 uniform float u_normalMaps;
 uniform float u_groundResponse;
 uniform float u_sculptFamily; // BoardScene.Surface: GRASS 0, DIRT 1, SAND 2, ROCK 3, CONCRETE 4, SNOW 5, LUNAR 6
+// A draw's families are compile-time constants in its family program (GpuFamilyPrograms), so the compiler
+// keeps only their paths; the generic program of the same flags reads the same values from the uniforms.
+#ifdef SCULPT_FAMILY
+#define sculptFamily SCULPT_FAMILY
+#else
+#define sculptFamily u_sculptFamily
+#endif
 uniform float u_levelHeight;
 uniform float u_clay;
 uniform vec3 u_wind;        // direction in xy, strength in z
@@ -33,6 +50,12 @@ uniform float u_gravity;    // scenario acceleration; without it there is no wat
 in vec4 v_coverWeights;
 in float v_coverInterpolation;
 uniform vec4 u_coverFamilies;
+#ifdef COVER_FAMILIES
+const vec4 coverFamilyConstants = COVER_FAMILIES;
+#define coverFamilies coverFamilyConstants
+#else
+#define coverFamilies u_coverFamilies
+#endif
 uniform vec4 u_coverResponses;
 uniform vec4 u_coverTiles0, u_coverTiles1, u_coverTiles2, u_coverTiles3;
 uniform vec4 u_coverLayers0, u_coverLayers1, u_coverLayers2, u_coverLayers3;
@@ -44,16 +67,16 @@ uniform vec4 u_coverLayers0, u_coverLayers1, u_coverLayers2, u_coverLayers3;
 
 // ---- Surface families --------------------------------------------------------------------------------------------
 
-bool family(float f) { return abs(u_sculptFamily - f) < .5; }
+bool family(float f) { return abs(sculptFamily - f) < .5; }
 
 // Grey lunar/volcanic sand reuses the shared loose-sand relief. Derive the colour from the supporting covers,
 // so a theme boundary interpolates in world space instead of changing abruptly at a hex edge.
 float greySand() {
 #ifdef terrainBlendFlag
     vec4 weights = max(v_coverWeights, vec4(0.0));
-    vec4 grey = (1.0 - step(vec4(.5), abs(u_coverFamilies - LUNAR_FAMILY)))
-          + (1.0 - step(vec4(.5), abs(u_coverFamilies - VOLCANO_FAMILY)));
-    vec4 substrate = step(vec4(.5), abs(u_coverFamilies - 2.0));
+    vec4 grey = (1.0 - step(vec4(.5), abs(coverFamilies - LUNAR_FAMILY)))
+          + (1.0 - step(vec4(.5), abs(coverFamilies - VOLCANO_FAMILY)));
+    vec4 substrate = step(vec4(.5), abs(coverFamilies - 2.0));
     return dot(weights, grey) / max(dot(weights, substrate), .0001);
 #else
     return family(LUNAR_FAMILY) || family(VOLCANO_FAMILY) ? 1.0 : 0.0;
@@ -68,7 +91,7 @@ float rockiness(float levels) { return smoothstep(2.15, 2.9, levels); }
 
 // A meadow worn through to its soil: the bare earth shows between the tussocks first.
 vec3 worn(vec3 turf, float height, float amount) {
-    vec3 soil = vec3(.31, .25, .18) * (.75 + .5 * height);
+    vec3 soil = toLinear(vec3(.31, .25, .18)) * (.75 + .5 * height);
     return mix(turf, soil, clamp(amount * 1.6 - height * .9, 0.0, 1.0));
 }
 
@@ -101,39 +124,33 @@ vec3 groundBounceFor(float f) {
     return vec3(.75, .78, .82);
 }
 
-vec3 groundBounce() { return groundBounceFor(u_sculptFamily); }
-
-// Bed colour around the wall map's own tint: hard beds pale, soft beds deeper.
-vec3 bedTintFor(float f, float hardness) {
-    if (abs(f - 2.0) < .5 || abs(f - DESERT_FAMILY) < .5 || abs(f - MARS_FAMILY) < .5) {
-        return mix(vec3(.90, .86, .83), vec3(1.06, 1.03, 1.0), hardness);
-    }
-    if (abs(f - 1.0) < .5) return mix(vec3(.86, .80, .74), vec3(1.08, 1.04, 1.0), hardness);
-    return mix(vec3(.90, .91, .93), vec3(1.06, 1.04, 1.01), hardness);
-}
-
-vec3 bedTint(float hardness) { return bedTintFor(u_sculptFamily, hardness); }
-
+vec3 groundBounce() { return groundBounceFor(sculptFamily); }
 
 vec3 groundTone(vec3 albedo, vec3 world, float broad, float fine, float region, float rim, float foot) {
-    return groundToneFor(u_sculptFamily, albedo, world, broad, fine, region, rim, foot);
+    return groundToneFor(sculptFamily, albedo, world, broad, fine, region, rim, foot);
 }
 
 // sculpt-material-functions
 void main() {
+    vec2 surfaceUV = v_diffuseUV;
     vec3 face = normalize(v_normal);
     float occlusion = v_color.r;
     float level = floor(v_color.g * 255.0 + .5) - 64.0;
     float kind = v_color.b;
     bool ground = kind < .125, plant = kind >= .125 && kind < .375, cliff = kind >= .375 && kind < .625;
+    bool leaf = plant && kind > .325; // Explicit authored tissue; legacy shrubs and wood remain opaque.
     bool panel = cliff && kind < .475;
     float projectionAngle = (v_color.a - .5) * 6.2831853;
     vec3 projection = panel ? vec3(cos(projectionAngle), sin(projectionAngle), 0.0) : face;
     terrainWallProjection = panel ? projection : vec3(0.0);
     float hardness = panel ? .5 : v_color.a;
     bool abyss = cliff && kind > .55;
+    bool mudShell = cliff && !panel && !abyss && kind > 139.0 / 255.0;
+    if (mudShell) occlusion = 1.0;
     bool pit = kind >= .625 && kind < .875;
     bool shore = ground && v_color.a < .25;
+    bool zeroDepth = shore && surfaceUV.y < 0.0;
+    if (zeroDepth) surfaceUV.y = -1.0 - surfaceUV.y;
     // Rock-kind bytes 224..254 carry the fractional water level; 255 remains ordinary dry rock.
     bool wetRock = kind >= .875 && kind < .999;
     bool waterCovered = shore || wetRock;
@@ -153,27 +170,37 @@ void main() {
     float palette = floor(tintByte / 16.0 + .03);
     float steps = shore ? (tintByte - 16.0 * palette) / 2.0 : (v_color.a - .3) / .1;
     vec3 world = v_cloudPosition / u_metre;
+    vec3 worldDx = dFdx(world), worldDy = dFdy(world);
+#ifdef lightingFlag
+    vec3 geometric = visibleFace(worldDx, worldDy, -viewDirection());
+#endif
+    // A scar patch's draw shades only where its image covers the receiver (scar-material.glsl).
+    if (!surfaceScarCovers()) { fragColor = vec4(0.0); return; }
     terrainMaterialLod(world, face);
     // The area a pixel covers, as a length: a tilted view's foreshortening alone does not remove the detail.
-    float footprint = sqrt(length(dFdx(world.xy)) * length(dFdy(world.xy)));
+    float footprint = sqrt(length(worldDx.xy) * length(worldDy.xy));
     farDetail = .8 * smoothstep(.18, .6, footprint);
-    pixelMetres = max(max(length(dFdx(world)), length(dFdy(world))), 1e-4);
+    pixelMetres = max(max(length(worldDx), length(worldDy)), 1e-4);
     // Depth below this water hex's level, in metres, and height above its water, which lies u_waterLine lower.
     float depth = waterCovered ? (level * u_levelHeight - v_cloudPosition.z) / u_metre : -1.0;
     float above = waterCovered ? u_waterLine / u_metre - depth : 99.0;
     vec2 p = vec2(world.x, -world.y);
-    if (shore && u_rainDetail > 0.0 && u_waterEffects > 0.0) {
-        // The rippling surface bends the view of a submerged bed, so its detail sways with ripples above it. The bed
-        // cannot tell whether a current or the wind moves the water, so this sway follows neither.
-        vec2 swell = (texture(u_waterDetail, CROSSING * v_cloudPosition.xy * u_rainScale * 1.65
-              + vec2(u_rainTime * .018, 0.0)).rg - .5) * CROSSING;
-        float under = smoothstep(0.0, 1.0, depth * u_metre - u_waterLine) * min(depth, 2.0);
-        p += vec2(swell.x, -swell.y) * (under * .3 * u_waterEffects * u_rainDetail);
-    }
+    // Capture numerical-map gradients before varying material/coverage branches.
+    mat2 groundGradient = mat2(dFdx(p), dFdy(p));
+    mat2 wallXGradient = mat2(vec2(worldDx.y * sign(projection.x), -worldDx.z),
+          vec2(worldDy.y * sign(projection.x), -worldDy.z));
+    mat2 wallYGradient = mat2(vec2(-worldDx.x * sign(projection.y), -worldDx.z),
+          vec2(-worldDy.x * sign(projection.y), -worldDy.z));
     // Smooth value fields from the shared 64-texel noise: broad has ~11 m cells, fine ~2.5 m, and region ~40 m.
     vec3 fields = groundFields(u_rainNoise, world);
     float broad = fields.x, fine = fields.y, region = fields.z;
-    vec3 albedo = vec3(.52);
+    // Keep the walking surface fully muddy. Deposits continue over its caprock edge and drain down the shell,
+    // with the existing world fields varying their reach. The shell carries drop from its local TOP edge, so
+    // descending decks keep the same fade. The material's own height breaks the margin without extra reads.
+    float deckMud = ground && !shore && kind > .05 ? 1.0
+          : mudShell ? 1.0 - smoothstep(.35, mix(1.3, 2.9, .35 * broad + .65 * fine), v_color.r * 8.0) : 0.0;
+    MaterialProjection rockProjection = materialProjection(world, face);
+    vec3 albedo = toLinear(vec3(.52));
     vec3 normal = face;
     float cavity = 1.0;
     float materialHeight = .5;
@@ -187,32 +214,66 @@ void main() {
     float sand = family(2.0) ? 1.0 : 0.0;
     vec3 bounce = groundBounce();
     float response = u_groundResponse;
+    float shoreAbsorption = 0.0;
     float rainCover = step(0.0, response);
     bool natural = (ground || cliff || bedrock) && !family(4.0);
-    float sediment = shore ? 1.0 - smoothstep(-.25, .05, above) : 0.0;
-    vec3 materialWorld = vec3(p.x, -p.y, world.z);
+    // Natural surfaces take the small cliff material: walls, banks (water banks too) and bedrock its side
+    // projections (blendCliff when blended), tops its top projection (blendCovers when blended). Volcanic programs
+    // keep their natural material on every face.
+#ifdef volcanicFlag
+    bool rocky = false;
+#else
+    bool rocky = natural && (cliff || bedrock || (shore && face.z < .6));
+#endif
+    // Reuse the material's world fields for a broken soil/gravel margin. Keep it below the dry rim so the
+    // neighbouring land agrees at the seam; no new noise reads or shoreline mesh are needed.
+    riverBank = shore && natural && palette < .5;
+    float bankMargin = .995 * u_waterLine / u_metre;
+    // Use the whole exposed bank for the fade. Nested height smoothsteps compressed it into a sharp strip.
+    float bankProgress = clamp((bankMargin - above) / max(bankMargin - .01, .001), 0.0, 1.0);
+    bankProgress += (broad * .35 + fine * .65 - .5) * .3 * bankProgress * (1.0 - bankProgress);
+    float nearWaterSediment = shore ? 1.0 - smoothstep(-.25, .05, above) : 0.0;
+    // Depth-zero arid banks use the same halfway profile for clear and Mars water alike.
+    shallowSediment = zeroDepth ? mix(nearWaterSediment, bankProgress, .5) : -1.0;
+    // Dry cover is gone just before the waterline; the endpoints still match the adjoining ground and bed.
+    float sediment = riverBank ? bankProgress : nearWaterSediment;
     // Levels of water over a submerged bed; none elsewhere.
     float submerged = 0.0;
+    vec3 transmission = vec3(1.0);
     float biomePool = 0.0, biomeDamp = 0.0;
     // Cliffs grade continuously with height.
     if (cliff) level = v_cloudPosition.z / u_levelHeight;
     if (u_clay < .5) {
         vec4 detail = vec4(0.0, 0.0, 1.0, 1.0);
         if (natural) {
-#ifndef terrainBlendFlag
-            float foot = shore || cliff || bedrock ? v_diffuseUV.x : v_diffuseUV.y;
-            float rim = shore || cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x;
+            float foot = shore || cliff || bedrock ? surfaceUV.x : surfaceUV.y;
+            float rim = shore || cliff || bedrock ? surfaceUV.y : surfaceUV.x;
             float rock = ground ? rockiness(steps) : bedrock ? 1.0 : v_color.g;
-            TerrainMaterial material = naturalMaterial(materialWorld, face, foot, rim, rock, ground ? .5 : hardness,
-                  broad, fine, region, sediment);
-            albedo = material.color;
-            normal = material.normal;
-            cavity = material.cavity;
-            materialHeight = material.height;
-            emission = material.emission;
-            roughness = material.roughness;
-            volcanic = material.volcanic;
+            float bed = ground ? .5 : hardness;
+#ifdef terrainBlendFlag
+            // Blended tops take blendCovers below.
+            if (rocky) {
+                TerrainMaterial material = blendCliff(rockProjection, world, face, foot, rim, rock, bed, broad, fine,
+                      region, sediment, materialCoverage);
+                coverEffects(materialCoverage, sediment, grass, sand, bounce, response, rainCover);
+#else
+            {
+#ifdef volcanicFlag
+                TerrainMaterial material = crustOrBankMaterial(world, face);
+#else
+                // One material for tops and walls: tops read the top projection, walls, banks and bedrock the sides.
+                TerrainMaterial material = cliffMaterial(rockProjection, world, face, foot, rim, rock, bed, broad, fine,
+                      region, sediment, sculptFamily, u_sculptTiles, u_sculptLayers, rocky, false);
 #endif
+#endif
+                albedo = material.color;
+                normal = material.normal;
+                cavity = material.cavity;
+                materialHeight = material.height;
+                emission = material.emission;
+                roughness = material.roughness;
+                volcanic = material.volcanic;
+            }
             // Match a top to its slope at the same height; tactical level grading remains continuous.
             if (!shore) level = v_cloudPosition.z / u_levelHeight;
         } else if (ground) {
@@ -223,14 +284,18 @@ void main() {
             // Pavement has no directional grain to preserve. Translate both aligned maps through a continuous
             // world field instead of repeating the same concrete cloud at two fixed scales (two reads either way).
             float concreteVariation = broad * .45 + fine * .55;
-            mat2 concreteGradient = mat2(dFdx(q), dFdy(q)) / u_sculptTiles.x;
+            mat2 qGradient = !steep ? groundGradient
+                  : abs(face.x) > abs(face.y)
+                  ? mat2(vec2(worldDx.y * sign(face.x), -worldDx.z), vec2(worldDy.y * sign(face.x), -worldDy.z))
+                  : mat2(vec2(-worldDx.x * sign(face.y), -worldDx.z), vec2(-worldDy.x * sign(face.y), -worldDy.z));
+            mat2 concreteGradient = qGradient / u_sculptTiles.x;
             vec4 top = family(4.0)
                   ? translatedTexel(u_sculptLayers.x, q / u_sculptTiles.x, concreteGradient, concreteVariation)
                   : planar(u_sculptLayers.x, q, u_sculptTiles.x, broad);
             vec4 rubble = planar(u_sculptLayers.y, q, u_sculptTiles.y, fine);
             vec4 weights = debrisWeights();
-            float rim = 1.0 - smoothstep(.3, 2.2 + 1.5 * fine, v_diffuseUV.x);
-            float foot = 1.0 - smoothstep(.4, 3.0 + 2.0 * broad, v_diffuseUV.y);
+            float rim = 1.0 - smoothstep(.3, 2.2 + 1.5 * fine, surfaceUV.x);
+            float foot = 1.0 - smoothstep(.4, 3.0 + 2.0 * broad, surfaceUV.y);
             float slope = 1.0 - smoothstep(.8, .96, face.z);
             float patches = smoothstep(.56, .78, fine * .7 + broad * .3);
             // Mantled ground shows scree only beside rock cliffs; beside the earth banks of lower steps a meadow wears
@@ -240,10 +305,17 @@ void main() {
             float want = clamp(max(edges * rock, slope * weights.z) + patches * weights.w, 0.0, 1.0);
             // A water hex's bed is stony from just above the waterline down, whatever grows on the land around; its
             // dry bank stays the land's own ground.
-            if (shore) want = max(want, 1.0 - smoothstep(-.25, .05, above));
+            if (shore) want = max(want, sediment);
             float w = heightBlend(top.a, rubble.a, want);
             albedo = mix(top.rgb, rubble.rgb, w);
             materialHeight = mix(top.a, rubble.a, w);
+            if (hasAuthoredRoughness(u_sculptLayers.x) || hasAuthoredRoughness(u_sculptLayers.y)) {
+                float topRoughness = family(4.0)
+                      ? translatedRoughness(u_sculptLayers.x, q / u_sculptTiles.x, concreteGradient, concreteVariation, roughness)
+                      : planarRoughness(u_sculptLayers.x, q, qGradient, u_sculptTiles.x, broad, roughness);
+                roughness = mix(topRoughness,
+                      planarRoughness(u_sculptLayers.y, q, qGradient, u_sculptTiles.y, fine, roughness), w);
+            }
             // In patches only: most of a bank's lip keeps its turf.
             if (family(0.0)) {
                 float wear = max(rim * .55, foot * .75) * (1.0 - rock) * smoothstep(.35, .7, fine);
@@ -251,7 +323,7 @@ void main() {
             }
             if (u_normalMaps > .5 && terrainNormalDetail > 0.0 && !steep) {
                 vec4 topNormal = family(4.0)
-                      ? translatedTexel(u_sculptLayers.x + 1.0, q / u_sculptTiles.x, concreteGradient, concreteVariation)
+                      ? translatedTexel(u_terrainData, u_sculptLayers.x * .5, q / u_sculptTiles.x, concreteGradient, concreteVariation)
                       : planarNormal(u_sculptLayers.x + 1.0, p, u_sculptTiles.x, broad);
                 if (family(4.0)) topNormal.rgb = mix(topNormal.rgb * 2.0 - 1.0, vec3(0.0, 0.0, 1.0), farDetail);
                 detail = mix(topNormal,
@@ -259,101 +331,82 @@ void main() {
             }
             albedo = groundTone(albedo, world, broad, fine, region, rim, foot);
         } else if (plant) {
-            // The bush GLB supplies distinct woody stems and leaves; UV/alpha carry its authored RGB.
+            // The bush GLB supplies distinct woody stems and leaves; UV/alpha carry its linear RGB.
             // Live shader reload can still encounter .25-kind meshes from the earlier height-based format.
             float leaf = texture(u_rainNoise, world.xy / 7.0 + world.z * .13).r;
-            vec3 pigment = kind > .275 ? vec3(v_diffuseUV, v_color.a)
-                  : family(0.0) ? vec3(.27, .35, .12) : vec3(.40, .42, .26);
+            vec3 pigment = kind > .275 ? vec3(surfaceUV, v_color.a)
+                  : family(0.0) ? toLinear(vec3(.27, .35, .12)) : toLinear(vec3(.40, .42, .26));
             albedo = pigment * mix(.92, 1.06, leaf);
         } else if (pit) {
-            // A tree pit in the pavement: earth and bark mulch inside a kerb of paler, cleaner stone.
+            // A tree pit in the pavement: authored bark mulch inside a concrete kerb.
             if (v_color.a > .5) {
-                albedo = planar(u_sculptLayers.x, p, u_sculptTiles.x, broad).rgb * 1.1;
+                albedo = planar(u_sculptLayers.x, p, u_sculptTiles.x, broad).rgb;
+                roughness = planarRoughness(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad, roughness);
             } else {
-                vec4 grit = planar(u_sculptLayers.y, p, u_sculptTiles.y * .6, fine);
-                float mulch = texture(u_rainNoise, world.xy / 9.0 + v_color.a).r;
-                albedo = mix(vec3(.27, .19, .13), vec3(.42, .30, .19), mulch) * mix(.8, 1.2, grit.a);
-                if (u_normalMaps > .5 && terrainNormalDetail > 0.0) normal = upNormal(planarNormal(u_sculptLayers.y + 1.0, p, u_sculptTiles.y * .6, fine).rgb, face);
+                vec4 mulch = planar(u_treePitMaterial.x, p, u_treePitMaterial.y, fine);
+                albedo = mulch.rgb;
+                materialHeight = mulch.a;
+                roughness = planarRoughness(u_treePitMaterial.x, p, groundGradient, u_treePitMaterial.y, fine, roughness);
+                if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+                    vec4 detail = planarNormal(u_treePitMaterial.x + 1.0, p, u_treePitMaterial.y, fine);
+                    normal = upNormal(detail.rgb, face);
+                    cavity = detail.a;
+                }
             }
         } else if (cliff && family(4.0)) {
-            concreteSlab(world, face, projection, v_diffuseUV.x, v_diffuseUV.y, albedo, normal, occlusion, cavity);
+            concreteSlab(world, worldDx, worldDy, face, projection, surfaceUV.x, surfaceUV.y,
+                  albedo, normal, occlusion, cavity, roughness);
         } else {
-            // Walls and rocks: the two vertical projections, V running down the face, never mirrored from outside.
+            // Rocks: the two vertical projections, V running down the face, never mirrored from outside.
             // Where a rounded corner turns between them, the projection whose relief stands higher shows through.
-            vec3 axes = pow(abs(face), vec3(4.0));
             vec2 uvx, uvy;
             float side;
             vec4 wall = wallSample(world, projection, uvx, uvy, side);
             // A boulder's crown needs a horizontal stone projection: the two wall projections collapse on a
             // flat top, otherwise leaving a single colour or stretched stripes under the moss/snow treatment.
-            float crown = cliff ? 0.0 : smoothstep(.45, .85, face.z);
+            float crown = smoothstep(.45, .85, face.z);
             if (crown > 0.0) wall = mix(wall, planar(u_sculptLayers.z, p, u_sculptTiles.z, fine), crown);
             albedo = wall.rgb;
             if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
                 normal = wallNormal(u_sculptLayers.z + 1.0, uvx, uvy, face, side);
-                cavity = mix(mapTexel(u_sculptLayers.z + 1.0, uvy).a, mapTexel(u_sculptLayers.z + 1.0, uvx).a, side) * .5 + .5;
+                cavity = mix(normalTexel(u_sculptLayers.z + 1.0, uvy).a, normalTexel(u_sculptLayers.z + 1.0, uvx).a, side) * .5 + .5;
                 if (crown > 0.0) {
                     vec4 top = planarNormal(u_sculptLayers.z + 1.0, p, u_sculptTiles.z, fine);
                     normal = normalize(mix(normal, upNormal(top.rgb, face), crown));
                     cavity = mix(cavity, top.a * .5 + .5, crown);
                 }
             }
-            roughness = mappedRoughness(stoneRoughness(u_sculptFamily, .5), wall.a, cavity);
-            float h = v_diffuseUV.x, d = v_diffuseUV.y;
-            if (cliff) {
-                float drop = h + d;
-                albedo *= bedTint(hardness);
-                // Caprock: the hard top bed of a cliff weathers paler; varnish streaks run down from under it.
-                float cap = 1.0 - smoothstep(.8, 2.2, d);
-                albedo = mix(albedo, albedo * vec3(1.08, 1.06, 1.03), cap * .6);
-                float streak = smoothstep(.55, .85, texture(u_rainNoise, vec2((world.x + world.y) / 7.0, world.z / 90.0)).r)
-                      * (1.0 - smoothstep(2.0, 14.0, d)) * smoothstep(.5, 1.5, d);
-                if (family(2.0) || family(3.0) || family(LUNAR_FAMILY)) albedo = mix(albedo, albedo * vec3(.52, .45, .42), streak * .6);
-
-                // Talus: fallen rock on the apron at the foot, where the face lies back. A mantle's banks slump into
-                // soil and turf instead.
-                float talus = min(.3 * drop, 6.0) * mix(.6, 1.0, fine);
-                float apron = (1.0 - smoothstep(talus * .55, talus, h)) * smoothstep(.2, .5, face.z);
-                apron = max(apron, 1.0 - smoothstep(.2, .6, h));
-                if (apron > 0.0) {
-                    float lying = smoothstep(.45, .8, face.z);
-                    vec2 dx = vec2(world.y * sign(projection.x), -world.z), dy = vec2(-world.x * sign(projection.y), -world.z) + 3.1;
-                    vec4 rubble = draped(u_sculptLayers.y, p, dx, dy, side, u_sculptTiles.y, fine, lying);
-                    // A desert talus is the cliff's own sandstone, broken: redder and darker than the drifted sand.
-                    if (family(2.0)) rubble.rgb = mix(rubble.rgb, wall.rgb * .92, .5);
-                    float w = heightBlend(wall.a, rubble.a, apron);
-                    albedo = mix(albedo, rubble.rgb, w);
-                    if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
-                        vec3 rubbleNormal = drapedNormal(u_sculptLayers.y + 1.0, p, dx, dy, face, side, u_sculptTiles.y, fine, lying);
-                        normal = normalize(mix(normal, rubbleNormal, w));
-                    }
-                }
+            roughness = mappedRoughness(stoneRoughness(sculptFamily, .5), wall.a);
+            if (hasAuthoredRoughness(u_sculptLayers.z)) {
+                float stone = wallRoughness(u_sculptLayers.z, uvx, uvy,
+                      wallXGradient / u_sculptTiles.z, wallYGradient / u_sculptTiles.z, side, roughness);
+                roughness = crown > 0.0 ? mix(stone,
+                      planarRoughness(u_sculptLayers.z, p, groundGradient, u_sculptTiles.z, fine, roughness), crown) : stone;
             }
+            float h = surfaceUV.x;
             // Broad ledges collect the ground cover (sand, snow, moss on alpine rock); on the rock kit only snow and
             // sand dust lie.
             float ledge = smoothstep(.8, .95, face.z) * smoothstep(.3, .6, fine) * (family(0.0) ? .7 : 1.0);
             // Snow caps the upper facets of a boulder, leaving its stone sides legible against the snowfield.
             if (family(5.0)) {
-                ledge = cliff ? smoothstep(.5, .72, face.z) : smoothstep(.72, .92, face.z);
-                if (!cliff) albedo *= .66;
+                ledge = smoothstep(.72, .92, face.z);
             }
-            if (!cliff) ledge *= family(5.0) ? smoothstep(.2, .9, h) : family(2.0) ? .45 : 0.0;
+            ledge *= family(5.0) ? smoothstep(.2, .9, h) : family(2.0) ? .45 : 0.0;
             if (ledge > 0.0 && !family(4.0)) {
                 vec4 top = planar(u_sculptLayers.x, p, u_sculptTiles.x, broad);
                 float w = heightBlend(wall.a, top.a, ledge);
                 albedo = mix(albedo, groundTone(top.rgb, world, broad, fine, region, 0.0, 0.0), w);
-                roughness = mix(roughness, mappedRoughness(coverRoughness(u_sculptFamily), top.a, cavity), w);
+                roughness = mix(roughness, planarRoughness(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad,
+                      mappedRoughness(coverRoughness(sculptFamily), top.a)), w);
                 if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
                     normal = normalize(mix(normal, upNormal(planarNormal(u_sculptLayers.x + 1.0, p, u_sculptTiles.x, broad).rgb, face), w));
                 }
             }
-            if (!cliff) {
-                // Each block its own shade; on alpine meadows a thin moss stain keeps the stone texture visible.
-                if (!wetRock) albedo *= mix(.78, 1.0, v_color.a);
-                if (family(0.0)) {
-                    float moss = smoothstep(.7, .94, face.z) * smoothstep(.6, .8, fine);
-                    albedo *= mix(vec3(1.0), vec3(.9, .97, .82), moss * .22);
-                }
+            // Stable per-block pigment variation, independent of water optics and root occlusion.
+            albedo *= mix(.78, 1.0, wetRock ? surfaceUV.y : v_color.a);
+            if (family(0.0)) {
+                float moss = smoothstep(.7, .94, face.z) * smoothstep(.6, .8, fine);
+                albedo *= mix(vec3(1.0), toLinear(vec3(.9, .97, .82)), moss * .22);
             }
         }
         if (ground && !natural && u_normalMaps > .5 && terrainNormalDetail > 0.0) {
@@ -361,71 +414,53 @@ void main() {
             cavity = detail.a * .6 + .4;
         }
         if (ground && !shore && family(4.0)) {
-            occlusion = 1.0 - .3 * exp(-v_diffuseUV.y / 3.5);
+            occlusion = 1.0 - .3 * exp(-surfaceUV.y / 3.5);
         }
         if (shore && !natural && family(4.0) && face.z < .6) {
-            concreteSlab(world, face, projection, v_diffuseUV.x, v_diffuseUV.y, albedo, normal, occlusion, cavity);
-        } else if (shore && !natural && !family(4.0)) {
-            // A drowned wall stays sheer: exposed rock above, then a broken transition into the bed's sediment
-            // near its foot. Its height above that bed is supplied by the same vertices that form the wall.
-            float rock = rockiness(steps) * (1.0 - smoothstep(.2, .8, face.z));
-            if (rock > 0.0) {
-                vec2 uvx, uvy;
-                float side;
-                vec4 wall = wallSample(world, face, uvx, uvy, side);
-                float foot = smoothstep(.05, 1.6 + 1.2 * fine + .6 * wall.a, v_diffuseUV.x);
-                rock *= foot;
-                albedo = mix(albedo, wall.rgb * bedTint(.5), rock);
-                if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
-                    normal = normalize(mix(normal, wallNormal(u_sculptLayers.z + 1.0, uvx, uvy, face, side), rock));
-                    float relief = mix(mapTexel(u_sculptLayers.z + 1.0, uvy).a, mapTexel(u_sculptLayers.z + 1.0, uvx).a, side);
-                    cavity = mix(cavity, relief * .5 + .5, rock);
-                }
-            }
+            concreteSlab(world, worldDx, worldDy, face, projection, surfaceUV.x, surfaceUV.y,
+                  albedo, normal, occlusion, cavity, roughness);
         }
-        // Natural materials fade within materialNormal; retained slab/rock paths share this final fade.
+        // Natural materials fade within rockNormal (materialNormal in volcanic programs); slab and rock kit paths share
+        // this final fade.
         // Vertex/contact occlusion remains separate, so losing fine pores does not remove cliff-foot shading.
         if (!natural && !plant && u_normalMaps > .5) {
             normal = normalize(mix(face, normal, terrainNormalDetail));
             cavity = mix(TERRAIN_DISTANT_CAVITY, cavity, terrainNormalDetail);
         }
 #ifdef terrainBlendFlag
-        if (ground || cliff) {
-            float foot = shore || cliff ? v_diffuseUV.x : v_diffuseUV.y;
-            float rim = shore || cliff ? v_diffuseUV.y : v_diffuseUV.x;
+        if ((ground || cliff) && !rocky) {
+            float foot = shore || cliff ? surfaceUV.x : surfaceUV.y;
+            float rim = shore || cliff ? surfaceUV.y : surfaceUV.x;
             float rock = ground ? rockiness(steps) : v_color.g;
             // A bank blend must use sediment below the waterline, never repaint the bed with neighbouring turf.
-            blendCovers(materialWorld, face, foot, rim, rock, ground ? .5 : hardness, sediment,
+            blendCovers(world, face, foot, rim, rock, ground ? .5 : hardness, sediment,
                   broad, fine, region, albedo, normal, cavity, materialHeight, grass, sand, bounce, response, rainCover,
                   emission, roughness, volcanic, materialCoverage);
         }
 #endif
+        // biomeMaskFlag: the board has biomes or liquids of two palettes (GpuBiomeSurface); without them this stage
+        // finds no cover and leaves everything as it is.
+#ifdef biomeMaskFlag
         if (ground || cliff || bedrock) {
-            biomeSurface(world, face, shore, above, cliff || bedrock ? v_diffuseUV.x : 0.0,
-                  cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x, materialHeight, sand,
-                  albedo, normal, cavity, grass, bounce, biomePool, biomeDamp);
+            biomeSurface(world, face, shore, above, cliff || bedrock ? surfaceUV.x : 0.0,
+                  cliff || bedrock ? surfaceUV.y : surfaceUV.x, materialHeight, sand, deckMud, region,
+                  albedo, normal, cavity, roughness, grass, bounce, biomePool, biomeDamp);
         }
+#endif
         if (ground && grass > 0.0 && !shore && u_wind.z > 0.0) {
             // Gusts roll across a meadow: the grass leans with them and catches the light differently.
             vec2 gust = length(u_wind.xy) > .01 ? normalize(u_wind.xy) : vec2(1.0, 0.0);
             float sway = sin(dot(world.xy, gust) * .45 - u_rainTime * 1.9 + fine * 6.0)
                   * sin(dot(world.xy, vec2(-gust.y, gust.x)) * .21 - u_rainTime * .7);
-            albedo *= 1.0 + sway * .05 * u_wind.z * grass;
             normal = normalize(normal + vec3(gust * sway * .12 * u_wind.z * grass, 0.0));
         }
-        float fungusGrade = family(FUNGUS_FAMILY) ? 1.0 : 0.0;
-#ifdef terrainBlendFlag
-        // Follow the shared contact weights at theme boundaries rather than tinting a neighbouring material abruptly.
-        vec4 fungal = 1.0 - step(vec4(.5), abs(u_coverFamilies - FUNGUS_FAMILY));
-        vec4 coverWeights = max(v_coverWeights, vec4(0.0));
-        fungusGrade = dot(coverWeights, fungal) / max(dot(coverWeights, vec4(1.0)), .0001);
-#endif
-        albedo = mix(levelGrade(albedo, level, fungusGrade), albedo, volcanic);
         if (waterCovered) {
-            // Wet in a band just above the waterline and below it.
-            albedo *= 1.0 - .25 * (1.0 - smoothstep(0.0, .12, above)) * (1.0 - smoothstep(0.0, .20, biomeDamp));
+            // Damp sediment stops short of the patchy dry bank, following the same already-sampled fields.
+            float dampMargin = shore && natural ? bankMargin * .65 : .12;
+            shoreAbsorption = .65 * (1.0 - smoothstep(0.0, dampMargin, above))
+                  * (1.0 - smoothstep(0.0, .20, biomeDamp));
         }
-        if (watered) {
+        if (watered && above < 0.0) {
             // Beneath the waterline the bed keeps the hue its column of water passes and catches caustics
             // (water-optics.glsl), while the surface above removes the brightness the column absorbs.
             submerged = max(0.0, depth * u_metre - u_waterLine) / u_levelHeight;
@@ -434,8 +469,8 @@ void main() {
             if (dot(mixture, vec4(1.0)) < .5) mixture = waterPalette(palette);
             // Water-owned triangles include exposed bars. Apply suspended sediment only below the actual
             // waterline, or the dry marsh changes colour at the straight boundary of the bed mesh.
-            vec3 bedTint = mix(waterBedTint(mixture, submerged), vec3(.92, .88, .73), clamp(biomeDamp * 2.0, 0.0, 1.0));
-            albedo *= mix(vec3(1.0), bedTint, smoothstep(0.0, .12, -above));
+            vec3 bedTint = mix(waterBedTint(mixture, submerged), toLinear(vec3(.92, .88, .73)), clamp(biomeDamp * 2.0, 0.0, 1.0));
+            transmission = mix(vec3(1.0), bedTint, smoothstep(0.0, .12, -above));
             if (u_rainDetail > 0.0 && u_waterEffects > 0.0) {
                 caustic = waterBedCaustics(v_cloudPosition.xy * u_rainScale, submerged) * u_rainDetail * u_waterEffects;
             }
@@ -449,78 +484,126 @@ void main() {
         if (u_terrainWear > 0.0 && terrainNormalDetail > 0.0) {
             vec4 wear = terrainWear(fields, materialHeight, cavity, face, normal);
 #ifdef terrainBlendFlag
-            vec3 pigment = materialWeathering(u_coverFamilies.x, wear, fields, cavity) * materialCoverage.x
-                  + materialWeathering(u_coverFamilies.y, wear, fields, cavity) * materialCoverage.y
-                  + materialWeathering(u_coverFamilies.z, wear, fields, cavity) * materialCoverage.z
-                  + materialWeathering(u_coverFamilies.w, wear, fields, cavity) * materialCoverage.w;
+            vec3 pigment = materialWeathering(coverFamilies.x, wear, fields, cavity) * materialCoverage.x
+                  + materialWeathering(coverFamilies.y, wear, fields, cavity) * materialCoverage.y
+                  + materialWeathering(coverFamilies.z, wear, fields, cavity) * materialCoverage.z
+                  + materialWeathering(coverFamilies.w, wear, fields, cavity) * materialCoverage.w;
 #else
-            vec3 pigment = materialWeathering(u_sculptFamily, wear, fields, cavity);
+            vec3 pigment = materialWeathering(sculptFamily, wear, fields, cavity);
 #endif
-            pigment *= u_terrainWear * exposed * (1.0 - biomePool) * (1.0 - biomeDamp * .65);
-            albedo *= vec3(1.0) + pigment;
+            // Snow's authored RGB already contains its cool granular crust. Do not add a second microscopic
+            // color treatment that disappears with normal LOD. Keep the original wear response for roughness.
+            vec3 colorPigment = pigment;
+#ifdef terrainBlendFlag
+            float snowCoverage = dot(materialCoverage, 1.0 - step(vec4(.5), abs(coverFamilies - 5.0)));
+            if (snowCoverage > 0.0) colorPigment -= materialWeathering(5.0, wear, fields, cavity) * snowCoverage;
+#else
+            if (family(5.0)) colorPigment = vec3(0.0);
+#endif
+            float wearStrength = u_terrainWear * exposed * (1.0 - biomePool) * (1.0 - biomeDamp * .65);
+            pigment *= wearStrength;
+            albedo *= authoredPigmentGain(vec3(1.0) + colorPigment * wearStrength);
             roughness = mix(roughness, .98, max(max(abs(pigment.r), abs(pigment.g)), abs(pigment.b)));
         }
         groundDamage(world, face, grass, sand, exposed, albedo, normal, cavity, roughness);
     }
-    #ifdef surfaceScarFlag
-    if (!ground) groundDamage(world, face, 0.0, sand, exposed, albedo, normal, cavity, roughness);
-    #endif
-    if (ground) albedo *= mix(1.0, terrainGrid(v_cloudPosition.xy * u_rainScale), exposed * (1.0 - volcanic));
+    if (!ground && u_surfaceScar > .5) groundDamage(world, face, 0.0, sand, exposed, albedo, normal, cavity, roughness);
+    // Scorch replaces material before rain, grid and elevation grade. Severity zero takes no material samples.
+    if (u_clay < .5 && u_groundScorch.x > 0.0 && volcanic < 1.0) {
+        vec2 scorch = groundScorches(v_cloudPosition.xy) * exposed * (1.0 - volcanic);
+        float severity = max(scorch.x, scorch.y);
+        if (severity > 0.0) {
+            severity += .025 * (2.0 * fine - 1.0) * 4.0 * severity * (1.0 - severity);
+            float top = leaf ? 0.0 : smoothstep(.35, .65, face.z);
+            vec3 sites = SCORCH_SITES;
+            float height = .5, referenceRoughness = .28, ao = 1.0;
+            vec3 detail = vec3(0.0, 0.0, 1.0);
+            if (top > 0.0) {
+                PackedTopCoordinates uv = packedTopCoordinates(rockProjection, u_scorchedMaterial.y, region);
+                vec4 reference = packedTopColor(u_scorchedMaterial.x, uv);
+                vec2 surface = packedTopSurface(u_scorchedMaterial.x, uv, detail);
+                sites = mix(sites, scorchSites(reference.rgb, surface.x), top);
+                height = mix(height, reference.a, top);
+                referenceRoughness = sqrt(mix(referenceRoughness * referenceRoughness, surface.x * surface.x, top));
+                ao = mix(ao, surface.y, top);
+            }
+            Scorched deposit = scorched(severity, sites, referenceRoughness, height);
+            albedo = mix(albedo, deposit.albedo, deposit.coverage);
+            roughness = sqrt(mix(roughness * roughness, deposit.roughness * deposit.roughness, deposit.coverage));
+            cavity = mix(cavity, ao, deposit.coverage);
+            if (u_normalMaps > .5 && terrainNormalDetail > 0.0 && top > 0.0) {
+                detail = normalize(vec3(detail.xy * deposit.detail, detail.z));
+                normal = normalize(mix(normal, upNormal(detail, face),
+                      deposit.coverage * smoothstep(.12, .75, severity) * top * terrainNormalDetail));
+            }
+            // Only a nuclear blast heats the sparse fused fissures. Painted glass is always cold.
+            float heat = u_groundScorch.y;
+            emission += deposit.coverage * smoothstep(.78, .97, scorch.x) * top
+                  * (1.0 - smoothstep(.04, .12, height)) * heat * heat * 1.1 * vec3(1.0, .12, .01);
+        }
+    }
     // Rain darkens exposed ground and rock, and gathers in puddles on level ground.
     float wet = u_wetness * rainCover * exposed;
-    float film = max(wet * max(0.0, response), max(biomeDamp, biomePool));
-    float puddle = biomePool;
+    // Moisture darkens porous peat, but does not turn its entire surface into standing water. Rain
+    // coating and transient puddles both respect that absorption; permanent pools remain fully wet.
+    float saturated = smoothstep(0.0, .28, biomeDamp);
+    float rainRetention = mix(1.0, .15, saturated);
+    float rainFilm = wet * max(0.0, response);
+    float film = max(rainFilm * rainRetention, biomePool);
     if (ground && wet * u_rainDetail > 0.0 && face.z > .97) {
         vec2 position = v_cloudPosition.xy * u_rainScale;
-        puddle = max(puddle, rainPuddle(position, wet, max(0.0, response)) * smoothstep(.97, .999, face.z) * u_rainDetail);
-        normal = normalize(mix(normal, normalize(vec3(rainRipples(position), 1.0)), puddle));
-        film = mix(film, 1.0, puddle);
+        float rainPool = rainPuddle(position, wet, max(0.0, response))
+              * smoothstep(.97, .999, face.z) * u_rainDetail;
+        // Ripples only where a puddle shows them; elsewhere the weight is zero and the normal stays exactly.
+        vec3 rippled = rainPool > 0.0 ? normalize(vec3(rainRipples(position), 1.0)) : normal;
+        normal = normalize(mix(normal, rippled, rainPool * rainRetention));
+        film = max(mix(rainFilm, 1.0, rainPool) * rainRetention, biomePool);
     }
-    albedo *= 1.0 - wet * mix(.18, .11, max(0.0, response));
-    albedo = toLinear(albedo);
+    // Biome peat/mud already contains its wet pigment. Rain only darkens the remaining unsaturated share;
+    // the existing film/pool response above still receives the full rain amount.
+    albedo = wetAlbedo(albedo, max(groundAbsorption(wet * (1.0 - saturated), response), shoreAbsorption));
+    if (ground) albedo *= mix(1.0, terrainGrid(v_cloudPosition.xy * u_rainScale), exposed * (1.0 - volcanic));
+    albedo *= transmission;
+    albedo = materialReflectance(albedo);
+    // Grade the completed bounded pigment: later weathering or a reflectance bound must not flatten the lift.
+    // Clay and molten material retain their own presentation; cliffs use the continuous height set above.
+    if (u_clay < .5 && level != 0.0 && volcanic < 1.0) {
+        float fungusGrade = family(FUNGUS_FAMILY) ? 1.0 : 0.0;
+#ifdef terrainBlendFlag
+        // The final material coverage includes height competition and sediment transfer at mixed contacts.
+        fungusGrade = dot(materialCoverage, 1.0 - step(vec4(.5), abs(coverFamilies - FUNGUS_FAMILY)));
+#endif
+        albedo = mix(levelGrade(albedo, level, fungusGrade), albedo, volcanic);
+    }
 #ifdef lightingFlag
-    // Sky from above; from below, light reflected by the sunlit ground: warm in the desert, white on snow.
-    vec3 ambient = skyLight(normal, bounce) * occlusion * cavity + lavaIrradiance(v_cloudPosition, normal) * cavity;
-    vec3 direct = vec3(0.0), sheen = vec3(0.0);
-#if numDirectionalLights > 0
-    vec3 light = -u_dirLights[0].direction;
-    // Foliage scatters light around its masses: a wrapped response instead of a hard terminator.
-    float incidence = plant ? max(0.0, dot(normal, light) * .6 + .4) : max(0.0, dot(normal, light));
-    vec3 sun = u_dirLights[0].color * sculptShadow(face, light);
-    direct = sun * incidence * mix(1.0, cavity, .5) * (1.0 + caustic);
-    if (!plant && u_clay < .5 && volcanic < 1.0 && incidence > 0.0) {
-        // Reuse the same shadowed sun and dielectric response as the other mapped materials. No additional
-        // shadow pass or surface-map fetch: roughness follows the already blended height/cavity channels.
-        sheen = sun * dielectricSheen(normal, light, -viewDirection(), film, roughness) * cavity;
-    } else if (film > 0.0 && incidence > 0.0) {
-        vec3 halfVector = normalize(light - viewDirection());
-        float exponent = mix(12.0, 96.0, film);
-        float fresnel = .02 + .98 * pow(1.0 - max(0.0, dot(-viewDirection(), halfVector)), 5.0);
-        sheen = sun * incidence * film * fresnel * pow(max(0.0, dot(normal, halfVector)), exponent) * (exponent + 2.0) / 8.0;
-    }
+    vec3 view = -viewDirection();
+    normal = shadingNormal(normal, geometric, view);
+    // Once per pixel, from the final normal: mapped relief, ripples and flat pools alike (light-model.glsl).
+    surfaceVariance = normalVariance(dFdx(normal), dFdy(normal));
+    // Thin tissue receives the shadow from its sun-facing side; other casters still occlude it.
+    // Keep the single receiver-plane lookup outside the per-pixel tissue/volcanic branches.
+    vec3 light = sunDirection();
+    vec3 receiver = leaf && dot(face, light) < 0.0 ? -face : face;
+    // Natural cliffs approximate a curved surface with shared vertex normals. Use that unmapped surface for
+    // incident sidedness: a triangle cutoff exposes their tessellation at the light horizon. Planar panels and
+    // other geometry retain triangle support; normal-map detail cannot move this incident hemisphere.
+    Surface surface = opaqueSurface(albedo, normal, cliff && !panel ? face : geometric, roughness, film,
+          sculptShadow(receiver, light));
+    surface.occlusion = surface.specularOcclusion = occlusion;
+    surface.cavity = cavity;
+    // Match the leaves in terrain-foliage: they pass .35 of their colour from the other side, never a wrap lobe.
+    if (leaf) surface.back = thinTransmission(albedo, .35);
+    surface.heat = volcanic;
+    surface.bounce = bounce;
+    surface.emission = emission;
+    vec3 result = shadeSurface(surface, caustic, submerged);
+#else
+    vec3 result = albedo + emission;
 #endif
-    if (volcanic > 0.0) {
-        vec3 hotAmbient, hotDirect, hotSheen;
-        surfaceLighting(normal, film, roughness, hotAmbient, hotDirect, hotSheen);
-        ambient = mix(ambient, hotAmbient * cavity, volcanic);
-        direct = mix(direct, hotDirect, volcanic);
-        sheen = mix(sheen, hotSheen, volcanic);
-    }
-    // Cloud shadows attenuate direct light and sheen here (inserted by GpuCloudShadow).
-    vec3 pigment = albedo;
-    albedo *= ambient + direct;
-    albedo += sheen;
-    if (submerged > 0.0) {
-        vec3 scattered = surfaceAmbient(vec3(0.0, 0.0, 1.0)) * occlusion + sunOnGround() * (1.0 + caustic);
-        albedo = submergedLight(albedo, pigment, scattered, submerged);
-    }
-#endif
-    vec3 result = toDisplay(albedo + emission);
-    if (puddle > 0.0) result = rainReflection(result, normal, puddle);
     // Fade through the final level above the black cap. All walls around one pit share this height reference,
     // even where their rims stand at different levels, so the fade cannot break into wedges at their corners.
     if (abyss) {
-        float light = smoothstep(0.0, .9 * u_levelHeight / u_metre, v_diffuseUV.x);
+        float light = smoothstep(0.0, .9 * u_levelHeight / u_metre, surfaceUV.x);
         result *= light * light;
     }
     fragColor = vec4(result, 1.0);

@@ -47,7 +47,7 @@ final class GpuRoutePulse implements Disposable {
     /** How far behind the head the route's marks stay lit, in hexes. */
     static final float TRAIL = 2.5f;
     /** The 3D ghost's glow added at the surge's peak, and the share of its transparency the peak takes away. */
-    static final Color GHOST_SURGE = new Color(.42f, .52f, .45f, 1);
+    static final float GHOST_SURGE = .52f;
     static final float GHOST_SURGE_OPACITY = .8f;
     /** How far the ripple runs out from the destination's centre, in hex radii, and how long it takes, in seconds. */
     static final float RING_RADIUS = 1.65f;
@@ -203,6 +203,11 @@ final class GpuRoutePulse implements Disposable {
         return true;
     }
 
+    /** Copies the final segment's colour for the destination ghost's surge. */
+    Color arrivalColor(Color out) {
+        return out.set(last);
+    }
+
     /**
      * The ghost's surge: 0 until the head lands, then a quick rise to the intensity in use and a slow ease back to 0
      * within {@link #SURGE} seconds.
@@ -322,9 +327,9 @@ final class GpuRoutePulse implements Disposable {
             float y = (mark[i + 1] + mark[i + 4]) / 2;
             float z = (mark[i + 2] + mark[i + 5]) / 2;
             float reach = Vector3.dst(mark[i], mark[i + 1], mark[i + 2], mark[i + 3], mark[i + 4], mark[i + 5]) / 2;
-            // A soft halo about the mark, and the mark itself drawn again, whiter.
-            flat(x, y, z, reach + 3.5f * half, glow(pointColour, .1f, .85f * alpha, .4f * alpha));
-            float core = glow(pointColour, .6f, alpha, .9f * alpha);
+            // A soft halo about the mark, and a brighter core in the same movement colour.
+            flat(x, y, z, reach + 3.5f * half, glow(pointColour, .85f * alpha, .4f * alpha));
+            float core = glow(pointColour, alpha, .9f * alpha);
             if (reach > 0) {
                 band(mark[i], mark[i + 1], mark[i + 2], mark[i + 3], mark[i + 4], mark[i + 5], 1.2f * half,
                       1.2f * half, core, core, false);
@@ -341,7 +346,7 @@ final class GpuRoutePulse implements Disposable {
                 float shine = (1 - age) * strength;
                 facing(x + MathUtils.cos(angle) * drift, y + MathUtils.sin(angle) * drift,
                       z + MOTE_RISE * radius * risen * (.6f + seed), MOTE_SIZE * radius,
-                      glow(pointColour, .55f, shine, .5f * shine));
+                      glow(pointColour, shine, .5f * shine));
             }
         }
     }
@@ -377,15 +382,15 @@ final class GpuRoutePulse implements Disposable {
                   sample[a] + (sample[b] - sample[a]) * t1, sample[a + 1] + (sample[b + 1] - sample[a + 1]) * t1,
                   sample[a + 2] + (sample[b + 2] - sample[a + 2]) * t1, half * (.3f + .7f * left0),
                   half * (.3f + .7f * left1),
-                  glow(pointColour, .25f, .85f * strength * left0 * left0, .4f * strength * left0 * left0),
-                  glow(pointColour, .25f, .85f * strength * left1 * left1, .4f * strength * left1 * left1), true);
+                  glow(pointColour, .85f * strength * left0 * left0, .4f * strength * left0 * left0),
+                  glow(pointColour, .85f * strength * left1 * left1, .4f * strength * left1 * left1), true);
         }
     }
 
     /**
      * The head at the located point: in 3D a pool of its light on the ground below it and glows facing the camera,
-     * from a wide, faint bloom to a white-hot core; flat glows in the Tactical View. {@code grow} widens it as it
-     * lands.
+     * from a wide, faint bloom to a bright core in the segment's colour; flat glows in the Tactical View.
+     * {@code grow} widens it as it lands.
      */
     private void head(float strength, float grow) {
         if (strength <= 0) {
@@ -393,19 +398,19 @@ final class GpuRoutePulse implements Disposable {
         }
         if (tactical) {
             float size = FLAT_HEAD_SIZE * GpuBoardOverlay.PIXEL * radius * grow;
-            flat(point.x, point.y, point.z, 2.2f * size, glow(pointColour, 0, .4f * strength, .12f * strength));
-            flat(point.x, point.y, point.z, size, glow(pointColour, .15f, .8f * strength, .4f * strength));
-            flat(point.x, point.y, point.z, .42f * size, glow(pointColour, .6f, strength, .75f * strength));
-            flat(point.x, point.y, point.z, .2f * size, glow(pointColour, 1, strength, .9f * strength));
+            flat(point.x, point.y, point.z, 2.2f * size, glow(pointColour, .4f * strength, .12f * strength));
+            flat(point.x, point.y, point.z, size, glow(pointColour, .8f * strength, .4f * strength));
+            flat(point.x, point.y, point.z, .42f * size, glow(pointColour, strength, .75f * strength));
+            flat(point.x, point.y, point.z, .2f * size, glow(pointColour, strength, .9f * strength));
             return;
         }
         float size = HEAD_SIZE * radius * grow;
         float pool = strength * MathUtils.clamp(1 - (point.z - pointGround) / radius / 2.4f, 0, 1);
-        flat(point.x, point.y, pointGround + .02f * radius, 2.4f * size, glow(pointColour, 0, .45f * pool, .18f * pool));
-        facing(point.x, point.y, point.z, 2 * size, glow(pointColour, 0, .35f * strength, .14f * strength));
-        facing(point.x, point.y, point.z, size, glow(pointColour, .1f, .85f * strength, .45f * strength));
-        facing(point.x, point.y, point.z, .36f * size, glow(pointColour, .55f, strength, .7f * strength));
-        facing(point.x, point.y, point.z, .15f * size, glow(pointColour, 1, strength, .9f * strength));
+        flat(point.x, point.y, pointGround + .02f * radius, 2.4f * size, glow(pointColour, .45f * pool, .18f * pool));
+        facing(point.x, point.y, point.z, 2 * size, glow(pointColour, .35f * strength, .14f * strength));
+        facing(point.x, point.y, point.z, size, glow(pointColour, .85f * strength, .45f * strength));
+        facing(point.x, point.y, point.z, .36f * size, glow(pointColour, strength, .7f * strength));
+        facing(point.x, point.y, point.z, .15f * size, glow(pointColour, strength, .9f * strength));
     }
 
     /**
@@ -428,7 +433,7 @@ final class GpuRoutePulse implements Disposable {
         float rise = .06f;
         float lit = since < rise ? since / rise : 1 - (since - rise) / (FLASH - rise);
         lit *= lit * strength;
-        flat(destination.x, destination.y, destination.z + lift(), 1.2f * radius, glow(last, .2f, .7f * lit,
+        flat(destination.x, destination.y, destination.z + lift(), 1.2f * radius, glow(last, .7f * lit,
               .3f * lit));
     }
 
@@ -446,9 +451,9 @@ final class GpuRoutePulse implements Disposable {
         float fade = strength * (1 - progress * progress * (3 - 2 * progress));
         float edge = tactical ? 3 * GpuBoardOverlay.PIXEL : .05f;
         float wake = (tactical ? 4 : 6) * edge * (.5f + progress);
-        hexBand(at - wake, at, glow(last, .05f, .65f * fade, .4f * fade), 0, .5f);
-        hexBand(at, at + 2 * edge, glow(last, .2f, .7f * fade, .35f * fade), .5f, 1);
-        hexBand(at - edge, at, glow(last, .35f, fade, .85f * fade), .5f, .5f);
+        hexBand(at - wake, at, glow(last, .65f * fade, .4f * fade), 0, .5f);
+        hexBand(at, at + 2 * edge, glow(last, .7f * fade, .35f * fade), .5f, 1);
+        hexBand(at - edge, at, glow(last, fade, .85f * fade), .5f, .5f);
     }
 
     /**
@@ -568,14 +573,13 @@ final class GpuRoutePulse implements Disposable {
     }
 
     /**
-     * A vertex colour for the premultiplied blending: {@code colour} moved {@code whiten} of the way to white gives
+     * A vertex colour for the premultiplied blending: the configured movement {@code colour} gives
      * off {@code light} (added to what lies under it) and covers {@code cover} of it, which keeps the colour in sight
      * on bright ground.
      */
-    private static float glow(Color colour, float whiten, float light, float cover) {
+    private static float glow(Color colour, float light, float cover) {
         float shine = MathUtils.clamp(light, 0, 1);
-        return Color.toFloatBits((colour.r + (1 - colour.r) * whiten) * shine,
-              (colour.g + (1 - colour.g) * whiten) * shine, (colour.b + (1 - colour.b) * whiten) * shine,
+        return Color.toFloatBits(colour.r * shine, colour.g * shine, colour.b * shine,
               MathUtils.clamp(cover, 0, 1));
     }
 

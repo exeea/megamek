@@ -13,7 +13,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Texture;
@@ -27,9 +29,13 @@ import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.RenderableSorter;
+import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
 import com.badlogic.gdx.utils.Array;
+import org.lwjgl.opengl.ARBTimerQuery;
+import org.lwjgl.opengl.GL;
+import org.lwjgl.opengl.GL15;
 
-/** Optional, one-frame inspection of actual terrain submissions; never installed during measured frames. */
+/** Optional inspection of actual terrain submissions; never installed during normal benchmark frames. */
 final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
     private record Origin(String category, int chunk) { }
     private record Row(String pass, String category, String family, int shader, long materialMask,
@@ -61,8 +67,13 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
     private String stage = "unlabelled";
     private boolean indexed;
     private long terrainPageBytes;
+    private final FamilyTiming timing;
 
-    GpuDrawCallAudit(GpuBattleView view) {
+    GpuDrawCallAudit(GpuBattleView view) { this(view, false); }
+
+    /** Timed mode is a separate diagnostic, with the same original sorter and submitted batches. */
+    GpuDrawCallAudit(GpuBattleView view, boolean timed) {
+        timing = timed ? new FamilyTiming() : null;
         terrain = (GpuTerrain) field(view, "terrain");
         batch = (ModelBatch) field(terrain, "batch");
         original = batch.getRenderableSorter();
@@ -77,9 +88,11 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
 
     @Override
     public void sort(Camera camera, Array<Renderable> renderables) {
+        if (timing != null) { timing.restore(renderables); }
         original.sort(camera, renderables);
         // Capture installed ownership after this frame's scene update, without asking providers to submit again.
         if (!indexed) { indexOrigins(); indexed = true; }
+        if (timing != null) { timing.wrap(renderables); return; }
         String pass = stage + "/" + passes.merge(stage, 1, Integer::sum);
         for (Renderable combined : renderables) {
             for (Renderable part : GpuTerrainBatch.ranges(combined)) {
@@ -127,6 +140,207 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
         }
     }
 
+    void beginTimingFrame() { timing.beginFrame(); }
+
+    /** Complete/read queries only after the actual full frame, outside every ordinary CPU/GPU sample. */
+    void endTimingFrame(boolean measured) { timing.endFrame(measured); }
+
+    String timingReport(String scenario) { return timing.report(scenario); }
+
+    private record TimeRow(String stage, String source, String family, String shaders) { }
+    private record TimeSpan(TimeRow row, int slot, int draws) { }
+
+    private static final class TimeCounts {
+        long nanos;
+        int spans, draws;
+    }
+
+    /** Query pairs are reused between complete diagnostic frames, never nested with a draw's internal work. */
+    private final class FamilyTiming {
+        private final Map<Shader, Timed> wrappers = new IdentityHashMap<>();
+        private final Set<Renderable> touched = Collections.newSetFromMap(new IdentityHashMap<>());
+        private final List<int[]> queries = new ArrayList<>();
+        private final List<TimeSpan> pending = new ArrayList<>();
+        private final List<Map<TimeRow, TimeCounts>> frames = new ArrayList<>();
+        private final List<Double> totals = new ArrayList<>();
+        private final Map<TimeRow, Set<String>> examples = new LinkedHashMap<>();
+        private final int[] frameQueries = new int[2];
+        private final long timestampMask;
+        private boolean active;
+
+        FamilyTiming() {
+            var capabilities = GL.getCapabilities();
+            int bits = capabilities.OpenGL33 || capabilities.GL_ARB_timer_query
+                  ? GL15.glGetQueryi(ARBTimerQuery.GL_TIMESTAMP, GL15.GL_QUERY_COUNTER_BITS) : 0;
+            if (bits == 0) { throw new IllegalStateException("Family attribution requires GPU timestamps"); }
+            timestampMask = bits == 64 ? -1L : (1L << bits) - 1;
+            for (int i = 0; i < 2; i++) { frameQueries[i] = GL15.glGenQueries(); }
+        }
+
+        void restore(Iterable<Renderable> parts) {
+            for (Renderable part : parts) {
+                if (part.shader instanceof Timed timed && timed.owner == this) { part.shader = timed.inner; }
+            }
+        }
+
+        void wrap(Array<Renderable> parts) {
+            if (!active) { throw new IllegalStateException("Draw outside family diagnostic frame"); }
+            for (Renderable part : parts) {
+                touched.add(part);
+                part.shader = wrappers.computeIfAbsent(part.shader, inner -> new Timed(inner, this));
+            }
+        }
+
+        void beginFrame() {
+            if (active || !pending.isEmpty()) { throw new IllegalStateException("Unfinished family diagnostic frame"); }
+            active = true;
+            ARBTimerQuery.glQueryCounter(frameQueries[0], ARBTimerQuery.GL_TIMESTAMP);
+        }
+
+        void draw(Shader inner, Renderable combined) {
+            // Restore before delegation: Group.ranges and the next frame's depth twins see the original shader.
+            combined.shader = inner;
+            Set<String> sources = new TreeSet<>(), families = new TreeSet<>(), programs = new TreeSet<>();
+            Set<String> ids = new LinkedHashSet<>();
+            int draws = 0;
+            for (Renderable part : GpuTerrainBatch.ranges(combined)) {
+                if (part.meshPart.size == 0) { continue; }
+                draws++;
+                sources.add(origin(part).category());
+                families.add(timingFamily(part));
+                Shader shader = GpuShaderProvider.unwrap(part.shader);
+                programs.add(Integer.toString(shaders.computeIfAbsent(shader, ignored -> shaders.size() + 1)));
+                if (ids.size() < 3) { ids.add(String.valueOf(part.material.id).replace(',', ';')); }
+            }
+            TimeRow row = new TimeRow(stage, label(sources), label(families), String.join("|", programs));
+            Set<String> retained = examples.computeIfAbsent(row, ignored -> new LinkedHashSet<>());
+            for (String id : ids) { if (retained.size() < 3) { retained.add(id); } }
+            int slot = pending.size();
+            if (slot == queries.size()) { queries.add(new int[] { GL15.glGenQueries(), GL15.glGenQueries() }); }
+            int[] pair = queries.get(slot);
+            ARBTimerQuery.glQueryCounter(pair[0], ARBTimerQuery.GL_TIMESTAMP);
+            try { inner.render(combined); }
+            finally { ARBTimerQuery.glQueryCounter(pair[1], ARBTimerQuery.GL_TIMESTAMP); }
+            pending.add(new TimeSpan(row, slot, draws));
+        }
+
+        void endFrame(boolean measured) {
+            ARBTimerQuery.glQueryCounter(frameQueries[1], ARBTimerQuery.GL_TIMESTAMP);
+            active = false;
+            restore(touched);
+            touched.clear();
+            Gdx.gl.glFinish();
+            Map<TimeRow, TimeCounts> result = new LinkedHashMap<>();
+            for (TimeSpan span : pending) {
+                long nanos = elapsed(queries.get(span.slot()));
+                TimeCounts counts = result.computeIfAbsent(span.row(), ignored -> new TimeCounts());
+                counts.nanos += nanos;
+                counts.spans++;
+                counts.draws += span.draws();
+            }
+            long total = elapsed(frameQueries);
+            pending.clear();
+            if (measured) { frames.add(result); totals.add(total / 1e6); }
+        }
+
+        private long elapsed(int[] pair) {
+            long before = ARBTimerQuery.glGetQueryObjectui64(pair[0], GL15.GL_QUERY_RESULT);
+            long after = ARBTimerQuery.glGetQueryObjectui64(pair[1], GL15.GL_QUERY_RESULT);
+            return (after - before) & timestampMask;
+        }
+
+        String report(String scenario) {
+            if (frames.isEmpty()) { throw new IllegalStateException("No measured family diagnostic frames"); }
+            var report = new StringBuilder(String.format(java.util.Locale.ROOT,
+                  "FAMILY GPU %s: frames=%d diagnosticWholeFrameMedianMs=%.4f diagnosticWholeFrameP95Ms=%.4f%n",
+                  scenario, frames.size(), percentile(totals, .5), percentile(totals, .95)));
+            report.append("stage,source,family,shaders,frames,renderSpansPerFrame,drawsPerFrame,gpuMedianMs,gpuP95Ms,materialExamples\n");
+            Set<TimeRow> rows = new LinkedHashSet<>();
+            for (var frame : frames) { rows.addAll(frame.keySet()); }
+            for (TimeRow row : rows) {
+                List<Double> times = new ArrayList<>();
+                int spans = 0, draws = 0;
+                for (var frame : frames) {
+                    TimeCounts counts = frame.get(row);
+                    times.add(counts == null ? 0 : counts.nanos / 1e6);
+                    if (counts != null) { spans += counts.spans; draws += counts.draws; }
+                }
+                report.append(String.format(java.util.Locale.ROOT, "%s,%s,%s,%s,%d,%.2f,%.2f,%.4f,%.4f,%s%n",
+                      row.stage(), row.source(), row.family(), row.shaders(), frames.size(),
+                      spans / (double) frames.size(), draws / (double) frames.size(),
+                      percentile(times, .5), percentile(times, .95), String.join("|", examples.get(row))));
+            }
+            report.append("FAMILY GPU limits: separate query-instrumented diagnostic, not ordinary frame performance. ")
+                  .append("Each interval includes inner.render (material binding and submitted geometry), excludes Shader.begin/end; ")
+                  .append("query boundaries can perturb GPU scheduling. Compare whole diagnostic time with the ordinary total. ")
+                  .append("Main terrain ModelBatch only: excludes separate terrain depth twins, shadows, units, particle batches and UI. ")
+                  .append("Actual batching, order, depth and blending are retained; mixed groups are never split. ")
+                  .append("Family names describe the submitted material and its cover palette, not isolated texture-sample costs. ")
+                  .append("Animation advances normally; camera stays at the reported steady view. Per-row percentiles cannot be summed.\n");
+            return report.toString();
+        }
+
+        void dispose() {
+            restore(touched);
+            touched.clear();
+            for (int[] pair : queries) { for (int query : pair) { GL15.glDeleteQueries(query); } }
+            for (int query : frameQueries) { GL15.glDeleteQueries(query); }
+        }
+    }
+
+    private static String label(Set<String> values) {
+        return values.isEmpty() ? "empty" : values.size() == 1 ? values.iterator().next()
+              : "mixed[" + String.join("|", values) + "]";
+    }
+
+    private static double percentile(List<Double> values, double fraction) {
+        List<Double> ordered = values.stream().sorted().toList();
+        return ordered.get(Math.min(ordered.size() - 1, (int) (ordered.size() * fraction)));
+    }
+
+    /** The actual material role, including blended palettes; no claim to separate costs inside one shader draw. */
+    private static String timingFamily(Renderable part) {
+        String family = family(part);
+        if (!family.equals("-")) {
+            var blend = part.material.get(GpuSurfaceBlend.class, GpuSurfaceBlend.TYPE);
+            if (blend != null) {
+                Set<String> covers = new TreeSet<>();
+                for (float value : blend.families) { covers.add(surfaceFamily((int) value)); }
+                family += "+cover[" + String.join("|", covers) + "]";
+            }
+            if (part.material.has(GpuMagmaShader.TYPE)) { family += "+magma-" + field(part.material.get(GpuMagmaShader.TYPE), "mode"); }
+            return family;
+        }
+        if (part.material.has(GpuMagmaShader.TYPE)) { return "magma-" + field(part.material.get(GpuMagmaShader.TYPE), "mode"); }
+        for (String marker : List.of("boardImpostor", "boardFoliage", "boardBiomeVegetation", "boardVegetationWind",
+              "boardBankTurf", "boardPit", "boardGround", "boardBridgeDeck", "boardModelSurface", "boardBuildingCutaway")) {
+            long type = Attribute.getAttributeType(marker);
+            if (type != 0 && part.material.has(type)) { return marker; }
+        }
+        return "model/other";
+    }
+
+    private static String surfaceFamily(int family) {
+        if (family == BoardSurfaceBlend.CRUST) { return "CRUST"; }
+        if (family == BoardSurfaceBlend.BANK) { return "VOLCANIC_BANK"; }
+        return family >= 0 && family < BoardScene.Surface.values().length
+              ? BoardScene.Surface.values()[family].name() : "bed-" + family;
+    }
+
+    /** One wrapper per original shader, so ModelBatch retains the original begin/end grouping. */
+    private static final class Timed implements Shader {
+        private final Shader inner;
+        private final GpuDrawCallAudit.FamilyTiming owner;
+        Timed(Shader inner, GpuDrawCallAudit.FamilyTiming owner) { this.inner = inner; this.owner = owner; }
+        @Override public void init() { }
+        @Override public boolean canRender(Renderable part) { return inner.canRender(part); }
+        @Override public int compareTo(Shader other) { return inner.compareTo(other instanceof Timed timed ? timed.inner : other); }
+        @Override public void begin(Camera camera, RenderContext context) { inner.begin(camera, context); }
+        @Override public void render(Renderable part) { owner.draw(inner, part); }
+        @Override public void end() { inner.end(); }
+        @Override public void dispose() { /* The terrain's provider owns the borrowed shader. */ }
+    }
+
     /**
      * The audited draws by source ("instanced-trees" for trees, placed objects and building modules, "grass", "scatter",
      * "water", ...) and by family ("water-..." for every water surface), summed over the passes.
@@ -138,6 +352,13 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
             result.merge(row.family(), counts.draws, Integer::sum);
         });
         return result;
+    }
+
+    /** The audited draws from {@code category} whose material has an attribute of {@code type}, over the passes. */
+    int draws(String category, long type) {
+        return rows.entrySet().stream()
+              .filter(entry -> entry.getKey().category().equals(category) && (entry.getKey().materialMask() & type) != 0)
+              .mapToInt(entry -> entry.getValue().draws).sum();
     }
 
     void report(String scenario) {
@@ -252,8 +473,7 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
             String alias = Attribute.getAttributeAlias(attribute.type);
             if ("boardSculpt".equals(alias) && attribute instanceof FloatAttribute value) {
                 int family = (int) value.value;
-                return family >= 0 && family < BoardScene.Surface.values().length
-                      ? BoardScene.Surface.values()[family].name() : "bed-" + family;
+                return surfaceFamily(family);
             }
             if (attribute instanceof GpuWaterShader water) {
                 return "water-" + field(water, "palette") + "-" + water.mode.name().toLowerCase(java.util.Locale.ROOT);
@@ -293,5 +513,6 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
     public void close() {
         try { sorterField.set(batch, original); }
         catch (IllegalAccessException error) { throw new IllegalStateException(error); }
+        finally { if (timing != null) { timing.dispose(); } }
     }
 }

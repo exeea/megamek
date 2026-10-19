@@ -24,7 +24,7 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Native material-family gallery: continuous ambient intensity, cover erosion and reversible controls. */
+/** Native material-family gallery: ambient weathering against none, cover erosion, and a reversible switch. */
 @Tag("on-demand")
 class GpuTerrainWeatheringSmokeTest {
     @Test
@@ -95,7 +95,7 @@ class GpuTerrainWeatheringSmokeTest {
                         frame.render(terrain, camera, scene);
                         byte[] worn = ScreenUtils.getFrameBufferPixels(false);
                         GpuReviewFrame.save(new File(output, name + "-on.png"));
-                        // The unified slider retains the previous full-strength mix, except revised concrete grime.
+                        // Full strength retains the previous mix, except revised concrete grime.
                         if (!baseline.isEmpty() && family != BoardScene.Surface.CONCRETE) {
                             var result = shaders.apply(baseline);
                             assertTrue(result.success(), result.message());
@@ -110,25 +110,6 @@ class GpuTerrainWeatheringSmokeTest {
                             assertArrayEquals(clean, worn, "Sand is a terrain cover and has no ambient weathering");
                         } else {
                             assertTrue(difference > .03, name + ": each ground family needs visible weathering");
-                        }
-                        for (float intensity : new float[] { .25f, .5f, .75f }) {
-                            terrain.setTerrainWear(intensity);
-                            frame.render(terrain, camera, scene);
-                            byte[] partial = ScreenUtils.getFrameBufferPixels(false);
-                            GpuReviewFrame.save(new File(output, name + "-" + Math.round(intensity * 100) + ".png"));
-                            double change = meanDifference(clean, partial);
-                            report.append(String.format(Locale.ROOT, "%s at %.2f: mean RGB byte change %.4f%n",
-                                  name, intensity, change));
-                            if (family == BoardScene.Surface.SAND) {
-                                assertArrayEquals(clean, partial, name + ": sand keeps its own cover");
-                            } else {
-                                assertTrue(change > .01, name + ": partial intensity must already be visible");
-                                assertTrue(meanDifference(partial, worn) > .01, name + ": partial is not full intensity");
-                            }
-                            if (family == BoardScene.Surface.CONCRETE) {
-                                assertEquals(intensity, change / difference, .08,
-                                      name + ": concrete intensity scales continuously, including below .5");
-                            }
                         }
                         terrain.setTerrainWear(0);
                         frame.render(terrain, camera, scene);

@@ -7,7 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
+import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.utils.FloatArray;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -17,6 +20,82 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 /** The same finished shoulder supports turf, blade roots and surface queries at both planted detail levels. */
 class BoardGrassBankTest {
+    @ParameterizedTest
+    @EnumSource(value = TerrainLod.class, names = { "FULL", "MEDIUM" })
+    void grassThinsTowardsOpenWaterWithoutMovingSurvivingBlades(TerrainLod lod) {
+        var dry = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
+        var at = BoardSurfaceBlendTest.CENTER;
+        var tile = dry.tile(at);
+        var support = BoardTacticalGeometry.Surface.of(new BoardSurface(dry, tile, lod), dry, BoardGeometry.floor(dry));
+        var meadow = roots(GpuGroundCover.plant(dry, tile, support, null));
+        float metre = BoardRelief.metres(1);
+        for (int edge = 0; edge < 6; edge++) {
+            var water = at.translated(BoardGeometry.edgeDirection(edge));
+            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS,
+                  0, c.equals(water) ? 1 : -1, 0));
+            // Keep the published support fixed to isolate density from changes in the shore's geometry.
+            var planted = GpuGroundCover.plant(scene, scene.tile(at), support, null);
+            assertEquals(planted, GpuGroundCover.plant(scene, scene.tile(at), support, null),
+                  "Rebuilding the bank keeps the same blades");
+            var shore = roots(planted);
+            assertTrue(meadow.containsAll(shore), "Thinning preserves each surviving root's position, height and rank");
+            var a = BoardGeometry.corner(at, 0, edge);
+            var b = BoardGeometry.corner(at, 0, edge + 1);
+            int[] candidates = new int[3], kept = new int[3];
+            int inland = 0;
+            for (var root : meadow) {
+                float distance = Intersector.distanceSegmentPoint(a.x, a.y, b.x, b.y, root.get(0), root.get(1)) / metre;
+                if (distance >= 3) {
+                    assertTrue(shore.contains(root), "The inland meadow keeps every blade");
+                    inland++;
+                } else {
+                    int band = (int) distance;
+                    candidates[band]++;
+                    if (shore.contains(root)) { kept[band]++; }
+                }
+            }
+            float previous = 0;
+            for (int band = 0; band < 3; band++) {
+                assertTrue(candidates[band] > 50 && kept[band] > 0, "Each metre of shore has a populated sample");
+                float retained = kept[band] / (float) candidates[band];
+                if (band == 0) { assertTrue(retained < .3f, "Grass is sparse beside the shore: " + retained); }
+                else { assertTrue(retained > previous + .15f, "Grass grows progressively denser inland"); }
+                previous = retained;
+            }
+            assertTrue(previous > .7f && inland > 1000, "The fade rejoins a dense, unchanged meadow");
+        }
+    }
+
+    @Test
+    void inlandRaisedAndFrozenWaterDoNotClearTheMeadow() {
+        var at = BoardSurfaceBlendTest.CENTER;
+        var dry = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
+        var support = BoardTacticalGeometry.Surface.of(new BoardSurface(dry, dry.tile(at)), dry, BoardGeometry.floor(dry));
+        var meadow = GpuGroundCover.plant(dry, dry.tile(at), support, null);
+        for (int level : new int[] { -3, -1, 0, 1 }) {
+            var water = at.translated(0);
+            var scene = BoardSurfaceBlendTest.scene(c -> c.equals(water)
+                  ? new BoardScene.Tile(c, level, 1, level == 0, 0, BoardScene.Surface.GRASS, null, null,
+                        null, null, null, List.of(), List.of(), BoardLiquid.WATER, null, true)
+                  : dry.tile(c));
+            assertEquals(meadow, GpuGroundCover.plant(scene, scene.tile(at), support, null),
+                  "A frozen shore or water at another elevation does not thin this meadow: " + level);
+        }
+        var distant = at.translated(0, 2);
+        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS,
+              0, c.equals(distant) ? 1 : -1, 0));
+        assertEquals(meadow, GpuGroundCover.plant(scene, scene.tile(at), support, null),
+              "Water beyond the adjoining shore cannot remove inland grass");
+    }
+
+    private static Set<List<Float>> roots(FloatArray roots) {
+        Set<List<Float>> result = new HashSet<>();
+        for (int i = 0; i < roots.size; i += 4) {
+            result.add(List.of(roots.get(i), roots.get(i + 1), roots.get(i + 2), roots.get(i + 3)));
+        }
+        return result;
+    }
+
     @ParameterizedTest
     @EnumSource(value = TerrainLod.class, names = { "FULL", "MEDIUM" })
     void twoLevelBanksSupportGrassBetweenTheirEarthFaces(TerrainLod lod) {

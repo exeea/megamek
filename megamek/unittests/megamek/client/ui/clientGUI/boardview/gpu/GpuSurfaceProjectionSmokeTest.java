@@ -47,7 +47,7 @@ class GpuSurfaceProjectionSmokeTest {
               """, """
               out vec4 fragColor;
               uniform int u_test;
-              uniform sampler2DArray u_terrainLayers;
+              uniform sampler2DArray u_terrainLayers, u_terrainData;
               uniform vec4 u_sculptTiles, u_sculptLayers;
               const mat2 TURN = mat2(.8253, .5646, -.5646, .8253);
               """ + GpuShaderSource.read("terrain-projection.glsl") + GpuShaderSource.read("terrain-hexes.glsl") + """

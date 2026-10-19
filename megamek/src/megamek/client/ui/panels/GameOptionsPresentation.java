@@ -280,6 +280,7 @@ final class GameOptionsPresentation {
               OptionsConstants.ADVANCED_WOODS_BURN_DOWN_AMOUNT,
               OptionsConstants.ADVANCED_NO_IGNITE_CLEAR);
         register(ADVANCED_RULES, RULES_ENVIRONMENT, "rules.environment.engineering",
+              OptionsConstants.ADVANCED_TAC_OPS_RAILS,
               OptionsConstants.ADVANCED_TAC_OPS_BATTLE_WRECK,
               OptionsConstants.ADVANCED_BRIDGE_BUILDING_ENGINEERS,
               OptionsConstants.UNOFFICIAL_BRIDGE_REPAIR_ENGINEERS);

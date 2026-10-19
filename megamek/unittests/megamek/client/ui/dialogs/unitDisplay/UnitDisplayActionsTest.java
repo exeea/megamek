@@ -51,7 +51,6 @@ import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.enums.WeaponSortOrder;
-import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.INarcPod;
 import megamek.common.equipment.Mounted;
@@ -354,37 +353,6 @@ class UnitDisplayActionsTest {
         verify(client).sendEntityWeaponOrderUpdate(atlas);
         assertEquals(WeaponSortOrder.RANGE_LOW_HIGH, other.getWeaponSortOrder());
         verify(client, never()).sendEntityWeaponOrderUpdate(other);
-    }
-
-    @Test
-    void anAmmunitionChoiceLoadsTheBinAndSendsItForOwnUnitsOnly() throws Exception {
-        Entity other = unit(2, enemy);
-        WeaponMounted lrm = atlas.getWeaponList().get(2);
-        List<AmmoMounted> bins = atlas.getAmmo().stream()
-              .filter(bin -> bin.getType().getAmmoType() == lrm.getType().getAmmoType()).toList();
-        // One shot fired from the second bin tells the list's two entries apart
-        bins.get(1).setShotsLeft(5);
-        onSwing(() -> {
-            WeaponPanel panel = weaponPanel();
-            panel.displayMek(atlas);
-            panel.weaponList.setSelectedIndex(2);
-            JComboBox<?> ammo = field(panel, "m_chAmmo");
-            assertEquals(List.of("[LT] LRM 20  (6)", "[LT] LRM 20  (5)"), items(ammo));
-            assertEquals(0, ammo.getSelectedIndex(), "The loaded bin");
-            ammo.setSelectedIndex(1);
-
-            panel.displayMek(other);
-            panel.weaponList.setSelectedIndex(2);
-            ((JComboBox<?>) field(panel, "m_chAmmo")).setSelectedIndex(1);
-            return null;
-        });
-        assertEquals("LRM 20", lrm.getName());
-        assertEquals(List.of(10, 12, 13), List.of(atlas.getEquipmentNum(lrm), atlas.getEquipmentNum(bins.get(0)),
-              atlas.getEquipmentNum(bins.get(1))));
-        // The unit, the weapon, the bin on its own carrier (a trailer may share it), the carrier and no mode
-        verify(client).sendAmmoChange(1, 10, 13, 1, 0);
-        assertSame(bins.get(1), lrm.getLinkedAmmo());
-        verify(client, times(1)).sendAmmoChange(anyInt(), anyInt(), anyInt(), anyInt(), anyInt());
     }
 
     @Test

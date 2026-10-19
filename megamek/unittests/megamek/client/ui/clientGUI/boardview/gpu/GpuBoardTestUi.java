@@ -14,6 +14,7 @@ import java.util.stream.Stream;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputMultiplexer;
+import com.badlogic.gdx.InputProcessor;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
@@ -31,6 +32,13 @@ import megamek.client.ui.util.KeyCommandBind;
 
 /** Shared native UI input and artwork assertions; all calls run on the GL thread. */
 final class GpuBoardTestUi {
+    /**
+     * How long a board may show its loading screen. Its terrain is ready only once every shader program it draws with
+     * has linked, and a program the program cache does not hold yet (a changed shader, another driver) compiles behind
+     * the loading screen first.
+     */
+    static final int LOADING_SECONDS = 120;
+
     private GpuBoardTestUi() { }
 
     /**
@@ -38,13 +46,7 @@ final class GpuBoardTestUi {
      * scripted frames count from the first presented frame; a test's own tick counter must skip the loading frames.
      */
     static boolean loading(GpuBattleView view) {
-        try {
-            var field = GpuBattleView.class.getDeclaredField("loadingStage");
-            field.setAccessible(true);
-            return field.get(view) != null;
-        } catch (ReflectiveOperationException error) {
-            throw new IllegalStateException(error);
-        }
+        return field(view, "loadingStage") != null;
     }
 
     /**
@@ -52,27 +54,66 @@ final class GpuBoardTestUi {
      * detail job is pending, so a manually driven view inspects the outcome of its edits, not the frame before it.
      */
     static void present(GpuBattleView view) {
-        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(120);
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(LOADING_SECONDS);
         // At least one frame: the loading screen appears only once a frame finds the terrain unbuilt.
         do {
-            assertTrue(System.nanoTime() < deadline, "Terrain loading must finish");
+            assertTrue(System.nanoTime() < deadline, () -> "Terrain loading must finish: " + loadingState(view));
             view.render();
         } while (loading(view) || busy(view));
     }
 
-    private static boolean busy(GpuBattleView view) {
+    /** Whether the view's terrain still has work: a rebuild, a requested build, detail or materials. */
+    static boolean busy(GpuBattleView view) {
+        GpuTerrain terrain = field(view, "terrain");
+        return terrain != null && terrain.busy();
+    }
+
+    /**
+     * The view's loading state for a timeout's message, as far as its terrain shows it, so a load that never finishes
+     * names the stage it stopped in: the loading screen and the frames drawn, the terrain's readiness for the view's
+     * board and its pending work, its build progress (-1 when nothing is building and its materials are ready; 100
+     * while it waits for its materials, such as shader programs), its shader programs linked of those it needs, its
+     * sections by state and each worker's step. GL thread.
+     */
+    static String loadingState(GpuBattleView view) {
+        GpuTerrain terrain = field(view, "terrain");
+        BoardScene scene = field(view, "scene");
+        String state = "loading screen " + loading(view) + ", frames " + view.frames();
+        if (terrain == null) {
+            return state + ", no terrain yet";
+        }
+        var shaders = terrain.shaderProgress();
+        return state + ", terrain ready " + (scene != null && terrain.ready(scene)) + ", busy " + terrain.busy()
+              + ", build progress " + terrain.buildProgress() + ", shaders " + shaders.linked() + "/" + shaders.total()
+              + ", sections "
+              + terrain.buildSections().states().stream().collect(java.util.stream.Collectors.groupingBy(
+                    section -> section, () -> new java.util.EnumMap<>(TerrainLoadProgress.SectionState.class),
+                    java.util.stream.Collectors.counting()))
+              + ", steps " + terrain.buildDetails().stream().map(TerrainLoadProgress.Status::text).toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T field(GpuBattleView view, String name) {
         try {
-            var field = GpuBattleView.class.getDeclaredField("terrain");
+            var field = GpuBattleView.class.getDeclaredField(name);
             field.setAccessible(true);
-            GpuTerrain terrain = (GpuTerrain) field.get(view);
-            return terrain != null && terrain.busy();
+            return (T) field.get(view);
         } catch (ReflectiveOperationException error) {
             throw new IllegalStateException(error);
         }
     }
 
+    /**
+     * The window's stage: the HUD's, or while the window loads its loading screen's, which follows the Alt+Enter key
+     * ({@code GpuBattleView.FullscreenKey}) among the input processors.
+     */
     static Stage stage() {
-        return (Stage) ((InputMultiplexer) Gdx.input.getInputProcessor()).getProcessors().first();
+        for (InputProcessor processor : ((InputMultiplexer) Gdx.input.getInputProcessor()).getProcessors()) {
+            if (processor instanceof Stage stage) {
+                return stage;
+            }
+        }
+        throw new IllegalStateException("The window's input has no stage");
     }
 
     static void press(KeyCommandBind bind) {
@@ -120,10 +161,39 @@ final class GpuBoardTestUi {
         clickActor(stage().getRoot().findActor(name));
     }
 
-    /** Chooses an editor library category: opens the Assets drop-down and clicks the category's item in its list. */
+    /**
+     * Opens an Assets palette category: its tile on the start page (cleared of a search first), else the item of the
+     * category name's drop-down on a category page (a gallery page, which the panel may reopen on, goes back to it).
+     */
     static void category(String id) {
+        Group root = stage().getRoot();
+        if (!shown(root.findActor("editor-category-" + id)) && root.findActor("editor-category") == null) {
+            ((com.badlogic.gdx.scenes.scene2d.ui.TextField) root.findActor("editor-search")).setText("");
+        }
+        if (!shown(root.findActor("editor-category-" + id)) && root.findActor("editor-category") == null) {
+            click("editor-back");
+            stage().draw(); // lays the category page out for the real clicks below
+        }
+        if (shown(root.findActor("editor-category-" + id))) { click("editor-category-" + id); return; }
         click("editor-category");
-        click("editor-library-" + id);
+        click("editor-category-item-" + id);
+    }
+
+    /**
+     * Scrolls the scroll pane holding the actor named {@code name}, such as a palette section's header, until the actor
+     * stands at its top; the grid creates the cards that come into view on the next frame.
+     */
+    static void reveal(String name) {
+        Actor actor = stage().getRoot().findActor(name);
+        assertTrue(actor != null, "Missing " + name);
+        for (Actor parent = actor.getParent(); parent != null; parent = parent.getParent()) {
+            if (parent instanceof ScrollPane scroll) {
+                Vector2 position = actor.localToAscendantCoordinates(scroll.getWidget(), new Vector2());
+                scroll.setScrollY(scroll.getWidget().getHeight() - position.y - actor.getHeight());
+                scroll.updateVisualScroll();
+                return;
+            }
+        }
     }
 
     /** Whether the actor is on a stage and shown: it and every group above it are visible. */
@@ -234,7 +304,7 @@ final class GpuBoardTestUi {
     static <T extends Actor> T tuning(GpuBoardTuning tuning, String name) {
         Actor control = Stream.of(tuning.defaults(), tuning.reloadAssets(), tuning.editShaders())
               .filter(button -> name.equals(button.getName())).findFirst().orElse(null);
-        for (Table page : List.of(tuning.cameraRows(), tuning.boardRows(), tuning.atmosphereRows(),
+        for (Table page : List.of(tuning.cameraRows(), tuning.displayRows(), tuning.boardRows(), tuning.atmosphereRows(),
               tuning.terrainRows())) {
             control = control != null ? control : page.findActor(name);
         }

@@ -407,7 +407,7 @@ final class GpuModalDialog implements GpuHud.Component {
                         }
                     });
                 }
-                choices.content(options);
+                choices.content(options).openedFrom(face);
                 Vector2 corner = face.localToStageCoordinates(new Vector2());
                 choices.showAt(corner.x, corner.y);
             });

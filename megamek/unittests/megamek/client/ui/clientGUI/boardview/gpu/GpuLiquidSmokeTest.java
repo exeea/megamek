@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -17,7 +18,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.ScreenUtils;
+import com.badlogic.gdx.utils.BufferUtils;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -37,10 +38,10 @@ class GpuLiquidSmokeTest {
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
-                try {
-                    checkInterpolation();
-                    for (boolean shader : new boolean[] { true, false }) { checkRendering(shader, false); }
-                    checkRendering(true, true);
+                try (var surface = new GpuSceneTestOutput()) {
+                    checkInterpolation(surface);
+                    for (boolean shader : new boolean[] { true, false }) { checkRendering(surface, shader, false); }
+                    checkRendering(surface, true, true);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
@@ -53,7 +54,7 @@ class GpuLiquidSmokeTest {
     }
 
     /** Pixel changes alone also accept texture panning. Stationary pools must match authored frames spatially. */
-    private static void checkInterpolation() {
+    private static void checkInterpolation(GpuSceneTestOutput surface) {
         BoardScene original = scene();
         List<BoardScene.Tile> flat = original.tiles().stream()
               .map(tile -> tile(tile.coords(), 0, tile.liquid(), tile.ground(), tile.frozen())).toList();
@@ -68,26 +69,24 @@ class GpuLiquidSmokeTest {
             camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             camera.setIsometric(false);
             camera.fit(scene);
-            List<int[]> first = samples(gif, camera, scene, true);
+            List<float[]> first = linearSamples(surface, gif, camera, scene, true);
             gif.animate(0.1f, List.of());
-            List<int[]> next = samples(gif, camera, scene, true);
+            List<float[]> next = linearSamples(surface, gif, camera, scene, true);
             shader.animate(0.05f, List.of());
-            List<int[]> middle = samples(shader, camera, scene, true);
+            List<float[]> middle = linearSamples(surface, shader, camera, scene, true);
             for (int family = 0; family < LIQUIDS.size(); family++) {
                 // PBR lava uses the continuous board clock in both modes, not authored GIF interpolation.
                 if (LIQUIDS.get(family).molten()) { continue; }
                 for (int pixel = 0; pixel < first.get(family).length; pixel++) {
-                    for (int shift : new int[] { 8, 16, 24 }) {
-                        float expected = (((first.get(family)[pixel] >>> shift) & 255)
-                              + ((next.get(family)[pixel] >>> shift) & 255)) / 2f;
-                        assertEquals(expected, (middle.get(family)[pixel] >>> shift) & 255, 2,
-                              "Stationary material must interpolate the changing artwork without shifting it: family "
-                                    + family + ", pixel " + pixel + ", channel " + shift);
-                    }
+                    float expected = (first.get(family)[pixel] + next.get(family)[pixel]) / 2f;
+                    // Two half-float rounding steps cover the stored endpoints and interpolated radiance.
+                    assertEquals(expected, middle.get(family)[pixel], Math.max(1, expected) * 2f / 1024,
+                          "Stationary material must interpolate linear artwork without shifting it: family "
+                                + family + ", RGB sample " + pixel);
                 }
             }
             shader.animate(0.05f, List.of());
-            List<int[]> boundary = samples(shader, camera, scene, true);
+            List<float[]> boundary = linearSamples(surface, shader, camera, scene, true);
             for (int family = 0; family < LIQUIDS.size(); family++) {
                 assertTrue(java.util.Arrays.equals(next.get(family), boundary.get(family)),
                       "Both modes must match at an authored frame boundary, family " + family);
@@ -98,7 +97,7 @@ class GpuLiquidSmokeTest {
         }
     }
 
-    private static void checkRendering(boolean shader, boolean procedural) throws Exception {
+    private static void checkRendering(GpuSceneTestOutput surface, boolean shader, boolean procedural) throws Exception {
         BoardScene scene = scene();
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
         assertTrue(output.isDirectory() || output.mkdirs());
@@ -113,11 +112,11 @@ class GpuLiquidSmokeTest {
                 terrain.renderShadows(camera.camera, List.of());
                 // Detail refinement and water-page builds must finish before the animation comparison starts.
                 GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
-                List<int[]> before = samples(terrain, camera, scene, true);
+                List<int[]> before = samples(surface, terrain, camera, scene, true);
                 GpuBoardTestUi.capture(new File(output, "liquids-" + (procedural ? "procedural" : shader ? "shader" : "gif")
                       + "-" + (isometric ? "isometric" : "top") + ".png"));
                 terrain.animate(1.25f, List.of());
-                List<int[]> after = samples(terrain, camera, scene, true);
+                List<int[]> after = samples(surface, terrain, camera, scene, true);
                 for (int family = 0; family < LIQUIDS.size() - 1; family++) {
                     int changed = 0;
                     for (int pixel = 0; pixel < before.get(family).length; pixel++) {
@@ -129,7 +128,7 @@ class GpuLiquidSmokeTest {
                 assertGreen(after.get(1));
                 assertGreen(after.get(5));
                 if (isometric) { assertWaterfallPalette(camera, scene, after); }
-                int[] opaqueLava = samples(terrain, camera, scene, false).get(2);
+                int[] opaqueLava = samples(surface, terrain, camera, scene, false).get(2);
                 assertTrue(java.util.Arrays.equals(opaqueLava, after.get(2)), "Magma must render in the opaque depth pass");
             }
 
@@ -142,15 +141,15 @@ class GpuLiquidSmokeTest {
             BoardScene edited = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
             camera.setIsometric(false);
             camera.fit(scene);
-            int[] toxic = samples(terrain, camera, scene, true).get(1);
+            int[] toxic = samples(surface, terrain, camera, scene, true).get(1);
             terrain.update(edited);
-            int[] fresh = samples(terrain, camera, edited, true).get(1);
+            int[] fresh = samples(surface, terrain, camera, edited, true).get(1);
             assertTrue(channel(toxic, 16) - channel(toxic, 8) > channel(fresh, 16) - channel(fresh, 8) + 15,
                   "Live removal of hazardous liquid must remove the green tint");
 
             terrain.setAtmosphere(new BoardAtmosphere.Lighting(new Vector3(0, 0, -1), Color.BLACK, Color.BLACK,
                   Color.BLACK, Color.BLACK, Color.BLACK, Color.WHITE, 1, 0, false));
-            List<int[]> dark = samples(terrain, camera, edited, true);
+            List<int[]> dark = samples(surface, terrain, camera, edited, true);
             assertTrue(channel(dark.get(2), 24) > 40, "Lava's emission remains visible without ambient or direct light");
             assertTrue(channel(dark.get(0), 24) < 5, "Water must not emit light");
         } finally {
@@ -203,32 +202,67 @@ class GpuLiquidSmokeTest {
         return sum / pixels.length;
     }
 
-    private static List<int[]> samples(GpuTerrain terrain, BoardCamera camera, BoardScene scene, boolean transparent) {
-        ScreenUtils.clear(0.03f, 0.045f, 0.06f, 1, true);
+    private static void draw(GpuSceneTestOutput surface, GpuTerrain terrain, BoardCamera camera, boolean transparent) {
+        surface.begin(.03f, .045f, .06f, 1);
         terrain.render(camera.camera, false);
         if (transparent) { terrain.renderTransparent(camera.camera); }
-        Pixmap image = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+    }
+
+    private static List<int[]> samples(GpuSceneTestOutput surface, GpuTerrain terrain, BoardCamera camera,
+          BoardScene scene, boolean transparent) {
+        draw(surface, terrain, camera, transparent);
+        surface.display();
+        Pixmap image = Pixmap.createFromFrameBuffer(0, 0, surface.scene().getWidth(), surface.scene().getHeight());
         try {
             List<int[]> result = new ArrayList<>();
-            for (int family = 0; family < LIQUIDS.size(); family++) {
-                Coords coords = pool(family);
-                Vector3 center = BoardGeometry.center(coords, scene.tile(coords).elevation());
-                center.z = BoardGeometry.surfaceZ(scene.tile(coords));
-                int[] pixels = new int[49];
-                for (int y = -3; y <= 3; y++) {
-                    for (int x = -3; x <= 3; x++) {
-                        Vector3 screen = camera.camera.project(center.cpy().add(x * 2, y * 2, 0));
-                        pixels[(y + 3) * 7 + x + 3] = image.getPixel(
-                              Math.round(screen.x * image.getWidth() / Gdx.graphics.getWidth()),
-                              Math.round(screen.y * image.getHeight() / Gdx.graphics.getHeight()));
-                    }
+            for (int[] positions : samplePositions(camera, scene, image.getWidth(), image.getHeight())) {
+                int[] pixels = new int[positions.length];
+                for (int i = 0; i < pixels.length; i++) {
+                    pixels[i] = image.getPixel(positions[i] % image.getWidth(), positions[i] / image.getWidth());
                 }
                 result.add(pixels);
             }
             return result;
-        } finally {
-            image.dispose();
+        } finally { image.dispose(); }
+    }
+
+    /** Frame interpolation is linear-light arithmetic; the display shoulder and transfer are deliberately absent. */
+    private static List<float[]> linearSamples(GpuSceneTestOutput surface, GpuTerrain terrain, BoardCamera camera,
+          BoardScene scene, boolean transparent) {
+        draw(surface, terrain, camera, transparent);
+        int width = surface.scene().getWidth(), height = surface.scene().getHeight();
+        FloatBuffer image = BufferUtils.newFloatBuffer(width * height * 4);
+        Gdx.gl.glReadPixels(0, 0, width, height, GL20.GL_RGBA, GL20.GL_FLOAT, image);
+        List<float[]> result = new ArrayList<>();
+        for (int[] positions : samplePositions(camera, scene, width, height)) {
+            float[] pixels = new float[positions.length * 3];
+            for (int i = 0; i < positions.length; i++) {
+                for (int channel = 0; channel < 3; channel++) {
+                    pixels[i * 3 + channel] = image.get(positions[i] * 4 + channel) / GpuSceneRadiance.SCALE;
+                }
+            }
+            result.add(pixels);
         }
+        return result;
+    }
+
+    private static List<int[]> samplePositions(BoardCamera camera, BoardScene scene, int width, int height) {
+        List<int[]> result = new ArrayList<>();
+        for (int family = 0; family < LIQUIDS.size(); family++) {
+            Coords coords = pool(family);
+            Vector3 center = BoardGeometry.center(coords, scene.tile(coords).elevation());
+            center.z = BoardGeometry.surfaceZ(scene.tile(coords));
+            int[] positions = new int[49];
+            for (int y = -3; y <= 3; y++) {
+                for (int x = -3; x <= 3; x++) {
+                    Vector3 screen = camera.camera.project(center.cpy().add(x * 2, y * 2, 0));
+                    positions[(y + 3) * 7 + x + 3] = Math.round(screen.y * height / Gdx.graphics.getHeight()) * width
+                          + Math.round(screen.x * width / Gdx.graphics.getWidth());
+                }
+            }
+            result.add(positions);
+        }
+        return result;
     }
 
     private static Coords pool(int family) { return new Coords(1 + (family % 3) * 3, 1 + (family / 3) * 3); }

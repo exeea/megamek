@@ -1769,11 +1769,8 @@ public class Board implements Serializable {
         curHex.removeTerrain(Terrains.FUEL_TANK_CF);
         curHex.removeTerrain(Terrains.FUEL_TANK_ELEV);
         curHex.removeTerrain(Terrains.FUEL_TANK_MAGN);
-        curHex.removeTerrain(Terrains.BRIDGE);
-        curHex.removeTerrain(Terrains.BRIDGE_CF);
-        curHex.removeTerrain(Terrains.BRIDGE_ELEV);
-        // A destroyed section drops its field-repair badge along with the bridge terrain.
-        curHex.removeTerrain(Terrains.BRIDGE_REPAIRED);
+        // A destroyed section drops its field-repair badge and the road and rail on its deck with it.
+        curHex.removeBridge();
 
         // Add rubble terrain that matches the building type.
         if (type > 0) {
@@ -2173,6 +2170,19 @@ public class Board implements Serializable {
         maxElevation = UNDEFINED_MAX_ELEV;
     }
 
+    /**
+     * Shifts a freshly loaded sheet before lobby/game assembly. Depths and heights relative to a hex stay unchanged;
+     * absolute object placements move with the sheet. The assembled board rebuilds its shared edge terrain normally.
+     */
+    public void shiftLevels(int offset) {
+        if (offset == 0) { return; }
+        for (Hex hex : data) {
+            hex.shiftLevel(offset);
+        }
+        resetStoredElevation();
+        processBoardEvent(new BoardEvent(this, null, BoardEvent.BOARD_CHANGED_ALL_HEXES));
+    }
+
     public boolean containsBridges() {
         if (isSpace() || isSky()) {
             return false;
@@ -2252,6 +2262,38 @@ public class Board implements Serializable {
             } else {
                 data[c].setTheme(newTheme);
             }
+        }
+        processBoardEvent(new BoardEvent(this, null, BoardEvent.BOARD_CHANGED_ALL_HEXES));
+    }
+
+    /**
+     * Applies a lobby theme to this session's loaded sheet. Cosmetic ground paint matching each hex's previous theme
+     * becomes clear ground, so it follows the new theme; different paint and all gameplay terrain remain. The catalog
+     * owns the legacy ground selectors as well as the native appearance IDs. The source file is never changed. Restore
+     * the lobby's Default choice by loading the original sheet again, not by calling {@link #setTheme(String)}.
+     */
+    public void overrideTheme(String newTheme) {
+        Objects.requireNonNull(newTheme, "A theme override must be explicit");
+        BoardEditorBlueprint blueprint = BoardEditorBlueprint.get();
+        for (Hex hex : data) {
+            String previous = hex.getTheme();
+            String ground = "ground/blend/" + (previous == null || previous.isBlank()
+                  ? "grass" : previous.toLowerCase(Locale.ROOT));
+            BoardEditorBlueprint.Variant variant = blueprint.variant(ground);
+            if (variant != null && variant.blend() && variant.owner().equals("ground")) {
+                HexAppearance appearance = hex.getAppearance().get("ground");
+                if (appearance != null && ground.equals(appearance.variant())) {
+                    Map<String, HexAppearance> styles = new HashMap<>(hex.getAppearance());
+                    styles.remove("ground");
+                    hex.setAppearance(styles);
+                }
+                Terrain token = hex.getTerrain(Terrains.GROUND_FLUFF);
+                HexAppearance legacy = token == null ? null : blueprint.reproducing(hex, token);
+                if (legacy != null && ground.equals(legacy.variant())) {
+                    hex.removeTerrain(Terrains.GROUND_FLUFF);
+                }
+            }
+            hex.setTheme(newTheme);
         }
         processBoardEvent(new BoardEvent(this, null, BoardEvent.BOARD_CHANGED_ALL_HEXES));
     }

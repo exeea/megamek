@@ -411,7 +411,10 @@ public abstract class Infantry extends Entity {
     public PilotingRollData checkBogDown(MoveStep step, Hex curHex, Coords lastPos, Coords curPos,
           boolean isPavementStep) {
         PilotingRollData roll = new PilotingRollData(getId(), 4, "entering boggy terrain");
-        int bgMod = curHex.getBogDownModifier(getMovementMode(), false);
+        // On a muddy raised bridge deck (Hex#deckMud) the deck's mud bogs down, even on its road surface.
+        Terrain deckMud = curHex.deckMud(step.getElevation());
+        int bgMod = (deckMud != null) ? deckMud.getBogDownModifier(getMovementMode(), false)
+              : curHex.getBogDownModifier(getMovementMode(), false);
         final boolean onBridge = (curHex.terrainLevel(Terrains.BRIDGE) > 0) &&
               (getElevation() == curHex.terrainLevel(Terrains.BRIDGE_ELEV));
         if (!lastPos.equals(curPos) &&
@@ -420,9 +423,7 @@ public abstract class Infantry extends Entity {
               (getMovementMode() != EntityMovementMode.HOVER) &&
               (getMovementMode() != EntityMovementMode.VTOL) &&
               (getMovementMode() != EntityMovementMode.WIGE) &&
-              (step.getElevation() == 0) &&
-              !isPavementStep &&
-              !onBridge) {
+              ((deckMud != null) || ((step.getElevation() == 0) && !isPavementStep && !onBridge))) {
             roll.append(new PilotingRollData(getId(), bgMod, "avoid bogging down"));
         } else {
             roll.addModifier(TargetRoll.CHECK_FALSE,

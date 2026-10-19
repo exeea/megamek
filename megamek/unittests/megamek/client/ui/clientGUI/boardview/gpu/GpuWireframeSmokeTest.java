@@ -31,7 +31,6 @@ import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.RenderableProvider;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
@@ -225,27 +224,20 @@ class GpuWireframeSmokeTest {
         var terrain = new GpuTerrain();
         var plain = new GpuTerrain();
         var wireframe = new GpuWireframe();
-        var geology = BoardRelief.geology();
-        var withoutCover = geology.stream().map(g -> new BoardRelief.Geology(g.cellWidth(), g.cellHeight(), g.cells(),
-              g.fractures(), g.strata(), g.bedding(), g.buttress(), g.recess(), g.relief(), g.cap(), g.talus(),
-              g.round(), g.bank(), g.lean(), g.cast(), 0, 0)).toList();
         var camera = new BoardCamera();
         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.setIsometric(true);
         camera.camera.zoom = .3f;
         camera.center(BoardGeometry.center(new Coords(1, 1), 0));
-        try {
+        try (var output = new GpuSceneTestOutput()) {
             for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.FUNGUS)) {
                 terrain.update(scatterScene(family, true));
-                try {
-                    BoardRelief.tuneGeology(withoutCover);
-                    plain.update(scatterScene(family, false));
-                } finally { BoardRelief.tuneGeology(geology); }
-                Pixmap shaded = scatterFrame(terrain, camera, null);
-                Pixmap bare = scatterFrame(plain, camera, null);
-                Pixmap expected = scatterFrame(plain, camera, wireframe);
-                Pixmap actual = scatterFrame(terrain, camera, wireframe);
-                Pixmap restored = scatterFrame(terrain, camera, null);
+                plain.update(scatterScene(family, false));
+                Pixmap shaded = scatterFrame(terrain, camera, null, output);
+                Pixmap bare = scatterFrame(plain, camera, null, output);
+                Pixmap expected = scatterFrame(plain, camera, wireframe, output);
+                Pixmap actual = scatterFrame(terrain, camera, wireframe, output);
+                Pixmap restored = scatterFrame(terrain, camera, null, output);
                 try {
                     assertFalse(shaded.getPixels().equals(bare.getPixels()), family + " must have visible scatter in normal rendering");
                     assertEquals(expected.getPixels(), actual.getPixels(), family + " scatter must affect neither wireframe fill nor lines");
@@ -256,7 +248,6 @@ class GpuWireframeSmokeTest {
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Scatter wireframe and shaded rendering");
         } finally {
-            BoardRelief.tuneGeology(geology);
             wireframe.dispose(); plain.dispose(); terrain.dispose();
         }
     }
@@ -278,13 +269,16 @@ class GpuWireframeSmokeTest {
         return new BoardScene(0, 4, 4, tiles, List.of(), List.of(), -1, "", List.of());
     }
 
-    private static Pixmap scatterFrame(GpuTerrain terrain, BoardCamera camera, GpuWireframe wireframe) {
+    private static Pixmap scatterFrame(GpuTerrain terrain, BoardCamera camera, GpuWireframe wireframe, GpuSceneTestOutput output) {
         terrain.settings().run(() -> {
             if (wireframe == null) { terrain.renderShadows(camera.camera, List.of()); }
+            output.scene().begin();
             Gdx.gl.glDepthMask(true);
             ScreenUtils.clear(0, 0, 0, 1, true);
             if (wireframe == null) { terrain.render(camera.camera, false); }
-            else { wireframe.fill(camera.camera, terrain); wireframe.lines(camera.camera, terrain); }
+            else { wireframe.fill(camera.camera, terrain); }
+            output.display();
+            if (wireframe != null) { wireframe.lines(camera.camera, terrain); }
         });
         return Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
     }
@@ -318,8 +312,7 @@ class GpuWireframeSmokeTest {
         var model = GpuUnitModel.sprite(new BoardScene.Pixels(new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB)),
               new TextureRegion(texture));
         var thermal = new GpuThermalUnits();
-        var buffer = new FrameBuffer(Pixmap.Format.RGBA8888, 64, 64, true);
-        try {
+        try (var output = new GpuSceneTestOutput(64, 64)) {
             var camera = new OrthographicCamera(2, 2);
             camera.position.set(0, 0, 2);
             camera.lookAt(0, 0, 0);
@@ -329,19 +322,20 @@ class GpuWireframeSmokeTest {
             var point = new BoardScene.Waypoint(new Coords(0, 0), 0, 0);
             var unit = new BoardScene.Unit(1, -1, "Sprite", point, null, false, null, 1, false, null, 0,
                   List.of(point.coords()), null, 30);
-            buffer.begin();
+            output.scene().begin();
+            Gdx.gl.glDepthMask(true);
             ScreenUtils.clear(0, 0, 0, 0, true);
             thermal.add(model.instance, unit, UnitBounds.world(model.instance));
             thermal.render(camera);
+            output.display();
             Pixmap rendered = Pixmap.createFromFrameBuffer(0, 0, 64, 64);
             try {
                 Color body = new Color(rendered.getPixel(16, 32));
                 assertTrue(body.r > .7f && body.g > .3f, "A hot flat sprite uses warm colors: " + body);
                 assertEquals(0, rendered.getPixel(48, 32), "Transparent sprite pixels must leave the target untouched");
-            } finally { rendered.dispose(); buffer.end(); }
+            } finally { rendered.dispose(); }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Thermal sprite fallback");
         } finally {
-            buffer.dispose();
             thermal.dispose();
             model.dispose();
             texture.dispose();

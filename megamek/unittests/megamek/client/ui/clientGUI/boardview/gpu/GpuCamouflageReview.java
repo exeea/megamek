@@ -18,7 +18,6 @@ import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
-import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
@@ -31,6 +30,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.icons.Camouflage;
@@ -46,7 +46,7 @@ final class GpuCamouflageReview {
         var damage = new UnitDamageDisplay();
         var batch = new ModelBatch(GpuUnitShader.provider());
         var source = new UnitCamouflage();
-        try {
+        try (var output = new GpuSceneTestOutput()) {
             var mek = new BipedMek();
             mek.addEquipment(EquipmentType.get("PPC"), Mek.LOC_LEFT_ARM);
             mek.addEquipment(EquipmentType.get("PPC"), Mek.LOC_RIGHT_ARM);
@@ -72,16 +72,19 @@ final class GpuCamouflageReview {
                     assertNull(texture(part), "Cockpit, metal and weapon tips retain their fixed artwork");
                 }
             }
-            var rest = frame(batch, first, 0);
-            assertTrue(difference(rest, frame(batch, second, 0)) > 1000, "The shader must visibly apply rotation at a fixed scale");
-            assertTrue(difference(rest, frame(batch, scaled, 0)) > 1000, "The shader must visibly apply scale at a fixed rotation");
+            var rest = frame(output, batch, first, 0);
+            assertTrue(difference(rest, frame(output, batch, second, 0)) > 1000,
+                  "The shader must visibly apply rotation at a fixed scale");
+            assertTrue(difference(rest, frame(output, batch, scaled, 0)) > 1000,
+                  "The shader must visibly apply scale at a fixed rotation");
             first.transform.setToTranslation(75, 0, 0);
-            assertTrue(difference(rest, frame(batch, first, 75)) < 300, "Moving unit and camera together must not make paint swim");
+            assertTrue(difference(rest, frame(output, batch, first, 75)) < 300,
+                  "Moving unit and camera together must not make paint swim");
             first.transform.idt();
             model.turnUpperBody(first, 35);
             first.getNode("LA-forearm").rotation.set(Vector3.X, 20);
             first.calculateTransforms();
-            assertTrue(difference(rest, frame(batch, first, 0)) > 1000);
+            assertTrue(difference(rest, frame(output, batch, first, 0)) > 1000);
             assertTrue(second.getNode("CT").rotation.isIdentity());
 
             var damaged = new ModelInstance(model.instance.model);
@@ -146,6 +149,9 @@ final class GpuCamouflageReview {
             var view = new GpuBattleView(fixture.source);
             try {
                 view.create();
+                // This fixture checks posed model paint; the default Mek meeple has no torso-turn animator.
+                GpuBoardTestUi.<SelectBox<UnitDisplayMode>>tuning(view, "tuning-unit-display")
+                      .setSelected(UnitDisplayMode.MODELS);
                 renderReady(view);
                 var instances = (Map<?, ?>) field(view, "unitInstances");
                 var before = (ModelInstance) instances.get("1:-1");
@@ -193,7 +199,9 @@ final class GpuCamouflageReview {
 
     /** A displayed board now arrives asynchronously; appearance assertions need its completed terrain upload. */
     static void renderReady(GpuBattleView view) throws Exception {
-        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        // Cold driver compilation of landscape variants can outlast 30 seconds; this checks readiness, not latency.
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(
+              Integer.getInteger("megamek.gpu.prepareSeconds", 120));
         do {
             view.render();
             var terrain = (GpuTerrain) field(view, "terrain");
@@ -201,7 +209,9 @@ final class GpuCamouflageReview {
             if (scene != null && terrain.ready(scene) && !terrain.busy()) { return; }
             Thread.sleep(1);
         } while (System.nanoTime() < deadline);
-        throw new AssertionError("Board did not finish preparing for unit appearance review");
+        var terrain = (GpuTerrain) field(view, "terrain");
+        throw new AssertionError("Board did not finish preparing for unit appearance review: "
+              + terrain.buildDetails() + "; busy=" + terrain.busy());
     }
 
     static Object field(Object object, String name) throws Exception {
@@ -239,7 +249,7 @@ final class GpuCamouflageReview {
               new UnitModelState.Camo("review", "pattern", rotation, scale, 0xFFFFFF, pixels, null));
     }
 
-    private static int[] frame(ModelBatch batch, ModelInstance instance, float offset) {
+    private static int[] frame(GpuSceneTestOutput output, ModelBatch batch, ModelInstance instance, float offset) {
         var camera = new OrthographicCamera(110, 68.75f);
         camera.near = 1;
         camera.far = 1000;
@@ -247,14 +257,13 @@ final class GpuCamouflageReview {
         camera.up.set(Vector3.Z);
         camera.lookAt(offset, 0, 20);
         camera.update();
-        Gdx.gl.glViewport(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        Gdx.gl.glClearColor(.15f, .19f, .23f, 1);
-        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        output.begin(.15f, .19f, .23f, 1);
         var environment = new Environment();
         environment.set(ColorAttribute.createAmbientLight(1, 1, 1, 1));
         batch.begin(camera);
         batch.render(instance, environment);
         batch.end();
+        output.display();
         var pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         try {
             int[] result = new int[pixels.getWidth() * pixels.getHeight()];

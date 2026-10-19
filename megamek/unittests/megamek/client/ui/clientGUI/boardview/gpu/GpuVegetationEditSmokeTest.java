@@ -40,7 +40,7 @@ class GpuVegetationEditSmokeTest {
     void heightEditsKeepUnchangedGrassAndFieldsSubmitted(boolean editField) throws Exception {
         var failure = new AtomicReference<Throwable>();
         var original = BoardGeometry.tuning();
-        boolean lod = TerrainLod.enabled();
+        var lod = TerrainLod.tuning();
         var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
               "vegetation-edits/" + (editField ? "field" : "grass"));
         Files.createDirectories(output.toPath());
@@ -54,7 +54,7 @@ class GpuVegetationEditSmokeTest {
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
                     GpuRiverTerrainSmokeTest.tune(.94f, true);
-                    TerrainLod.setEnabled(false);
+                    TerrainLod.tune(new TerrainLod.Tuning(1, 1));
                     var camera = new BoardCamera();
                     camera.resize(1536, 1024);
                     camera.setIsometric(editField);
@@ -139,7 +139,7 @@ class GpuVegetationEditSmokeTest {
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally {
-                    terrain.dispose(); frame.dispose(); BoardGeometry.tune(original); TerrainLod.setEnabled(lod);
+                    terrain.dispose(); frame.dispose(); BoardGeometry.tune(original); TerrainLod.tune(lod);
                     Gdx.app.exit();
                 }
             }

@@ -145,47 +145,34 @@ class BoardEditorSectionTest {
         Coords added = south.translated(3);
         select(added);
         send(Action.ADD_COMPONENT, "", "bridge");
-        assertEquals(natural, hex(added).getAppearance().get("bridge"), "+ Add Bridge joins the natural span");
+        assertEquals(built, hex(added).getAppearance().get("bridge"), "+ Add Bridge is an explicit local bridge");
         send(Action.CHOOSE_BRUSH, "bridge", "bridge/built");
         session.pointer(added.translated(3), 0, 0, false);
         session.finishStroke();
-        assertEquals(List.of(built, built, built, built, built), types(north, middle, south, added, added.translated(3)),
-              "A Built bridge card makes the span it joins built");
+        assertEquals(List.of(natural, natural, natural, built, built), types(north, middle, south, added, added.translated(3)),
+              "A Built bridge card changes only the hexes it paints");
         select(new Coords(3, 3));
         send(Action.BRIDGE_TYPE, "", "natural");
         assertEquals("Select a bridge first.", session.snapshot().message(), "Only a bridge has a type");
     }
 
-    @Test void bridgeCardKeepsTheSpanPillarsUniform() {
-        // A pillared bridge over three hexes joined north to south, and an unrelated pillared one-hex bridge.
-        Coords north = new Coords(1, 1), middle = new Coords(1, 2), south = new Coords(1, 3), other = new Coords(5, 5);
-        for (Coords at : List.of(north, middle, south, other)) {
+    @Test void bridgeCardsChangeOnlyTheirPaintedHexesWhileSpanActionsStayExplicit() {
+        Coords north = new Coords(1, 1), middle = new Coords(1, 2), south = new Coords(1, 3);
+        for (Coords at : List.of(north, middle, south)) {
             Hex hex = new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:2", "");
             hex.setAppearance(java.util.Map.of("bridge", HexAppearance.PILLARS));
             session.board().setHex(at, hex);
         }
-        var pillars = HexAppearance.PILLARS;
-        send(Action.CHOOSE_BRUSH, "bridge", "bridge/built");
-        session.pointer(middle, 0, 0, false);
-        session.finishStroke();
-        assertEquals(List.of(pillars, pillars, pillars), types(north, middle, south), "The painted hex keeps the span's piers");
-        session.pointer(other, 0, 0, false);
-        session.finishStroke();
-        assertEquals(pillars, hex(other).getAppearance().get("bridge"), "A Built card keeps the piers of the hex it covers");
-        send(Action.UNDO, "", "");
-        send(Action.UNDO, "", "");
-        assertFalse(session.snapshot().canUndo(), "One undo step per stroke");
-
-        Coords added = south.translated(3);
-        session.pointer(added, 0, 0, false);
-        session.finishStroke();
-        assertEquals(List.of(pillars, pillars, pillars, pillars), types(north, middle, south, added),
-              "A hex joining a pillared span gets its piers");
         send(Action.CHOOSE_BRUSH, "bridge", "bridge/natural");
-        session.pointer(added, 0, 0, false);
+        session.pointer(middle, 0, 0, false, null, false, "bridge");
         session.finishStroke();
-        var natural = HexAppearance.NATURAL_BRIDGE;
-        assertEquals(List.of(natural, natural, natural, natural), types(north, middle, south, added), "A rock arch has no piers");
+        assertEquals(List.of(HexAppearance.PILLARS, HexAppearance.NATURAL_BRIDGE, HexAppearance.PILLARS),
+              types(north, middle, south), "Painting a rock arch does not retype its neighbours");
+        select(middle);
+        send(Action.PILLARS, "", "true");
+        assertEquals(List.of(HexAppearance.PILLARS, HexAppearance.PILLARS, HexAppearance.PILLARS), types(north, middle, south));
+        send(Action.UNDO, "", "");
+        assertEquals(HexAppearance.NATURAL_BRIDGE, hex(middle).getAppearance().get("bridge"));
     }
 
     @Test void trussDesignAndColourChangeTheWholeSpanInOneUndoStep() {
@@ -225,10 +212,10 @@ class BoardEditorSectionTest {
         Coords added = south.translated(3);
         select(added);
         send(Action.ADD_COMPONENT, "", "bridge");
-        assertEquals(greenDeck, hex(added).getAppearance().get("bridge"), "+ Add Bridge joins the green truss");
+        assertEquals(HexAppearance.BUILT_BRIDGE, hex(added).getAppearance().get("bridge"), "+ Add Bridge is local");
         send(Action.CHOOSE_BRUSH, "bridge", "bridge/truss");
         session.pointer(other.translated(0), 0, 0, false);
-        session.pointer(other, 0, 0, false);
+        session.pointer(other, 0, 0, false, null, false, "bridge");
         session.finishStroke();
         assertTrue(HexAppearance.truss(hex(other).getAppearance()) && HexAppearance.truss(hex(other.translated(0)).getAppearance()),
               "A Truss card's stroke makes the span it paints a truss");
@@ -236,13 +223,13 @@ class BoardEditorSectionTest {
         send(Action.CHOOSE_BRUSH, "bridge", "bridge/built");
         session.pointer(added, 0, 0, false);
         session.finishStroke();
-        assertEquals(List.of(HexAppearance.BUILT_BRIDGE, HexAppearance.BUILT_BRIDGE, HexAppearance.BUILT_BRIDGE,
-              HexAppearance.BUILT_BRIDGE), types(north, middle, south, added), "A Built card gives the span the standard deck");
+        assertEquals(List.of(greenDeck, greenDeck, greenDeck, HexAppearance.BUILT_BRIDGE), types(north, middle, south, added),
+              "A Built card leaves the other hexes' design unchanged");
         select(middle);
         send(Action.BRIDGE_DESIGN, "", "truss");
         send(Action.BRIDGE_TYPE, "", "natural");
-        assertEquals(List.of(HexAppearance.NATURAL_BRIDGE, HexAppearance.NATURAL_BRIDGE), types(north, added),
-              "A rock arch has no design");
+        assertEquals(List.of(HexAppearance.NATURAL_BRIDGE, HexAppearance.BUILT_BRIDGE), types(north, added),
+              "The span action changes the connected bridge, not the separate new bridge");
         send(Action.BRIDGE_DESIGN, "", "truss");
         assertEquals("Make the bridge built first.", session.snapshot().message());
     }

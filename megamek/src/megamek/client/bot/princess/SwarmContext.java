@@ -240,7 +240,7 @@ public class SwarmContext {
                 var yMidPoint = (startY + endY) / 2;
                 for (var coords : new Coords(xMidPoint, yMidPoint).allAtDistanceOrLess(3)) {
                     var hex = board.getHex(coords);
-                    if (hex == null || hex.isClearHex() && hasNoHazards(hex)) {
+                    if (hex == null || hex.isClear() && hasNoHazards(hex)) {
                         addStrategicGoal(coords);
                         break;
                     }

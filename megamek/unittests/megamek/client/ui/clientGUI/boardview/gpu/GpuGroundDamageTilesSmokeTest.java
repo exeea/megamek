@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -12,9 +13,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
@@ -63,6 +66,8 @@ class GpuGroundDamageTilesSmokeTest {
             assertEquals(small.tileCount(), large.tileCount());
             assertTrue(large.tileCount() <= 9, "One impact must touch only its local tiles");
             int[] a = draw(small, near), b = draw(large, far);
+            captureCoverage("seam-near", a);
+            captureCoverage("seam-far", b);
             int changed = 0, visible = 0;
             for (int i = 0; i < a.length; i++) {
                 if ((a[i] >>> 24) > 20) { visible++; }
@@ -101,6 +106,7 @@ class GpuGroundDamageTilesSmokeTest {
             long coverage = 0;
             int left = 256, right = -1, top = 256, bottom = -1;
             int[] pixels = draw(damage, point);
+            captureCoverage("gouge-" + weapon, pixels);
             for (int y = 0; y < 256; y++) for (int x = 0; x < 256; x++) {
                 int alpha = pixels[y * 256 + x] >>> 24;
                 coverage += alpha;
@@ -147,6 +153,23 @@ class GpuGroundDamageTilesSmokeTest {
         }
     }
 
+    /** Show the actual uploaded mask's coverage channel; shaded material captures belong to the ground-damage test. */
+    private static void captureCoverage(String name, int[] pixels) {
+        if (!Boolean.getBoolean("megamek.gpu.materialMigrationReview")) { return; }
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "damage-tiles");
+        assertTrue(output.isDirectory() || output.mkdirs());
+        var image = new Pixmap(256, 256, Pixmap.Format.RGBA8888);
+        try {
+            for (int y = 0; y < 256; y++) {
+                for (int x = 0; x < 256; x++) {
+                    int coverage = pixels[y * 256 + x] >>> 24;
+                    image.drawPixel(x, y, coverage << 24 | coverage << 16 | coverage << 8 | 255);
+                }
+            }
+            PixmapIO.writePNG(new FileHandle(new File(output, name + "-coverage.png")), image);
+        } finally { image.dispose(); }
+    }
+
     private static void paint(GpuGroundDamage damage, BoardScene scene, GpuGroundDamage.Impact mark, Vector3 point, String key) {
         paint(damage, scene, mark, point, key, point.cpy().add(-BoardRelief.metres(20), 0, BoardRelief.metres(5)));
     }
@@ -180,16 +203,17 @@ class GpuGroundDamageTilesSmokeTest {
 
     private static int[] draw(GpuGroundDamage damage, Vector3 at) {
         var shader = GpuGlsl.compile("Ground scar tiles", """
-              attribute vec3 a_position;
+              in vec3 a_position;
               uniform vec4 u_region;
-              varying vec2 v_world;
+              out vec2 v_world;
               void main() {
                   gl_Position = vec4(a_position, 1.0);
                   v_world = u_region.xy + a_position.xy * u_region.zw;
               }
               """, "#define GROUND_DAMAGE_FRAGMENT\n" + GpuGroundDamage.shaderSource() + """
-              varying vec2 v_world;
-              void main() { gl_FragColor = groundDamageAt(v_world); }
+              in vec2 v_world;
+              out vec4 fragColor;
+              void main() { fragColor = groundDamageAt(v_world); }
               """);
         var target = new FrameBuffer(Pixmap.Format.RGBA8888, 256, 256, false);
         var mesh = new Mesh(true, 4, 6, VertexAttribute.Position());

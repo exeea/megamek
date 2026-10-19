@@ -65,16 +65,12 @@ final class BoardObstacles {
             if (feature.asset().equals("bridge") && object == null) {
                 // A pier stands from below the floor up to the deck: its whole column is solid wherever cover could grow.
                 for (int d = 0; d < 6; d++) {
-                    if (BoardBridgeFooting.pier(scene, tile, d)) { pier(tile, d, false); }
+                    if (BoardBridgeFooting.pier(scene, tile, d)) {
+                        pier(tile, d, BoardBridge.guideway(tile) || BoardBridge.guideway(scene.neighbor(tile, d)));
+                    }
                 }
                 deck(scene, tile, feature);
                 continue;
-            }
-            if (BoardRail.route(feature)) {
-                // A maglev's piers stand so too, up to its beam; the beam itself is the model footprint below.
-                for (int d = 0; d < 6; d++) {
-                    if (BoardBridgeFooting.pier(scene, tile, feature, d) != null) { pier(tile, d, true); }
-                }
             }
             // Paint has no model footprint. Structures already provide clearance for objects on their roofs/decks.
             if (object != null && (object.kind().equals("decal") || object.placement().receiver() != null
@@ -250,22 +246,52 @@ final class BoardObstacles {
      * does not grow through it. A raised deck leaves the ground beneath it as it is.
      */
     private void deck(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature bridge) {
-        float s = BoardGeometry.hexScale(), half = BoardBridge.PASSAGE_HALF_WIDTH * s, centreZ = BoardBridge.deckZ(tile);
+        float s = BoardGeometry.hexScale(), centreZ = BoardBridge.deckZ(tile);
         var centre = BoardGeometry.center(tile.coords(), 0);
         for (int d = 0; d < 6; d++) {
             if ((bridge.bridgeExits() & (1 << d)) == 0) { continue; }
-            var edge = BoardGeometry.center(tile.coords().translated(d), 0).add(centre).scl(.5f);
+            var next = scene.tile(tile.coords().translated(d));
+            var bank = BoardGeometry.center(tile.coords().translated(d), 0);
+            var edge = new Vector3(bank).add(centre).scl(.5f);
             var across = new Vector3(edge).sub(centre).nor();
-            across.set(-across.y, across.x, 0).scl(half);
-            var a = new Vector3(centre).add(across);
-            var b = new Vector3(centre).sub(across);
-            var c = new Vector3(edge).sub(across);
-            var e = new Vector3(edge).add(across);
-            var bounds = new BoundingBox().inf().ext(a).ext(b).ext(c).ext(e);
-            float edgeZ = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, scene.tile(tile.coords().translated(d)), d));
-            footprints.add(new Footprint(List.of(a, b, c, new Vector3(a), new Vector3(c), e),
-                  Math.min(centreZ, edgeZ) - BoardBridge.SLAB * s, Math.max(centreZ, edgeZ), bounds));
+            across.set(-across.y, across.x, 0).scl(BoardBridge.passage(tile, d) * s);
+            float edgeZ = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, next, d));
+            passage(centre, edge, across, Math.min(centreZ, edgeZ) - BoardBridge.SLAB * s, Math.max(centreZ, edgeZ));
+            if (BoardBridge.family(tile) != BoardBridge.Family.NATURAL && !BoardBridge.guideway(tile)
+                  && BoardBridge.bank(tile, next, d) && next.elevation() < tile.elevation() + bridge.elevation()) {
+                // The solid ramp begins at the bridge inset and ends with a wider authored landing block.
+                // Reserve that whole passage, leaving the level centre of the span height-aware above.
+                float lane = (tile.deckCorridor().sides() & 1 << d) != 0
+                      ? BoardRoad.CORRIDOR_HALF : BoardRoad.Kind.PAVED.halfWidth;
+                var outer = new Vector3(across).nor().scl(Math.max(BoardBridge.passage(tile, d),
+                      lane + BoardBridgeFooting.terminalWidth()) * s);
+                int e = Math.floorMod(1 - d, 6);
+                var corner = BoardGeometry.corner(tile.coords(), 0, e);
+                var edgeVector = BoardGeometry.corner(tile.coords(), 0, e + 1).sub(corner);
+                var normal = new Vector3(-edgeVector.y, edgeVector.x, 0).nor();
+                var inner = new Vector3(centre).lerp(corner, .5f);
+                var along = new Vector3(bank).sub(centre).nor();
+                var a = new Vector3(centre).add(outer);
+                var b = new Vector3(centre).sub(outer);
+                a.mulAdd(along, new Vector3(inner).sub(a).dot(normal) / along.dot(normal));
+                b.mulAdd(along, new Vector3(inner).sub(b).dot(normal) / along.dot(normal));
+                quadrilateral(a, b, new Vector3(bank).sub(outer), new Vector3(bank).add(outer),
+                      Math.min(BoardGeometry.groundZ(tile), BoardGeometry.groundZ(next)) - BoardBridge.SLAB * s, centreZ);
+            }
         }
+    }
+
+    private void passage(Vector3 start, Vector3 end, Vector3 across, float low, float high) {
+        var a = new Vector3(start).add(across);
+        var b = new Vector3(start).sub(across);
+        var c = new Vector3(end).sub(across);
+        var d = new Vector3(end).add(across);
+        quadrilateral(a, b, c, d, low, high);
+    }
+
+    private void quadrilateral(Vector3 a, Vector3 b, Vector3 c, Vector3 d, float low, float high) {
+        var bounds = new BoundingBox().inf().ext(a).ext(b).ext(c).ext(d);
+        footprints.add(new Footprint(List.of(a, b, c, new Vector3(a), new Vector3(c), d), low, high, bounds));
     }
 
     private static List<Vector3> triangles(BoardShape shape) {

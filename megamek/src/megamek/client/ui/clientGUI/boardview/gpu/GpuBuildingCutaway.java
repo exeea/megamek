@@ -20,10 +20,21 @@ final class GpuBuildingCutaway extends Attribute {
         this.inside = inside;
     }
 
+    /** Shade before the color clip so mapped normals and optical coats retain their neighboring derivatives. */
     static String fragment(String source, String height) {
-        return source.replace("void main() {", "uniform vec3 u_buildingCutaway;\nvoid main() {\n"
-              + "bool insideStorey = " + height + " >= u_buildingCutaway.x && " + height + " < u_buildingCutaway.y;\n"
-              + "if (insideStorey != (u_buildingCutaway.z > 0.0)) discard;\n");
+        return GpuShaderSource.replaceOnce(source, "void main() {", "void cutawayBaseSurface() {", "cutaway fragment")
+              + "\nuniform vec3 u_buildingCutaway;\nvoid main() {\ncutawayBaseSurface();\n" + clip(height) + "}\n";
+    }
+
+    /** The depth-only pass has no material frame to preserve and retains its original early clip. */
+    static String depthFragment(String source, String height) {
+        return GpuShaderSource.replaceOnce(source, "void main() {", "uniform vec3 u_buildingCutaway;\nvoid main() {\n"
+              + clip(height), "cutaway depth fragment");
+    }
+
+    private static String clip(String height) {
+        return "bool insideStorey = " + height + " >= u_buildingCutaway.x && " + height + " < u_buildingCutaway.y;\n"
+              + "if (insideStorey != (u_buildingCutaway.z > 0.0)) discard;\n";
     }
 
     static String depthVertex(String source, boolean instanced) {

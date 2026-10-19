@@ -40,6 +40,12 @@ final class GpuJumpJetReview {
     private GpuJumpJetReview() { }
 
     static void verify(GpuUnitModels library, ModelBatch batch) throws Exception {
+        try (var output = new GpuSceneTestOutput()) {
+            verify(output, library, batch);
+        }
+    }
+
+    private static void verify(GpuSceneTestOutput output, GpuUnitModels library, ModelBatch batch) throws Exception {
         var tileset = new MekTileset(Configuration.unitImagesDir());
         tileset.loadFromFile("mekset.txt");
         var infantry = new ConvInfantry();
@@ -96,7 +102,7 @@ final class GpuJumpJetReview {
                     assertEquals(frame == 48 ? 0 : expected, jets.emitterCount(), family + " frame " + frame);
                     assertTrue(jets.smokeCount() <= expected * GpuJumpJets.PUFFS_PER_EMITTER);
                     if (entity instanceof BattleArmor || frame == 10 || frame == 24 || frame == 40 || frame == 48) {
-                        render(batch, camera, instance, jets, "runtime-jump-" + family + "-" + String.format("%02d", frame),
+                        render(output, batch, camera, instance, jets, "runtime-jump-" + family + "-" + String.format("%02d", frame),
                               frame == 24 || frame == 40);
                     }
                 }
@@ -129,6 +135,7 @@ final class GpuJumpJetReview {
                 }
                 jets.endFrame();
                 assertEquals(GpuJumpJets.MAX_EMITTERS, jets.emitterCount());
+                output.begin(.11f, .14f, .18f, 1);
                 jets.render(camera);
                 jets.beginFrame();
                 jets.endFrame();
@@ -202,23 +209,25 @@ final class GpuJumpJetReview {
               entity.height() + 1, false, model, 0xFFFFFF);
     }
 
-    private static void render(ModelBatch batch, OrthographicCamera camera, ModelInstance instance, GpuJumpJets jets,
-          String name, boolean verifyBlue) {
+    private static void render(GpuSceneTestOutput output, ModelBatch batch, OrthographicCamera camera,
+          ModelInstance instance, GpuJumpJets jets, String name, boolean verifyBlue) {
         var environment = new Environment();
         environment.set(ColorAttribute.createAmbientLight(.7f, .7f, .7f, 1));
         environment.add(new DirectionalLight().set(.8f, .8f, .8f, -.4f, -.7f, -1));
-        Gdx.gl.glViewport(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        Gdx.gl.glClearColor(.11f, .14f, .18f, 1);
-        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        output.begin(.11f, .14f, .18f, 1);
         batch.begin(camera);
         batch.render(instance, environment);
         batch.end();
+        output.display();
         Pixmap before = verifyBlue ? Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight()) : null;
+        output.scene().begin();
         if (before != null) {
+            Gdx.gl.glDepthMask(true);
             Gdx.gl.glClearDepthf(0);
             Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
             try {
                 jets.render(camera);
+                output.display();
                 Pixmap hidden = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                 try {
                     assertEquals(before.getPixels(), hidden.getPixels(), "Exhaust must respect foreground depth");
@@ -226,6 +235,8 @@ final class GpuJumpJetReview {
                     hidden.dispose();
                 }
             } finally {
+                output.scene().begin();
+                Gdx.gl.glDepthMask(true);
                 Gdx.gl.glClearDepthf(1);
                 Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
             }
@@ -234,6 +245,7 @@ final class GpuJumpJetReview {
             batch.end();
         }
         jets.render(camera);
+        output.display();
         Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         try {
             if (before != null) {

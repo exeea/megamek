@@ -43,7 +43,9 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
+import megamek.client.ui.clientGUI.boardview.UnitAnnotations;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.Configuration;
@@ -75,6 +77,8 @@ import org.junit.jupiter.api.Test;
 class GpuLiveBoardSpaceSmokeTest {
     /** The movement fixture's Sagittaire (walk 3, run 5) pins a waypoint north of it and runs on to the road. */
     private static final Coords WAYPOINT = new Coords(11, 10);
+    /** The minimap's planned-route colour. */
+    private static final Color ROUTE = Color.valueOf("D4FFF0");
     private static final Coords DESTINATION = new Coords(11, 7);
     private static final int ATLAS = 1;
     private static final int SAGITTAIRE = 2;
@@ -119,7 +123,7 @@ class GpuLiveBoardSpaceSmokeTest {
                 assertEquals(DESTINATION, move.destination());
                 assertFalse(move.envelope().isEmpty(), "The plan has its envelope");
                 assertSame(move, field(live.overlay, "move"), "The overlay draws the published plan");
-                verifyMovement3d(live, move);
+                verifyMovement3d(live, move, moving.unit);
                 verifyUnchangedRecaptures(live, 60);
 
                 live.view.setTacticalView(true);
@@ -133,7 +137,7 @@ class GpuLiveBoardSpaceSmokeTest {
     }
 
     /** The 3D view: heads, plates, tip, pin, guides and badge; then the overlay alone on the board. */
-    private static void verifyMovement3d(Live live, GpuMovePlan.Snapshot move) throws Exception {
+    private static void verifyMovement3d(Live live, GpuMovePlan.Snapshot move, Entity planner) throws Exception {
         live.zoom(DESTINATION, 120);
         live.capture("i1b-movement-3d.png");
         // For the review: the overlay without MegaMek's own sprites.
@@ -147,7 +151,9 @@ class GpuLiveBoardSpaceSmokeTest {
             verifyModelHead(live, view, id);
         }
         Actor focus = live.actor("nameplate-" + SAGITTAIRE);
-        assertEquals("Sagittaire", GpuBoardTestUi.texts(focus).getFirst(), "The planning unit's tag");
+        // A tag names its unit as the client's label style does (GpuNameplates).
+        assertEquals(UnitAnnotations.labelName(planner, GUIPreferences.getInstance().getUnitLabelStyle()),
+              GpuBoardTestUi.texts(focus).getFirst(), "The planning unit's tag");
         verifyPlate(live, view, "nameplate-" + SAGITTAIRE, SAGITTAIRE);
         verifyPlate(live, view, "pip-" + ATLAS, ATLAS);
         verifyPlate(live, view, "pip-" + ARCHER, ARCHER);
@@ -236,7 +242,7 @@ class GpuLiveBoardSpaceSmokeTest {
         verifyPlate(live, view, "nameplate-" + SAGITTAIRE, SAGITTAIRE);
         assertSame(live.model(SAGITTAIRE), field(live.overlay, "ghostSource"),
               "The Tactical View's ghost copies the unit's meeple");
-        assertNotNull(field(live.overlay, "dropEdges"), "The Tactical View's elevation-drop edges");
+        // The terrain's top artwork draws the elevation-drop edges; the overlay adds none (GpuBoardOverlaySmokeTest).
         live.show(live.overlayOnly(live.frame.get().panels().move()));
         Pixmap planned = live.board();
         live.show(live.overlayOnly(GpuMovePlan.Snapshot.EMPTY));
@@ -288,6 +294,10 @@ class GpuLiveBoardSpaceSmokeTest {
         }
         assertNotNull(shown, "The Archer walks between its hexes");
         Minimap minimap = live.minimap();
+        Vector3 from = BoardGeometry.center(live.unit(SAGITTAIRE).location().coords(), 0);
+        Vector3 to = BoardGeometry.center(WAYPOINT, 0);
+        float routeX = (from.x + to.x) / 2;
+        float routeY = (from.y + to.y) / 2;
         Pixmap window = live.window();
         try {
             assertEquals(shown, live.hudView().unitPositions().get(ARCHER), "No time passed");
@@ -298,17 +308,23 @@ class GpuLiveBoardSpaceSmokeTest {
                 int left = minimap.pixel(window, hex.x, hex.y);
                 assertFalse(shows(left, UiTheme.CORAL, 32), "No square at its hexes: " + Integer.toHexString(left));
             }
-            // The planned route's line starts at the planning unit, whose own hex the route leaves out (E2b).
-            Vector3 from = BoardGeometry.center(live.unit(SAGITTAIRE).location().coords(), 0);
-            Vector3 to = BoardGeometry.center(WAYPOINT, 0);
-            int route = minimap.pixel(window, (from.x + to.x) / 2, (from.y + to.y) / 2);
-            assertTrue(shows(route, Color.valueOf("D4FFF0"), 40), () -> "The route's first leg, was "
-                  + Integer.toHexString(route));
+            // While a move plays, the HUD holds the played unit's state and hides the plan (GpuHudState.presented).
+            int hidden = minimap.pixel(window, routeX, routeY);
+            assertFalse(shows(hidden, ROUTE, 40), () -> "No route while a move plays, was " + Integer.toHexString(hidden));
         } finally {
             window.dispose();
         }
         live.publish();
         live.draw(60, .1f);
+        // Once it has played, the planned route's line starts at the planning unit, whose own hex the route leaves out
+        // (E2b).
+        Pixmap settled = live.window();
+        try {
+            int route = minimap.pixel(settled, routeX, routeY);
+            assertTrue(shows(route, ROUTE, 40), () -> "The route's first leg, was " + Integer.toHexString(route));
+        } finally {
+            settled.dispose();
+        }
     }
 
     /** {@code preferences} at {@code factor} times their HUD scale. */
@@ -341,14 +357,26 @@ class GpuLiveBoardSpaceSmokeTest {
         assertEquals(head.x, rect.x + rect.width / 2, 1, id + ": around the model's middle");
     }
 
-    /** The plate {@code name} stands bottom-centred on unit {@code id}'s head (G8a). */
-    private static void verifyPlate(Live live, GpuHud.HudView view, String name, int id) {
+    /**
+     * The plate {@code name} stands bottom-centred on unit {@code id}'s head (G8a); while the unit's marks show, they
+     * stand on the head and the plate {@code GpuNameplates.MARKS_GAP} above them (GpuNameplates.Plate#place).
+     */
+    private static void verifyPlate(Live live, GpuHud.HudView view, String name, int id)
+          throws ReflectiveOperationException {
         Actor plate = live.actor(name);
         assertTrue(GpuBoardTestUi.shown(plate), name + " is shown");
         Vector2 corner = plate.localToStageCoordinates(new Vector2());
         Vector2 head = view.unitHeads().get(id);
         assertEquals(head.x, corner.x + plate.getWidth() / 2, 1, name + ": centred on the head");
-        assertEquals(head.y, corner.y, 1, name + ": standing on the head");
+        Actor marks = live.hud.stage.getRoot().findActor("marks-" + id);
+        float bottom = head.y;
+        if (GpuBoardTestUi.shown(marks)) {
+            assertEquals(head.y, marks.localToStageCoordinates(new Vector2()).y, 1, id + ": its marks on the head");
+            var gap = GpuNameplates.class.getDeclaredField("MARKS_GAP");
+            gap.setAccessible(true);
+            bottom += marks.getHeight() + gap.getFloat(null);
+        }
+        assertEquals(bottom, corner.y, 1, name + ": standing on the head, above the marks");
     }
 
     /** The overlay keeps its meshes over {@code frames} recaptures that show the same (G7). */
@@ -862,6 +890,7 @@ class GpuLiveBoardSpaceSmokeTest {
             // The view reads the preferences through the accessor; tests change them through the field.
             when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);
             when(source.takeFrame()).thenAnswer(invocation -> frame.get());
+            when(source.reserveUnits()).thenAnswer(invocation -> real.reserveUnits());
             when(source.moves()).thenReturn(mock(GpuMovePlan.class));
             when(source.fire()).thenReturn(mock(GpuFireOrders.class));
             when(source.physical()).thenReturn(mock(GpuPhysicalOptions.class));

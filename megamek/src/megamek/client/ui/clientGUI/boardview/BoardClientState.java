@@ -2159,7 +2159,11 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
             case ARTILLERY_HIT, ARTILLERY_MISS, ARTILLERY_DRIFT -> true;
             default -> false;
         };
-        return isTerrainCapture && isArtilleryLanding;
+        // A nuclear or orbital strike's 2D explosion picture, sliced across its hexes, would lie flat on the 3D
+        // terrain under its grass; the 3D board draws the blast and its scorch instead.
+        boolean isDetonation = display.getType() == SpecialHexDisplay.Type.NUKE_HIT
+              || display.getType() == SpecialHexDisplay.Type.ORBITAL_BOMBARDMENT;
+        return gpuCapture && isDetonation || isTerrainCapture && isArtilleryLanding;
     }
 
     public BoardMarker.Kind pointMarkerKind(SpecialHexDisplay display) {

@@ -16,7 +16,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Disposable;
 
-/** A bounded, GPU-animated particle pool. Shares the world's depth buffer and never covers the tactical UI. */
+/** A bounded, GPU-animated particle pool. Blends linear light into the scene and shares its opaque depth. */
 final class GpuWeatherParticles implements Disposable {
     private static final int BASE_PARTICLES = 768;
     private static final int PARTICLES = BASE_PARTICLES * 6;
@@ -78,7 +78,8 @@ final class GpuWeatherParticles implements Disposable {
     }
 
     static String source(String stage, String condition) {
-        return GpuShaderSource.read(stage).replace("// WEATHER_CONDITION", GpuShaderSource.read(condition));
+        String source = GpuShaderSource.read(stage, java.util.Map.of("WEATHER_CONDITION", condition));
+        return stage.endsWith(".frag") ? GpuSceneRadiance.fragment(source) : source;
     }
 
     void render(Camera camera, BoardScene scene, BoardAtmosphere.Effects effects, Color light, float clock) {
@@ -91,7 +92,8 @@ final class GpuWeatherParticles implements Disposable {
         Gdx.gl.glDepthMask(false);
         Gdx.gl.glDisable(GL20.GL_CULL_FACE);
         Gdx.gl.glEnable(GL20.GL_BLEND);
-        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+        Gdx.gl.glBlendFuncSeparate(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA,
+              GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA);
         try {
             float windX = MathUtils.sinDeg(effects.windDirection());
             float windY = MathUtils.cosDeg(effects.windDirection());

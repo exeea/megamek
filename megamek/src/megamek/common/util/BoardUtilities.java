@@ -47,9 +47,12 @@ import megamek.client.bot.princess.CardinalEdge;
 import megamek.common.Hex;
 import megamek.common.OffBoardDirection;
 import megamek.common.board.Board;
+import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BoardType;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
+import megamek.common.board.RailRoute;
 import megamek.common.compute.Compute;
 import megamek.common.enums.BuildingType;
 import megamek.common.loaders.MapSettings;
@@ -1241,7 +1244,7 @@ public class BoardUtilities {
                 field.addTerrain(new Terrain(Terrains.ICE, 1));
             } else if (field.containsTerrain(Terrains.SWAMP)) {
                 field.removeTerrain(Terrains.SWAMP);
-                if (field.terrainsPresent() == 0) {
+                if (field.isClear()) {
                     if (Compute.randomInt(100) < 30) {
                         // if no other terrains present, 30% chance to change to
                         // rough
@@ -1302,7 +1305,7 @@ public class BoardUtilities {
             if (field.containsTerrain(Terrains.SWAMP)) {
                 field.removeTerrain(Terrains.SWAMP); // any swamps are dried
                 // up to hardened mud
-                if ((field.terrainsPresent() == 0) && (Compute.randomInt(100) < 30)) {
+                if (field.isClear() && (Compute.randomInt(100) < 30)) {
                     // if no other terrains present, 30% chance to change to
                     // rough
                     field.addTerrain(new Terrain(Terrains.ROUGH, 1));
@@ -1413,9 +1416,16 @@ public class BoardUtilities {
                 Coords c = new Coords(x, y);
                 Hex hex = board.getHex(c);
 
-                //moderate rain - mud in clear hexes, depth 0 water, and dirt roads
+                // A CLEAR raised deck (Hex#isClearDeck) is clear ground of its own: every rain that muds clear ground
+                // muds it, whatever lies beneath (TO:AR p.48 and p.57).
+                if (weatherCond.isModerateRainOrHeavyRainOrGustingRainOrDownpourOrLightningStorm()
+                      && (hex.terrainLevel(Terrains.BRIDGE_ELEV) > 0) && hex.isClearDeck()) {
+                    hex.addTerrain(new Terrain(Terrains.BRIDGE_MUD, 1));
+                }
+
+                //moderate rain - mud in clear hexes (Hex#isClear), depth 0 water, and dirt roads
                 if (weatherCond.isModerateRainOrLightningStorm()) {
-                    if ((hex.terrainsPresent() == 0)
+                    if (hex.isClear()
                           || (hex.containsTerrain(Terrains.WATER) && (hex.depth() == 0))
                           || (hex.containsTerrain(Terrains.ROAD)
                           && hex.terrainLevel(Terrains.ROAD) == Terrains.ROAD_LVL_DIRT)) {
@@ -1702,12 +1712,23 @@ public class BoardUtilities {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 Hex hex = board.getHex(x, y).duplicate();
-                for (int type : new int[] { Terrains.ROAD, Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.BRIDGE, Terrains.CLIFF_TOP }) {
+                for (int type : new int[] { Terrains.ROAD, Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.BRIDGE, Terrains.CLIFF_TOP,
+                                            Terrains.RAIL, Terrains.BRIDGE_RAIL, Terrains.BRIDGE_ROAD }) {
                     Terrain terrain = hex.getTerrain(type);
                     // High values select legacy artwork. They must never be truncated as directional bits.
                     if (terrain != null && terrain.getExits() >= 0 && terrain.getExits() <= 63) { terrain.flipExits(horiz, vert); }
                 }
                 hex.setDecorations(hex.getDecorations().stream().map(object -> object.flip(horiz, vert)).toList());
+                Map<String, HexAppearance> appearance = new HashMap<>(hex.getAppearance());
+                HexAppearance look = appearance.get("vegetation");
+                if (look != null) {
+                    // A container yard look turns (and changes hands) with the sheet, as the objects do.
+                    appearance.put("vegetation", BoardEditorBlueprint.get().flipped(look, horiz, vert));
+                }
+                // A rail's junction layout turns with its exits.
+                appearance.computeIfPresent("rail", (owner, rail) -> RailRoute.flip(rail, horiz, vert));
+                appearance.computeIfPresent("bridgeRail", (owner, rail) -> RailRoute.flip(rail, horiz, vert));
+                if (!appearance.equals(hex.getAppearance())) { hex.setAppearance(appearance); }
                 int nx = horiz ? width - x - 1 : x, ny = vert ? height - y - 1 : y;
                 transformed[ny * width + nx] = hex;
             }

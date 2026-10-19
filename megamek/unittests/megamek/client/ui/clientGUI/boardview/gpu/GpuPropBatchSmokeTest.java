@@ -87,7 +87,8 @@ class GpuPropBatchSmokeTest {
         Texture texture = new Texture(image);
         image.dispose();
         texture.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
-        Material material = new Material(ColorAttribute.createDiffuse(Color.WHITE));
+        // Scene props and scatter carry this marker; batching must preserve it, not reject the material.
+        Material material = new Material(ColorAttribute.createDiffuse(Color.WHITE), new GpuLinearColors());
         material.set(new GpuModelMaterial(.6f, 0, null));
         if (textured) { material.set(TextureAttribute.createDiffuse(texture)); }
         Model small = model(20, material);

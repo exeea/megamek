@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
 
@@ -19,7 +18,6 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -37,6 +35,7 @@ class GpuFoliageSmokeTest {
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
                 GpuAssets assets = new GpuAssets();
+                GpuSceneTestOutput outputFrame = new GpuSceneTestOutput();
                 try {
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -65,15 +64,15 @@ class GpuFoliageSmokeTest {
                                     assertEquals(512, map.textureDescription.texture.getWidth());
                                     var normal = material.get(TextureAttribute.class, TextureAttribute.Normal);
                                     assertNotNull(normal, "Cactus ribs use the authored normal map");
-                                    assertSame(assets.material("foliage/cactus-skin-normal"),
+                                    assertSame(assets.materialData("vegetation/cactus-skin-normal"),
                                           normal.textureDescription.texture);
-                                    assertSame(assets.material("foliage/cactus-skin"), map.textureDescription.texture);
+                                    assertSame(assets.material("vegetation/cactus-skin"), map.textureDescription.texture);
                                     continue;
                                 }
                                 assertEquals(64, map.textureDescription.texture.getWidth());
                                 assertEquals(64, map.textureDescription.texture.getHeight());
                                 assertEquals(Texture.TextureWrap.Repeat, map.textureDescription.texture.getVWrap());
-                                assertSame(assets.material("foliage/" + material.id), map.textureDescription.texture,
+                                assertSame(assets.material("vegetation/" + material.id), map.textureDescription.texture,
                                       "Tree variants share the small texture maps");
                             }
                         }
@@ -81,12 +80,14 @@ class GpuFoliageSmokeTest {
                         camera.fit(scene);
                         terrain.animate(0, List.of());
                         terrain.renderShadows(List.of());
-                        ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
+                        outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
                         terrain.render(camera.camera, false);
+                        outputFrame.display();
                         GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"),
                               "trees-" + (snow ? "snow" : "summer") + ".png"));
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     }
+                    outputFrame.pixels().end();
                     var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                           BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                     try {
@@ -117,6 +118,7 @@ class GpuFoliageSmokeTest {
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
+                    outputFrame.close();
                     terrain.dispose();
                     assets.dispose();
                     Gdx.app.exit();

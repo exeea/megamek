@@ -125,4 +125,7 @@ final class GpuGeysers implements Disposable {
 
     @Override
     public void dispose() { spray.dispose(); visible.clear(); }
+
+    /** Links its program now (GpuTerrain.prepareEffects), not when a geyser first comes into view. */
+    void prepare() { spray.prepare(); }
 }

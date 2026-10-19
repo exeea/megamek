@@ -61,8 +61,8 @@ final class GpuMovePlan implements AutoCloseable {
      */
     enum Mode { AUTO, WALK, RUN, JUMP, BACK, TARGET, OTHER }
 
-    /** The movement band of a step or envelope hex. */
-    enum Band { WALK, RUN, SPRINT, JUMP, ILLEGAL }
+    /** The movement band of a step or envelope hex; BACK and BOOST are only used for route steps. */
+    enum Band { WALK, BACK, RUN, BOOST, SPRINT, JUMP, ILLEGAL }
 
     /** One route step at its absolute level. */
     record Step(Coords coords, int boardId, float level, int facing, Band band, boolean airborne) { }
@@ -849,7 +849,7 @@ final class GpuMovePlan implements AutoCloseable {
         return facts;
     }
 
-    /** The path's steps after the mode's start steps, each banded by its movement type (the last as an end step). */
+    /** The path's steps after the mode's start steps, banded by movement type and boost use (last as an end step). */
     private List<Step> route(MovePath path) {
         List<Step> route = new ArrayList<>();
         int last = path.length() - 1;
@@ -870,8 +870,18 @@ final class GpuMovePlan implements AutoCloseable {
               || ((movement.isVTOL() || movement.isWiGE()) && (step.getClearance() > 0));
         float level = (step.getAltitude() > 0) ? step.getAltitude()
               : (step.getElevation() + ((hex == null) ? 0 : hex.getLevel()));
-        return new Step(step.getPosition(), step.getBoardId(), level, step.getFacing(),
-              band(step.getMovementType(last)), flying);
+        EntityMovementType type = step.getMovementType(last);
+        // Match StepSprite: the movement compiler marks each boosted step, including VTOL jet boosters.
+        Band band = switch (type) {
+            case MOVE_RUN, MOVE_VTOL_RUN, MOVE_OVER_THRUST ->
+                  (step.isUsingMASC() || step.isUsingSupercharger()) ? Band.BOOST : Band.RUN;
+            case MOVE_JUMP, MOVE_ILLEGAL -> band(type);
+            default -> switch (step.getType()) {
+                case BACKWARDS, LATERAL_LEFT_BACKWARDS, LATERAL_RIGHT_BACKWARDS -> Band.BACK;
+                default -> band(type);
+            };
+        };
+        return new Step(step.getPosition(), step.getBoardId(), level, step.getFacing(), band, flying);
     }
 
     /** A movement type's band, grouped as GpuBoardSource.movementMP groups the MP the type uses. */
@@ -904,8 +914,8 @@ final class GpuMovePlan implements AutoCloseable {
     /** The route's movement as the dock foot and the tip name it; a walking route in an explicit run says so (G10). */
     private static String typeLabel(EntityMovementType type, Mode mode) {
         return Messages.getString(switch (band(type)) {
-            case WALK -> (mode == Mode.RUN) ? "GpuBoard.hud.move.walkRunOnly" : "GpuBoard.hud.move.walk";
-            case RUN -> "GpuBoard.hud.move.run";
+            case WALK, BACK -> (mode == Mode.RUN) ? "GpuBoard.hud.move.walkRunOnly" : "GpuBoard.hud.move.walk";
+            case RUN, BOOST -> "GpuBoard.hud.move.run";
             case SPRINT -> "GpuBoard.hud.move.sprint";
             case JUMP -> "GpuBoard.hud.move.jump";
             case ILLEGAL -> "GpuBoard.hud.move.illegal";

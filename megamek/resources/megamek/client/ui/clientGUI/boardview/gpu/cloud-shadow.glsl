@@ -5,11 +5,14 @@ in vec3 v_cloudPosition;
 #ifdef cloudShadowFlag
 uniform sampler2D u_cloudShadow;
 uniform mat4 u_cloudProjection;
+uniform float u_cloudEnabled;
+uniform float u_cloudReflection;
 
 float cloudTransmission(vec3 position) {
+    if (u_cloudEnabled < 0.5) return 1.0;
     vec3 uv = (u_cloudProjection * vec4(position, 1.0)).xyz;
     if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0 || uv.z >= 1.0) return 1.0;
     // The atlas integrates the layer from its base. Surfaces within/above it receive only the remaining column.
-    return pow(max(texture(u_cloudShadow, uv.xy).r, 0.003), clamp(1.0 - uv.z, 0.0, 1.0));
+    return pow(max(textureLod(u_cloudShadow, uv.xy, 0.0).r, 0.003), clamp(1.0 - uv.z, 0.0, 1.0));
 }
 #endif

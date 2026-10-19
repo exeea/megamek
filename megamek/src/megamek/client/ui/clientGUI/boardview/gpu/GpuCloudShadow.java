@@ -5,6 +5,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.math.Matrix4;
@@ -15,6 +16,9 @@ final class GpuCloudShadow extends Attribute {
     private static final String MAIN = "void main() {";
     final Texture texture;
     final Matrix4 projection;
+    boolean enabled = true;
+    /** The layer can reflect sky light even when no directional source casts a cloud shadow. */
+    boolean reflection;
 
     GpuCloudShadow(Texture texture, Matrix4 projection) {
         super(TYPE);
@@ -23,13 +27,35 @@ final class GpuCloudShadow extends Attribute {
     }
 
     static String prefix(Renderable renderable, DefaultShader.Config config) {
+        var diffuse = renderable.material.get(TextureAttribute.class, TextureAttribute.Diffuse);
         return DefaultShader.createPrefix(renderable, config)
+              + (diffuse != null && GpuColorTexture.isColor(diffuse.textureDescription.texture) ? "#define linearTextureFlag\n" : "")
+              + (renderable.material.has(GpuLinearColors.TYPE) ? "#define linearColorsFlag\n" : "")
               + (renderable.material.has(GpuModelMaterial.TYPE) ? "#define modelSurfaceFlag\n" : "")
               + (RigidGlb.colourSlotted(renderable.meshPart.mesh.getVertexAttributes()) ? "#define colourSlotsFlag\n" : "")
-              + (renderable.environment != null && renderable.environment.has(TYPE) ? "#define cloudShadowFlag\n" : "");
+              + (renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.TYPE)
+                    ? "#define environmentLightingFlag\n" : "")
+              + (renderable.environment != null && renderable.environment.has(TYPE) ? "#define cloudShadowFlag\n" : "")
+              + (renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.Antialiasing.TYPE)
+                    ? "#define specularAntialiasingFlag\n" : "")
+              + GpuAmbientOcclusion.prefix(renderable);
     }
 
     static void register(DefaultShader shader) {
+        shader.register("u_cloudEnabled", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                GpuCloudShadow cloud = attributes.get(GpuCloudShadow.class, TYPE);
+                target.set(id, cloud != null && cloud.enabled ? 1f : 0f);
+            }
+        });
+        shader.register("u_cloudReflection", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                GpuCloudShadow cloud = attributes.get(GpuCloudShadow.class, TYPE);
+                target.set(id, cloud != null && cloud.reflection ? 1f : 0f);
+            }
+        });
         shader.register("u_cloudShadow", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
@@ -52,35 +78,27 @@ final class GpuCloudShadow extends Attribute {
         return insert(source, position, position + "\nv_cloudPosition = pos.xyz;\n");
     }
 
-    static String fragment(String source, boolean ground) {
+    /** A lit surface's fragment stage: its one lighting function attenuates direct light under clouds. */
+    static String fragment(String source) {
         String declarations = GpuShaderSource.read("cloud-shadow.glsl");
-        // The libGDX shaders also dim the sunlit ground's share of their ambient (GpuUnitShader.linearVertex).
-        // Shared terrain functions can sample clouds before main; declare their inputs before those helpers.
-        String anchor = ground && source.contains("// terrain-lighting-functions") ? "// terrain-lighting-functions"
+        // Shared lighting functions can sample clouds before main; declare their inputs before those helpers.
+        String anchor = source.contains("// terrain-lighting-functions") ? "// terrain-lighting-functions"
               : source.contains("// model-lighting-functions") ? "// model-lighting-functions" : MAIN;
-        source = insert(source, anchor, declarations + "\n" + (ground ? "" : "in vec3 v_groundBounce;\n") + anchor);
-        if (ground) {
-            return insert(source, "albedo *= ambient + direct;",
-                  GpuShaderSource.read("cloud-surface.glsl") + "\nalbedo *= ambient + direct;");
-        }
-        int start = source.indexOf(MAIN) + MAIN.length();
-        String body = source.substring(start).replace("v_lightDiffuse", "cloudDiffuse")
-              .replace("v_lightSpecular", "cloudSpecular").replace("v_ambientLight", "cloudAmbient");
-        // Ambient remains separate in libGDX's shadow-enabled scene shaders. Emissive materials are unaffected.
-        return source.substring(0, start) + "\n" + GpuShaderSource.read("cloud-lighting.glsl") + "\n" + body;
+        source = insert(source, anchor, declarations + "\n" + anchor);
+        return insert(source, "albedo *= ambient + direct;",
+              GpuShaderSource.read("cloud-surface.glsl") + "\nalbedo *= ambient + direct;");
     }
 
     private static String insert(String source, String anchor, String replacement) {
-        int index = source.indexOf(anchor);
-        if (index < 0 || source.indexOf(anchor, index + anchor.length()) >= 0) {
-            throw new IllegalStateException("Incompatible cloud shader insertion point: " + anchor);
-        }
-        return source.substring(0, index) + replacement + source.substring(index + anchor.length());
+        return GpuShaderSource.replaceOnce(source, anchor, replacement, "cloud");
     }
 
     @Override
     public Attribute copy() {
-        return new GpuCloudShadow(texture, projection);
+        var copy = new GpuCloudShadow(texture, projection);
+        copy.enabled = enabled;
+        copy.reflection = reflection;
+        return copy;
     }
 
     @Override

@@ -58,9 +58,10 @@ public class Terrains implements Serializable {
     // ultra
     /**
      * Base {@link #FLUFF} terrain level for the cosmetic "cleared rubble path" overlay left after a bulldozer clears a
-     * rubble hex (TacOps). The hex itself becomes clear terrain (rubble removed); a fluff terrain at
-     * {@code CLEARED_RUBBLE_FLUFF_BASE + structureType} (1 light .. 5 wall) is added purely so the tileset can draw the
-     * rubble "_path" tiles showing the hex was once rubble. Fluff has no gameplay effect (see {@code Hex.isClearHex}).
+     * rubble hex (TacOps). The rubble is removed; a fluff terrain at
+     * {@code CLEARED_RUBBLE_FLUFF_BASE + structureType} (1 light .. 5 wall) is added so the tileset can draw the
+     * rubble "_path" tiles showing the hex was once rubble. The marker keeps the hex from counting as clear
+     * ({@code Hex.isClear}); it has no other gameplay effect.
      */
     public static final int CLEARED_RUBBLE_FLUFF_BASE = 2000;
     public static final int JUNGLE = 5; // 1: light 2: heavy 3: ultra
@@ -209,10 +210,28 @@ public class Terrains implements Serializable {
     public static final int BRIDGE_REPAIRED = 60;
 
     /**
+     * A rail on the hex's ground, beneath any bridge (TO:AR p.49). Level 1 rail, 0 destroyed; its exits are its sides and
+     * are always specified, so parallel rails in adjacent hexes never join.
+     */
+    public static final int RAIL = 62;
+    /** A rail on the hex's bridge deck (level 1); its exits, always specified, lie within the bridge's exits. */
+    public static final int BRIDGE_RAIL = 63;
+    /**
+     * A road on the hex's bridge deck, {@link #ROAD}'s twin with its levels (1 paved, 2 alley, 3 dirt, 4 gravel); its
+     * exits, always specified, lie within the bridge's exits. The rules treat every deck as a road whatever it carries.
+     */
+    public static final int BRIDGE_ROAD = 64;
+    /**
+     * Mud (TO:AR p.48) on the hex's raised bridge deck, which rain puts on a CLEAR deck ({@link Hex#isClearDeck}); the
+     * hex's MUD is the ground's. Read through {@link Hex#deckMud}; it has no effect on a deck at the hex level.
+     */
+    public static final int BRIDGE_MUD = 65;
+
+    /**
      * Keeps track of the different type of terrains that can have exits.
      */
     public static final int[] exitableTerrains = { PAVEMENT, ROAD, BUILDING, FUEL_TANK, BRIDGE, WATER,
-                                                   INDUSTRIAL_ELEVATOR };
+                                                   INDUSTRIAL_ELEVATOR, RAIL, BRIDGE_RAIL, BRIDGE_ROAD };
 
     private static final String[] names = { "none", "woods", "water", "rough", "rubble", "jungle", "sand", "tundra",
                                             "magma", "planted_fields", "heavy_industrial", "space", "pavement", "road",
@@ -229,7 +248,8 @@ public class Terrains implements Serializable {
                                             "incline_top", "incline_bottom", "incline_high_top", "incline_high_bottom",
                                             "foliage_elev", "black_ice", "sky",
                                             "deployment_zone", "hazardous_liquid", "ultra_sublevel",
-                                            "bridge_repaired", "industrial_elevator" };
+                                            "bridge_repaired", "industrial_elevator", "rail", "bridge_rail",
+                                            "bridge_road", "bridge_mud" };
 
     /** Terrains in this set are hidden in the Editor, not saved to board files and handled internally. */
     public static final HashSet<Integer> AUTOMATIC = new HashSet<>(Arrays.asList(
@@ -426,6 +446,14 @@ public class Terrains implements Serializable {
                 return "Pavement";
             case ROAD:
                 return "Road";
+            case BRIDGE_ROAD:
+                return "Road on bridge";
+            case RAIL:
+                return level == 0 ? "Destroyed rail" : "Rail";
+            case BRIDGE_RAIL:
+                return "Rail on bridge";
+            case BRIDGE_MUD:
+                return "Mud (bridge deck)";
             case FIRE:
                 if (level == 1) {
                     return "Fire";
@@ -607,6 +635,9 @@ public class Terrains implements Serializable {
             case ROUGH:
             case PAVEMENT:
                 return 200;
+            case RAIL:
+                // TO:AR p.49 and p.62: CF 20, used only with TacOps rails.
+                return (level > 0) ? 20 : 0;
             case ROAD:
                 if (level == 3) {
                     return 20;
@@ -693,6 +724,8 @@ public class Terrains implements Serializable {
             };
             case SNOW -> (terrainLevel == 2) ? 1 : 0;
             case ICE, MUD -> 1;
+            // TO:AR p.32, used only with TacOps rails.
+            case RAIL -> (terrainLevel > 0) ? 2 : 0;
             default -> 0;
         };
     }

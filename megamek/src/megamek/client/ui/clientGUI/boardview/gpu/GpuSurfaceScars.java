@@ -19,10 +19,14 @@ import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Attribute;
+import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.Renderable;
+import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
+import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -31,16 +35,22 @@ import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.ShortArray;
 import megamek.common.board.Coords;
-import megamek.logging.MMLogger;
 
-/** Sparse surface tiles on the real receiving mesh. Images accumulate; geometry does not accumulate per shot. */
+/**
+ * Sparse surface tiles on the real receiving mesh. Images accumulate; geometry does not accumulate per shot. A tile's
+ * patch draws with its receiver's own program (GpuTerrain): its vertices add the page UV and image layer, and a
+ * per-draw uniform, u_surfaceScar (scar-material.glsl), tells a patch's draw from the receiver's.
+ */
 final class GpuSurfaceScars implements Disposable {
-    private static final MMLogger LOGGER = MMLogger.create(GpuSurfaceScars.class);
-    /** Where a sculpted terrain shader takes the scar helpers (GpuTerrain adds them there). */
-    static final String SCULPT_HELPERS = "// sculpt-material-functions";
-    /** Where a model shader takes them. */
-    static final String MODEL_SURFACE = "vec3 modelSurface(vec3 albedo, vec3 emission) {";
-    private static boolean warnedUnsupported;
+    /** A patch vertex's page UV and image layer, after its receiver's own attributes. */
+    private static final String UV = "a_scarUV";
+    /** Where the terrain's model fragment stage takes the scar helpers. */
+    private static final String MODEL_SURFACE =
+          "vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 view) {";
+    /** Where it applies the scar material: before the shading frame's repair. */
+    private static final String SHADING_NORMAL = "normal = shadingNormal(normal, geometric, view);";
+    /** The shading frame's derivatives precede a patch's coverage test. */
+    private static final String FRAME_READY = "// surface-frame-ready";
     static final class Marking extends Attribute {
         static final long TYPE = register("boardSurfaceScar");
         Marking() { super(TYPE); }
@@ -69,44 +79,70 @@ final class GpuSurfaceScars implements Disposable {
     static VertexAttributes attributes(VertexAttributes source) {
         List<VertexAttribute> attributes = new ArrayList<>();
         source.forEach(attribute -> attributes.add(attribute.copy()));
-        attributes.add(new VertexAttribute(VertexAttributes.Usage.Generic, 3, "a_scarUV", 9));
+        attributes.add(new VertexAttribute(VertexAttributes.Usage.Generic, 3, UV, 9));
         return new VertexAttributes(attributes.toArray(VertexAttribute[]::new));
+    }
+
+    /** The receiver's layout key (getMaskWithSizePacked) of a mesh's attributes: a patch's without its page UV. */
+    static long receiverLayout(VertexAttributes attributes) {
+        int last = attributes.size() - 1;
+        if (last < 0 || !UV.equals(attributes.get(last).alias)) { return attributes.getMaskWithSizePacked(); }
+        long mask = 0;
+        for (int i = 0; i < last; i++) { mask |= attributes.get(i).usage; }
+        return mask | (long) last << 32;
+    }
+
+    /**
+     * The layout a program created for {@code mesh} maps its vertex attributes from, when the program reads the page UV
+     * and draws without instances: the mesh's own plus the page UV, so the program binds its patches' page UV too. Null
+     * otherwise. A client-side layout without GL buffers; the caller disposes it.
+     */
+    static Mesh layout(ShaderProgram program, Mesh mesh) {
+        var attributes = mesh.getVertexAttributes();
+        if (mesh.isInstanced() || program.getAttributeLocation(UV) < 0 || receiverLayout(attributes)
+              != attributes.getMaskWithSizePacked()) { return null; }
+        return new Mesh(Mesh.VertexDataType.VertexArray, true, 0, 0, attributes(attributes));
     }
 
     static Material material(Material source) {
         var material = new Material(source);
-        if (!GpuTerrain.sculpted(material) && !material.has(GpuModelMaterial.TYPE)) { material.set(new GpuModelMaterial(.8f, 0, null)); }
         material.set(new Marking());
+        // A family program never draws a scar: the patch draws with the generic program of its receiver's material.
+        material.remove(GpuFamilyPrograms.Constants.TYPE);
         return material;
     }
 
+    /** Every terrain vertex stage forwards the page UV; a receiver's mesh has none, and its own draws never read it. */
     static String vertex(String source) {
-        return source.replace("void main() {", "in vec3 a_scarUV;\nout vec3 v_scarUV;\nvoid main() {\nv_scarUV = a_scarUV;\n");
+        return GpuShaderSource.replaceOnce(source, "void main() {",
+              "in vec3 " + UV + ";\nout vec3 v_scarUV;\nvoid main() {\nv_scarUV = " + UV + ";\n", "scar vertex");
     }
 
     /**
-     * The scar variant of a surface's fragment shader. A sculpted terrain shader gets the scar helpers from GpuTerrain,
-     * a model shader here. A scar on a surface whose shader takes neither, such as a sculpted water surface drawn with
-     * a liquid shader, is not drawn: before, its shader failed to compile and the whole 3D board stopped.
+     * The terrain's model fragment stage (model.frag) with the scar helpers (scar-material.glsl): a model draws its own
+     * patches, which shade only where their image covers it. Unit programs keep model.frag without them.
      */
-    static String fragment(String source, boolean sculpt) {
-        boolean takesHelpers = sculpt ? source.contains(SCULPT_HELPERS) : source.contains(MODEL_SURFACE);
-        if (!takesHelpers) {
-            if (!warnedUnsupported) {
-                warnedUnsupported = true;
-                LOGGER.warn("[SurfaceScars] a scar reached a surface whose shader cannot draw one (sculpted {}); it is"
-                      + " not drawn", sculpt);
+    static String fragment(String source) {
+        String helpers = "#define GROUND_DAMAGE_FRAGMENT\n" + GpuGroundDamage.shaderSource()
+              + GpuShaderSource.read("scar-material.glsl");
+        source = GpuShaderSource.replaceOnce(source, MODEL_SURFACE, helpers + "\n" + MODEL_SURFACE, "scar model");
+        source = GpuShaderSource.replaceOnce(source, SHADING_NORMAL, "float scarCavity = 1.0;\n"
+              + "scarMaterial(surfaceScarMask, modelVertexNormal(geometric), albedo, 1.0, albedo, normal, scarCavity,"
+              + " roughness);\n" + SHADING_NORMAL, "scar model");
+        // The helpers exist in lit programs only (model-surface.glsl), the only ones a patch draws with.
+        return GpuShaderSource.replaceOnce(source, FRAME_READY, FRAME_READY
+              + "\n#ifdef lightingFlag\nif (!surfaceScarCovers()) { fragColor = vec4(0.0); return; }\n#endif\n",
+              "scar model");
+    }
+
+    /** The per-draw gate: 1 for a patch's draw, 0 for its receiver's own. */
+    static void register(DefaultShader shader) {
+        shader.register("u_surfaceScar", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, attributes.has(Marking.TYPE) ? 1f : 0f);
             }
-            return source.replace("void main() {", "void main() {\ndiscard;\n");
-        }
-        if (!sculpt) {
-            String helpers = "#define GROUND_DAMAGE_FRAGMENT\n" + GpuGroundDamage.shaderSource()
-                  + GpuShaderSource.read("scar-material.glsl");
-            source = source.replace("vec3 modelSurface(vec3 albedo, vec3 emission) {", helpers + "\nvec3 modelSurface(vec3 albedo, vec3 emission) {")
-                  .replace("vec3 normal = modelNormal();", "vec3 normal = modelNormal();\nfloat scarCavity = 1.0;\n"
-                        + "scarMaterial(surfaceScarMask, normalize(v_normal), albedo, 1.0, albedo, normal, scarCavity, roughness);\n");
-        }
-        return source.replace("void main() {", "void main() {\nsurfaceScarMask = surfaceScar();\nif (surfaceScarMask.r <= 0.0) discard;\n");
+        });
     }
     int tileCount() { return tiles.size(); }
     int triangleCount() { return tiles.values().stream().mapToInt(page -> page.triangles).sum(); }

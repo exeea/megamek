@@ -61,6 +61,9 @@ class GpuBuildingHoverSmokeTest {
     @Test
     void hoverFollowsBuildingHitWhileKeepingItsHex() throws Exception {
         var failure = new AtomicReference<Throwable>();
+        var preferences = megamek.client.ui.clientGUI.GUIPreferences.getInstance();
+        boolean types = preferences.getHexTypesEnabled();
+        SwingUtilities.invokeAndWait(() -> preferences.setHexTypesEnabled(false));
         try (var fixture = GpuBoardFixture.create(board())) {
             var config = GpuBoardWindow.configuration(false);
             config.setWindowedMode(1200, 900);
@@ -90,6 +93,8 @@ class GpuBuildingHoverSmokeTest {
                     }
                 }
             }, config);
+        } finally {
+            SwingUtilities.invokeAndWait(() -> preferences.setHexTypesEnabled(types));
         }
         if (failure.get() != null) { throw new AssertionError("Building hover column", failure.get()); }
     }
@@ -355,10 +360,19 @@ class GpuBuildingHoverSmokeTest {
     }
 
     private static void checkRenderedStoreys(GpuBattleView view, GpuTerrain terrain, GpuBoardHud ui) throws Exception {
+        // Terrain writes scaled scene radiance; byte assertions consume the shared display conversion.
+        try (var output = new GpuSceneTestOutput()) {
+            checkRenderedStoreys(view, terrain, ui, output);
+        }
+    }
+
+    private static void checkRenderedStoreys(GpuBattleView view, GpuTerrain terrain, GpuBoardHud ui,
+          GpuSceneTestOutput output) throws Exception {
         var camera = view.boardCamera.camera;
+        output.begin(0, 0, 0, 1);
         HdpiUtils.glViewport(0, 0, (int) camera.viewportWidth, (int) camera.viewportHeight);
-        ScreenUtils.clear(0, 0, 0, 1, true);
         terrain.render(camera, false);
+        output.display();
         var pages = (GpuPropBatch) field(terrain, "propBatch");
         long pageBuilds = pages.rebuilds();
         int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
@@ -369,12 +383,18 @@ class GpuBuildingHoverSmokeTest {
         try {
             for (int level : new int[] { 2, 4, 0, 5, 1, 2 }) {
                 terrain.animate(0, List.of(), level == 1 ? 1 : .5f, BUILDING, level * BoardGeometry.level());
-                ScreenUtils.clear(0, 0, 0, 1, true);
+                output.begin(0, 0, 0, 1);
+                HdpiUtils.glViewport(0, 0, (int) camera.viewportWidth, (int) camera.viewportHeight);
                 terrain.render(camera, false);
+                output.display();
                 assertEquals(pageBuilds, pages.rebuilds(),
                       "Opening/closing a building storey must not rebuild static prop pages");
                 Pixmap hiddenWalls = Pixmap.createFromFrameBuffer(0, 0, width, height);
+                // Continue the same scene/depth after its intermediate display readback; do not clear it.
+                output.scene().begin();
+                HdpiUtils.glViewport(0, 0, (int) camera.viewportWidth, (int) camera.viewportHeight);
                 terrain.renderTransparent(camera);
+                output.display();
                 Pixmap opened = Pixmap.createFromFrameBuffer(0, 0, width, height);
                 try {
                     int changedInside = 0, visibleWalls = 0, changedRoof = 0, visibleRoof = 0;

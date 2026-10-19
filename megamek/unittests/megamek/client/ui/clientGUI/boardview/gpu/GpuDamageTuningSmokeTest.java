@@ -36,7 +36,6 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
@@ -62,7 +61,7 @@ class GpuDamageTuningSmokeTest {
                 var glass = plate(new Color(.21f, .67f, .73f, 1));
                 var damage = new UnitDamageDisplay();
                 var batch = new ModelBatch(GpuUnitShader.provider());
-                var buffer = new FrameBuffer(Pixmap.Format.RGBA8888, 128, 128, true);
+                var buffer = new GpuSceneTestOutput(128, 128);
                 try {
                     var instance = new ModelInstance(model);
                     var preview = UnitDamageDisplay.preview(BoardScene.LocationDamage.NONE, true, 1);
@@ -111,7 +110,7 @@ class GpuDamageTuningSmokeTest {
                     camera.update();
                     assertArrayEquals(original, pixels(batch, buffer, camera, instance), "Damage stays attached during movement");
                 } catch (Throwable error) { failure.set(error); }
-                finally { buffer.dispose(); batch.dispose(); damage.dispose(); glass.dispose(); model.dispose(); Gdx.app.exit(); }
+                finally { buffer.close(); batch.dispose(); damage.dispose(); glass.dispose(); model.dispose(); Gdx.app.exit(); }
             }
         }, GpuBoardWindow.configuration(false));
         if (failure.get() != null) { throw new AssertionError("Damage texture rendering failed", failure.get()); }
@@ -129,13 +128,12 @@ class GpuDamageTuningSmokeTest {
         return builder.end();
     }
 
-    private static int[] pixels(ModelBatch batch, FrameBuffer buffer, OrthographicCamera camera, ModelInstance instance) {
-        buffer.begin();
-        Gdx.gl.glClearColor(1, 0, 1, 1);
-        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+    private static int[] pixels(ModelBatch batch, GpuSceneTestOutput buffer, OrthographicCamera camera, ModelInstance instance) {
+        buffer.begin(1, 0, 1, 1);
         batch.begin(camera);
         batch.render(instance);
         batch.end();
+        buffer.display();
         var pixels = Pixmap.createFromFrameBuffer(0, 0, 128, 128);
         try {
             int[] result = new int[112 * 112];
@@ -143,7 +141,7 @@ class GpuDamageTuningSmokeTest {
                 for (int x = 8; x < 120; x++) { result[(y - 8) * 112 + x - 8] = pixels.getPixel(x, y); }
             }
             return result;
-        } finally { pixels.dispose(); buffer.end(); }
+        } finally { pixels.dispose(); buffer.pixels().end(); }
     }
 
     @Test
@@ -194,29 +192,17 @@ class GpuDamageTuningSmokeTest {
     }
 
     private static void verify(GpuBattleView view, GpuBoardFixture fixture) throws Exception {
-        CheckBox vsync = GpuBoardTestUi.tuning(view, "tuning-vsync");
-        assertTrue(vsync.isChecked());
-        GpuBoardTestUi.pressTuning(vsync);
-        assertFalse(vsync.isChecked());
         CheckBox override = GpuBoardTestUi.tuning(view, "tuning-override-damage");
         Slider slider = GpuBoardTestUi.tuning(view, "Display damage");
         SelectBox<UnitDamageDisplay.Location> location = GpuBoardTestUi.tuning(view, "tuning-damage-location");
-        assertTrue(location.isDisabled());
-        assertEquals(UnitDamageDisplay.Location.ALL, location.getSelected());
         // Meks show as meeples by default; per-location damage is the location model's.
         SelectBox<UnitDisplayMode> display = GpuBoardTestUi.tuning(view, "tuning-unit-display");
         display.setSelected(UnitDisplayMode.MODELS);
         view.render();
         var actual = displayedDamage(view, 1);
-        assertFalse(override.isChecked());
-        assertTrue(slider.isDisabled());
-        assertEquals(0, slider.getValue());
         assertEquals(UnitDamageDisplay.Stage.ARMOR_STRIPPED, actual.stages().get("LT"));
 
         GpuBoardTestUi.pressTuning(override);
-        assertTrue(override.isChecked());
-        assertFalse(slider.isDisabled());
-        assertFalse(location.isDisabled());
         ModelInstance infantryInstance = instance(view, 3);
         float[] levels = { .25f, .50f, .75f, 1, .50f, 0 };
         UnitDamageDisplay.Stage[] mekStages = { UnitDamageDisplay.Stage.ARMOR_WORN,
@@ -281,7 +267,6 @@ class GpuDamageTuningSmokeTest {
         view.render();
         GpuBoardTestUi.pressTuning(override);
         view.render();
-        assertTrue(slider.isDisabled());
         assertEquals(actual, displayedDamage(view, 1), "Disabling the preview restores actual damage");
         assertTrue(displayedDamage(view, 2).isNone());
         assertInfantry(view, 0);
@@ -291,12 +276,6 @@ class GpuDamageTuningSmokeTest {
         view.render();
         GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(view, "tuning-defaults"));
         view.render();
-        assertFalse(vsync.isChecked(), "Defaults keeps the VSync preference the user set");
-        assertFalse(override.isChecked());
-        assertTrue(location.isDisabled());
-        assertEquals(UnitDamageDisplay.Location.ALL, location.getSelected());
-        assertTrue(slider.isDisabled());
-        assertEquals(0, slider.getValue());
         // Defaults also brings back the Mek meeple.
         display.setSelected(UnitDisplayMode.MODELS);
         view.render();

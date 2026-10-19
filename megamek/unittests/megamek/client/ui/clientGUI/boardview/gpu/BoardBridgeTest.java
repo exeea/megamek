@@ -4,18 +4,15 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.GdxNativesLoader;
-import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
@@ -24,7 +21,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** Check the exported triangles against playable road footprints, including every turn and junction. */
+/** Check the generated triangles against playable road footprints, including every turn and junction. */
 class BoardBridgeTest {
     @BeforeAll
     static void natives() { GdxNativesLoader.load(); }
@@ -43,23 +40,13 @@ class BoardBridgeTest {
         assertEquals(1, features.size());
         assertEquals(exits, features.getFirst().bridgeExits());
 
-        File root = new File(Configuration.dataDir(), "models/board");
-        var file = new FileHandle(new File(root, BoardBridge.asset(exits) + ".glb"));
-        var model = RigidGlb.loadLods(file, root.toPath()).getFirst();
         List<float[]> top = new ArrayList<>();
         List<float[]> geometry = new ArrayList<>();
-        for (var mesh : model.meshes) {
-            for (var part : mesh.parts) {
-                for (int i = 0; i < part.indices.length; i += 3) {
-                    float[] triangle = new float[9];
-                    for (int p = 0; p < 3; p++) {
-                        System.arraycopy(mesh.vertices, Short.toUnsignedInt(part.indices[i + p]) * RigidGlb.STRIDE,
-                              triangle, p * 3, 3);
-                    }
-                    if (triangle[2] == triangle[5] && triangle[5] == triangle[8]) { top.add(triangle); }
-                    geometry.add(triangle);
-                }
-            }
+        for (var face : facets(exits)) {
+            float[] triangle = { face.a().x, face.a().y, face.a().z, face.b().x, face.b().y, face.b().z,
+                  face.c().x, face.c().y, face.c().z };
+            if (triangle[2] == triangle[5] && triangle[5] == triangle[8]) { top.add(triangle); }
+            geometry.add(triangle);
         }
         var road = BoardRoad.clearance(at, exits);
         var carriageway = road.footprint(-.4f);
@@ -116,6 +103,13 @@ class BoardBridgeTest {
             }
             else { assertEquals(Float.NEGATIVE_INFINITY, z, "Unconnected exit " + d); }
         }
+    }
+
+    /** Local generated geometry of a level, plain bridge with these exits and no rail marker. */
+    static List<BoardBridge.Facet> facets(int exits) {
+        var tile = BoardBridgeSlopeTest.bridge(new Coords(0, 0), 0, 2, exits);
+        var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
+        return BoardBridgeMesh.build(tile, BoardBridge.deck(scene, tile));
     }
 
     private static float height(List<float[]> triangles, float x, float y) {

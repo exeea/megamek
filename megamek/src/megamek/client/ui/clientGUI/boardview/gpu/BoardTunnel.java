@@ -12,7 +12,7 @@ import megamek.common.board.Coords;
 record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind kind, boolean bridge) {
     static final String ASSET = "road-tunnel";
     static final String BRIDGE_ASSET = "road-tunnel-bridge";
-    // Asset contract: tools/build_tunnel_asset.py. +Y points into the cliff, Z is up.
+    // Asset contract: mm-data tools/board-models/road-tunnel.md. +Y points into the cliff, Z is up.
     static final float HALF_WIDTH = 9.5f;
     static final float SPRING = 6;
     static final float DEPTH = 18;
@@ -23,10 +23,10 @@ record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind ki
         if (BoardRoad.rendered(tile)) {
             entrances(scene, tile, tile.roadExits(), tile.elevation(), tile.road(), false, result);
         }
+        // A deck's road continues into the wall on its own sides.
         var feature = BoardBridge.feature(tile);
-        var kind = feature == null ? BoardRoad.Kind.NONE : BoardBridge.kind(scene, tile);
-        if (kind != BoardRoad.Kind.NONE) {
-            entrances(scene, tile, feature.bridgeExits(), tile.elevation() + feature.elevation(), kind, true, result);
+        if (feature != null && tile.deckRoad() != BoardRoad.Kind.NONE) {
+            entrances(scene, tile, tile.deckRoadExits(), tile.elevation() + feature.elevation(), tile.deckRoad(), true, result);
         }
         return List.copyOf(result);
     }

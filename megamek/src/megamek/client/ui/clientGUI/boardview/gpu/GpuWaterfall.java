@@ -59,7 +59,8 @@ final class GpuWaterfall {
      */
     static Vector3[][] grid(BoardSurface surface, BoardSurface.Side drop) {
         BoardSurface.Crest crest = surface.crest(drop);
-        float top = BoardGeometry.waterZ(surface.tile), bottom = drop.lowA(), height = Math.max(.001f, top - bottom);
+        float top = surface.tile.frozen() ? BoardGeometry.surfaceZ(surface.tile) : BoardGeometry.waterZ(surface.tile);
+        float bottom = drop.lowA(), height = Math.max(.001f, top - bottom);
         float lip = BoardSurface.fallLip(top, bottom), thrown = thrown(height);
         float fillet = fillet(top, bottom);
         // The path: level from the pool's edge to the crest, then z = top - height u², x growing with u, down to where
@@ -90,6 +91,7 @@ final class GpuWaterfall {
             float stream = envelope * envelope * (.6f * MathUtils.sin(MathUtils.PI2 * (s * 1.7f + phase))
                   + .4f * MathUtils.sin(MathUtils.PI2 * (s * 3.9f + phase * 1.9f)));
             Vector3 base = crest.point(s), direction = crest.normal(s);
+            if (surface.tile.frozen()) { base.z = top; }
             float localLip = surface.lipWidth(drop.edge(), s, lip);
             float landing = offset(localLip, height, fillet, thrown, rows - 1);
             float landingX = base.x + direction.x * landing, landingY = base.y + direction.y * landing;
@@ -152,13 +154,14 @@ final class GpuWaterfall {
                     alongMouth.set(grid[Math.min(i + 1, columns)][r]).sub(grid[Math.max(i - 1, 0)][r]);
                 }
                 alongPath.set(grid[i][Math.min(r + 1, rows - 1)]).sub(grid[i][Math.max(r - 1, 0)]);
+                float s = i / (float) columns;
+                // A free bank tapers the lip to zero, so its first two vertices coincide. The limiting path
+                // still leaves the crest horizontally outward; keep the mouth's slope when crossing it below.
+                if (r == 0 && alongPath.isZero()) { alongPath.set(crest.normal(s)); }
                 // Down the path crossed with along the crest faces away from the wall and up over the crest.
                 normal.set(alongPath).crs(alongMouth).nor();
-                float s = i / (float) columns;
                 data.r = Math.clamp((top - p.z) / height, 0, 1);
                 data.g = Math.min(freeA ? Math.min(1, s / FRAY) : 1, freeB ? Math.min(1, (1 - s) / FRAY) : 1);
-                // Off the board's edge nothing catches the fall: it frays away as it drops, like its free sides.
-                if (surface.bottomless(drop)) { data.g *= 1 - BoardRelief.smooth((data.r - .25f) / .7f); }
                 data.a = field == null ? 0 : field.agitation(p);
                 index[i][r] = mesh.vertex(new MeshPartBuilder.VertexInfo().setPos(p).setNor(normal)
                       .setUV(across[i], p.z / repeat).setCol(data));
@@ -177,11 +180,24 @@ final class GpuWaterfall {
      * sheet stretches by at most half a unit to meet both.
      */
     private static float[] across(Vector3[][] grid, BoardSurface.Crest crest, boolean freeA, boolean freeB) {
-        int columns = grid.length - 1;
+        Vector3[] line = new Vector3[grid.length];
+        for (int i = 0; i < grid.length; i++) { line[i] = grid[i][1]; }
+        return across(line, crest, freeA, freeB, U_LENGTH * BoardGeometry.hexScale());
+    }
+
+    /** One canonical crest keeps material coordinates unchanged when the ice body chooses fewer columns. */
+    static float[] across(BoardSurface.Crest crest, boolean freeA, boolean freeB, float unit) {
+        int columns = BoardSurface.SHORE_SEGMENTS * COLUMNS;
+        Vector3[] line = new Vector3[columns + 1];
+        for (int i = 0; i <= columns; i++) { line[i] = crest.point(i / (float) columns); }
+        return across(line, crest, freeA, freeB, unit);
+    }
+
+    private static float[] across(Vector3[] line, BoardSurface.Crest crest, boolean freeA, boolean freeB, float unit) {
+        int columns = line.length - 1;
         float[] result = new float[columns + 1];
-        float unit = U_LENGTH * BoardGeometry.hexScale();
         for (int i = 1; i <= columns; i++) {
-            Vector3 a = grid[i - 1][1], b = grid[i][1];
+            Vector3 a = line[i - 1], b = line[i];
             result[i] = result[i - 1] + (float) Math.hypot(b.x - a.x, b.y - a.y) / unit;
         }
         float span = Math.max(result[columns], 1e-4f), start = 0, stretched = span;
@@ -298,10 +314,6 @@ final class GpuWaterfall {
     }
 
     private static String insertOnce(String source, String anchor, String replacement) {
-        int index = source.indexOf(anchor);
-        if (index < 0 || source.indexOf(anchor, index + anchor.length()) >= 0) {
-            throw new IllegalStateException("Incompatible water vertex shader insertion point: " + anchor);
-        }
-        return source.substring(0, index) + replacement + source.substring(index + anchor.length());
+        return GpuShaderSource.replaceOnce(source, anchor, replacement, "water vertex");
     }
 }

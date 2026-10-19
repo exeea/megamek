@@ -57,7 +57,7 @@ final class GpuClouds implements Disposable {
             GpuShaderManager.dispose(shadowShader);
             throw failure;
         }
-        shadow.getColorBufferTexture().setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        shadow.getColorBufferTexture().setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
         attribute = new GpuCloudShadow(shadow.getColorBufferTexture(), projection);
     }
 
@@ -84,6 +84,8 @@ final class GpuClouds implements Disposable {
         var profile = BoardAtmosphere.clouds(settings);
         motion.advance(settings.effects(), delta);
         sun.set(lighting.direction()).scl(-1);
+        // No sun/moon still leaves a cloud layer. Its opacity uses a stable vertical column, without a shadow.
+        if (!lighting.hasDirectLight()) { sun.set(0, 0, 1); }
         // The immutable terrain snapshot owns these elevations; wind/camera movement cannot change them.
         if (tiles != board.tiles() || level != BoardGeometry.level()) {
             tiles = board.tiles();
@@ -127,6 +129,9 @@ final class GpuClouds implements Disposable {
         shadowShader.setUniformf("u_cloudBounds", minX, minY, spanX, spanY);
         quad.render(shadowShader, GL20.GL_TRIANGLES);
         shadow.end();
+        shadow.getColorBufferTexture().bind(0);
+        // Only reflection uses these levels; shadowTransmission explicitly samples the unchanged red LOD0.
+        Gdx.gl.glGenerateMipmap(GL20.GL_TEXTURE_2D);
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
     }
 
@@ -139,6 +144,7 @@ final class GpuClouds implements Disposable {
     }
 
     void bindShadow(ShaderProgram shader, int unit) {
+        shader.setUniformf("u_cloudEnabled", attribute.enabled ? 1 : 0);
         attribute.texture.bind(unit);
         shader.setUniformi("u_cloudShadow", unit);
         shader.setUniformMatrix("u_cloudProjection", projection);

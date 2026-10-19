@@ -2,6 +2,8 @@
 package megamek.common.net.marshalling;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -74,6 +76,53 @@ class ResolvedAttackPacketTest {
         var marshaller = new NativeSerializationMarshaller();
         marshaller.marshall(new Packet(PacketCommand.ENTITY_ATTACK_RESOLVED, result), bytes);
         assertEquals(result, marshaller.unmarshall(new ByteArrayInputStream(bytes.toByteArray())).getObject(0));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+          "Davy Crockett-M Long Tom Ammo, 1",
+          "Ammo Alamo,                    2",
+          "Ammo Santa Anna,               3",
+          "Ammo AR10 Santa Anna,          3",
+          "Ammo Peacemaker,               4",
+          "Ammo AR10 Peacemaker,          4"
+    })
+    void nuclearAmmoIdentitySurvivesCaptureResolutionCopiesAndNetwork(String ammoName, int nuclearType) throws Exception {
+        var owner = new Tank();
+        var gun = Mounted.createMounted(owner, EquipmentType.get("ISLongTom"));
+        var ammo = (AmmoType) EquipmentType.get(ammoName);
+        assertNotNull(ammo, "Use registered ammunition, including its real flags and munition set");
+        gun.setLinked(Mounted.createMounted(owner, ammo));
+        var captured = ResolvedAttack.Shot.capture(gun);
+        assertEquals(nuclearType, captured.nuclearType());
+
+        var ordinary = (AmmoType) EquipmentType.get("ISLongTomAmmo");
+        gun.setLinked(Mounted.createMounted(owner, ordinary));
+        var standard = ResolvedAttack.Shot.capture(gun);
+        assertNull(standard.nuclearType());
+        assertEquals(nuclearType, captured.nuclearType(), "Later ammo selection cannot change the captured shot");
+        assertNull(captured.withResolution(ordinary, 1).nuclearType(), "Actual ordinary ammo clears a nuclear profile");
+        assertEquals(nuclearType, captured.withResolution(null, null).nuclearType(), "Missing resolution ammo preserves capture");
+
+        var origin = new UnitLocation(1, new Coords(2, 3), 0, 0, 0);
+        var landing = new UnitLocation(-1, new Coords(2, 1), 0, 0, 0);
+        var resolved = standard.withResolution(ammo, 0);
+        assertEquals(nuclearType, resolved.nuclearType(), "Resolved ammo overrides the earlier ordinary selection");
+        var copied = resolved.withDamagePerHit(0).asDefensive().withInterception(UUID.randomUUID(), 0)
+              .withTrajectory(origin, landing).withResolution(null, null);
+        assertEquals(nuclearType, copied.nuclearType(), "All presentation copies retain the observed nuclear type");
+        var scheduled = standard.withNuclearType(nuclearType).withResolution(null, null);
+        assertEquals(nuclearType, scheduled.nuclearType(), "A scheduled detonation's explicit type survives resolution");
+        assertNull(scheduled.withResolution(ordinary, null).nuclearType());
+
+        var result = new ResolvedAttack(UUID.randomUUID(), ResolvedAttack.Kind.SHOT, origin, landing, Targetable.TYPE_HEX_CLEAR,
+              0, "ISLongTom", 0, true, List.of(new ResolvedAttack.Mount(1, 0, captured),
+                    new ResolvedAttack.Mount(1, 1, standard), new ResolvedAttack.Mount(1, 2, scheduled)), copied);
+        var bytes = new ByteArrayOutputStream();
+        var marshaller = new NativeSerializationMarshaller();
+        marshaller.marshall(new Packet(PacketCommand.ENTITY_ATTACK_RESOLVED, result), bytes);
+        assertEquals(result, marshaller.unmarshall(new ByteArrayInputStream(bytes.toByteArray())).getObject(0),
+              "Both primary and per-mount nuclear profiles survive the actual network filter");
     }
 
     @Test

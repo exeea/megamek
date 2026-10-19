@@ -11,6 +11,18 @@ import org.junit.jupiter.api.Test;
 /** The alpha-weighted wall color shared by unit tokens and raised features. */
 class GpuCutoutTest {
     @Test
+    void sideColorAveragesLinearLight() {
+        BufferedImage image = new BufferedImage(2, 1, BufferedImage.TYPE_INT_ARGB);
+        image.setRGB(0, 0, 0xff008080);
+        image.setRGB(1, 0, 0xffff8080);
+        Color color = GpuCutout.averageColor(new BoardScene.Pixels(image));
+        assertEquals(.5f, color.r, .000001f, "Black and white contribute equal linear radiance");
+        assertEquals(.2158605f, color.g, .000001f, "Authored gray decodes before the weighted average");
+        assertEquals(.2158605f, color.b, .000001f);
+        assertEquals(1, color.a);
+    }
+
+    @Test
     void sideColorIgnoresTransparentPixelsAndWeightsPartialAlpha() {
         BufferedImage image = new BufferedImage(3, 1, BufferedImage.TYPE_INT_ARGB);
         image.setRGB(0, 0, 0xffff0000);

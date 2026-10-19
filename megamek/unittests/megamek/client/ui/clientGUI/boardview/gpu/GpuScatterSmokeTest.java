@@ -79,7 +79,7 @@ class GpuScatterSmokeTest {
                         var materials = scatterMaterials(terrain);
                         assertTrue(!materials.isEmpty(), "The scatter layer must carry its atlas");
                         assertEquals(1, materials.values().stream().map(value -> value.textureDescription.texture).distinct().count(),
-                              "Every scatter type and chunk borrows the same atlas");
+                              "Every rock/grass type and chunk borrows the same atlas");
                         Texture atlas = materials.values().iterator().next().textureDescription.texture;
                         assertEquals(Texture.TextureFilter.MipMapLinearLinear, atlas.getMinFilter());
                         var features = scene.tiles().stream().flatMap(tile -> tile.features().stream()).toList();
@@ -103,6 +103,9 @@ class GpuScatterSmokeTest {
                         camera.center(BoardGeometry.center(new Coords(7, 7), 0));
                         profiler.enable();
                         int scatterDraws = 0;
+                        long bushFamilies = scene.tiles().stream().filter(tile -> tile.features().stream()
+                              .anyMatch(feature -> feature.asset().equals("scatter-plant")))
+                              .map(BoardScene.Tile::surface).distinct().count();
                         float[] pixels = { 6, 2.4f, 1.5f, 2.4f, 4 };
                         for (int step = 0; step < pixels.length; step++) {
                             camera.camera.zoom = diameter / pixels[step] * Gdx.graphics.getBackBufferHeight()
@@ -121,9 +124,10 @@ class GpuScatterSmokeTest {
                             assertEquals(vertices, decorated[0] - background[0], "Color pass at LoD step " + step);
                             if (step == 0) {
                                 scatterDraws = decorated[1] - background[1];
-                                // Detailed bushes may cross a 16-bit mesh's vertex limit. They must still batch.
-                                assertTrue(scatterDraws > 0 && scatterDraws <= Math.ceil(vertices / 32768.0),
-                                      "Scatter must stay in packed batches rather than draw individual objects");
+                                // Distinct tissue materials cannot merge with the atlas. Allow one part per
+                                // bush family plus the original 16-bit geometry budget, never one per object.
+                                assertTrue(scatterDraws > 0 && scatterDraws <= Math.ceil(vertices / 32768.0) + bushFamilies,
+                                      "Scatter must stay in material batches rather than draw individual objects");
                             }
                             assertEquals(visible ? scatterDraws : 0, decorated[1] - background[1],
                                   "Scatter batch visibility at LoD step " + step);
@@ -202,6 +206,7 @@ class GpuScatterSmokeTest {
                                 frame.render(terrain, camera, captured);
                                 String output = System.getProperty("megamek.gpu.screenshots");
                                 if (output != null) { GpuReviewFrame.save(new File(output, "bush-field-" + name + ".png")); }
+                                bushLowSun(terrain, camera, captured, "bush-field-" + name);
                                 var plantTile = captured.tiles().stream().filter(tile -> tile.surface() == family
                                       && tile.features().stream().anyMatch(f -> f.asset().equals("scatter-plant")))
                                       .findFirst().orElseThrow();
@@ -211,6 +216,7 @@ class GpuScatterSmokeTest {
                                       plant.x() * BoardGeometry.hexScale(), plant.y() * BoardGeometry.hexScale(), 0));
                                 frame.render(terrain, camera, captured);
                                 if (output != null) { GpuReviewFrame.save(new File(output, "bush-scatter-" + name + ".png")); }
+                                bushLowSun(terrain, camera, captured, "bush-scatter-" + name);
                                 camera.camera.zoom = .12f;
                                 camera.update();
                                 frame.render(terrain, camera, captured);
@@ -247,8 +253,11 @@ class GpuScatterSmokeTest {
         for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
             for (Object part : (Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "scatterRenderables")) {
                 Material material = ((Renderable) part).material;
+                // Bushes use the same tissue-aware sculpt material as field shrubs. Atlas controls apply
+                // only to rocks and grass; removing the sculpt dummy diffuse slot would also remove its UVs.
+                if (GpuTerrain.sculpted(material)) { continue; }
                 TextureAttribute atlas = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
-                assertTrue(atlas != null, "Scatter must use the diffuse-only textured path");
+                assertTrue(atlas != null, "Non-bush scatter must retain its shared textured path");
                 result.put(material, atlas);
             }
         }
@@ -299,6 +308,20 @@ class GpuScatterSmokeTest {
         var road = new BoardScene.Tile(new Coords(0, 1), 1, -1, false, 1, BoardScene.Surface.GRASS,
               ground, null, null, List.of(), List.of());
         return new BoardScene(0, 1, 2, List.of(empty, road), List.of(), List.of(), -1, "", List.of());
+    }
+
+    private static void bushLowSun(GpuTerrain terrain, BoardCamera camera, BoardScene scene, String name) {
+        String output = System.getProperty("megamek.gpu.screenshots");
+        if (output == null) { return; }
+        var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(6.5f, 0, 0, 2, 0, 0));
+        try {
+            for (int side = 0; side < 2; side++) {
+                frame.render(terrain, camera, scene);
+                GpuReviewFrame.save(new File(output, name + "-low-sun-" + side + ".png"));
+                camera.orbit(180, 0);
+                camera.update();
+            }
+        } finally { frame.dispose(); }
     }
 
     private static void preview(GpuTerrain terrain, BoardCamera camera, String name) {

@@ -17,6 +17,9 @@ final class TerrainLoadProgress {
         Sections { states = List.copyOf(states); }
     }
 
+    /** The shader programs a load has linked, of those it needs so far (GpuTerrain.shaderProgress). */
+    record Shaders(int linked, int total) { }
+
     /** Read the landscape overview across each row, then down, while retaining the terrain's chunk indices. */
     static int displayIndex(int section, int columns, int rows) {
         return rows > columns ? section : section % rows * columns + section / rows;

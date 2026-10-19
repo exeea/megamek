@@ -8,8 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -21,9 +23,10 @@ import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
-import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -56,7 +59,7 @@ class GpuBuildingMaterialsSmokeTest {
                             hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, 2));
                         } else if (x == 4 && y == 7) {
                             // A road bank at deck height attaches to the span below; a span without an attached
-                            // road is a natural bridge with no GLB deck.
+                            // road uses the bridge type captured by BoardScene.
                             hex.setLevel(2);
                             hex.addTerrain(new Terrain(Terrains.ROAD, 1, true, 1 << 3));
                         } else if (x == 4 && y == 8) {
@@ -68,6 +71,7 @@ class GpuBuildingMaterialsSmokeTest {
                     }
                 }
                 fixture.game.setBoard(new Board(9, 9, hexes));
+                BoardSceneryLayouts.convert(fixture.game.getBoard());
                 fixture.source.refresh();
             });
             BoardScene captured = fixture.source.takeFrame().scene();
@@ -77,6 +81,7 @@ class GpuBuildingMaterialsSmokeTest {
                   .filter(feature -> feature.asset().startsWith("buildings/")).count());
             new Lwjgl3Application(new ApplicationAdapter() {
                 GpuTerrain terrain;
+                GpuSceneTestOutput outputFrame;
                 BoardCamera camera;
                 int frames;
 
@@ -85,6 +90,7 @@ class GpuBuildingMaterialsSmokeTest {
                     try {
                         checkMaterials(scene);
                         terrain = new GpuTerrain();
+                        outputFrame = new GpuSceneTestOutput();
                         terrain.update(scene);
                         checkHeights(scene, terrain);
                         BoardGeometry.Tuning previous = BoardGeometry.tuning();
@@ -114,8 +120,9 @@ class GpuBuildingMaterialsSmokeTest {
                     try {
                         terrain.animate(0, List.of());
                         terrain.renderShadows(List.of());
-                        ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
+                        outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
                         terrain.render(camera.camera, false);
+                        outputFrame.display();
                         File output = new File(System.getProperty("megamek.gpu.screenshots"));
                         if (++frames == 4) {
                             GpuBoardTestUi.capture(new File(output, "building-material-families.png"));
@@ -143,6 +150,7 @@ class GpuBuildingMaterialsSmokeTest {
 
                 @Override
                 public void dispose() {
+                    if (outputFrame != null) { outputFrame.close(); }
                     if (terrain != null) {
                         terrain.dispose();
                     }
@@ -152,7 +160,7 @@ class GpuBuildingMaterialsSmokeTest {
         assertNull(failure.get(), () -> String.valueOf(failure.get()));
     }
 
-    private static void checkMaterials(BoardScene scene) {
+    private static void checkMaterials(BoardScene scene) throws IOException {
         GpuAssets assets = new GpuAssets();
         try {
             for (var tile : scene.tiles()) {
@@ -172,26 +180,19 @@ class GpuBuildingMaterialsSmokeTest {
                     var wall = model.getMaterial(role);
                     assertNotNull(wall, feature.asset());
                     Texture texture = wall.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture;
-                    assertSame(assets.material("buildings/" + family), texture, feature.asset());
+                    assertSame(assets.material("structures/facades/" + family), texture, feature.asset());
                     assertEquals(128, texture.getWidth());
                     assertEquals(128, texture.getHeight());
                     assertEquals(Texture.TextureWrap.Repeat, texture.getUWrap());
                 }
             }
-            BoundingBox bridge = assets.model("bridge").calculateBoundingBox(new BoundingBox());
-            assertEquals(18, bridge.getWidth(), .0001f);
-            assertEquals(72, bridge.getHeight(), .0001f);
-            assertEquals(-1.5f, bridge.min.z, .0001f, "Authored underside thickness");
-            assertEquals(2.5f, bridge.max.z, .0001f, "Authored rail height");
-            var deck = assets.model("bridge").getMaterial("bridge-deck");
-            assertSame(assets.road("asphalt").color(),
-                  deck.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture);
-            var sides = assets.model("bridge").getMaterial("bridge-structure");
-            assertSame(assets.sculpt("concrete").color(),
-                  sides.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture);
             for (var surface : BoardScene.Surface.values()) {
-                assertEquals(128, assets.material(surface.wall).getWidth());
-                assertEquals(128, assets.material(surface.wall).getHeight());
+                // Classic walls are the Classic tiles in terrain/classic; each loads at its authored size.
+                var source = ImageIO.read(new File(Configuration.dataDir(), "models/board/textures/" + surface.classicWall + ".png"));
+                assertNotNull(source, surface.classicWall);
+                Texture texture = assets.material(surface.classicWall);
+                assertEquals(source.getWidth(), texture.getWidth(), surface.classicWall + " keeps its authored width");
+                assertEquals(source.getHeight(), texture.getHeight(), surface.classicWall + " keeps its authored height");
             }
         } finally {
             assets.dispose();
@@ -210,10 +211,15 @@ class GpuBuildingMaterialsSmokeTest {
         }
         Coords coords = new Coords(4, 8);
         assertEquals(1, scene.tile(coords).features().stream().filter(f -> f.asset().equals("bridge")).count());
+        // Generated deck material follows the attached paved road; its live texture combinations are covered by
+        // GpuBridgeSmokeTest.bridgeMaterialsFollowApproachesAndDistantEdits.
+        var bridge = BoardBridge.deck(scene, scene.tile(coords));
+        assertNotNull(bridge);
+        assertEquals(BoardRoad.Kind.PAVED, bridge.kind());
         BoundingBox placed = terrain.roofBounds(coords);
-        assertNotNull(placed, "Bridge terrain must instantiate one complete GLB deck");
+        assertNotNull(placed, "Bridge terrain must install one complete generated deck");
         float deck = 2 * BoardGeometry.level() + GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale();
-        // The authored deck kit sets the exact underside and rail heights, near the slab's 1.5 below and 2.5 above.
+        // Generated slab and rails retain the bridge placement contract at both tested board scales.
         assertEquals(deck - 1.5f * BoardGeometry.hexScale(), placed.min.z, .15f * BoardGeometry.hexScale());
         // A banked span carries the authored terminal block above its rails.
         assertEquals(deck + Math.max(2.5f, BoardBridgeFooting.terminalHeight()) * BoardGeometry.hexScale(), placed.max.z,

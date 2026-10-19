@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import com.badlogic.gdx.Gdx;
@@ -16,7 +17,6 @@ import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
-import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
@@ -599,10 +599,7 @@ final class GpuBiomeVegetation implements Disposable {
                 try { mesh = new GpuInstancedMesh(template); } finally { template.dispose(); }
                 var builder = new ModelBuilder();
                 builder.begin();
-                var material = new Material(ColorAttribute.createDiffuse(Color.WHITE), IntAttribute.createCullFace(GL20.GL_NONE),
-                      new Kind(crop), new FloatAttribute(Kind.LOD, lod));
-                if (texture != null) { material.set(TextureAttribute.createDiffuse(texture)); }
-                builder.part(crop ? "crop" : "reeds", mesh, GL20.GL_TRIANGLES, material);
+                builder.part(crop ? "crop" : "reeds", mesh, GL20.GL_TRIANGLES, material(crop, lod, texture));
                 builder.manage(mesh);
                 instance = new ModelInstance(builder.end());
             }
@@ -610,10 +607,7 @@ final class GpuBiomeVegetation implements Disposable {
             if (count > capacity) {
                 if (capacity > 0) { mesh.disableInstancedRendering(); }
                 capacity = Math.max(count, Math.max(256, capacity * 2));
-                var root = new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverRoot");
-                // libGDX indexes instance attributes by usage/unit, separately from the mesh's vertex attributes.
-                mesh.enableInstancedRendering(false, capacity, crop ? new VertexAttribute[] { root,
-                      new VertexAttribute(VertexAttributes.Usage.Position, 4, "a_coverRow") } : new VertexAttribute[] { root });
+                mesh.enableInstancedRendering(false, capacity, instanceAttributes(crop));
             }
             mesh.setInstanceData(data.items, 0, data.size);
             uploads++;
@@ -625,6 +619,31 @@ final class GpuBiomeVegetation implements Disposable {
             if (instance != null) { instance.model.dispose(); }
             mesh = null; instance = null; capacity = 0;
             begin(); previous.clear(); previousSpans.clear(); previousSizes.clear(); data.clear();
+        }
+    }
+
+    private static Material material(boolean crop, int lod, Texture texture) {
+        Material material = new Material(ColorAttribute.createDiffuse(Color.WHITE), IntAttribute.createCullFace(GL20.GL_NONE),
+              new Kind(crop), new FloatAttribute(Kind.LOD, lod));
+        if (texture != null) { material.set(TextureAttribute.createDiffuse(texture)); }
+        return material;
+    }
+
+    private static VertexAttribute[] instanceAttributes(boolean crop) {
+        var root = new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverRoot");
+        // libGDX indexes instance attributes by usage/unit, separately from the mesh's vertex attributes.
+        return crop ? new VertexAttribute[] { root, new VertexAttribute(VertexAttributes.Usage.Position, 4, "a_coverRow") }
+              : new VertexAttribute[] { root };
+    }
+
+    /** These batches are created at draw time, outside terrain chunks; prepare their real layouts before editor cards draw. */
+    void prepareMaterials(BiConsumer<Material, Mesh> consumer) {
+        for (boolean isCrop : new boolean[] { true, false }) {
+            Mesh layout = template(isCrop, 0);
+            try {
+                layout.enableInstancedRendering(true, 1, instanceAttributes(isCrop));
+                consumer.accept(material(isCrop, 0, texture(isCrop, false)), layout);
+            } finally { layout.dispose(); }
         }
     }
 
@@ -689,16 +708,14 @@ final class GpuBiomeVegetation implements Disposable {
               .replace("@CROP_LEAN@", Float.toString(CROP_LEAN))
               .replace("@CROP_SCALE@", Float.toString(CROP_SCALE));
         // A plant outside this template's band or the view leaves every vertex of its triangles outside the clip volume.
-        return source.replace("void main() {", wind + plant + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
+        return GpuShaderSource.coverVertex(source.replace("void main() {",
+              wind + plant + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
                     + "if (!biomePlant(a_position, a_normal, a_color, coverPosition, coverNormal, coverColor)) {\n"
                     + "gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }\n")
               .replace("v_diffuseUV = u_diffuseUVTransform.xy + a_texCoord0 * u_diffuseUVTransform.zw;",
                     "v_diffuseUV = u_diffuseUVTransform.xy + a_texCoord0 * u_diffuseUVTransform.zw;\n"
                           + "if (u_biomeKind < 1.5 && a_coverRow.x > 0.0 && abs(a_normal.x) < .5) {\n"
-                          + "v_diffuseUV.x = u_biomeLod > 1.5 ? cropU : cropU * .5;\n}")
-              .replace("vec4 pos = u_worldTrans * vec4(a_position, 1.0);", "vec4 pos = vec4(coverPosition, 1.0);")
-              .replace("vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = coverNormal;")
-              .replace("v_color = a_color;", "v_color = coverColor;");
+                          + "v_diffuseUV.x = u_biomeLod > 1.5 ? cropU : cropU * .5;\n}"));
     }
 
     /** Orthographic detail has one scale everywhere: below the coarsest tier's start no hex grows crops or reeds. */
@@ -724,8 +741,8 @@ final class GpuBiomeVegetation implements Disposable {
                 if (kind == BoardScene.Biome.FIELD || kind == BoardScene.Biome.MARSH) { kinds.put(tile.coords(), kind); }
             }
         }
-        float viewportPixels = Gdx.graphics == null ? camera.viewportHeight
-              : camera.viewportHeight * Gdx.graphics.getBackBufferHeight() / Math.max(1f, Gdx.graphics.getHeight());
+        float viewportPixels = Gdx.graphics == null ? camera.viewportHeight : camera.viewportHeight
+              * Gdx.graphics.getBackBufferHeight() * BoardCamera.renderScale / Math.max(1f, Gdx.graphics.getHeight());
         if (view != null && view.viewportPixels() == viewportPixels
               && Arrays.equals(view.projectionView(), camera.combined.val) && view.candidates().equals(candidates)) {
             boolean current = true;
@@ -801,14 +818,7 @@ final class GpuBiomeVegetation implements Disposable {
     }
 
     private void submit(Batch batch, List<ModelInstance> result, Vector3 centre) {
-        if (!batch.current.isEmpty() && (batch.crop ? crop == null : sedge == null)) {
-            if (batch.crop) {
-                var textures = cropTextures();
-                crop = textures[0];
-                canopy = textures[1];
-            } else { sedge = plantTexture("marsh-sedge"); }
-        }
-        Texture texture = batch.crop ? batch == distantCrops ? canopy : crop : sedge;
+        Texture texture = batch.current.isEmpty() ? null : texture(batch.crop, batch == distantCrops);
         long before = batch.uploads;
         ModelInstance instance = batch.upload(texture);
         uploads += batch.uploads - before;
@@ -816,6 +826,17 @@ final class GpuBiomeVegetation implements Disposable {
             instance.transform.setToTranslation(centre);
             result.add(instance);
         }
+    }
+
+    private Texture texture(boolean isCrop, boolean distant) {
+        if (isCrop ? crop == null : sedge == null) {
+            if (isCrop) {
+                var textures = cropTextures();
+                crop = textures[0];
+                canopy = textures[1];
+            } else { sedge = plantTexture("marsh-sedge"); }
+        }
+        return isCrop ? distant ? canopy : crop : sedge;
     }
 
     long uploads() { return uploads; }
@@ -826,47 +847,38 @@ final class GpuBiomeVegetation implements Disposable {
      */
     private static Texture[] cropTextures() {
         var registration = new JsonReader().parse(new FileHandle(new File(Configuration.dataDir(),
-              "models/board/textures/foliage/crop-row.json")));
-        var artwork = new ArrayList<Artwork>();
-        var rows = new Pixmap(2 * ROW_PIXELS, 640, Pixmap.Format.RGBA8888);
-        var canopy = new Pixmap(512, 256, Pixmap.Format.RGBA8888);
-        try {
-            for (String view : List.of("side", "front", "top")) {
-                var source = Artwork.load("crop-row-" + view, registration.get(view));
-                artwork.add(source);
-                boolean top = view.equals("top");
-                boolean front = view.equals("front");
-                source.draw(rows, front ? ROW_PIXELS : 0, top ? 512 : 0, top ? 128 : 512, top,
-                      front ? PLANT_FILL : ALONG_FILL);
-            }
-            // The heads fill roughly the top quarter of the stalks.
-            canopy.setBlending(Pixmap.Blending.None);
-            canopy.setFilter(Pixmap.Filter.BiLinear);
-            canopy.drawPixmap(rows, 0, 10, ROW_PIXELS, 123, 0, 0, 512, 128);
-            canopy.drawPixmap(rows, 0, 512, ROW_PIXELS, 128, 0, 128, 512, 128);
-            fill(rows, 0, 512);
-            fill(rows, 512, 640);
-            fill(canopy, 0, 128);
-            fill(canopy, 128, 256);
-            var near = filteredTexture(rows);
-            try { return new Texture[] { near, filteredTexture(canopy) }; }
-            catch (RuntimeException error) { near.dispose(); throw error; }
-        } finally {
-            rows.dispose(); canopy.dispose();
-            for (var source : artwork) { source.pixels().dispose(); }
+              "models/board/textures/vegetation/crop-row.json")));
+        var rows = new GpuLinearImage(2 * ROW_PIXELS, 640);
+        var canopy = new GpuLinearImage(512, 256);
+        for (String view : List.of("side", "front", "top")) {
+            var source = Artwork.load("crop-row-" + view, registration.get(view));
+            boolean top = view.equals("top");
+            boolean front = view.equals("front");
+            source.draw(rows, front ? ROW_PIXELS : 0, top ? 512 : 0, top ? 128 : 512, top,
+                  front ? PLANT_FILL : ALONG_FILL);
         }
+        // The heads fill roughly the top quarter of the stalks.
+        canopy.drawCutout(rows, 0, 10, ROW_PIXELS, 123, 0, 0, 512, 128);
+        canopy.drawCutout(rows, 0, 512, ROW_PIXELS, 128, 0, 128, 512, 128);
+        rows.bleed(0, 512);
+        rows.bleed(512, 640);
+        canopy.bleed(0, 128);
+        canopy.bleed(128, 256);
+        var near = filteredTexture(rows);
+        try { return new Texture[] { near, filteredTexture(canopy) }; }
+        catch (RuntimeException error) { near.dispose(); throw error; }
     }
 
-    /** Pixel-space registration belongs to the artwork; world spacing belongs to the shared row template. */
+    /** Normalized artwork anchors are resolved once to pixels; world spacing belongs to the shared row template. */
     private record CropSprite(int left, int top, int right, int bottom, int x, int y) { }
 
-    private record Artwork(Pixmap pixels, List<CropSprite> plants) {
+    private record Artwork(GpuLinearImage pixels, List<CropSprite> plants) {
         static Artwork load(String name, JsonValue anchors) {
             if (anchors == null || anchors.size != PLANTS_PER_ROW) {
                 throw new IllegalArgumentException(name + " requires seven registered variants");
             }
-            var source = new Pixmap(new FileHandle(new File(Configuration.dataDir(),
-                  "models/board/textures/foliage/" + name + ".png")));
+            var source = GpuColorTexture.decode(new FileHandle(new File(Configuration.dataDir(),
+                  "models/board/textures/vegetation/" + name + ".png")));
             try {
                 var plants = new ArrayList<CropSprite>();
                 for (int i = 0; i < PLANTS_PER_ROW; i++) {
@@ -880,22 +892,21 @@ final class GpuBiomeVegetation implements Disposable {
                             top = Math.min(top, y); bottom = Math.max(bottom, y);
                         }
                     }
-                    int x = anchors.get(i).getInt(0), y = anchors.get(i).getInt(1);
+                    float u = anchors.get(i).getFloat(0), v = anchors.get(i).getFloat(1);
+                    if (!(u >= 0 && u < 1 && v >= 0 && v < 1)) {
+                        throw new IllegalArgumentException(name + " requires normalized registration for variant " + i);
+                    }
+                    int x = (int) (u * source.getWidth()), y = (int) (v * source.getHeight());
                     if (left > right || top > bottom || x < start || x >= end || y < top || y > bottom) {
                         throw new IllegalArgumentException(name + " has invalid registration for variant " + i);
                     }
                     plants.add(new CropSprite(left, top, right, bottom, x, y));
                 }
-                return new Artwork(source, plants);
-            } catch (RuntimeException error) {
-                source.dispose();
-                throw error;
-            }
+                return new Artwork(new GpuLinearImage(source), plants);
+            } finally { source.dispose(); }
         }
 
-        void draw(Pixmap target, int x, int y, int height, boolean overhead, float fill) {
-            target.setBlending(Pixmap.Blending.None);
-            target.setFilter(Pixmap.Filter.BiLinear);
+        void draw(GpuLinearImage target, int x, int y, int height, boolean overhead, float fill) {
             for (int i = 0; i < plants.size(); i++) {
                 var plant = plants.get(i);
                 float centre = x + (i + .5f) * ROW_PIXELS / PLANTS_PER_ROW;
@@ -908,39 +919,15 @@ final class GpuBiomeVegetation implements Disposable {
                 int top = overhead ? Math.round(y + height / 2f + (plant.top - plant.y) * sy) : y;
                 int width = Math.max(1, Math.round((plant.right - plant.left + 1) * sx));
                 int drawnHeight = overhead ? Math.max(1, Math.round((plant.bottom - plant.top + 1) * sy)) : height;
-                target.drawPixmap(pixels, plant.left, plant.top, plant.right - plant.left + 1,
+                target.drawCutout(pixels, plant.left, plant.top, plant.right - plant.left + 1,
                       overhead ? plant.bottom - plant.top + 1 : plant.y - plant.top + 1,
                       left, top, width, drawnHeight);
             }
         }
     }
 
-    /**
-     * Give empty texels a region's average plant colour. The cutouts' empty texels are nearly black, and mipmaps average
-     * colour and coverage separately: without this the distant canopy would turn dark olive and lose its golden heads.
-     * Near rows also need clean empty texels now that the views have registered transparent gutters.
-     */
-    private static void fill(Pixmap pixels, int top, int bottom) {
-        long red = 0, green = 0, blue = 0, count = 0;
-        for (int y = top; y < bottom; y++) {
-            for (int x = 0; x < pixels.getWidth(); x++) {
-                int pixel = pixels.getPixel(x, y);
-                if ((pixel & 255) < 128) { continue; }
-                red += pixel >>> 24; green += pixel >>> 16 & 255; blue += pixel >>> 8 & 255; count++;
-            }
-        }
-        if (count == 0) { return; }
-        int colour = (int) (red / count) << 24 | (int) (green / count) << 16 | (int) (blue / count) << 8;
-        for (int y = top; y < bottom; y++) {
-            for (int x = 0; x < pixels.getWidth(); x++) {
-                int alpha = pixels.getPixel(x, y) & 255;
-                if (alpha < 32) { pixels.drawPixel(x, y, colour | alpha); }
-            }
-        }
-    }
-
-    private static Texture filteredTexture(Pixmap pixels) {
-        var texture = new Texture(pixels, true);
+    private static Texture filteredTexture(GpuLinearImage pixels) {
+        var texture = pixels.texture(true);
         texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
         texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
         return texture;
@@ -948,16 +935,12 @@ final class GpuBiomeVegetation implements Disposable {
 
     /** One shared 512px reed cutout; keep the full-resolution source as the editable asset. */
     private static Texture plantTexture(String name) {
-        var source = new Pixmap(new FileHandle(new File(Configuration.dataDir(),
-              "models/board/textures/foliage/" + name + ".png")));
+        var source = GpuColorTexture.decode(new FileHandle(new File(Configuration.dataDir(),
+              "models/board/textures/vegetation/" + name + ".png")));
         try {
-            var pixels = new Pixmap(512, 512, Pixmap.Format.RGBA8888);
-            try {
-                pixels.setBlending(Pixmap.Blending.None);
-                pixels.setFilter(Pixmap.Filter.BiLinear);
-                pixels.drawPixmap(source, 0, 0, source.getWidth(), source.getHeight(), 0, 0, 512, 512);
-                return filteredTexture(pixels);
-            } finally { pixels.dispose(); }
+            var pixels = new GpuLinearImage(512, 512);
+            pixels.drawCutout(new GpuLinearImage(source), 0, 0, source.getWidth(), source.getHeight(), 0, 0, 512, 512);
+            return filteredTexture(pixels);
         } finally { source.dispose(); }
     }
 

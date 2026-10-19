@@ -33,7 +33,8 @@ final class GpuWireframe implements Disposable {
      * behind surfaces and gives units, effects and overlays their usual occlusion.
      */
     void fill(Camera camera, GpuTerrain terrain) {
-        Gdx.gl.glClearColor(0.01f, 0.03f, 0.02f, 1);
+        Gdx.gl.glClearColor(GpuColor.linear(.01f) * GpuSceneRadiance.SCALE,
+              GpuColor.linear(.03f) * GpuSceneRadiance.SCALE, GpuColor.linear(.02f) * GpuSceneRadiance.SCALE, 1);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         // libGDX's render context tracks neither polygon offset nor polygon mode; later passes must find both reset.
         // Pushed back, the fill hides no surface's own edges.

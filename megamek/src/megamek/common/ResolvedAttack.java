@@ -64,8 +64,16 @@ public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLoca
     public record Shot(String mode, Set<String> munitions, boolean artillery, boolean defensive, int shots,
           int missiles, boolean indirect, Integer missileHits, UnitLocation launch, UnitLocation impact,
           boolean ballistic, int rackSize, boolean ppc, boolean machineGun, boolean rapidFire,
-          Interception interception, double damagePerHit, boolean plasma) implements Serializable {
+          Interception interception, double damagePerHit, boolean plasma, Integer nuclearType) implements Serializable {
         public Shot { munitions = Set.copyOf(munitions); }
+
+        public Shot(String mode, Set<String> munitions, boolean artillery, boolean defensive, int shots,
+              int missiles, boolean indirect, Integer missileHits, UnitLocation launch, UnitLocation impact,
+              boolean ballistic, int rackSize, boolean ppc, boolean machineGun, boolean rapidFire,
+              Interception interception, double damagePerHit, boolean plasma) {
+            this(mode, munitions, artillery, defensive, shots, missiles, indirect, missileHits, launch, impact,
+                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, damagePerHit, plasma, null);
+        }
 
         public Shot(String mode, Set<String> munitions, boolean artillery, boolean defensive, int shots,
               int missiles, boolean indirect, Integer missileHits, UnitLocation launch, UnitLocation impact,
@@ -123,29 +131,44 @@ public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLoca
             return new Shot(mode, ammo == null ? munitions : ammo.getMunitionType().stream()
                   .map(Enum::name).collect(java.util.stream.Collectors.toSet()), artillery, defensive, shots,
                   missiles, indirect, hits, launch, impact, ballistic, rackSize, ppc, machineGun, rapidFire, interception,
-                  damagePerHit, plasma);
+                  damagePerHit, plasma, ammo == null ? nuclearType : nuclearType(ammo));
         }
 
         /** The same shot dealing {@code damage} per hit, such as an artillery shell's damage in an outer ring. */
         public Shot withDamagePerHit(double damage) {
             return new Shot(mode, munitions, artillery, defensive, shots, missiles, indirect, missileHits, launch, impact,
-                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, damage, plasma);
+                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, damage, plasma, nuclearType);
         }
 
         public Shot asDefensive() {
             return new Shot(mode, munitions, artillery, true, shots, missiles, indirect, missileHits, launch, impact,
-                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, damagePerHit, plasma);
+                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, damagePerHit, plasma, nuclearType);
         }
 
         public Shot withInterception(UUID id, int count) {
             return new Shot(mode, munitions, artillery, defensive, shots, missiles, indirect, missileHits, launch, impact,
-                  ballistic, rackSize, ppc, machineGun, rapidFire, id == null ? null : new Interception(id, Math.max(0, count)), damagePerHit, plasma);
+                  ballistic, rackSize, ppc, machineGun, rapidFire, id == null ? null : new Interception(id, Math.max(0, count)), damagePerHit, plasma, nuclearType);
         }
 
         /** Artillery supplies its observed launch and resolved landing, including scatter. No client re-roll. */
         public Shot withTrajectory(UnitLocation origin, UnitLocation destination) {
             return new Shot(mode, munitions, true, defensive, shots, missiles, true, missileHits, origin, destination,
-                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, damagePerHit, plasma);
+                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, damagePerHit, plasma, nuclearType);
+        }
+
+        /** The stock nuclear type observed by the server, not inferred from nominal weapon damage. */
+        public Shot withNuclearType(int type) {
+            return new Shot(mode, munitions, artillery, defensive, shots, missiles, indirect, missileHits, launch, impact,
+                  ballistic, rackSize, ppc, machineGun, rapidFire, interception, damagePerHit, plasma, type);
+        }
+
+        private static Integer nuclearType(AmmoType ammo) {
+            if (ammo == null) { return null; }
+            if (ammo.getMunitionType().contains(AmmoType.Munitions.M_DAVY_CROCKETT_M)) { return 1; }
+            if (ammo.getAmmoType() == AmmoType.AmmoTypeEnum.ALAMO) { return 2; }
+            if (ammo.hasFlag(AmmoType.F_SANTA_ANNA)) { return 3; }
+            if (ammo.hasFlag(AmmoType.F_PEACEMAKER)) { return 4; }
+            return null;
         }
 
         public static Shot capture(Mounted<?> mount) {
@@ -168,7 +191,7 @@ public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLoca
                   weapon.curMode().isIndirect(), null, null, null,
                   type.hasFlag(WeaponType.F_BALLISTIC), type.getRackSize(), type.hasFlag(WeaponType.F_PPC),
                   type.hasFlag(WeaponType.F_MG), weapon.isRapidFire(), null, damage,
-                  type.hasFlag(WeaponType.F_PLASMA) || type.hasFlag(WeaponType.F_PLASMA_MFUK));
+                  type.hasFlag(WeaponType.F_PLASMA) || type.hasFlag(WeaponType.F_PLASMA_MFUK), nuclearType(ammo));
         }
     }
 

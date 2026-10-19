@@ -18,6 +18,74 @@ class GpuWaterFlowTest {
     private static final Coords HIGH = new Coords(3, 3);
 
     @Test
+    void riverRipplesDissipateAcrossSeveralLakeHexesAndAgreeAcrossChunks() {
+        BoardScene scene = basin("");
+        Coords mouth = new Coords(5, 4);
+        var original = new BoardFlow.Current(0, -.1f * BoardGeometry.width() / BoardGeometry.height());
+        var routed = Map.of(mouth, original);
+        var spread = GpuWaterShader.surfaceCurrents(scene, routed);
+        assertEquals(routed, Map.of(mouth, original), "Presentation must not mutate the routed current");
+        assertEquals(original, spread.get(mouth), "The river keeps its incoming speed and direction");
+        float previous = Math.abs(original.v());
+        for (int distance = 1; distance <= 3; distance++) {
+            var next = spread.get(mouth.translated(3, distance));
+            assertTrue(next != null && next.v() < 0, "Ripples continue downstream through lake hex " + distance);
+            assertTrue(Math.abs(next.v()) < previous, "The disturbance dissipates as it enters the lake");
+            previous = Math.abs(next.v());
+        }
+        assertTrue(previous < Math.abs(original.v()) * .2f, "The distant tail must be small before it ends");
+        assertEquals(null, spread.get(mouth.translated(3, 5)), "Distant lake water has no invented current");
+        var left = new GpuWaterShader.Pools(scene, spread, Map.of(mouth, new BoardSurface(scene, scene.tile(mouth))));
+        Coords lake = mouth.translated(3, 3);
+        var right = new GpuWaterShader.Pools(scene, spread, Map.of(lake, new BoardSurface(scene, scene.tile(lake))));
+        for (int distance = 0; distance <= 3; distance++) {
+            Vector3 a = BoardGeometry.center(mouth.translated(3, distance), 0);
+            Vector3 b = BoardGeometry.center(mouth.translated(3, distance + 1), 0);
+            Vector3 before = a.cpy().lerp(b, .4999f), after = a.cpy().lerp(b, .5001f);
+            assertTrue(sample(left, before).dst(sample(right, after)) < .0001f,
+                  "The mouth must stay continuous across tile and chunk boundaries");
+        }
+        var edited = new GpuWaterShader.Pools(scene, GpuWaterShader.surfaceCurrents(scene, Map.of()), Map.of());
+        assertEquals(0, sample(edited, BoardGeometry.center(lake, 0)).len(),
+              "Removing the inlet removes its derived ripple tail");
+    }
+
+    @Test
+    void riverRipplesRespectConnectedWaterAndNeverExtendLava() {
+        Coords mouth = new Coords(5, 6), beyond = new Coords(7, 6);
+        var routed = Map.of(mouth, new BoardFlow.Current(-.1f, 0));
+        assertTrue(GpuWaterShader.surfaceCurrents(basin(""), routed).containsKey(beyond),
+              "The control must be close enough to receive river ripples");
+        for (String barrier : List.of("land", "ice", "height", "lava")) {
+            assertEquals(null, GpuWaterShader.surfaceCurrents(basin(barrier), routed).get(beyond),
+                  "Ripples must not pass through a " + barrier + " barrier");
+        }
+        var lava = Map.of(new Coords(6, 6), new BoardFlow.Current(-.025f, 0));
+        assertEquals(lava, GpuWaterShader.surfaceCurrents(basin("lava"), lava), "Lava keeps its existing flow");
+    }
+
+    private static Vector2 sample(GpuWaterShader.Pools pools, Vector3 point) {
+        float[] values = new float[4];
+        pools.sample(point.x, point.y, values);
+        return new Vector2(values[1], values[2]);
+    }
+
+    private static BoardScene basin(String barrier) {
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 13; x++) {
+            for (int y = 0; y < 13; y++) {
+                boolean wall = x == 6;
+                BoardLiquid liquid = wall && barrier.equals("land") ? BoardLiquid.NONE
+                      : wall && barrier.equals("lava") ? new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.WATER;
+                tiles.add(new BoardScene.Tile(new Coords(x, y), wall && barrier.equals("height") ? 1 : 0,
+                      liquid.present() ? 1 : -1, wall && barrier.equals("ice"), 0, BoardScene.Surface.SAND,
+                      null, null, null, null, null, List.of(), List.of(), liquid, null, true));
+            }
+        }
+        return new BoardScene(0, 13, 13, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    @Test
     void theAnimatedCurrentAcceleratesDownBothSlopesAndSettlesAfterTheFoot() {
         for (int direction = 0; direction < 6; direction++) {
             float gentle = 0;

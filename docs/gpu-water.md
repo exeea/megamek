@@ -101,9 +101,8 @@ pools use nearby landing segments to place foam and agitation, including a fall
 that lands beside a hex corner. Water surface, fall, spray and cut faces use
 separate shader modes because they have different opacity and lighting needs.
 
-`BoardSurface.FALLS_OFF_THE_BOARD` optionally extends outgoing rivers below the
-board edge. It is disabled by default. Ordinary exposed edges show a cut surface;
-an off-board fall has no invented receiving pool or landing spray. The cut shares
+Water that runs into the board edge, rivers included, is cut off there with the
+board and shows a cut surface. The cut shares
 the surface's wave vertex program: its top vertices (colour G zero) follow the
 waves at the same rest positions as the surface's border samples, so the section
 shows the wave profile without a gap. Its bottom stays on the bed.
@@ -129,23 +128,35 @@ with Donelan-Banner spreading, cross-faded in power with its neighbours, plus a
 low, narrow swell so calm open water keeps moving. Amplitudes are in metres: the
 spectrum of a full gale (wind 1, about 20 m/s) gives roughly 3 m significant
 height with 70 m crests, a moderate wind about 1.7 m, calm about 0.3 m of swell.
+At zero wind the short wind sea has zero power. It grows smoothly through light
+air (wind 0–0.15); the numerical minimum wind speed used to keep the spectral
+peak finite must not generate chop in calm weather. The residual swell remains
+at a roughly 110 m wavelength, about an eight-second period at standard gravity.
 As art direction, a full gale is drawn so its tallest waves, crest to trough, reach
 `GpuOcean.MAX_WAVE_HEIGHT`, so its crests fold and foam visibly from a tactical
 camera. The gain grows with the square of the wind (`GpuOcean.storm`, `u_storm` in
 `ocean-initial.frag`); calm water stays physical. Running water divides its
 ripple band by the current gain (`GpuOcean.gain`, `u_waterStorm`), so a river's
 short chop keeps its real height whatever the configured maximum. Scenario gravity sets both the spectrum's
-amplitudes and its wave speeds. At zero gravity, `GpuTerrain.update` derives a
-lunar presentation from the source tiles: every surface uses ROCK, vegetation
-and scatter disappear (the tiles are `bare`, which `BoardScatter.allowed` also
-denies the relief's field stones and shrubs), rough boulders give way to bedrock outcrops
+amplitudes and its wave speeds. In vacuum (`GpuTerrain.setVacuum`, from the visual
+pressure, which zero gravity forces to VACUUM) or at zero gravity, `GpuTerrain.update`
+derives an airless presentation from the source tiles (`BoardScene.Tile.lunar`): every
+surface uses LUNAR, and the vegetation, snow and black ice disappear with their labels
+(trees, grass, plant and fungus scatter, fields, felled timber, biomes, swamp). The
+tiles are `barren`, so the relief's field cover grows no shrubs on them; lunar-theme
+ground with air keeps its shrubs. In vacuum with gravity, water and hazardous
+liquids freeze through the existing ICE flag (`Tile.frozen`) and keep their depth and
+labels, magma stays molten, and loose stones, field stones and rough boulders stay.
+At zero gravity nothing lies loose either: scatter and field cover go (the tiles are
+`bare`, which `BoardScatter.allowed` also denies the relief's field stones and shrubs),
+rough boulders give way to bedrock outcrops
 ([Rough terrain variants](gpu-rough.md#zero-gravity)), and all liquids, magma crust and ice are removed. Each
 hex's positive water depth is subtracted from its elevation, and its depth/level
 labels become the resulting ground level. Bridges gain that same depth in relative
 height, including their height labels, so their decks stay at the original absolute
 level. Rendering, picking and support use
 this same snapshot after the existing terrain rebuild publishes it. Returning
-to positive gravity restores the source terrain; game hexes remain unchanged.
+to air and positive gravity restores the source terrain; game hexes remain unchanged.
 Waves travel downwind at their deep-water speed; the smoke test checks
 the direction. The choppy displacement gathers the surface towards each crest, the
 more so the stronger the wind, so crests are sharp and troughs broad; the smoke
@@ -195,18 +206,44 @@ reaches the board edge continues past it: the exposure map repeats the edge hexe
 beyond the board, so a lake or sea that touches the edge has unlimited fetch across
 it while a river leaving the board stays narrow. The shore field already treats an
 off-board edge as a mouth, not a bank. Descents, falls and ice have no fetch, so
-they keep their own current-driven surface. Lighting over the shallows keeps part of the swell and all of the chop
-even where the geometry is flat, so shallow water never turns to glass. Waves fade
+they keep their own current-driven surface. Shading follows the same swell attenuation
+as geometry, with only small floors for shorter wind waves; shallow or sheltered
+water cannot regain an open sea's swell through a shading floor. In calm air the
+long band's exposure uses the available open water rather than an arbitrary local
+wind bearing. Waves fade
 before elevation transitions, retaining the existing rounded stream descent. This
 is a rendering approximation, not a hydraulic solver or a change to movement rules.
 
-Running water shows its current in any light. A coarse detail layer carried by the
-current alone (no world drift) shades broad, light and dark faces on level running water
-deeper than the shallows, and drifts clearer and siltier patches of the water's own
-colour past, so a river reads as flowing even in calm air and without a sun glint.
-Its banks take no lake surf, surge or wind-drifted foam band: only the band's grain
-drifts downstream. The depth-0 shallows, descents, lakes and falls keep their own
-look. Running water is too narrow for the wind to raise a sea on it. Above a light breeze
+Near an open coast a small normal wave follows the shore-distance field inward,
+even with zero local wind. Its fixed eight-second clock blends with the faster
+wind wash without changing phase when wind strength changes. Existing directional
+fetch limits this residual wash in small lakes and channels; it is not an explicit
+ocean classification or a refraction solver. Calm wash adds no permanent foam rim.
+Wind-driven surf is strongest on shores facing the incoming waves. Fine surface
+detail oscillates over a bounded distance instead of steadily translating a still
+lake along an arbitrary bearing.
+
+Ordinary rivers carry the same fine surface detail as lakes, with small downstream
+ripples and very slight fine colour variation. Broad reflective faces and large
+clear/silty patches are not used to indicate ordinary flow. Coarser churn belongs
+to actual agitation at rapids, descending water and falls.
+
+`GpuWaterShader.surfaceCurrents` derives the renderer's current map from `BoardFlow`
+once per terrain update. It extends small motion into connected still water with
+a smooth four-hex fade, before the existing field kernel interpolates between
+centres. The tail cannot cross land, ice, lava or a surface-height change, and
+cannot carry a fall's fast approach into a lake as rapids. Changes to this derived
+map use the existing field/chunk invalidation, including removal of an inlet.
+It does not change routed flow or gameplay state, and distant lake interiors stay still.
+
+One continuous current-speed blend (0–0.10 hex widths/s) controls river detail,
+wind-wave suppression and shore wash. A visual bottom-drag approximation slows
+surface advection and damps ripples across shallow columns (0.02–0.45 levels),
+including depth-zero shelves. It uses the continuous optical depth, with no
+separate depth-zero surface switch; it is not a discharge or hydraulic calculation.
+A full current's banks take no
+lake surf, surge or wind-drifted foam band. Descents and falls keep their own
+agitation. Running water is too narrow for the wind to raise a sea on it. Above a light breeze
 (`waterWindShare`) a level reach takes only the ripple band, the short steep chop
 of a short fetch, read where its current has carried it (the same two restarting
 phases as its detail maps), so the chop travels with the flow plus the wind; in a
@@ -216,7 +253,7 @@ A descent keeps its own current-driven surface: its mesh normal, exactly up on
 level water, tilts from the lip, and the tilt both removes the wind's chop and
 broadens the sun's glint, since water running down a slope is broken. A mirror-like
 glint there would trace a thin static line along the descent's curve. Bed caustics
-and the refraction sway of a submerged bed follow neither wind nor current.
+follow neither wind nor current.
 
 Only the longest cascade displaces geometry; shorter ones exist in the normals.
 Shading separates a broad normal (swell and some chop), which lights the waves so
@@ -224,6 +261,29 @@ they read from a tactical height, from the full normal used for reflection and
 glitter. Crests glow turquoise with light scattered through them, strongest when
 looking towards the sun. Air/water Fresnel uses a 0.02037 normal-incidence
 reflectance and a fifth-power angular response.
+
+The shared local lights (`lava-lighting.glsl`: lava, burning hexes, luminous fungi,
+fireballs and weapon fire) reach water as the sun does. Their irradiance on a level
+surface lights the water body, foam, falls and spray. Pools and the glassy part of
+falling sheets also mirror them, with the water's f0 and the same antialiased roughness
+as the sun's glint, each source through its own size-widened lobe; a beam or flamer
+stream mirrors along its whole length. A pool or fall pixel walks the light list once
+(`waterLocalLighting`, which calls `lavaLighting`): the walk gives the level irradiance
+and the highlight on the wave facets, and on a fall also the highlight on its sheet.
+`waterLighting(false)` therefore leaves the local lights out of the sky and sun
+irradiance. Spray and board-edge sections take only the irradiance, through
+`waterLighting()`; spray gets no forward-scattering glow from them. The submerged bed
+receives them through `shadeSurface`.
+
+Orthographic views use a soft ceiling on direct sun glare: their parallel camera
+rays can put every level water surface at the mirror angle simultaneously.
+`WATER_ORTHOGRAPHIC_GLARE` in `water-lighting.glsl` limits this contribution to
+45% of the sunlight on white level ground, easing in above half that limit.
+Weak glints stay unchanged and highlight colour is preserved. This is a readability
+choice at normal exposure, not a physical reflectance limit. It applies to pools
+and waterfall sheets with effects on or off; perspective reflections, sky/cloud
+reflections, local-light reflections, foam and the shared scene exposure remain
+unchanged.
 
 The FFT targets belong to the renderer, rather than individual hexes. Rapids keep
 their existing current-driven patches. The **Water effects** control under Tuning →

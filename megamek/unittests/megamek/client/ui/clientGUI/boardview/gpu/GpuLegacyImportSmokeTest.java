@@ -77,13 +77,14 @@ class GpuLegacyImportSmokeTest {
         FIXTURE.put(new Coords(5, 5), new Sample("building:2;bldg_elev:1;bldg_cf:50;fluff:6:8", 0));
         FIXTURE.put(new Coords(7, 5), new Sample("fluff:4:0", 0));
         FIXTURE.put(new Coords(9, 5), new Sample("fluff:13:0", 0));
-        // A seaport container yard, a gantry crane and a crane tip are one object each; the yard's woods grow no trees.
+        // A seaport container yard and a quay crane are the woods' container yard look, whose rows the woods own (no
+        // trees); a crane tip no crane's boom reaches is a boom segment object.
         FIXTURE.put(new Coords(1, 7), new Sample("woods:1;foliage_elev:2;fluff:80:01", 0));
         FIXTURE.put(new Coords(3, 7), new Sample("woods:1;foliage_elev:2;fluff:81:01", 0));
         FIXTURE.put(new Coords(5, 7), new Sample("fluff:82:1", 0));
         // Trees on snow take their winter form.
         FIXTURE.put(new Coords(9, 7), new Sample("snow:1;fluff:93:8", 0));
-        // Merged duplicates: the narrow glass roof is the wide one stretched, an SE crane tip the diagonal tip turned.
+        // Merged duplicates: the narrow glass roof is the wide one stretched, an SE crane tip the boom segment turned.
         FIXTURE.put(NARROW_ROOF, new Sample("building:2;bldg_elev:1;bldg_cf:50;fluff:90:2", 0));
         FIXTURE.put(new Coords(10, 5), new Sample("fluff:82:3", 0));
     }
@@ -514,7 +515,11 @@ class GpuLegacyImportSmokeTest {
             for (int frame = 0; frame < 5 || terrain.busy(); frame++) { view.render(); }
             settle(view, source);
             assertEquals(JOINTS.keySet(), piers(terrain).keySet(), "One Undo restores the span's piers");
-            // The flat middle deck, which its GLB alone draws, is what hovering, placing and the side view find there.
+            // Undo clears the selection; reopen the bridge inspector before continuing with its controls.
+            source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.COMPONENT, "bridge"),
+                  source.takeFrame().boardGeneration());
+            settle(view, source);
+            // The runtime middle deck is what hovering, placing and the side view find there.
             var deckScene = (BoardScene) field(view, "scene");
             var onDeck = new com.badlogic.gdx.math.collision.Ray(BoardGeometry.center(DECK, 0).add(0, 0, 200), new Vector3(0, 0, -1));
             var walk = terrain.walkableHit(deckScene, onDeck);
@@ -537,6 +542,9 @@ class GpuLegacyImportSmokeTest {
             for (int frame = 0; frame < 5 || terrain.busy(); frame++) { view.render(); }
             settle(view, source);
             assertEquals(JOINTS.keySet(), piers(terrain).keySet(), "One Undo restores the built span and its piers");
+            source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.COMPONENT, "bridge"),
+                  source.takeFrame().boardGeneration());
+            settle(view, source);
             assertNotNull(stageRoot.findActor("editor-bridge-pillars"));
             // Built: Truss for the whole span, then a colour from its swatches, as a placed object's (b10-f1): one undo
             // step each; the piers stay.
@@ -569,12 +577,12 @@ class GpuLegacyImportSmokeTest {
             for (int frame = 0; frame < 30 || terrain.busy(); frame++) { view.render(); }
             GpuBoardTestUi.capture(new File(OUTPUT, "legacy-import-piers-side.png"));
 
-            // The reduced palette: one entry per real object or stamp; seaport pieces and one animal per species.
+            // The reduced palette: one entry per real object or stamp; seaport props and one animal card per species.
             var root = GpuBoardTestUi.stage().getRoot();
-            GpuBoardTestUi.click("editor-category");
-            assertNotNull(root.findActor("editor-library-Seaport"));
-            assertNotNull(root.findActor("editor-library-Animals"));
-            GpuBoardTestUi.click("editor-library-Parks and furniture"); settle(view, source);
+            GpuBoardTestUi.category("industry"); settle(view, source);
+            assertNotNull(root.findActor("editor-section-industry/seaport"));
+            GpuBoardTestUi.category("parks"); settle(view, source);
+            assertNotNull(root.findActor("editor-section-parks/animals"));
             assertNull(BoardEditorBlueprint.get().asset("scenery/saxarba/SMV_Fluff/FluffSystem-07-Garden-02-Table-1-03"),
                   "No baked picnic-table composite");
             var search = (com.badlogic.gdx.scenes.scene2d.ui.TextField) root.findActor("editor-search");
@@ -589,9 +597,11 @@ class GpuLegacyImportSmokeTest {
             for (int frame = 0; frame < 60; frame++) { view.render(); }
             GpuBoardTestUi.capture(new File(OUTPUT, "legacy-import-palette.png"));
 
-            // Structures · Bridge: a "Bridge" (built), a "Natural bridge" and a "Truss bridge" card, each with its own sample;
-            // no plain preset.
-            GpuBoardTestUi.category("bridge"); settle(view, source);
+            // Transportation · Bridges: a "Bridge" (built), a "Natural bridge" and a "Truss bridge" card, each with its own
+            // sample; no plain preset.
+            GpuBoardTestUi.category("transportation"); settle(view, source);
+            search.setText("bridge");
+            settle(view, source);
             assertNull(root.findActor("editor-library-bridge/default"), "The single Bridge preset is gone");
             List<com.badlogic.gdx.scenes.scene2d.ui.Image> samples = new ArrayList<>();
             for (String key : List.of("bridge/built", "bridge/natural", "bridge/truss")) {
@@ -797,8 +807,11 @@ class GpuLegacyImportSmokeTest {
     /** The board's scene as every 3D view captures it ({@link BoardTiles}). */
     static BoardScene scene(Board board) throws Exception {
         var captured = new AtomicReference<BoardScene>();
-        SwingUtilities.invokeAndWait(() -> captured.set(new BoardScene(0, board.getWidth(), board.getHeight(),
-              BoardTiles.captureAll(board), List.of(), List.of(), -1, "", List.of())));
+        SwingUtilities.invokeAndWait(() -> {
+            BoardSceneryLayouts.convert(board);
+            captured.set(new BoardScene(0, board.getWidth(), board.getHeight(),
+                  BoardTiles.captureAll(board), List.of(), List.of(), -1, "", List.of()));
+        });
         return captured.get();
     }
 

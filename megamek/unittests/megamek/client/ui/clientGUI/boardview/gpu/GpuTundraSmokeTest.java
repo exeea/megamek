@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -8,6 +9,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -16,6 +18,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -24,6 +27,78 @@ import org.junit.jupiter.api.Test;
 /** Native material compilation, terrain editing and paired base/tundra review across every natural theme. */
 @Tag("on-demand")
 class GpuTundraSmokeTest {
+    @Test
+    void terrestrialVariantsUseBothMaterialsWithoutChangingOtherTundraFamilies() throws Exception {
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "tundra");
+        Files.createDirectories(output.toPath());
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(900, 600);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override public void create() {
+                var manager = new GpuShaderManager();
+                try {
+                    manager.run(() -> {
+                        try { checkVariants(manager, output); }
+                        catch (Throwable error) { failure.set(error); }
+                    });
+                } finally { manager.close(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Tundra variants", failure.get()); }
+    }
+
+    private static void checkVariants(GpuShaderManager manager, File output) throws Exception {
+        String source = GpuShaderSource.readDisk("terrain-tundra.glsl");
+        String boundary = "float tundraVariant(vec2 world) {";
+        assertTrue(source.contains(boundary), "The diagnostic must change only the variant selection");
+        var terrain = new GpuTerrain();
+        var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+              BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+        try {
+            var camera = new BoardCamera();
+            camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            camera.camera.zoom = .32f;
+            camera.center(BoardGeometry.center(new Coords(5, 3), 0));
+            for (String theme : List.of("grass", "fungus", "lunar")) {
+                var scene = BoardAridSurfaceTest.capture(BoardTundraTest.board(theme, true));
+                install(terrain, frame, camera, scene);
+                frame.render(terrain, camera, scene);
+                byte[] baseline = pixels(camera);
+                byte[][] endpoints = new byte[2][];
+                for (int endpoint = 0; endpoint < 2; endpoint++) {
+                    var changed = manager.apply(Map.of("terrain-tundra.glsl",
+                          source.replace(boundary, boundary + " return " + endpoint + ".0;")));
+                    assertTrue(changed.success(), changed.message());
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    frame.render(terrain, camera, scene);
+                    endpoints[endpoint] = pixels(camera);
+                    GpuReviewFrame.save(new File(output, theme + "-variant-" + endpoint + ".png"));
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), theme + " endpoint " + endpoint);
+                }
+                if (theme.equals("grass")) {
+                    long difference = 0;
+                    for (int i = 0; i < endpoints[0].length; i++) {
+                        difference += Math.abs((endpoints[0][i] & 255) - (endpoints[1][i] & 255));
+                    }
+                    assertTrue(difference > endpoints[0].length,
+                          "The actual earth material variants must visibly differ");
+                } else {
+                    assertArrayEquals(baseline, endpoints[0], theme + " must ignore the terrestrial mask");
+                    assertArrayEquals(baseline, endpoints[1], theme + " must ignore the terrestrial mask");
+                }
+                var restored = manager.apply(Map.of());
+                assertTrue(restored.success(), restored.message());
+                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                frame.render(terrain, camera, scene);
+                assertArrayEquals(baseline, pixels(camera), theme + " must restore the world-space variation");
+            }
+        } finally {
+            try { frame.dispose(); terrain.dispose(); }
+            finally { assertTrue(manager.apply(Map.of()).success(), "Restore production tundra sources"); }
+        }
+    }
+
     @Test
     void rendersThemePreservingTundraInBothViewsAfterEdits() throws Exception {
         var before = new ArrayList<BoardScene>();
@@ -73,10 +148,10 @@ class GpuTundraSmokeTest {
                             camera.setIsometric(oblique);
                             camera.camera.zoom = .46f;
                             camera.center(BoardGeometry.center(new Coords(4, 3), 0));
-                            terrain.update(before.get(i));
+                            install(terrain, frame, camera, before.get(i));
                             frame.render(terrain, camera, before.get(i));
                             float[] base = sample(camera);
-                            terrain.update(after.get(i));
+                            install(terrain, frame, camera, after.get(i));
                             terrain.animate(.5f, List.of());
                             frame.render(terrain, camera, after.get(i));
                             float[] tundra = sample(camera);
@@ -89,8 +164,8 @@ class GpuTundraSmokeTest {
                         }
                     }
                     // Array-backed theme contacts and water use the same coverage stencil as plain dry ground.
-                    terrain.update(mixed);
                     camera.setIsometric(true);
+                    install(terrain, frame, camera, mixed);
                     for (float zoom : new float[] { .22f, .80f }) {
                         camera.camera.zoom = zoom;
                         camera.center(BoardGeometry.center(new Coords(4, 3), 0));
@@ -115,10 +190,10 @@ class GpuTundraSmokeTest {
                                   .max(java.util.Comparator.comparingDouble(f -> f.b().cpy().sub(f.a())
                                         .crs(f.c().cpy().sub(f.a())).len2())).orElseThrow();
                             var points = List.of(BoardGeometry.center(at, 1), center(slope));
-                            terrain.update(baseScene);
+                            install(terrain, frame, camera, baseScene);
                             frame.render(terrain, camera, baseScene);
                             var samples = points.stream().map(p -> sample(camera, p)).toList();
-                            terrain.update(tundraScene);
+                            install(terrain, frame, camera, tundraScene);
                             frame.render(terrain, camera, tundraScene);
                             String name = (i == 0 ? "terraces" : "concrete-lichen") + (oblique ? "-oblique" : "-top");
                             GpuReviewFrame.save(new File(output, name + ".png"));
@@ -141,6 +216,18 @@ class GpuTundraSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Tundra material review", failure.get()); }
+    }
+
+    private static void install(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene)
+          throws Exception {
+        frame.prepare(terrain, camera, scene);
+        terrain.update(scene);
+        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+    }
+
+    private static byte[] pixels(BoardCamera camera) {
+        var point = camera.camera.project(BoardGeometry.center(new Coords(5, 3), 0));
+        return ScreenUtils.getFrameBufferPixels(Math.round(point.x) - 24, Math.round(point.y) - 24, 48, 48, false);
     }
 
     private static float[] sample(BoardCamera camera) {

@@ -26,6 +26,17 @@ final class GpuShaderProvider implements ShaderProvider, GpuShaderManager.Target
     private final List<Handle> handles = new ArrayList<>();
     private GpuShaderManager.Captured<ShaderProvider> active;
     private ShaderProvider fallback;
+    /** A draw whose program still links: it draws nothing and suits no other draw. Render thread only. */
+    static final Shader UNLINKED = new Shader() {
+        @Override public void init() { }
+        @Override public int compareTo(Shader other) { return 0; }
+        @Override public boolean canRender(Renderable instance) { return false; }
+        @Override public void begin(Camera camera, RenderContext context) { }
+        @Override public void render(Renderable renderable) { }
+        @Override public void end() { }
+        @Override public void dispose() { }
+    };
+    private static int unlinkedDraws;
 
     GpuShaderProvider(GpuShaderManager session, String name, Supplier<ShaderProvider> factory) {
         this.session = session;
@@ -38,26 +49,42 @@ final class GpuShaderProvider implements ShaderProvider, GpuShaderManager.Target
     static Shader unwrap(Shader shader) { return shader instanceof Handle handle ? handle.shader : shader; }
     ShaderProvider active() { return active.value(); }
 
+    /** Draws skipped so far for a program still linking ({@link #UNLINKED}): an image drawn meanwhile is incomplete. */
+    static int unlinkedDraws() { return unlinkedDraws; }
+
+    /**
+     * Its program, or once the board shows (GpuGlsl.deferral) and the program is still missing, {@link #UNLINKED} while
+     * the program links off the render thread: those draws are skipped until a later frame finds it linked.
+     */
     @Override
     public Shader getShader(Renderable renderable) {
         if (renderable.shader != null && renderable.shader.canRender(renderable)) { return renderable.shader; }
         for (Handle handle : handles) { if (handle.canRender(renderable)) { return handle; } }
-        Shader shader;
+        GpuGlsl.Preparation links = GpuGlsl.deferral();
+        if (links != null && GpuGlsl.overBudget()) { unlinkedDraws++; return UNLINKED; }
+        Shader[] created = new Shader[1];
         Shader suggested = renderable.shader;
         renderable.shader = null;
         try {
-            try { shader = active.value().getShader(renderable); }
-            catch (GpuGlsl.Pending unfinished) { throw unfinished; }
-            catch (RuntimeException failure) {
-                if (!session.hasDrafts()) { throw failure; }
-                session.reportFallback(failure);
-                if (fallback == null) { fallback = session.original(factory); }
-                shader = fallback.getShader(renderable);
+            Runnable create = () -> created[0] = active.value().getShader(renderable);
+            if (links == null) { create.run(); }
+            else {
+                long start = System.nanoTime();
+                boolean linked = links.run(create);
+                GpuGlsl.spent(System.nanoTime() - start);
+                if (!linked) { unlinkedDraws++; return UNLINKED; }
             }
+        } catch (GpuGlsl.Pending unfinished) {
+            throw unfinished;
+        } catch (RuntimeException failure) {
+            if (!session.hasDrafts()) { throw failure; }
+            session.reportFallback(failure);
+            if (fallback == null) { fallback = session.original(factory); }
+            created[0] = fallback.getShader(renderable);
         } finally { renderable.shader = suggested; }
-        var handle = new Handle(shader, renderable);
+        var handle = new Handle(created[0], renderable);
         handles.add(handle);
-        if (shader instanceof BaseShader base) { session.configureInputs(variantName(handles.size()), base.program); }
+        if (created[0] instanceof BaseShader base) { session.configureInputs(variantName(handles.size()), base.program); }
         return handle;
     }
 

@@ -17,7 +17,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector3;
-import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.EntityMovementMode;
@@ -32,8 +32,7 @@ import org.junit.jupiter.api.Test;
 class GpuInfantryPlateauSmokeTest {
     @Test
     void formationsStaySupportedAfterCaptureTerrainEditsAndInstantArrival() throws Exception {
-        var board = new Board();
-        board.load(new File("data/boards/Map Pack Savannahs/16x17 Mountain Lake (Savannah).board"));
+        var board = BoardFile.loadSheet(new File("data/boards/Map Pack Savannahs/16x17 Mountain Lake (Savannah).board"), false, true);
         var failure = new AtomicReference<Throwable>();
         var original = BoardGeometry.tuning();
         var originalRelief = BoardRelief.tuning();

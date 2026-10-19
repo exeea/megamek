@@ -19,6 +19,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
@@ -29,8 +30,7 @@ import org.junit.jupiter.api.Test;
 class GpuRapidsFoamSmokeTest {
     @Test
     void torrentsLeaveOpenWaterBetweenMovingFoamPatches() throws Exception {
-        Board board = new Board();
-        board.load(new File("data/boards/unofficial/Drewbacca/16x17 Jungle River 1.board"));
+        Board board = BoardFile.loadSheet(new File("data/boards/unofficial/Drewbacca/16x17 Jungle River 1.board"), false, true);
         assertEquals(2, board.getHex(8, 1).terrainLevel(Terrains.RAPIDS));
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var configuration = GpuBoardWindow.configuration(false);

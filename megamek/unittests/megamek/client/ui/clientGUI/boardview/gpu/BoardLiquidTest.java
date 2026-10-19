@@ -116,7 +116,9 @@ class BoardLiquidTest {
         for (TerrainLod lod : TerrainLod.values()) {
             BoardSurface surface = new BoardSurface(scene, scene.tile(pool), lod);
             for (int direction = 0; direction < 6; direction++) {
-                Vector3 point = new Vector3(center).lerp(BoardGeometry.corner(pool, 0, direction), .2f);
+                // An isolated depth-0 pool reaches about a fifth of the way to its corners; its waterline moves a tenth
+                // of a unit with the shore search's precision, so the centre is sampled inside that.
+                Vector3 point = new Vector3(center).lerp(BoardGeometry.corner(pool, 0, direction), .15f);
                 float liquid = BoardSurface.sampleHeight(surface.waterFaces, point.x, point.y, Float.NaN);
                 assertTrue(Float.isFinite(liquid), pool + " pool must retain a visible center at " + lod);
                 assertTrue(BoardSurface.sampleHeight(surface.faces, point.x, point.y, Float.NEGATIVE_INFINITY) < liquid,
@@ -197,7 +199,8 @@ class BoardLiquidTest {
                             BoardSurface solid = new BoardSurface(crust, crust.tile(coords), lod);
                             BoardSurface ordinary = new BoardSurface(rock, rock.tile(coords), lod);
                             assertTrue(solid.relief.sculpted());
-                            assertEquals(ordinary.faces, solid.faces, "Crust keeps the canonical sculpted top");
+                            assertEquals(ordinary.foundation(), solid.foundation(),
+                                  "Crust keeps the canonical terrain; ordinary rock alone carries loose rim stones");
                             assertEquals(ordinary.walls(rock, -50), solid.walls(crust, -50),
                                   "Crust keeps every slope and cliff, including both halves of the shared edge");
                         }

@@ -120,6 +120,33 @@ class GpuScenePlaybackTest {
         }
     }
 
+    @Test
+    void designationOnlyChangesRequirePlaybackCheckpoints() {
+        var source = UnitPlaybackTest.unit(1, 0);
+        var target = UnitPlaybackTest.unit(2, 4);
+        var before = snapshot(0, source, target);
+        var designation = new BoardScene.Designation(source.id(), source.location(), target.id(), target.location());
+        var tagged = withDesignations(before, List.of(designation));
+        assertFalse(before.samePlaybackState(tagged), "A new line needs its own world checkpoint");
+        assertFalse(tagged.samePlaybackState(before), "Removing only the line must also release a checkpoint");
+        assertTrue(tagged.samePlaybackState(withDesignations(before, List.of(designation))),
+              "An equivalent designation snapshot does not create another checkpoint");
+        var other = UnitPlaybackTest.unit(3, 2);
+        var retargeted = withDesignations(before, List.of(new BoardScene.Designation(
+              source.id(), source.location(), other.id(), other.location())));
+        assertFalse(tagged.samePlaybackState(retargeted), "The same number of lines can mark a different target");
+        assertEquals(List.of(), tagged.duringPlayback(before, false).designations(),
+              "The line follows the settled world until its checkpoint is applied");
+        assertEquals(List.of(designation), before.duringPlayback(tagged, false).designations());
+    }
+
+    private static BoardScene withDesignations(BoardScene scene, List<BoardScene.Designation> designations) {
+        return new BoardScene(scene.boardId(), scene.width(), scene.height(), scene.tiles(), scene.units(),
+              scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(),
+              scene.firingLines(), scene.rangeBorders(), scene.markers(), scene.tactical(), scene.rangeLabels(),
+              scene.fieldOfView(), scene.electronicWarfare(), designations, scene.starShells());
+    }
+
     private static void assertWorld(BoardScene expected, BoardScene shown) {
         assertSame(expected.tiles(), shown.tiles(), "Terrain and every bitmap layer share the event's checkpoint");
         assertEquals(expected.markers(), shown.markers());

@@ -283,7 +283,11 @@ class GpuTacticalTest {
                     legacy2D.getComponent();
                     legacy2D.zoomOut();
                     float zoom = legacy2D.getScale();
-                    assertEquals(captured.tactical(), fixture.view.captureTacticalGeometry());
+                    BoardTactical legacy = fixture.view.captureTacticalGeometry();
+                    assertEquals(captured.tactical(), legacy.withRuler(null),
+                          "Sprites share geometry; the native frame takes its ruler from the native LOS model");
+                    assertNotNull(legacy.ruler(), "The Legacy 2D measurement remains available to its renderer");
+                    assertNull(captured.tactical().ruler(), "No native measurement was started");
                     assertEquals(zoom, legacy2D.getScale());
                 } finally {
                     legacy2D.dispose();

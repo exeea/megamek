@@ -4,6 +4,7 @@ package megamek.client.ui.gdx;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.ArrayList;
+
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
@@ -17,6 +18,49 @@ import org.junit.jupiter.api.Test;
 
 @Tag("on-demand")
 class UiNumberSmokeTest {
+    @Test void clickedSliderKeepsFocusForArrowEditsAndCommitsOnReleaseOrBlur() {
+        UiTestStage.run(ui -> {
+            record Change(String value, boolean finished) { }
+            var events = new ArrayList<Change>();
+            UiNumber number = new UiNumber(ui.kit, ui.stage, "Height", 2, -10, 30, .1,
+                  (value, finished) -> events.add(new Change(value, finished)));
+            ui.stage.addActor(number); number.setBounds(100, 350, 320, 36); ui.draw();
+            try {
+                Vector2 caption = point(ui.stage, number.findActor("editor-scrub-Height"));
+                ui.stage.touchDown((int) caption.x, (int) caption.y, 0, Input.Buttons.LEFT);
+                ui.stage.touchUp((int) caption.x, (int) caption.y, 0, Input.Buttons.LEFT);
+                ui.draw();
+                Slider slider = ui.stage.getRoot().findActor("editor-slider-Height");
+                Vector2 track = point(ui.stage, slider);
+                ui.stage.touchDown((int) track.x, (int) track.y, 0, Input.Buttons.LEFT);
+                ui.stage.touchUp((int) track.x, (int) track.y, 0, Input.Buttons.LEFT);
+                assertTrue(number.editing(), "The popup stays open for keyboard adjustments after a click");
+                assertSame(slider, ui.stage.getKeyboardFocus());
+                events.clear();
+                float value = slider.getValue();
+                assertTrue(ui.stage.keyDown(Input.Keys.RIGHT));
+                assertEquals(value + .1f, slider.getValue(), .0001f);
+                assertEquals(new Change(UiNumber.format(slider.getValue()), false), events.getLast());
+                assertTrue(ui.stage.keyUp(Input.Keys.RIGHT));
+                assertEquals(new Change(UiNumber.format(slider.getValue()), true), events.getLast());
+                assertEquals(1, events.stream().filter(Change::finished).count());
+                assertTrue(number.editing());
+
+                assertTrue(ui.stage.keyDown(Input.Keys.LEFT));
+                ui.stage.touchDown(20, 20, 0, Input.Buttons.LEFT);
+                ui.stage.touchUp(20, 20, 0, Input.Buttons.LEFT);
+                assertNull(ui.stage.getKeyboardFocus());
+                assertFalse(number.editing());
+                assertEquals(new Change(UiNumber.format(slider.getValue()), true), events.getLast());
+                assertEquals(2, events.stream().filter(Change::finished).count());
+                ui.stage.keyUp(Input.Keys.LEFT);
+                assertFalse(ui.stage.keyDown(Input.Keys.RIGHT));
+                assertEquals(value, slider.getValue(), .0001f);
+                assertEquals(2, events.stream().filter(Change::finished).count(), "Blur commits only once");
+            } finally { number.close(); }
+        });
+    }
+
     @Test void captionCaptureAllowsOffscreenDragsAndReleasesOnEveryExit() {
         UiTestStage.run(ui -> {
             record Change(String value, boolean finished) { }
@@ -191,7 +235,8 @@ class UiNumberSmokeTest {
                 ui.draw(); ui.capture("editor-numeric-slider-drag").dispose();
                 ui.stage.touchUp((int) track.x + 35, (int) track.y, 0, Input.Buttons.LEFT);
                 assertEquals(new Change(readout.getText().toString(), true), events.getLast());
-                assertFalse(popup.isVisible());
+                assertTrue(popup.isVisible(), "The track stays available for arrow-key adjustments");
+                assertSame(slider, ui.stage.getKeyboardFocus());
             } finally { number.close(); }
         });
     }

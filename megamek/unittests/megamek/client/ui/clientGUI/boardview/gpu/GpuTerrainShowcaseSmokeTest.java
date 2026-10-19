@@ -266,7 +266,7 @@ class GpuTerrainShowcaseSmokeTest {
                 }
                 var tile = new BoardScene.Tile(coords, level, depth, false, 0, family, pixels,
                       null, null, null, null, features, List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true);
-                tiles.add(family == BoardScene.Surface.LUNAR ? tile.lunar() : tile);
+                tiles.add(family == BoardScene.Surface.LUNAR ? tile.lunar(true) : tile);
             }
         }
         assertTrue(tiles.size() == width * height);

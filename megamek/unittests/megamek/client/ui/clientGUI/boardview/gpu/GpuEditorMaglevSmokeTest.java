@@ -147,11 +147,11 @@ class GpuEditorMaglevSmokeTest {
         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1600, 1000);
-        // Maglev and Rail are two choices in Transport (its props; the level crossing is under Decals); the rolling stock
-        // and train stamps have their own group.
-        List<String> transport = List.of(RailRoute.Kind.MAGLEV.asset, RailRoute.Kind.RAIL.asset, "scenery/rail/crossing-signal");
-        List<String> visible = List.of("scenery/maglev/platform", "scenery/maglev/wagon", "scenery/maglev/cab",
-              "stamp/maglev-train");
+        // Maglev and Rail are two cards in Transportation's Rail and maglev section, with the crossing signal, the level
+        // crossing and the platform; the rolling stock has its own section and the train stamps are Blueprints.
+        List<String> transport = List.of(RailRoute.Kind.MAGLEV.asset, RailRoute.Kind.RAIL.asset, "scenery/rail/crossing-signal",
+              "decal/rail/level-crossing", "scenery/maglev/platform");
+        List<String> stock = List.of("scenery/maglev/wagon", "scenery/maglev/cab");
         try {
             new Lwjgl3Application(new GpuBattleView(source) {
                 final long deadline = System.nanoTime() + 90_000_000_000L;
@@ -168,21 +168,26 @@ class GpuEditorMaglevSmokeTest {
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         var root = GpuBoardTestUi.stage().getRoot();
                         switch (step) {
-                            case 0 -> GpuBoardTestUi.category("Transport");
+                            case 0 -> GpuBoardTestUi.category("transportation");
                             case 1 -> {
                                 if (!ready(root.findActor("editor-library"))) { return; }
                                 for (String id : transport) { assertNotNull(root.findActor("editor-library-" + id), id); }
                                 GpuBoardTestUi.capture(new File(OUTPUT, "editor-transport-palette.png"));
-                                GpuBoardTestUi.category("Maglev and wagons");
+                                GpuBoardTestUi.reveal("editor-section-transportation/maglev-stock");
                             }
                             case 2 -> {
                                 if (!ready(root.findActor("editor-library"))) { return; }
-                                for (String id : visible) { assertNotNull(root.findActor("editor-library-" + id), id); }
-                                assertNull(root.findActor("editor-library-scenery/maglev/coupler"), "The coupler comes with the train");
+                                for (String id : stock) { assertNotNull(root.findActor("editor-library-" + id), id); }
+                                assertNull(megamek.common.board.BoardEditorBlueprint.get().entry("scenery/maglev/coupler"),
+                                      "The coupler comes with the train");
                                 GpuBoardTestUi.capture(new File(OUTPUT, "editor-maglev-palette.png"));
-                                GpuBoardTestUi.click("editor-library-stamp/maglev-train");
+                                GpuBoardTestUi.reveal("editor-section-transportation/blueprints");
                             }
                             case 3 -> {
+                                if (!ready(root.findActor("editor-library"))) { return; }
+                                GpuBoardTestUi.click("editor-library-stamp/maglev-train");
+                            }
+                            case 4 -> {
                                 assertEquals("stamp/maglev-train", source.editorState().activeBrush().key());
                                 assertEquals(BoardEditorSession.Tool.PAINT, source.editorState().tool());
                                 Gdx.app.exit(); return;

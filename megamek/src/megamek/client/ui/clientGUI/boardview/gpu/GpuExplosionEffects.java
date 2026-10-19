@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
@@ -21,6 +22,8 @@ final class GpuExplosionEffects implements Disposable {
     static final int CAPACITY = 512;
     private static final Comparator<Volume> BACK_TO_FRONT = Comparator.comparingDouble((Volume v) -> v.depth).reversed();
     private final Volume[] volumes = new Volume[CAPACITY];
+    /** A fireball's light: hotter than a burning hex's. */
+    private static final Vector3 FIRE = new Vector3(2.6f, 1.15f, .35f);
     private final Vector3 burstCenter = new Vector3();
     private final Vector3 axisScratch = new Vector3();
     private final Color light = new Color(Color.WHITE);
@@ -56,6 +59,19 @@ final class GpuExplosionEffects implements Disposable {
     }
 
     void begin() { count = 0; }
+
+    /**
+     * This frame's burning volumes as local lights (GpuLavaLighting): a fireball lights the ground around it, up to
+     * four of its radii away, as long as its fire lasts and fades.
+     */
+    void lights(List<GpuLavaLighting.Source> into) {
+        for (int i = 0; i < count; i++) {
+            Volume volume = volumes[i];
+            float glow = volume.fire * volume.alpha * (1 - volume.age);
+            if (glow < .05f) { continue; }
+            into.add(new GpuLavaLighting.Source(-1, volume.center.cpy(), .8f * glow, FIRE, 2 * volume.radius));
+        }
+    }
     int size() { return count; }
     void setSmokeLight(Color color) { light.set(color); }
     void setLightDirection(Vector3 direction) { sun.set(direction).scl(-1).nor(); }
@@ -127,6 +143,22 @@ final class GpuExplosionEffects implements Disposable {
         count++;
     }
 
+    /** Links its program now (GpuBattleView's warm-up), not at the first blast in play. */
+    void prepare() {
+        if (shader != null) { return; }
+        shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU explosion",
+              GpuShaderSource.read("explosion.vert"), GpuEffectBatch.fragment("explosion.frag")), next -> shader = next);
+        // The same unit cube bounds every analytic volume. Allocate/upload once, then move it with uniforms.
+        proxy = new Mesh(true, 8, 36, VertexAttribute.Position());
+        proxy.setVertices(new float[] {
+              -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1,
+              -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1 });
+        proxy.setIndices(new short[] {
+              0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7,
+              0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5,
+              2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7 });
+    }
+
     void render(Camera camera) {
         ownDepth.begin();
         render(camera, ownDepth);
@@ -134,19 +166,7 @@ final class GpuExplosionEffects implements Disposable {
 
     void render(Camera camera, GpuEffectDepth snapshot) {
         if (count == 0) { return; }
-        if (shader == null) {
-            shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU explosion",
-                  GpuShaderSource.read("explosion.vert"), GpuShaderSource.read("explosion.frag")), next -> shader = next);
-            // The same unit cube bounds every analytic volume. Allocate/upload once, then move it with uniforms.
-            proxy = new Mesh(true, 8, 36, VertexAttribute.Position());
-            proxy.setVertices(new float[] {
-                  -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1,
-                  -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1 });
-            proxy.setIndices(new short[] {
-                  0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7,
-                  0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5,
-                  2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7 });
-        }
+        prepare();
         Texture depth = snapshot.capture();
         depth.bind(0);
         for (int i = 0; i < count; i++) { volumes[i].depth = volumes[i].center.dot(camera.direction); }
@@ -169,7 +189,7 @@ final class GpuExplosionEffects implements Disposable {
             shader.setUniformi("u_depth", 0);
             for (int i = 0; i < count; i++) {
                 Volume volume = volumes[i];
-                float reach = volume.radius * (1 + volume.stretch) * (1 + volume.elongation);
+                float reach = volume.radius * (1 + volume.stretch) * (1 + Math.max(0, volume.elongation));
                 if (!camera.frustum.sphereInFrustum(volume.center, reach)) { continue; }
                 shader.setUniformf("u_centerRadius", volume.center.x, volume.center.y, volume.center.z, volume.radius);
                 shader.setUniformf("u_stretch", volume.stretch);

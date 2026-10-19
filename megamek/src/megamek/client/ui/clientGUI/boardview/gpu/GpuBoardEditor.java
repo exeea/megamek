@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardHud.GAP;
 import static megamek.client.ui.gdx.UiKit.onChange;
+import static megamek.common.board.BoardEditorBlueprint.themeLabel;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -10,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -71,13 +73,28 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private static final int PAGE_SIZE = 18;
     /** The prefixes of the Layers node ids: a component's row, an object's row and a group's row. */
     private static final String COMPONENT_ROW = "editor-component-", OBJECT_ROW = "editor-content-", GROUP_ROW = "editor-group-";
-    /** Layers type icons, one table: components by id, objects by palette group (see {@link #layerIcon}). */
+    /**
+     * Layers type icons, one table: components by id, objects by their asset's first palette section, else by its
+     * category (see {@link #layerIcon}); "vegetation" is both the component and the category.
+     */
     private static final Map<String, String> LAYER_ICONS = Map.ofEntries(
           Map.entry("ground", "hex"), Map.entry("pavement", "hex"), Map.entry("water", "water"), Map.entry("vegetation", "tree"),
           Map.entry("road", "road"), Map.entry("building", "building"), Map.entry("bridge", "bridge"),
           Map.entry("fuelTank", "fuel-tank"), Map.entry("industry", "factory"),
-          Map.entry("Trees and plants", "tree"), Map.entry("Alien plants", "tree"), Map.entry("Maglev and wagons", "train"),
-          Map.entry("Vehicles", "car"), Map.entry("Transport", "car"), Map.entry("Animals", "animal"));
+          Map.entry("transportation/maglev-stock", "train"), Map.entry("transportation/rail-stock", "train"),
+          Map.entry("transportation/rail-maglev", "train"), Map.entry("transportation/airfields", "star"),
+          Map.entry("transportation", "car"), Map.entry("parks/animals", "animal"));
+    /** The Assets panel's page: the start page (no category), a category's sections, or a gallery card's designs. */
+    private record Page(String category, String gallery) { }
+    private static final Page START = new Page(null, null);
+    /** The page last shown, where the panel reopens when the editor is built again in this session. */
+    private static Page lastPage = START;
+    /** A grid card: a blueprint card (an entry, a picker family or a gallery), or the Theme card of {@code theme}. */
+    private record Tile(BoardEditorBlueprint.Card card, String theme) { }
+    /** A grid section: the end of its header's name, its caption (null: no header) and its cards. */
+    private record Shelf(String id, String title, List<Tile> tiles) { }
+    /** A grid section's header: an upper-case caption over a hairline. */
+    private static final float SHELF_HEIGHT = 30;
     /** A tool's bare key (positional, US-named) and icon; the session's Tool stays a plain enum. */
     private record ToolStyle(int key, String icon) {
         String keyText() { return Input.Keys.toString(key); }
@@ -107,6 +124,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
           List.of("GpuBoard.hud.mouse.ctrlClick", "BoardEditor.help.ctrlClick"),
           List.of("BoardEditor.help.mouse.ctrlDrag", "BoardEditor.help.ctrlDrag"),
           List.of("BoardEditor.help.mouse.ctrlWheel", "BoardEditor.help.ctrlWheel"),
+          List.of("BoardEditor.help.mouse.brushPicker", "BoardEditor.help.brushPicker"),
           List.of("GpuBoard.hud.mouse.altClick", "GpuBoard.hud.help.altClick"),
           List.of("GpuBoard.hud.mouse.rightDrag", "GpuBoard.hud.hint.pan"),
           List.of("GpuBoard.hud.mouse.orbitDrag", "GpuBoard.hud.help.orbit"),
@@ -118,8 +136,16 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private final Supplier<GpuTerrain> terrain;
     private final BoardEditorBlueprint blueprint = BoardEditorBlueprint.get();
     private final Table toolbar, library, inspector, detail = new Table();
-    /** The Assets panel's category: one compact drop-down listing every category under its section. */
-    private final UiButton categoryFace;
+    /**
+     * The Assets panel: its header (the title on the start page; else back and the category's drop-down, or the
+     * gallery's name), the start page's category tiles, built once and only hidden while another page shows, so their
+     * previews stay cached, and each tile's mark of the active brush's category.
+     */
+    private final Table libraryHead = new Table(), tiles = new Table();
+    private final Map<String, Actor> categoryMarks = new LinkedHashMap<>();
+    private Page page = lastPage;
+    /** The category name's drop-down face on a category page, under which the category list opens. */
+    private UiButton categoryFace;
     /** The right column: Layers above Edit, each with its own scroll, and a draggable divider between them. */
     private final SplitPane split;
     /** The divider's share as the user last dragged it, or negative while Layers take their natural height. */
@@ -151,10 +177,12 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     /** An issue's hex waiting to be framed until its selection has applied, and when that wait ends (nanoTime). */
     private megamek.common.board.Coords pendingFrame;
     private long pendingFrameUntil;
-    private List<BoardIssue> shownIssues;
+    private List<BoardIssue> shownIssues, sessionIssues;
+    /** The installed fit's objects inside the walls of Fitted pavement hexes; listed after the session's issues. */
+    private List<BoardConcrete.Cut> shownCuts = List.of();
     private final Label status, documentName;
     private final Table documentStatus = new Table();
-    private final ScrollPane inspectorScroll, layersScroll, libraryScroll;
+    private final ScrollPane inspectorScroll, layersScroll, libraryScroll, tilesScroll;
     private final UiKit.SearchField librarySearch, themeFind;
     private TextField searchField;
     private final AssetManager thumbnails = new AssetManager();
@@ -163,14 +191,12 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private final GpuEditorModelPreviews junctions = new GpuEditorModelPreviews();
     private final GpuEditorTerrainPreviews samples = new GpuEditorTerrainPreviews();
     private record Preview(Image image, String file) { }
-    private record Entry(String key, String label, String thumbnail, String type, String owner) { }
     /** A card's "Preview…" label, shown until its preview image has a drawable. */
     private record Loading(Image image, Label label) { }
     private final List<Preview> previews = new ArrayList<>();
     private final List<Loading> loading = new ArrayList<>();
     private final List<UiButton> tools = new ArrayList<>();
     private final UiButton undo, redo;
-    private final Label stripTitle;
     /**
      * Layers: the inspected hex's components with the objects on them, the other objects, and its groups with their
      * members. Node ids are the rows' actor names: {@link #COMPONENT_ROW}, {@link #OBJECT_ROW} or {@link #GROUP_ROW}
@@ -183,7 +209,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private final Table sectionPanel, settingsLayer = new Table(), settingsBody = new Table();
     private final Table themeLayer = new Table(), themeGallery;
     private final UiChoiceGrid themeCards;
-    private final UiCardGrid libraryGrid = new UiCardGrid(2, 116, 6);
+    private final UiCardGrid libraryGrid = new UiCardGrid(2, 116, SHELF_HEIGHT, 6);
     private final ScrollPane themeScroll;
     private final TextField themeSearch;
     private Consumer<String> themeCommit;
@@ -216,10 +242,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     /** What the Brush panel shows: the tool, its radius and the active brush, compared by value on a new snapshot. */
     private record BrushState(BoardEditorSession.Tool tool, int radius, BoardEditorSession.Brush brush) { }
     private BrushState brushState, nextBrush;
-    private String libraryGroup = "";
     /** The Sculpt tray's hovered-hex hint; null while another tool's tray is shown. */
     private Label sculptHint;
-    private final Table libraryNavigation = new Table();
     private final Table designLayer = new Table(), designDialog;
     private final UiChoiceGrid designCards;
     /** The gallery's title: the design gallery's, or the junction card's ({@link #openJunctions}). */
@@ -230,11 +254,11 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private String designOwner = "", designQuery = "";
     private int designPage;
     private float width, height, utilityWidth, utilityHeight;
-    private String category = "Terrain", shownSelection = "";
+    private String shownSelection = "";
     private BoardEditorSession.Snapshot snapshot;
     private long generation;
-    private String libraryOwner = "ground", query = "";
-    private boolean objects;
+    /** The search, lower case: while it holds text, the grid shows its results over every category. */
+    private String query = "";
     /**
      * What Layers and Edit show, compared by value when a new snapshot or a newly installed anchor arrives; they are
      * rebuilt only when it changed and no edit, list drag, open choice or board drag is in progress.
@@ -285,22 +309,51 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         toolbar.add(button(UiKit.text("BoardEditor.butBoardSaveAs"), () -> send(Action.SAVE_AS))).padLeft(3);
         stage.addActor(toolbar);
 
-        // Assets: a full-height column with a compact category drop-down, search and a vertical two-column card grid.
+        // Assets: a full-height column with its page's header, one search over every category, and the start page's
+        // category tiles or the page's sections of cards in a vertical two-column grid.
         library = ui.panel(); library.setName("editor-library"); library.defaults().growX().minWidth(0);
-        library.add(ui.header(UiKit.text("BoardEditor.assets"), null)).row();
-        // Its text and the strip title's are set by showLibrary at the end of the constructor.
-        categoryFace = ui.select("", false); categoryFace.setName("editor-category");
-        onChange(categoryFace, this::showCategories);
-        library.add(categoryFace).height(30).pad(0, 10, 6, 10).row();
-        library.add(libraryNavigation).pad(0, 10, 0, 10).row();
-        librarySearch = ui.search(UiKit.text("BoardEditor.findChoice")); searchField = librarySearch.field; searchField.setName("editor-search");
-        onChange(searchField, () -> { query = searchField.getText().toLowerCase(Locale.ROOT); showLibrary(); });
+        library.add(libraryHead).row();
+        librarySearch = ui.search(UiKit.text("BoardEditor.searchAll")); searchField = librarySearch.field; searchField.setName("editor-search");
+        onChange(searchField, () -> {
+            String next = searchField.getText().trim().toLowerCase(Locale.ROOT);
+            if (next.equals(query)) { return; }
+            boolean header = next.isEmpty() != query.isEmpty();
+            query = next;
+            if (header) { showHead(); }
+            showGrid(false);
+        });
+        // A focused field takes every key: Esc clears its text, and a second Esc leaves the field.
+        searchField.addListener(new InputListener() {
+            @Override public boolean keyDown(InputEvent event, int key) {
+                if (key != Input.Keys.ESCAPE) { return false; }
+                if (searchField.getText().isEmpty()) { stage.setKeyboardFocus(null); } else { searchField.setText(""); }
+                return true;
+            }
+        });
         library.add(librarySearch).pad(0, 10, 6, 10).row();
-        stripTitle = ui.label("", "hud-small", 11.5f, UiTheme.MUTED); stripTitle.setEllipsis(true);
-        library.add(stripTitle).pad(0, 12, 4, 12).row();
+        // A button's least width is its preferred width (Button): the two columns take half the width each instead.
+        tiles.top(); tiles.defaults().growX().uniformX().minWidth(0).height(98).padBottom(6);
+        for (var category : blueprint.categories()) {
+            Image icon = new Image();
+            // The Theme tile shows its theme's sample; the others render their icon hex as a hex stamp.
+            if (category.themes() != null) { samples.add(category.icon().getTheme(), "", "", icon); }
+            else { samples.add(BoardEditorSession.hexStamp("icon/" + category.id(), category.icon()), icon); }
+            String id = category.id();
+            UiButton tile = visualCard(categoryName(id), icon, 66, () -> show(new Page(id, null)));
+            tile.setName("editor-category-" + id);
+            Image mark = new Image(ui.skin.newDrawable("white", UiTheme.MINT)); mark.setVisible(false);
+            mark.setName("editor-category-mark-" + id); categoryMarks.put(id, mark);
+            overlay(tile, mark, 7, com.badlogic.gdx.utils.Align.topRight);
+            boolean left = categoryMarks.size() % 2 == 1;
+            tiles.add(tile).padRight(left ? 3 : 0).padLeft(left ? 0 : 3);
+            if (!left) { tiles.row(); }
+        }
+        tilesScroll = ui.scrollList(tiles); tilesScroll.setName("editor-category-scroll");
         libraryScroll = ui.scrollList(libraryGrid); libraryScroll.setName("editor-choice-scroll");
         libraryScroll.setFadeScrollBars(false);
-        library.add(libraryScroll).grow().minSize(0).pad(0, 8, 8, 4);
+        // The bar beside the cards, not over the right column's edge.
+        tilesScroll.setScrollbarsOnTop(false); libraryScroll.setScrollbarsOnTop(false);
+        library.add(new Stack(tilesScroll, libraryScroll)).grow().minSize(0).pad(0, 8, 8, 4);
         stage.addActor(library);
         // Brush: the bottom-left corner of the board area, for the tools with options (Paint, Sculpt, Erase).
         ui.panel(brushPanel); brushPanel.pad(6, 8, 6, 8); brushPanel.setName("editor-brush"); stage.addActor(brushPanel);
@@ -422,7 +475,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         themeScroll = ui.scrollList(themeCards); themeScroll.setName("editor-theme-scroll");
         themeGallery.add(themeScroll).growX().pad(0, 6, 0, 6).row();
         themeLayer.add(themeGallery); stage.addActor(themeLayer);
-        showLibrary();
+        showPage();
     }
 
     /** A tool's name as the toolbar, the Brush panel and the context menu show it. */
@@ -430,10 +483,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         return UiKit.text("BoardEditor.tool." + tool.name().toLowerCase(Locale.ROOT));
     }
 
-    /** An Assets section's name; the section ids are the blueprint's categories and the two object kinds. */
-    private static String categoryName(String section) {
-        return UiKit.text("BoardEditor.category." + section.toLowerCase(Locale.ROOT));
-    }
+    /** A palette category's name. */
+    private static String categoryName(String category) { return UiKit.text("BoardEditor.palette." + category); }
 
     private UiButton button(String label, Runnable action) { return button(null, label, action); }
     private UiButton button(String icon, String label, Runnable action) {
@@ -624,6 +675,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             installed = board.editorObjects(next.selected()); installedReads++;
         }
         terrainBuilding = building; installedFrom = board;
+        var cuts = board == null ? List.<BoardConcrete.Cut>of() : board.concreteCuts();
+        if (cuts != shownCuts) { shownCuts = cuts; issuesChanged(); }
         boolean placed = !sameAnchors(installed, installedObjects);
         installedObjects = installed;
         section.update(next, generation, installedObjects, placed);
@@ -699,6 +752,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         });
     }
 
+    /** Palette programs join the editor's loading boundary, including cards that have not been opened yet. */
+    boolean prepare(BoardScene scene) {
+        GpuTerrain board = terrain.get();
+        if (board == null) { return false; }
+        return samples.prepare(board, scene) & models.prepare(board) & junctions.prepare(board);
+    }
+
     /** The hovered item as a level key of the inspected hex: the side view's, else a Layers row's, else the board's. */
     private String hovered() {
         String own = sideOpen ? section.hovered() : "";
@@ -730,18 +790,17 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         boolean visible = inspecting();
         if (!visible && inspector.isVisible()) { stage.unfocus(inspector); }
         inspector.setVisible(visible);
-        if (!libraryTheme.equals(next.activeBrush().theme())) { libraryTheme = next.activeBrush().theme(); showLibrary(); }
+        // Cards preview in the theme the brush paints; the shown page keeps its place. A brush that does not apply its
+        // theme (Water after a Theme card keeps that card's) leaves each hex its own, so its cards show the default.
+        String theme = next.activeBrush().themeEnabled() ? next.activeBrush().theme() : "";
+        if (!libraryTheme.equals(theme)) { libraryTheme = theme; showGrid(true); }
         nextBrush = new BrushState(next.tool(), next.brush(), next.activeBrush());
         for (int i = 0; i < tools.size(); i++) { tools.get(i).pressed(i == next.tool().ordinal()); }
         undo.setDisabled(!next.canUndo()); redo.setDisabled(!next.canRedo());
-        if (next.issues() != shownIssues) {
+        if (next.issues() != sessionIssues) {
             // The session publishes a new list only when validation changed it.
-            shownIssues = next.issues();
-            issues.setVisible(!shownIssues.isEmpty());
-            issuesTip.getActor().setText(UiKit.text("BoardEditor.issuesTip", UiKit.text("BoardEditor.issueCount", shownIssues.size())));
-            if (issueMenu != null && choices.isVisible() && issueMenu.isDescendantOf(choices)) {
-                if (shownIssues.isEmpty()) { choices.cancel(); } else { showIssues(); }
-            }
+            sessionIssues = next.issues();
+            issuesChanged();
         }
         // Hexes are written by their board number everywhere in the editor: "0807".
         String coords = next.selected() == null ? "" : next.selected().getBoardNum();
@@ -762,7 +821,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             showMapSettings(next);
         }
         libraryCards.removeIf(card -> card.getStage() == null);
-        for (UiButton card : libraryCards) { card.pressed(card.getUserObject().equals(next.activeBrush().key())); }
+        String active = next.activeBrush().key(), category = activeCategory(active);
+        for (UiButton card : libraryCards) { card.pressed(((java.util.Set<?>) card.getUserObject()).contains(active)); }
+        categoryMarks.forEach((id, mark) -> mark.setVisible(id.equals(category)));
     }
 
     /**
@@ -778,99 +839,259 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
               + (objects == 0 ? "" : " · " + UiKit.text("BoardEditor.objectCount", objects));
     }
 
-    private List<Entry> libraryEntries() {
-        List<Entry> entries = new ArrayList<>();
-        if (objects) {
-            var assets = blueprint.assets().stream().filter(BoardEditorBlueprint.Asset::palette)
-                  .filter(a -> a.kind().equals(category.equals("Props") ? "prop" : "decal")).toList();
-            if (libraryOwner.isEmpty()) {
-                assets.stream().map(BoardEditorBlueprint.Asset::group).distinct().sorted().forEach(group ->
-                      entries.add(new Entry(group, group, "", "group", assets.stream().filter(a -> a.group().equals(group)).findFirst().orElseThrow().id())));
-            } else {
-                assets.stream().filter(a -> a.group().equals(libraryOwner)).forEach(a -> entries.add(new Entry(a.id(), a.label(), a.thumbnail(), "asset", "")));
-            }
-        } else if (libraryOwner.isEmpty()) {
-            blueprint.components().stream().filter(c -> c.category().equals(category) && c.palette())
-                  .forEach(c -> entries.add(new Entry(c.id(), c.label(), "", "category", c.id())));
-        } else {
-            var definition = blueprint.component(libraryOwner);
-            if (libraryGroup.isEmpty()) {
-                definition.presets().forEach(p -> entries.add(new Entry(p.id(), p.label(), "", "preset", definition.id())));
-            }
-            designVariants(libraryOwner).stream().filter(v -> libraryGroup.isEmpty() || libraryGroup.equals(v.group()))
-                  .forEach(v -> entries.add(new Entry(v.id(), v.label(), v.thumbnail(), "variant", v.owner())));
-        }
-        return entries;
+    /** Shows {@code next}, remembered for the panel built next; the search is cleared. */
+    private void show(Page next) {
+        page = lastPage = next;
+        // The search's own change event finds the query already empty.
+        query = ""; searchField.setText("");
+        showPage();
     }
 
-    /** Opens the category list under the Assets drop-down: every category, grouped under its section. */
+    /** One step back: from a gallery to its category, from a category to the start page; false on the start page. */
+    private boolean back() {
+        if (page.category() == null) { return false; }
+        show(page.gallery() != null ? new Page(page.category(), null) : START);
+        return true;
+    }
+
+    /** The shown page's header, then its grid. A page whose category or gallery the blueprint no longer has is the start page. */
+    private void showPage() {
+        if (page.category() != null && (category(page.category()) == null || page.gallery() != null && gallery() == null)) {
+            page = lastPage = START;
+        }
+        showHead();
+        showGrid(false);
+    }
+
+    /**
+     * The Assets header: the title on the start page; while the search holds text, back (which clears it) and "Search
+     * results", since the results span every category; else back and the category's drop-down, or the gallery's name.
+     */
+    private void showHead() {
+        libraryHead.clearChildren(); categoryFace = null;
+        boolean searching = !query.isEmpty();
+        if (page.category() == null && !searching) {
+            libraryHead.add(ui.header(UiKit.text("BoardEditor.assets"), null)).growX();
+        } else {
+            Table head = new Table(); head.pad(8, 8, 8, 14); head.left();
+            UiButton previous = ui.button("hud-mini", "chevron-left", "", null); previous.setName("editor-back");
+            previous.clearChildren(); previous.pad(0); previous.icons.forEach(icon -> previous.add(icon).size(18));
+            onChange(previous, () -> { stage.setKeyboardFocus(null); escapeAssets(); });
+            ui.tip(previous).getActor().setText(UiKit.text("BoardEditor.back"));
+            head.add(previous).size(28);
+            String name = searching ? UiKit.text("BoardEditor.searchResults")
+                  : page.gallery() != null ? page.gallery() : categoryName(page.category());
+            Label title = new Label(UiTheme.upper(name), ui.skin, "hud-title");
+            title.setEllipsis(true); title.setName("editor-library-title");
+            if (searching || page.gallery() != null) { head.add(title).minWidth(0).padLeft(10); }
+            else {
+                // The category's name is a drop-down for a jump to another category.
+                categoryFace = new UiButton(ui, "hud-icon"); categoryFace.setName("editor-category");
+                categoryFace.add(title).minWidth(0).padLeft(6);
+                var chevron = ui.icon("chevron-down", 14, UiTheme.MUTED); categoryFace.icons.add(chevron);
+                categoryFace.add(chevron).padLeft(6).padRight(6);
+                onChange(categoryFace, this::showCategories);
+                head.add(categoryFace).minWidth(0).padLeft(4);
+            }
+            head.add().expandX();
+            libraryHead.add(head).growX();
+        }
+    }
+
+    private BoardEditorBlueprint.Category category(String id) {
+        return blueprint.categories().stream().filter(c -> c.id().equals(id)).findFirst().orElse(null);
+    }
+
+    /** The shown gallery's card, found by its family in the page's category; null if there is none. */
+    private BoardEditorBlueprint.Card gallery() {
+        return category(page.category()).sections().stream().flatMap(s -> s.cards().stream())
+              .filter(card -> card.gallery() && card.label().equals(page.gallery())).findFirst().orElse(null);
+    }
+
+    /** Opens the category list under the category's name: every category, the shown one ticked; a choice opens it. */
     private void showCategories() {
         stage.setKeyboardFocus(null); numbers.forEach(UiNumber::dismiss);
         UiMenuList list = new UiMenuList(ui); list.setName("editor-category-list");
-        for (String section : List.of("Terrain", "Features", "Structures", "Props", "Decals")) {
-            list.add(ui.caption(categoryName(section))).left().pad(8, 14, 2, 14).row();
-            boolean assets = section.equals("Props") || section.equals("Decals");
-            List<Option> entries = assets ? blueprint.assets().stream().filter(BoardEditorBlueprint.Asset::palette)
-                  .filter(a -> a.kind().equals(section.equals("Props") ? "prop" : "decal"))
-                  .map(BoardEditorBlueprint.Asset::group).distinct().sorted().map(g -> new Option(g, g)).toList()
-                  : blueprint.components().stream().filter(c -> c.palette() && c.category().equals(section)).map(c -> new Option(c.label(), c.id())).toList();
-            for (Option entry : entries) {
-                list.item(entry.label(), null, entry.id().equals(libraryOwner), false, true, () -> {
-                    choices.cancel(); category = section; objects = assets; browse(entry.id());
-                }).setName("editor-library-" + entry.id());
-            }
+        for (var category : blueprint.categories()) {
+            String id = category.id();
+            list.item(categoryName(id), null, id.equals(page.category()), false, true, () -> { choices.cancel(); show(new Page(id, null)); })
+                  .setName("editor-category-item-" + id);
         }
-        choices.header(null, null).content(list);
+        choices.header(null, null).content(list).openedFrom(categoryFace);
         var corner = categoryFace.localToStageCoordinates(new com.badlogic.gdx.math.Vector2());
         choices.showAt(corner.x, corner.y - 2);
     }
 
-    private void showLibrary() {
+    /**
+     * The grid of the shown page, or of the search's results while it holds text; the start page shows its tiles
+     * instead. {@code keep}: the grid keeps its scroll (the same cards in another theme).
+     */
+    private void showGrid(boolean keep) {
+        boolean start = page.category() == null && query.isEmpty();
+        tilesScroll.setVisible(start); libraryScroll.setVisible(!start);
+        float scroll = libraryScroll.getScrollY();
         libraryCards.clear(); models.clear();
-        String label = objects ? libraryOwner : blueprint.component(libraryOwner).label();
-        categoryFace.setText(categoryName(category) + " · " + label);
-        libraryNavigation.clearChildren();
-        var groups = objects ? List.<String>of() : designVariants(libraryOwner).stream().map(BoardEditorBlueprint.Variant::group).distinct().sorted().toList();
-        if (groups.size() > 1) {
-            String all = UiKit.text("BoardEditor.allDesigns");
-            List<Option> filters = new ArrayList<>(); filters.add(new Option(all, "")); groups.forEach(g -> filters.add(new Option(g, g)));
-            libraryNavigation.add(choice("", libraryGroup.isEmpty() ? all : libraryGroup, filters,
-                  value -> { libraryGroup = value; showLibrary(); })).growX().minWidth(0).padBottom(6).row();
+        List<Shelf> shelves = start ? List.of() : query.isEmpty() ? shelves() : results();
+        List<Tile> shown = new ArrayList<>();
+        List<UiCardGrid.Section> sections = new ArrayList<>();
+        for (Shelf shelf : shelves) {
+            sections.add(new UiCardGrid.Section(shelf.title() == null ? null : shelfHeader(shelf), shelf.tiles().size()));
+            shown.addAll(shelf.tiles());
         }
-        var matching = libraryEntries().stream().filter(e -> (e.label() + " " + e.key()).toLowerCase(Locale.ROOT).contains(query)).toList();
-        stripTitle.setText(UiKit.text("BoardEditor.choiceCount", matching.size()));
-        libraryGrid.items(matching.size(), index -> {
-            Entry entry = matching.get(index);
-            Image preview = new Image(); preview(entry, preview);
-            UiButton choose = visualCard(entry.label(), preview, 70, () -> {
-                if (entry.type().equals("asset")) { send(Action.ASSET, entry.key()); }
-                else { send(Action.CHOOSE_BRUSH, entry.owner(), entry.key()); }
-            });
-            String key = entry.type().equals("preset") ? entry.owner() + "/" + entry.key() : entry.key();
-            choose.setName("editor-library-" + key); choose.setUserObject(key);
-            if (snapshot != null) { choose.pressed(key.equals(snapshot.activeBrush().key())); }
-            libraryCards.removeIf(card -> card.getStage() == null); libraryCards.add(choose); return choose;
-        });
-        libraryScroll.setScrollY(0); libraryScroll.updateVisualScroll();
+        if (!start && shown.isEmpty()) {
+            Label none = ui.label(UiKit.text("BoardEditor.noResults"), "hud-small", 12, UiTheme.MUTED); none.setName("editor-no-results");
+            sections.add(new UiCardGrid.Section(none, 0));
+        }
+        libraryGrid.items(sections, index -> card(shown.get(index)));
+        libraryScroll.validate();
+        libraryScroll.setScrollY(keep ? scroll : 0); libraryScroll.updateVisualScroll();
     }
 
-    private void preview(Entry entry, Image image) {
-        if (!entry.thumbnail().isEmpty()) { thumbnail(entry.thumbnail(), image); return; }
-        switch (entry.type()) {
-            case "category" -> samples.add(libraryTheme, entry.owner(), "", image);
-            case "preset" -> samples.add(libraryTheme, entry.owner(), "preset:" + entry.key(), image);
-            case "variant" -> {
-                var variant = blueprint.variant(entry.key());
-                if (variant != null && !variant.asset().isEmpty()) { models.add(variant.asset(), image); }
-                else { samples.add(libraryTheme, entry.owner(), entry.key(), image); }
+    /** The shown page's sections: a gallery's designs, or its category's sections. */
+    private List<Shelf> shelves() {
+        var category = category(page.category());
+        if (page.gallery() == null) { return shelves(category); }
+        return List.of(new Shelf(category.id(), null, gallery().members().stream().map(member -> new Tile(single(member), null)).toList()));
+    }
+
+    /** A category's sections: the blueprint's, or for the Theme category its themes and, apart, its special ones. */
+    private List<Shelf> shelves(BoardEditorBlueprint.Category category) {
+        if (category.themes() == null) {
+            return category.sections().stream().map(section -> new Shelf(section.path(), sectionName(section),
+                  section.cards().stream().map(card -> new Tile(card, null)).toList())).toList();
+        }
+        var special = category.themes();
+        String key = "BoardEditor.palette." + category.id();
+        return List.of(new Shelf(category.id() + "/themes", UiKit.text(key + ".themes"), themeOptions().stream()
+                    .filter(theme -> !special.contains(theme.id())).map(theme -> new Tile(null, theme.id())).toList()),
+              new Shelf(category.id() + "/special", UiKit.text(key + ".special"), special.stream().map(theme -> new Tile(null, theme)).toList()));
+    }
+
+    /**
+     * The search's results: per category, in start-page order, its cards that match by their label, a member's label or
+     * key, or their section's name. A gallery's designs are listed one by one; a picker family is one card.
+     */
+    private List<Shelf> results() {
+        List<Shelf> results = new ArrayList<>();
+        for (var category : blueprint.categories()) {
+            java.util.Set<Tile> found = new java.util.LinkedHashSet<>();
+            for (Shelf shelf : shelves(category)) {
+                for (Tile tile : shelf.tiles()) {
+                    var card = tile.card();
+                    if (card == null) {
+                        if (matches(shelf.title(), themeLabel(tile.theme()))) { found.add(tile); }
+                    } else if (card.gallery()) {
+                        card.members().stream().filter(member -> matches(shelf.title(), card.label(), member.label(), member.key()))
+                              .forEach(member -> found.add(new Tile(single(member), null)));
+                    } else if (matches(shelf.title(), card.label()) || card.members().stream().anyMatch(member -> matches(member.label(), member.key()))) {
+                        found.add(tile);
+                    }
+                }
             }
-            default -> {
-                String key = entry.type().equals("group") ? entry.owner() : entry.key();
-                var asset = blueprint.asset(key);
-                if (asset.kind().equals("prop")) { models.add(asset.model(), asset.colours(), image); }
-                else { thumbnail(megamek.common.board.BoardDecalArt.image(asset.id()), image); }
+            if (!found.isEmpty()) { results.add(new Shelf(category.id(), categoryName(category.id()), List.copyOf(found))); }
+        }
+        return results;
+    }
+
+    private boolean matches(String... texts) {
+        for (String text : texts) { if (text.toLowerCase(Locale.ROOT).contains(query)) { return true; } }
+        return false;
+    }
+
+    private static String sectionName(BoardEditorBlueprint.Section section) {
+        return UiKit.text("BoardEditor.palette." + section.category() + "." + section.id());
+    }
+
+    /** A gallery's design as a card of its own. */
+    private static BoardEditorBlueprint.Card single(BoardEditorBlueprint.Entry member) {
+        return new BoardEditorBlueprint.Card(member.label(), List.of(member));
+    }
+
+    /** A section's header: its caption over a hairline, named after the section. */
+    private Table shelfHeader(Shelf shelf) {
+        Table header = new Table(); header.setName("editor-section-" + shelf.id()); header.bottom().left();
+        header.add(ui.caption(shelf.title())).left().padLeft(2).padBottom(3).row();
+        header.add(new Image(ui.skin.newDrawable("white", UiTheme.LINE))).growX().height(1);
+        return header;
+    }
+
+    /**
+     * A grid card: a Theme card arms its theme's brush; a gallery card opens its designs; any other card arms its entry, a
+     * picker family its first member. Its user object holds the brush keys that highlight it.
+     */
+    private UiButton card(Tile tile) {
+        Image preview = new Image();
+        UiButton card;
+        if (tile.theme() != null) {
+            String theme = tile.theme();
+            samples.add(theme, "", "", preview);
+            card = visualCard(themeLabel(theme), preview, 70, () -> send(Action.CHOOSE_BRUSH, "theme", theme));
+            card.setName("editor-library-theme/" + theme); card.setUserObject(java.util.Set.of(BoardEditorSession.THEME_BRUSH + theme));
+        } else {
+            var shown = tile.card();
+            var first = shown.members().getFirst();
+            preview(first, preview);
+            if (shown.gallery()) {
+                card = visualCard(shown.label() + " ›", preview, 70, () -> show(new Page(page.category(), shown.label())));
+                card.setName("editor-gallery-" + shown.label());
+            } else {
+                card = visualCard(shown.label(), preview, 70, () -> arm(first));
+                card.setName("editor-library-" + first.key());
+                // A gallery's designs share long names ("Legacy building art 52"): two lines show what tells them apart.
+                if (blueprint.card(first).gallery()) {
+                    card.getLabel().setEllipsis(false); card.getLabel().setWrap(true); card.getCell(card.getLabel()).height(32);
+                }
+            }
+            card.setUserObject(shown.members().stream().map(BoardEditorBlueprint.Entry::key).collect(java.util.stream.Collectors.toSet()));
+            if (first.blueprint()) {
+                // The chip on a dark plate, legible over any preview.
+                Table plate = new Table(); plate.setBackground(ui.skin.newDrawable("white", UiTheme.alpha(UiTheme.POP, .85f)));
+                plate.add(ui.chip(UiKit.text("BoardEditor.blueprint"), UiKit.Tone.NORMAL));
+                overlay(card, plate, 0, com.badlogic.gdx.utils.Align.topLeft);
             }
         }
+        // The whole name, which a long one's card cuts short.
+        ui.tip(card).getActor().setText(card.getText());
+        if (snapshot != null) { card.pressed(((java.util.Set<?>) card.getUserObject()).contains(snapshot.activeBrush().key())); }
+        libraryCards.add(card);
+        return card;
+    }
+
+    /** Arms the brush with a palette entry: a preset or design as a terrain brush, an asset as an object or stamp brush. */
+    private void arm(BoardEditorBlueprint.Entry entry) {
+        if (entry.asset() != null) { send(Action.ASSET, entry.key()); }
+        else { send(Action.CHOOSE_BRUSH, entry.owner(), entry.preset() != null ? entry.preset().id() : entry.variant().id()); }
+    }
+
+    /** The category of a brush key (its entry's first section, or the Theme category's); null for none, as a hex stamp. */
+    private String activeCategory(String key) {
+        if (key.startsWith(BoardEditorSession.THEME_BRUSH)) { return blueprint.themeCategory() == null ? null : blueprint.themeCategory().id(); }
+        var entry = blueprint.entry(key);
+        return entry == null ? null : BoardEditorBlueprint.categoryOf(entry.sections().getFirst());
+    }
+
+    /** {@code badge} over the card's preview in its {@code align} corner; {@code size} 0 keeps the badge's own size. */
+    private static void overlay(UiButton card, Actor badge, float size, int align) {
+        Table corner = new Table(); corner.setTouchable(Touchable.disabled); corner.align(align);
+        var cell = corner.add(badge).pad(4);
+        if (size > 0) { cell.size(size); }
+        ((Stack) card.getCells().first().getActor()).add(corner);
+    }
+
+    /** An entry's preview: a preset's sample, a design's, an object's model or decal, or a stamp's thumbnail. */
+    private void preview(BoardEditorBlueprint.Entry entry, Image image) {
+        if (entry.preset() != null) { samples.add(libraryTheme, entry.owner(), "preset:" + entry.preset().id(), image); }
+        else if (entry.variant() != null) { preview(entry.variant(), image); }
+        else if (!entry.asset().thumbnail().isEmpty()) { thumbnail(entry.asset().thumbnail(), image); }
+        else if (entry.asset().kind().equals("prop")) { models.add(entry.asset().model(), entry.asset().colours(), image); }
+        else { thumbnail(BoardDecalArt.image(entry.asset().id()), image); }
+    }
+
+    /** A design's preview: its thumbnail, else its model, else its sample. */
+    private void preview(BoardEditorBlueprint.Variant variant, Image image) {
+        if (!variant.thumbnail().isEmpty()) { thumbnail(variant.thumbnail(), image); }
+        else if (!variant.asset().isEmpty()) { models.add(variant.asset(), image); }
+        else { samples.add(libraryTheme, variant.owner(), variant.id(), image); }
     }
 
     private void thumbnail(String relative, Image image) {
@@ -898,22 +1119,27 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             String name = toolName(tool);
             Label title = ui.label(tool == BoardEditorSession.Tool.SCULPT ? name : name + " · " + brush.label(), "hud-title", 12, UiTheme.TEXT);
             title.setName("editor-brush-title"); title.setEllipsis(true); brushRow(title);
-            boolean route = brush.object() != null && megamek.common.board.RailRoute.isRoute(brush.object());
-            // A stamp brush keeps only its id: it has no options, and each click places its layout as one new group.
+            // A stamp brush keeps only its id: it has no options, and each click places its layout as one new group. A
+            // multi-hex blueprint (the DropShip) has none either: each click builds it on the hex and its neighbours; its
+            // Erase is its component's, over the radius.
             boolean stamp = brush.object() == null && brush.component().isEmpty();
+            var entry = blueprint.entry(brush.key());
+            boolean hexes = entry != null && entry.preset() != null && !entry.preset().hexes().isEmpty();
             if (tool == BoardEditorSession.Tool.SCULPT) { showSculpt(brush); }
-            else if (stamp) { brushRow(hint(UiKit.text("BoardEditor.hint.stamp"))); }
-            else if (tool == BoardEditorSession.Tool.ERASE) {
-                // A maglev brush erases the maglevs within a level of its height; routes crossing above or below stay.
-                boolean maglev = route && RailRoute.kind(brush.object()) == RailRoute.Kind.MAGLEV;
-                if (!route) {
-                    UiNumber radius = brushNumber(UiKit.text("BoardEditor.radius"), snapshot.brush(), 1, 20, 1, Action.BRUSH, "");
-                    var zone = zoneBrush(brush);
-                    if (zone == null) { brushRow(radius); } else { brushRow(radius, zoneNumber(zone)); }
-                } else if (maglev) { brushRow(routeHeight(brush.object(), true, Action.BRUSH_VALUE)); }
+            else if (stamp || hexes && tool == BoardEditorSession.Tool.PAINT) {
+                familyRow(brush);
+                brushRow(hint(UiKit.text(stamp ? "BoardEditor.hint.stamp" : "BoardEditor.hint.hexBlueprint")));
+            }
+            else if (brush.themeCard() && tool == BoardEditorSession.Tool.ERASE) { brushRow(hint(UiKit.text("BoardEditor.themeNoErase"))); }
+            else if (tool == BoardEditorSession.Tool.ERASE && brush.way()) {
+                wayHeight(brush);
+                brushRow(hint(UiKit.text("BoardEditor.way.eraseHint")));
+            } else if (tool == BoardEditorSession.Tool.ERASE) {
+                UiNumber radius = brushNumber(UiKit.text("BoardEditor.radius"), snapshot.brush(), 1, 20, 1, Action.BRUSH, "");
+                var zone = zoneBrush(brush);
+                if (zone == null) { brushRow(radius); } else { brushRow(radius, zoneNumber(zone)); }
                 brushRow(hint(UiKit.text(brush.sampledHex() != null ? "BoardEditor.hint.eraseHexes"
-                      : brush.object() == null ? "BoardEditor.hint.eraseComponent" : maglev ? "BoardEditor.hint.eraseMaglev"
-                      : route ? "BoardEditor.hint.eraseObjects" : "BoardEditor.hint.eraseObjectsInRadius")));
+                      : brush.object() == null ? "BoardEditor.hint.eraseComponent" : "BoardEditor.hint.eraseObjectsInRadius")));
             } else if (brush.object() != null) { objectControls(brush.object()); }
             else {
                 if (brush.sampledHex() != null) {
@@ -927,33 +1153,81 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (width > 0) { layoutCorners(); }
     }
 
-    /** A terrain brush's radius and the options its component offers for painting. */
+    /**
+     * A terrain brush's radius and the options its component offers for painting: Level and Theme for ground and a hex
+     * stamp (a Theme card, which is its theme, has Level only), and, except on a hex stamp, a row per brush field the
+     * brush holds (a number or a choice of its levels) and per optional field its card offers ({@code settings}), whose
+     * None leaves the field out.
+     */
     private void componentControls(BoardEditorSession.Brush brush) {
         List<Actor> controls = new ArrayList<>();
-        controls.add(brushNumber(UiKit.text("BoardEditor.radius"), snapshot.brush(), 1, 20, 1, Action.BRUSH, ""));
+        if (brush.way()) { wayHeight(brush); }
+        else { controls.add(brushNumber(UiKit.text("BoardEditor.radius"), snapshot.brush(), 1, 20, 1, Action.BRUSH, "")); }
         var definition = blueprint.component(brush.component());
         if (brush.sampledHex() != null || definition.id().equals("ground")) {
             controls.add(brushNumber(UiKit.text("BoardEditor.levelLabel"), brush.elevation(), -10, 30, 1, Action.BRUSH_VALUE, "elevation")
                   .withCheckbox(brush.elevationEnabled(), checked -> send(Action.BRUSH_VALUE, "applyElevation", Boolean.toString(checked))));
-            var theme = ui.checkbox(UiKit.text("BoardEditor.labTheme"), brush.themeEnabled());
-            onChange(theme, () -> send(Action.BRUSH_VALUE, "applyTheme", Boolean.toString(theme.isTicked())));
-            Table themeControl = new Table(); themeControl.add(theme).padRight(4);
-            themeControl.add(choice("", themeLabel(brush.theme()), themeOptions(), value -> send(Action.BRUSH_VALUE, "theme", value)))
-                  .width(125).height(27); controls.add(themeControl);
-        } else {
-            for (var field : definition.fields()) {
-                if (!field.brush()) { continue; }
-                var value = brush.properties().stream().filter(p -> p.terrain().equals(field.terrain())).findFirst().orElse(null);
-                if (value == null) { continue; }
-                controls.add(brushNumber(field.label(), value.value(), field.min(), field.max(), field.step(), Action.BRUSH_VALUE, "terrain:" + field.terrain()));
+            if (!brush.themeCard()) {
+                var theme = ui.checkbox(UiKit.text("BoardEditor.labTheme"), brush.themeEnabled());
+                onChange(theme, () -> send(Action.BRUSH_VALUE, "applyTheme", Boolean.toString(theme.isTicked())));
+                Table themeControl = new Table(); themeControl.setName("editor-brush-theme"); themeControl.add(theme).padRight(4);
+                themeControl.add(choice("", themeLabel(brush.theme()), themeOptions(), value -> send(Action.BRUSH_VALUE, "theme", value)))
+                      .width(125).height(27); controls.add(themeControl);
             }
+        }
+        var entry = blueprint.entry(brush.key());
+        List<String> settings = entry == null || entry.preset() == null ? List.of() : entry.preset().settings();
+        for (var field : brush.sampledHex() != null ? List.<BoardEditorBlueprint.Field>of() : definition.fields()) {
+            var value = brush.property(field.terrain());
+            boolean offered = settings.contains(field.terrain());
+            if (!field.brush() || value == null && !offered || brush.way() && field.terrain().equals("bridge_elev")) { continue; }
+            String target = "terrain:" + field.terrain();
+            if (field.choices().isEmpty()) {
+                if (value != null) { controls.add(brushNumber(field.label(), value.value(), field.min(), field.max(), field.step(), Action.BRUSH_VALUE, target)); }
+                continue;
+            }
+            List<Option> options = new ArrayList<>();
+            if (offered) { options.add(new Option(UiKit.text("BoardEditor.none"), "")); }
+            field.choices().forEach(choice -> options.add(new Option(choice.label(), Integer.toString(choice.value()))));
+            String current = value == null ? UiKit.text("BoardEditor.none") : field.choices().stream().filter(c -> c.value() == value.value())
+                  .map(BoardEditorBlueprint.Choice::label).findFirst().orElse(UiKit.text("BoardEditor.value", Integer.toString(value.value())));
+            Table row = choice(field.label(), current, options, chosen -> send(Action.BRUSH_VALUE, target, chosen));
+            row.setName("editor-brush-" + target); controls.add(row);
+        }
+        // A skin look turns as one: every hex of a stroke gets the brush's rotation.
+        var style = brush.sampledHex() != null ? null : brush.appearance().get(definition.id());
+        var design = style == null || style.variant() == null ? null : blueprint.variant(style.variant());
+        if (design != null && design.skin() != null) {
+            controls.add(brushNumber(UiKit.text("BoardEditor.designRotation"), style.rotation() == null ? 0 : style.rotation(),
+                  0, 330, 30, Action.BRUSH_VALUE, "rotation:" + definition.id()));
+        }
+        if (brush.sampledHex() == null && definition.id().equals("scorch")) {
+            controls.add(scorchSeverity(brush.appearance(), chosen -> send(Action.BRUSH_VALUE, "variant:scorch", chosen)));
+        }
+        if (brush.sampledHex() == null && definition.id().equals("pavement")) {
+            List<Option> options = new ArrayList<>();
+            for (var edges : megamek.common.board.HexAppearance.Edges.values()) {
+                options.add(new Option(UiKit.text(edgesKey(edges)), edges.name().toLowerCase(Locale.ROOT)));
+            }
+            var current = megamek.common.board.HexAppearance.edges(brush.appearance());
+            Table row = choice(UiKit.text("BoardEditor.pavementEdges"), UiKit.text(edgesKey(current)), options,
+                  chosen -> send(Action.BRUSH_VALUE, "edges", chosen));
+            row.setName("editor-brush-edges"); controls.add(row);
+        }
+        if (brush.sampledHex() == null && definition.id().equals("road")) {
+            controls.add(trafficControlChoice(brush.appearance(), "road",
+                  chosen -> send(Action.BRUSH_VALUE, "trafficControl", chosen)));
         }
         var zone = zoneBrush(brush);
         if (zone != null) { controls.add(zoneNumber(zone)); }
         controls.add(clearOnly(brush));
+        var fill = ui.checkbox(UiKit.text("BoardEditor.fill"), brush.fill()); fill.setName("editor-fill");
+        onChange(fill, () -> send(Action.BRUSH_VALUE, "fill", Boolean.toString(fill.isTicked())));
+        ui.tip(fill).getActor().setText(UiKit.text("BoardEditor.fill.tooltip"));
+        if (!brush.way()) { controls.add(fill); }
         brushRows.add(controls);
         brushRow(hint(UiKit.text(brush.sampledHex() != null ? "BoardEditor.hint.paintStamp"
-              : zone != null ? "BoardEditor.deploymentZoneHint"
+              : brush.themeCard() ? "BoardEditor.hint.theme" : zone != null ? "BoardEditor.deploymentZoneHint"
               : snapshot.drawsRoutes() ? "BoardEditor.hint.road" : "BoardEditor.hint.paint")));
     }
 
@@ -987,14 +1261,30 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         return snapshot.objects().stream().filter(object -> object.id().equals(snapshot.object())).findFirst().orElse(null);
     }
 
+    /**
+     * A picker family's Type row (Brush): the family's members, the armed one shown; choosing one arms it (as its card
+     * would, so the brush's transform starts again).
+     */
+    private void familyRow(BoardEditorSession.Brush brush) {
+        var entry = blueprint.entry(brush.key());
+        var card = entry == null ? null : blueprint.card(entry);
+        if (card != null && card.picker()) {
+            brushRow(choice(UiKit.text("BoardEditor.familyType"), entry.label(), members(card), key -> send(Action.ASSET, key)));
+        }
+    }
+
+    private static List<Option> members(BoardEditorBlueprint.Card card) {
+        return card.members().stream().map(member -> new Option(member.label(), member.key())).toList();
+    }
+
     /** The paint template of an object brush; the inspector edits a placed instance with the same values. */
     private void objectControls(BoardDecoration object) {
+        familyRow(snapshot.activeBrush());
         Action action = Action.BRUSH_VALUE;
         String prefix = "object:";
         if (RailRoute.isRoute(object)) {
-            // Only a maglev holds a height of its own; a rail follows the ground or a deck.
+            wayHeight(snapshot.activeBrush());
             boolean maglev = RailRoute.kind(object) == RailRoute.Kind.MAGLEV;
-            if (maglev) { brushRow(routeHeight(object, true, action)); }
             brushRow(hint(UiKit.text(maglev ? "BoardEditor.hint.route" : "BoardEditor.hint.rail")));
             return;
         }
@@ -1028,6 +1318,23 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private double heightOffset(BoardDecoration object) {
         var placement = object.placement();
         return placement.offset() == null ? placement.level() - snapshot.elevation() : placement.offset();
+    }
+
+    /** All six route cards share the document's height policy. */
+    private void wayHeight(BoardEditorSession.Brush brush) {
+        UiKit.Segmented mode = ui.segmented("hud-seg", false, UiKit.text("BoardEditor.way.follow"), UiKit.text("BoardEditor.way.level"));
+        mode.buttons.get(0).setName("editor-way-follow"); mode.buttons.get(1).setName("editor-way-level");
+        onChange(mode.buttons.get(0), () -> send(Action.BRUSH_VALUE, "wayHeight", "follow"));
+        onChange(mode.buttons.get(1), () -> send(Action.BRUSH_VALUE, "wayHeight", "level"));
+        mode.select(brush.levelHeight() ? 1 : 0);
+        var pillars = ui.checkbox(UiKit.text("BoardEditor.pillars"), brush.pillars());
+        pillars.setName("editor-way-pillars");
+        onChange(pillars, () -> send(Action.BRUSH_VALUE, "wayPillars", Boolean.toString(pillars.isTicked())));
+        brushRow(mode, brushNumber(UiKit.text("BoardEditor.way.height"), brush.heightOffset(), 0, 50, 1,
+              Action.BRUSH_VALUE, "wayOffset"), pillars);
+        sculptHint = ui.label(source.editorHint(), "hud-small", 12, UiTheme.TEXT);
+        sculptHint.setName("editor-way-readout"); sculptHint.setWrap(true);
+        brushRow(sculptHint);
     }
 
     /** Sculpt's options share the tray: mode, Slope and the common radius, plus the hovered hex's hint. */
@@ -1074,14 +1381,19 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private void showDesigns() {
         if (designOwner.isEmpty()) { return; }
         designCards.clearChildren(); designPages.clearChildren();
-        List<Entry> entries = new ArrayList<>();
-        entries.add(new Entry("", UiKit.text("BoardEditor.defaultDesign"), "", "category", designOwner));
-        designVariants(designOwner).forEach(v -> entries.add(new Entry(v.id(), v.label(), v.thumbnail(), "variant", v.owner())));
-        var matching = entries.stream().filter(e -> (e.label() + " " + e.key()).toLowerCase(Locale.ROOT).contains(designQuery)).toList();
+        // The owner's default look (null) first, then its designs.
+        List<BoardEditorBlueprint.Variant> designs = new ArrayList<>();
+        designs.add(null); designs.addAll(designVariants(designOwner));
+        String standard = UiKit.text("BoardEditor.defaultDesign");
+        var matching = designs.stream().filter(v -> (v == null ? standard : v.label() + " " + v.id()).toLowerCase(Locale.ROOT)
+              .contains(designQuery)).toList();
         int last = Math.max(0, (matching.size() - 1) / PAGE_SIZE); designPage = Math.min(designPage, last);
-        for (Entry entry : matching.subList(Math.min(matching.size(), designPage * PAGE_SIZE), Math.min(matching.size(), (designPage + 1) * PAGE_SIZE))) {
-            Image image = new Image(); preview(entry, image);
-            UiButton card = visualCard(entry.label(), image, 80, () -> { send(Action.VARIANT, designOwner, entry.key()); closeDesigns(); });
+        for (var design : matching.subList(Math.min(matching.size(), designPage * PAGE_SIZE), Math.min(matching.size(), (designPage + 1) * PAGE_SIZE))) {
+            Image image = new Image();
+            if (design == null) { samples.add(libraryTheme, designOwner, "", image); } else { preview(design, image); }
+            UiButton card = visualCard(design == null ? standard : design.label(), image, 80, () -> {
+                send(Action.VARIANT, designOwner, design == null ? "" : design.id()); closeDesigns();
+            });
             designCards.addActor(card);
         }
         if (last > 0) {
@@ -1135,16 +1447,17 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
     /** The type icon of a component's Layers row; the Ground row keeps the hexagon, other rules terrain shows "rules". */
     private static String layerIcon(BoardEditorBlueprint.Component component) { return LAYER_ICONS.getOrDefault(component.id(), "rules"); }
-    /** The type icon of an object's Layers row: decals, then by palette group; decoration without rules shows a star. */
+    /**
+     * The type icon of an object's Layers row: decals and routes by kind, then by its asset's first palette section or
+     * that section's category; decoration without rules shows a star.
+     */
     private String layerIcon(BoardDecoration object) {
         if (object.kind().equals("decal")) { return "decal"; }
-        // A rail or maglev route keeps the train icon in its Transport group.
         if (RailRoute.isRoute(object)) { return "train"; }
         var asset = blueprint.asset(object.asset());
-        return asset == null ? "star" : LAYER_ICONS.getOrDefault(asset.group(), "star");
-    }
-    private void browse(String owner) {
-        libraryOwner = owner; libraryGroup = ""; query = ""; searchField.setText(""); showLibrary(); if (snapshot != null) { showBrush(); }
+        if (asset == null || asset.sections().isEmpty()) { return "star"; }
+        String section = asset.sections().getFirst();
+        return LAYER_ICONS.getOrDefault(section, LAYER_ICONS.getOrDefault(BoardEditorBlueprint.categoryOf(section), "star"));
     }
 
     /** Runs what a Layers row or its action does, by node id or action name. */
@@ -1178,7 +1491,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                   .children(objectRows(snapshot.objects().stream().filter(object -> !snapshot.grouped(object)
                         && object.placement().receiver() != null && component.receiver().equals(object.placement().receiver().terrain()))
                         .toList(), component.receiver()));
-            if (!component.present().isEmpty()) {
+            if (!component.present().isEmpty() || component.fields().isEmpty()) {
                 String remove = id + "-remove";
                 layerCommands.put(remove, () -> send(Action.REMOVE_COMPONENT, component.id()));
                 row = row.action(new UiTree.Action(remove, "close", null, true));
@@ -1219,13 +1532,15 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     /**
-     * Whether Layers lists {@code component} for the inspected hex: Ground always, a component by its own terrain, and
-     * an additive one without terrain of its own (Hazards, Weather, Scenario features, Salvage, Elevators) while any of
-     * its fields is in the hex. An additive row has no remove button: each field has its own in Edit.
+     * Whether Layers lists {@code component} for the inspected hex: Ground always, a component by its own terrain, one
+     * with no fields at all (a look such as Scorched ground) by its appearance, and an additive one without terrain of
+     * its own (Hazards, Weather, Scenario features, Salvage, Elevators) while any of its fields is in the hex. An
+     * additive row has no remove button: each field has its own in Edit.
      */
     private boolean listed(BoardEditorBlueprint.Component component) {
         if (component.id().equals("ground")) { return true; }
         if (!component.present().isEmpty()) { return component.isPresent(name -> snapshot.property(name) != null); }
+        if (component.fields().isEmpty()) { return snapshot.appearance().containsKey(component.id()); }
         return component.palette() && component.fields().stream().anyMatch(field -> snapshot.property(field.terrain()) != null);
     }
 
@@ -1293,8 +1608,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         }
         Table appearance = new Table(); appearance.defaults().growX().minWidth(0).uniformX().top().pad(0, 2, 0, 2);
         if (definition.id().equals("ground")) { appearance.add(themeChoice(UiKit.text("BoardEditor.hexTheme"), snapshot.theme(), v -> send(Action.THEME, v))); }
-        // A bridge's designs are its type: the Built and Natural buttons below.
-        if (!designVariants(definition.id()).isEmpty() && !definition.id().equals("bridge")) {
+        // A bridge's designs are its type: the Built and Natural buttons below; a scorch's its Severity row.
+        if (!designVariants(definition.id()).isEmpty() && !definition.id().equals("bridge") && !definition.id().equals("scorch")) {
             var style = snapshot.appearance().get(definition.id());
             var variant = style == null ? null : blueprint.variant(style.variant());
             String designId = variant == null ? blueprint.variants(definition.id()).stream()
@@ -1310,10 +1625,23 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             if (variant != null && variant.blend()) {
                 number(UiKit.text("BoardEditor.blendStrength"), style.strength() == null ? .5 : style.strength(), 0, 1, .05, Action.BLEND, "");
             }
+            if (variant != null && variant.skin() != null) {
+                number(UiKit.text("BoardEditor.designRotation"), style.rotation() == null ? 0 : style.rotation(), 0, 330, 30,
+                      Action.DESIGN_ROTATION, definition.id());
+            }
         } else if (appearance.hasChildren()) { detail.add(appearance).row(); }
         for (var field : definition.fields()) { if (!field.optional() || snapshot.property(field.terrain()) != null) { field(field); } }
+        if (definition.id().equals("pavement")) { pavementEdges(); }
+        if (definition.id().equals("road")) { trafficControl("road"); }
+        if (definition.id().equals("scorch")) {
+            detail.add(scorchSeverity(snapshot.appearance(), chosen -> send(Action.VARIANT, "scorch", chosen))).growX().row();
+        }
+        // Deck mud is offered only where it plays: on a natural raised deck (Hex#deckMud).
+        var deck = snapshot.property("bridge_elev");
+        boolean deckMud = Boolean.FALSE.equals(megamek.common.board.HexAppearance.bridgeBuilt(snapshot.appearance()))
+              && deck != null && deck.value() > 0;
         var optional = definition.fields().stream().filter(f -> f.optional() && !f.terrain().contains("fluff") && !f.terrain().equals("cliff_top")
-              && snapshot.property(f.terrain()) == null).toList();
+              && (deckMud || !f.terrain().equals("bridge_mud")) && snapshot.property(f.terrain()) == null).toList();
         if (!optional.isEmpty()) {
             choose(UiKit.text("BoardEditor.addProperty"), UiKit.text("BoardEditor.choose"), optional.stream().map(f -> new Option(f.label(), f.terrain())).toList(), key -> {
                 var field = optional.stream().filter(f -> f.terrain().equals(key)).findFirst().orElseThrow();
@@ -1322,6 +1650,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         }
         if (definition.id().equals("ground") || definition.id().equals("cliff")) { heading(UiKit.text("BoardEditor.cliffEdges")); edges("cliff_top"); }
         if (definition.id().equals("bridge")) {
+            if (megamek.common.board.HexAppearance.implicit(snapshot.appearance())) { text(UiKit.text("BoardEditor.way.implicit")); }
             // This hex's state; a click sets the whole connected bridge.
             Boolean built = megamek.common.board.HexAppearance.bridgeBuilt(snapshot.appearance());
             Table type = new Table(); type.defaults().growX().uniformX().minWidth(0).pad(0, 2, 0, 2);
@@ -1355,17 +1684,121 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                 // The truss's Body slot, chosen like a placed object's colour: one choice for the whole span.
                 if (truss) {
                     heading(UiKit.text("BoardEditor.bridgeColour"));
-                    colourRows(colourSlots(TRUSS_COLOURS), snapshot.appearance().get("bridge").colours(),
+                    colourRows(List.of(BoardBridgeTruss.BODY), snapshot.appearance().get("bridge").colours(),
                           (slot, value) -> send(Action.BRIDGE_COLOUR, value));
                 }
             }
         }
+        if (definition.id().equals("ground")) {
+            heading(UiKit.text("BoardEditor.way.groundSection"));
+            wayRow("road", false); wayRow("rail", false);
+        } else if (definition.id().equals("bridge")) {
+            heading(UiKit.text("BoardEditor.way.deckSection"));
+            wayRow("bridge_road", true); wayRow("bridge_rail", true);
+        } else if (definition.id().equals("road") && snapshot.property("bridge") != null) {
+            wayLayerButtons("road", false);
+        }
         UiButton sample = button(UiKit.text("BoardEditor.useAsBrush"), () -> send(Action.SAMPLE)); sample.setName("editor-use-hex-brush");
         ui.tip(sample).getActor().setText(UiKit.text("BoardEditor.useAsBrush.tooltip"));
         detail.add(sample).padTop(8).row();
-        if (!definition.present().isEmpty()) {
+        if (!definition.present().isEmpty() || definition.fields().isEmpty()) {
             detail.add(removeButton(UiKit.text("BoardEditor.removeComponent"), () -> send(Action.REMOVE_COMPONENT, definition.id()))).row();
         }
+    }
+
+    /** A scorched hex's Severity (HexAppearance.Scorch): its named levels, the stored one shown. */
+    private Table scorchSeverity(Map<String, megamek.common.board.HexAppearance> appearance, Consumer<String> choose) {
+        var style = appearance.get("scorch");
+        var current = style == null ? null : blueprint.variant(style.variant());
+        Table row = choice(UiKit.text("BoardEditor.scorchSeverity"), current == null ? UiKit.text("BoardEditor.none") : current.label(),
+              blueprint.variants("scorch").stream().map(variant -> new Option(variant.label(), variant.id())).toList(), choose);
+        row.setName("editor-scorch-severity");
+        return row;
+    }
+
+    /** The pavement hex's Edges ({@link megamek.common.board.HexAppearance.Edges}): one row of Auto, Fitted and Hex. */
+    private void pavementEdges() {
+        heading(UiKit.text("BoardEditor.pavementEdges"));
+        var current = megamek.common.board.HexAppearance.edges(snapshot.appearance());
+        Table row = new Table(); row.defaults().growX().uniformX().minWidth(0).pad(0, 2, 0, 2);
+        for (var edges : megamek.common.board.HexAppearance.Edges.values()) {
+            String value = edges.name().toLowerCase(Locale.ROOT), key = edgesKey(edges);
+            UiButton button = button(UiKit.text(key), () -> send(Action.EDGES, value));
+            button.setName("editor-pavement-edges-" + value);
+            button.pressed(edges == current);
+            ui.tip(button).getActor().setText(UiKit.text(key + ".tooltip"));
+            row.add(button);
+        }
+        detail.add(row).growX().row();
+    }
+
+    private static String edgesKey(megamek.common.board.HexAppearance.Edges edges) {
+        String name = edges.name();
+        return "BoardEditor.edges" + name.charAt(0) + name.substring(1).toLowerCase(Locale.ROOT);
+    }
+
+    private Table trafficControlChoice(Map<String, megamek.common.board.HexAppearance> appearance, String owner,
+          Consumer<String> choose) {
+        var current = megamek.common.board.HexAppearance.trafficControl(appearance, owner);
+        List<Option> options = List.of(new Option(UiKit.text("BoardEditor.trafficStops"), "stops"),
+              new Option(UiKit.text("BoardEditor.trafficSignals"), "signals"),
+              new Option(UiKit.text("BoardEditor.trafficGantry"), "gantry"));
+        String label = switch (current) {
+            case STOPS -> "BoardEditor.trafficStops";
+            case SIGNALS -> "BoardEditor.trafficSignals";
+            case GANTRY -> "BoardEditor.trafficGantry";
+        };
+        Table row = choice(UiKit.text("BoardEditor.trafficControl"), UiKit.text(label), options, choose);
+        row.setName("editor-traffic-control-" + owner);
+        return row;
+    }
+
+    private void trafficControl(String owner) {
+        detail.add(trafficControlChoice(snapshot.appearance(), owner,
+              chosen -> send(Action.TRAFFIC_CONTROL, owner, chosen))).growX().row();
+    }
+
+    private void wayRow(String terrain, boolean deck) {
+        var owner = blueprint.component(terrain.equals("road") ? "road" : "ways");
+        var field = owner.fields().stream().filter(item -> item.terrain().equals(terrain)).findFirst().orElseThrow();
+        if (snapshot.property(terrain) == null) { text(field.label() + " · " + UiKit.text("BoardEditor.none")); return; }
+        field(field);
+        if (snapshot.property("bridge") != null) { wayLayerButtons(terrain, deck); }
+        if (terrain.equals("road") || terrain.equals("bridge_road")) { trafficControl(deck ? "bridgeRoad" : "road"); }
+        if (terrain.equals("rail") || terrain.equals("bridge_rail")) {
+            var rail = snapshot.property(terrain);
+            var kind = rail.value() == 2 ? RailRoute.Kind.MAGLEV : RailRoute.Kind.RAIL;
+            int tracks = megamek.common.board.HexAppearance.tracks(snapshot.appearance(), deck ? "bridgeRail" : "rail");
+            int current = tracks == 0 ? RailRoute.pieces(rail.exits()) : tracks;
+            var layouts = RailRoute.junctions(rail.exits());
+            if (layouts.size() > 1 || current != layouts.getFirst().tracks()) {
+                Image preview = new Image(); junctions.add(kind, rail.exits(), current, preview);
+                var chosen = layouts.stream().filter(layout -> layout.tracks() == current).findFirst().orElse(null);
+                var card = visualCard(junctionLabel(chosen), preview, 64,
+                      () -> openJunctions(kind, rail.exits(), current, terrain));
+                card.setName("editor-junction"); detail.add(card).row();
+            }
+            String road = deck ? "bridge_road" : "road";
+            if (snapshot.property(road) != null) {
+                String key = deck ? "bridgeRail" : "rail";
+                int beside = megamek.common.board.HexAppearance.beside(snapshot.appearance(), key);
+                choose(UiKit.text("BoardEditor.way.corridor"), UiKit.text(beside == 0 ? "BoardEditor.way.middle" : "BoardEditor.way.beside"),
+                      List.of(new Option(UiKit.text("BoardEditor.way.middle"), "middle"), new Option(UiKit.text("BoardEditor.way.beside"), "beside")),
+                      value -> send(Action.CORRIDOR, key, value));
+                if (beside != 0) { detail.add(button(UiKit.text("BoardEditor.way.swap"), () -> send(Action.CORRIDOR, key, "swap"))).row(); }
+            }
+        }
+    }
+
+    private void wayLayerButtons(String terrain, boolean deck) {
+        Table layers = new Table();
+        for (boolean target : new boolean[] { true, false }) {
+            UiButton button = button(UiKit.text(target ? "BoardEditor.railOnDeck" : "BoardEditor.railBeneath"),
+                  () -> send(Action.WAY_LAYER, terrain, target ? "deck" : "ground"));
+            button.pressed(deck == target); button.setName("editor-way-" + terrain + (target ? "-deck" : "-beneath"));
+            layers.add(button).growX().uniformX();
+        }
+        detail.add(layers).growX().row();
     }
 
     private void field(BoardEditorBlueprint.Field field) {
@@ -1383,10 +1816,16 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             UiChoiceGrid cards = ui.choiceGrid(120, 4).fit(INSPECTOR_WIDTH - 24, Float.MAX_VALUE);
             for (var choice : field.choices()) {
                 Image image = new Image();
-                var preset = blueprint.component(snapshot.component()).presets().stream()
-                      .filter(p -> new megamek.common.Hex(0, p.terrain(), "").terrainLevel(megamek.common.units.Terrains.getType(field.terrain())) == choice.value())
-                      .findFirst();
-                samples.add(snapshot.theme(), snapshot.component(), preset.map(p -> "preset:" + p.id()).orElse(""), image);
+                // Each finish's sample: the component's preview hex at that level in its material.
+                boolean road = field.terrain().equals("road") || field.terrain().equals("bridge_road");
+                var owner = blueprint.component(road ? "road" : snapshot.component());
+                var sample = new megamek.common.Hex(owner.previewLevel(), owner.preview(), snapshot.theme());
+                int type = megamek.common.units.Terrains.getType(road ? "road" : field.terrain());
+                var shown = sample.getTerrain(type);
+                sample.addTerrain(new megamek.common.units.Terrain(type, choice.value(), shown != null && shown.hasExitsSpecified(),
+                      shown == null ? 0 : shown.getExits()));
+                sample.setAppearance(Map.of(owner.id(), new megamek.common.board.HexAppearance(null, null, choice.material(), null)));
+                samples.add(BoardEditorSession.hexStamp(owner.id() + "/" + field.terrain() + "/" + choice.value(), sample), image);
                 UiButton card = visualCard(choice.label(), image, 48, () -> send(Action.TERRAIN, field.terrain(), Integer.toString(choice.value())));
                 card.setName("editor-surface-" + choice.value()); card.pressed(value.value() == choice.value()); cards.addActor(card);
             }
@@ -1443,7 +1882,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
               side -> send(Action.EDGE, terrain, Integer.toString(side)));
         edges.setName("editor-edges-" + terrain);
         detail.add(edges).row();
-        if (!terrain.equals("cliff_top") && value != null) {
+        if (!Set.of("cliff_top", "bridge", "bridge_road", "bridge_rail", "rail").contains(terrain) && value != null) {
             detail.add(button(UiKit.text(value.explicit() ? "BoardEditor.useAutoEdges" : "BoardEditor.autoEdges"),
                   () -> send(Action.AUTO_EDGES, terrain))).row();
         }
@@ -1456,7 +1895,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
     private void object(BoardDecoration object) {
         heading(objectLabel(object));
-        if (RailRoute.isRoute(object)) { route(object); return; }
+        // An object of a picker family swaps to another member in place: Type.
+        var asset = blueprint.assetOf(object);
+        var entry = asset == null ? null : blueprint.entry(asset.id());
+        var family = entry == null ? null : blueprint.card(entry);
+        if (family != null && family.picker()) {
+            choose(UiKit.text("BoardEditor.familyType"), entry.label(), members(family), key -> send(Action.OBJECT_VALUE, "asset", key));
+        }
         text(UiKit.text(object.kind().equals("prop") ? "BoardEditor.visualProp" : "BoardEditor.surfaceDecal"));
         var placement = object.placement();
         String support = placement.receiver() == null ? "fixed" : switch (placement.receiver().terrain()) {
@@ -1502,56 +1947,6 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     /**
-     * A route marker's Edit panel: its kind, what carries it (a maglev's level; a rail running along a bridge its deck or
-     * the ground beneath, {@link RailRoute#alongDeck}), the sides it leaves by, its junction layout where its sides have
-     * more than one, and the maglev's Pillars toggle.
-     */
-    private void route(BoardDecoration object) {
-        boolean maglev = RailRoute.kind(object) == RailRoute.Kind.MAGLEV;
-        text(UiKit.text(maglev ? "BoardEditor.routeHint" : "BoardEditor.railHint"));
-        var bridge = snapshot.property("bridge");
-        if (maglev) { detail.add(routeHeight(object, false, Action.OBJECT_VALUE)).row(); }
-        else if (bridge != null && RailRoute.alongDeck(object.connections(), bridge.exits())) {
-            Table support = new Table(); support.defaults().growX().uniformX().minWidth(0).pad(0, 2, 0, 2);
-            for (boolean deck : new boolean[] { true, false }) {
-                String key = deck ? "BoardEditor.railOnDeck" : "BoardEditor.railBeneath";
-                UiButton button = button(UiKit.text(key), () -> send(Action.OBJECT_VALUE, "receiver", deck ? "bridge/deck" : "ground/top"));
-                button.setName(deck ? "editor-rail-deck" : "editor-rail-beneath");
-                button.pressed(deck == RailRoute.onDeck(object));
-                ui.tip(button).getActor().setText(UiKit.text(key + ".tooltip"));
-                support.add(button);
-            }
-            detail.add(support).growX().row();
-        } else { text(UiKit.text("BoardEditor.support.ground")); }
-        // A side joins the neighbouring route only while both have it; toggling sets both.
-        UiHexSides sides = new UiHexSides(ui, object.connections(), side -> send(Action.OBJECT_VALUE, "side", Integer.toString(side)));
-        sides.setName("editor-route-sides");
-        detail.add(sides).row();
-        var layouts = RailRoute.junctions(object.connections());
-        int current = RailRoute.pieces(object, object.connections());
-        if (layouts.size() > 1 || current != layouts.getFirst().tracks()) {
-            Image preview = new Image(); junctions.add(RailRoute.kind(object), object.connections(), current, preview);
-            Table junction = new Table(); junction.defaults().growX().minWidth(0);
-            junction.add(ui.caption(UiKit.text("BoardEditor.junction"))).left().padBottom(5).row();
-            var chosen = layouts.stream().filter(layout -> layout.tracks() == current).findFirst().orElse(null);
-            UiButton card = visualCard(junctionLabel(chosen), preview, 64, () -> openJunctions(object));
-            card.setName("editor-junction"); ui.tip(card).getActor().setText(UiKit.text("BoardEditor.junction.tooltip"));
-            junction.add(card);
-            detail.add(junction).padTop(8).row();
-        }
-        if (maglev) {
-            // As a bridge's Pillars: the whole connected route, one undo step.
-            boolean on = object.pillars();
-            UiButton pillars = button(UiKit.text("BoardEditor.pillars"), () -> send(Action.PILLARS, Boolean.toString(!on)));
-            pillars.setName("editor-route-pillars"); pillars.pressed(on);
-            ui.tip(pillars).getActor().setText(UiKit.text("BoardEditor.routePillars.tooltip"));
-            detail.add(pillars).padTop(8).row();
-        }
-        detail.add(button(UiKit.text("BoardEditor.useAsBrush"), () -> send(Action.SAMPLE))).padTop(8).row();
-        detail.add(removeButton(UiKit.text("BoardEditor.remove"), () -> send(Action.REMOVE_OBJECT))).row();
-    }
-
-    /**
      * A junction layout's descriptive name ({@link RailRoute#junctions}: "Crossing", "Turnout to SE", ...), naming its
      * side where it has one; one drawn by strokes that is no listed layout (null) is "As drawn".
      */
@@ -1566,17 +1961,16 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
      * The junction card's gallery, in the design gallery's layer: each sensible layout of the route's sides seen from
      * above, the default first; a pick stores it as the route's tracks, one undo step.
      */
-    private void openJunctions(BoardDecoration route) {
+    private void openJunctions(RailRoute.Kind kind, int sides, int current, String terrain) {
         stage.setKeyboardFocus(null); choices.cancel(); numbers.forEach(UiNumber::dismiss);
         designOwner = ""; designHeading.setText(UiTheme.upper(UiKit.text("BoardEditor.junctionTitle")));
         designCards.clearChildren(); designPages.clearChildren();
-        int sides = route.connections(), current = RailRoute.pieces(route, sides);
         var layouts = RailRoute.junctions(sides);
         for (int index = 0; index < layouts.size(); index++) {
             int layout = layouts.get(index).tracks();
-            Image image = new Image(); junctions.add(RailRoute.kind(route), sides, layout, image);
+            Image image = new Image(); junctions.add(kind, sides, layout, image);
             UiButton card = visualCard(junctionLabel(layouts.get(index)) + (layout == current ? "  ✓" : ""), image, 80, () -> {
-                send(Action.OBJECT_VALUE, "tracks", Integer.toString(layout)); closeDesigns();
+                send(Action.WAY_TRACKS, terrain, Integer.toString(layout)); closeDesigns();
             });
             card.setName("editor-junction-" + index);
             designCards.addActor(card);
@@ -1589,8 +1983,6 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
 
     /** Each model's colour slots, read from its file once. */
     private final Map<String, List<RigidGlb.ColourSlot>> colourSlots = new java.util.HashMap<>();
-    /** Every truss deck shares one Body slot; the straight deck's file names it. */
-    private static final String TRUSS_COLOURS = "bridges/truss-exits-09";
 
     /**
      * One row per colour slot of the object's model: its preset swatches, then its colour as #rrggbb to type any other.
@@ -1665,20 +2057,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         detail.add(button(UiKit.text("BoardEditor.mirror"), () -> send(Action.GROUP_VALUE, "mirror", "true"))).row();
     }
 
-    private Table routeHeight(BoardDecoration object, boolean compact, Action action) {
-        var placement = object.placement();
-        boolean absolute = placement.mode().equals("absolute");
-        String prefix = action == Action.BRUSH_VALUE ? "object:" : "";
-        var fixed = ui.checkbox(UiKit.text("BoardEditor.fixedElevation"), absolute);
-        fixed.setName("editor-maglev-fixed-height");
-        onChange(fixed, () -> send(action, prefix + "receiver", fixed.isTicked() ? "absolute" : "ground/top"));
-        String label = UiKit.text(absolute ? "BoardEditor.levelLabel" : "BoardEditor.heightAboveGround");
-        String target = prefix + (absolute ? "level" : "offset");
-        double value = absolute ? placement.level() : placement.offset();
-        UiNumber number = compact ? brushNumber(label, value, -10, 30, .25, action, target)
-              : numeric(label, value, -10, 30, .25, action, target);
-        Table row = new Table(); row.add(fixed).left().row(); row.add(number).growX().minWidth(0); return row;
-    }
+
     private void choose(String label, String selected, List<Option> options, Consumer<String> commit) {
         detail.add(choice(label, selected, options, commit)).row();
     }
@@ -1691,19 +2070,15 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             for (Option option : options) {
                 list.item(option.label(), null, null, false, true, () -> { choices.cancel(); face.setText(option.label()); commit.accept(option.id()); });
             }
-            choices.header(label, null).content(list); choices.showAbove(face, 0);
+            choices.header(label, null).content(list).openedFrom(face); choices.showAbove(face, 0);
         });
         return row;
     }
-    private String themeLabel(String value) {
-        // A theme's name is its tileset id written as words; no theme is the default grass.
-        String words = (value.isEmpty() ? "grass" : value).replace('_', ' ').replace('-', ' ');
-        return words.substring(0, 1).toUpperCase(Locale.ROOT) + words.substring(1);
-    }
+    /** The tilesets' themes and the Theme category's special ones (Dirt, Rock), as every theme choice lists them. */
     private List<Option> themeOptions() {
         List<Option> themes = new ArrayList<>();
-        java.util.stream.Stream.concat(java.util.stream.Stream.of("grass"), source.editorThemes().stream())
-              .filter(value -> !value.isEmpty()).distinct().sorted()
+        java.util.stream.Stream.of(java.util.stream.Stream.of("grass"), source.editorThemes().stream(), blueprint.specialThemes().stream())
+              .flatMap(stream -> stream).filter(value -> !value.isEmpty()).distinct().sorted()
               .forEach(value -> themes.add(new Option(themeLabel(value), value)));
         return themes;
     }
@@ -1991,7 +2366,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             }).setName("editor-settings-remove-" + id);
         }
         if (snapshot.boardComponents().isEmpty()) { list.item(UiKit.text("BoardEditor.none"), null, null, false, false, () -> { }); }
-        choices.header(UiKit.text("CommonMenuBar.boardRemove"), null).content(list); choices.showAbove(face, 0);
+        choices.header(UiKit.text("CommonMenuBar.boardRemove"), null).content(list).openedFrom(face);
+        choices.showAbove(face, 0);
     }
 
     /** A Settings button that sends a whole-board command; its message shows in the dialog's status line. */
@@ -2089,6 +2465,24 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         helpBody.add(text).growX().minWidth(0).minHeight(26).padTop(2).padBottom(2).padRight(12);
         helpBody.add(badge).width(160).padTop(3).padBottom(3).padRight(10).row();
     }
+    /**
+     * The triangle's list: the session's issues, then each object inside a wall of a Fitted pavement hex, which only the
+     * installed 3D fit knows.
+     */
+    private void issuesChanged() {
+        if (sessionIssues == null) { return; }
+        List<BoardIssue> merged = new ArrayList<>(sessionIssues);
+        for (var cut : shownCuts) {
+            merged.add(new BoardIssue(cut.at(), cut.object(), UiKit.text("BoardEditor.issueInsideWall", assetLabel(cut.asset()))));
+        }
+        shownIssues = List.copyOf(merged);
+        issues.setVisible(!shownIssues.isEmpty());
+        issuesTip.getActor().setText(UiKit.text("BoardEditor.issuesTip", UiKit.text("BoardEditor.issueCount", shownIssues.size())));
+        if (issueMenu != null && choices.isVisible() && issueMenu.isDescendantOf(choices)) {
+            if (shownIssues.isEmpty()) { choices.cancel(); } else { showIssues(); }
+        }
+    }
+
     /** Lists the issues under the triangle; choosing one frames its hex and selects it, and its object if it has one. */
     private void showIssues() {
         if (shownIssues == null || shownIssues.isEmpty()) { return; }
@@ -2105,6 +2499,11 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         }
         if (shownIssues.size() > ISSUE_ROWS) {
             issueMenu.item(UiKit.text("BoardEditor.issuesMore", shownIssues.size() - ISSUE_ROWS), null, null, false, false, () -> { });
+        }
+        if (snapshot.copies() > 0) {
+            issueMenu.separator();
+            issueMenu.item(UiKit.text("BoardEditor.removeCopies"), null, null, false, true, () -> { choices.cancel(); send(Action.REMOVE_COPIES); })
+                  .setName("editor-remove-copies");
         }
         choices.header(UiKit.text("BoardEditor.issueCount", shownIssues.size()), UiKit.text("BoardEditor.issuesSaveHint"))
               .content(issueMenu);
@@ -2131,6 +2530,15 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (settingsLayer.isVisible()) { closeSettings(); return true; }
         if (helpLayer.isVisible()) { closeHelp(); return true; }
         return false;
+    }
+
+    /**
+     * Esc's last step, after the line-of-sight ruler's: the Assets panel's search clears, a gallery goes back to its
+     * category, a category to the start page.
+     */
+    boolean escapeAssets() {
+        if (!query.isEmpty()) { query = ""; searchField.setText(""); showHead(); showGrid(false); return true; }
+        return back();
     }
     private void heading(String text) { Label label = ui.caption(text); label.setWrap(true); detail.add(label).growX().minWidth(0).padTop(12).row(); }
     private void text(String text) {

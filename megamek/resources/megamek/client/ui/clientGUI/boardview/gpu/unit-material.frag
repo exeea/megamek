@@ -1,5 +1,5 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-// Inserted before libGDX's main; overlays modify diffuse color before lighting and emissive contribution.
+// Inserted before libGDX's main; linear texture samples blend with linear diffuse before lighting and emission.
 uniform sampler2D u_markerTexture;
 uniform float u_markerEnabled;
 in vec3 v_paintPosition;

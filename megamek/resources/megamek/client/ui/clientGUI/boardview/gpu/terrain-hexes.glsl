@@ -1,6 +1,7 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // One nearest-filtered texel per board hex (GpuBiomeSurface) and the world fields every lit surface can share with it.
-// R biome, G aqueous palette + 1, B ice, A elevation + 64. Unused samplers cost nothing: programs drop them.
+// R biome/stencil quarters, low G aqueous palette + 1 (bit 4 uniform biome), B ice, A elevation + 64.
+// Unused samplers cost nothing: programs drop them.
 uniform sampler2D u_biomeHexes;
 uniform vec2 u_biomeBoard;
 
@@ -10,11 +11,26 @@ float biomeHash(ivec2 p) {
     h = (h ^ (h >> 13)) * 1274126177u;
     return float((h ^ (h >> 16)) & 0x00ffffffu) / 16777216.0;
 }
-float biomeNoise(vec2 p) {
+vec4 biomeNoiseCorners(vec2 p, out vec2 f) {
     ivec2 cell = ivec2(floor(p));
-    vec2 t = fract(p); t = t * t * (3.0 - 2.0 * t);
-    return mix(mix(biomeHash(cell), biomeHash(cell + ivec2(1, 0)), t.x),
-          mix(biomeHash(cell + ivec2(0, 1)), biomeHash(cell + ivec2(1, 1)), t.x), t.y);
+    f = fract(p);
+    return vec4(biomeHash(cell), biomeHash(cell + ivec2(1, 0)),
+          biomeHash(cell + ivec2(0, 1)), biomeHash(cell + ivec2(1, 1)));
+}
+float biomeNoise(vec2 p) {
+    vec2 f;
+    vec4 h = biomeNoiseCorners(p, f);
+    vec2 t = f * f * (3.0 - 2.0 * f);
+    return mix(mix(h.x, h.y, t.x), mix(h.z, h.w, t.x), t.y);
+}
+
+// Value and its analytic XY gradient. Keeping the scalar interpolation identical preserves vegetation's field.
+vec3 biomeNoiseGradient(vec2 p) {
+    vec2 f;
+    vec4 h = biomeNoiseCorners(p, f);
+    vec2 t = f * f * (3.0 - 2.0 * f), dt = 6.0 * f * (1.0 - f);
+    float lower = mix(h.x, h.y, t.x), upper = mix(h.z, h.w, t.x);
+    return vec3(mix(lower, upper, t.y), mix(h.y - h.x, h.w - h.z, t.y) * dt.x, (upper - lower) * dt.y);
 }
 
 // BoardSurfaceBlend.sandExposure: sparse windows through windblown sand into the local substrate. This field

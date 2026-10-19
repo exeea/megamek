@@ -35,6 +35,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /** Real artwork capture must not let cosmetic terrain transitions replace native ground materials. */
 class BoardGroundCaptureTest {
+    /** SeaPort's structured pavement: the hexes the board stored as pavement 4 before that alias became pavement 1. */
+    private static final Set<String> STRUCTURED = Set.of("0601", "0801", "0901", "0602", "0702", "0902", "0603", "0707", "0807",
+          "1007", "1207", "0708", "1310", "1311", "1411", "1412", "1313", "1314", "1315", "1316", "1317");
+
     @Test
     void seaportStructuredPavementKeepsNativeConcreteWithoutPaintedGroundDecals() throws Exception {
         onEdt(() -> {
@@ -48,7 +52,7 @@ class BoardGroundCaptureTest {
                 var scene = source.takeFrame().scene();
                 int structured = 0;
                 for (var tile : scene.tiles()) {
-                    if (board.getHex(tile.coords()).terrainLevel(Terrains.PAVEMENT) != 4) { continue; }
+                    if (!STRUCTURED.contains(tile.coords().getBoardNum())) { continue; }
                     structured++;
                     assertEquals(BoardScene.Surface.CONCRETE, tile.surface(), tile.coords().toString());
                     assertTrue(tile.detailedGround(), "Native concrete at " + tile.coords());
@@ -209,6 +213,11 @@ class BoardGroundCaptureTest {
                     if (decoration.equals("fluff:50:1")) {
                         assertNotNull(tile.decals(), "Surface markings remain visible");
                         assertNotNull(tile.tilesetDecals());
+                    } else if (decoration.startsWith("woods:")) {
+                        // A container yard's art is its woods' look (b12), never tileset scenery or paint.
+                        assertNull(tile.decals());
+                        assertTrue(image.scenery().models().isEmpty());
+                        assertNull(tile.tilesetScenery());
                     } else {
                         assertNull(tile.decals(), "Modeled scenery must not retain a painted pavement duplicate");
                         assertFalse(image.scenery().models().isEmpty(), "Keep models selected by composite tileset rules");
@@ -229,7 +238,7 @@ class BoardGroundCaptureTest {
             game.setBoard(board);
             try (var source = new GpuMapSource(game, null, null)) {
                 BoardScene scene = source.takeFrame().scene();
-                int transitions = 0, roads = 0, water = 0;
+                int transitions = 0, roads = 0, water = 0, unmixedCentres = 0;
                 for (var tile : scene.tiles()) {
                     var hex = board.getHex(tile.coords());
                     assertEquals(BoardScene.Surface.GRASS, tile.surface(), tile.coords().toString());
@@ -245,8 +254,15 @@ class BoardGroundCaptureTest {
                             float amount = hex.getTerrain(Terrains.GROUND_FLUFF).getExits() / 6f;
                             var p = BoardGeometry.center(tile.coords(), tile.elevation());
                             assertEquals(amount, tile.groundCover().desert(), .00001f);
-                            assertEquals(amount, BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z).desert(), .00001f,
-                                  "The authored desert percentage reaches native material vertices at " + tile.coords());
+                            // Higher neighbouring terrain blends its talus into the receiving hex, even at its
+                            // centre. A centre without that contact retains the captured proportions exactly.
+                            boolean belowCliff = tile.coords().allAdjacent().stream().map(scene::tile)
+                                  .anyMatch(next -> next != null && next.elevation() > tile.elevation());
+                            if (!belowCliff) {
+                                unmixedCentres++;
+                                assertEquals(amount, BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z).desert(), .00001f,
+                                      "The authored desert percentage reaches native material vertices at " + tile.coords());
+                            }
                             assertTrue(BoardSurfaceBlend.boundary(scene, tile));
                         }
                     }
@@ -257,6 +273,7 @@ class BoardGroundCaptureTest {
                     }
                 }
                 assertTrue(transitions > 100, "Exercise the actual map's widespread decorative transitions");
+                assertTrue(unmixedCentres > 0, "Exercise native material sampling away from higher neighbouring terrain");
                 if (number == 2) { assertTrue(roads > 0 && water > 0, "The real road and river remain in the captured scene"); }
                 assertEquals(transitions, board.getHexes(scene.tiles().stream().map(BoardScene.Tile::coords).toList()).stream()
                       .filter(hex -> hex.containsTerrain(Terrains.GROUND_FLUFF)).count(), "Capture never edits the board");

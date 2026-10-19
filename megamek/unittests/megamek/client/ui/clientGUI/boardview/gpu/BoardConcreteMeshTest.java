@@ -45,7 +45,6 @@ class BoardConcreteMeshTest {
     @Test
     void commCenterFittedSlopeKeepsAStraightRimAndConstantWidth() throws Exception {
         BoardScene scene = commCenter();
-        assertEquals(BoardConcrete.Mode.EVERYWHERE, BoardConcrete.mode(), "Exercise the default fitted concrete outline");
         BoardConcrete shape = BoardConcrete.of(scene);
         Coords first = new Coords(1, 14), last = new Coords(2, 15);
         Vector3 a = shape.corner(first, 3), direction = shape.corner(last, 5).sub(a).nor();

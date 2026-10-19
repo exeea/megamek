@@ -3,6 +3,9 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -10,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
@@ -19,6 +23,49 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class BoardWaterfallTest {
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void collapsedFreeBankLipKeepsFiniteSheetNormals(TerrainLod lod) {
+        int collapsed = 0, visible = 0;
+        for (int direction = 0; direction < 6; direction++) {
+            BoardScene scene = mesa(direction);
+            var surface = new BoardSurface(scene, scene.tile(new Coords(3, 3)), lod);
+            var drop = surface.waterfalls.getFirst();
+            Vector3[][] grid = GpuWaterfall.grid(surface, drop);
+            int columns = grid.length - 1, rows = grid[0].length;
+            List<Vector3> normals = new ArrayList<>();
+            MeshPartBuilder mesh = mock(MeshPartBuilder.class);
+            when(mesh.vertex(any(MeshPartBuilder.VertexInfo.class))).thenAnswer(call -> {
+                MeshPartBuilder.VertexInfo vertex = call.getArgument(0);
+                assertTrue(Float.isFinite(vertex.normal.x) && Float.isFinite(vertex.normal.y)
+                      && Float.isFinite(vertex.normal.z), "Every sheet normal must be finite");
+                assertEquals(1, vertex.normal.len2(), .00001,
+                      "Zero CPU normals become undefined when normalized by the vertex shader");
+                normals.add(new Vector3(vertex.normal));
+                return (short) (normals.size() - 1);
+            });
+            GpuWaterfall.sheet(mesh, surface, drop, null);
+            assertEquals(grid.length * rows, normals.size());
+            for (int column : new int[] { 0, columns }) {
+                assertEquals(grid[column][0], grid[column][1], "Exercise the collapsed free-bank lip");
+                collapsed++;
+                // Although one triangle collapses, the adjacent column's lip still leaves a visible triangle
+                // touching this vertex. Its winding must agree with the limiting crest normal.
+                int neighbor = column == 0 ? 1 : columns - 1;
+                Vector3 a = grid[neighbor][column == 0 ? 1 : 0];
+                Vector3 b = grid[neighbor][column == 0 ? 0 : 1];
+                Vector3 face = new Vector3(b).sub(a).crs(new Vector3(grid[column][0]).sub(a));
+                if (!face.isZero()) {
+                    assertTrue(face.dot(normals.get(column * rows)) > 0,
+                          "The repaired anchor must face the same way as its nondegenerate sheet triangle");
+                    visible++;
+                }
+            }
+        }
+        assertEquals(12, collapsed, "Both free banks in every board direction must be covered");
+        assertTrue(visible > 0, "Collapsed lip anchors must participate in visible geometry");
+    }
+
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void domeVentWaterfallWallsAreClosedForLavaAndWater(TerrainLod lod) {
@@ -274,38 +321,35 @@ class BoardWaterfallTest {
     void rockBehindTheCurtainBlocksRaysFromObliqueAngles() {
         var original = BoardRelief.tuning();
         try {
-            for (float width : new float[] { .05f, .5f, 1 }) {
-                GpuRiverTerrainSmokeTest.setWidth(width);
-                for (int direction = 0; direction < 6; direction++) {
-                    BoardScene scene = scene(direction, 1);
-                    BoardSurface upper = new BoardSurface(scene, scene.tile(new Coords(3, 3)));
-                    for (var face : upper.waterFaces) {
-                        // Collinear mouth samples can leave subpixel ears through float rounding.
-                        assertTrue(new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z
-                                    >= -.001f * BoardGeometry.HEX_SCALE * BoardGeometry.HEX_SCALE,
-                              "The upper pool must not fold over where its lip meets a bank: width " + width + ", direction " + direction);
-                    }
-                    var fall = upper.waterfalls.getFirst();
-                    var crest = upper.crest(fall);
-                    List<BoardSurface.Face> solid = new ArrayList<>(upper.walls(scene, BoardGeometry.floor(scene)));
-                    solid.addAll(upper.faces.stream().filter(f -> f.finish() != BoardSurface.Finish.OUTCROP).toList());
-                    // Avoid casting precisely along a triangle edge, where float ray tests can miss both faces.
-                    for (int column = 1; column < 23; column++) {
-                        float s = column / 23f;
-                        for (int row = 1; row < 13; row++) {
-                            Vector3 p = crest.point(s);
-                            p.z = fall.lowA() + (p.z - fall.lowA()) * row / 13;
-                            for (float angle : new float[] { -.7f, 0, .7f }) {
-                                Vector3 outward = crest.normal(s).mulAdd(crest.tangent(s), angle).nor();
-                                float reach = BoardGeometry.WIDTH * .4f;
-                                Ray ray = new Ray(new Vector3(p).mulAdd(outward, reach), new Vector3(outward).scl(-1));
-                                Vector3 hit = new Vector3();
-                                assertTrue(solid.stream().anyMatch(f -> Intersector.intersectRayTriangle(ray,
-                                            f.a(), f.b(), f.c(), hit) && hit.dst(ray.origin) < 2 * reach
-                                            && new Vector3(f.b()).sub(f.a()).crs(new Vector3(f.c()).sub(f.a()))
-                                                  .dot(ray.direction) < 0),
-                                      "Open cliff: width " + width + ", direction " + direction + ", at " + p + ", angle " + angle);
-                            }
+            for (int direction = 0; direction < 6; direction++) {
+                BoardScene scene = scene(direction, 1);
+                BoardSurface upper = new BoardSurface(scene, scene.tile(new Coords(3, 3)));
+                for (var face : upper.waterFaces) {
+                    // Collinear mouth samples can leave subpixel ears through float rounding.
+                    assertTrue(new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z
+                                >= -.001f * BoardGeometry.HEX_SCALE * BoardGeometry.HEX_SCALE,
+                          "The upper pool must not fold over where its lip meets a bank: direction " + direction);
+                }
+                var fall = upper.waterfalls.getFirst();
+                var crest = upper.crest(fall);
+                List<BoardSurface.Face> solid = new ArrayList<>(upper.walls(scene, BoardGeometry.floor(scene)));
+                solid.addAll(upper.faces.stream().filter(f -> f.finish() != BoardSurface.Finish.OUTCROP).toList());
+                // Avoid casting precisely along a triangle edge, where float ray tests can miss both faces.
+                for (int column = 1; column < 23; column++) {
+                    float s = column / 23f;
+                    for (int row = 1; row < 13; row++) {
+                        Vector3 p = crest.point(s);
+                        p.z = fall.lowA() + (p.z - fall.lowA()) * row / 13;
+                        for (float angle : new float[] { -.7f, 0, .7f }) {
+                            Vector3 outward = crest.normal(s).mulAdd(crest.tangent(s), angle).nor();
+                            float reach = BoardGeometry.WIDTH * .4f;
+                            Ray ray = new Ray(new Vector3(p).mulAdd(outward, reach), new Vector3(outward).scl(-1));
+                            Vector3 hit = new Vector3();
+                            assertTrue(solid.stream().anyMatch(f -> Intersector.intersectRayTriangle(ray,
+                                        f.a(), f.b(), f.c(), hit) && hit.dst(ray.origin) < 2 * reach
+                                        && new Vector3(f.b()).sub(f.a()).crs(new Vector3(f.c()).sub(f.a()))
+                                              .dot(ray.direction) < 0),
+                                  "Open cliff: direction " + direction + ", at " + p + ", angle " + angle);
                         }
                     }
                 }
@@ -317,7 +361,6 @@ class BoardWaterfallTest {
     void waterfallRocksKeepFoundationsAtEveryWaterDepth() {
         var original = BoardRelief.tuning();
         try {
-            GpuRiverTerrainSmokeTest.setWidth(.5f);
             for (int depth : new int[] { 0, 1, 3 }) {
                 BoardScene scene = scene(3, depth);
                 for (Coords coords : List.of(new Coords(3, 3), new Coords(3, 4))) {

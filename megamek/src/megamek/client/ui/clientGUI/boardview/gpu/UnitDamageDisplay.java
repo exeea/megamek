@@ -231,7 +231,7 @@ final class UnitDamageDisplay implements Disposable {
     Texture overlay(Stage stage) {
         if (attemptedOverlays.add(stage)) {
             try {
-                Texture loaded = new Texture(new FileHandle(new File(Configuration.dataDir(),
+                Texture loaded = GpuColorTexture.create(new FileHandle(new File(Configuration.dataDir(),
                       "models/units/textures/" + stage.file + ".png")), true);
                 loaded.setWrap(Texture.TextureWrap.MirroredRepeat, Texture.TextureWrap.MirroredRepeat);
                 loaded.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
@@ -280,7 +280,7 @@ final class UnitDamageDisplay implements Disposable {
                 if (!attempted) {
                     attempted = true;
                     try {
-                        texture = new Texture(new FileHandle(new File(Configuration.dataDir(),
+                        texture = GpuColorTexture.create(new FileHandle(new File(Configuration.dataDir(),
                               "models/units/textures/destroyed-armor.png")), true);
                         texture.setWrap(Texture.TextureWrap.MirroredRepeat, Texture.TextureWrap.MirroredRepeat);
                         texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
@@ -382,7 +382,7 @@ final class UnitDamageDisplay implements Disposable {
             copy.id += WRECKED_SUFFIX;
         }
         copy.remove(TextureAttribute.Diffuse | ColorAttribute.Emissive | TextureAttribute.Emissive | Overlay.TYPE);
-        copy.set(ColorAttribute.createDiffuse(WRECKED));
+        copy.set(ColorAttribute.createDiffuse(GpuLinearColors.authored(copy, WRECKED)));
         return copy;
     }
 }

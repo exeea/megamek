@@ -22,8 +22,8 @@ vec4 fireParticle() {
     float edge = 1.0 - smoothstep(0.40, 0.98, radius + (0.5 - noise) * 0.8);
     edge *= 1.0 - smoothstep(0.80, 1.0, max(abs(v_uv.x), abs(v_uv.y)));
     float heat = clamp(0.92 - age * 0.32 - radius * 0.43 + (noise - 0.5) * 0.55, 0.0, 1.0);
-    vec3 flame = mix(vec3(0.85, 0.035, 0.002), vec3(1.0, 0.34, 0.015), smoothstep(0.12, 0.55, heat));
-    flame = mix(flame, vec3(1.0, 0.88, 0.28), smoothstep(0.48, 0.86, heat));
+    vec3 flame = mix(toLinear(vec3(0.85, 0.035, 0.002)), toLinear(vec3(1.0, 0.34, 0.015)), smoothstep(0.12, 0.55, heat));
+    flame = mix(flame, toLinear(vec3(1.0, 0.88, 0.28)), smoothstep(0.48, 0.86, heat));
     float core = (1.0 - smoothstep(0.0, 0.35, age)) * (1.0 - smoothstep(0.0, 0.38, radius));
-    return vec4(mix(flame, vec3(1.0, 0.97, 0.72), core), edge * v_effect.y);
+    return vec4(mix(flame, toLinear(vec3(1.0, 0.97, 0.72)), core), edge * v_effect.y);
 }

@@ -1,0 +1,29 @@
+#version 330 core
+// Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
+// One axis of the depth-aware blur over the half-resolution occlusion (ambient-occlusion-horizon.frag). Five taps
+// weighted .5, 1, 1, 1, .5 give each phase of the 4 by 4 pattern the same weight, so two passes remove it; a tap on
+// another surface, by camera distance, drops out. The contact shadow in B is averaged alike.
+layout(location = 0) out vec4 fragColor;
+uniform sampler2D u_occlusion; // R visibility, G camera distance less its origin, B contact visibility
+uniform ivec2 u_direction;
+// world size of one scene pixel at camera distance d: x + y * d (y is 0 where the origin is not)
+uniform vec2 u_blur;
+
+void main() {
+    ivec2 centre = ivec2(gl_FragCoord.xy);
+    ivec2 last = textureSize(u_occlusion, 0) - 1;
+    vec3 middle = texelFetch(u_occlusion, centre, 0).rgb;
+    // A half-resolution texel spans two scene pixels.
+    float texelSize = 2.0 * (u_blur.x + u_blur.y * middle.g);
+    float sum = 0.0, contact = 0.0, total = 0.0;
+    for (int index = -2; index <= 2; index++) {
+        vec3 tap = texelFetch(u_occlusion, clamp(centre + u_direction * index, ivec2(0), last), 0).rgb;
+        // Sloped ground changes depth along the taps: the tolerance grows with the distance from the centre.
+        float tolerance = texelSize * (2.0 + 8.0 * float(abs(index)));
+        float weight = (abs(index) == 2 ? .5 : 1.0) * max(0.0, 1.0 - abs(tap.g - middle.g) / tolerance);
+        sum += tap.r * weight;
+        contact += tap.b * weight;
+        total += weight;
+    }
+    fragColor = vec4(sum / total, middle.g, contact / total, 0.0);
+}

@@ -18,6 +18,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
+import com.badlogic.gdx.utils.BufferUtils;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -39,7 +40,7 @@ class GpuHeatGlowSmokeTest {
               if (u_occluder > .5 && !source) discard;
               vec3 color = vec3(.12, .16, .10);
               if (source && u_occluder < .5 && u_heat.r > 0.0) color = u_heat;
-              fragColor = vec4(pow(color, vec3(1.0 / 2.2)), 1.0);
+              fragColor = vec4(color, 1.0);
               gl_FragDepth = u_occluder > .5 ? .25 : .5;
           }
           """;
@@ -48,11 +49,27 @@ class GpuHeatGlowSmokeTest {
           in vec2 v_uv;
           layout(location = 0) out vec4 fragColor;
           uniform sampler2D u_source;
-          void main() { fragColor = vec4(texture(u_source, v_uv).rgb / 32.0, 1.0); }
+          // SCENE_RADIANCE
+          void main() { fragColor = vec4(loadScene(texture(u_source, v_uv).rgb) / 32.0, 1.0); }
           """;
 
     @Test
     void heatSurvivesNightButRespectsOcclusionAndVisibilityWithoutChangingOrdinarySurfaces() {
+        nativeCheck(this::checkHeat);
+    }
+
+    @Test
+    void halfFloatStoragePreservesBrightRangeThroughAlphaBlendingHeatAndLateExposure() {
+        nativeCheck(() -> {
+            try {
+                checkSceneRange(1);
+                checkSceneRange(1500000f / 180380);
+            }
+            catch (ReflectiveOperationException error) { throw new AssertionError(error); }
+        });
+    }
+
+    private static void nativeCheck(Runnable check) {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowSizeLimits(256, 128, -1, -1);
@@ -60,7 +77,7 @@ class GpuHeatGlowSmokeTest {
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
-                try { checkHeat(); }
+                try { check.run(); }
                 catch (Throwable error) { failure.set(error); }
                 finally { Gdx.app.exit(); }
             }
@@ -68,12 +85,134 @@ class GpuHeatGlowSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Heat glow", failure.get()); }
     }
 
+    private static void checkSceneRange(float multiplier) throws ReflectiveOperationException {
+        Mesh quad = GpuAtmosphere.screenQuad();
+        ShaderProgram source = GpuGlsl.compile("HDR storage range", GpuShaderSource.read("atmosphere.vert"),
+              GpuSceneRadiance.fragment("""
+                    #version 330 core
+                    layout(location = 0) out vec4 fragColor;
+                    uniform vec4 u_radiance;
+                    void main() { fragColor = u_radiance; }
+                    """));
+        var atmosphere = new GpuAtmosphere();
+        var terrain = new GpuTerrain();
+        var camera = new OrthographicCamera(256, 128);
+        camera.position.set(0, 0, 100);
+        camera.near = 1;
+        camera.far = 201;
+        camera.update();
+        var molten = scene(true);
+        // Retain the original point-ice regression stimulus, then stress the storage boundary near the finite
+        // directional conservative bound (~1.46 million). These do not claim current filtered ice produces them.
+        float[] highlight = { 180380 * multiplier, 137941 * multiplier, 73770 * multiplier };
+        float[] warm = { 180380 * multiplier, 20000 * multiplier, 4000 * multiplier };
+        float[] mixed = new float[3];
+        for (int channel = 0; channel < 3; channel++) { mixed[channel] = highlight[channel] * .25f + warm[channel] * .5f; }
+        try {
+            atmosphere.configure(new BoardAtmosphere.Settings(12, 0, 0, 2.5f, 0, 0));
+            atmosphere.setOptions(new GpuAtmosphere.Options(0, false, 0, 0, 0));
+            atmosphere.updateLight(camera);
+            atmosphere.configureClouds(terrain, molten);
+            atmosphere.begin(256, 128, 0);
+            GpuAtmosphere.screenState();
+            source.bind();
+            source.setUniformf("u_radiance", highlight[0], highlight[1], highlight[2], 1);
+            quad.render(source, GL20.GL_TRIANGLES);
+            assertRadiance(highlight, readPixel(128, 64), "The actual main scene retains the bright range stimulus");
+
+            Gdx.gl.glClearColor(0, 0, 0, 0);
+            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+            Gdx.gl.glEnable(GL20.GL_BLEND);
+            Gdx.gl.glBlendFuncSeparate(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA,
+                  GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA);
+            source.setUniformf("u_radiance", highlight[0], highlight[1], highlight[2], .5f);
+            quad.render(source, GL20.GL_TRIANGLES);
+            source.setUniformf("u_radiance", warm[0], warm[1], warm[2], .5f);
+            quad.render(source, GL20.GL_TRIANGLES);
+            float[] stored = readPixel(128, 64);
+            assertRadiance(mixed, stored, "Transparent highlights blend in the shared half-float storage units");
+            assertEquals(.75, stored[3], .0005, "The radiance scale must never scale coverage alpha");
+            assertTrue(stored[0] / GpuSceneRadiance.SCALE > 65504,
+                  "The blended highlight must still exceed the unscaled half-float range");
+            atmosphere.end(camera, terrain, molten, 0);
+
+            var heatField = GpuAtmosphere.class.getDeclaredField("heatGlow");
+            heatField.setAccessible(true);
+            var heat = (GpuHeatGlow) heatField.get(atmosphere);
+            for (String name : new String[] { "work", "glow" }) {
+                var field = GpuHeatGlow.class.getDeclaredField(name);
+                field.setAccessible(true);
+                var target = (FrameBuffer) field.get(heat);
+                target.begin();
+                try {
+                    assertRadiance(mixed, readPixel(target.getWidth() / 2, target.getHeight() / 2),
+                          "Downsampling and both heat blur passes preserve uniform HDR radiance: " + name);
+                } finally { target.end(); }
+            }
+
+            // Use the actual configured composite with diagnostic exposure below the user slider's range.
+            // No source is rerendered: exposure must recover stored highlight detail after blending and blur.
+            var compositeField = GpuAtmosphere.class.getDeclaredField("compositeShader");
+            compositeField.setAccessible(true);
+            var composite = (ShaderProgram) compositeField.get(atmosphere);
+            for (float exposure : new float[] { 1f / (262144 * multiplier), 1f / (524288 * multiplier) }) {
+                GpuAtmosphere.screenState();
+                composite.bind();
+                composite.setUniformf("u_exposure", exposure);
+                quad.render(composite, GL20.GL_TRIANGLES);
+                Pixmap output = Pixmap.createFromFrameBuffer(128, 64, 1, 1);
+                try {
+                    int rgba = output.getPixel(0, 0);
+                    for (int channel = 0; channel < 3; channel++) {
+                        double radiance = mixed[channel] * 1.12 * exposure;
+                        double shoulder = Math.min(radiance, .6) + .4 * (1 - Math.exp(-Math.max(radiance - .6, 0) / .4));
+                        double encoded = shoulder <= .0031308 ? 12.92 * shoulder : 1.055 * Math.pow(shoulder, 1 / 2.4) - .055;
+                        assertEquals(Math.round(encoded * 255), (rgba >>> (24 - 8 * channel)) & 255, 1,
+                              "Late exposure recovers the source plus the 12% heat halo; channel=" + channel);
+                    }
+                } finally { output.dispose(); }
+            }
+            var sceneField = GpuAtmosphere.class.getDeclaredField("sceneColor");
+            sceneField.setAccessible(true);
+            var sceneTarget = (FrameBuffer) sceneField.get(atmosphere);
+            sceneTarget.begin();
+            try {
+                float[] after = readPixel(128, 64);
+                for (int channel = 0; channel < 4; channel++) {
+                    assertEquals(stored[channel], after[channel], "Display conversion must leave the HDR source unchanged");
+                }
+            } finally { sceneTarget.end(); }
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        } finally {
+            terrain.dispose();
+            atmosphere.dispose();
+            source.dispose();
+            quad.dispose();
+        }
+    }
+
+    private static float[] readPixel(int x, int y) {
+        var pixel = BufferUtils.newFloatBuffer(4);
+        Gdx.gl.glReadPixels(x, y, 1, 1, GL20.GL_RGBA, GL20.GL_FLOAT, pixel);
+        return new float[] { pixel.get(0), pixel.get(1), pixel.get(2), pixel.get(3) };
+    }
+
+    private static void assertRadiance(float[] expected, float[] stored, String message) {
+        for (int channel = 0; channel < 3; channel++) {
+            assertTrue(Float.isFinite(stored[channel]), message + ": finite channel " + channel);
+            assertEquals(expected[channel], stored[channel] / GpuSceneRadiance.SCALE, expected[channel] * .002,
+                  message + ": channel " + channel);
+        }
+    }
+
     private void checkHeat() {
         assertEquals(256, Gdx.graphics.getBackBufferWidth());
         assertEquals(128, Gdx.graphics.getBackBufferHeight());
         Mesh quad = GpuAtmosphere.screenQuad();
-        ShaderProgram source = GpuGlsl.compile("Heat test source", GpuShaderSource.read("atmosphere.vert"), SOURCE);
-        ShaderProgram copy = GpuGlsl.compile("Heat test copy", GpuShaderSource.read("atmosphere.vert"), COPY);
+        ShaderProgram source = GpuGlsl.compile("Heat test source", GpuShaderSource.read("atmosphere.vert"),
+              GpuSceneRadiance.fragment(SOURCE));
+        ShaderProgram copy = GpuGlsl.compile("Heat test copy", GpuShaderSource.read("atmosphere.vert"),
+              COPY.replace("// SCENE_RADIANCE", GpuSceneRadiance.functions()));
         GpuAtmosphere atmosphere = new GpuAtmosphere();
         GpuTerrain terrain = new GpuTerrain();
         GpuHeatGlow glow = new GpuHeatGlow(quad);

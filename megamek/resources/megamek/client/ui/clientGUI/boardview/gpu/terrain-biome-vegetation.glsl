@@ -128,8 +128,8 @@ bool biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
         normal = cross(right, up * tangentZ + vec3(tangentXY, 0.0));
     }
     normal = dot(normal, normal) > .00000001 ? normalize(normal) : vec3(0.0, 0.0, 1.0);
-    color = vec4(pigment.rgb * mix(.80, 1.17, fract(seed * 31.7)), 1.0);
-    if (!crop) color.rgb *= mix(.75, 1.04, smoothstep(0.0, .6, point.z));
+    // Crop and reed cutouts already contain their colour and vertical shading.
+    color = vec4(pigment.rgb, 1.0);
     v_coverData = vec2(height, clamp(point.z, 0.0, 1.0));
     return true;
 }

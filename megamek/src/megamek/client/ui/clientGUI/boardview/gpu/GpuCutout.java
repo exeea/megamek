@@ -167,6 +167,7 @@ final class GpuCutout {
         return vertices;
     }
 
+    /** Alpha-weighted linear pigment, for scene geometry and material factors. */
     static Color averageColor(BoardScene.Pixels pixels) {
         double red = 0;
         double green = 0;
@@ -175,14 +176,13 @@ final class GpuCutout {
         for (int index = 0; index < pixels.width() * pixels.height(); index++) {
             int rgba = pixels.rgba(index);
             int alpha = rgba & 0xff;
-            red += (rgba >>> 24) * alpha;
-            green += ((rgba >>> 16) & 0xff) * alpha;
-            blue += ((rgba >>> 8) & 0xff) * alpha;
+            red += GpuColor.linear((rgba >>> 24) / 255f) * alpha;
+            green += GpuColor.linear(((rgba >>> 16) & 0xff) / 255f) * alpha;
+            blue += GpuColor.linear(((rgba >>> 8) & 0xff) / 255f) * alpha;
             weight += alpha;
         }
         return weight == 0 ? new Color(Color.BLACK)
-              : new Color((float) (red / weight / 255), (float) (green / weight / 255),
-                    (float) (blue / weight / 255), 1);
+              : new Color((float) (red / weight), (float) (green / weight), (float) (blue / weight), 1);
     }
 
     /** One cutout vertex in artwork pixels: {@code t} runs from the volume's bottom (0) to its top (1). */

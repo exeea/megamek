@@ -4,10 +4,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
@@ -21,6 +21,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -48,11 +49,13 @@ class GpuRiverSmokeTest {
             BoardScene scene = fixture.source.takeFrame().scene();
             new Lwjgl3Application(new ApplicationAdapter() {
                 GpuTerrain terrain;
+                GpuSceneTestOutput outputFrame;
                 BoardCamera camera;
 
                 @Override
                 public void create() {
                     terrain = new GpuTerrain();
+                    outputFrame = new GpuSceneTestOutput();
                     terrain.update(scene);
                     camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -65,9 +68,10 @@ class GpuRiverSmokeTest {
                 public void render() {
                     try {
                         terrain.renderShadows(List.of());
-                        ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
+                        outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
                         terrain.render(camera.camera, false);
                         terrain.renderTransparent(camera.camera);
+                        outputFrame.display();
                         File output = new File(System.getProperty("megamek.gpu.screenshots"));
                         GpuBoardTestUi.capture(new File(output, "river-board-edge.png"));
                         Pixmap pixels = ScreenUtils.getFrameBufferPixmap(0, 0,
@@ -94,6 +98,7 @@ class GpuRiverSmokeTest {
 
                 @Override
                 public void dispose() {
+                    outputFrame.close();
                     terrain.dispose();
                 }
             }, GpuBoardWindow.configuration(false));
@@ -150,11 +155,13 @@ class GpuRiverSmokeTest {
                     }
                 }
                 fixture.game.setBoard(new Board(10, 10, hexes));
+                BoardSceneryLayouts.convert(fixture.game.getBoard());
                 fixture.source.refresh();
             });
             BoardScene scene = fixture.source.takeFrame().scene();
             new Lwjgl3Application(new ApplicationAdapter() {
                 GpuTerrain terrain;
+                GpuSceneTestOutput outputFrame;
                 BoardCamera camera;
                 int frames;
                 int fallPixels;
@@ -162,6 +169,7 @@ class GpuRiverSmokeTest {
                 @Override
                 public void create() {
                     terrain = new GpuTerrain();
+                    outputFrame = new GpuSceneTestOutput();
                     terrain.update(scene);
                     camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -173,9 +181,10 @@ class GpuRiverSmokeTest {
                     try {
                         terrain.animate(1f / 12, List.of());
                         terrain.renderShadows(List.of());
-                        ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
+                        outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
                         terrain.render(camera.camera, false);
                         terrain.renderTransparent(camera.camera);
+                        outputFrame.display();
                         File output = new File(System.getProperty("megamek.gpu.screenshots"));
                         if (++frames == 3) {
                             GpuBoardTestUi.capture(new File(output, "river-channels-top.png"));
@@ -188,9 +197,15 @@ class GpuRiverSmokeTest {
                         } else if (frames == 9) {
                             GpuBoardTestUi.capture(new File(output, "waterfall-closeup.png"));
                             fallPixels = waterfallPixels(camera, scene);
+                            outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
+                            terrain.render(camera.camera, false);
+                            terrain.renderTransparent(camera.camera);
+                            outputFrame.display();
+                            assertEquals(fallPixels, waterfallPixels(camera, scene),
+                                  "A paused waterfall keeps the same sheet pixels");
                         } else if (frames == 13) {
                             GpuBoardTestUi.capture(new File(output, "waterfall-flow.png"));
-                            assertNotEquals(fallPixels, waterfallPixels(camera, scene), "The vertical waterfall texture must animate");
+                            assertNotEquals(fallPixels, waterfallPixels(camera, scene), "The visible waterfall sheet must animate");
                             camera.center(BoardGeometry.center(new Coords(6, 2), 3));
                         } else if (frames == 16) {
                             GpuBoardTestUi.capture(new File(output, "nature-and-rubble.png"));
@@ -222,6 +237,7 @@ class GpuRiverSmokeTest {
 
                 @Override
                 public void dispose() {
+                    outputFrame.close();
                     terrain.dispose();
                 }
             }, GpuBoardWindow.configuration(false));
@@ -230,17 +246,28 @@ class GpuRiverSmokeTest {
     }
 
     private static int waterfallPixels(BoardCamera camera, BoardScene scene) {
-        BoardSurface.Side drop = new BoardSurface(scene, scene.tile(new Coords(2, 2))).waterfalls.getFirst();
-        Vector3 point = new Vector3(drop.a()).lerp(drop.b(), 0.5f);
-        point.z = (point.z + drop.lowA()) / 2;
-        Vector3 screen = camera.camera.project(point);
-        Pixmap pixels = ScreenUtils.getFrameBufferPixmap((int) screen.x - 2, (int) screen.y - 2, 5, 5);
+        BoardSurface surface = new BoardSurface(scene, scene.tile(new Coords(2, 2)));
+        Vector3[][] sheet = GpuWaterfall.grid(surface, surface.waterfalls.getFirst());
+        Pixmap pixels = ScreenUtils.getFrameBufferPixmap(0, 0,
+              Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {
-            int[] colors = new int[25];
-            for (int i = 0; i < colors.length; i++) {
-                colors[i] = pixels.getPixel(i % 5, i / 5);
+            // The sheet is thrown away from its cliff. The old vertical Side-plane probe could read the
+            // stationary rock behind it; sample actual interior sheet triangles over its falling length.
+            List<Integer> colors = new ArrayList<>();
+            for (int column = 2; column + 3 < sheet.length; column++) {
+                for (int row = 2; row + 3 < sheet[column].length; row++) {
+                    Vector3 point = new Vector3(sheet[column][row]).add(sheet[column + 1][row])
+                          .add(sheet[column][row + 1]).scl(1 / 3f);
+                    Vector3 screen = camera.camera.project(point);
+                    int x = Math.round(screen.x * pixels.getWidth() / Gdx.graphics.getWidth());
+                    int y = Math.round(screen.y * pixels.getHeight() / Gdx.graphics.getHeight());
+                    assertTrue(x >= 0 && x < pixels.getWidth() && y >= 0 && y < pixels.getHeight(),
+                          "Waterfall sample must remain in the framebuffer: " + x + ", " + y);
+                    colors.add(pixels.getPixel(x, y));
+                }
             }
-            return Arrays.hashCode(colors);
+            assertTrue(!colors.isEmpty(), "The waterfall probe must sample sheet triangles");
+            return colors.hashCode();
         } finally {
             pixels.dispose();
         }

@@ -53,7 +53,7 @@ import megamek.common.board.BoardDecoration;
 
 /**
  * CPU-only importer for the rigid GLB kits. JglTF decodes buffers/accessors; this adapter preserves named parts
- * and converts Y-up/linear glTF data into the board's Z-up/display-color ModelData. Textures and animation remain
+ * and converts Y-up glTF data into the board's Z-up ModelData, preserving linear colors. Textures and animation remain
  * owned by the existing renderer. Unsupported asset features fail before any graphics resources are allocated.
  */
 final class RigidGlb {
@@ -101,9 +101,8 @@ final class RigidGlb {
     record Source(File file, String variant) { }
 
     static Source source(File root, String asset) {
-        File own = new File(root, asset + ".glb");
-        File bare = asset.endsWith("-snow") ? new File(root, asset.substring(0, asset.length() - "-snow".length()) + ".glb") : null;
-        return !own.isFile() && bare != null && bare.isFile() ? new Source(bare, "snow") : new Source(own, null);
+        File file = megamek.common.board.BoardModelBounds.file(root, asset);
+        return new Source(file, file.equals(new File(root, asset + ".glb")) ? null : "snow");
     }
 
     static List<ModelData> loadLods(Source source, Path textureRoot) {
@@ -178,12 +177,12 @@ final class RigidGlb {
     /**
      * Replace the colours of {@code data}'s slot vertices with {@code colours} (a layout row's, a truss deck's or an
      * editor preview's). Each channel keeps its ratio to the slot's default colour in linear light, so the shaded parts
-     * of a slot stay shaded; tools/glb_geometry.py recolour() applies the same rule offline.
+     * of a slot stay shaded.
      * <p>
      * KEEP IN SYNC with model-colour-slots.glsl#slotColour, its GPU twin, which recolours a placed object's one shared
      * mesh ({@link #colourSlotMesh}) in every view. Both read each slot's replacement from the same {@link #packed}
-     * 0xRRGGBB (channel / 255), skip a slot whose value is negative, and apply {@code display(shade x
-     * linear(replacement))} with exact sRGB and no clamping; {@link #shade} is their shared factor.
+     * 0xRRGGBB (channel / 255), skip a slot whose value is negative, and apply {@code shade x linear(replacement)}
+     * with exact sRGB input decoding and no clamping; {@link #shade} is their shared factor.
      * RigidGlbTest#theSharedMeshAndPackedColoursGiveTheRecolouredCopysVertexColours compares the two per vertex.
      */
     static void recolour(ModelData data, BoardDecoration.Colours colours) {
@@ -200,7 +199,7 @@ final class RigidGlb {
             float[] replacements = { (rgb >> 16 & 255) / 255f, (rgb >> 8 & 255) / 255f, (rgb & 255) / 255f };
             for (int channel = 0; channel < 3; channel++) {
                 int at = vertex * STRIDE + 6 + channel;
-                vertices[at] = display(shade(vertices[at], defaults[channel]) * linear(replacements[channel]));
+                vertices[at] = shade(vertices[at], defaults[channel]) * GpuColor.linear(replacements[channel]);
             }
         }
     }
@@ -210,8 +209,8 @@ final class RigidGlb {
      * that vertex takes the replacement itself. The one factor of {@link #recolour} and of {@link #colourSlotMesh}.
      */
     private static float shade(float vertex, float slotDefault) {
-        float d = linear(slotDefault);
-        return d > 1e-6f ? linear(vertex) / d : 1;
+        float d = GpuColor.linear(slotDefault);
+        return d > 1e-6f ? vertex / d : 1;
     }
 
     /**
@@ -400,7 +399,7 @@ final class RigidGlb {
      * {@code variant}, when not null, reads each material's {@code mmVariants.<variant>} extras instead of its own
      * values where they name them: {@code name}, {@code textures} by role ({@code baseColor}, {@code normal},
      * {@code occlusion}), {@code colourScale} (linear factors on its triangles' vertex colours) and {@code colours}
-     * (its one primitive's linear vertex colours). tools/merge_snow_trees.py writes them.
+     * (its one primitive's linear vertex colours). The bare species' GLB carries them.
      */
     private static ModelData convert(FileHandle file, String id, Asset asset, List<NodeModel> roots, String variant) {
         try {
@@ -427,7 +426,7 @@ final class RigidGlb {
                     result.alphaTests.put(target.id, cutoff);
                 }
                 float[] color = material.getBaseColorFactor();
-                target.diffuse = new Color(display(color[0]), display(color[1]), display(color[2]), color[3]);
+                target.diffuse = new Color(color[0], color[1], color[2], color[3]);
                 float roughness = material.getRoughnessFactor(), metallic = material.getMetallicFactor();
                 require(Float.isFinite(roughness) && roughness >= 0 && roughness <= 1
                       && Float.isFinite(metallic) && metallic >= 0 && metallic <= 1, "Invalid metallic-roughness factors");
@@ -554,7 +553,7 @@ final class RigidGlb {
                 if (!painted.add(vertex)) { continue; }
                 for (int channel = 0; channel < 3; channel++) {
                     int at = vertex * STRIDE + 6 + channel;
-                    vertices.items[at] = display(linear(vertices.items[at]) * ((Number) scale.get(channel)).floatValue());
+                    vertices.items[at] *= ((Number) scale.get(channel)).floatValue();
                 }
             }
         }
@@ -565,7 +564,7 @@ final class RigidGlb {
                 int at = (base + vertex) * STRIDE + 6;
                 for (int channel = 0; channel < 4; channel++) {
                     float component = ((Number) value.get(channel)).floatValue();
-                    vertices.items[at + channel] = channel < 3 ? display(component) : component;
+                    vertices.items[at + channel] = component;
                 }
             }
         }
@@ -623,8 +622,8 @@ final class RigidGlb {
             slots.add((byte) (slot == null ? 0 : Math.round(slot[i])));
             vertices.addAll(p[i * 3], -p[i * 3 + 2], p[i * 3 + 1]);
             vertices.addAll(n[i * 3], -n[i * 3 + 2], n[i * 3 + 1]);
-            vertices.addAll(c == null ? 1 : display(c[i * channels]), c == null ? 1 : display(c[i * channels + 1]),
-                  c == null ? 1 : display(c[i * channels + 2]), c == null || channels == 3 ? 1 : c[i * channels + 3]);
+            vertices.addAll(c == null ? 1 : c[i * channels], c == null ? 1 : c[i * channels + 1],
+                  c == null ? 1 : c[i * channels + 2], c == null || channels == 3 ? 1 : c[i * channels + 3]);
             vertices.addAll(uv == null ? 0 : uv[i * 2], uv == null ? 0 : uv[i * 2 + 1]);
         }
         return base;
@@ -701,14 +700,6 @@ final class RigidGlb {
         result.children = source.getChildren().stream().map(child -> node(child, parts, materials, visited, names))
               .toArray(ModelNode[]::new);
         return result;
-    }
-
-    private static float display(float linear) {
-        return linear <= .0031308f ? 12.92f * linear : (float) (1.055 * Math.pow(linear, 1 / 2.4) - .055);
-    }
-
-    private static float linear(float display) {
-        return display <= .04045f ? display / 12.92f : (float) Math.pow((display + .055) / 1.055, 2.4);
     }
 
     private static void require(boolean condition, String message) {

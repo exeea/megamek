@@ -9,7 +9,7 @@
 | `BoardFeatures` | Capture rough/fluff appearance and remove duplicate legacy decals when native geometry represents it. |
 | `BoardRough` | Choose deterministic variant placements; supply the same occupied geometry to drawing, picking and support. |
 | `BoardRelief / BoardRocks` | Build ordinary rough boulders, zero-gravity outcrops and their terrain contact. |
-| `BoardScene.Tile.lunar` | At zero gravity, turn rough boulders into bedrock outcrops. |
+| `BoardScene.Tile.lunar` | At zero gravity, turn rough boulders into bedrock outcrops; in vacuum with gravity, keep them. |
 | `GpuAssets` | Own the variant GLBs and shared textures; snapshots retain only placement data. |
 
 The 3D board reads the existing rough terrain and its `fluff` value:
@@ -46,10 +46,8 @@ edge or a slope steeper than 80% of its own height is omitted rather than left
 floating. Both camera modes and terrain detail levels use these same low-poly
 meshes. Water geometry snapshots retain their obstacle placements.
 
-The four assets live in `mm-data/data/models/board/rough`. Rebuild them with
-`python tools/build_rough_assets.py` from the mm-data checkout. The script uses
-the existing rigid mesh writer and concrete/bark textures, and updates the board
-asset manifest. The tooth has 28 triangles, trunk 91, and each stump pose 112. Their maximum
+The four assets live in `mm-data/data/models/board/rough` and use the shared
+concrete and bark textures. The tooth has 28 triangles, trunk 91, and each stump pose 112. Their maximum
 footprint radii are three board units for standing stumps and six for the other pieces
 before placement scaling, matching capture's route clearance. No GL resources
 are retained in scene snapshots; GPU models and
@@ -60,7 +58,9 @@ textures remain owned by `GpuAssets`.
 Without gravity nothing lies loose. The lunar presentation (`BoardScene.Tile.lunar`, see
 [water](gpu-water.md)) keeps every third rough boulder of the hex's spiral as a bedrock outcrop
 three times its size; the captured height stays its bound for headroom and picking. Dragon's
-Teeth remain; felled timber goes with the other vegetation.
+Teeth remain; felled timber goes with the other vegetation. In vacuum with gravity the same
+presentation keeps every rough boulder as it is (in the LUNAR rock kit) and also drops felled
+timber.
 
 `BoardRelief.boulders` places outcrops through the boulders' own path, so they share the terrain
 mesh, picking, unit support and road, bridge and tunnel clearance. They keep their authored
@@ -69,7 +69,7 @@ a slowly varying board-wide field, so neighbouring formations align. A fifth of 
 plain and its root is never above the downhill side; one near the hex edge shrinks to fit.
 
 At zero gravity `terrain-sculpt.frag` shades the dry rock kit with the ground's own
-`naturalMaterial` as fully exposed rock: bedding planes and skirts take the plain's cover in the
+`cliffMaterial` as fully exposed rock: bedding planes and skirts take the plain's cover in the
 same world projection, scarps its wall. Occlusion toward the root remains only on scarps. Rim
 formations and fallen blocks below cliffs share this shading but keep their placement.
 

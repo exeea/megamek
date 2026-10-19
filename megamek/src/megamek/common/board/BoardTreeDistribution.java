@@ -17,10 +17,7 @@ public final class BoardTreeDistribution {
     /** The park trees: a legacy park's broad tree slot and paved ground's woods draw from these. */
     public static final List<String> PARK = List.of("tree-broad", "tree", "birch", "tree-forked", "tree-layered",
           "birch-spreading");
-    /**
-     * The vegetation design that draws no trees while the woods stay for the rules, as on legacy art that paints its
-     * own scenery over woods (seaport container yards and cranes).
-     */
+    /** The vegetation design that draws no trees while the woods stay for the rules. */
     public static final String NO_TREES = "woods/no-trees";
     /** The terrains whose art draws trees: the Tactical View's base tile leaves them out where {@link #noTrees} holds. */
     public static final List<Integer> TREE_TERRAINS = List.of(Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV);
@@ -32,12 +29,15 @@ public final class BoardTreeDistribution {
     private BoardTreeDistribution() { }
 
     /**
-     * The one "no trees" rule of every 3D view: the hex's vegetation design is {@link #NO_TREES}. The 3D woods draw no
-     * trees there, and the Tactical View's base tile no woods sprite, as the old tileset's seaport supers replaced it.
+     * The one "no trees" rule of every 3D view: the hex's vegetation design draws no trees, being {@link #NO_TREES} or a
+     * skin that draws its own scenery ({@link BoardEditorBlueprint.Skin}, a container yard). The 3D woods draw no trees
+     * there, and the Tactical View's base tile no woods sprite.
      */
     public static boolean noTrees(Hex hex) {
         var design = hex.getAppearance().get("vegetation");
-        return design != null && NO_TREES.equals(design.variant());
+        if (design == null || design.variant() == null) { return false; }
+        var variant = BoardEditorBlueprint.get().variant(design.variant());
+        return NO_TREES.equals(design.variant()) || variant != null && variant.skin() != null;
     }
 
     public static String species(List<String> trees, Coords coords, float x, float y, long individual) {

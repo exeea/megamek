@@ -6,6 +6,7 @@ uniform float u_magmaOceanScale;
 const float MAGMA_CYCLE = 4.0;
 // The molten pattern spans larger, readable rafts. Solid crust retains its authored 12 m repeat.
 float magmaRepeatMetres() { return 24.0; }
+float magmaDistantRoughness() { return .85; }
 // BoardFlow already slows lava to a quarter of water's speed. This keeps its ordinary reach near 2.4 m/s at 1g.
 const float MAGMA_CURRENT_SPEED = 3.2;
 
@@ -25,12 +26,16 @@ Volcanic magmaPhaseSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec2 velocity, ve
     vec2 jump = vec2(.75487766, .56984029);
     vec2 first = liquidFlowUv(uv, velocity, flow, 0, jump, moving);
     vec2 second = liquidFlowUv(uv, velocity, flow, 1, jump, moving);
-    Volcanic a = magmaSample(first, dx, dy, eye);
-    Volcanic b = magmaSample(second, dx, dy, eye);
+    Volcanic a = magmaSample(first, dx, dy, eye, true);
+    Volcanic b = magmaSample(second, dx, dy, eye, true);
     // Blend emitted light rather than applying a nonlinear heat ramp to an averaged temperature: that would
     // pulse at each crossfade. Each phase's cooling skin remains opaque and dark.
-    a.emission = magmaEmission(a.heat, smoothstep(.28, .56, a.heat.x));
-    b.emission = magmaEmission(b.heat, smoothstep(.28, .56, b.heat.x));
+    float exposedA = smoothstep(.28, .56, a.heat.x);
+    float exposedB = smoothstep(.28, .56, b.heat.x);
+    // Exposed melt emits; only its cooling skin carries reflected pigment. Apply coverage before the
+    // phase blend, just like emission, so the two moving phases cannot pump brightness at their resets.
+    a.albedo *= 1.0 - exposedA;
+    b.albedo *= 1.0 - exposedB;
     return magmaMix(a, b, flow.weight.y);
 }
 
@@ -75,9 +80,6 @@ vec3 magmaDrift(vec3 face, vec2 current, float bank, vec4 waves) {
 
 // The existing shore distance makes a coherent hot interior and a cooler red margin around retained dark rafts.
 Volcanic magmaChill(Volcanic material, float shore) {
-    // Exposed melt is glossier than its rough cooling rafts, using the existing heat sample.
-    float melt = smoothstep(.45, .80, material.heat.x);
-    material.surface.g = mix(material.surface.g, min(material.surface.g, .4), melt);
     float chill = 1.0 - smoothstep(0.0, MAGMA_MARGIN, shore);
     // A wider thermal margin follows the actual channel. Scale linear radiance, keeping phase blending
     // energy-preserving and cold rafts cold instead of adding a uniform yellow layer over the texture.
@@ -86,13 +88,6 @@ Volcanic magmaChill(Volcanic material, float shore) {
     material.albedo = mix(material.albedo, vec3(dot(material.albedo, vec3(.3, .59, .11)) * .6), chill);
     material.surface.g = mix(material.surface.g, max(material.surface.g, .8), chill);
     return material;
-}
-
-vec3 magmaHeatColor(float heat) {
-    // Linear radiance, deliberately above diffuse white: the scene keeps this energy for its
-    // highlight shoulder and heat halo. Cooling skin stays red; exposed melt reaches orange/yellow.
-    vec3 body = mix(vec3(1.2, .008, .0005), vec3(4.2, .40, .006), smoothstep(.15, .70, heat));
-    return mix(body, vec3(10.0, 5.5, .14), smoothstep(.68, .94, heat));
 }
 
 vec3 magmaRadiance(Volcanic material, float bank, float strength) {

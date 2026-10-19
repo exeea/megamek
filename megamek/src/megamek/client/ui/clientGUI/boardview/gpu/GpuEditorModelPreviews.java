@@ -3,20 +3,27 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.io.File;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
-import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.Environment;
+import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
@@ -28,6 +35,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Configuration;
+import megamek.common.board.RailRoute;
 
 /** A page-sized, disposable preview queue: CPU model decoding off-thread; one upload/render per UI frame. */
 final class GpuEditorModelPreviews implements Disposable {
@@ -41,7 +49,70 @@ final class GpuEditorModelPreviews implements Disposable {
     private final Map<Image, FrameBuffer> images = new HashMap<>();
     private Future<ModelData> pending;
     private Request current;
+    /** The current request's model and its textures while a program it draws with still links (GpuShaderProvider). */
+    private Model model;
+    private final Map<String, Texture> textures = new HashMap<>();
     private ModelBatch batch;
+    private GpuSceneDisplay display;
+    private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
+    private final List<Renderable> warmup = new ArrayList<>();
+    private GpuGlsl.Preparation links;
+    private record Programs(GpuTerrain board, long lighting) { }
+    /** The requested program set is ready once its retained warmup samples are empty. */
+    private Programs programs;
+
+    /** Asset cards use the imported-model layouts already found by the board's palette preparation. */
+    boolean prepare(GpuTerrain board) {
+        Environment light = lighting();
+        Programs requested = new Programs(board, light.getMask());
+        if (requested.equals(programs) && warmup.isEmpty()) { return true; }
+        if (links == null) { links = new GpuGlsl.Preparation(); }
+        if (batch == null) { batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider)); }
+        if (!requested.equals(programs)) {
+            clearWarmup();
+            programs = requested;
+            board.previewModelMaterials((material, attributes) -> prepare(material, attributes, light));
+            // Junction cards use the raw generated route, before the board's linear-colour material conversion.
+            // Rail and maglev share this builder's single material/layout; their shape and colours are only data.
+            Model route = new Model(BoardRail.model(BoardRail.flat(RailRoute.Kind.RAIL,
+                  RailRoute.side(0) | RailRoute.side(3), 0)));
+            try {
+                Renderable part = new ModelInstance(route).getRenderable(new Renderable());
+                prepare(new Material(part.material), part.meshPart.mesh.getVertexAttributes(), light);
+            } finally { route.dispose(); }
+        }
+        boolean ready = true;
+        for (Renderable sample : warmup) { ready &= links.run(() -> batch.getShaderProvider().getShader(sample)); }
+        if (ready) { clearWarmup(); }
+        return ready;
+    }
+
+    private void clearWarmup() {
+        warmup.forEach(sample -> sample.meshPart.mesh.dispose());
+        warmup.clear();
+    }
+
+    private void prepare(Material material, VertexAttributes attributes, Environment light) {
+        Renderable sample = new Renderable();
+        sample.material = material;
+        sample.environment = light;
+        sample.meshPart.set("editor-model-warmup", new Mesh(true, 0, 0, attributes), 0, 0, GL20.GL_TRIANGLES);
+        warmup.add(sample);
+    }
+
+    private Environment lighting() {
+        var lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
+        Environment light = new Environment();
+        environmentLighting.set(lighting);
+        light.set(environmentLighting);
+        GpuEnvironmentLighting.applyAntialiasing(light);
+        light.set(ColorAttribute.createAmbientLight(lighting.ambient()));
+        light.add(new DirectionalLight().set(lighting.direct(), lighting.direction()));
+        return light;
+    }
+
+    /** Its display program links with the editor, behind the loading stage, for framebuffer objects. */
+    GpuEditorModelPreviews() { GpuGlsl.offscreen(() -> display = new GpuSceneDisplay()); }
 
     void add(String asset, Image target) { add(asset, megamek.common.board.BoardDecoration.Colours.NONE, target); }
 
@@ -62,16 +133,27 @@ final class GpuEditorModelPreviews implements Disposable {
             if (entry.getKey().getStage() != null) { return false; }
             entry.getValue().dispose(); return true;
         });
-        if (pending != null && current.target().getStage() == null) {
-            pending.cancel(true); pending = null; current = null;
+        if (current != null && current.target().getStage() == null) {
+            if (pending != null) { pending.cancel(true); }
+            pending = null; current = null; release();
         }
-        if (pending != null && pending.isDone()) {
-            try { render(pending.get(), current.top(), current.target()); }
-            catch (Exception failure) {
+        if (pending != null && pending.isDone() || model != null) {
+            try {
+                if (model == null) {
+                    model = ModelTextures.create(pending.get(), textures,
+                          (key, color) -> textures.computeIfAbsent((color ? "color:" : "data:") + key, ignored -> color
+                                ? GpuColorTexture.create(new FileHandle(key), true)
+                                : GpuColorTexture.createData(new FileHandle(key), true)));
+                    pending = null;
+                }
+                // A program it draws with still links: the same model draws again next frame.
+                if (render(model, current.top(), current.target())) { current = null; release(); }
+            } catch (Exception failure) {
                 current.target().setUserObject(megamek.client.ui.gdx.UiKit.text("BoardEditor.noPreview"));
-            } finally { pending = null; current = null; }
+                pending = null; current = null; release();
+            }
         }
-        if (pending == null && !queue.isEmpty()) {
+        if (pending == null && current == null && !queue.isEmpty()) {
             current = queue.removeFirst(); String asset = current.asset(); var colours = current.colours();
             int sides = current.sides(), tracks = current.tracks();
             pending = worker.submit(() -> {
@@ -92,13 +174,11 @@ final class GpuEditorModelPreviews implements Disposable {
         }
     }
 
-    private void render(ModelData data, boolean top, Image target) {
-        Map<String, Texture> textures = new HashMap<>();
-        Model model = null;
+    /** Draws the model's preview into the target; false while a program it draws with still links (GpuShaderProvider). */
+    private boolean render(Model model, boolean top, Image target) {
         FrameBuffer image = null;
+        FrameBuffer scene = null;
         try {
-            model = ModelTextures.create(data, textures,
-                  key -> textures.computeIfAbsent(key, file -> new Texture(new FileHandle(file), true)));
             ModelInstance instance = new ModelInstance(model);
             BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox());
             Vector3 center = bounds.getCenter(new Vector3());
@@ -108,30 +188,53 @@ final class GpuEditorModelPreviews implements Disposable {
             camera.up.set(top ? Vector3.Y : Vector3.Z);
             camera.position.set(center).add((top ? new Vector3(0, -.25f, 1) : new Vector3(1, -1.3f, 1)).nor().scl(radius * (top ? 3 : 3.7f)));
             camera.lookAt(center); camera.near = radius / 100; camera.far = radius * 10; camera.update();
-            Environment light = new Environment();
-            light.set(new ColorAttribute(ColorAttribute.AmbientLight, .55f, .55f, .55f, 1));
-            light.add(new DirectionalLight().set(.85f, .85f, .8f, -1, -1, -2));
-            if (batch == null) { batch = new ModelBatch(); }
-            image = new FrameBuffer(Pixmap.Format.RGBA8888, 128, 96, true);
-            image.begin();
+            var lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
+            float exposure = lighting.adaptation();
+            float backdropScale = GpuSceneRadiance.SCALE / exposure;
+            Environment light = lighting();
+            if (batch == null) { batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider)); }
+            scene = GpuHeatGlow.buffer(128, 96, true);
+            image = GpuAtmosphere.buffer(128, 96, true);
+            int skipped = GpuShaderProvider.unlinkedDraws();
+            scene.begin();
             try {
-                ScreenUtils.clear(.045f, .06f, .065f, 1, true);
+                Gdx.gl.glDepthMask(true);
+                ScreenUtils.clear(GpuColor.linear(.045f) * backdropScale,
+                      GpuColor.linear(.06f) * backdropScale,
+                      GpuColor.linear(.065f) * backdropScale, 1, true);
                 batch.begin(camera);
                 try { batch.render(instance, light); } finally { batch.end(); }
-            } finally { image.end(); }
+            } finally { scene.end(); }
+            if (GpuShaderProvider.unlinkedDraws() != skipped) { return false; }
+            try { display.render(scene, image, exposure); } finally { image.end(); }
             TextureRegion region = new TextureRegion(image.getColorBufferTexture()); region.flip(false, true);
             target.setDrawable(new TextureRegionDrawable(region)); target.setUserObject("Ready"); images.put(target, image); image = null;
+            return true;
         } finally {
+            if (scene != null) { scene.dispose(); }
             if (image != null) { image.dispose(); }
-            if (model != null) { model.dispose(); }
-            textures.values().forEach(Texture::dispose);
         }
+    }
+
+    /** Releases the current request's model and textures. */
+    private void release() {
+        if (model != null) { model.dispose(); model = null; }
+        textures.values().forEach(Texture::dispose);
+        textures.clear();
     }
 
     void clear() {
         queue.clear();
-        if (pending != null) { pending.cancel(true); pending = null; current = null; }
+        if (pending != null) { pending.cancel(true); pending = null; }
+        current = null; release();
         images.values().forEach(FrameBuffer::dispose); images.clear();
     }
-    @Override public void dispose() { clear(); worker.shutdownNow(); if (batch != null) { batch.dispose(); } }
+    @Override public void dispose() {
+        clear(); worker.shutdownNow();
+        if (links != null) { links.dispose(); }
+        clearWarmup();
+        if (batch != null) { batch.dispose(); }
+        if (display != null) { display.dispose(); }
+        environmentLighting.dispose();
+    }
 }

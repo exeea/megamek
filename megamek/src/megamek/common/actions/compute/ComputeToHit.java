@@ -41,6 +41,7 @@ import megamek.common.actions.WeaponAttackAction;
 import megamek.common.annotations.Nullable;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Coords;
+import megamek.common.board.RailRoute;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeECM;
 import megamek.common.compute.ComputeSideTable;
@@ -1104,9 +1105,13 @@ public class ComputeToHit {
               (targetType == Targetable.TYPE_FUEL_TANK_IGNITE) ||
               (target.isBuildingEntityOrGunEmplacement());
 
-        if ((distance == 1) && isBuilding && (ae.moved != EntityMovementType.MOVE_SPRINT
+        // TacOps rails are attacked per the building rules (TO:AR p.49): an adjacent Clear-hex attack on a rail hits.
+        boolean isRail = (targetType == Targetable.TYPE_HEX_CLEAR) && RailRoute.rules(game)
+              && RailRoute.intact(game.getHex(target.getPosition(), target.getBoardId()));
+
+        if ((distance == 1) && (isBuilding || isRail) && (ae.moved != EntityMovementType.MOVE_SPRINT
               && ae.moved != EntityMovementType.MOVE_VTOL_SPRINT)) {
-            return Messages.getString("WeaponAttackAction.AdjBuilding");
+            return Messages.getString(isBuilding ? "WeaponAttackAction.AdjBuilding" : "WeaponAttackAction.AdjRail");
         }
 
         // Attacks against buildings from inside automatically hit.

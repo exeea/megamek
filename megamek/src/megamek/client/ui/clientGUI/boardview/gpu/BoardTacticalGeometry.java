@@ -41,10 +41,10 @@ final class BoardTacticalGeometry {
     /** Only the finished triangles are retained; none of the terrain builder's scene or shoreline caches. */
     record Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes,
           List<BoardSurface.Face> faces, List<BoardSurface.Face> water, List<BoardSurface.Face> walls,
-          List<BoardSurface.Side> waterfalls, float highestTop) {
+          List<BoardSurface.Side> waterfalls, List<GpuFrozenWaterfall.Geometry> frozenFalls, float highestTop) {
         Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes, List<BoardSurface.Face> faces,
               List<BoardSurface.Face> water, List<BoardSurface.Face> walls, List<BoardSurface.Side> waterfalls) {
-            this(top, slopes, faces, water, walls, waterfalls, highest(top));
+            this(top, slopes, faces, water, walls, waterfalls, List.of(), highest(top));
         }
 
         /** Derived once with this immutable finished-surface snapshot; raised border endpoints reuse it. */
@@ -67,7 +67,8 @@ final class BoardTacticalGeometry {
             if (!surface.tile.frozen()) { top.addAll(surface.waterFaces); }
             List<BoardSurface.Face> walls = List.copyOf(surface.walls(scene, floor));
             return new Surface(List.copyOf(top), BoardGeometry.tuning().stepsBetweenTops() ? lying(walls) : List.of(),
-                  List.copyOf(surface.faces), List.copyOf(surface.waterFaces), walls, List.copyOf(surface.waterfalls));
+                  List.copyOf(surface.faces), List.copyOf(surface.waterFaces), walls, List.copyOf(surface.waterfalls),
+                  surface.frozenFalls(), highest(top));
         }
     }
     private record Edge(float x1, float y1, float x2, float y2) {
@@ -380,6 +381,30 @@ final class BoardTacticalGeometry {
 
     private static float cross(Vector3 a, Vector3 b, Vector3 c) {
         return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    }
+
+    /** Convex XY clipping retains interpolated Z and reuses wholly covered vertices. The boundary is anticlockwise. */
+    static List<Vector3> clip(List<Vector3> polygon, List<Vector3> boundary) {
+        for (int edge = 0; edge < boundary.size() && !polygon.isEmpty(); edge++) {
+            polygon = clip(polygon, boundary.get(edge), boundary.get((edge + 1) % boundary.size()));
+        }
+        return polygon;
+    }
+
+    /** Keep the left half-plane of one directed XY edge. */
+    static List<Vector3> clip(List<Vector3> polygon, Vector3 a, Vector3 b) {
+        if (polygon.isEmpty()) { return polygon; }
+        if (polygon.stream().allMatch(p -> cross(a, b, p) >= 0)) { return polygon; }
+        List<Vector3> next = new ArrayList<>(polygon.size() + 1);
+        Vector3 previous = polygon.getLast();
+        float before = cross(a, b, previous);
+        for (Vector3 point : polygon) {
+            float after = cross(a, b, point);
+            if ((before >= 0) != (after >= 0)) { next.add(new Vector3(previous).lerp(point, before / (before - after))); }
+            if (after >= 0) { next.add(point); }
+            previous = point; before = after;
+        }
+        return next;
     }
 
     /** The faces of a wall that lie back far enough to be walked and marked on: slopes and talus, not cliff faces. */

@@ -3,63 +3,69 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 import com.badlogic.gdx.math.Vector3;
-import megamek.common.board.BoardDecoration;
 
-/** Grade the authored slab and rails together; the installed facets serve drawing, road paint and picking. */
+/** Grade the generated slab and rails together; the installed facets serve drawing, road paint and picking. */
 final class BoardBridgeSlope {
-    /** A deck GLB's nodes in one set of colours: a truss kit per span colour, the standard kit in its own. */
-    private record Kit(String asset, BoardDecoration.Colours colours) { }
-
-    private static final Map<Kit, BoardKit<Map<String, BoardShape>>> SHAPES = new ConcurrentHashMap<>();
-
     private BoardBridgeSlope() { }
 
-    static void reload() { SHAPES.clear(); }
-
-    /**
-     * Drops the recoloured kits (truss span colours) and keeps the uncoloured ones, at each scene commit
-     * ({@code GpuTerrain#commitRebuild}): the colours tried on graded spans do not stay for the session, and a later build
-     * decodes the colours it draws again.
-     */
-    static void retainUncoloured() { SHAPES.keySet().removeIf(kit -> !kit.colours().slots().isEmpty()); }
-
-    /**
-     * A truss draws its body and the joint or end node of each exit ({@link BoardBridge#trussNodes}), its steel as
-     * STEEL facets in their recoloured colour; the standard kit has one node.
-     */
+    /** Install one generated deck, including its actual end or joint trusses, onto the shared grade profile. */
     static BoardBridge.Shape build(BoardScene.Tile tile, BoardBridge.Deck deck, BoardBridgeFooting footing) {
-        var kit = new Kit(deck.asset(), deck.truss() ? deck.colours() : BoardDecoration.Colours.NONE);
-        var nodes = SHAPES.computeIfAbsent(kit, key ->
-              new BoardKit<>(() -> BoardShape.loadNodes(key.asset(), key.colours()))).get();
-        var drawn = deck.truss() ? BoardBridge.trussNodes(deck) : List.copyOf(nodes.keySet());
-        var profile = profile(tile, deck);
+        var profile = deck.sloped() || footing.solidExits() != 0 ? profile(tile, deck) : List.<BoardSurface.Face>of();
         var faces = new ArrayList<>(footing.shape().facets());
         var clipper = new BoardTacticalGeometry.Clipper();
         float level = tile.elevation() + BoardBridge.feature(tile).elevation();
         float scale = BoardGeometry.hexScale();
         var center = BoardGeometry.center(tile.coords(), 0);
         center.z = BoardBridge.deckZ(level);
-        for (var face : drawn.stream().flatMap(node -> nodes.get(node).polygons().stream()).toList()) {
-            var points = face.points();
-            boolean steel = face.material().equals("bridge-steel");
-            var part = steel ? BoardBridge.Part.STEEL : face.normal().z > .99f && Math.abs(points[0].z) < .001f
-                  ? BoardBridge.Part.TOP : BoardBridge.Part.STRUCTURE;
-            boolean slab = Math.max(points[0].z, Math.max(points[1].z, points[2].z)) <= .001f;
-            clipper.prepare(new BoardTacticalGeometry.Triangle(new Vector3(points[0]).scl(scale).add(center),
-                  new Vector3(points[1]).scl(scale).add(center), new Vector3(points[2]).scl(scale).add(center), -1));
+        for (var face : BoardBridgeMesh.build(tile, deck)) {
+            var a = new Vector3(face.a()).scl(scale).add(center);
+            var b = new Vector3(face.b()).scl(scale).add(center);
+            var c = new Vector3(face.c()).scl(scale).add(center);
+            if (profile.isEmpty()) {
+                BoardBridge.triangle(faces, a, b, c, face.part(), face.colour());
+                continue;
+            }
+            boolean slab = Math.max(face.a().z, Math.max(face.b().z, face.c().z)) <= .001f;
+            var polygon = List.of(a, b, c);
             for (var patch : profile) {
-                // The solid ramp owns its top and sides. Retain only the authored rails above that block.
-                if (slab && patch.landEdge() >= 0
-                      && (footing.solidExits() & (1 << BoardGeometry.edgeDirection(patch.landEdge()))) != 0) { continue; }
-                clipper.displace(patch, triangle -> BoardBridge.triangle(faces, triangle.a(), triangle.b(), triangle.c(),
-                      part, steel ? face.color() : null));
+                int direction = patch.landEdge() < 0 ? -1 : BoardGeometry.edgeDirection(patch.landEdge());
+                boolean solid = direction >= 0 && (footing.solidExits() & (1 << direction)) != 0;
+                // The solid ramp owns its top and sides. Retain only the raised rails above that block.
+                if (slab && solid) { continue; }
+                var exposed = polygon;
+                if (face.part() == BoardBridge.Part.STEEL && direction >= 0
+                      && (solid || footing.lengths().get(direction) > 0 && deck.rises().get(direction) > 0)) {
+                    // Fascia triangles cross the support's top: dropping only whole slab triangles leaves
+                    // coplanar steel over concrete. Cut before grading so both meet on the same slope.
+                    exposed = above(polygon, center.z - (solid ? 0 : BoardBridge.SLAB * scale));
+                }
+                for (int i = 1; i + 1 < exposed.size(); i++) {
+                    clipper.prepare(new BoardTacticalGeometry.Triangle(exposed.getFirst(), exposed.get(i), exposed.get(i + 1), -1));
+                    clipper.displace(patch, triangle -> BoardBridge.triangle(faces, triangle.a(), triangle.b(), triangle.c(),
+                          face.part(), face.colour()));
+                }
             }
         }
         return BoardBridge.shape(BoardScene.Surface.CONCRETE, level, faces);
+    }
+
+    /** Clip a facet at the concrete support's top, retaining winding and the exposed steel above it. */
+    private static List<Vector3> above(List<Vector3> polygon, float height) {
+        if (polygon.stream().allMatch(p -> p.z >= height)) { return polygon; }
+        var result = new ArrayList<Vector3>(4);
+        var previous = polygon.getLast();
+        for (var point : polygon) {
+            if ((previous.z >= height) != (point.z >= height)) {
+                var cut = new Vector3(previous).lerp(point, (height - previous.z) / (point.z - previous.z));
+                cut.z = height;
+                result.add(cut);
+            }
+            if (point.z >= height) { result.add(point); }
+            previous = point;
+        }
+        return result;
     }
 
     /**
@@ -69,14 +75,37 @@ final class BoardBridgeSlope {
     static List<BoardSurface.Face> profile(BoardScene.Tile tile, BoardBridge.Deck deck) {
         var result = new ArrayList<BoardSurface.Face>();
         var center = BoardGeometry.center(tile.coords(), 0);
+        var corners = new Vector3[6];
+        var inner = new Vector3[6];
         for (int edge = 0; edge < 6; edge++) {
-            var a = BoardGeometry.corner(tile.coords(), 0, edge);
-            var b = BoardGeometry.corner(tile.coords(), 0, edge + 1);
-            var innerA = new Vector3(center).lerp(a, .5f);
-            var innerB = new Vector3(center).lerp(b, .5f);
-            var mouthA = new Vector3(a).lerp(b, .25f);
-            var mouthB = new Vector3(a).lerp(b, .75f);
-            mouthA.z = mouthB.z = deck.rises().get(BoardGeometry.edgeDirection(edge)) * BoardGeometry.level();
+            corners[edge] = BoardGeometry.corner(tile.coords(), 0, edge);
+            inner[edge] = new Vector3(center).lerp(corners[edge], .5f);
+        }
+        float wide = (BoardRoad.CORRIDOR_HALF + BoardRoad.SHOULDER) * BoardGeometry.hexScale();
+        for (int edge = 0; edge < 6; edge++) {
+            int direction = BoardGeometry.edgeDirection(edge), next = (edge + 1) % 6;
+            if ((deck.corridor().sides() & 1 << direction) == 0 || deck.rises().get(direction) == 0) { continue; }
+            var across = new Vector3(corners[next]).sub(corners[edge]).nor();
+            var midpoint = new Vector3(corners[edge]).lerp(corners[next], .5f).lerp(center, .5f);
+            // Share the widened hub corners with the adjoining patches, avoiding overlapping grade planes.
+            // Adjacent graded exits retain their common corner so junctions still have one continuous surface.
+            if (deck.rises().get(BoardGeometry.edgeDirection((edge + 5) % 6)) == 0) {
+                inner[edge] = new Vector3(midpoint).mulAdd(across, -wide);
+            }
+            if (deck.rises().get(BoardGeometry.edgeDirection(next)) == 0) {
+                inner[next] = new Vector3(midpoint).mulAdd(across, wide);
+            }
+        }
+        for (int edge = 0; edge < 6; edge++) {
+            int next = (edge + 1) % 6, direction = BoardGeometry.edgeDirection(edge);
+            var a = corners[edge];
+            var b = corners[next];
+            var innerA = inner[edge];
+            var innerB = inner[next];
+            float inset = (deck.corridor().sides() & 1 << direction) == 0 ? .25f : .5f - wide / a.dst(b);
+            var mouthA = new Vector3(a).lerp(b, inset);
+            var mouthB = new Vector3(a).lerp(b, 1 - inset);
+            mouthA.z = mouthB.z = deck.rises().get(direction) * BoardGeometry.level();
             result.add(face(center, innerA, innerB, -1));
             result.add(face(innerA, a, mouthA, edge));
             result.add(face(innerA, mouthA, mouthB, edge));

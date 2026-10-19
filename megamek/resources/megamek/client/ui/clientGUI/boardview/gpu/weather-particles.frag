@@ -4,7 +4,8 @@ layout(location = 0) out vec4 fragColor;
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 
-uniform vec3 u_light;
+uniform vec3 u_light; // Linear incident light; exposure and display encoding belong to the scene composite.
+// LIGHT_MODEL
 
 in vec2 v_uv;
 in float v_fade;
@@ -17,6 +18,6 @@ float particleDisc(vec2 uv) {
 
 void main() {
     vec4 particle = particleAppearance(v_uv);
-    vec3 color = particle.rgb;
+    vec3 color = toLinear(particle.rgb);
     fragColor = vec4(color * u_light, particle.a * v_fade);
 }
