@@ -545,7 +545,7 @@ class RigidGlbTest {
         var snow = RigidGlb.loadLods(source, root.toPath());
         com.badlogic.gdx.graphics.g3d.model.data.ModelMaterial crown = null;
         for (var material : snow.getFirst().materials) { if (material.id.equals("canopy-snow-cutout")) { crown = material; } }
-        assertTrue(crown.textures.first().fileName.replace('\\', '/').contains("textures/vegetation/conifer-snow-cutout.png"));
+        assertTrue(crown.textures.first().fileName.replace('\\', '/').contains("textures/vegetation/conifer-snow-cutout_albedo.png"));
         float[] bareVertices = bare.getFirst().meshes.first().vertices, snowVertices = snow.getFirst().meshes.first().vertices;
         assertEquals(bareVertices.length, snowVertices.length, "The winter form keeps the bare geometry");
         boolean tinted = false;

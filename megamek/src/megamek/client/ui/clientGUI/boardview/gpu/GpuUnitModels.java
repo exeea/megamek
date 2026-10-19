@@ -123,8 +123,7 @@ final class GpuUnitModels implements Disposable {
                         for (var material : model.materials) {
                             if ("bark".equals(material.id) && !material.has(TextureAttribute.Diffuse)) {
                                 if (bark == null) {
-                                    Path texture = UnitModelDescriptor.contained(root, root.resolve("board/textures/vegetation/bark.png"));
-                                    bark = GpuColorTexture.create(new FileHandle(texture.toFile()), true);
+                                    bark = GpuColorTexture.create(() -> GpuMaterialMaps.color("vegetation/bark"), true, true);
                                     bark.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
                                     bark.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
                                 }
@@ -133,7 +132,7 @@ final class GpuUnitModels implements Disposable {
                         }
                     }
                     modular.put(descriptor, new ModularAsset(value, List.copyOf(levels), List.copyOf(counts)));
-                } catch (IOException | RuntimeException error) {
+                } catch (RuntimeException error) {
                     new HashSet<>(levels).forEach(Model::dispose);
                     throw error;
                 }

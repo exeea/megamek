@@ -877,8 +877,7 @@ final class GpuBiomeVegetation implements Disposable {
             if (anchors == null || anchors.size != PLANTS_PER_ROW) {
                 throw new IllegalArgumentException(name + " requires seven registered variants");
             }
-            var source = GpuColorTexture.decode(new FileHandle(new File(Configuration.dataDir(),
-                  "models/board/textures/vegetation/" + name + ".png")));
+            var source = GpuMaterialMaps.color("vegetation/" + name);
             try {
                 var plants = new ArrayList<CropSprite>();
                 for (int i = 0; i < PLANTS_PER_ROW; i++) {
@@ -935,8 +934,7 @@ final class GpuBiomeVegetation implements Disposable {
 
     /** One shared 512px reed cutout; keep the full-resolution source as the editable asset. */
     private static Texture plantTexture(String name) {
-        var source = GpuColorTexture.decode(new FileHandle(new File(Configuration.dataDir(),
-              "models/board/textures/vegetation/" + name + ".png")));
+        var source = GpuMaterialMaps.color("vegetation/" + name);
         try {
             var pixels = new GpuLinearImage(512, 512);
             pixels.drawCutout(new GpuLinearImage(source), 0, 0, source.getWidth(), source.getHeight(), 0, 0, 512, 512);

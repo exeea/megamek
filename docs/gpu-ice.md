@@ -15,11 +15,14 @@ is present. Rules for discovery, movement and breaking ice stay in the game code
 | `BoardEditorTerrain` | Authoring markers for hidden flags, independently of gameplay appearance. |
 | `data/models/board/textures/terrain/ice` | Chromatic scattering-tint input, normal and packed optical controls. |
 
-The Material Maker project `mm-data/tools/materials/terrain/ice/sheet` exports these maps
-(`sheet.png`, `sheet-normal.png`, `sheet-surface.png`); run `python tools/materials/export.py`
-from the `mm-data` root.
+The Material Maker project `mm-data/tools/materials/terrain/ice/sheet` exports the
+`terrain/ice/sheet` Godot 4 Standard material ([board materials](gpu-board-materials.md)):
+`sheet_albedo`, `_normal`, `_heightmap`, `_orm` (roughness), `_sss` (cloudiness) and the
+extra `sheet_cracks` map. Run `python tools/materials/export.py` from the `mm-data` root.
+Exported wider than its catalogued 1024 pixels, the sheet covers proportionally more
+ground before it repeats (`u_iceCoverage`).
 
-`sheet.png` is a chromatic input to the optical coat, not a final diffuse albedo
+The albedo is a chromatic input to the optical coat, not a final diffuse albedo
 or measured transmission coefficient. The shader blends two filtered RGB samples,
 divides by their mean (with a .05 floor), and uses 35% of that tint around its
 bare-ice scattering color. Changing hue affects the coat; uniformly scaling RGB
@@ -30,9 +33,9 @@ and the surface beneath it.
 This normalization happens after filtering. Pre-normalizing the PNG would change
 mip and repeat blending and is not an equivalent optimization. The generator's
 separate mean subtraction centers the engineered height field; it does not
-normalize color brightness. `sheet-surface.png` stores height, roughness, cracks
-and cloudiness in RGBA, and `sheet-normal.png` supplies the aligned normal; the
-renderer uploads those two as the layers of one array (`u_iceMaps`). These
+normalize color brightness. The renderer packs height, roughness, cracks and
+cloudiness into one surface map, and uploads it with the aligned normal as the
+layers of one array (`u_iceMaps`). These
 are artistic control maps, not measured ice samples. Rebuilding from a changed
 source can also change those numeric maps; a color-only revision must explicitly
 preserve and verify them.

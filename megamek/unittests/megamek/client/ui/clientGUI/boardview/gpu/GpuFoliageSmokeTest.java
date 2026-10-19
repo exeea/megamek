@@ -64,7 +64,7 @@ class GpuFoliageSmokeTest {
                                     assertEquals(512, map.textureDescription.texture.getWidth());
                                     var normal = material.get(TextureAttribute.class, TextureAttribute.Normal);
                                     assertNotNull(normal, "Cactus ribs use the authored normal map");
-                                    assertSame(assets.materialData("vegetation/cactus-skin-normal"),
+                                    assertSame(assets.materialNormal("vegetation/cactus-skin"),
                                           normal.textureDescription.texture);
                                     assertSame(assets.material("vegetation/cactus-skin"), map.textureDescription.texture);
                                     continue;

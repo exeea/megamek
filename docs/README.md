@@ -31,6 +31,7 @@ The feature guides explain the implementation boundaries and asset contracts.
 | [Legacy scenery conversion](3d-board-editor.md#native-files-and-compatibility) | Tileset scenery and decal tokens converted to objects, decals and designs. |
 | [Terrain realism](gpu-terrain-realism.md) | Realism scope and user decisions, renderer state, controls, open work, acceptance rules, budgets and native reviews. |
 | [Materials and geometry](gpu-terrain-materials.md) | Shared corners, cliffs, slopes, concrete, texture channels and world projection. |
+| [Board materials](gpu-board-materials.md) | The Godot 4 Standard material files, their GPU packing, loose and constrained materials, and export. |
 | [Terrain contacts](gpu-terrain-contacts.md) | Cross-material boundaries, cliff-foot deposits and shading-only refinement. |
 | [Roads](gpu-roads.md) | Footprints, masks, graded approaches, bridge inheritance and chunk invalidation. |
 | [Slopes and tunnels](gpu-road-slopes-tunnels.md) | Road grades, solid cliff boundaries and cosmetic tunnel portals. |

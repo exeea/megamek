@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
@@ -32,14 +33,17 @@ import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.utils.Disposable;
-import com.badlogic.gdx.utils.JsonReader;
-import com.badlogic.gdx.utils.JsonValue;
 import megamek.common.Configuration;
 import megamek.common.board.TilesetScenery;
 
 /** GL-thread ownership of shared models, repeating terrain materials, and animated liquid frames. */
 final class GpuAssets implements Disposable {
     private final File root = new File(Configuration.dataDir(), "models/board");
+    /** Board materials: Godot 4 StandardMaterial3D resources and their maps (GodotMaterial), with materials.json. */
+    private final File textures = new File(root, "textures");
+    private final Map<String, GodotMaterial> definitions = new HashMap<>();
+    private final Map<String, Float> coverages = new HashMap<>();
+    private GpuMaterialCatalog catalog;
     private final Map<String, Model> models = new HashMap<>();
     private final Map<String, List<Model>> modelLods = new HashMap<>();
     /** Each recoloured model's decoded levels, in the model's own colours (a missing level repeats the one before). */
@@ -57,7 +61,6 @@ final class GpuAssets implements Disposable {
     private final Map<Boolean, MaterialArrays> magmas = new HashMap<>();
     private LavaEmission lavaEmission;
     private final Map<String, Sculpt> sculpts = new HashMap<>();
-    private final Map<String, JsonValue> sculptEntries = new HashMap<>();
     private MaterialArrays sculptArray;
     private SculptRoughness sculptRoughness;
     private MaterialArrays roadArray;
@@ -71,8 +74,51 @@ final class GpuAssets implements Disposable {
     /** Three aligned, repeating maps. Surface channels are height, roughness, occlusion and relief range. */
     record Cliff(Texture color, Texture normal, Texture surface) { }
 
-    /** The ice sheet's colour, and its aligned normal and surface maps as layers 0 and 1 of one array. */
-    record Ice(Texture color, TextureArray maps) { }
+    /**
+     * The ice sheet's colour, and its aligned normal and surface maps as layers 0 and 1 of one array; {@code coverage}
+     * multiplies its repeat (GpuMaterialCatalog).
+     */
+    record Ice(Texture color, TextureArray maps, float coverage) { }
+
+    /** A board material's Godot 4 Standard definition, read once per asset owner (asset reload makes a fresh owner). */
+    GodotMaterial definition(String name) {
+        return definitions.computeIfAbsent(name, key -> {
+            File file = new File(textures, key + ".tres");
+            requireFiles(List.of(new FileHandle(file)));
+            return GodotMaterial.read(file, textures);
+        });
+    }
+
+    boolean hasMaterial(String name) { return new File(textures, name + ".tres").isFile(); }
+
+    GpuMaterialCatalog catalog() {
+        if (catalog == null) { catalog = GpuMaterialCatalog.read(new File(textures, "materials.json")); }
+        return catalog;
+    }
+
+    /**
+     * How many times its catalogued ground a loose material's texture covers: 1 at its catalogued width, 2 at twice
+     * that width. Every renderer that repeats the material in world space multiplies its repeat by this.
+     */
+    float coverage(String name) {
+        return coverages.computeIfAbsent(name, key -> {
+            int[] size = GpuMaterialMaps.size(definition(key).albedo());
+            return catalog().coverage(key, size[0], size[1]);
+        });
+    }
+
+    /** One packed layout of a board material, made when its texture is uploaded. */
+    private Supplier<Pixmap> packed(String name, GpuMaterialMaps.Layout layout) {
+        GodotMaterial material = definition(name);
+        // Resolve and check the maps now, so a missing file fails before any upload.
+        requireFiles(GpuMaterialMaps.maps(material, layout).stream().map(FileHandle::new).toList());
+        return () -> GpuMaterialMaps.pack(material, layout);
+    }
+
+    /** A packed layout's dimensions, from its main map's header. */
+    private int[] size(String name, GpuMaterialMaps.Layout layout) {
+        return GpuMaterialMaps.size(GpuMaterialMaps.primary(definition(name), layout));
+    }
 
     /**
      * Molten lava's or solid crust's aligned maps in separate colour and numerical arrays:
@@ -81,28 +127,32 @@ final class GpuAssets implements Disposable {
      */
     MaterialArrays magma(boolean molten) {
         if (magmas.containsKey(molten)) { return magmas.get(molten); }
-        var files = new ArrayList<FileHandle>();
-        for (String map : List.of("", "-normal", "-surface", "-heat")) {
-            files.add(materialFile("terrain/lava/" + (molten ? "lava" : "crust") + map));
+        String name = magmaName(molten);
+        var layers = new ArrayList<Layer>();
+        for (var layout : List.of(GpuMaterialMaps.Layout.COLOR, GpuMaterialMaps.Layout.NORMAL, GpuMaterialMaps.Layout.RELIEF,
+              molten ? GpuMaterialMaps.Layout.MOLTEN_HEAT : GpuMaterialMaps.Layout.CRUST_HEAT)) {
+            layers.add(layer(name, layout));
         }
-        MaterialArrays maps = repeatingArray(files, 4);
+        MaterialArrays maps = repeatingArray(layers, 4);
         magmas.put(molten, maps);
         return maps;
     }
+
+    static String magmaName(boolean molten) { return molten ? "terrain/lava/lava" : "terrain/lava/crust"; }
 
     /** The exported linear emission's scale and area mean, owned with the corresponding material maps. */
     record LavaEmission(float scale, float red, float green, float blue) { }
 
     LavaEmission lavaEmission() {
         if (lavaEmission != null) { return lavaEmission; }
-        FileHandle definition = new FileHandle(new File(root, "textures/terrain/lava/lava.json"));
-        FileHandle image = materialFile("terrain/lava/lava-heat");
-        requireFiles(List.of(definition, image));
-        JsonValue value = new JsonReader().parse(definition).get("emissionScale");
-        if (value == null || !value.isNumber() || !Float.isFinite(value.asFloat()) || value.asFloat() < 0) {
-            throw new IllegalArgumentException("Lava emissionScale must be finite and nonnegative: " + definition);
-        }
-        float scale = value.asFloat();
+        GodotMaterial lava = definition(magmaName(true));
+        File emission = lava.emission();
+        if (emission == null) { throw new IllegalArgumentException("Molten lava needs its emission map: " + lava.file); }
+        FileHandle image = new FileHandle(emission);
+        requireFiles(List.of(image));
+        // The Godot material's emission energy is the exported linear emission's scale.
+        float scale = lava.emissionEnergy();
+        if (scale < 0) { throw new IllegalArgumentException("Lava emission energy must be nonnegative: " + lava.file); }
         Pixmap pixels = GpuColorTexture.decode(image);
         try {
             long red = 0, green = 0, blue = 0;
@@ -123,56 +173,60 @@ final class GpuAssets implements Disposable {
 
     /**
      * A sculpted-terrain material from {@code textures/terrain/surfaces}: albedo with height in alpha, a tangent-space normal
-     * with occlusion in alpha, and the metres one repeat spans (from the set's manifest).
+     * with occlusion in alpha, and the metres one repeat spans ({@link #sculptTile}).
      */
     record Sculpt(Texture color, Texture normal, float tile) { }
 
     /** Aligned colour/height and normal/AO arrays in the supplied stable material order. */
     MaterialArrays sculptArray(List<String> names) {
         if (sculptArray == null) {
-            var files = new ArrayList<FileHandle>();
+            var layers = new ArrayList<Layer>();
             for (String name : names) {
-                sculptEntry(name);
-                files.add(materialFile("terrain/surfaces/" + name));
-                files.add(materialFile("terrain/surfaces/" + name + "-normal"));
+                String material = sculptName(name);
+                sculptTile(name);
+                layers.add(layer(material, GpuMaterialMaps.colorLayout(material)));
+                layers.add(layer(material, GpuMaterialMaps.normalLayout(material)));
             }
-            sculptArray = repeatingArray(files, 2);
+            sculptArray = repeatingArray(layers, 2);
         }
         return sculptArray;
     }
 
+    private static String sculptName(String name) { return "terrain/surfaces/" + name; }
+
     /** Optional authored scalar/map metadata in the same stable material order as the sculpt array. */
     record SculptRoughness(TextureArray maps, float[] metadata) { }
 
-    /** Map > scalar > missing-property fallback. A declared invalid map is never silently ignored. */
+    /**
+     * Authored roughness, which replaces the terrain's contextual (role, hardness, distance) roughness: map > scalar >
+     * the contextual fallback. A material authors it as Godot does: a roughness map that varies is a map (times the
+     * {@code roughness} factor); a uniform map or none, with a factor below 1, is that scalar. The Godot default (factor 1
+     * over a white map, which Material Maker writes while the roughness input is unconnected) keeps the context. Mud and
+     * scorch keep their roughness in their own normal maps' blue channel instead (GpuMaterialMaps.NORMAL_ROUGHNESS).
+     */
     SculptRoughness sculptRoughness(List<String> names) {
         if (sculptRoughness != null) { return sculptRoughness; }
-        var files = new ArrayList<FileHandle>();
+        var layers = new ArrayList<byte[]>();
+        int width = 1, height = 1;
         float[] metadata = new float[names.size() * 2];
         Arrays.fill(metadata, -1);
-        File directory = new File(root, "textures/terrain/surfaces");
         for (int index = 0; index < names.size(); index++) {
-            JsonValue entry = sculptEntry(names.get(index));
-            if (entry.has("roughness")) {
-                float scalar = entry.getFloat("roughness");
-                if (!Float.isFinite(scalar) || scalar < 0 || scalar > 1) {
-                    throw new IllegalArgumentException("Invalid sculpt roughness scalar: " + names.get(index));
-                }
-                metadata[index * 2] = scalar;
+            String name = sculptName(names.get(index));
+            if (GpuMaterialMaps.PACKED_ROUGHNESS.contains(name)) { continue; }
+            var authored = authoredRoughness(definition(name));
+            if (authored.map() == null) {
+                metadata[index * 2] = authored.scalar();
+                continue;
             }
-            if (entry.has("roughness_map")) {
-                String name = entry.getString("roughness_map");
-                if (!name.matches("[a-zA-Z0-9_-]+\\.png")) {
-                    throw new IllegalArgumentException("Sculpt roughness_map must name one local PNG: " + name);
-                }
-                FileHandle file = new FileHandle(new File(directory, name));
-                if (!file.exists()) { throw new IllegalArgumentException("Missing sculpt roughness map: " + file); }
-                metadata[index * 2 + 1] = files.size();
-                files.add(file);
+            if (layers.isEmpty()) { width = authored.width(); height = authored.height(); }
+            else if (authored.width() != width || authored.height() != height) {
+                throw new IllegalArgumentException("Roughness array dimensions must agree; no implicit resize: " + name);
             }
+            metadata[index * 2 + 1] = layers.size();
+            layers.add(authored.map());
         }
-        // Decode/validate every supplied image before allocating GL storage. No resizing or inferred material data.
-        var data = new RoughnessArrayData(files);
+        // Validate every supplied map before allocating GL storage. No resizing or inferred material data.
+        var data = new RoughnessArrayData(layers, width, height);
         TextureArray maps = null;
         try {
             maps = new TextureArray(data);
@@ -191,42 +245,46 @@ final class GpuAssets implements Disposable {
         } finally { data.disposeSources(); }
     }
 
+    /** A sculpted material's authored roughness: an R8 map, else a scalar, else -1 for the contextual roughness. */
+    record AuthoredRoughness(float scalar, byte[] map, int width, int height) { }
+
+    /** {@link #sculptRoughness}'s rule for one material, without a graphics context. */
+    static AuthoredRoughness authoredRoughness(GodotMaterial material) {
+        float factor = material.roughness();
+        if (factor < 0 || factor > 1) { throw new IllegalArgumentException("Invalid sculpt roughness: " + material.file); }
+        File file = material.roughnessMap();
+        if (file == null) { return new AuthoredRoughness(factor < 1 ? factor : -1, null, 0, 0); }
+        requireFiles(List.of(new FileHandle(file)));
+        var channel = GpuMaterialMaps.channel(file, material.channel("roughness_texture_channel"));
+        byte[] values = channel.values();
+        boolean uniform = true;
+        for (byte value : values) { uniform &= value == values[0]; }
+        if (uniform) {
+            // A uniform map is a scalar; white with factor 1 is Godot's default and keeps the context.
+            float scalar = (values[0] & 255) / 255f * factor;
+            return new AuthoredRoughness(scalar < 1 ? scalar : -1, null, 0, 0);
+        }
+        if (factor != 1) {
+            for (int texel = 0; texel < values.length; texel++) { values[texel] = (byte) Math.round((values[texel] & 255) * factor); }
+        }
+        return new AuthoredRoughness(-1, values, channel.width(), channel.height());
+    }
+
     /** R8 is independent of the albedo/normal pair; all supplied maps retain their exact declared resolution. */
     private static final class RoughnessArrayData implements TextureArrayData {
-        private final List<Pixmap> sources = new ArrayList<>();
+        private final List<byte[]> sources;
         private final int depth;
         private boolean prepared;
-        private int width = 1, height = 1;
+        private final int width, height;
 
-        RoughnessArrayData(List<FileHandle> files) {
-            depth = Math.max(1, files.size());
-            try {
-                for (FileHandle file : files) {
-                    byte[] bytes = file.readBytes();
-                    if (bytes.length < 26 || bytes[0] != (byte) 137 || bytes[1] != 80 || bytes[2] != 78
-                          || bytes[3] != 71 || bytes[24] != 8 || (bytes[25] != 0 && bytes[25] != 2
-                          && bytes[25] != 4 && bytes[25] != 6)) {
-                        throw new IllegalArgumentException("Roughness requires a non-indexed PNG8; no implicit precision conversion: " + file);
-                    }
-                    Pixmap pixels = GpuColorTexture.decode(file);
-                    sources.add(pixels);
-                    if (sources.size() == 1) { width = pixels.getWidth(); height = pixels.getHeight(); }
-                    if (pixels.getWidth() != width || pixels.getHeight() != height) {
-                        throw new IllegalArgumentException("Roughness array dimensions must agree; no implicit resize: " + file);
-                    }
-                    for (int y = 0; y < height; y++) {
-                        for (int x = 0; x < width; x++) {
-                            int rgba = pixels.getPixel(x, y), r = rgba >>> 24;
-                            if (r != ((rgba >>> 16) & 255) || r != ((rgba >>> 8) & 255)) {
-                                throw new IllegalArgumentException("Roughness map must contain scalar data: " + file);
-                            }
-                        }
-                    }
-                }
-            } catch (RuntimeException exception) { disposeSources(); throw exception; }
+        RoughnessArrayData(List<byte[]> sources, int width, int height) {
+            this.sources = new ArrayList<>(sources);
+            depth = Math.max(1, sources.size());
+            this.width = width;
+            this.height = height;
         }
 
-        void disposeSources() { sources.forEach(Pixmap::dispose); sources.clear(); }
+        void disposeSources() { sources.clear(); }
         @Override public boolean isPrepared() { return prepared; }
         @Override public void prepare() { prepared = true; }
         @Override public int getWidth() { return width; }
@@ -249,12 +307,7 @@ final class GpuAssets implements Disposable {
                 for (int layer = 0; layer < getDepth(); layer++) {
                     upload.clear();
                     if (sources.isEmpty()) { upload.put((byte) 0); }
-                    else {
-                        Pixmap pixels = sources.get(layer);
-                        for (int y = 0; y < height; y++) {
-                            for (int x = 0; x < width; x++) { upload.put((byte) (pixels.getPixel(x, y) >>> 24)); }
-                        }
-                    }
+                    else { upload.put(sources.get(layer)); }
                     upload.flip();
                     Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, width, height, 1,
                           GL30.GL_RED, GL20.GL_UNSIGNED_BYTE, upload);
@@ -274,11 +327,14 @@ final class GpuAssets implements Disposable {
      */
     MaterialArrays roadArray() {
         if (roadArray == null) {
-            var files = new ArrayList<FileHandle>();
+            var layers = new ArrayList<Layer>();
             for (String name : GpuRoads.MATERIALS) {
-                for (String map : List.of("", "-normal", "-surface")) { files.add(materialFile("roads/" + name + map)); }
+                for (var layout : List.of(GpuMaterialMaps.Layout.COLOR, GpuMaterialMaps.Layout.NORMAL,
+                      GpuMaterialMaps.Layout.RELIEF)) {
+                    layers.add(layer("roads/" + name, layout));
+                }
             }
-            roadArray = repeatingArray(files, 3);
+            roadArray = repeatingArray(layers, 3);
         }
         return roadArray;
     }
@@ -288,21 +344,31 @@ final class GpuAssets implements Disposable {
         @Override public void dispose() { color.dispose(); data.dispose(); }
     }
 
-    /** Sets of aligned maps; their first map is colour and all remaining maps carry numerical data. */
-    private static MaterialArrays repeatingArray(List<FileHandle> files, int maps) {
-        requireFiles(files);
-        if (files.isEmpty() || maps < 2 || files.size() % maps != 0) {
+    /** One array layer: a board material's packed layout and its dimensions. */
+    record Layer(int width, int height, Supplier<Pixmap> pixels) { }
+
+    private Layer layer(String name, GpuMaterialMaps.Layout layout) {
+        int[] size = size(name, layout);
+        return new Layer(size[0], size[1], packed(name, layout));
+    }
+
+    /**
+     * Sets of aligned maps; their first map is colour and all remaining maps carry numerical data. Both arrays share the
+     * largest layer's grid, so a material exported larger keeps its detail; smaller layers are resampled to it.
+     */
+    private static MaterialArrays repeatingArray(List<Layer> layers, int maps) {
+        if (layers.isEmpty() || maps < 2 || layers.size() % maps != 0) {
             throw new IllegalArgumentException("Incomplete repeating material arrays");
         }
-        var colors = new ArrayList<FileHandle>();
-        var data = new ArrayList<FileHandle>();
-        for (int index = 0; index < files.size(); index++) {
-            (index % maps == 0 ? colors : data).add(files.get(index));
+        var colors = new ArrayList<Supplier<Pixmap>>();
+        var data = new ArrayList<Supplier<Pixmap>>();
+        int width = 0, height = 0;
+        for (int index = 0; index < layers.size(); index++) {
+            Layer layer = layers.get(index);
+            (index % maps == 0 ? colors : data).add(layer.pixels());
+            width = Math.max(width, layer.width());
+            height = Math.max(height, layer.height());
         }
-        // Both arrays retain the previous set's grid, even when a numerical source has a different size.
-        var first = GpuColorTexture.decode(files.getFirst());
-        int width = first.getWidth(), height = first.getHeight();
-        first.dispose();
         TextureArray color = null, numeric = null;
         try {
             color = repeatingArray(new MaterialArrayData(colors, width, height, true));
@@ -335,13 +401,12 @@ final class GpuAssets implements Disposable {
 
     /** A single storage domain; source bytes are unchanged unless the existing grid requires resizing. */
     private static final class MaterialArrayData implements TextureArrayData {
-        private final List<FileHandle> files;
+        private final List<Supplier<Pixmap>> files;
         private final int width, height;
         private final boolean color;
         private boolean prepared;
 
-        MaterialArrayData(List<FileHandle> files, int width, int height, boolean color) {
-            requireFiles(files);
+        MaterialArrayData(List<Supplier<Pixmap>> files, int width, int height, boolean color) {
             this.files = List.copyOf(files);
             this.width = width;
             this.height = height;
@@ -372,7 +437,7 @@ final class GpuAssets implements Disposable {
             Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 1);
             try {
                 for (int layer = 0; layer < files.size(); layer++) {
-                    var pixels = GpuColorTexture.decode(files.get(layer));
+                    var pixels = files.get(layer).get();
                     try {
                         var upload = GpuColorTexture.arrayPixels(pixels, width, height, color);
                         try {
@@ -625,7 +690,8 @@ final class GpuAssets implements Disposable {
         return industrial.computeIfAbsent(layout, key -> {
             // Textures are asset-owned; decode before allocating native mesh buffers.
             Texture paint = material("structures/industrial/paint"), steel = material("structures/industrial/steel");
-            var data = BoardIndustrial.model(key);
+            // Their planar repeats widen with their textures (GpuMaterialCatalog); the fan is fitted to its opening.
+            var data = BoardIndustrial.model(key, coverage("structures/industrial/paint"), coverage("structures/industrial/steel"));
             Texture fan = data.materials.size > 2 ? material("structures/industrial/fan") : null;
             Model model = new Model(data);
             for (var surface : model.materials) {
@@ -679,67 +745,61 @@ final class GpuAssets implements Disposable {
         }).get(level);
     }
 
+    /** A board material's colour: albedo with its coverage, or with height for sculpted terrain. */
     Texture material(String name) {
-        return texture(materialFile(name), true);
+        return texture(name, GpuMaterialMaps.colorLayout(name), true);
     }
 
-    Texture materialData(String name) {
-        return texture(materialFile(name), false);
+    /** A board material's normal map in the board's layout (GpuMaterialMaps.normalLayout). */
+    Texture materialNormal(String name) {
+        return texture(name, GpuMaterialMaps.normalLayout(name), false);
+    }
+
+    /** The albedo image of a board material, for code that composes its own textures from it. */
+    FileHandle albedo(String name) {
+        FileHandle file = new FileHandle(definition(name).albedo());
+        requireFiles(List.of(file));
+        return file;
     }
 
     Texture scatter() {
-        return materials.computeIfAbsent("scatter-atlas", key -> GpuScatter.atlas(root));
+        return materials.computeIfAbsent("scatter-atlas", key -> GpuScatter.atlas(this));
     }
 
     Cliff road(String name) {
-        return relief("roads", name);
+        return cliffs.computeIfAbsent("roads/" + name, key -> new Cliff(texture(key, GpuMaterialMaps.Layout.COLOR, true),
+              texture(key, GpuMaterialMaps.Layout.NORMAL, false), texture(key, GpuMaterialMaps.Layout.RELIEF, false)));
     }
 
     Ice ice() {
         if (ice == null) {
-            FileHandle color = materialFile("terrain/ice/sheet");
-            List<FileHandle> maps = List.of(materialFile("terrain/ice/sheet-normal"), materialFile("terrain/ice/sheet-surface"));
-            requireFiles(List.of(color, maps.get(0), maps.get(1)));
-            var first = GpuColorTexture.decode(maps.getFirst());
-            int width = first.getWidth(), height = first.getHeight();
-            first.dispose();
-            ice = new Ice(texture(color, true), repeatingArray(new MaterialArrayData(maps, width, height, false)));
+            String name = "terrain/ice/sheet";
+            Texture color = texture(name, GpuMaterialMaps.Layout.COLOR, true);
+            var maps = List.of(layer(name, GpuMaterialMaps.Layout.NORMAL), layer(name, GpuMaterialMaps.Layout.ICE));
+            int width = Math.max(maps.get(0).width(), maps.get(1).width());
+            int height = Math.max(maps.get(0).height(), maps.get(1).height());
+            ice = new Ice(color, repeatingArray(new MaterialArrayData(maps.stream().map(Layer::pixels).toList(), width, height,
+                  false)), coverage(name));
         }
         return ice;
     }
 
-    private Cliff relief(String folder, String family) {
-        return cliffs.computeIfAbsent(folder + "/" + family, key -> {
-            FileHandle color = materialFile(key);
-            FileHandle normal = materialFile(key + "-normal");
-            FileHandle surface = materialFile(key + "-surface");
-            requireFiles(List.of(color, normal, surface));
-            return new Cliff(texture(color, true), texture(normal, false), texture(surface, false));
-        });
-    }
-
-    /** One complete sculpt material and its authored repeat scale. */
+    /** One complete sculpt material and its repeat scale. */
     Sculpt sculpt(String name) {
-        return sculpts.computeIfAbsent(name, key -> {
-            JsonValue entry = sculptEntry(key);
-            return new Sculpt(texture(materialFile("terrain/surfaces/" + key), true), texture(materialFile("terrain/surfaces/" + key + "-normal"), false),
-                  entry.getFloat("tile"));
-        });
+        return sculpts.computeIfAbsent(name, key -> new Sculpt(material(sculptName(key)), materialNormal(sculptName(key)),
+              sculptTile(key)));
     }
 
-    /** Array-backed materials need the repeat scale without decoding and uploading a second set of 2D textures. */
+    /**
+     * The metres one repeat of a sculpted-terrain material covers: its catalogued repeat at its catalogued width, widened
+     * with the texture ({@link #coverage}). Array-backed materials need it without uploading a second set of 2D textures.
+     */
     float sculptTile(String name) {
-        return sculptEntry(name).getFloat("tile");
-    }
-
-    private JsonValue sculptEntry(String name) {
-        return sculptEntries.computeIfAbsent(name, key -> {
-            FileHandle definition = new FileHandle(new File(root, "textures/terrain/surfaces/" + key + ".json"));
-            requireFiles(List.of(definition, materialFile("terrain/surfaces/" + key),
-                  materialFile("terrain/surfaces/" + key + "-normal")));
-            // Like the textures, metadata belongs to this asset owner; asset reload creates a fresh owner.
-            return new JsonReader().parse(definition);
-        });
+        String material = sculptName(name);
+        definition(material);
+        float metres = catalog().loose(material).metres();
+        if (Float.isNaN(metres)) { throw new IllegalArgumentException("A sculpted material needs its catalogued metres: " + name); }
+        return metres * coverage(material);
     }
 
     private static void requireFiles(List<FileHandle> files) {
@@ -748,10 +808,6 @@ final class GpuAssets implements Disposable {
                 throw new IllegalArgumentException("Missing required Enhanced terrain asset: " + file);
             }
         }
-    }
-
-    private FileHandle materialFile(String name) {
-        return new FileHandle(new File(root, "textures/" + name + ".png"));
     }
 
     /** Original rim lightness mask for drops up to two levels, without normalization or generated normals. */
@@ -772,15 +828,27 @@ final class GpuAssets implements Disposable {
 
     private BoardScene.Pixels loadRimMask(String asset) {
         try {
-            return new BoardScene.Pixels(ImageIO.read(materialFile(asset).file()));
+            return new BoardScene.Pixels(ImageIO.read(albedo(asset).file()));
         } catch (IOException error) {
             throw new UncheckedIOException("Cannot load the cliff-top rim mask", error);
         }
     }
 
-    private Texture texture(FileHandle file, boolean color) {
-        return materials.computeIfAbsent((color ? "color:" : "data:") + file.file().toPath().toAbsolutePath().normalize(), key -> {
-            Texture texture = color ? GpuColorTexture.create(file, true) : GpuColorTexture.createData(file, true);
+    /**
+     * A board material's packed layout as a texture, keyed by its main map so a model naming that map shares it
+     * (GpuMaterialMaps.modelMap).
+     */
+    private Texture texture(String name, GpuMaterialMaps.Layout layout, boolean color) {
+        return texture(new FileHandle(GpuMaterialMaps.primary(definition(name), layout)), color,
+              GpuMaterialMaps.cacheSuffix(layout), packed(name, layout));
+    }
+
+    private Texture texture(FileHandle file, boolean color) { return texture(file, color, "", null); }
+
+    private Texture texture(FileHandle file, boolean color, String suffix, Supplier<Pixmap> pixels) {
+        return materials.computeIfAbsent((color ? "color:" : "data:") + file.file().toPath().toAbsolutePath().normalize() + suffix, key -> {
+            Texture texture = pixels != null ? GpuColorTexture.create(pixels, true, color)
+                  : color ? GpuColorTexture.create(file, true) : GpuColorTexture.createData(file, true);
             texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
             boolean repeating = file.file().toPath().toAbsolutePath().normalize()
                   .startsWith(new File(root, "textures").toPath().toAbsolutePath().normalize());
@@ -980,7 +1048,9 @@ final class GpuAssets implements Disposable {
         magmas.clear();
         lavaEmission = null;
         sculpts.clear();
-        sculptEntries.clear();
+        definitions.clear();
+        coverages.clear();
+        catalog = null;
         if (sculptArray != null) { sculptArray.dispose(); sculptArray = null; }
         if (sculptRoughness != null) { sculptRoughness.maps().dispose(); sculptRoughness = null; }
         if (roadArray != null) { roadArray.dispose(); roadArray = null; }

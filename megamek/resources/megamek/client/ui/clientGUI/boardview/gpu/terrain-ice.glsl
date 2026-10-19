@@ -17,6 +17,8 @@ const float u_iceMode = ICE_MODE;
 uniform float u_iceMode;
 #endif
 uniform float u_iceMetre;
+// GpuAssets.coverage of the sheet's maps: a wider texture repeats less often at the same texel density.
+uniform float u_iceCoverage;
 uniform float u_iceLevel;      // world units per level
 uniform float u_iceWaterline;  // world units from a water hex's level down to its surface
 uniform float u_iceNormals;
@@ -142,12 +144,13 @@ vec3 iceCascade(vec3 worldDx, vec3 worldDy) {
     vec3 world = v_cloudPosition / u_iceMetre;
     // Authored once with the retained geometry: crest arc length and actual downward path length.
     // Capture UV gradients before the detail branch; no derivative depends on a coverage discard.
-    vec2 uv = v_diffuseUV, uvDx = dFdx(v_diffuseUV), uvDy = dFdy(v_diffuseUV);
+    vec2 uv = v_diffuseUV / u_iceCoverage, uvDx = dFdx(v_diffuseUV) / u_iceCoverage, uvDy = dFdy(v_diffuseUV) / u_iceCoverage;
     // Deliberately retain the broad, world-anchored frost field across the separate closed-surface charts.
     vec2 along = vec2(.79, .61);
     vec4 properties = textureGrad(u_iceMaps, vec3(uv, 1.0), uvDx, uvDy);
     vec3 veins = iceNoise(vec2(dot(world.xy, along), world.z * .09), .65, vec2(18.7, 6.3));
-    float detail = 1.0 - smoothstep(.008, .08, max(length(uvDx), length(uvDy)));
+    // The fade follows the texel footprint, which a wider texture keeps at the same density.
+    float detail = 1.0 - smoothstep(.008, .08, max(length(uvDx), length(uvDy)) * u_iceCoverage);
     float bubbles = properties.b * detail;
     float rime = smoothstep(.27, .55, veins.x * .70 + properties.a * .30);
     // Snow settles on upward shelves; the vertical faces retain glazed ribs instead of lake-shaped snow patches.
@@ -191,12 +194,12 @@ vec3 iceFinish(vec3 underlying, vec3 worldDx, vec3 worldDy) {
     float thin = step(1.5, u_iceMode) * (1.0 - step(2.5, u_iceMode));
     bool lead = slab > .5 && v_color.r < .5;
     vec2 world = v_cloudPosition.xy / u_iceMetre;
-    vec2 metres = vec2(world.x, -world.y), uv = metres / 24.0;
+    vec2 metres = vec2(world.x, -world.y), uv = metres / (24.0 * u_iceCoverage);
     // The caller captured derivatives before the supporting surface's road/scar coverage discard.
     // These affine transforms retain the same map footprint through sheet/lead/border early-outs.
     vec2 metresDx = vec2(worldDx.x, -worldDx.y) / u_iceMetre;
     vec2 metresDy = vec2(worldDy.x, -worldDy.y) / u_iceMetre;
-    vec2 uvDx = metresDx / 24.0, uvDy = metresDy / 24.0;
+    vec2 uvDx = metresDx / (24.0 * u_iceCoverage), uvDy = metresDy / (24.0 * u_iceCoverage);
     float pixel = max(length(abs(metresDx) + abs(metresDy)), 1e-4);
     // Snow and ice cover ground up to steep banks; a slab's own cut edges are ice as well.
     float coverage = max(slab, smoothstep(.2, .45, face.z));
@@ -233,7 +236,7 @@ vec3 iceFinish(vec3 underlying, vec3 worldDx, vec3 worldDy) {
     }
     vec2 footprint = max(abs(uvDx), abs(uvDy));
     // Shading LOD follows projected texel footprint; mipmaps filter every map with the same derivatives.
-    float detail = 1.0 - smoothstep(.006, .07, max(footprint.x, footprint.y));
+    float detail = 1.0 - smoothstep(.006, .07, max(footprint.x, footprint.y) * u_iceCoverage);
     // Broad world fields, and which of two differently rotated samples of the maps shows, so the 24 m repeat does not
     // read across a lake.
     vec3 broad = iceNoise(metres, 12.0, vec2(9.3, 41.7)) * .65 + iceNoise(metres, 4.0, vec2(27.1, 3.9)) * .35;
@@ -310,7 +313,7 @@ vec3 iceFinish(vec3 underlying, vec3 worldDx, vec3 worldDy) {
         }
         if (snow > 0.0) {
             mat2 stretch = windStretch * (24.0 / 9.0);
-            dunes = iceMappedNormal(wind / 9.0, stretch, stretch * uvDx, stretch * uvDy);
+            dunes = iceMappedNormal(wind / (9.0 * u_iceCoverage), stretch, stretch * uvDx, stretch * uvDy);
         }
         vec3 micro = mix(polished, dunes, snow);
         vec3 tangent = normalize(vec3(face.z, 0.0, -face.x));

@@ -117,8 +117,14 @@ class BoardBridgeFootingTest {
         var originalData = Configuration.dataDir();
         var source = originalData.toPath().resolve("models/board");
         var target = Files.createDirectories(directory.resolve("models/board"));
-        Files.createDirectories(target.resolve("textures/terrain/surfaces"));
-        Files.copy(source.resolve("textures/terrain/surfaces/concrete.png"), target.resolve("textures/terrain/surfaces/concrete.png"));
+        // The concrete material (its Godot 4 Standard resource and maps) with the catalogue of loose materials.
+        var concrete = Files.createDirectories(target.resolve("textures/terrain/surfaces"));
+        Files.copy(source.resolve("textures/materials.json"), target.resolve("textures/materials.json"));
+        try (var files = Files.list(source.resolve("textures/terrain/surfaces"))) {
+            for (Path file : files.filter(path -> path.getFileName().toString().matches("concrete(\\.tres|_.*\\.png)")).toList()) {
+                Files.copy(file, concrete.resolve(file.getFileName()));
+            }
+        }
         // The reload also rereads the pier kits, the bridge's and the maglev's.
         Files.createDirectories(target.resolve("bridges"));
         Files.copy(source.resolve("bridges/bridge-pier.glb"), target.resolve("bridges/bridge-pier.glb"));

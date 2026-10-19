@@ -188,7 +188,7 @@ class GpuBuildingMaterialsSmokeTest {
             }
             for (var surface : BoardScene.Surface.values()) {
                 // Classic walls are the Classic tiles in terrain/classic; each loads at its authored size.
-                var source = ImageIO.read(new File(Configuration.dataDir(), "models/board/textures/" + surface.classicWall + ".png"));
+                var source = ImageIO.read(new File(Configuration.dataDir(), "models/board/textures/" + surface.classicWall + "_albedo.png"));
                 assertNotNull(source, surface.classicWall);
                 Texture texture = assets.material(surface.classicWall);
                 assertEquals(source.getWidth(), texture.getWidth(), surface.classicWall + " keeps its authored width");

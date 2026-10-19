@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.FloatBuffer;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -22,7 +21,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -67,16 +65,13 @@ class GpuMagmaSmokeTest {
         var roots = new ArrayList<Path>();
         for (int index = 0; index < 4; index++) {
             Path root = directory.resolve("source-" + index);
-            Path lava = Files.createDirectories(root.resolve("models/board/textures/terrain/lava"));
+            Path textures = root.resolve("models/board/textures");
             // The final repeat changes coverage to zero while retaining exactly the same emitted light.
             int alpha = index == 3 ? 0 : 255;
-            for (var map : Map.of("", 0xff000000, "-normal", 0xff8080ff,
-                  "-surface", 0x0080ccff, "-heat", (alpha << 24) | 0x004080c0).entrySet()) {
-                var image = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
-                for (int y = 0; y < 2; y++) for (int x = 0; x < 2; x++) { image.setRGB(x, y, map.getValue()); }
-                assertTrue(ImageIO.write(image, "png", lava.resolve("lava" + map.getKey() + ".png").toFile()));
-            }
-            Files.writeString(lava.resolve("lava.json"), "{\"emissionScale\":" + (index == 3 ? 2 : index * 2) + "}");
+            BoardMaterialFiles.relief(textures, "terrain/lava/lava", filled(0xff000000), filled(0xff8080ff),
+                  filled(0x0080ccff));
+            BoardMaterialFiles.heat(textures, "terrain/lava/lava", filled((alpha << 24) | 0x004080c0),
+                  index == 3 ? 2 : index * 2);
             roots.add(root);
         }
         var failure = new AtomicReference<Throwable>();
@@ -469,6 +464,13 @@ class GpuMagmaSmokeTest {
     }
 
     /** A zero-weight plateau meets positive coverage inside a derivative quad, not on its even-pixel edge. */
+    /** A 2-pixel square of one ARGB colour. */
+    private static BufferedImage filled(int argb) {
+        var image = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 2; y++) for (int x = 0; x < 2; x++) { image.setRGB(x, y, argb); }
+        return image;
+    }
+
     private static Mesh paletteQuad(int scenario, float span) {
         float[] vertices = new float[12 * 14];
         int offset = 0;

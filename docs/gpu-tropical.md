@@ -33,8 +33,9 @@ no separate renderer, animation timeline or picking geometry.
 - `tools/materials/terrain/surfaces/tropical-ground/tropical-ground.ptex`: Material
   Maker project and its `sources/` images. `python tools/materials/export.py`, run
   from the mm-data root, exports it with the other projects.
-- `data/models/board/textures/terrain/surfaces/tropical-ground.png` and
-  `tropical-ground-normal.png`: 512-pixel runtime maps, four-metre repeat.
+- `data/models/board/textures/terrain/surfaces/tropical-ground.tres` and its
+  `_albedo`, `_heightmap`, `_normal` and `_orm` maps: a 512-pixel Godot 4 Standard
+  material ([board materials](gpu-board-materials.md)), four-metre repeat.
 
 Normal relief is an artistic estimate from the generated source, not a measured
 scan.

@@ -369,11 +369,14 @@ atlas before the previous atlas is disposed.
 
 ## Assets and fallback
 
-Road maps live in `mm-data/data/models/board/textures/roads`.
-Each material has albedo, tangent normals and a packed surface map:
-R height, G roughness, B cavity occlusion, A relief range. Texture height affects fine
+Road materials live in `mm-data/data/models/board/textures/roads` as Godot 4 Standard
+materials ([board materials](gpu-board-materials.md)). The GPU receives albedo, tangent
+normals and a packed surface map: R height, G roughness, B cavity occlusion, A relief
+range (from `heightmap_scale`). Texture height affects fine
 coverage/wetting; the ground mesh continues to own actual height and support.
 The Material Maker projects under mm-data's `tools/materials/roads/` export the aligned maps.
+A road texture exported wider than its catalogued 1024 pixels covers proportionally more
+road before it repeats.
 
 Unsupported road levels, custom artwork combinations and submerged roads keep the
 existing artwork fallback. Ice on dry ground supports native roads. Supported road

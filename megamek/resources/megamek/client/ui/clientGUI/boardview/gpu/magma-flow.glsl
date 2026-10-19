@@ -75,7 +75,7 @@ vec3 magmaDrift(vec3 face, vec2 current, float bank, vec4 waves) {
           * smoothstep(.75, .95, abs(face.z));
     // The shared liquid engine samples against this physical velocity (texture repeats per second).
     // magmaPatch transforms it with the same domain/rotation as every map, preventing vertical counterflow.
-    return velocity / magmaRepeatMetres();
+    return velocity / magmaTileMetres();
 }
 
 // The existing shore distance makes a coherent hot interior and a cooler red margin around retained dark rafts.

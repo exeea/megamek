@@ -51,7 +51,7 @@ class GpuColorTextureSmokeTest {
             Files.createDirectories(scars);
             // Other brush styles remain the real independent round-impact controls.
             try (var files = Files.list(previous.toPath().resolve("models/board/textures/terrain/damage"))) {
-                for (var file : files.filter(path -> path.toString().endsWith(".png")).toList()) {
+                for (var file : files.filter(path -> path.toString().endsWith(".png") || path.toString().endsWith(".tres")).toList()) {
                     Files.copy(file, scars.resolve(file.getFileName()));
                 }
             }
@@ -67,6 +67,7 @@ class GpuColorTextureSmokeTest {
                 registration.append(']');
             }
             Files.writeString(crops.resolve("crop-row.json"), registration.append('}'));
+            for (String view : List.of("side", "front", "top")) { BoardMaterialFiles.tres(crops, "crop-row-" + view); }
             var compose = GpuBiomeVegetation.class.getDeclaredMethod("cropTextures");
             compose.setAccessible(true);
             int[][] original = null;
@@ -87,7 +88,7 @@ class GpuColorTextureSmokeTest {
                                 }
                             }
                         }
-                        javax.imageio.ImageIO.write(image, "png", crops.resolve("crop-row-" + view + ".png").toFile());
+                        javax.imageio.ImageIO.write(image, "png", crops.resolve("crop-row-" + view + "_albedo.png").toFile());
                     }
                     var textures = (Texture[]) compose.invoke(null);
                     try {
@@ -108,7 +109,7 @@ class GpuColorTextureSmokeTest {
                         for (int x = 32; x < 224; x++) { image.setRGB(x, y, 0xff606060); }
                     }
                     for (String name : List.of("laser-gouge", "ppc-gouge", "ballistic-gouge")) {
-                        javax.imageio.ImageIO.write(image, "png", scars.resolve(name + ".png").toFile());
+                        javax.imageio.ImageIO.write(image, "png", scars.resolve(name + "_albedo.png").toFile());
                     }
                     var damage = new GpuGroundDamage();
                     try {
@@ -593,11 +594,18 @@ class GpuColorTextureSmokeTest {
             try { PixmapIO.writePNG(constant, pixels); } finally { pixels.dispose(); }
             pixels = pattern();
             try { PixmapIO.writePNG(varying, pixels); } finally { pixels.dispose(); }
-            // Exercise the actual owned pair, including its sized storage and compact material indices.
+            FileHandle wide = new FileHandle(directory.resolve("wide.png").toFile());
+            pixels = new Pixmap(4, 4, Pixmap.Format.RGBA8888);
+            pixels.setBlending(Pixmap.Blending.None);
+            pixels.setColor(0x80808080);
+            pixels.fill();
+            try { PixmapIO.writePNG(wide, pixels); } finally { pixels.dispose(); }
+            // Exercise the actual owned pair, including its sized storage and compact material indices. The pair takes
+            // its largest layer's grid (2 by 2), so the constant layer is resized up to it.
             var factory = GpuAssets.class.getDeclaredMethod("repeatingArray", List.class, int.class);
             factory.setAccessible(true);
-            var arrays = (GpuAssets.MaterialArrays) factory.invoke(null,
-                  List.of(constant, constant, varying, varying, gray, gray), 2);
+            var arrays = (GpuAssets.MaterialArrays) factory.invoke(null, List.of(layer(constant), layer(constant),
+                  layer(varying), layer(varying), layer(gray), layer(gray)), 2);
             try (var sample = new Sampler(true)) {
                 arrays.color().bind();
                 assertEquals(GL30.GL_SRGB8_ALPHA8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
@@ -607,33 +615,17 @@ class GpuColorTextureSmokeTest {
                       GL11.GL_TEXTURE_INTERNAL_FORMAT), "Numerical storage has no colour transfer");
                 assertEquals(3, arrays.color().getDepth());
                 assertEquals(3, arrays.data().getDepth());
+                assertEquals(2, arrays.color().getWidth(), "The largest layer sets the grid");
                 assertPixel(sample.read(arrays.color(), .5f, .5f, 0, 0), .21586050, .21586050, .21586050,
                       128.0 / 255, .001, "Only colour RGB is decoded; height remains raw");
                 assertPixel(sample.read(arrays.data(), .5f, .5f, 0, 0), 128.0 / 255, 128.0 / 255, 128.0 / 255,
                       128.0 / 255, .001, "Normal/data layers retain their numerical values");
                 arrays.color().bind();
-                var stored = BufferUtils.newByteBuffer(3 * 4);
+                var stored = BufferUtils.newByteBuffer(3 * 4 * 4);
                 GL11.glGetTexImage(GL30.GL_TEXTURE_2D_ARRAY, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, stored);
-                for (int channel = 0; channel < 4; channel++) {
-                    assertEquals(channel == 3 ? 128 : 188, Byte.toUnsignedInt(stored.get(4 + channel)),
-                          "Linear resize stores sRGB byte 188 and independent coverage byte 128");
+                for (int index = 0; index < 4 * 4; index++) {
+                    assertEquals(128, Byte.toUnsignedInt(stored.get(index)), "A uniform layer keeps its bytes when resized");
                 }
-                // Use the same hardware decoder, whose permitted precision need not match CPU sRGB exactly.
-                Pixmap referencePixels = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
-                Texture reference;
-                try {
-                    referencePixels.setBlending(Pixmap.Blending.None);
-                    referencePixels.drawPixel(0, 0, 0xBCBCBC80);
-                    reference = GpuColorTexture.create(referencePixels, false);
-                } finally { referencePixels.dispose(); }
-                try (var referenceSample = new Sampler(false)) {
-                    float[] expected = referenceSample.read(reference, .5f, .5f, 0, 0);
-                    float[] actual = sample.read(arrays.color(), .5f, .5f, 1, 0);
-                    assertPixel(actual, expected[0], expected[1], expected[2], expected[3], 0,
-                          "Resized array and fixed-byte colour texture sample identically");
-                } finally { reference.dispose(); }
-                assertPixel(sample.read(arrays.data(), .5f, .5f, 1, 0), 128.0 / 255, 128.0 / 255, 128.0 / 255,
-                      128.0 / 255, .001, "Numerical resize rounds the independent mean to byte 128");
                 assertPixel(sample.read(arrays.color(), .5f, .5f, 2, 0), .21586050, .21586050, .21586050, 1, .001,
                       "File-decoded one-channel artwork is opaque grayscale");
                 assertPixel(sample.read(arrays.data(), .5f, .5f, 2, 0), 128.0 / 255, 128.0 / 255, 128.0 / 255, 1, .001,
@@ -641,8 +633,38 @@ class GpuColorTextureSmokeTest {
             } finally { arrays.dispose(); }
             assertEquals(0, arrays.color().getTextureObjectHandle(), "Pair disposal releases colour");
             assertEquals(0, arrays.data().getTextureObjectHandle(), "Pair disposal releases data");
-            arrays = (GpuAssets.MaterialArrays) factory.invoke(null, List.of(varying, varying), 2);
+            // Black and white columns widened from 2 to 4 texels by a wider layer: colour resizes in linear light
+            // (0, .25, .75, 1 store sRGB bytes 0, 137, 225, 255), numerical data and coverage in their raw values.
+            arrays = (GpuAssets.MaterialArrays) factory.invoke(null, List.of(layer(varying), layer(varying),
+                  layer(wide), layer(wide)), 2);
             try (var sample = new Sampler(true)) {
+                int[] colour = { 0, 137, 225, 255 }, data = { 0, 64, 191, 255 }, coverage = { 64, 96, 160, 192 };
+                for (boolean isColour : new boolean[] { true, false }) {
+                    (isColour ? arrays.color() : arrays.data()).bind();
+                    var stored = BufferUtils.newByteBuffer(2 * 16 * 4);
+                    GL11.glGetTexImage(GL30.GL_TEXTURE_2D_ARRAY, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, stored);
+                    for (int x = 0; x < 4; x++) {
+                        for (int channel = 0; channel < 4; channel++) {
+                            int expected = channel == 3 ? coverage[x] : isColour ? colour[x] : data[x];
+                            assertEquals(expected, Byte.toUnsignedInt(stored.get(x * 4 + channel)),
+                                  (isColour ? "Linear colour" : "Raw data") + " resize, texel " + x + " channel " + channel);
+                        }
+                    }
+                }
+                // Use the same hardware decoder, whose permitted precision need not match CPU sRGB exactly.
+                Pixmap referencePixels = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
+                Texture reference;
+                try {
+                    referencePixels.setBlending(Pixmap.Blending.None);
+                    referencePixels.drawPixel(0, 0, 0x89898960);
+                    reference = GpuColorTexture.create(referencePixels, false);
+                } finally { referencePixels.dispose(); }
+                try (var referenceSample = new Sampler(false)) {
+                    float[] expected = referenceSample.read(reference, .5f, .5f, 0, 0);
+                    float[] actual = sample.read(arrays.color(), 1.5f / 4, .5f, 0, 0);
+                    assertPixel(actual, expected[0], expected[1], expected[2], expected[3], 0,
+                          "Resized array and fixed-byte colour texture sample identically");
+                } finally { reference.dispose(); }
                 assertPixel(sample.read(arrays.color(), .5f, .5f, 0, 0), .5, .5, .5, 128.0 / 255, .001,
                       "Array bilinear filtering decodes before averaging");
                 assertPixel(sample.read(arrays.color(), .5f, .5f, 0, 1), .5, .5, .5, 128.0 / 255, .004,
@@ -651,6 +673,12 @@ class GpuColorTextureSmokeTest {
                       "Numerical mips average raw channels within UNORM8 storage precision");
             } finally { arrays.dispose(); }
         });
+    }
+
+    /** A repeating-array layer of one image, at the dimensions its header declares. */
+    private static GpuAssets.Layer layer(FileHandle file) {
+        int[] size = GpuMaterialMaps.size(file.file());
+        return new GpuAssets.Layer(size[0], size[1], () -> GpuColorTexture.decode(file));
     }
 
     private static Pixmap pattern() {
@@ -733,19 +761,19 @@ class GpuColorTextureSmokeTest {
             try (var sample = new Sampler(true)) {
                 Path sculpt = Files.createDirectories(directory.resolve("models/board/textures/terrain/surfaces"));
                 for (String name : List.of("mapped", "scalar", "legacy")) { sculptPair(sculpt, name); }
-                Files.writeString(sculpt.resolve("mapped.json"), """
-                      {"tile":3,"roughness":0.93,"roughness_map":"roughness.png"}
-                      """);
-                Files.writeString(sculpt.resolve("scalar.json"), "{\"tile\":3,\"roughness\":0.27}");
-                Files.writeString(sculpt.resolve("legacy.json"), "{\"tile\":3}");
+                // Godot's rule: a varying roughness map is a map, a factor below 1 over none is a scalar, and the
+                // default (factor 1 over white) keeps the contextual roughness.
                 int[] values = { 17, 61, 103, 149, 193, 239 };
-                scalarPng(sculpt.resolve("roughness.png"), 3, 2, values);
+                roughnessMap(sculpt.resolve("mapped_orm.png"), 3, 2, values);
+                Path scalar = sculpt.resolve("scalar.tres");
+                Files.writeString(scalar, Files.readString(scalar).replace("roughness = 1.0", "roughness = 0.27")
+                      .replace("roughness_texture = ExtResource( 2 )\n", ""));
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 8);
                 var material = assets.sculptRoughness(List.of("mapped", "scalar", "legacy"));
                 assertEquals(8, GL11.glGetInteger(GL20.GL_UNPACK_ALIGNMENT), "Odd rows must restore unpack state");
                 assertSame(material, assets.sculptRoughness(List.of("mapped", "scalar", "legacy")));
                 org.junit.jupiter.api.Assertions.assertArrayEquals(
-                      new float[] { .93f, 0, .27f, -1, -1, -1 }, material.metadata());
+                      new float[] { -1, 0, .27f, -1, -1, -1 }, material.metadata());
                 material.maps().bind();
                 assertEquals(GL30.GL_R8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
                       GL11.GL_TEXTURE_INTERNAL_FORMAT), "Roughness must use compact numerical storage");
@@ -775,7 +803,7 @@ class GpuColorTextureSmokeTest {
         });
     }
 
-    /** Use the actual shared shader with provider metadata, including a map and scalar on the same material. */
+    /** Use the actual shared shader with provider metadata: an authored map, a scalar and the contextual fallback. */
     private static void assertAuthoredRoughness(GpuAssets.SculptRoughness material) {
         var quad = GpuAtmosphere.screenQuad();
         var shader = GpuGlsl.compile("Authored roughness contract", GpuShaderSource.read("atmosphere.vert"),
@@ -817,28 +845,17 @@ class GpuColorTextureSmokeTest {
                 Path sculpt = Files.createDirectories(directory.resolve("models/board/textures/terrain/surfaces"));
                 sculptPair(sculpt, "first");
                 sculptPair(sculpt, "second");
-                Files.writeString(sculpt.resolve("first.json"), """
-                      {"tile":3,"roughness_map":"first-roughness.png"}
-                      """);
-                Files.writeString(sculpt.resolve("second.json"), """
-                      {"tile":3,"roughness_map":"second-roughness.png"}
-                      """);
-                scalarPng(sculpt.resolve("first-roughness.png"), 3, 2, new int[] { 1, 2, 3, 4, 5, 6 });
-                scalarPng(sculpt.resolve("second-roughness.png"), 2, 2, new int[] { 1, 2, 3, 4 });
+                roughnessMap(sculpt.resolve("first_orm.png"), 3, 2, new int[] { 1, 2, 3, 4, 5, 6 });
+                roughnessMap(sculpt.resolve("second_orm.png"), 2, 2, new int[] { 1, 2, 3, 4 });
                 assertRoughnessRejected("no implicit resize");
-                var image = new BufferedImage(3, 2, BufferedImage.TYPE_INT_RGB);
-                image.setRGB(1, 1, 0x204080);
-                javax.imageio.ImageIO.write(image, "png", sculpt.resolve("second-roughness.png").toFile());
-                assertRoughnessRejected("scalar data");
-                image = new BufferedImage(3, 2, BufferedImage.TYPE_USHORT_GRAY);
-                image.getRaster().setSample(1, 1, 0, 32768);
-                javax.imageio.ImageIO.write(image, "png", sculpt.resolve("second-roughness.png").toFile());
-                assertRoughnessRejected("non-indexed PNG8");
-                Files.delete(sculpt.resolve("second-roughness.png"));
-                assertRoughnessRejected("Missing sculpt roughness map");
-                scalarPng(sculpt.resolve("second-roughness.png"), 3, 2, new int[] { 1, 2, 3, 4, 5, 6 });
-                Files.delete(sculpt.resolve("first-normal.png"));
-                assertRoughnessRejected("first-normal.png");
+                Files.delete(sculpt.resolve("second_orm.png"));
+                assertRoughnessRejected("second_orm.png");
+                roughnessMap(sculpt.resolve("second_orm.png"), 3, 2, new int[] { 1, 2, 3, 4, 5, 6 });
+                Path first = sculpt.resolve("first.tres");
+                Files.writeString(first, Files.readString(first).replace("roughness = 1.0", "roughness = 1.5"));
+                assertRoughnessRejected("Invalid sculpt roughness");
+                Files.delete(first);
+                assertRoughnessRejected("first.tres");
             } finally { megamek.common.Configuration.setDataDir(previous); }
         });
     }
@@ -859,9 +876,9 @@ class GpuColorTextureSmokeTest {
             megamek.common.Configuration.setDataDir(directory.toFile());
             try (var array = new Sampler(true); var texture = new Sampler(false)) {
                 Path sculpt = Files.createDirectories(directory.resolve("models/board/textures/terrain/surfaces"));
-                for (String missing : List.of("none", "earth.png", "earth-normal.png", "earth.json")) {
+                for (String missing : List.of("none", "earth_albedo.png", "earth_heightmap.png", "earth_normal.png",
+                      "earth_orm.png", "earth.tres")) {
                     sculptPair(sculpt, "earth");
-                    Files.writeString(sculpt.resolve("earth.json"), "{\"tile\":3}");
                     if (!missing.equals("none")) { Files.delete(sculpt.resolve(missing)); }
                     var assets = new GpuAssets();
                     try {
@@ -887,19 +904,25 @@ class GpuColorTextureSmokeTest {
         });
     }
 
+    /** A sculpted material repeating every 3 m: colour 0x1080e0 at height 0x40, the board's normal 0x40c0f0 with AO 0x60. */
     private static void sculptPair(Path sculpt, String name) throws Exception {
-        GpuAssetReloadTest.png(sculpt.resolve(name + ".png"), 0x401080e0);
-        GpuAssetReloadTest.png(sculpt.resolve(name + "-normal.png"), 0x6040c0f0);
+        BoardMaterialFiles.sculpt(sculpt.getParent().getParent(), name, filled(0x401080e0), filled(0x6040c0f0), 3);
     }
 
-    private static void scalarPng(Path path, int width, int height, int[] values) throws Exception {
+    private static BufferedImage filled(int argb) {
+        var image = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) { image.setRGB(x, y, argb); }
+        return image;
+    }
+
+    /** An ORM map of full occlusion whose roughness (G) holds {@code values}. */
+    private static void roughnessMap(Path path, int width, int height, int[] values) throws Exception {
         var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) { image.setRGB(x, y, values[y * width + x] * 0x010101); }
+            for (int x = 0; x < width; x++) { image.setRGB(x, y, 0xff0000 | values[y * width + x] << 8); }
         }
-        assertTrue(javax.imageio.ImageIO.write(image, "png", path.toFile()));
+        javax.imageio.ImageIO.write(image, "png", path.toFile());
     }
-
 
     private static BoardScene.Pixels pixels(int rgba) { return pixels(rgba, 4); }
 

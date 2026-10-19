@@ -716,6 +716,13 @@ final class GpuTerrain implements Disposable {
                     if (mask != null) { target.set(id, mask.textureDescription); }
                 }
             });
+            result.register("u_bridgeDeckCoverage", new BaseShader.LocalSetter() {
+                @Override
+                public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                    FloatAttribute deck = attributes.get(FloatAttribute.class, BridgeDeck.TYPE);
+                    target.set(id, deck == null ? 1 : deck.value);
+                }
+            });
             result.register("u_roadTransition", new BaseShader.LocalSetter() {
                 @Override
                 public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
@@ -1502,10 +1509,16 @@ final class GpuTerrain implements Disposable {
         public Pit copy() { return new Pit(); }
     }
 
-    /** Bridge asphalt uses the road's world UVs, even when its model instance rotates or changes length. */
+    /**
+     * Bridge asphalt uses the road's world UVs, even when its model instance rotates or changes length. The value is
+     * the road texture's coverage: its world-space repeat widens with its texture (GpuAssets.coverage).
+     */
     private static final class BridgeDeck extends FloatAttribute {
         static final long TYPE = register("boardBridgeDeck");
-        BridgeDeck() { super(TYPE, 1); }
+        BridgeDeck(float coverage) { super(TYPE, coverage); }
+
+        @Override
+        public BridgeDeck copy() { return new BridgeDeck(value); }
     }
 
     /** Foliage shading: solid, canopy, snow, fungal fruiting body or cyan mycelium. */
@@ -3782,10 +3795,11 @@ final class GpuTerrain implements Disposable {
                   mesh -> sculptedFaces(mesh, surface, wallFaces, Float.NaN, scene, surfaces));
         }
         if (!bridgeSupports.isEmpty()) {
+            float coverage = assets.coverage("terrain/surfaces/concrete");
             solid.addTriangles(material(assets.material("terrain/surfaces/concrete"), false), meshes -> {
                 for (var face : bridgeSupports) {
                     var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
-                    bridgeFace(meshes.get(), face.a(), face.b(), face.c(), normal, Color.WHITE);
+                    bridgeFace(meshes.get(), face.a(), face.b(), face.c(), normal, Color.WHITE, coverage);
                 }
             });
         }
@@ -3894,8 +3908,9 @@ final class GpuTerrain implements Disposable {
             ModelInstance instance = new ModelInstance(model);
             // The road continues inside with the same world UVs, normal/surface maps and weather response as its approach.
             Material tunnelFloor = instance.getMaterial("tunnel-floor");
-            tunnelFloor.set(roadMaterial(GpuRoads.texture(tunnel.kind()).substring("roads/".length()), false));
-            tunnelFloor.set(new BridgeDeck());
+            String road = GpuRoads.texture(tunnel.kind());
+            tunnelFloor.set(roadMaterial(road.substring("roads/".length()), false));
+            tunnelFloor.set(new BridgeDeck(assets.coverage(road)));
             instance.transform.set(tunnel.transform());
             BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
             // The road's portal stays in the Tactical View, as the road does.
@@ -4054,10 +4069,10 @@ final class GpuTerrain implements Disposable {
                     // Terrain scenery shares the ground's lighting and weather response.
                     material.set(new Ground(.15f));
                     if (material.id.equals("rubble-concrete")) {
-                        material.set(TextureAttribute.createNormal(assets.materialData("terrain/surfaces/concrete-normal")));
+                        material.set(TextureAttribute.createNormal(assets.materialNormal("terrain/surfaces/concrete")));
                     } else if (material.id.equals("geyser-rock")) {
-                        material.set(TextureAttribute.createNormal(assets.materialData(feature.asset().endsWith("magma")
-                              ? "terrain/surfaces/volcano-basalt-normal" : "terrain/surfaces/rock-normal")));
+                        material.set(TextureAttribute.createNormal(assets.materialNormal(feature.asset().endsWith("magma")
+                              ? "terrain/surfaces/volcano-basalt" : "terrain/surfaces/rock")));
                     } else if (material.id.equals("geyser-lava")) {
                         Material lava = GpuMagmaShader.material(assets, GpuMagmaShader.LAVA, null);
                         if (lava != null) { for (Attribute attribute : lava) { material.set(attribute.copy()); } }
@@ -5168,9 +5183,10 @@ final class GpuTerrain implements Disposable {
         }
         Material deck = concrete;
         if (bridge.paved()) {
-            deck = roadMaterial(GpuRoads.material(tile, true, GpuRoads.texture(bridge.kind())), false);
+            String road = GpuRoads.material(tile, true, GpuRoads.texture(bridge.kind()));
+            deck = roadMaterial(road, false);
             deck.set(GpuIceShader.road(deck, scene, tile));
-            deck.set(new BridgeDeck());
+            deck.set(new BridgeDeck(assets.coverage("roads/" + road)));
         }
         Material steel = bridge.truss() ? new Material(ColorAttribute.createDiffuse(Color.WHITE), new GpuLinearColors()) : null;
         bridgeFooting(solid, shape, deck, concrete, steel);
@@ -5181,6 +5197,7 @@ final class GpuTerrain implements Disposable {
      * the standard kit and piers) in its facets' recoloured colour, everything else in the structure's concrete.
      */
     private void bridgeFooting(Layer solid, BoardBridge.Shape shape, Material deck, Material structure, Material steel) {
+        float coverage = assets.coverage("terrain/surfaces/concrete");
         for (var part : List.of(BoardBridge.Part.TOP, BoardBridge.Part.STRUCTURE, BoardBridge.Part.STEEL)) {
             if (part == BoardBridge.Part.STEEL && (steel == null || shape.facets().stream().noneMatch(f -> f.part() == part))) {
                 continue;
@@ -5197,17 +5214,21 @@ final class GpuTerrain implements Disposable {
                           ? face.part() : BoardBridge.Part.STRUCTURE;
                     if (drawn != part) { continue; }
                     bridgeFace(meshes.get(), face.a(), face.b(), face.c(), face.normal(),
-                          face.colour() == null ? Color.WHITE : face.colour());
+                          face.colour() == null ? Color.WHITE : face.colour(), coverage);
                 }
             });
         }
     }
 
-    /** Decks, terminals and their supports share one world-space concrete texture scale. */
-    private static void bridgeFace(MeshPartBuilder mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 normal, Color colour) {
+    /**
+     * Decks, terminals and their supports share one world-space concrete texture scale, widened with the concrete
+     * texture ({@code coverage}, GpuAssets.coverage).
+     */
+    private static void bridgeFace(MeshPartBuilder mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 normal, Color colour,
+          float coverage) {
         var points = new MeshPartBuilder.VertexInfo[3];
         int i = 0;
-        float repeat = BoardGeometry.width() / 5;
+        float repeat = BoardGeometry.width() / 5 * coverage;
         for (var p : List.of(a, b, c)) {
             float u = Math.abs(normal.z) > .5f || Math.abs(normal.x) <= .5f ? p.x : p.y;
             float v = Math.abs(normal.z) > .5f ? -p.y : -p.z;
@@ -5268,8 +5289,10 @@ final class GpuTerrain implements Disposable {
             material.set(mask);
             material = GpuIceShader.road(material, scene, tile);
             float vertexCoat = coat;
+            // The coat's own texture sets its repeat: a road's material, or the sculpted material it paints.
+            float coverage = assets.coverage(road != null ? "roads/" + road : "terrain/surfaces/" + patch.texture());
             overlay.addTriangles(material, meshes -> GpuRoads.write(meshes, preparedPatch.triangles(), patch, mask, surface,
-                  preparedPatch.flat(), vertexCoat));
+                  preparedPatch.flat(), vertexCoat, coverage));
         }
     }
 

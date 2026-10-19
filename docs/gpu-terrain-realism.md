@@ -84,7 +84,8 @@ The user set these boundaries:
   hardpan .90, rock and concrete .80, snow .82, lunar .96 and fungus .84. Rock faces
   range from .80 to .66 with hardness (+.08 for sand, desert and Mars); lunar faces
   are .92 and fungal faces .84. Grain varies these by up to ±.04 with normal detail.
-  A material's JSON `roughness` or `roughness_map` overrides them on ordinary rock kits,
+  A material's authored roughness ([board materials](gpu-board-materials.md#sculpted-terrain-roughness))
+  overrides them on ordinary rock kits,
   pavement, tree pits and volcanic programs' natural material. The `cliffMaterial` path
   (including zero-gravity bedrock), biomes and tundra keep the estimates. Marsh
   peat (.80), quick mud (.72) and moss (.93) stay rough; only exposed pools get the

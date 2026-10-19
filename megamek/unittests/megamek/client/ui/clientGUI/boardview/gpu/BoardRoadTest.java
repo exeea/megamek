@@ -412,7 +412,7 @@ class BoardRoadTest {
             mesh.begin(GpuRoads.VERTICES, GL20.GL_TRIANGLES);
             var triangles = GpuRoads.drape(tile, surface, patch);
             GpuRoads.write(() -> mesh, triangles, patch, new GpuRoads.Mask(region, data), surface, false,
-                  Color.WHITE.toFloatBits());
+                  Color.WHITE.toFloatBits(), 1);
             assertEquals(triangles.size() * 3, mesh.getNumIndices(), "Mask UVs do not require additional geometry");
             int stride = mesh.getAttributes().vertexSize / Float.BYTES;
             int maskOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.Generic).offset / Float.BYTES;

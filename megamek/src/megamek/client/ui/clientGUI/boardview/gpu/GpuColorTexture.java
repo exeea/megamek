@@ -41,6 +41,14 @@ final class GpuColorTexture {
         return new Texture(new ImageData(() -> decode(encoded), mipmaps, true, true, false));
     }
 
+    /**
+     * A managed texture of pixels made on demand, such as a board material's packed layout (GpuMaterialMaps): made
+     * again, not kept, when the context is restored. {@code color} selects sRGB storage for RGB.
+     */
+    static Texture create(Supplier<Pixmap> pixels, boolean mipmaps, boolean color) {
+        return new Texture(new ImageData(pixels, mipmaps, true, true, color));
+    }
+
     /** File grayscale means opaque luminance; the caller owns the returned pixels. */
     static Pixmap decode(FileHandle file) { return decodedImage(new Pixmap(file)); }
 

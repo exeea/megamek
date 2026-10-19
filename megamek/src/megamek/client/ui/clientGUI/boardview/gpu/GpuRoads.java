@@ -461,8 +461,9 @@ final class GpuRoads {
         return new MaskData(new BoardScene.Pixels(image).compact(), x, y, w, h);
     }
 
+    /** {@code coverage} widens the patch's world-space texture repeat with its texture (GpuAssets.coverage). */
     static void write(Supplier<MeshPartBuilder> meshes, List<BoardTacticalGeometry.Triangle> triangles,
-          Patch patch, Mask mask, BoardSurface surface, boolean flat, float coat) {
+          Patch patch, Mask mask, BoardSurface surface, boolean flat, float coat, float coverage) {
         Map<Vector3, Vector3> normals = new HashMap<>();
         for (var face : flat ? List.<BoardSurface.Face>of() : surface.groundFaces()) {
             if (face.finish() != BoardSurface.Finish.TOP) { continue; }
@@ -472,7 +473,7 @@ final class GpuRoads {
             }
         }
         for (var t : triangles) {
-            float repeat = BoardRelief.detailMetres(patch.repeat());
+            float repeat = BoardRelief.detailMetres(patch.repeat()) * coverage;
             float lift = patch.lift() * BoardGeometry.hexScale();
             Vector3 fallback = new Vector3(t.b()).sub(t.a()).crs(new Vector3(t.c()).sub(t.a())).nor();
             Vector3 a = flat ? fallback : surface.roadNormal(t.a(), normals.getOrDefault(normalKey(t.a(), lift), fallback)).nor();

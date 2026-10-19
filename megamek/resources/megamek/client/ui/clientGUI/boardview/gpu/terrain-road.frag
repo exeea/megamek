@@ -22,6 +22,9 @@ in vec2 v_roadMaskUV;
 #endif
 #ifdef bridgeDeckFlag
 uniform float u_worldMetre;
+#ifdef bridgeDeckFlag
+uniform float u_bridgeDeckCoverage; // GpuAssets.coverage of the deck's road texture
+#endif
 #endif
 #ifdef roadMapsFlag
 uniform sampler2D u_roadSurface;
@@ -116,8 +119,8 @@ void main() {
     surfaceVariance = normalVariance(dFdx(face), dFdy(face));
     vec2 uv = v_diffuseUV;
 #ifdef bridgeDeckFlag
-    // A rotated bridge shares the adjacent road's scale, orientation and texture phase.
-    uv = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_worldMetre;
+    // A rotated bridge shares the adjacent road's scale, orientation and texture phase, widened with its texture.
+    uv = vec2(v_cloudPosition.x, -v_cloudPosition.y) / (u_worldMetre * u_bridgeDeckCoverage);
 #endif
 #ifdef roadCoatFlag
     mat2 roadGradient = mat2(dFdx(uv), dFdy(uv));
