@@ -145,11 +145,12 @@ class GpuAssetReloadSmokeTest {
                             compositeSource = composite.replace(outputColor,
                                   "fragColor = vec4(vec3(0.85, 0.15, 0.65) + color * 0.001,");
                             unitSource = GpuShaderSource.read("unit-material.frag")
-                                  .replace("return diffuse;", "return diffuse.bgr; // asset-reload-unit");
+                                  .replace("return diffuse;", "return diffuse.bgr;");
                             Files.writeString(shaders.resolve("atmosphere-composite.frag"), compositeSource);
                             Files.writeString(shaders.resolve("unit-material.frag"), unitSource);
-                            Files.writeString(shaders.resolve("color-space.glsl"),
-                                  GpuShaderSource.read("color-space.glsl") + "\n// asset-reload-include\n");
+                            // Compilation drops comments (GpuGlsl.withoutComments), so the shared include's edit is a define.
+                            Files.writeString(shaders.resolve("light-model.glsl"),
+                                  GpuShaderSource.read("light-model.glsl") + "\n#define ASSET_RELOAD_INCLUDE\n");
                             Path textures = directory.resolve("models/board/textures");
                             GpuAssetReloadTest.png(textures.resolve("terrain/classic/rock_albedo.png"), 0xff0000ff);
                             // A finished export changes every map, wider than its catalogued 512 pixels: at the same
@@ -191,8 +192,8 @@ class GpuAssetReloadSmokeTest {
                             for (var entry : reloaded.entrySet()) {
                                 assertTrue(entry.getValue().isCompiled(), entry.getKey());
                                 if (entry.getKey().startsWith("units")) {
-                                    assertTrue(entry.getValue().getFragmentShaderSource().contains("asset-reload-unit"));
-                                    assertTrue(entry.getValue().getVertexShaderSource().contains("asset-reload-include"));
+                                    assertTrue(entry.getValue().getFragmentShaderSource().contains("return diffuse.bgr;"));
+                                    assertTrue(entry.getValue().getFragmentShaderSource().contains("ASSET_RELOAD_INCLUDE"));
                                 }
                             }
                             assertCompositePixels();
@@ -306,7 +307,7 @@ class GpuAssetReloadSmokeTest {
                                 copyNativeBatch(Path.of(nativePlan), directory);
                                 Files.delete(shaders.resolve("atmosphere-composite.frag"));
                                 Files.delete(shaders.resolve("unit-material.frag"));
-                                Files.delete(shaders.resolve("color-space.glsl"));
+                                Files.delete(shaders.resolve("light-model.glsl"));
                                 GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(this, "tuning-reload-assets"));
                                 assertTrue(button.isDisabled());
                                 step = 8;

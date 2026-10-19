@@ -216,7 +216,7 @@ class GpuShaderReloadTest {
 
     private static Stream<Arguments> shaderFiles() {
         return Stream.of("resources", "megamek/resources").flatMap(root -> Stream.of("light-model.glsl",
-              "tree-instances.glsl", "water-spray.glsl", "cloud-surface.glsl",
+              "color-space.glsl", "tree-instances.glsl", "water-spray.glsl", "cloud-surface.glsl",
               "model.frag", "model-surface.glsl", "model-colour-slots.glsl",
               "road-mask.vert", "terrain-blend.vert",
               "ground-surface.glsl", "water-uniforms.glsl", "water-lighting.glsl", "water-pool.glsl", "water-interactions.glsl",

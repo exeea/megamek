@@ -630,9 +630,9 @@ final class GpuHud implements GpuBoardHud {
     }
 
     /**
-     * The Esc chain (C.4), one step per press. In FIRING, TARGETING, OFFBOARD (the targeting display) and PHYSICAL it
-     * never forwards CANCEL, which would clear declared attacks; elsewhere the last step forwards it to the phase
-     * display.
+     * The Esc chain (C.4), one step per press. With nothing left to close it skips a running playback, as the dock's
+     * Skip to results does. In FIRING, TARGETING, OFFBOARD (the targeting display) and PHYSICAL it never forwards
+     * CANCEL, which would clear declared attacks; elsewhere the last step forwards it to the phase display.
      */
     private boolean escape() {
         // A row dragged in a list (a target card's attacks, the sheet's weapons) goes home first.
@@ -669,6 +669,8 @@ final class GpuHud implements GpuBoardHud {
             source.moves().clearRoute();
         } else if (state.inspected != Entity.NONE) {
             state.inspected = Entity.NONE;
+        } else if (!phase.isEndReport() && state.history.running()) {
+            state.history.skip();
         } else {
             return phase.isFiring() || phase.isTargeting() || phase.isOffboard() || phase.isPhysical();
         }

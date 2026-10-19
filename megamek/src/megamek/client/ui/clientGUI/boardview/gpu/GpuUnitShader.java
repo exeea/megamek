@@ -125,8 +125,8 @@ final class GpuUnitShader extends DefaultShader {
         source = replaceOnce(source, MAIN,
               "#ifdef modelSurfaceFlag\nout vec2 v_modelUV;\n#endif\n" + MAIN
                     + "\n#ifdef modelSurfaceFlag\nv_modelUV = a_texCoord0;\n#endif\n", "vertex");
-        // The vertex stage needs only the colour transfer (toLinear). The light model belongs to the fragment stages:
-        // with environment lighting it calls functions only they define, which Mesa's linker rejects in this stage.
+        // The vertex colours' sRGB transfer (toLinear) alone: the light model belongs to the fragment stages, which
+        // also define its environment lighting. Mesa refuses to link a vertex stage that declares it without them.
         source = replaceOnce(source, MAIN, GpuShaderSource.read("color-space.glsl") + "\n" + MAIN, "vertex");
         // A recolourable model's shared mesh takes its placement's colours before any lighting (RigidGlb.recolour).
         source = replaceOnce(source, MAIN, GpuShaderSource.read("model-colour-slots.glsl") + "\n" + MAIN, "vertex");
