@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -71,7 +72,7 @@ class GpuAuthoredScorchSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Authored scorch", failure.get()); }
     }
 
-    /** The lightest scorch clears both grass paths missing from a flat grassland sweep, preserving shrubs and rocks. */
+    /** Authored and nuclear scorch clear grass and decorative shrubs, with the same rocks still drawn. */
     private static void reviewGrass(File output) throws Exception {
         var bank = new Coords(4, 4);
         var dirt = new Coords(5, 8);
@@ -87,6 +88,8 @@ class GpuAuthoredScorchSmokeTest {
               new BoardScene.Feature("scatter-plant", 16, 0, 0, 1, .15f, 0, BoardScene.FeatureKind.SCATTER),
               new BoardScene.Feature("scatter-rock", -16, 0, 0, 1, .15f, 0, BoardScene.FeatureKind.SCATTER));
         int[] cleanVertices = new int[samples.size()];
+        var fieldSurfaces = new BoardSurface.Cache();
+        long cleanFieldStones = 0;
         var terrain = new GpuTerrain();
         var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
         var camera = new BoardCamera();
@@ -94,30 +97,29 @@ class GpuAuthoredScorchSmokeTest {
         camera.setIsometric(true);
         int programs = 0;
         try {
-            for (boolean burned : new boolean[] { false, true }) {
-                if (burned) {
-                    for (int x = 0; x < board.getWidth(); x++) {
-                        for (int y = 0; y < board.getHeight(); y++) {
-                            board.getHex(x, y).setAppearance(Map.of("scorch", new HexAppearance("scorch/singed", null, null, null)));
-                        }
+            for (String phase : List.of("clean", "singed", "nuclear")) {
+                boolean burned = !phase.equals("clean");
+                for (int x = 0; x < board.getWidth(); x++) {
+                    for (int y = 0; y < board.getHeight(); y++) {
+                        board.getHex(x, y).setAppearance(phase.equals("singed")
+                              ? Map.of("scorch", new HexAppearance("scorch/singed", null, null, null)) : Map.of());
                     }
                 }
                 BoardScene captured = GpuLegacyImportSmokeTest.scene(board);
                 BoardScene scene = captured.withTiles(captured.tiles().stream().map(tile ->
                       tile.withFeatures(tile.coords().equals(dirt) ? samples : List.of())).toList());
-                var surface = new BoardSurface(scene, scene.tile(dirt));
-                for (int i = 0; i < samples.size(); i++) {
-                    var mesh = new MeshBuilder();
-                    mesh.begin(VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal
-                          | VertexAttributes.Usage.ColorPacked | VertexAttributes.Usage.TextureCoordinates, GL20.GL_TRIANGLES);
-                    GpuScatter.build(mesh, scene.tile(dirt), surface, samples.get(i));
-                    if (!burned) {
-                        cleanVertices[i] = mesh.getNumVertices();
-                        assertTrue(cleanVertices[i] > 0, "The dirt fixture must draw " + samples.get(i).asset());
-                    } else {
-                        assertEquals(i == 0 ? 0 : cleanVertices[i], mesh.getNumVertices(),
-                              "Authored scorch removes dry grass while preserving shrubs and rocks");
-                    }
+                if (phase.equals("nuclear")) {
+                    terrain.update(scene, camera.camera);
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    assertEquals(samples, terrain.presentation(scene).tile(dirt).features(),
+                          "Erasing authored scorch restores the existing decorative mesh before the nuclear hit");
+                    assertTrue(fieldFaces(terrain.presentation(scene), fieldSurfaces, true) > 0,
+                          "Erasing authored scorch restores field shrubs through the existing surface cache");
+                    terrain.scorch(scene, new GpuGroundDamage.Scorch(BoardGeometry.center(dirt, 0),
+                          BoardGeometry.width() * board.getWidth() * 2, 0));
+                    var clock = GpuGroundDamage.class.getDeclaredField("scorchedAt");
+                    clock.setAccessible(true);
+                    clock.setLong(terrain.groundDamage(), System.nanoTime() - 3_600_000_000_000L);
                 }
                 var centre = BoardGeometry.center(bank, scene.tile(bank).elevation());
                 var outward = BoardGeometry.center(bank.translated(2), scene.tile(bank).elevation()).sub(centre).nor();
@@ -133,30 +135,80 @@ class GpuAuthoredScorchSmokeTest {
                 frame.prepare(terrain, camera, scene);
                 terrain.update(scene, camera.camera);
                 GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                BoardScene shown = terrain.presentation(scene);
+                var surface = new BoardSurface(shown, shown.tile(dirt));
+                assertEquals(samples, scene.tile(dirt).features(), "Scorch must not mutate the source scene");
+                assertTrue(scene.tiles().stream().noneMatch(BoardScene.Tile::barren), "Source tiles retain their vegetation policy");
+                long fieldPlants = fieldFaces(shown, fieldSurfaces, true);
+                long fieldStones = fieldFaces(shown, fieldSurfaces, false);
+                if (!burned) {
+                    assertTrue(fieldPlants > 0, "Empty-feature dirt tiles must exercise real PLANT/LEAF field faces");
+                    assertTrue(fieldStones > 0, "The same field also contains independent stone faces");
+                    cleanFieldStones = fieldStones;
+                } else {
+                    assertTrue(shown.tiles().stream().allMatch(BoardScene.Tile::barren),
+                          "Every affected tile is barren, including tiles without scatter features");
+                    assertEquals(0, fieldPlants, phase + " removes actual generated field shrubs");
+                    assertEquals(cleanFieldStones, fieldStones, phase + " preserves the same field stones");
+                }
+                for (int i = 0; i < samples.size(); i++) {
+                    var mesh = new MeshBuilder();
+                    mesh.begin(VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal
+                          | VertexAttributes.Usage.ColorPacked | VertexAttributes.Usage.TextureCoordinates, GL20.GL_TRIANGLES);
+                    if (shown.tile(dirt).features().contains(samples.get(i))) {
+                        GpuScatter.build(mesh, shown.tile(dirt), surface, samples.get(i));
+                    }
+                    if (!burned) {
+                        cleanVertices[i] = mesh.getNumVertices();
+                        assertTrue(cleanVertices[i] > 0, "The dirt fixture must draw " + samples.get(i).asset());
+                    } else {
+                        assertEquals(i < 2 ? 0 : cleanVertices[i], mesh.getNumVertices(),
+                              phase + " removes dry grass and shrubs while preserving rock geometry");
+                    }
+                }
                 var planted = terrain.planted(bank);
                 assertTrue(planted != null && planted.turf() != null && !planted.turf().isEmpty(),
                       "The focused two-level bank must exercise actual turf geometry");
                 terrain.setGrass(true);
                 frame.render(terrain, camera, scene);
                 int[] withGrass = pixels();
-                GpuReviewFrame.save(new File(output, burned ? "grass-bank-singed.png" : "grass-bank-clean.png"));
+                GpuReviewFrame.save(new File(output, "grass-bank-" + phase + ".png"));
                 terrain.setGrass(false);
                 frame.render(terrain, camera, scene);
                 assertEquals(burned, java.util.Arrays.equals(withGrass, pixels()),
-                      "Clean bank grass must draw; Singed must look identical with that grass disabled");
+                      "Clean bank grass must draw; " + phase + " must look identical with that grass disabled");
                 terrain.setGrass(true);
                 camera.fit(scene, List.of(scene.tile(dirt)));
                 frame.prepare(terrain, camera, scene);
                 GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                 frame.render(terrain, camera, scene);
-                GpuReviewFrame.save(new File(output, burned ? "dry-grass-singed.png" : "dry-grass-clean.png"));
+                GpuReviewFrame.save(new File(output, "dry-grass-" + phase + ".png"));
                 if (!burned) { programs = GpuShaderLoadSmokeTest.programs(terrain); }
                 else {
                     assertEquals(programs, GpuShaderLoadSmokeTest.programs(terrain), "Removing grass links no new programs");
                 }
+                terrain.update(scene, camera.camera);
+                var stableTiles = terrain.presentation(scene).tiles();
+                terrain.update(scene, camera.camera);
+                assertSame(stableTiles, terrain.presentation(scene).tiles(), "Unchanged frames retain the derived tile list");
+                assertFalse(terrain.busy(), "Unchanged scorch does not start another geometry rebuild");
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally { terrain.dispose(); frame.dispose(); }
+    }
+
+    /** Inspect actual full-detail relief, including plants that were never captured as SCATTER features. */
+    private static long fieldFaces(BoardScene scene, BoardSurface.Cache surfaces, boolean plants) {
+        return scene.tiles().stream().filter(tile -> tile.coords().getX() >= 6 && tile.coords().getY() >= 7)
+              .mapToLong(tile -> {
+                  var surface = surfaces.get(scene, tile);
+                  return surface.faces.stream().filter(face -> {
+                      var shade = surface.relief.shade(face.a());
+                      return shade != null && (plants
+                            ? shade.kind() == BoardRelief.Kind.PLANT || shade.kind() == BoardRelief.Kind.LEAF
+                            : shade.kind() == BoardRelief.Kind.ROCK);
+                  }).count();
+              }).sum();
     }
 
     private static void review(Board board, BoardScene scene, File output) throws Exception {

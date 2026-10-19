@@ -241,7 +241,8 @@ final class GpuArtilleryBlast {
         boolean scorched;
 
         Blast(Vector3 ground, @Nullable Vector3 opening, @Nullable ResolvedAttack.Shot profile,
-              @Nullable UnitAttack attack, int key, AreaEffectHelper.FuelAirStrength fuelAirStrength) {
+              @Nullable UnitAttack attack, int key, AreaEffectHelper.FuelAirStrength fuelAirStrength,
+              @Nullable NukeStats scheduledNuke) {
             this.ground.set(ground);
             this.opening = opening == null ? null : opening.cpy();
             this.profile = profile;
@@ -252,7 +253,7 @@ final class GpuArtilleryBlast {
             boolean fuelAir = isFuelAir(profile);
             // A fuel-air round in vacuum or thinner than thin air does nothing, as the rules say: a dud.
             boolean noFuelAirBurn = fuelAir && (fuelAirStrength == AreaEffectHelper.FuelAirStrength.NONE);
-            style = (isDud(profile) || noFuelAirBurn) ? Style.DUD : isStarShell(profile) ? Style.STAR_SHELL
+            style = scheduledNuke != null ? Style.NUCLEAR : (isDud(profile) || noFuelAirBurn) ? Style.DUD : isStarShell(profile) ? Style.STAR_SHELL
                   : laysMines(profile) ? Style.MINES : area.cluster() ? Style.CLUSTER : fuelAir ? Style.FUEL_AIR
                   : style(profile, key);
             intensity = (fuelAirStrength == AreaEffectHelper.FuelAirStrength.HALF) && fuelAir ? THIN_AIR_INTENSITY : 1;
@@ -265,7 +266,7 @@ final class GpuArtilleryBlast {
                 case FUEL_AIR -> fuelAirHexes(targetHex, area.hexRadius());
                 default -> debrisPieces(area.hexRadius(), key);
             };
-            nuke = style == Style.NUCLEAR ? AreaEffectHelper.getNukeStats(DAVY_CROCKETT_TYPE) : null;
+            nuke = scheduledNuke != null ? scheduledNuke : style == Style.NUCLEAR ? nuclearStats(profile) : null;
             Vector3 hexCentre = targetHex == null ? ground : BoardGeometry.center(targetHex, 0);
             heading = attack == null ? DEFAULT_HEADING
                   : heading(BoardGeometry.center(attack.event.attacker().location().coords(), 0), hexCentre);
@@ -303,7 +304,7 @@ final class GpuArtilleryBlast {
      * smoke or lights the field, which keep their own presentation.
      */
     static boolean explodes(@Nullable ResolvedAttack.Shot profile) {
-        if (profile == null || !profile.artillery()) { return false; }
+        if (profile == null || (!profile.artillery() && nuclearStats(profile) == null)) { return false; }
         for (String munition : profile.munitions()) {
             if (NON_EXPLOSIVE.contains(munition)) { return false; }
         }
@@ -350,7 +351,7 @@ final class GpuArtilleryBlast {
      * damage, which it does only for a homing round with no TAG to follow. It throws up dirt and leaves no crater.
      */
     static boolean isDud(@Nullable ResolvedAttack.Shot profile) {
-        return explodes(profile) && (profile.damagePerHit() == 0);
+        return explodes(profile) && nuclearStats(profile) == null && (profile.damagePerHit() == 0);
     }
 
     /**
@@ -361,7 +362,7 @@ final class GpuArtilleryBlast {
     static float size(@Nullable ResolvedAttack.Shot profile) {
         double damage = profile == null || profile.damagePerHit() <= 0 ? REFERENCE_DAMAGE : profile.damagePerHit();
         float scale = MathUtils.clamp((float) (damage / REFERENCE_DAMAGE), SMALLEST_SCALE, LARGEST_SCALE);
-        if (profile != null && profile.munitions().contains("M_DAVY_CROCKETT_M")) { scale = 2.5f; }
+        if (nuclearStats(profile) != null) { scale = 2.5f; }
         else if (profile != null && profile.munitions().contains("M_FAE")) { scale *= 1.3f; }
         return BoardGeometry.height() * .55f * scale;
     }
@@ -369,12 +370,20 @@ final class GpuArtilleryBlast {
     /** The shape of the blast: a nuclear round always mushrooms and fuel-air or anti-air rounds burn as a fireball. */
     static Style style(@Nullable ResolvedAttack.Shot profile, int seed) {
         Set<String> munitions = profile == null ? Set.of() : profile.munitions();
-        if (munitions.contains("M_DAVY_CROCKETT_M")) { return Style.NUCLEAR; }
+        if (nuclearStats(profile) != null) { return Style.NUCLEAR; }
         if (munitions.contains("M_FAE")) { return Style.FUEL_AIR; }
         if (munitions.contains("M_ADA")) { return Style.FIREBALL; }
         // Crowns are what a shell landing in earth mostly throws up; the other two keep a barrage varied.
         float pick = random(seed, 7);
         return pick < .5f ? Style.CROWN : pick < .75f ? Style.MUSHROOM : Style.FIREBALL;
+    }
+
+    /** Uses the server-observed ammunition type, retaining support for older Davy Crockett profiles. */
+    static @Nullable NukeStats nuclearStats(@Nullable ResolvedAttack.Shot profile) {
+        if (profile == null) { return null; }
+        Integer type = profile.nuclearType();
+        if (type == null && profile.munitions().contains("M_DAVY_CROCKETT_M")) { type = DAVY_CROCKETT_TYPE; }
+        return type == null ? null : AreaEffectHelper.getNukeStats(type);
     }
 
     /**
@@ -596,6 +605,16 @@ final class GpuArtilleryBlast {
      */
     void detonate(Vector3 ground, @Nullable Vector3 opening, @Nullable ResolvedAttack.Shot profile,
           @Nullable UnitAttack attack, int key) {
+        detonate(ground, opening, profile, attack, key, null);
+    }
+
+    /** Scheduled stock/custom strike using its server-resolved blast parameters, with no invented weapon or unit. */
+    void detonateNuclear(Vector3 ground, NukeStats stats, int key) {
+        detonate(ground, null, null, null, key, stats);
+    }
+
+    private void detonate(Vector3 ground, @Nullable Vector3 opening, @Nullable ResolvedAttack.Shot profile,
+          @Nullable UnitAttack attack, int key, @Nullable NukeStats scheduledNuke) {
         for (Blast blast : blasts) {
             if (blast.key == key) { return; }
         }
@@ -603,7 +622,7 @@ final class GpuArtilleryBlast {
             LOGGER.debug("[ArtilleryBlast] {} blasts already drawing, the oldest makes way", MAX_BLASTS);
             blasts.removeFirst();
         }
-        var blast = new Blast(ground, opening, profile, attack, key, fuelAirStrength);
+        var blast = new Blast(ground, opening, profile, attack, key, fuelAirStrength, scheduledNuke);
         blasts.add(blast);
         LOGGER.info("[ArtilleryBlast] {} blast of radius {} with {} pieces of debris over R{} at {}", blast.style,
               blast.size, blast.pieces.size(), blast.area.hexRadius(), ground);

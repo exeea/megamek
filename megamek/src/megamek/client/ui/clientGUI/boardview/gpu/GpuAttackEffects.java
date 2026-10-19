@@ -381,6 +381,9 @@ final class GpuAttackEffects implements Disposable {
     /** Ages the artillery blasts, which outlive the attacks that landed them, by the frame's real time. */
     void advance(float seconds) { artilleryBlasts.advance(seconds); }
 
+    /** A different board ends persistent blasts; their reusable GPU effects and warm programs stay owned here. */
+    void clearArtilleryBlasts() { artilleryBlasts.clear(); }
+
     /**
      * The density of each minefield the local player knows of, by hex, whose mines lie on the ground until it is
      * gone, and the terrain they lie on. An empty map draws none.
@@ -415,6 +418,11 @@ final class GpuAttackEffects implements Disposable {
 
     /** The brightest nuclear flash now, for the whole view. */
     GpuArtilleryBlast.Flash nuclearFlash() { return artilleryBlasts.flash(); }
+
+    /** A packet-confirmed scheduled strike has no unit flight, but shares normal nuclear flash, blast and scorch. */
+    void detonate(megamek.common.NuclearDetonation event) {
+        artilleryBlasts.detonateNuclear(BoardGeometry.center(event.coords(), event.elevation()), event.stats(), event.id().hashCode());
+    }
 
     /** Each nuclear blast's scorch over its blast area, once, as it goes off. */
     void artilleryScorches(Consumer<GpuGroundDamage.Scorch> receiver) {

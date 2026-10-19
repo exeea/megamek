@@ -100,6 +100,9 @@ public interface GameListener extends java.util.EventListener {
     /** Transient confirmed combat playback; older/non-visual clients may ignore it. */
     default void gameAttackResolved(GameAttackResolvedEvent event) {}
 
+    /** Scheduled nuclear presentation; the following board updates remain authoritative. */
+    default void gameNuclearDetonation(GameNuclearDetonationEvent event) {}
+
     void gameClientFeedbackRequest(GameCFREvent e);
 
     void gameVictory(PostGameResolution e);

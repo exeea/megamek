@@ -28,16 +28,44 @@ final class BoardBridgeSlope {
                 continue;
             }
             boolean slab = Math.max(face.a().z, Math.max(face.b().z, face.c().z)) <= .001f;
-            clipper.prepare(new BoardTacticalGeometry.Triangle(a, b, c, -1));
+            var polygon = List.of(a, b, c);
             for (var patch : profile) {
+                int direction = patch.landEdge() < 0 ? -1 : BoardGeometry.edgeDirection(patch.landEdge());
+                boolean solid = direction >= 0 && (footing.solidExits() & (1 << direction)) != 0;
                 // The solid ramp owns its top and sides. Retain only the raised rails above that block.
-                if (slab && patch.landEdge() >= 0
-                      && (footing.solidExits() & (1 << BoardGeometry.edgeDirection(patch.landEdge()))) != 0) { continue; }
-                clipper.displace(patch, triangle -> BoardBridge.triangle(faces, triangle.a(), triangle.b(), triangle.c(),
-                      face.part(), face.colour()));
+                if (slab && solid) { continue; }
+                var exposed = polygon;
+                if (face.part() == BoardBridge.Part.STEEL && direction >= 0
+                      && (solid || footing.lengths().get(direction) > 0 && deck.rises().get(direction) > 0)) {
+                    // Fascia triangles cross the support's top: dropping only whole slab triangles leaves
+                    // coplanar steel over concrete. Cut before grading so both meet on the same slope.
+                    exposed = above(polygon, center.z - (solid ? 0 : BoardBridge.SLAB * scale));
+                }
+                for (int i = 1; i + 1 < exposed.size(); i++) {
+                    clipper.prepare(new BoardTacticalGeometry.Triangle(exposed.getFirst(), exposed.get(i), exposed.get(i + 1), -1));
+                    clipper.displace(patch, triangle -> BoardBridge.triangle(faces, triangle.a(), triangle.b(), triangle.c(),
+                          face.part(), face.colour()));
+                }
             }
         }
         return BoardBridge.shape(BoardScene.Surface.CONCRETE, level, faces);
+    }
+
+    /** Clip a facet at the concrete support's top, retaining winding and the exposed steel above it. */
+    private static List<Vector3> above(List<Vector3> polygon, float height) {
+        if (polygon.stream().allMatch(p -> p.z >= height)) { return polygon; }
+        var result = new ArrayList<Vector3>(4);
+        var previous = polygon.getLast();
+        for (var point : polygon) {
+            if ((previous.z >= height) != (point.z >= height)) {
+                var cut = new Vector3(previous).lerp(point, (height - previous.z) / (point.z - previous.z));
+                cut.z = height;
+                result.add(cut);
+            }
+            if (point.z >= height) { result.add(point); }
+            previous = point;
+        }
+        return result;
     }
 
     /**

@@ -33,8 +33,8 @@ float groundScorchAt(vec2 world) {
     return max(scorches.x, scorches.y);
 }
 
-// Even Singed (.15) clears grass; only the visual fringe retains partial coverage.
-float scorchedGrass(vec2 world) { return smoothstep(0.0, .10, groundScorchAt(world)); }
+// Any authored or nuclear scorch clears grass, including the material's fading edge.
+float scorchedGrass(vec2 world) { return groundScorchAt(world) > 0.0 ? 1.0 : 0.0; }
 
 // One deposit evaluation for every land surface. Sculpt tops supply the authored reference maps; steep faces and
 // plants use their average sites, without a stretched map or extra samples. All palette values are linear reflectance.

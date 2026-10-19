@@ -21,6 +21,7 @@ import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponType;
 import megamek.common.units.Entity;
 import megamek.common.units.UnitLocation;
+import megamek.common.weapons.handlers.AreaEffectHelper;
 import org.junit.jupiter.api.Test;
 
 /** Which landings draw an artillery blast, which shape they take, and how long the blasts live. */
@@ -55,6 +56,55 @@ class GpuArtilleryBlastTest {
         assertEquals(GpuArtilleryBlast.Style.NUCLEAR, GpuArtilleryBlast.style(shot(true, "M_DAVY_CROCKETT_M"), 1));
         assertEquals(GpuArtilleryBlast.Style.FUEL_AIR, GpuArtilleryBlast.style(shot(true, "M_FAE"), 1));
         assertEquals(GpuArtilleryBlast.Style.FIREBALL, GpuArtilleryBlast.style(shot(true, "M_ADA"), 1));
+    }
+
+    @Test
+    void nuclearMissilesUseTheirOwnBlastAndCraterInsteadOfAnOrdinaryBurst() {
+        for (int type : new int[] { 1, 2, 3, 4 }) {
+            var profile = shot(false).withNuclearType(type).withDamagePerHit(0);
+            assertTrue(GpuArtilleryBlast.drawsLanding(profile), "A nuclear missile need not be artillery");
+            assertFalse(GpuArtilleryBlast.isDud(profile), "Resolved nuclear stats take precedence over nominal damage");
+            assertEquals(GpuArtilleryBlast.Style.NUCLEAR, GpuArtilleryBlast.style(profile, 21));
+            var blasts = new GpuArtilleryBlast();
+            var ground = new Vector3(40, 80, 3);
+            blasts.detonate(ground, profile, null, 21);
+            blasts.detonate(ground, profile, null, 21);
+            var scorches = new ArrayList<GpuGroundDamage.Scorch>();
+            blasts.scorches(scorches::add);
+            blasts.scorches(scorches::add);
+            assertEquals(1, scorches.size(), "Repeated contact reports must produce one scorch");
+            var stats = AreaEffectHelper.getNukeStats(type);
+            assertEquals(GpuArtilleryBlast.nuclearRadius(stats), scorches.getFirst().radius());
+            assertEquals(2 * stats.craterDepth * BoardGeometry.height(), scorches.getFirst().crater());
+            blasts.advance(.05f);
+            assertTrue(blasts.flash().intensity() > 0);
+            blasts.advance(GpuArtilleryBlast.NUCLEAR_SECONDS);
+            assertEquals(0, blasts.size());
+        }
+    }
+
+    @Test
+    void changingBoardsClearsLiveNuclearEffectsAndPendingScorch() {
+        var effects = new GpuAttackEffects();
+        try {
+            var strike = new megamek.common.NuclearDetonation(java.util.UUID.randomUUID(), 0,
+                  new Coords(2, 3), 0, 1000, 23, 86, 1);
+            effects.detonate(strike);
+            effects.advance(.05f);
+            assertEquals(1, effects.artilleryBlastCount());
+            assertTrue(effects.nuclearFlash().intensity() > 0);
+            effects.clearArtilleryBlasts();
+            assertEquals(0, effects.artilleryBlastCount());
+            assertEquals(0, effects.nuclearFlash().intensity());
+            var scorches = new ArrayList<GpuGroundDamage.Scorch>();
+            effects.artilleryScorches(scorches::add);
+            assertTrue(scorches.isEmpty(), "A previous board's strike must not scorch the next one");
+            effects.detonate(strike);
+            effects.artilleryScorches(scorches::add);
+            assertEquals(1, scorches.size(), "The same effects owner remains usable after its board changes");
+        } finally {
+            effects.dispose();
+        }
     }
 
     @Test

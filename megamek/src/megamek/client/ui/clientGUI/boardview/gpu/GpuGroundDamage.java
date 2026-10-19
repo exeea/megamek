@@ -203,6 +203,7 @@ final class GpuGroundDamage implements Disposable {
     private int marks;
     private boolean scorched;
     private long scorchedAt;
+    private long scorchRevision;
     /** The hexes' authored scorch bytes as last written to the directory's alpha byte, and the tiles they came from. */
     private byte[] authored = new byte[0];
     private List<BoardScene.Tile> authoredTiles;
@@ -255,6 +256,40 @@ final class GpuGroundDamage implements Disposable {
     /** Whether any scorch shows: a nuclear blast's or a hex's authored one ({@link HexAppearance#scorch}). */
     boolean scorchShown() { return scorched || authoredAny; }
 
+    long scorchRevision() { return scorchRevision; }
+
+    /**
+     * Baked decorative vegetation belongs to its hex. Clear it when authored scorch reaches that hex or a nuclear
+     * directory texel's bilinear footprint touches it. This reads the existing mask only when the scene or scorch
+     * changes; it neither advances the displayed authored mask nor changes gameplay vegetation.
+     */
+    boolean scorched(BoardScene scene, BoardScene.Tile tile) {
+        if (HexAppearance.scorch(tile.appearance()) > 0) { return true; }
+        for (int direction = 0; direction < 6; direction++) {
+            var neighbor = scene.neighbor(tile, direction);
+            if (neighbor != null && HexAppearance.scorch(neighbor.appearance()) > 0) { return true; }
+        }
+        if (!scorched || directory.isEmpty() || boardId != scene.boardId()
+              || columns != scene.width() || rows != scene.height()) { return false; }
+        float cx = BoardGeometry.centerX(tile.coords()), cy = -BoardGeometry.centerY(tile.coords());
+        float halfWidth = BoardGeometry.width() * .5f + tileWorldSize;
+        float halfHeight = BoardGeometry.height() * .5f + tileWorldSize;
+        int firstX = Math.max(0, (int) Math.floor((cx - halfWidth) / tileWorldSize));
+        int lastX = Math.min(tileColumns - 1, (int) Math.floor((cx + halfWidth) / tileWorldSize));
+        int firstY = Math.max(0, (int) Math.floor((cy - halfHeight) / tileWorldSize));
+        int lastY = Math.min(tileRows - 1, (int) Math.floor((cy + halfHeight) / tileWorldSize));
+        for (int y = firstY; y <= lastY; y++) {
+            for (int x = firstX; x <= lastX; x++) {
+                int key = y * tileColumns + x, address = key % (TILE_SIZE * TILE_SIZE);
+                int pixel = directory.get(key / (TILE_SIZE * TILE_SIZE)).getPixel(address % TILE_SIZE, address / TILE_SIZE);
+                if ((pixel >>> 8 & 255) > 0 && BoardBiome.hexDistance(
+                      Math.abs((x + .5f) * tileWorldSize - cx), Math.abs((y + .5f) * tileWorldSize - cy))
+                      < tileWorldSize * 1.5f) { return true; }
+            }
+        }
+        return false;
+    }
+
     /** Ground Zero's glow after the last blast: 1 as it goes off, a third left after {@link #HEAT_SECONDS}. */
     float scorchHeat() {
         return scorched ? (float) Math.exp(-(System.nanoTime() - scorchedAt) / 1e9 / HEAT_SECONDS) : 0;
@@ -296,6 +331,7 @@ final class GpuGroundDamage implements Disposable {
         }
         scorched = true;
         scorchedAt = System.nanoTime();
+        scorchRevision++;
         directoryDirty = true;
     }
 
@@ -865,6 +901,7 @@ final class GpuGroundDamage implements Disposable {
         brushes.values().forEach(art -> art.levels().forEach(Pixmap::dispose));
         brushes.clear();
         texture = null; capacity = 0; seen.clear(); marks = 0; scorched = false;
+        scorchRevision++;
         authored = new byte[0]; authoredTiles = null; authoredAny = false;
         nextSurfaceKey = -1;
         pending.clear(); resumeTile = 0; groundScene = null;

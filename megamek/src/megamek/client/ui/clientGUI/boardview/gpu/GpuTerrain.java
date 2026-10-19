@@ -1032,6 +1032,10 @@ final class GpuTerrain implements Disposable {
     /** GL-thread cache derived from the immutable source tiles; published with the existing terrain rebuild. */
     private List<BoardScene.Tile> lunarSource, lunarTiles;
     private boolean lunarWeightless;
+    /** Derived decorative scatter, rebuilt once per source snapshot or nuclear mask change. */
+    private List<BoardScene.Tile> scatterSource, scatterTiles;
+    private long scatterScorchRevision = -1;
+    private int scatterBoardId;
     private final Vector3 wind = new Vector3();
     private final List<Model> shadowModels = new ArrayList<>();
     private final List<Matrix4> shadowTransforms = new ArrayList<>();
@@ -2218,6 +2222,16 @@ final class GpuTerrain implements Disposable {
             lunarSource = null;
             lunarTiles = null;
         }
+        if (scatterSource != scene.tiles() || scatterBoardId != scene.boardId()
+              || scatterScorchRevision != groundDamage.scorchRevision()) {
+            scatterSource = scene.tiles();
+            scatterBoardId = scene.boardId();
+            scatterScorchRevision = groundDamage.scorchRevision();
+            BoardScene source = scene;
+            scatterTiles = List.copyOf(scene.tiles().stream().map(tile -> groundDamage.scorched(source, tile)
+                  ? tile.withoutVegetation() : tile).toList());
+        }
+        scene = scene.withTiles(scatterTiles);
         TerrainSettings settings = TerrainSettings.capture();
         if (kindsPending && kinds == null) {
             kinds = new GpuTerrain(this);
@@ -2364,6 +2378,8 @@ final class GpuTerrain implements Disposable {
         coverScene = null;
         lunarSource = null;
         lunarTiles = null;
+        scatterSource = null;
+        scatterTiles = null;
         requested = null;
         meshGeneration++;
     }
@@ -7740,6 +7756,8 @@ final class GpuTerrain implements Disposable {
         biomes.dispose();
         surfaceScars.dispose();
         groundDamage.dispose();
+        scatterSource = null;
+        scatterTiles = null;
         propBatch.dispose();
         fungus.dispose();
         geysers.dispose();

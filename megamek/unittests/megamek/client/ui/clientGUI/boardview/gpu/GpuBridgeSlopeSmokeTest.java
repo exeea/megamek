@@ -16,12 +16,71 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Rendered slope, picking and edit integration using the same installed bridge geometry. */
 @Tag("on-demand")
 class GpuBridgeSlopeSmokeTest {
+    /** Close views of the steel fascia where the sloping deck meets each concrete approach. */
+    @Test
+    void trussApproachesRenderAtBothBankHeightsAndLevelScales() throws Exception {
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "bridge-slopes");
+        Files.createDirectories(output.toPath());
+        var failure = new AtomicReference<Throwable>();
+        var previous = BoardGeometry.tuning();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1280, 960);
+        config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                var at = new Coords(4, 4);
+                try {
+                    for (int levelHeight : new int[] { 18, 30 }) {
+                        BoardGeometry.tune(new BoardGeometry.Tuning(1, 1, 1, levelHeight, previous.gridShade()));
+                        for (int roadLevel : new int[] { 0, 2 }) {
+                            var scene = BoardBridgeTypeTest.typed(BoardSurfaceBlendTest.scene(c -> {
+                                if (c.equals(at)) { return BoardBridgeSlopeTest.bridge(c, -1, 2, 9); }
+                                boolean approach = c.equals(at.translated(0)) || c.equals(at.translated(3));
+                                return BoardRoadTest.tile(c, approach ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                                      approach ? 9 : 0, approach ? roadLevel : -1, BoardScene.Surface.ROCK);
+                            }), HexAppearance.TRUSS);
+                            var terrain = new GpuTerrain();
+                            try {
+                                var camera = new BoardCamera();
+                                camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                                frame.prepare(terrain, camera, scene);
+                                terrain.update(scene);
+                                terrain.animate(0, List.of());
+                                for (boolean side : new boolean[] { false, true }) {
+                                    camera.setIsometric(true);
+                                    if (side) { camera.orbit(45, 78 - camera.tilt()); }
+                                    camera.camera.zoom = .12f;
+                                    camera.center(BoardGeometry.center(at, 1));
+                                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                    frame.render(terrain, camera, scene);
+                                    GpuReviewFrame.save(new File(output, "truss-approach-road" + roadLevel + "-lh"
+                                          + levelHeight + (side ? "-side" : "-iso") + ".png"));
+                                }
+                            } finally { terrain.dispose(); }
+                        }
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally {
+                    frame.dispose();
+                    BoardGeometry.tune(previous);
+                    Gdx.app.exit();
+                }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Truss approach fascia rendering", failure.get()); }
+    }
+
     @Test
     void steppedSpansRenderAndPickTheirSlopesAfterAnElevationEdit() throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots"), "bridge-slopes");

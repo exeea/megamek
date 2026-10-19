@@ -382,11 +382,12 @@ scorch; Classic does not borrow this material.
 
 Painted glass is always cold. Only nuclear severity heats the low-height fissures,
 using the existing cooling clock; distant mip levels suppress these small details.
-A later nuke still restarts that shared clock. Even Singed severity clears grass
-blades and bank turf; only the fading fringe gradually retains grass. Authored
-scorch also removes baked dry-grass scatter when its chunk rebuilds. Nuclear-only
-scorch still tints that scatter because it shares the opaque rock mesh. Shrubs,
-biome crops and reeds remain.
+A later nuke still restarts that shared clock. Any authored or nuclear scorch
+clears grass blades and bank turf, including the fading fringe. Both also remove
+decorative grass and shrub scatter through the existing chunk rebuild. Baked
+scatter is removed across each touched hex; blades and turf follow the precise
+mask. Rocks remain. Woods and jungle follow authoritative terrain conversion;
+biome crops and reeds retain their existing behavior.
 There is one appended material layer and one uniform, with no new sampler or
 shader variant. Zero severity leaves the original material unchanged. Scorched
 boards add four directory reads per receiving fragment, then four material samples

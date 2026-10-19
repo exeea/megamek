@@ -313,7 +313,9 @@ public enum PacketCommand {
     ENTITY_SCAN_WITHDRAW,
 
     /** Server-confirmed, visibility-filtered attack presentation; never an attack order. */
-    ENTITY_ATTACK_RESOLVED;
+    ENTITY_ATTACK_RESOLVED,
+    /** Server-confirmed scheduled nuclear strike, including custom resolved blast parameters. */
+    NUCLEAR_DETONATION;
     //endregion Enum Declarations
 
     //region Boolean Comparison Methods

@@ -17,8 +17,10 @@ import java.io.File;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
@@ -37,12 +39,17 @@ import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.Configuration;
 import megamek.common.Hex;
+import megamek.common.NuclearDetonation;
 import megamek.common.Player;
+import megamek.common.ResolvedAttack;
 import megamek.common.SpecialHexDisplay;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.event.GameAttackResolvedEvent;
+import megamek.common.event.GameNuclearDetonationEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
+import megamek.common.interfaces.IEntityRemovalConditions;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.options.OptionsConstants;
 import megamek.common.preference.PreferenceManager;
@@ -52,12 +59,68 @@ import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
+import megamek.common.units.Targetable;
 import megamek.common.units.UnitLocation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuBoardSourceTest {
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void scheduledStrikePublishesOnlyItsCompleteTerrainAndPreservesPublicFlashAcrossConcealment(boolean concealed)
+          throws Exception {
+        Board board = new Board(8, 8, Stream.generate(Hex::new).limit(64).toArray(Hex[]::new));
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
+            Coords coords = fixture.entity.getPosition();
+            var strike = new NuclearDetonation(UUID.randomUUID(), 0, coords, 0, 10000, 109, 184, 3);
+            fixture.source.takeFrame();
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.game.fireGameEvent(new GameNuclearDetonationEvent(fixture.game, strike, false));
+                board.setHex(coords, new Hex(-1));
+                fixture.source.refresh();
+            });
+            var during = fixture.source.takeFrame();
+            assertEquals(0, during.scene().tiles().stream().filter(tile -> tile.coords().equals(coords))
+                  .findFirst().orElseThrow().elevation(), "Intermediate damage must not escape the packet boundary");
+            assertTrue(during.timeline().stream().noneMatch(BoardScene.Detonation.class::isInstance));
+            SwingUtilities.invokeAndWait(() -> {
+                var location = new UnitLocation(fixture.entity.getId(), coords, 0, 0, 0);
+                var death = new ResolvedAttack(UUID.randomUUID(), ResolvedAttack.Kind.DEATH, location, location,
+                      Targetable.TYPE_ENTITY, -1, "", Entity.LOC_NONE, true);
+                fixture.game.fireGameEvent(new GameAttackResolvedEvent(fixture.game, death, fixture.entity, fixture.entity));
+                if (concealed) {
+                    fixture.game.removeEntity(fixture.entity.getId(), IEntityRemovalConditions.REMOVE_UNKNOWN);
+                }
+                board.setHex(coords, new Hex(-3));
+                fixture.source.refresh();
+                fixture.game.fireGameEvent(new GameNuclearDetonationEvent(fixture.game, strike, true));
+            });
+            var completed = fixture.source.takeFrame();
+            var timeline = completed.timeline();
+            int impact = -1;
+            for (int i = 0; i < timeline.size(); i++) {
+                if (timeline.get(i) instanceof BoardScene.Detonation) { impact = i; }
+            }
+            assertTrue(impact >= 0);
+            assertTrue(timeline.get(impact + 1) instanceof BoardScene.SceneUpdate);
+            assertEquals(!concealed, timeline.stream().anyMatch(BoardScene.Combat.class::isInstance),
+                  "Visible deaths remain queued; a concealment must not restore a hidden unit");
+            var playback = new UnitPlayback();
+            playback.accept(timeline, completed.scene(), ignored -> false);
+            playback.advance(1f, UnitMotion.Speed.NORMAL);
+            assertEquals(List.of(strike), playback.takeDetonations(), "Public flash survives the visibility reset");
+            assertEquals(-3, playback.present(completed.scene()).tiles().stream().filter(tile -> tile.coords().equals(coords))
+                  .findFirst().orElseThrow().elevation());
+            if (concealed) {
+                assertTrue(playback.present(completed.scene()).units().isEmpty());
+            }
+            SwingUtilities.invokeAndWait(() -> fixture.game.fireGameEvent(
+                  new GameNuclearDetonationEvent(fixture.game, strike, true)));
+            assertTrue(fixture.source.takeFrame().timeline().isEmpty(), "Duplicate completion must not replay the blast");
+        }
+    }
+
     @Test
     void movementPaletteCapturesEveryClientColorWithoutSharingMutableState() throws Exception {
         SwingUtilities.invokeAndWait(() -> {

@@ -304,7 +304,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
     /**
      * Water depth -1 means dry. Ground and decals are independent from solid feature geometry. A barren tile is the
-     * airless ground of {@link #lunar}: nothing grows on it, so its field cover keeps only stones. A bare tile is its
+     * airless ground of {@link #lunar}, or scorched ground: nothing grows on it, so its field cover keeps only stones. A bare tile is its
      * zero-gravity rock: nothing lies loose or grows on it, so neither scatter nor field cover dresses it. The tileset
      * art is the hex's Saxarba art and the bridge art its bridge's, which only the Tactical View draws. {@code deckRoad}
      * and {@code deckRoadExits}: the road its bridge deck carries ({@link Terrains#BRIDGE_ROAD}), NONE and 0 on a clean
@@ -522,6 +522,16 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                   decalsWithoutLimbs, tactical, List.copyOf(shown), text, liquid, tileset, detailedGround, road, fireSmoke, biome,
                   impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
                   cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor);
+        }
+
+        /** Burned presentation only: remove decorative vegetation and prevent field shrubs replacing it. */
+        Tile withoutVegetation() {
+            List<Feature> kept = features.stream().filter(feature -> !GpuScatter.vegetation(feature)).toList();
+            if (barren && kept.size() == features.size()) { return this; }
+            return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
+                  decalsWithoutLimbs, tactical, kept, text, liquid, tileset, detailedGround, road, fireSmoke, biome,
+                  impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
+                  cover, true, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor);
         }
 
         /**
@@ -960,11 +970,20 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         public int boardId() { return scene.boardId(); }
     }
 
+    /** A scheduled strike has a location and resolved blast parameters, but no attacking unit. */
+    record Detonation(megamek.common.NuclearDetonation result) implements Animation {
+        @Override
+        public int entityId() { return -1; }
+
+        @Override
+        public int boardId() { return result.boardId(); }
+    }
+
     /**
      * Target type is captured with the visible event, independently of its chosen model or sprite. An attacker off the
      * map (off-board artillery) has no place on the board to show, so the camera frames only its target.
+     * {@code attackerClan} decides a mixed-tech weapon's look (laser colour).
      */
-    /** {@code attackerClan}: the attacker's tech base, which decides a mixed-tech weapon's look (laser colour). */
     record Combat(megamek.common.ResolvedAttack result, Unit attacker, Unit target, Waypoint destination,
           boolean conventionalInfantryTarget, boolean attackerOffBoard, boolean attackerClan) implements Animation {
         Combat(megamek.common.ResolvedAttack result, Unit attacker, Unit target, Waypoint destination) {

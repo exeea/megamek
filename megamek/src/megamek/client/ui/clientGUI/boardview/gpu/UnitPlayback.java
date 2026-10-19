@@ -22,6 +22,8 @@ final class UnitPlayback {
     static final int MAX_PENDING_EVENTS = 512;
     /** Maximum spread between a unit's weapon launches, in shared animation seconds. */
     static final float VOLLEY_JITTER_SECONDS = .12f;
+    /** A brief contact edge lets the camera settle before the scheduled strike and its final terrain appear together. */
+    static final float DETONATION_CONTACT_SECONDS = .05f;
     final Map<Integer, UnitMotion> motions = new HashMap<>();
     /** GL-owned visual preview; NaN keeps each event's captured game gravity. Read only when a jump starts. */
     float gravityOverride = Float.NaN;
@@ -32,6 +34,8 @@ final class UnitPlayback {
     private final List<UnitAttack> attacks = new ArrayList<>();
     /** Completed/instant shots wait only until the next render consumes their persistent cosmetic impacts. */
     private final Map<UUID, UnitAttack> completedAttacks = new LinkedHashMap<>();
+    private final Map<UUID, megamek.common.NuclearDetonation> detonations = new LinkedHashMap<>();
+    private boolean detonationStarted;
     private final UnitVolley volley = new UnitVolley();
     private record Reaction(BoardScene.Movement movement, double start) { }
     private final List<Reaction> reactions = new ArrayList<>();
@@ -176,6 +180,12 @@ final class UnitPlayback {
                     combatTerrainRelease = terrainRelease();
                     if (attack.shot()) { volley.add(attack, 0); }
                     collectVolley();
+                } else if (active instanceof BoardScene.Detonation) {
+                    combatSeconds = 0;
+                    combatContact = DETONATION_CONTACT_SECONDS;
+                    combatTerrainRelease = combatContact;
+                    combatDuration = GpuArtilleryBlast.SHOCK_SECONDS;
+                    detonationStarted = false;
                 } else if (active instanceof BoardScene.Conversion change) {
                     conversion = new UnitConversion(change);
                 } else if (active instanceof BoardScene.AttachmentChange change) {
@@ -197,6 +207,9 @@ final class UnitPlayback {
                 } else if (motion == null) {
                     double previousCombat = combatSeconds;
                     combatSeconds = Math.min(combatDuration, combatSeconds + step * speed.rate);
+                    if (active instanceof BoardScene.Detonation detonation && !beforeImpact()) {
+                        startDetonation(detonation);
+                    }
                     volley.advance((float) combatSeconds);
                     attacks.forEach(shot -> {
                         float previous = shot.seconds;
@@ -281,6 +294,24 @@ final class UnitPlayback {
         return result;
     }
 
+    /** Contact edges consumed once by effects, including strikes skipped with Instant playback. */
+    List<megamek.common.NuclearDetonation> takeDetonations() {
+        var result = List.copyOf(detonations.values());
+        detonations.clear();
+        return result;
+    }
+
+    BoardScene.Detonation detonation() {
+        return review == null && active instanceof BoardScene.Detonation event ? event : null;
+    }
+
+    private void startDetonation(BoardScene.Detonation event) {
+        if (detonationStarted) { return; }
+        detonationStarted = true;
+        detonations.putIfAbsent(event.result().id(), event.result());
+        if (detonations.size() > MAX_PENDING_EVENTS) { detonations.remove(detonations.keySet().iterator().next()); }
+    }
+
     private void completeAttack(UnitAttack shot) {
         if (!GpuGroundDamage.COMBAT_SCARS || !shot.shot() || shot.defensive()) { return; }
         shot.seconds = shot.duration;
@@ -301,7 +332,7 @@ final class UnitPlayback {
     void stepOnce() {
         if (paused) {
             stepping = true;
-            stepFrom = completed || attack != null && !beforeImpact() ? active : null;
+            stepFrom = completed || (attack != null || active instanceof BoardScene.Detonation) && !beforeImpact() ? active : null;
         }
     }
 
@@ -385,7 +416,9 @@ final class UnitPlayback {
         }
     }
 
-    private boolean beforeImpact() { return attack == null || combatSeconds + 1e-7 < combatContact; }
+    private boolean beforeImpact() {
+        return attack == null && !(active instanceof BoardScene.Detonation) || combatSeconds + 1e-7 < combatContact;
+    }
 
     /** The latest moment a shot in the volley changes the terrain, never after the volley ends. */
     private double terrainRelease() {
@@ -394,7 +427,9 @@ final class UnitPlayback {
         return Math.min(release, combatDuration);
     }
 
-    private boolean beforeTerrainRelease() { return attack == null || combatSeconds + 1e-7 < combatTerrainRelease; }
+    private boolean beforeTerrainRelease() {
+        return attack == null && !(active instanceof BoardScene.Detonation) || combatSeconds + 1e-7 < combatTerrainRelease;
+    }
 
     private boolean sameVolley(BoardScene.Combat next) {
         var primary = attacks.stream().filter(shot -> !shot.defensive()).findFirst().orElse(attack);
@@ -448,6 +483,7 @@ final class UnitPlayback {
 
     void finish() {
         attacks.forEach(this::completeAttack);
+        if (active instanceof BoardScene.Detonation event) { startDetonation(event); }
         motions.values().forEach(UnitMotion::finish);
         if (!completed) { reactions.forEach(reaction -> completeMovement.accept(reaction.movement())); }
         if (active instanceof BoardScene.Movement movement && !completed) {
@@ -466,6 +502,9 @@ final class UnitPlayback {
                 settleConversion(change);
             } else if (event instanceof BoardScene.Combat combat) {
                 completeAttack(new UnitAttack(combat));
+            } else if (event instanceof BoardScene.Detonation detonation) {
+                detonationStarted = false;
+                startDetonation(detonation);
             }
         }
         resetQueue();
@@ -489,6 +528,7 @@ final class UnitPlayback {
 
     void clear() {
         completedAttacks.clear();
+        detonations.clear();
         resetQueue();
         review(null);
         paused = false;

@@ -639,6 +639,7 @@ class GpuBattleView extends ApplicationAdapter {
             terrain.boardChanged();
             atmosphere.resetContrast();
             playback.clear();
+            attackEffects.clearArtilleryBlasts();
             history.clear();
             animators.clear();
             groundSurfaces.clear();
@@ -853,6 +854,7 @@ class GpuBattleView extends ApplicationAdapter {
         markers.update(unitInstances.values(), boardCamera.camera);
         updateJumpJets();
         attackEffects.update(playback.attacks(), completedAttacks, unitModels, unitInstances);
+        playback.takeDetonations().forEach(attackEffects::detonate);
         attackEffects.advance(Gdx.graphics.getDeltaTime());
         // No craters in the Tactical View or on the Classic columns.
         if (!terrain.columns() && !boardCamera.tactical()) {
@@ -1593,6 +1595,9 @@ class GpuBattleView extends ApplicationAdapter {
             boardCamera.frameMovement(state.movement(), motions.get(state.activeEntityId()), state.present(scene), playbackCameraWidth());
         } else if (state.attack() != null && state.attack().shot()) {
             boardCamera.frameAttacks(state.attacks(), playbackCameraWidth());
+        } else if (state.detonation() != null) {
+            var strike = state.detonation().result();
+            boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
         } else {
             return true;
         }
@@ -1663,6 +1668,12 @@ class GpuBattleView extends ApplicationAdapter {
         // Keep the last idle selection until the entire playback, including its completion hold, ends; a reviewed
         // attack is framed as a live one.
         if (playback.busy() || playback.reviewing()) {
+            if (playback.detonation() != null) {
+                var strike = playback.detonation().result();
+                cameraFollowingPlayback = true;
+                boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
+                return;
+            }
             if (playback.movement() != null) {
                 // The complete route is already framed. Do not chase the unit or recenter it on arrival.
                 cameraFollowingPlayback = false;
@@ -1713,6 +1724,9 @@ class GpuBattleView extends ApplicationAdapter {
             boardCamera.frameSelection(selection, cameraWidth());
         } else if (instantAction instanceof BoardScene.Combat combat && combat.result().kind() == ResolvedAttack.Kind.SHOT) {
             boardCamera.frameAttacks(List.of(new UnitAttack(combat)), playbackCameraWidth());
+        } else if (instantAction instanceof BoardScene.Detonation detonation) {
+            var strike = detonation.result();
+            boardCamera.frameLocation(BoardGeometry.center(strike.coords(), strike.elevation()), playbackCameraWidth());
         } else if (instantAction != null) {
             scene.units().stream().filter(unit -> unit.id() == instantAction.entityId()).findFirst()
                   .filter(unit -> onMap(scene, unit))

@@ -15,6 +15,7 @@ import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.BeforeAll;
@@ -235,6 +236,61 @@ class BoardBridgeSlopeTest {
                     }
                     var under = new Vector3(center.x, center.y, 0).mulAdd(across, -30 * BoardGeometry.hexScale());
                     assertFalse(Float.isFinite(footing.shape().hit(new Ray(under, across))), "The level span remains open below");
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 1, 2, 3, 4, 5 })
+    void trussFasciaAndRampConcreteNeverShareAnExposedFace(int direction) {
+        float scale = BoardGeometry.hexScale();
+        for (int x : new int[] { 3, 4 }) {
+            var at = new Coords(x, 4);
+            var roadAt = at.translated(direction);
+            int exits = (1 << direction) | (1 << ((direction + 3) % 6));
+            for (int roadLevel : new int[] { 0, 2 }) {
+                var scene = BoardBridgeTypeTest.typed(BoardSurfaceBlendTest.scene(c -> c.equals(at)
+                      ? bridge(c, -1, 2, exits)
+                      : BoardRoadTest.tile(c, c.equals(roadAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                            c.equals(roadAt) ? exits : 0, c.equals(roadAt) ? roadLevel : -1, BoardScene.Surface.GRASS)),
+                      HexAppearance.TRUSS);
+                var tile = scene.tile(at);
+                var center = BoardGeometry.center(at, 1);
+                var roadCenter = BoardGeometry.center(roadAt, roadLevel);
+                var along = new Vector3(roadCenter).sub(center);
+                along.z = 0;
+                along.nor();
+                var across = new Vector3(-along.y, along.x, 0);
+                for (var lod : TerrainLod.values()) {
+                    var footing = BoardBridgeFooting.build(scene, tile, lod, new HashMap<>());
+                    var shape = BoardBridgeSlope.build(tile, BoardBridge.deck(scene, tile), footing);
+                    var steel = BoardBridge.shape(shape.surface(), shape.level(), shape.facets().stream()
+                          .filter(f -> f.part() == BoardBridge.Part.STEEL).toList());
+                    var concrete = BoardBridge.shape(shape.surface(), shape.level(), shape.facets().stream()
+                          .filter(f -> f.part() != BoardBridge.Part.STEEL).toList());
+                    for (float t : new float[] { .31f, .38f, .44f }) {
+                        for (float below : new float[] { -.6f, .35f, 1.7f }) {
+                            var p = new Vector3(center).lerp(roadCenter, t);
+                            p.z = center.z + (roadCenter.z - center.z) * (2 * t - .5f)
+                                  + (GpuRoads.SURFACE_LIFT - below) * scale;
+                            for (int side : new int[] { -1, 1 }) {
+                                var ray = new Ray(new Vector3(p).mulAdd(across, side * 30 * scale),
+                                      new Vector3(across).scl(-side));
+                                float steelDistance = (float) Math.sqrt(steel.hit(ray));
+                                float concreteDistance = (float) Math.sqrt(concrete.hit(ray));
+                                assertEquals((30 - BoardRoad.Kind.PAVED.halfWidth - BoardRoad.SHOULDER) * scale,
+                                      Math.min(steelDistance, concreteDistance), .01f, "The ramp side stays closed");
+                                assertFalse(Math.abs(steelDistance - concreteDistance) < .001f,
+                                      "Steel and concrete z-fight: direction=" + direction + " road=" + roadLevel
+                                            + " lod=" + lod + " t=" + t + " below=" + below);
+                            }
+                        }
+                    }
+                    var suspended = new Vector3(center).mulAdd(along, 3 * scale);
+                    suspended.z += (GpuRoads.SURFACE_LIFT - 1.7f) * scale;
+                    assertTrue(Float.isFinite(steel.hit(new Ray(suspended.mulAdd(across, 30 * scale),
+                          new Vector3(across).scl(-1)))), "The unsupported centre retains its full steel fascia");
                 }
             }
         }

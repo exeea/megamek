@@ -1324,6 +1324,12 @@ public class Client extends AbstractClient {
                               game.getTarget(result.targetType(), result.target().entityId())));
                     }
                     break;
+                case NUCLEAR_DETONATION:
+                    if (packet.getObject(0) instanceof megamek.common.NuclearDetonation detonation) {
+                        game.processGameEvent(new megamek.common.event.GameNuclearDetonationEvent(this, detonation,
+                              packet.getBooleanValue(1)));
+                    }
+                    break;
                 case TURN:
                     changeTurnIndex(packet.getIntValue(0), packet.getIntValue(1));
                     break;

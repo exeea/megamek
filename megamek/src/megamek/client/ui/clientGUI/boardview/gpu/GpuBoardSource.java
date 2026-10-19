@@ -130,6 +130,10 @@ final class GpuBoardSource implements BoardSource {
     private volatile GpuBoardWindow.DialogRequest dialog;
     private long dialogSequence;
     private Frame frame;
+    /** Packet-bounded presentation capture only; the game continues to apply its authoritative strike updates. */
+    private record NuclearCapture(megamek.common.NuclearDetonation strike, Frame before,
+          List<BoardScene.Animation> consequences) { }
+    private NuclearCapture nuclearCapture;
     /** EDT-owned menu request; the selection flag scopes this capture, not the game's acting unit. */
     private Coords contextCoords;
     private int contextUnitId = Entity.NONE;
@@ -218,6 +222,42 @@ final class GpuBoardSource implements BoardSource {
                 onSwing(() -> {
                     if (isCurrentView(eventView)) {
                         captureCombat(event);
+                    }
+                });
+            }
+
+            @Override
+            public void gameNuclearDetonation(megamek.common.event.GameNuclearDetonationEvent event) {
+                BoardClientState eventView = GpuBoardSource.this.view;
+                onSwing(() -> {
+                    var result = event.detonation();
+                    if (!isCurrentView(eventView) || result.boardId() != view.getBoardId()) { return; }
+                    if (!event.completed() && !receivedAttacks.add(result.id())) { return; }
+                    Frame next = capture();
+                    synchronized (GpuBoardSource.this) {
+                        if (event.completed()) {
+                            if (nuclearCapture == null || !nuclearCapture.strike().id().equals(result.id())) { return; }
+                            publishScene(next, true);
+                            var consequences = nuclearCapture.consequences();
+                            nuclearCapture = null;
+                            Set<Integer> concealed = consequences.stream().filter(BoardScene.Concealed.class::isInstance)
+                                  .map(BoardScene.Animation::entityId).collect(Collectors.toSet());
+                            consequences.stream().filter(BoardScene.Concealed.class::isInstance)
+                                  .forEach(GpuBoardSource.this::queueAnimation);
+                            queueAnimation(new BoardScene.Detonation(result));
+                            queueAnimation(new BoardScene.SceneUpdate(next.scene()));
+                            consequences.stream().filter(action -> !(action instanceof BoardScene.Concealed)
+                                  && !concealed.contains(action.entityId())
+                                  && !(action instanceof BoardScene.Combat combat && combat.target() != null
+                                        && concealed.contains(combat.target().id()))
+                                  && !(action instanceof BoardScene.AttachmentChange change
+                                        && concealed.contains(change.carrier().id())))
+                                  .forEach(GpuBoardSource.this::queueAnimation);
+                        } else {
+                            publishScene(next, true);
+                            nuclearCapture = new NuclearCapture(result, next, new ArrayList<>());
+                            if (receivedAttacks.size() > 2048) { receivedAttacks.removeFirst(); }
+                        }
                     }
                 });
             }
@@ -513,6 +553,11 @@ final class GpuBoardSource implements BoardSource {
     }
 
     private synchronized void queueAnimation(BoardScene.Animation animation) {
+        if (nuclearCapture != null) {
+            // One final checkpoint follows the flash. Deaths keep their captured victims and play afterwards.
+            if (!(animation instanceof BoardScene.SceneUpdate)) { nuclearCapture.consequences().add(animation); }
+            return;
+        }
         if (animation instanceof BoardScene.SceneUpdate
               && !pendingEvents.isEmpty() && pendingEvents.getLast() instanceof BoardScene.SceneUpdate) {
             pendingEvents.removeLast();
@@ -704,7 +749,7 @@ final class GpuBoardSource implements BoardSource {
     }
 
     public synchronized Frame takeFrame() {
-        Frame result = frame.withTimeline(List.copyOf(pendingEvents));
+        Frame result = (nuclearCapture == null ? frame : nuclearCapture.before()).withTimeline(List.copyOf(pendingEvents));
         pendingEvents.clear();
         animationsTaken = animationsQueued;
         return result;
@@ -725,6 +770,7 @@ final class GpuBoardSource implements BoardSource {
                 terrain.changed(null);
                 synchronized (this) {
                     pendingEvents.clear();
+                    nuclearCapture = null;
                 }
             }
         }
@@ -745,6 +791,7 @@ final class GpuBoardSource implements BoardSource {
             atmosphere.reset();
             synchronized (this) {
                 pendingEvents.clear();
+                nuclearCapture = null;
                 receivedAttacks.clear();
                 removalAttempts.clear();
                 voluntaryReleases.clear();
@@ -1586,6 +1633,7 @@ final class GpuBoardSource implements BoardSource {
         view.releasePlanarCapture();
         synchronized (this) {
             pendingEvents.clear();
+            nuclearCapture = null;
         }
     }
     private long animationsQueued;

@@ -25,6 +25,51 @@ import org.junit.jupiter.api.Test;
 
 class UnitPlaybackTest {
     @Test
+    void scheduledStrikeReleasesItsFinalTerrainAtFlashBeforeFollowingCasualties() {
+        var victim = unit(2, 0);
+        var before = scene(victim);
+        var after = new BoardScene(0, 1, 1, List.of(new BoardScene.Tile(new Coords(0, 0), -3, -1,
+              false, 0, null, null, null, null, List.of(), List.of())), List.of(), List.of(), -1, "FIRING", List.of());
+        var strike = new megamek.common.NuclearDetonation(UUID.randomUUID(), 0, new Coords(0, 0), 0, 10000, 109, 184, 3);
+        var playback = new UnitPlayback();
+        playback.accept(List.of(new BoardScene.SceneUpdate(before), new BoardScene.Detonation(strike),
+              new BoardScene.SceneUpdate(after), attack(victim, victim, ResolvedAttack.Kind.DEATH, true)), after, ignored -> false);
+        playback.advance(0, UnitMotion.Speed.NORMAL);
+        assertNull(playback.attack(), "A scheduled strike has no invented attacker");
+        assertEquals(0, playback.present(after).tiles().getFirst().elevation());
+        assertTrue(playback.takeDetonations().isEmpty());
+        playback.advance((UnitPlayback.DETONATION_CONTACT_SECONDS - .001) / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
+        assertEquals(0, playback.present(after).tiles().getFirst().elevation());
+        playback.advance(.001 / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
+        assertEquals(List.of(strike), playback.takeDetonations());
+        assertEquals(-3, playback.present(after).tiles().getFirst().elevation());
+        assertTrue(playback.present(after).units().contains(victim), "The queued casualty retains its observed model");
+        playback.advance(.1, UnitMotion.Speed.NORMAL);
+        assertTrue(playback.takeDetonations().isEmpty(), "The flash edge is delivered once");
+        playback.finish();
+        assertTrue(playback.takeDetonations().isEmpty(), "Finishing after contact must not emit a second blast");
+        assertEquals(after.units(), playback.present(after).units());
+    }
+
+    @Test
+    void instantScheduledStrikesKeepOrderAndClearDiscardsUnplayedEffects() {
+        var first = new megamek.common.NuclearDetonation(UUID.randomUUID(), 0, new Coords(0, 0), 0, 1000, 23, 86, 1);
+        var second = new megamek.common.NuclearDetonation(UUID.randomUUID(), 0, new Coords(0, 0), -1, 1234, 31, 93, 2);
+        var unchanged = scene();
+        var playback = new UnitPlayback();
+        var events = List.<BoardScene.Animation>of(new BoardScene.SceneUpdate(unchanged), new BoardScene.Detonation(first),
+              new BoardScene.SceneUpdate(unchanged), new BoardScene.Detonation(second), new BoardScene.SceneUpdate(unchanged));
+        playback.accept(events, unchanged, ignored -> false);
+        playback.advance(0, UnitMotion.Speed.INSTANT);
+        assertEquals(List.of(first, second), playback.takeDetonations());
+        assertFalse(playback.busy());
+        playback.accept(events, unchanged, ignored -> false);
+        playback.clear();
+        playback.finish();
+        assertTrue(playback.takeDetonations().isEmpty());
+    }
+
+    @Test
     void movementPresentationRetainsTheCapturedHeat() {
         var start = unit(1, 0);
         var target = unit(1, 4);
