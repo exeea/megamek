@@ -115,7 +115,8 @@ covers 8 m at 1024 pixels. `GpuAssets.coverage` gives that factor (texture width
 enlarged secondary sample that breaks up terrain repetition. A loose material's maps
 must be square. A terrain array holding a wider material takes its grid, and the
 smaller materials are resampled up to it. To change a density instead, change
-`metres` (or `pixels`) in the catalogue.
+`metres` (or `pixels`) in the catalogue. *Reload assets* in the Tuning panel re-reads the
+catalogue with the maps and rebuilds the board, so the new density shows at once.
 
 ### Loose (47)
 
@@ -167,7 +168,7 @@ Godot > Godot 4 Standard* into `data/models/board/textures/<folder>`. Alternativ
 exports with Material Maker's command line (see `mm-data/tools/materials/README.md`).
 The command line renders every map at 2048 pixels whatever the node's Size, so the
 script resamples each map to its node's Size. *Reload assets* in the Tuning panel picks
-up a new export without restarting.
+up a new export, and any catalogue change, without restarting.
 
 `GpuBoardMaterialsTest` checks that every shipped material reads, that its maps exist,
 and that it is catalogued exactly once, with square maps if it is loose.

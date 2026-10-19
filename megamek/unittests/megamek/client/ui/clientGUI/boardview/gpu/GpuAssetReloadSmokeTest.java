@@ -174,6 +174,17 @@ class GpuAssetReloadSmokeTest {
                             GpuAssetReloadTest.png(lava.resolve("lava_coverage.png"), 0xff404040);
                             Path molten = lava.resolve("lava.tres");
                             Files.writeString(molten, Files.readString(molten).replace("emission_energy = 5.0", "emission_energy = 4.0"));
+                            // The catalogue is data too: grass takes twice the metres per repeat (half its density),
+                            // and asphalt is catalogued at half its width, so the same texture covers twice the road.
+                            Path catalog = textures.resolve("materials.json");
+                            var catalogMapper = new ObjectMapper();
+                            var entries = (ObjectNode) catalogMapper.readTree(catalog.toFile());
+                            var loose = (ObjectNode) entries.get("loose");
+                            var grassEntry = (ObjectNode) loose.get("terrain/surfaces/grass");
+                            grassEntry.put("metres", grassEntry.get("metres").floatValue() * 2);
+                            ((ObjectNode) loose.get("roads/asphalt")).put("pixels", 512);
+                            catalogMapper.writerWithDefaultPrettyPrinter().writeValue(catalog.toFile(), entries);
+                            assertEquals(1, assets().coverage("roads/asphalt"), "Edits wait for the actual Reload action");
                             assertSame(originalEmission, assets().lavaEmission(), "Edits wait for the actual Reload action");
                             scaleMesh(directory.resolve("models/board/tree.glb"));
                             scaleMesh(directory.resolve("models/board/rocks/block-0.glb"));
@@ -203,8 +214,10 @@ class GpuAssetReloadSmokeTest {
                             assertEquals(0, originalSculpt.data().getTextureObjectHandle(), "Old numerical array must be released");
                             var sculpt = assets().sculptArray(sculptLayers);
                             assertNotSame(originalSculpt, sculpt);
-                            assertEquals(sculptTile * 1.25f, assets().sculptTile("grass"), .0001f,
-                                  "Reload must refresh the material's coverage as well as its maps");
+                            assertEquals(sculptTile * 2 * 1.25f, assets().sculptTile("grass"), .0001f,
+                                  "Reload must re-read the catalogue and the material's width as well as its maps");
+                            assertEquals(2, assets().coverage("roads/asphalt"),
+                                  "A catalogue edit reaches the road's repeat after Reload assets");
                             int grassLayer = sculptLayers.indexOf("grass") * 2;
                             assertTrue(grassLayer >= 0);
                             // FBO readback returns stored bytes: RGB is now encoded sRGB; height, normal and AO stay raw.
