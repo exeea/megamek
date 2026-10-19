@@ -533,6 +533,28 @@ class GpuHudInputTest {
     }
 
     @Test
+    void escSkipsARunningPlaybackOnceNothingIsLeftToClose() {
+        BoardScene.Waypoint from = new BoardScene.Waypoint(HEX, 0, 0);
+        BoardScene.Unit mover = new BoardScene.Unit(FOE, -1, "Unit " + FOE, from, null, false, null, 1, false);
+        hud.state.history.accept(List.of(new BoardScene.Movement(FOE, 0,
+              List.of(from, new BoardScene.Waypoint(new Coords(5, 6), 0, 0)), EntityMovementType.MOVE_WALK, 0, 4,
+              mover)), mock(BoardScene.class), GpuReportLog.Snapshot.EMPTY, ignored -> false);
+        assertTrue(hud.state.history.running());
+        GpuHud.HudView playing = new GpuHud.HudView(false, true, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
+        hud.update(frame(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, unit(FIRST, OWN, false, false),
+              unit(FOE, ENEMY, false, false)), GpuHudData.EMPTY), playing, null, preferences());
+
+        assertTrue(press(Input.Keys.SPACE, KeyEvent.VK_SPACE, 0));
+        assertEquals(UnitMotion.Speed.NORMAL, hud.state.history.speed(), "Space keeps its own binds");
+        hud.state.inspected = FOE;
+        assertTrue(escape());
+        assertEquals(Entity.NONE, hud.state.inspected);
+        assertEquals(UnitMotion.Speed.NORMAL, hud.state.history.speed(), "Esc closes what is open first");
+        assertTrue(escape());
+        assertEquals(UnitMotion.Speed.INSTANT, hud.state.history.speed(), "then skips to the results");
+    }
+
+    @Test
     void boardClicksFollowThePhaseAndTheLocalTurn() {
         GpuBattleStatus.UnitStatus actor = unit(FIRST, OWN, true, true);
         GpuBattleStatus.UnitStatus ready = unit(SECOND, OWN, true, true);

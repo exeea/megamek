@@ -2872,9 +2872,6 @@ class GpuBattleView extends ApplicationAdapter {
                 }
             }
             if (drawing) { return true; }
-            if (isMoving() && binds.contains(KeyCommandBind.CENTER_ON_SELECTED)) {
-                playback.finish();
-            }
             if (awt != KeyEvent.VK_UNDEFINED) {
                 pressedKeys.put(key, new KeyPress(awt, modifiers));
                 source.key(awt, true, modifiers);
