@@ -184,7 +184,6 @@ void main() {
     // Depth below this water hex's level, in metres, and height above its water, which lies u_waterLine lower.
     float depth = waterCovered ? (level * u_levelHeight - v_cloudPosition.z) / u_metre : -1.0;
     float above = waterCovered ? u_waterLine / u_metre - depth : 99.0;
-    shallowSediment = zeroDepth ? 1.0 - smoothstep(-.25, .05, above) : -1.0;
     vec2 p = vec2(world.x, -world.y);
     // Capture numerical-map gradients before varying material/coverage branches.
     mat2 groundGradient = mat2(dFdx(p), dFdy(p));
@@ -233,8 +232,11 @@ void main() {
     // Use the whole exposed bank for the fade. Nested height smoothsteps compressed it into a sharp strip.
     float bankProgress = clamp((bankMargin - above) / max(bankMargin - .01, .001), 0.0, 1.0);
     bankProgress += (broad * .35 + fine * .65 - .5) * .3 * bankProgress * (1.0 - bankProgress);
+    float nearWaterSediment = shore ? 1.0 - smoothstep(-.25, .05, above) : 0.0;
+    // Depth-zero arid banks use the same halfway profile for clear and Mars water alike.
+    shallowSediment = zeroDepth ? mix(nearWaterSediment, bankProgress, .5) : -1.0;
     // Dry cover is gone just before the waterline; the endpoints still match the adjoining ground and bed.
-    float sediment = riverBank ? bankProgress : shore ? 1.0 - smoothstep(-.25, .05, above) : 0.0;
+    float sediment = riverBank ? bankProgress : nearWaterSediment;
     // Levels of water over a submerged bed; none elsewhere.
     float submerged = 0.0;
     vec3 transmission = vec3(1.0);

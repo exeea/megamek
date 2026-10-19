@@ -20,6 +20,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -29,8 +30,7 @@ import org.junit.jupiter.api.Test;
 class GpuFungusSmokeTest {
     @Test
     void rendersFungalCrevasseByDayAndNightWithSporesOnlyOnMatureColonies() throws Exception {
-        Board board = new Board();
-        board.load(new File("data/boards/Alien Worlds/32x17 Fungal Crevasse.board"));
+        Board board = BoardFile.loadSheet(new File("data/boards/Alien Worlds/32x17 Fungal Crevasse.board"), false, true);
         BoardScene scene = capture(board);
         Board bare = Board.createEmptyBoard(6, 6);
         for (int x = 0; x < 6; x++) for (int y = 0; y < 6; y++) {

@@ -15,6 +15,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -86,8 +87,7 @@ class GpuTerrainDetailSmokeTest {
     }
 
     private static BoardScene shortCanyon() throws Exception {
-        Board board = new Board();
-        board.load(new File("data/boards/unofficial/Carpe Mortis/16x17 Short Canyon.board"));
+        Board board = BoardFile.loadSheet(new File("data/boards/unofficial/Carpe Mortis/16x17 Short Canyon.board"), false, true);
         var scene = new AtomicReference<BoardScene>();
         try (var fixture = GpuBoardFixture.create(board)) {
             SwingUtilities.invokeAndWait(() -> {

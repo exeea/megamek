@@ -5585,11 +5585,13 @@ final class GpuTerrain implements Disposable {
         boolean bank = (face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.SHORE)
               && a != null && b != null && c != null && a.kind() == BoardRelief.Kind.GROUND
               && b.kind() == a.kind() && c.kind() == a.kind();
-        if (openWater(surface.tile) != null && (bank || submergedCliff(a) && submergedCliff(b) && submergedCliff(c))) {
+        if (surface.tile.liquid().present() && !surface.tile.liquid().molten()
+              && (bank || submergedCliff(a) && submergedCliff(b) && submergedCliff(c))) {
             // An emerged bank needs its pool's height too: soil and damp gravel begin above the water, while
             // absorption still uses actual depth. Clipping it to the wet footprint erased that dry-side transition.
             // The pool's vertical bed boundaries also retain this reference: their projection can lie behind an
             // undercut, where an XY coverage test cannot decide submersion. Exterior cliffs still use clipping.
+            // Frozen banks need the same material reference, including when neighbouring ground materials blend.
             float shore = GpuWaterShader.palette(surface.tile.liquid());
             polygonConsumer.accept(List.of(sculptVertex(face.a(), a, shore, surface),
                   sculptVertex(face.b(), b, shore, surface), sculptVertex(face.c(), c, shore, surface)));

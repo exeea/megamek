@@ -17,6 +17,7 @@ import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -26,8 +27,7 @@ import org.junit.jupiter.api.Test;
 class GpuDomeVentRotationSmokeTest {
     @Test
     void rotatingDomeVentKeepsItsInteriorOpaque() throws Exception {
-        var board = new Board();
-        board.load(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"));
+        var board = BoardFile.loadSheet(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"), false, true);
         var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "dome-orbit");
         Files.createDirectories(output.toPath());
         try (var fixture = GpuBoardFixture.create(board)) {

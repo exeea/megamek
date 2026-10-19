@@ -1885,7 +1885,7 @@ final class BoardSurface {
         float distance = (float) Math.hypot(boundary.x - waterline.x, boundary.y - waterline.y);
         float fraction = Math.min(1, BoardRelief.SHORE_LIP * BoardGeometry.hexScale() / Math.max(distance, .0001f));
         Vector3 lip = new Vector3(waterline).lerp(boundary, fraction);
-        boolean graded = !tile.frozen() && !tile.liquid().molten();
+        boolean graded = !tile.liquid().molten();
         if (graded && index % SHORE_SEGMENTS == 0) {
             int edge = index / SHORE_SEGMENTS, before = (edge + 5) % 6;
             graded = (!mouth(edge) || relief.gradedBankMouth(edge))
@@ -1989,6 +1989,7 @@ final class BoardSurface {
         Vector3 rawFrom = along(outlinePoint(start), plunge), rawTo = along(outlinePoint(start + turn), plunge);
         float fromOffset = radius(from) - radius(rawFrom), toOffset = radius(to) - radius(rawTo);
         Vector3 fromNormal = bankNormal(from, (edge + 5) % 6), toNormal = bankNormal(to, (edge + 1) % 6);
+        boolean fromCliff = relief.wetCliff((edge + 5) % 6), toCliff = relief.wetCliff((edge + 1) % 6);
         for (int i = 1; i <= fine; i++) {
             if (i < fine) {
                 float t = BoardRelief.smooth(i / (float) fine);
@@ -1999,9 +2000,18 @@ final class BoardSurface {
                 // the raw trace follows the hex edge past the fixed opening, then doubles back into a pointed bank.
                 float fromCorrection = fromNormal == null ? fromOffset : bankJoin(from, fromNormal, limit, rawRadius);
                 float toCorrection = toNormal == null ? toOffset : bankJoin(to, toNormal, limit, rawRadius);
+                float outerRadius = radius(limit);
+                if (fromCliff || toCliff) {
+                    // A fixed wall endpoint must not push the natural shore onto the straight hex edge or beneath
+                    // the neighbouring grass. Taper within the actual relief boundary, which also builds the top.
+                    outerRadius = Math.min(outerRadius, relief.bankRadius(center, limit));
+                    float room = Math.max(0, outerRadius - rawRadius);
+                    if (fromCliff) { fromCorrection = Math.min(fromCorrection, room); }
+                    if (toCliff) { toCorrection = Math.min(toCorrection, room); }
+                }
                 float correction = fromCorrection * ease(2 * t) + toCorrection * ease(2 * (1 - t));
                 float core = Math.min(rawRadius, (tile.waterDepth() > 0 ? 12 : 4) * BoardGeometry.hexScale());
-                float radius = Math.min(radius(limit), Math.max(core, rawRadius + correction));
+                float radius = Math.min(outerRadius, Math.max(core, rawRadius + correction));
                 trace[i].sub(center).scl(radius / rawRadius).add(center);
             }
             length[i] = length[i - 1] + (float) Math.hypot(trace[i].x - trace[i - 1].x, trace[i].y - trace[i - 1].y);

@@ -15,6 +15,7 @@ import com.badlogic.gdx.graphics.Pixmap;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import org.junit.jupiter.api.Tag;
@@ -40,6 +41,7 @@ class GpuDecalBatchingSmokeTest {
             board.getHex(new Coords(14, 1)).setDecorations(List.of(decal("far-green", "capellan-confederation", 2)));
             Game game = new Game();
             game.setBoard(board);
+            BoardSceneryLayouts.convert(game.getBoard());
             return new GpuMapSource(game, null, null);
         });
         SwingUtilities.invokeAndWait(setup);

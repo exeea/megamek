@@ -279,11 +279,11 @@ vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 ti
     vec3 body;
     float bodyAlpha;
     if (procedural) {
-        // Physical absorption sets the in-scattered light. Clear shallows gain their turquoise gradually, keeping
-        // the bed visible at the bank; the other palettes retain their colour floor. The opacity is capped, and
-        // the bed shaders take the rest of the absorption, so submerged units stay readable.
+        // The thin column of depth-zero water needs visible turquoise as well as absorption; ramp it within the
+        // shallows, not across whole game levels. The waterline still fades to clear. Cap opacity and let the bed
+        // take the rest of the absorption, so submerged units stay readable.
         float column = max(1.0 - max(max(kept.r, kept.g), kept.b),
-              0.3 * smoothstep(0.0, mix(0.1, 0.45, mixture.x), depth));
+              0.3 * smoothstep(0.0, 0.1, depth));
         // Deep water varies a little in tone over a few hexes, as depth and silt do, and troughs run darker than
         // the crests beside them.
         vec3 deep = scatter * mix(0.86, 1.12, broad.r) * mix(0.8, 1.15, crest);

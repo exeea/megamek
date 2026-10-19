@@ -19,6 +19,7 @@ import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.enums.GamePhase;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.game.Game;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,7 @@ class GpuStartupSmokeTest {
             Game game = new Game();
             game.setBoard(new Board(4, 3, tiles));
             game.setPhase(GamePhase.LOUNGE);
+            BoardSceneryLayouts.convert(game.getBoard());
             source.set(new GpuMapSource(game, null, null));
         });
         AtomicReference<Throwable> failure = new AtomicReference<>();

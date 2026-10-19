@@ -241,7 +241,7 @@ final class BoardNaturalBridge {
         float width = mouthWidth(center.x + along.x * .5f, center.y + along.y * .5f, true);
         along.nor();
         return new BoardBridge.Approach(center.x, center.y, along.x, along.y, BoardGeometry.height(), width,
-              bank.elevation() * BoardGeometry.level());
+              bank.elevation() * BoardGeometry.level(), false);
     }
 
     /** Round the exposed outline through its control points; mouths keep their exact shared contacts. */

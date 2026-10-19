@@ -438,6 +438,71 @@ class BoardSurfaceTest {
         });
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = { 2, 18 })
+    void raisedRiverBanksShareTheirGroundNormalsAndFeatherBothContacts(int levelHeight) {
+        var geometry = BoardGeometry.tuning();
+        try {
+            BoardGeometry.tune(new BoardGeometry.Tuning(1, 1, 1, levelHeight, .8f));
+            for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DIRT)) {
+                var tiles = new ArrayList<BoardScene.Tile>();
+                for (int x = 0; x < 7; x++) {
+                    for (int y = 0; y < 7; y++) {
+                        boolean wet = x == 3 && y > 0 && y < 6;
+                        tiles.add(new BoardScene.Tile(new Coords(x, y), x < 3 ? 1 : 0, wet ? 1 : -1, false,
+                              0, family, null, null, null, null, null, List.of(), List.of(),
+                              wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                    }
+                }
+                var scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+                var high = new BoardSurface(scene, scene.tile(new Coords(2, 3)));
+                var low = new BoardSurface(scene, scene.tile(new Coords(3, 3)));
+                Map<Vector3, Vector3> upperNormals = new HashMap<>(), lowerNormals = new HashMap<>();
+                for (var surface : List.of(high, low)) {
+                    var normals = surface == high ? upperNormals : lowerNormals;
+                    for (var face : surface.faces) {
+                        for (var point : List.of(face.a(), face.b(), face.c())) {
+                            var shade = surface.relief.shade(point);
+                            if (shade != null && shade.kind() == BoardRelief.Kind.GROUND) {
+                                normals.put(point, new Vector3(shade.normal()));
+                            }
+                        }
+                    }
+                }
+                int feet = 0, rims = 0, feathers = 0, middle = 0;
+                float contact = Math.min(BoardRelief.metres(1.5f), levelHeight * .5f);
+                for (var face : high.walls(scene, BoardGeometry.floor(scene))) {
+                    if (!high.tile.coords().translated(BoardGeometry.edgeDirection(face.landEdge()))
+                          .equals(low.tile.coords())) { continue; }
+                    for (var point : List.of(face.a(), face.b(), face.c())) {
+                        var normal = high.relief.shade(point).normal();
+                        if (point.z == 0 && lowerNormals.containsKey(point)) {
+                            assertTrue(normal.epsilonEquals(lowerNormals.get(point), .00001f),
+                                  "The exposed wall meets its water-owned ground with the same normal");
+                            feet++;
+                        } else if (point.z == levelHeight && upperNormals.containsKey(point)) {
+                            assertTrue(normal.epsilonEquals(upperNormals.get(point), .00001f),
+                                  "The wall retains its actual shared crest normal");
+                            rims++;
+                        } else if (point.z > 0 && point.z < contact * .5f
+                              || point.z < levelHeight && point.z > levelHeight - contact * .5f) {
+                            assertTrue(normal.z > .75f, "Contact rows feather into the adjoining ground");
+                            feathers++;
+                        } else if (point.z > contact && point.z < levelHeight - contact && normal.z < .8f) {
+                            middle++;
+                        }
+                    }
+                }
+                assertTrue(feet > 0 && rims > 0 && feathers > 0, "Exercise both contacts and their interior rows");
+                if (levelHeight == 18) { assertTrue(middle > 0, "The slope's middle retains its steep normals"); }
+                for (var entry : upperNormals.entrySet()) {
+                    assertTrue(high.relief.shade(entry.getKey()).normal().epsilonEquals(entry.getValue(), .00001f),
+                          "Blending the wall must not mutate its top's shared normal vectors");
+                }
+            }
+        } finally { BoardGeometry.tune(geometry); }
+    }
+
     @Test
     void bentChannelsTriangulateTheirActualOutlineAndMeetTheNeighboringMouths() {
         Coords center = new Coords(2, 2);
@@ -573,11 +638,12 @@ class BoardSurfaceTest {
         // Frozen falls keep their curtain and picking: BoardFrozenWaterfallTest.
     }
 
-    @Test
-    void wallsBesideFallsMeetTheGradedBank() {
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void wallsBesideFallsMeetTheGradedBank(boolean frozen) {
         Coords high = new Coords(2, 2);
         for (int direction = 0; direction < 6; direction++) {
-            BoardScene scene = riverScene(Map.of(high, 3, high.translated(direction), 0), false);
+            BoardScene scene = riverScene(Map.of(high, 3, high.translated(direction), 0), frozen);
             BoardSurface upper = new BoardSurface(scene, scene.tile(high));
             int edge = upper.waterfalls.getFirst().edge();
             int checked = 0;

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -22,6 +23,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.BoardDecoration;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.RailRoute;
@@ -31,6 +33,80 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardBridgeFootingTest {
+    @Test
+    void convertedLegacyBridgePaintStaysAboveTheSlabAndBothBankRoads() throws Exception {
+        var board = BoardFile.loadSheet(new File(Configuration.boardsDir(),
+              "GrassLands/16x17 Grasslands River CommCenter.board"), false, true);
+        Coords at = new Coords(7, 14);
+        assertEquals(1, board.getHex(at).terrainLevel(Terrains.BRIDGE_ROAD),
+              "The production legacy conversion must infer the connected paved deck road");
+        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var tile = scene.tile(at);
+        assertEquals(BoardRoad.Kind.PAVED, tile.deckRoad());
+        var deck = BoardBridge.deck(scene, tile);
+        assertEquals(deck.exits(), deck.roadExits());
+        var surfaces = new HashMap<Coords, BoardSurface>();
+        var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, surfaces);
+        var shape = footing.withDeck(scene, tile, deck, TerrainLod.FULL, surfaces);
+        var painted = footing.paint(deck);
+        var road = painted.road(deck, at);
+        var patches = GpuRoads.deckPatches(tile, deck, road, painted);
+        var asphalt = patches.stream().filter(p -> p.texture().equals("roads/asphalt") && p.fade() == null)
+              .findFirst().orElseThrow();
+        var marks = patches.stream().filter(p -> p.texture().equals("concrete")).findFirst().orElseThrow();
+        var coat = GpuRoads.deck(tile, BoardBridge.feature(tile), asphalt, painted, surfaces, shape);
+        var paint = GpuRoads.deck(tile, BoardBridge.feature(tile), marks, painted, surfaces, shape);
+        float scale = BoardGeometry.hexScale();
+        var center = BoardGeometry.center(at, tile.elevation() + BoardBridge.feature(tile).elevation());
+        for (int direction : new int[] { 2, 5 }) {
+            var bank = scene.tile(at.translated(direction));
+            assertEquals(BoardRoad.Kind.PAVED, bank.road(), "Both real bank contacts have connected roads");
+            var surface = surfaces.computeIfAbsent(bank.coords(), key -> new BoardSurface(scene, bank));
+            var bankRoad = BoardRoad.of(scene, bank);
+            var bankAsphalt = GpuRoads.patches(bank, bankRoad).stream()
+                  .filter(p -> p.texture().equals("roads/asphalt") && p.fade() == null).findFirst().orElseThrow();
+            var groundCoat = GpuRoads.drape(bank, surface, bankAsphalt);
+            var axis = BoardGeometry.center(bank.coords(), 0).sub(BoardGeometry.center(at, 0)).nor();
+            var side = new Vector3(-axis.y, axis.x, 0);
+            var gate = new Vector3(center).lerp(BoardGeometry.center(bank.coords(), bank.elevation()), .5f);
+            int supported = 0, joined = 0, marked = 0;
+            for (float along = 0; along <= footing.lengths().get(direction) * scale; along += .5f * scale) {
+                for (float lateral : new float[] { -2, -.25f, 0, .25f, 2 }) {
+                    var point = new Vector3(gate).mulAdd(axis, along).mulAdd(side, lateral * scale);
+                    float x = (point.x - center.x) / scale, y = (point.y - center.y) / scale;
+                    if (!asphalt.shape().contains(x, y)) { continue; }
+                    float top = triangleHeight(coat, point), slab = BoardBridge.top(shape, point.x, point.y);
+                    if (!Float.isFinite(top) || !Float.isFinite(slab)) { continue; }
+                    assertTrue(top > slab + .005f * scale, "The opaque deck coat clears the supporting slab");
+                    supported++;
+                    float bx = (point.x - BoardGeometry.centerX(bank.coords())) / scale;
+                    float by = (point.y - BoardGeometry.centerY(bank.coords())) / scale;
+                    float ground = triangleHeight(groundCoat, point);
+                    if (bankAsphalt.shape().contains(bx, by) && Float.isFinite(ground)) {
+                        assertTrue(top > ground + .005f * scale, "Overlapping bank asphalt cannot fight the deck coat");
+                        joined++;
+                    }
+                    if (marks.shape().contains(x, y)) {
+                        assertTrue(triangleHeight(paint, point) > top + .005f * scale,
+                              "Road markings stay above the opaque base coat at the landing");
+                        marked++;
+                    }
+                }
+            }
+            assertTrue(supported > 0 && joined > 0 && marked > 0,
+                  "Exercise the slab, real bank-road overlap and markings at each end: " + direction);
+        }
+    }
+
+    private static float triangleHeight(List<BoardTacticalGeometry.Triangle> triangles, Vector3 point) {
+        float height = Float.NEGATIVE_INFINITY;
+        for (var triangle : triangles) {
+            height = Math.max(height, new BoardSurface.Face(triangle.a(), triangle.b(), triangle.c(),
+                  BoardSurface.Finish.TOP).height(point.x, point.y));
+        }
+        return height;
+    }
+
     @Test
     void reloadingAnEditedGlbChangesTheBankExtension(@TempDir Path directory) throws Exception {
         var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.GRASS, false, true);
@@ -143,6 +219,82 @@ class BoardBridgeFootingTest {
                     assertTrue(footing.shape().facets().size() <= budget, "Close LODs bevel the caps; distant LODs keep the silhouette");
                 }
             }
+        }
+    }
+
+    @Test
+    void aLevelBuiltLandingReachesTheNaturalBankInsteadOfPullingItUnderTheBridge() {
+        var geometry = BoardGeometry.tuning();
+        var relief = BoardRelief.tuning();
+        try {
+            BoardGeometry.tune(BoardGeometry.DEFAULTS);
+            BoardRelief.tune(BoardRelief.DEFAULTS);
+            Coords bridge = new Coords(3, 4), road = new Coords(4, 5);
+            BoardScene plain = BoardRiverTest.commCenterRiverScene();
+            var hex = new Hex(0, "water:1;bridge:4:36;bridge_cf:120;bridge_elev:1", "");
+            var bridgeTile = new BoardScene.Tile(bridge, 0, 1, false, 0, BoardScene.Surface.GRASS,
+                  null, null, null, null, null, BoardFeatures.capture(hex, bridge, Map.of()), List.of(),
+                  BoardLiquid.WATER, null, true);
+            var bare = BoardNaturalBridgeTest.replace(plain, bridgeTile);
+            var scene = BoardNaturalBridgeTest.replace(bare, withRoad(bare.tile(road), 36));
+            var roadOnly = BoardNaturalBridgeTest.replace(scene, plain.tile(bridge));
+            var natural = BoardBridgeTypeTest.typed(scene, HexAppearance.NATURAL_BRIDGE);
+            var bank = new BoardSurface(scene, scene.tile(road));
+            var bareBank = new BoardSurface(bare, bare.tile(road));
+            var ordinaryBank = new BoardSurface(roadOnly, roadOnly.tile(road));
+            var naturalBank = new BoardSurface(natural, natural.tile(road));
+            var water = new BoardSurface(scene, scene.tile(bridge));
+            int edge = Math.floorMod(1 - road.direction(bridge), 6), opposite = (edge + 3) % 6;
+            float top = BoardGeometry.groundZ(scene.tile(road));
+            for (float z : new float[] { top, top - BoardRelief.metres(.25f), top - BoardRelief.metres(.75f), 0 }) {
+                for (float t : new float[] { 1f / 3, .5f, 2f / 3 }) {
+                    Vector3 actual = bank.relief.roadPoint(edge, t, z);
+                    assertTrue(actual.epsilonEquals(bareBank.relief.roadPoint(edge, t, z), .002f),
+                          "The built landing leaves the receding natural bank's profile intact");
+                    assertTrue(actual.epsilonEquals(water.relief.roadPoint(opposite, 1 - t, z), .002f),
+                          "Both sides retain one shared bank wall without a land/water crack");
+                    assertTrue(ordinaryBank.relief.roadPoint(edge, t, z)
+                          .epsilonEquals(naturalBank.relief.roadPoint(edge, t, z), .002f),
+                          "Ordinary road clearance and natural bridge mouths keep their existing profile");
+                }
+            }
+            assertTrue(bank.relief.roadPoint(edge, .5f, top)
+                  .dst(ordinaryBank.relief.roadPoint(edge, .5f, top)) > BoardRelief.metres(2),
+                  "The fixture exercises the former projecting grassy landing");
+            for (float t : new float[] { 1f / 3, .5f, 2f / 3 }) {
+                float aboveRoad = top + BoardRelief.metres(1);
+                assertTrue(bank.relief.roadPoint(edge, t, aboveRoad)
+                      .epsilonEquals(ordinaryBank.relief.roadPoint(edge, t, aboveRoad), .002f),
+                      "Relief above the road retains ordinary clearance around the bridge passage");
+            }
+            for (int k = 0; k < 6; k++) {
+                float[] actual = bank.relief.shoreShift(k), expected = bareBank.relief.shoreShift(k);
+                assertEquals(expected[0], actual[0], .002f, "Landing clearance cannot move the shared coast corners");
+                assertEquals(expected[1], actual[1], .002f);
+            }
+
+            var surfaces = new HashMap<Coords, BoardSurface>();
+            surfaces.put(road, bank);
+            var footing = BoardBridgeFooting.build(scene, scene.tile(bridge), TerrainLod.FULL, surfaces);
+            int direction = bridge.direction(road);
+            float reach = footing.lengths().get(direction) * BoardGeometry.hexScale();
+            var center = BoardGeometry.center(bridge, 1);
+            var along = BoardGeometry.center(road, 1).sub(center);
+            var gate = new Vector3(center).mulAdd(along, .5f);
+            along.nor();
+            var across = new Vector3(-along.y, along.x, 0);
+            for (int side : new int[] { -1, 0, 1 }) {
+                var toe = new Vector3(gate).mulAdd(along, reach - BoardRelief.metres(.05f))
+                      .mulAdd(across, side * (9 * BoardGeometry.hexScale() + BoardRelief.metres(.15f)));
+                float support = BoardSurface.sampleHeight(bank.foundation(), toe.x, toe.y, Float.NaN);
+                assertTrue(Float.isFinite(support), "The bridge's widened terminal reaches the actual natural bank");
+                float height = height(footing.shape(), toe);
+                assertTrue(height >= support && height < support + BoardRelief.metres(.3f),
+                      "The bridge terminal sits on the bank without moving the terrain towards it");
+            }
+        } finally {
+            BoardRelief.tune(relief);
+            BoardGeometry.tune(geometry);
         }
     }
 

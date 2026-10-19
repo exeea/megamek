@@ -32,6 +32,7 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import megamek.common.planetaryConditions.Atmosphere;
@@ -121,12 +122,14 @@ class GpuTerrainPreparationSmokeTest {
             }
             var game = new Game();
             game.setBoard(board);
+            BoardSceneryLayouts.convert(game.getBoard());
             try (var source = new GpuMapSource(game, null, null)) { captured.set(source.takeFrame().scene()); }
             Board plain = Board.createEmptyBoard(5, 4);
             for (int x = 0; x < 5; x++) {
                 for (int y = 0; y < 4; y++) { plain.setHex(new Coords(x, y), new Hex(0, "", "grass")); }
             }
             game.setBoard(plain);
+            BoardSceneryLayouts.convert(game.getBoard());
             try (var source = new GpuMapSource(game, null, null)) { uniform.set(source.takeFrame().scene()); }
             // Actual uploaded lake and cascade materials share the same attribute mask but ICE_MODE differs.
             Board ice = Board.createEmptyBoard(5, 4);
@@ -137,6 +140,7 @@ class GpuTerrainPreparationSmokeTest {
                 }
             }
             game.setBoard(ice);
+            BoardSceneryLayouts.convert(game.getBoard());
             try (var source = new GpuMapSource(game, null, null)) { frozen.set(source.takeFrame().scene()); }
         });
         var report = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),

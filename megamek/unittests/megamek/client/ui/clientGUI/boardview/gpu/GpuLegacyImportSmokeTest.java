@@ -807,8 +807,11 @@ class GpuLegacyImportSmokeTest {
     /** The board's scene as every 3D view captures it ({@link BoardTiles}). */
     static BoardScene scene(Board board) throws Exception {
         var captured = new AtomicReference<BoardScene>();
-        SwingUtilities.invokeAndWait(() -> captured.set(new BoardScene(0, board.getWidth(), board.getHeight(),
-              BoardTiles.captureAll(board), List.of(), List.of(), -1, "", List.of())));
+        SwingUtilities.invokeAndWait(() -> {
+            BoardSceneryLayouts.convert(board);
+            captured.set(new BoardScene(0, board.getWidth(), board.getHeight(),
+                  BoardTiles.captureAll(board), List.of(), List.of(), -1, "", List.of()));
+        });
         return captured.get();
     }
 

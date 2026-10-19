@@ -40,6 +40,7 @@ import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.NumberUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -55,8 +56,7 @@ class GpuTerrainScalingSmokeTest {
     void measuresProjectedTerrainAndMaterialStateReuse() throws Exception {
         String path = System.getProperty("megamek.gpu.performanceBoard", "");
         assumeTrue(!path.isEmpty());
-        Board board = new Board();
-        board.load(new File(path));
+        Board board = BoardFile.loadSheet(new File(path), false, true);
         boolean cost = Boolean.getBoolean("megamek.gpu.performanceCost");
         int width = cost ? Integer.getInteger("megamek.gpu.performanceWidth", 2560) : 1280;
         int height = cost ? Integer.getInteger("megamek.gpu.performanceHeight", 1440) : 900;

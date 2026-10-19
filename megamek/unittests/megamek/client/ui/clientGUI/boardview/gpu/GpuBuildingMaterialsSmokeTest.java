@@ -26,6 +26,7 @@ import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -70,6 +71,7 @@ class GpuBuildingMaterialsSmokeTest {
                     }
                 }
                 fixture.game.setBoard(new Board(9, 9, hexes));
+                BoardSceneryLayouts.convert(fixture.game.getBoard());
                 fixture.source.refresh();
             });
             BoardScene captured = fixture.source.takeFrame().scene();

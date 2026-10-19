@@ -14,6 +14,70 @@ import org.junit.jupiter.api.Test;
 
 class BoardRiverTest {
     @Test
+    void concreteAcrossANarrowChannelCannotPullTheOppositeBankIntoWater() {
+        var original = BoardRelief.tuning();
+        var geometry = BoardGeometry.tuning();
+        try {
+            BoardGeometry.tune(BoardGeometry.DEFAULTS);
+            BoardRelief.tune(BoardRelief.DEFAULTS);
+            BoardScene scene = commCenterRiverScene();
+            Coords peninsula = new Coords(4, 5);
+            BoardSurface land = new BoardSurface(scene, scene.tile(peninsula));
+            Vector3 corner = BoardGeometry.corner(peninsula, 0, 2);
+            Vector3 inward = BoardGeometry.center(peninsula, 0).sub(corner).nor();
+            float[] shift = land.relief.shoreShift(2);
+            assertTrue(shift[0] * inward.x + shift[1] * inward.y > 0,
+                  "The bank recedes into its peninsula instead of reaching across the channel towards concrete");
+
+            // The other tip legitimately advances a little. Searching backwards must find its local crossing too.
+            corner = BoardGeometry.corner(peninsula, 0, 0);
+            Vector3 away = corner.sub(BoardGeometry.center(new Coords(5, 4), 0)).nor();
+            shift = land.relief.shoreShift(0);
+            float retreat = shift[0] * away.x + shift[1] * away.y;
+            assertTrue(retreat < -BoardGeometry.hexScale() && retreat > -20 * BoardGeometry.hexScale(),
+                  "The neighbouring tip keeps its bounded outward shoreline instead of clamping all moves inward");
+
+            for (Coords first : List.of(new Coords(3, 4), new Coords(4, 4))) {
+                Coords second = new Coords(first.getX() + 1, first.getY());
+                BoardSurface left = new BoardSurface(scene, scene.tile(first));
+                BoardSurface right = new BoardSurface(scene, scene.tile(second));
+                int edge = Math.floorMod(1 - first.direction(second), 6), opposite = (edge + 3) % 6;
+                int count = BoardSurface.SHORE_SEGMENTS;
+                for (int i = 0; i <= count; i++) {
+                    Vector3 a = left.outline.get((edge * count + i) % (6 * count));
+                    Vector3 b = right.outline.get(((opposite + 1) * count - i) % (6 * count));
+                    assertTrue(a.epsilonEquals(b, .002f),
+                          "Both water tiles meet at the moved bank and throughout their shared mouth");
+                }
+            }
+        } finally {
+            BoardRelief.tune(original);
+            BoardGeometry.tune(geometry);
+        }
+    }
+
+    /** Shared CommCenter river crop for the opposite-bank and concrete/natural contact regressions. */
+    static BoardScene commCenterRiverScene() {
+        // C/D are concrete at levels 1/3, W water, digits raised grass, and dots level grass.
+        // The concrete heights matter: fortifications split the fitted quay into separate terraces.
+        String[] rows = { "CDCCCCDW.", "CDCCCD2WW", "CDCDD.WWW", "CC2CC.WW.",
+              "C.CWWWW..", "..WW11...", "..WW....." };
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < rows[0].length(); x++) {
+            for (int y = 0; y < rows.length; y++) {
+                char ground = rows[y].charAt(x);
+                boolean wet = ground == 'W', concrete = ground == 'C' || ground == 'D';
+                int level = ground == 'C' || ground == '1' ? 1 : ground == 'D' ? 3 : ground == '2' ? 2 : 0;
+                tiles.add(new BoardScene.Tile(new Coords(x, y), level, wet ? 1 : -1, false, 0,
+                      concrete ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS,
+                      null, null, null, null, null, List.of(), List.of(),
+                      wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+            }
+        }
+        return new BoardScene(0, rows[0].length(), rows.length, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    @Test
     void exposedBanksMeetAcrossFrozenAndOpenRiverMouths() {
         var original = BoardRelief.tuning();
         var geometry = BoardGeometry.tuning();

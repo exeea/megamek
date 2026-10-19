@@ -11,6 +11,7 @@ import java.util.Set;
 
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -90,8 +91,7 @@ class GpuRiverTerrainSmokeTest {
 
     /** The reported broad junctions and triangular terrain islands; buildings retain their protected hexes. */
     static BoardScene pavedMapScene(int number) {
-        Board board = new Board();
-        board.load(new File("data/boards/Deserts/16x17 AeroBase " + number + ".board"));
+        Board board = BoardFile.loadSheet(new File("data/boards/Deserts/16x17 AeroBase " + number + ".board"), false, true);
         BoardScene.Pixels pixels = groundPixels();
         Map<Integer, String> models = Map.of(Terrains.BUILDING, "buildings/saxarba/building_hard/building_hard_00");
         List<BoardScene.Tile> tiles = new ArrayList<>();
@@ -127,8 +127,7 @@ class GpuRiverTerrainSmokeTest {
     /** The printed reference's wrapped peninsulas, raised banks and depth-zero shallows. */
     static BoardScene mapScene(BoardScene.Surface family) {
         BoardScene.Pixels pixels = groundPixels();
-        Board board = new Board();
-        board.load(new File("data/boards/Map Pack Savannahs/16x17 Mountain Lake (Savannah).board"));
+        Board board = BoardFile.loadSheet(new File("data/boards/Map Pack Savannahs/16x17 Mountain Lake (Savannah).board"), false, true);
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < board.getWidth(); x++) {
             for (int y = 0; y < board.getHeight(); y++) {

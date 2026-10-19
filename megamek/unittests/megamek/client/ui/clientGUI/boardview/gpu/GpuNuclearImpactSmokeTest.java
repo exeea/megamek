@@ -33,6 +33,7 @@ import megamek.common.Player;
 import megamek.common.Report;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.equipment.AmmoType;
@@ -152,8 +153,7 @@ class GpuNuclearImpactSmokeTest {
     private static Board board() {
         Board[] sheets = new Board[4];
         for (int index = 0; index < sheets.length; index++) {
-            sheets[index] = new Board();
-            sheets[index].load(new File(Configuration.boardsDir(), BOARD));
+            sheets[index] = BoardFile.loadSheet(new File(Configuration.boardsDir(), BOARD), false, true);
         }
         var board = BoardUtilities.combine(16, 17, 2, 2, sheets, MapSettings.MEDIUM_GROUND);
         assertEquals(32, board.getWidth());

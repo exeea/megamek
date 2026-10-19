@@ -28,6 +28,8 @@ import com.badlogic.gdx.utils.ObjectMap;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import megamek.common.planetaryConditions.Fog;
@@ -122,8 +124,7 @@ class GpuSamplerBudgetSmokeTest {
     }
 
     private static void review(Scene scene, Map<String, Integer> used, Map<String, Integer> over) throws Exception {
-        Board board = new Board();
-        board.load(new File("data/boards/" + scene.board()));
+        Board board = BoardFile.loadSheet(new File("data/boards/" + scene.board()), false, true);
         try (var fixture = GpuBoardFixture.create(board)) {
             SwingUtilities.invokeAndWait(() -> {
                 var conditions = fixture.game.getPlanetaryConditions();
@@ -158,6 +159,7 @@ class GpuSamplerBudgetSmokeTest {
                 }
             }
             var game = new Game();
+            BoardSceneryLayouts.convert(board);
             game.setBoard(board);
             try (var source = new GpuMapSource(game, null, null)) { return source.takeFrame().scene(); }
         });

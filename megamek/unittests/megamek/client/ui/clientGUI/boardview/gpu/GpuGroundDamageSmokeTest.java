@@ -24,6 +24,7 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -33,8 +34,7 @@ import org.junit.jupiter.api.Test;
 class GpuGroundDamageSmokeTest {
     @Test
     void naturalWearAndCombatScarsHaveIndependentControls() throws Exception {
-        Board board = new Board();
-        board.load(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"));
+        Board board = BoardFile.loadSheet(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"), false, true);
         BoardScene scene = BoardAridSurfaceTest.capture(board);
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);

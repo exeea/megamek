@@ -18,6 +18,7 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -31,8 +32,7 @@ import org.junit.jupiter.api.Test;
 class GpuDomeVentSeamsSmokeTest {
     @Test
     void descendingLavaBankAndTheFallsCliffOccludeTheBackground() throws Exception {
-        Board board = new Board();
-        board.load(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 2.board"));
+        Board board = BoardFile.loadSheet(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 2.board"), false, true);
         BoardScene scene;
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
             SwingUtilities.invokeAndWait(fixture.source::refresh);

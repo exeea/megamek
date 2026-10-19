@@ -19,6 +19,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -94,11 +95,9 @@ class GpuScenerySmokeTest {
             demolition.setHex(new Coords(type * 2, 6), new Hex(0, "pavement:1;ground_fluff:2000;fluff:" + (2000 + type), ""));
         }
         demolition.setHex(new Coords(6, 8), new Hex(0, "fortified:1", ""));
-        var fccw = new Board();
-        fccw.load(new File("data/boards/unofficial/Aokarasu/45x45 FCCW 4-1.board"));
+        var fccw = BoardFile.loadSheet(new File("data/boards/unofficial/Aokarasu/45x45 FCCW 4-1.board"), false, true);
         assertEquals(45, fccw.getWidth());
-        var fccwNoBasement = new Board();
-        fccwNoBasement.load(new File("data/boards/buildingsnobasement/45x45 FCCW 4-1 (No Basement).board"));
+        var fccwNoBasement = BoardFile.loadSheet(new File("data/boards/buildingsnobasement/45x45 FCCW 4-1 (No Basement).board"), false, true);
         assertEquals(45, fccwNoBasement.getWidth());
         var ledges = Board.createEmptyBoard(8, 7);
         for (int x = 0; x < 8; x++) for (int y = 0; y < 7; y++) {

@@ -30,6 +30,7 @@ import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import megamek.common.planetaryConditions.Fog;
@@ -101,6 +102,7 @@ class GpuBoardPrintSmokeTest {
                 }
             }
             game.setBoard(new Board(12, 9, hexes));
+            BoardSceneryLayouts.convert(game.getBoard());
             game.getPlanetaryConditions().setWeather(Weather.HEAVY_RAIN);
             game.getPlanetaryConditions().setFog(Fog.FOG_HEAVY);
             captured.set(new GpuMapSource(game, null, editor));

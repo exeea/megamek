@@ -265,8 +265,16 @@ final class BoardBridge {
     }
 
     /** A bridge's passage at deck height, through a bank or along the deck; what lies well below it is no obstruction. */
-    record Approach(float x, float y, float nx, float ny, float length, float width, float level) {
+    record Approach(float x, float y, float nx, float ny, float length, float width, float level,
+          boolean supportedLanding) {
         float lateral(Vector3 point) { return (point.y - y) * nx - (point.x - x) * ny; }
+
+        /** A built level landing extends to the bank; its road must not pull receding terrain out under the deck. */
+        boolean retreats(float px, float py, float dx, float dy, float margin) {
+            if (!supportedLanding || dx * nx + dy * ny >= 0) { return false; }
+            float along = (px - x) * nx + (py - y) * ny;
+            return along >= 0 && along <= length && Math.abs((py - y) * nx - (px - x) * ny) <= width + margin;
+        }
 
         boolean obstructs(Vector3 point, float radius, float height) {
             float along = (point.x - x) * nx + (point.y - y) * ny;
@@ -287,7 +295,8 @@ final class BoardBridge {
         var own = feature(tile);
         for (int d = 0; d < 6; d++) {
             boolean span = own != null && (own.bridgeExits() & (1 << d)) != 0;
-            if (!span && !bank(scene.tile(tile.coords().translated(d)), tile, (d + 3) % 6)) { continue; }
+            var next = scene.tile(tile.coords().translated(d));
+            if (!span && !bank(next, tile, (d + 3) % 6)) { continue; }
             var direction = BoardGeometry.center(tile.coords().translated(d), tile.elevation()).sub(center);
             float length = direction.len();
             direction.scl(1 / length);
@@ -295,7 +304,9 @@ final class BoardBridge {
             float width = passage(tile, d) * BoardGeometry.hexScale();
             float level = span ? Math.min(tile.elevation() + own.elevation(),
                   edgeElevation(tile, scene.tile(tile.coords().translated(d)), d)) * BoardGeometry.level() : center.z;
-            result.add(new Approach(center.x, center.y, direction.x, direction.y, length, width, level));
+            boolean supportedLanding = !span && family(next) != Family.NATURAL && !guideway(next)
+                  && road(next, tile, (d + 3) % 6) && next.elevation() + feature(next).elevation() == tile.elevation();
+            result.add(new Approach(center.x, center.y, direction.x, direction.y, length, width, level, supportedLanding));
         }
         return List.copyOf(result);
     }

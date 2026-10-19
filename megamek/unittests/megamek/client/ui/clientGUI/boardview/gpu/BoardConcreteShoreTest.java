@@ -673,6 +673,53 @@ class BoardConcreteShoreTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(floats = { .5f, 1, 2 })
+    void naturalBanksStayVisibleWhenTheyTaperIntoAFixedQuay(float scale) {
+        var geometry = BoardGeometry.tuning();
+        var relief = BoardRelief.tuning();
+        try {
+            var defaults = BoardGeometry.DEFAULTS;
+            BoardGeometry.tune(new BoardGeometry.Tuning(scale, defaults.unitScale(), defaults.unitHeightScale(),
+                  defaults.levelHeight(), defaults.gridShade()));
+            BoardRelief.tune(BoardRelief.DEFAULTS);
+            BoardScene scene = BoardRiverTest.commCenterRiverScene();
+            Coords at = new Coords(4, 4);
+            BoardSurface water = new BoardSurface(scene, scene.tile(at));
+            BoardSurface grass = new BoardSurface(scene, scene.tile(new Coords(5, 3)));
+            Vector3 center = BoardGeometry.center(at, 0);
+            int count = BoardSurface.SHORE_SEGMENTS;
+            // Edge 0 is level natural ground, ending at the raised concrete quay on edge 1.
+            for (int i = 1; i < count; i++) {
+                Vector3 point = water.outline.get(i);
+                assertTrue(Float.isNaN(BoardSurface.sampleHeight(grass.faces, point.x, point.y, Float.NaN)),
+                      "The natural waterline stays inside its actual relief boundary, clear of the grass top");
+                Vector3 outward = new Vector3(point.x - center.x, point.y - center.y, 0).nor();
+                Vector3 bank = new Vector3(point).mulAdd(outward, .2f * scale);
+                assertTrue(Float.isNaN(BoardSurface.sampleHeight(grass.faces, bank.x, bank.y, Float.NaN)),
+                      "A visible strip of natural bank remains before the neighbouring grass");
+                float height = BoardSurface.sampleHeight(water.faces, bank.x, bank.y, Float.NaN);
+                assertTrue(height > point.z && height < 0,
+                      "The exposed bank rises from the water before meeting the fixed quay endpoint");
+            }
+            Vector3 a = water.relief.seam(1, 1, 0), b = water.relief.seam(1, 1, 1);
+            int walls = 0;
+            for (var face : water.faces) {
+                if (face.finish() != BoardSurface.Finish.WALL || face.landEdge() != 1) { continue; }
+                walls++;
+                for (Vector3 point : List.of(face.a(), face.b(), face.c())) {
+                    assertEquals(0, distance(a, b, point), .002f * scale,
+                          "Tapering the natural bank keeps the adjacent quay wall vertical");
+                }
+            }
+            assertTrue(walls > 0, "The concrete quay keeps its submerged wall");
+            assertUnfolded(water, "Natural bank beside a fixed quay");
+        } finally {
+            BoardRelief.tune(relief);
+            BoardGeometry.tune(geometry);
+        }
+    }
+
     @Test
     void concreteBanksBesideDescendingWaterKeepFiniteContactGeometry() {
         for (int direction = 0; direction < 6; direction++) {

@@ -28,7 +28,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.g3d.utils.BaseShaderProvider;
 import com.badlogic.gdx.math.Vector3;
-import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
@@ -444,8 +444,7 @@ class GpuBiomeSmokeTest {
     }
 
     private static BoardScene fireAndIce() {
-        var board = new Board();
-        board.load(new File("data/boards/unofficial/Drewbacca/16x17 Fire And Ice 2.board"));
+        var board = BoardFile.loadSheet(new File("data/boards/unofficial/Drewbacca/16x17 Fire And Ice 2.board"), false, true);
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < board.getWidth(); x++) {
             for (int y = 0; y < board.getHeight(); y++) {

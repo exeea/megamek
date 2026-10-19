@@ -337,7 +337,9 @@ class GpuBoardSmokeTest {
                 }
             }
             fixture.view.markDeploymentHexesFor(null);
-            fixture.game.setBoard(new Board(48, 51, hexes));
+            Board board = new Board(48, 51, hexes);
+            board.setNativeFormat(original.isNativeFormat());
+            fixture.game.setBoard(board);
             Player opponent = new Player(2, "GPU opponent");
             opponent.setTeam(2);
             fixture.game.addPlayer(opponent.getId(), opponent);

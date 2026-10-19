@@ -10,6 +10,7 @@ import java.util.Map;
 
 import com.badlogic.gdx.utils.FloatArray;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -36,8 +37,7 @@ class GpuCoverPlantingSmokeTest {
     void timesSurfacesAndPlanting(String name) throws Exception {
         String boards = System.getProperty("megamek.gpu.coverBoards", "");
         org.junit.jupiter.api.Assumptions.assumeTrue(boards.isEmpty() || List.of(boards.split(",")).contains(name));
-        Board board = new Board();
-        board.load(new File(BOARDS.get(name)));
+        Board board = BoardFile.loadSheet(new File(BOARDS.get(name)), false, true);
         var report = new StringBuilder();
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
             BoardScene scene = fixture.source.takeFrame().scene();

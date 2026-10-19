@@ -17,6 +17,7 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import org.junit.jupiter.api.Tag;
@@ -38,14 +39,17 @@ class GpuGroundTransitionSmokeTest {
             }
             var game = new Game();
             game.setBoard(board);
+            BoardSceneryLayouts.convert(game.getBoard());
             try (var source = new GpuMapSource(game, null, null)) { ramp.set(source.takeFrame().scene()); }
             for (int material = 0; material < controls.length; material++) {
                 for (int x = 0; x < 7; x++) for (int y = 0; y < 3; y++) {
                     board.setHex(new Coords(x, y), new Hex(0, "", material == 0 ? "grass" : "desert"));
                 }
+                BoardSceneryLayouts.convert(game.getBoard());
                 try (var source = new GpuMapSource(game, null, null)) { controls[material] = source.takeFrame().scene(); }
             }
             game.setBoard(BoardGroundCaptureTest.grassland(3));
+            BoardSceneryLayouts.convert(game.getBoard());
             try (var source = new GpuMapSource(game, null, null)) { grassland.set(source.takeFrame().scene()); }
         });
         var failure = new AtomicReference<Throwable>();

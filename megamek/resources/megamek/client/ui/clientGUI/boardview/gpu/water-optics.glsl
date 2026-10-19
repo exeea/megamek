@@ -47,10 +47,10 @@ vec3 waterShallows(vec4 weights) {
 }
 vec3 waterShallows(float palette) { return waterShallows(waterPalette(palette)); }
 
-// Clear-water margins reveal the bed before the extra tint builds across the shallow shelf. Other liquid palettes
-// retain their immediate colour; surface and submerged ground share this same optical depth.
+// Even depth-zero water has only about .056 levels over its bed. Build the tint within that thin column so it
+// still reads as water, while fading continuously to clear at the actual waterline. The bed shares this curve.
 vec3 waterTransmission(vec4 palette, float levels) {
-    float optical = max(levels, 0.0) + 0.16 * smoothstep(0.0, mix(0.05, 0.45, palette.x), levels);
+    float optical = max(levels, 0.0) + 0.16 * smoothstep(0.0, 0.05, levels);
     return exp(-waterAbsorption(palette) * (optical * WATER_PATH));
 }
 vec3 waterTransmission(float palette, float levels) { return waterTransmission(waterPalette(palette), levels); }

@@ -21,6 +21,7 @@ import jdk.jfr.Event;
 import jdk.jfr.Name;
 import jdk.jfr.StackTrace;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -40,8 +41,7 @@ class GpuTerrainAsyncSmokeTest {
     void measuresOpeningEditingTuningAndZoomingWhileRendering() throws Exception {
         String path = System.getProperty("megamek.gpu.performanceBoard", "");
         assumeTrue(!path.isEmpty());
-        Board board = new Board();
-        board.load(new File(path));
+        Board board = BoardFile.loadSheet(new File(path), false, true);
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var original = BoardGeometry.tuning();
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {

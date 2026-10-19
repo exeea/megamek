@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
@@ -16,13 +17,15 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuWaterCoverageTest {
     @ParameterizedTest
-    @EnumSource(value = BoardScene.Surface.class, names = { "GRASS", "SAND", "SNOW", "DESERT", "MARS" })
-    void exposedRiverBanksKeepTheWaterlineWithoutChangingTheirGeometry(BoardScene.Surface family) {
+    @MethodSource("riverBankCases")
+    void exposedRiverBanksKeepTheWaterlineWithoutChangingTheirGeometry(BoardScene.Surface family, boolean frozen) {
         var geometry = BoardGeometry.tuning();
         var relief = BoardRelief.tuning();
         try {
@@ -33,7 +36,7 @@ class GpuWaterCoverageTest {
                 for (int x = 0; x < 7; x++) {
                     for (int y = 0; y < 7; y++) {
                         boolean water = x == 3 && y > 0 && y < 6;
-                        tiles.add(new BoardScene.Tile(new Coords(x, y), 0, water ? depth : -1, false, 0,
+                        tiles.add(new BoardScene.Tile(new Coords(x, y), 0, water ? depth : -1, frozen && water, 0,
                               family, null, null, null, null, null, List.of(), List.of(),
                               water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
                     }
@@ -44,7 +47,6 @@ class GpuWaterCoverageTest {
                 int exposed = 0, slopes = 0;
                 for (var face : river.faces) {
                     if (face.finish() != BoardSurface.Finish.TOP && face.finish() != BoardSurface.Finish.SHORE) { continue; }
-                    if (Math.max(face.a().z, Math.max(face.b().z, face.c().z)) <= waterline + .001f) { continue; }
                     var mesh = mesh();
                     GpuTerrain.coveredFace(mesh, river, face, List.of(river));
                     assertEquals(3, mesh.getNumVertices(), "An exposed bank needs no additional triangles");
@@ -80,11 +82,49 @@ class GpuWaterCoverageTest {
                     }
                 }
                 assertTrue(exposed > 0 && slopes > 0, "Exercise the dry shelf and the emerged sloping bank");
+                if (frozen) {
+                    var waterGeometry = river.waterGeometry();
+                    int banks = 0, supports = 0;
+                    for (int edge = 0; edge < 6; edge++) {
+                        var land = scene.tile(river.tile.coords().translated(BoardGeometry.edgeDirection(edge)));
+                        if (land.liquid().present()) { continue; }
+                        var outer = new Vector3(waterGeometry.shoreCorners()[edge])
+                              .lerp(waterGeometry.shoreCorners()[(edge + 1) % 6], .5f);
+                        var inner = waterGeometry.waterline()[edge * BoardSurface.SHORE_SEGMENTS
+                              + BoardSurface.SHORE_SEGMENTS / 2];
+                        var point = new Vector3(outer).lerp(inner, .25f);
+                        assertTrue(river.height(point.x, point.y) < -.05f,
+                              "A frozen bank must begin grading across its outer shelf, before the narrow water lip");
+                        banks++;
+                    }
+                    for (var face : river.faces) {
+                        if (face.finish() != BoardSurface.Finish.ICE) { continue; }
+                        for (var point : List.of(face.a(), face.b(), face.c())) {
+                            assertEquals(BoardGeometry.surfaceZ(river.tile), point.z, .00001f,
+                                  "The ice support plane stays at its game level");
+                            supports++;
+                        }
+                    }
+                    assertTrue(banks > 0 && supports > 0, "Exercise both the frozen bank and the ice support");
+                    assertFalse(river.iceSlab.isEmpty());
+                    for (var face : river.iceSlab) {
+                        for (var point : List.of(face.a(), face.b(), face.c())) {
+                            assertEquals(BoardGeometry.surfaceZ(river.tile), point.z, .00001f,
+                                  "The visible ice slab retains its original height");
+                        }
+                    }
+                }
             }
         } finally {
             BoardGeometry.tune(geometry);
             BoardRelief.tune(relief);
         }
+    }
+
+    private static Stream<Arguments> riverBankCases() {
+        return Stream.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND, BoardScene.Surface.SNOW,
+                    BoardScene.Surface.DESERT, BoardScene.Surface.MARS)
+              .flatMap(family -> Stream.of(Arguments.of(family, false), Arguments.of(family, true)));
     }
 
     @ParameterizedTest

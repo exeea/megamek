@@ -15,6 +15,8 @@ import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.Player;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.EquipmentType;
@@ -39,12 +41,12 @@ final class GpuBoardFixture implements AutoCloseable {
     }
 
     private static Board loadBoard() {
-        Board board = new Board();
-        board.load(new File("data/boards/AGoAC Maps/16x17 Grassland 2.board"));
-        return board;
+        return BoardFile.loadSheet(new File("data/boards/AGoAC Maps/16x17 Grassland 2.board"), false, true);
     }
 
     private GpuBoardFixture(Board board) throws Exception {
+        // Match the game load boundary for in-memory legacy fixtures as well as files; native boards retain their art.
+        BoardSceneryLayouts.convert(board);
         game.setBoard(board);
         game.setPhase(GamePhase.MOVEMENT);
         player.setTeam(1);

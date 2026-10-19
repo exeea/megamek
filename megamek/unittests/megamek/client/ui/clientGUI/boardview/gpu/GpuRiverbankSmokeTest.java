@@ -22,6 +22,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import megamek.common.units.Terrain;
@@ -53,6 +54,7 @@ class GpuRiverbankSmokeTest {
                     }
                     var game = new Game();
                     game.setBoard(new Board(7, 7, hexes));
+                    BoardSceneryLayouts.convert(game.getBoard());
                     try (var source = new GpuMapSource(game, null, null)) { scenes.add(source.takeFrame().scene()); }
                     names.add(theme + (arid ? "-depth" + depth : depth < 0 ? "-dry" : "-water"));
                 }
@@ -90,6 +92,12 @@ class GpuRiverbankSmokeTest {
                         Thread.sleep(600);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "riverbank-" + names.get(i) + "-slope.png"));
+                        if (names.get(i).endsWith("-depth0")) {
+                            terrain.setWaterEffects(false);
+                            frame.render(terrain, camera, scene);
+                            GpuReviewFrame.save(new File(output, "riverbank-" + names.get(i) + "-effects-off.png"));
+                            terrain.setWaterEffects(true);
+                        }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     }
                 } catch (Throwable error) { failure.set(error); }

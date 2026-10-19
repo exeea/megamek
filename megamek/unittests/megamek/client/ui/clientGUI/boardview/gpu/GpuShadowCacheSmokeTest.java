@@ -27,6 +27,7 @@ import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -36,8 +37,7 @@ import org.junit.jupiter.api.Test;
 class GpuShadowCacheSmokeTest {
     @Test
     void movingUnitsReuseStaticDepthAndInvalidationMatchesTheFullPass() throws Exception {
-        Board board = new Board();
-        board.load(new File("data/boards/Grasslands BattleMats/32x17 Grasslands A BattleMat.board"));
+        Board board = BoardFile.loadSheet(new File("data/boards/Grasslands BattleMats/32x17 Grasslands A BattleMat.board"), false, true);
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
             BoardScene scene = fixture.source.takeFrame().scene();

@@ -5,7 +5,7 @@
 uniform float u_terrainWear; // 0: no ambient weathering; 1: full material weathering and cover erosion
 uniform vec4 u_bankMaterials; // existing soil-contact and gravel: colour layer / repeat in metres
 bool riverBank = false; // set by the water-owned ground, before evaluating its material roles
-float shallowSediment = -1.0; // Original depth-zero arid shore profile; negative on deeper water and dry land.
+float shallowSediment = -1.0; // Halfway depth-zero arid shore profile; negative on deeper water and dry land.
 
 struct TerrainMaterial {
     vec3 color; // linear reflectance; color maps are decoded at upload, before filtering
@@ -910,7 +910,7 @@ float familyDust(float f) {
 TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float aboveFoot, float belowRim,
       float rock, float hardness, float broad, float fine, float region, float sediment, float familyId,
       vec4 tiles, vec4 layers, bool sides, bool single) {
-    // Desert/Mars depth-zero bars keep their original native surface and near-water deposit curve.
+    // Desert/Mars depth-zero bars blend the original soft deposit edge halfway toward the broader shore deposit.
     if (shallowSediment >= 0.0 && (abs(familyId - DESERT_FAMILY) < .5 || abs(familyId - MARS_FAMILY) < .5)) {
         sediment = shallowSediment;
     }
@@ -989,6 +989,7 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     // slots, rather than sampling an extra layer; snow and dune sand must not become the submerged bed.
     bool soilBank = riverBank && (familyId < 2.5 || abs(familyId - 5.0) < .5
           || abs(familyId - TROPICAL_FAMILY) < .5);
+    float coverEnd = abs(familyId) < .5 || abs(familyId - TROPICAL_FAMILY) < .5 ? .6 : .9;
     float bedRock = rock * (1.0 - smoothstep(.2, .8, up)) * smoothstep(.05, 2.2, aboveFoot);
     float bankBlend = 0.0;
     if (soilBank) {
@@ -1000,9 +1001,9 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         if (bankBlend > 0.0) {
             layers.w = u_bankMaterials.x; tiles.w = u_bankMaterials.y;
             layers.y = u_bankMaterials.z; tiles.y = u_bankMaterials.w;
-            // Finish the cover-to-soil fade before gravel starts, keeping only two roles on earth banks.
+            // Grass gives way to soil earlier; gravel still starts beside the water. Keep only two roles on earth banks.
             // Rock cliffs retain their existing strongest-two-role treatment.
-            roles = mix(roles, vec4(0.0, 1.0 - bedRock, 0.0, bedRock), clamp(bankBlend / .9, 0.0, 1.0));
+            roles = mix(roles, vec4(0.0, 1.0 - bedRock, 0.0, bedRock), clamp(bankBlend / coverEnd, 0.0, 1.0));
             roles = mix(roles, vec4(0.0, 0.0, 1.0 - bedRock, bedRock), clamp((bankBlend - .9) / .1, 0.0, 1.0));
         }
     } else {
@@ -1014,7 +1015,7 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     isFirst *= 1.0 - step(.5, vec4(0.0, isFirst.x, isFirst.x + isFirst.y, isFirst.x + isFirst.y + isFirst.z));
     // Exposed level stone keeps a film of its cover: a dusty top always samples the cover as one of its two roles.
     float dust = single ? 0.0 : familyDust(familyId) * smoothstep(.88, .98, up) * (1.0 - sediment);
-    if (soilBank) dust *= 1.0 - clamp(bankBlend / .9, 0.0, 1.0);
+    if (soilBank) dust *= 1.0 - clamp(bankBlend / coverEnd, 0.0, 1.0);
     vec4 rest = roles * (1.0 - isFirst);
     if (dust > 0.0) rest.x += 2.0 * (1.0 - isFirst.x);
     float pick = max(max(rest.x, rest.y), max(rest.z, rest.w));

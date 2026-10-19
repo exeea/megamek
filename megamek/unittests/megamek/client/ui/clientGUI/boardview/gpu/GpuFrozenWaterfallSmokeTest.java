@@ -23,6 +23,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import org.junit.jupiter.api.Tag;
@@ -236,6 +237,7 @@ class GpuFrozenWaterfallSmokeTest {
                 }
             }
             game.setBoard(board);
+            BoardSceneryLayouts.convert(game.getBoard());
             try (var source = new GpuMapSource(game, null, null)) { return source.takeFrame().scene(); }
         });
         SwingUtilities.invokeAndWait(task);
@@ -265,6 +267,7 @@ class GpuFrozenWaterfallSmokeTest {
                 }
             }
             game.setBoard(board);
+            BoardSceneryLayouts.convert(game.getBoard());
             try (var source = new GpuMapSource(game, null, null)) { return source.takeFrame().scene(); }
         });
         SwingUtilities.invokeAndWait(task);

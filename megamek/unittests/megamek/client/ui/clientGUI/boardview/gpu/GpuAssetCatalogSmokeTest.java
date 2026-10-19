@@ -15,6 +15,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -94,6 +95,7 @@ class GpuAssetCatalogSmokeTest {
                     }
                 }
                 fixture.game.setBoard(new Board(8, 8, hexes));
+                BoardSceneryLayouts.convert(fixture.game.getBoard());
                 fixture.source.refresh();
             });
             BoardScene captured = fixture.source.takeFrame().scene();

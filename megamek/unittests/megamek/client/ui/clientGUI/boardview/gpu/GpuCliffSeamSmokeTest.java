@@ -14,6 +14,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -23,8 +24,7 @@ import org.junit.jupiter.api.Test;
 class GpuCliffSeamSmokeTest {
     @Test
     void rendersJoinedCliffsAroundCommCenter1210() throws Exception {
-        Board board = new Board();
-        board.load(new File("data/boards/GrassLands/16x17 Grasslands River CommCenter.board"));
+        Board board = BoardFile.loadSheet(new File("data/boards/GrassLands/16x17 Grasslands River CommCenter.board"), false, true);
         BoardScene scene;
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
             SwingUtilities.invokeAndWait(fixture.source::refresh);

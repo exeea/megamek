@@ -150,6 +150,9 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
 
     static float terminalLength() { return KIT.get().getFirst().size().y; }
 
+    /** The authored entrance block's outward reach from the carriageway edge, in model pixels. */
+    static float terminalWidth() { return KIT.get().getFirst().size().x; }
+
     /** How far a banked span's terminal block rises above the deck surface. */
     static float terminalHeight() { return KIT.get().getFirst().size().z; }
 

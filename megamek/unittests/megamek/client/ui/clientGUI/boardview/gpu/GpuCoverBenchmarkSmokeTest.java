@@ -27,6 +27,7 @@ import com.badlogic.gdx.utils.FloatArray;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -66,13 +67,11 @@ class GpuCoverBenchmarkSmokeTest {
         Board loaded;
         Coords focus;
         if (board.equals("mesacity")) {
-            loaded = new Board();
-            loaded.load(new File(MESA_CITY));
+            loaded = BoardFile.loadSheet(new File(MESA_CITY), false, true);
             focus = new Coords(36, 24);
         } else if (board.equals("elevated")) {
             // Grass lowlands three levels below a plateau carrying the highway: the reported grass pop-in.
-            loaded = new Board();
-            loaded.load(new File(ELEVATED_HIGHWAY));
+            loaded = BoardFile.loadSheet(new File(ELEVATED_HIGHWAY), false, true);
             focus = new Coords(24, 28);
         } else {
             loaded = uniform(kind);

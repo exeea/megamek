@@ -47,7 +47,7 @@ import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Configuration;
-import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -1145,8 +1145,7 @@ class GpuMagmaSmokeTest {
 
     /** The same shipped-board capture path as the landscape fixture; preserve every terrain field. */
     static BoardScene domeScene() throws Exception {
-        var board = new Board();
-        board.load(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"));
+        var board = BoardFile.loadSheet(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"), false, true);
         var captured = new AtomicReference<BoardScene>();
         try (var fixture = GpuBoardFixture.create(board)) {
             SwingUtilities.invokeAndWait(() -> {

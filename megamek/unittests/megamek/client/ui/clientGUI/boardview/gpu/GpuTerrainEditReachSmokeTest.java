@@ -35,6 +35,7 @@ import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -149,8 +150,7 @@ class GpuTerrainEditReachSmokeTest {
                     report.append("GL_RENDERER ").append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append('\n');
                     measureBoard("synthetic", synthetic(), fixed, results, problems, report);
                     for (String path : BOARDS.split(",")) {
-                        Board board = new Board();
-                        board.load(new File("data/boards", path.trim()));
+                        Board board = BoardFile.loadSheet(new File("data/boards", path.trim()), false, true);
                         measureBoard(new File(path.trim()).getName(), board, sample(board, path.trim()), results, problems,
                               report);
                     }

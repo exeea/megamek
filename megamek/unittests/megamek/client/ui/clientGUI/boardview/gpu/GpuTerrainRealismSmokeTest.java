@@ -33,7 +33,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.planetaryConditions.Atmosphere;
@@ -86,8 +86,7 @@ class GpuTerrainRealismSmokeTest {
         var views = new ArrayList<View>();
         for (Landscape landscape : LANDSCAPES) {
             if (!selected.contains(landscape.name)) { continue; }
-            var board = new Board();
-            board.load(new File("data/boards", landscape.path));
+            var board = BoardFile.loadSheet(new File("data/boards", landscape.path), false, true);
             if (scorch) {
                 var severities = List.of("singed", "charred", "ash", "glass");
                 for (int x = 0; x < board.getWidth(); x++) {
