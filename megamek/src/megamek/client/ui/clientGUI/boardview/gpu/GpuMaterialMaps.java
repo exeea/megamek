@@ -35,15 +35,15 @@ final class GpuMaterialMaps {
         NORMAL_ROUGHNESS,
         /** Height, roughness, ambient occlusion, relief UV / .1 (Godot's heightmap_scale / 100): roads and magma. */
         RELIEF,
-        /** Grain height, roughness, cracks and bubbles ({@code _cracks}), cloudiness (subsurface scattering): ice. */
+        /** Grain height, roughness, cracks and bubbles ({@code texture_cracks}), cloudiness (subsurface scattering): ice. */
         ICE,
         /** Ambient occlusion, roughness, thin-tissue transmission (subsurface scattering): a glTF occlusion map. */
         OCCLUSION,
         /** glTF metallic-roughness: G roughness, B metallic. */
         METALLIC_ROUGHNESS,
-        /** Linear emission RGB with exposed-melt coverage ({@code _coverage}) in A: molten lava. */
+        /** Linear emission RGB with exposed-melt coverage ({@code texture_coverage}) in A: molten lava. */
         MOLTEN_HEAT,
-        /** Heat (emission) in R, crack glow ({@code _glow}) in A: solid crust. */
+        /** Heat (emission) in R, crack glow ({@code texture_glow}) in A: solid crust. */
         CRUST_HEAT
     }
 
@@ -363,9 +363,9 @@ final class GpuMaterialMaps {
         Surface(Packer packer) {
             this.packer = packer;
             material = packer.material;
-            occlusionChannel = material.channel("ao_texture_channel");
-            roughnessChannel = material.channel("roughness_texture_channel");
-            metallicChannel = material.channel("metallic_texture_channel");
+            occlusionChannel = material.occlusionChannel();
+            roughnessChannel = material.roughnessChannel();
+            metallicChannel = material.metallicChannel();
             roughnessFactor = material.roughness();
             metallicFactor = material.metallic();
             subsurfaceStrength = material.subsurfaceStrength();

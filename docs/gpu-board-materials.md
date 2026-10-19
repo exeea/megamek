@@ -1,9 +1,11 @@
 # Board materials
 
-Every board material is a Godot 4 `StandardMaterial3D`, exactly as Material Maker's
-**Godot/Godot 4 Standard** export writes it. Artists who know Godot, or any engine
-that reads a standard PBR material, can read and replace these files. No custom
-export target or packed files remain.
+Every board material is a Godot 4 material resource. Almost all are a `StandardMaterial3D`,
+exactly as Material Maker's **Godot/Godot 4 Standard** export writes it. The three with a
+map that a standard material has no slot for (lava, crust and ice) are a `ShaderMaterial`,
+which is how Godot itself adds maps to a material ([below](#shadermaterials)). Artists who
+know Godot, or any engine that reads a standard PBR material, can read and replace these
+files. No custom export target or packed files remain.
 
 ## Files
 
@@ -22,8 +24,10 @@ A material named `terrain/surfaces/grass` is
 
 A material uses only the maps its resource names. `GodotMaterial` reads the resource:
 Material Maker's `format=2` text and the Godot 4 editor's `format=3` text (quoted ids,
-`uid`, `res://` paths relative to the textures folder) both work. Map paths must stay
-inside the textures folder. The game reads these properties and ignores the rest:
+`uid`, `res://` paths) both work. A `res://` path is relative to the textures folder, so open
+`mm-data/data/models/board/textures` itself as the Godot project to edit them there; its
+`project.godot`, `.godot/` and `.import` files are git-ignored. Map paths must stay inside the
+textures folder. The game reads these `StandardMaterial3D` properties and ignores the rest:
 
 | Property | Use |
 | --- | --- |
@@ -37,20 +41,36 @@ inside the textures folder. The game reads these properties and ignores the rest
 | `emission_enabled`, `emission_texture`, `emission_energy` (or `emission_energy_multiplier`) | Lava heat. |
 | `subsurf_scatter_enabled`, `subsurf_scatter_texture`, `subsurf_scatter_strength` | Ice cloudiness, foliage transmission. |
 
-### Maps without a StandardMaterial3D slot
+### ShaderMaterials
 
-Three materials need one map that a standard material has no slot for. Their Material
-Maker projects write it with a stock Export node, beside the other maps:
+Three materials need one map that a standard material has no slot for, and colour data a
+standard material would misread. Each is a `ShaderMaterial` of the `<name>.gdshader` beside it:
 
-| Map | Content |
-| --- | --- |
-| `terrain/lava/lava_coverage.png` | Exposed-melt coverage of molten lava. |
-| `terrain/lava/crust_glow.png` | Crack glow of solid crust. |
-| `terrain/ice/sheet_cracks.png` | Ice cracks and bubbles. |
+| Material | Extra parameter (map) | Colour space |
+| --- | --- | --- |
+| `terrain/lava/lava` | `texture_coverage` (`lava_coverage.png`): exposed-melt coverage | `texture_emission` is linear radiance, times `emission_energy` (5) |
+| `terrain/lava/crust` | `texture_glow` (`crust_glow.png`): fissure glow | `texture_emission` is linear heat in R, which the shader colours |
+| `terrain/ice/sheet` | `texture_cracks` (`sheet_cracks.png`): cracks and bubbles | `texture_albedo` is a tint whose hue alone matters |
 
-Molten lava's `lava_emission.png` stores linear values, because `emission_energy` (5) is
-the scale the spill light and the shader apply to them; crust's grey emission is its heat.
-Ice keeps its cloudiness in `sheet_sss.png`.
+The standard maps and factors take the names of Godot's own converted shaders: `albedo`,
+`texture_albedo`, `roughness`, `metallic`, `texture_normal`, `normal_scale`,
+`texture_heightmap`, `heightmap_scale`, `texture_emission`, `emission_energy`,
+`texture_subsurface_scattering` and `subsurface_scattering_strength`. One `texture_orm`
+holds occlusion, roughness and metallic in R, G and B, as Godot's ORMMaterial3D packs them.
+As in Godot, a parameter the resource omits takes the default the shader declares, and a
+parameter the shader does not declare has no effect.
+
+The `.gdshader`s are previews for Godot only: each declares the parameters, with hints that
+give each map's colour space, and draws a static surface close to the game's look. The game
+reads the parameters and renders these materials with its own shaders (`terrain-magma.glsl`,
+`magma-flow.glsl`, `magma-solid.glsl`, `terrain-ice.glsl`), which add the board's flow, banks,
+floes and edges.
+
+Material Maker cannot write a `ShaderMaterial`. Its projects export the standard maps, plus
+the extra map from a stock Export node, and `export.py` turns Material Maker's
+`StandardMaterial3D` into the `ShaderMaterial` (see `mm-data/tools/materials/README.md`). A
+`StandardMaterial3D` with a `<name>.gdshader` beside it, which an editor export leaves, is
+refused with an error naming `export.py --wrap`.
 
 ## How the renderer packs them
 
@@ -171,4 +191,6 @@ script resamples each map to its node's Size. *Reload assets* in the Tuning pane
 up a new export, and any catalogue change, without restarting.
 
 `GpuBoardMaterialsTest` checks that every shipped material reads, that its maps exist,
-and that it is catalogued exactly once, with square maps if it is loose.
+and that it is catalogued exactly once, with square maps if it is loose. A `ShaderMaterial`
+must assign every map its shader declares, set only parameters it declares, and be exactly
+the materials with a `<name>.gdshader`.

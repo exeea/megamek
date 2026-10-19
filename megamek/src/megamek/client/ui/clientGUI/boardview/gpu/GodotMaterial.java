@@ -7,33 +7,55 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * A board material: a Godot 4 {@code StandardMaterial3D} text resource ({@code <name>.tres}) and the maps it names, as
- * Material Maker's "Godot/Godot 4 Standard" export writes them ({@code <name>_albedo.png}, {@code _orm.png},
- * {@code _normal.png}, {@code _heightmap.png}, {@code _emission.png}, {@code _sss.png}). Both Material Maker's
- * {@code format=2} spelling and Godot's own {@code format=3} files are read. A map path is relative to the resource's
- * folder, or a {@code res://} path relative to the board's textures folder. Only the properties the board renders are
- * read (see docs/gpu-board-materials.md); an omitted property keeps Godot's default. CPU-only: no graphics context.
+ * A board material: a Godot 4 text resource ({@code <name>.tres}) and the maps it names. Most are
+ * {@code StandardMaterial3D}s, as Material Maker's "Godot/Godot 4 Standard" export writes them
+ * ({@code <name>_albedo.png}, {@code _orm.png}, {@code _normal.png}, {@code _heightmap.png}, {@code _emission.png},
+ * {@code _sss.png}). A material with a map StandardMaterial3D has no slot for is a {@code ShaderMaterial} of the
+ * {@code <name>.gdshader} beside it: its parameters take the names of Godot's own converted shaders ({@code albedo},
+ * {@code texture_albedo}, {@code roughness}, ...), its {@code texture_orm} holds occlusion, roughness and metallic in R, G
+ * and B as Godot's ORMMaterial3D packs them, and each extra map is a {@code texture_<map>} parameter. As in Godot, a
+ * parameter the resource omits takes the shader's declared default, and an undeclared one does not exist.
+ * <p>
+ * Both Material Maker's {@code format=2} spelling and Godot's own {@code format=3} files are read. A path is relative to
+ * the resource's folder, or a {@code res://} path relative to the board's textures folder (the folder a Godot project
+ * opens). Only the properties the board renders are read (see docs/gpu-board-materials.md); an omitted
+ * StandardMaterial3D property keeps Godot's default. CPU-only: no graphics context.
  */
 final class GodotMaterial {
     /** Godot's BaseMaterial3D.TextureChannel order. */
     static final int RED = 0, GREEN = 1, BLUE = 2, ALPHA = 3, GRAYSCALE = 4;
+    private static final String PARAMETER = "shader_parameter/";
+    private static final Pattern COMMENT = Pattern.compile("//[^\\n]*|/\\*.*?\\*/", Pattern.DOTALL);
+    // A material parameter: neither a global nor an instance uniform. Hints and the default follow the name.
+    private static final Pattern UNIFORM = Pattern.compile(
+          "(?<![\\w ])\\s*uniform\\s+(?:(?:lowp|mediump|highp)\\s+)?(\\w+)\\s+(\\w+)\\s*(?::[^=;]*)?(?:=([^;]*))?;");
     private static final Pattern SECTION = Pattern.compile("\\[(\\w+)((?:\\s+\\w+=(?:\"(?:[^\"\\\\]|\\\\.)*\"|[^\\s\\]]+))*)\\s*]");
     private static final Pattern ATTRIBUTE = Pattern.compile("(\\w+)=(\"(?:[^\"\\\\]|\\\\.)*\"|[^\\s\\]]+)");
     private static final Pattern EXTERNAL = Pattern.compile("ExtResource\\(\\s*(\"(?:[^\"\\\\]|\\\\.)*\"|\\d+)\\s*\\)");
 
+    /** A Material Maker StandardMaterial3D, or the ShaderMaterial of the shader beside it. */
+    enum Kind { STANDARD, SHADER }
+
     final File file;
+    final Kind kind;
     private final Map<String, String> properties;
     private final Map<String, File> resources;
+    /** A ShaderMaterial's shader parameters in declaration order: name to declared default, or null for none. */
+    private final Map<String, String> uniforms;
 
-    private GodotMaterial(File file, Map<String, String> properties, Map<String, File> resources) {
+    private GodotMaterial(File file, Kind kind, Map<String, String> properties, Map<String, File> resources,
+          Map<String, String> uniforms) {
         this.file = file;
+        this.kind = kind;
         this.properties = properties;
         this.resources = resources;
+        this.uniforms = uniforms;
     }
 
     /** {@code textures}: the folder {@code res://} paths resolve against. */
@@ -46,6 +68,7 @@ final class GodotMaterial {
         }
         Map<String, String> properties = new HashMap<>();
         Map<String, File> resources = new HashMap<>();
+        Kind kind = null;
         String section = null;
         String key = null;
         StringBuilder value = new StringBuilder();
@@ -64,10 +87,12 @@ final class GodotMaterial {
                 section = match.group(1);
                 Map<String, String> attributes = attributes(match.group(2));
                 if (section.equals("gd_resource")) {
-                    if (!"StandardMaterial3D".equals(attributes.get("type"))) {
-                        throw new IllegalArgumentException("Board materials are Godot 4 StandardMaterial3D resources"
-                              + " (Material Maker's Godot/Godot 4 Standard export): " + file);
-                    }
+                    kind = switch (String.valueOf(attributes.get("type"))) {
+                        case "StandardMaterial3D" -> Kind.STANDARD;
+                        case "ShaderMaterial" -> Kind.SHADER;
+                        default -> throw new IllegalArgumentException("Board materials are Godot 4 StandardMaterial3D"
+                              + " resources (Material Maker's Godot/Godot 4 Standard export) or ShaderMaterials: " + file);
+                    };
                     header = true;
                 } else if (section.equals("ext_resource")) {
                     String id = attributes.get("id"), path = attributes.get("path");
@@ -87,7 +112,32 @@ final class GodotMaterial {
         }
         if (!header) { throw new IllegalArgumentException("Not a Godot text resource: " + file); }
         if (key != null) { throw new IllegalArgumentException("Unterminated value of " + key + " in " + file); }
-        return new GodotMaterial(file, properties, resources);
+        var material = new GodotMaterial(file, kind, properties, resources, Map.of());
+        if (kind == Kind.STANDARD) {
+            File shader = new File(file.getParentFile(), material.name() + ".gdshader");
+            if (shader.isFile()) {
+                throw new IllegalArgumentException(file + " is a StandardMaterial3D, but " + shader.getName() + " beside it"
+                      + " makes it a ShaderMaterial; an editor export replaced it: run tools/materials/export.py --wrap");
+            }
+            return material;
+        }
+        File shader = material.texture("shader");
+        if (shader == null) { throw new IllegalArgumentException("A ShaderMaterial needs its shader: " + file); }
+        return new GodotMaterial(file, kind, properties, resources, uniforms(shader));
+    }
+
+    /** A shader's material parameters: name to declared default (null for none), in declaration order. */
+    private static Map<String, String> uniforms(File shader) {
+        String code;
+        try {
+            code = Files.readString(shader.toPath(), StandardCharsets.UTF_8);
+        } catch (IOException error) {
+            throw new IllegalArgumentException("Missing required board material shader: " + shader, error);
+        }
+        Map<String, String> result = new LinkedHashMap<>();
+        Matcher match = UNIFORM.matcher(COMMENT.matcher(code).replaceAll(""));
+        while (match.find()) { result.put(match.group(2), match.group(3) == null ? null : match.group(3).strip()); }
+        return result;
     }
 
     private static boolean balanced(CharSequence value) {
@@ -133,7 +183,7 @@ final class GodotMaterial {
 
     boolean has(String property) { return properties.containsKey(property); }
 
-    /** The file a texture property names, or null when the property is absent. */
+    /** The file a texture (or shader) property names, or null when the property is absent. */
     File texture(String property) {
         String value = properties.get(property);
         if (value == null) { return null; }
@@ -148,7 +198,10 @@ final class GodotMaterial {
 
     float number(String property, float fallback) {
         String value = properties.get(property);
-        if (value == null) { return fallback; }
+        return value == null ? fallback : parseNumber(property, value);
+    }
+
+    private float parseNumber(String property, String value) {
         try {
             float number = Float.parseFloat(value);
             if (!Float.isFinite(number)) { throw new NumberFormatException(); }
@@ -181,11 +234,21 @@ final class GodotMaterial {
     /** A {@code Color(r, g, b, a)} value. */
     float[] color(String property, float... fallback) {
         String value = properties.get(property);
-        if (value == null) { return fallback; }
-        if (!value.startsWith("Color(") || !value.endsWith(")")) {
+        return value == null ? fallback : parseColor(property, value);
+    }
+
+    /** A resource's {@code Color(r, g, b, a)}, or a shader default's {@code vec4(r, g, b, a)} or {@code vec4(v)}. */
+    private float[] parseColor(String property, String value) {
+        String compact = value.replace(" ", "");
+        if (compact.startsWith("vec4(") && compact.indexOf(',') < 0) {
+            String all = compact.substring("vec4(".length(), compact.length() - 1);
+            compact = "vec4(" + all + "," + all + "," + all + "," + all + ")";
+        }
+        int open = compact.indexOf('(');
+        if (!(compact.startsWith("Color(") || compact.startsWith("vec4(")) || !compact.endsWith(")")) {
             throw new IllegalArgumentException(property + " must be a Color, not " + value + ": " + file);
         }
-        String[] parts = value.substring("Color(".length(), value.length() - 1).split(",");
+        String[] parts = compact.substring(open + 1, compact.length() - 1).split(",");
         float[] result = { 1, 1, 1, 1 };
         if (parts.length < 3 || parts.length > 4) {
             throw new IllegalArgumentException(property + " must be a Color, not " + value + ": " + file);
@@ -201,7 +264,7 @@ final class GodotMaterial {
     }
 
     /** A texture channel property: Godot's BaseMaterial3D.TextureChannel, red by default. */
-    int channel(String property) {
+    private int channel(String property) {
         int channel = integer(property, RED);
         if (channel < RED || channel > GRAYSCALE) {
             throw new IllegalArgumentException(property + " must be a texture channel 0-4: " + file);
@@ -209,60 +272,109 @@ final class GodotMaterial {
         return channel;
     }
 
+    /** Whether this ShaderMaterial's shader declares a parameter (Godot ignores values of undeclared ones). */
+    boolean declares(String parameter) { return kind == Kind.SHADER && uniforms.containsKey(parameter); }
+
+    /** A map parameter: the file the resource assigns, or null when the shader does not declare it or none is set. */
+    private File parameterTexture(String parameter) { return declares(parameter) ? texture(PARAMETER + parameter) : null; }
+
+    /** A number parameter: the resource's value, else the shader's default, else Godot's zero; undeclared, absent. */
+    private float parameterNumber(String parameter, float absent) {
+        if (!declares(parameter)) { return absent; }
+        String value = properties.getOrDefault(PARAMETER + parameter, uniforms.get(parameter));
+        return value == null ? 0 : parseNumber(PARAMETER + parameter, value);
+    }
+
+    /** A colour parameter, as {@link #parameterNumber}; undeclared, white (no tint). */
+    private float[] parameterColor(String parameter) {
+        if (!declares(parameter)) { return new float[] { 1, 1, 1, 1 }; }
+        String value = properties.getOrDefault(PARAMETER + parameter, uniforms.get(parameter));
+        return value == null ? new float[4] : parseColor(PARAMETER + parameter, value);
+    }
+
     // The properties the board renders, with Godot's defaults and enable flags.
 
     File albedo() {
-        File albedo = texture("albedo_texture");
-        if (albedo == null) { throw new IllegalArgumentException("A board material needs an albedo_texture: " + file); }
+        String property = kind == Kind.SHADER ? PARAMETER + "texture_albedo" : "albedo_texture";
+        File albedo = kind == Kind.SHADER ? parameterTexture("texture_albedo") : texture(property);
+        if (albedo == null) { throw new IllegalArgumentException("A board material needs its " + property + ": " + file); }
         return albedo;
     }
 
-    float[] albedoColor() { return color("albedo_color", 1, 1, 1, 1); }
+    float[] albedoColor() { return kind == Kind.SHADER ? parameterColor("albedo") : color("albedo_color", 1, 1, 1, 1); }
 
-    File normal() { return flag("normal_enabled", false) ? texture("normal_texture") : null; }
+    File normal() {
+        if (kind == Kind.SHADER) { return parameterTexture("texture_normal"); }
+        return flag("normal_enabled", false) ? texture("normal_texture") : null;
+    }
 
-    float normalScale() { return number("normal_scale", 1); }
+    float normalScale() { return kind == Kind.SHADER ? parameterNumber("normal_scale", 1) : number("normal_scale", 1); }
 
-    File occlusion() { return flag("ao_enabled", false) ? texture("ao_texture") : null; }
+    File occlusion() {
+        if (kind == Kind.SHADER) { return parameterTexture("texture_orm"); }
+        return flag("ao_enabled", false) ? texture("ao_texture") : null;
+    }
 
-    File roughnessMap() { return texture("roughness_texture"); }
+    int occlusionChannel() { return kind == Kind.SHADER ? RED : channel("ao_texture_channel"); }
 
-    float roughness() { return number("roughness", 1); }
+    File roughnessMap() { return kind == Kind.SHADER ? parameterTexture("texture_orm") : texture("roughness_texture"); }
 
-    File metallicMap() { return texture("metallic_texture"); }
+    int roughnessChannel() { return kind == Kind.SHADER ? GREEN : channel("roughness_texture_channel"); }
 
-    float metallic() { return number("metallic", 0); }
+    float roughness() { return kind == Kind.SHADER ? parameterNumber("roughness", 1) : number("roughness", 1); }
+
+    File metallicMap() { return kind == Kind.SHADER ? parameterTexture("texture_orm") : texture("metallic_texture"); }
+
+    int metallicChannel() { return kind == Kind.SHADER ? BLUE : channel("metallic_texture_channel"); }
+
+    float metallic() { return kind == Kind.SHADER ? parameterNumber("metallic", 0) : number("metallic", 0); }
 
     /** Material Maker's tessellated material names the heightmap {@code depth_texture}; Godot 4 names it heightmap. */
     File heightmap() {
+        if (kind == Kind.SHADER) { return parameterTexture("texture_heightmap"); }
         if (!flag("heightmap_enabled", false)) { return null; }
         File heightmap = texture("heightmap_texture");
         return heightmap != null ? heightmap : texture("depth_texture");
     }
 
     /** Godot's heightmap depth in texture UV units, times 100. */
-    float heightmapScale() { return number("heightmap_scale", 5); }
+    float heightmapScale() {
+        return kind == Kind.SHADER ? parameterNumber("heightmap_scale", 5) : number("heightmap_scale", 5);
+    }
 
-    boolean heightmapFlipped() { return flag("heightmap_flip_texture", false); }
+    /** A StandardMaterial3D's flip; a board shader declares none (Godot compiles the flip into its converted shaders). */
+    boolean heightmapFlipped() { return kind == Kind.STANDARD && flag("heightmap_flip_texture", false); }
 
-    File emission() { return flag("emission_enabled", false) ? texture("emission_texture") : null; }
+    File emission() {
+        if (kind == Kind.SHADER) { return parameterTexture("texture_emission"); }
+        return flag("emission_enabled", false) ? texture("emission_texture") : null;
+    }
 
     /** Godot 4 renamed emission_energy to emission_energy_multiplier; Material Maker writes the former. */
     float emissionEnergy() {
+        if (kind == Kind.SHADER) { return parameterNumber("emission_energy", 1); }
         return has("emission_energy_multiplier") ? number("emission_energy_multiplier", 1) : number("emission_energy", 1);
     }
 
-    File subsurface() { return flag("subsurf_scatter_enabled", false) ? texture("subsurf_scatter_texture") : null; }
+    File subsurface() {
+        if (kind == Kind.SHADER) { return parameterTexture("texture_subsurface_scattering"); }
+        return flag("subsurf_scatter_enabled", false) ? texture("subsurf_scatter_texture") : null;
+    }
 
-    float subsurfaceStrength() { return number("subsurf_scatter_strength", 0); }
+    float subsurfaceStrength() {
+        return kind == Kind.SHADER ? parameterNumber("subsurface_scattering_strength", 0) : number("subsurf_scatter_strength", 0);
+    }
 
     /**
-     * An additional map of this material with no StandardMaterial3D property, saved beside it by a Material Maker
-     * Export node as {@code <name>_<suffix>.png} (docs/gpu-board-materials.md lists them).
+     * A map StandardMaterial3D has no slot for: a ShaderMaterial's {@code texture_<map>} parameter, which its shader
+     * declares (docs/gpu-board-materials.md lists them).
      */
-    File extra(String suffix) {
-        File extra = new File(file.getParentFile(), name() + "_" + suffix + ".png");
-        if (!extra.isFile()) { throw new IllegalArgumentException("Missing required board material map: " + extra); }
+    File extra(String map) {
+        File extra = parameterTexture("texture_" + map);
+        if (extra == null) {
+            throw new IllegalArgumentException("A board material needs its " + PARAMETER + "texture_" + map + " (a "
+                  + "ShaderMaterial whose shader declares it): " + file);
+        }
         return extra;
     }
 }

@@ -255,7 +255,7 @@ final class GpuAssets implements Disposable {
         File file = material.roughnessMap();
         if (file == null) { return new AuthoredRoughness(factor < 1 ? factor : -1, null, 0, 0); }
         requireFiles(List.of(new FileHandle(file)));
-        var channel = GpuMaterialMaps.channel(file, material.channel("roughness_texture_channel"));
+        var channel = GpuMaterialMaps.channel(file, material.roughnessChannel());
         byte[] values = channel.values();
         boolean uniform = true;
         for (byte value : values) { uniform &= value == values[0]; }

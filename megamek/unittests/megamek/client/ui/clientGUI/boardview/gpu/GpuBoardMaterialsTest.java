@@ -52,8 +52,8 @@ class GpuBoardMaterialsTest {
         assertEquals(textures.resolve("terrain/surfaces/test_albedo.png").toFile(), material.albedo());
         assertEquals(textures.resolve("terrain/surfaces/test_orm.png").toFile(), material.roughnessMap());
         assertEquals(material.roughnessMap(), material.occlusion());
-        assertEquals(GodotMaterial.GREEN, material.channel("roughness_texture_channel"));
-        assertEquals(GodotMaterial.RED, material.channel("ao_texture_channel"));
+        assertEquals(GodotMaterial.GREEN, material.roughnessChannel());
+        assertEquals(GodotMaterial.RED, material.occlusionChannel());
         assertNull(material.emission(), "Disabled features have no map");
 
         Path folder = Files.createDirectories(textures.resolve("vegetation"));
@@ -90,6 +90,81 @@ class GpuBoardMaterialsTest {
         assertNull(editor.normal());
     }
 
+    /** As Godot reads them: parameters the resource omits take the shader's defaults; undeclared ones do not exist. */
+    @Test
+    void readsShaderMaterialsAsGodotDoes() throws Exception {
+        Path folder = Files.createDirectories(textures.resolve("terrain/ice"));
+        Files.writeString(folder.resolve("sheet.gdshader"), """
+              // Comments, groups, global and instance uniforms are not material parameters.
+              shader_type spatial;
+              /* uniform float commented = 1.0; */
+              global uniform float board_wind;
+              instance uniform float variation = 0.5;
+              group_uniforms surface;
+              uniform vec4 albedo : source_color = vec4(0.5);
+              uniform sampler2D texture_albedo : source_color, filter_linear_mipmap, repeat_enable;
+              uniform sampler2D texture_orm : hint_roughness_g;
+              uniform float roughness : hint_range(0.0, 1.0) = 0.25; // A default the resource omits.
+              uniform highp float metallic;
+              uniform float heightmap_scale = 12.5;
+              uniform sampler2D texture_cracks : hint_default_black;
+              void fragment() { ALBEDO = albedo.rgb; }
+              """);
+        // As Godot saves it: res:// paths, generated ids, values in any order.
+        Files.writeString(folder.resolve("sheet.tres"), """
+              [gd_resource type="ShaderMaterial" load_steps=4 format=3 uid="uid://ice"]
+
+              [ext_resource type="Shader" path="res://terrain/ice/sheet.gdshader" id="1_enbsj"]
+              [ext_resource type="Texture2D" path="res://terrain/ice/sheet_cracks.png" id="2_d0eaq"]
+              [ext_resource type="Texture2D" path="sheet_albedo.png" id="3_hfjrh"]
+              [ext_resource type="Texture2D" path="sheet_orm.png" id="4_5ap6k"]
+
+              [resource]
+              render_priority = 0
+              shader = ExtResource("1_enbsj")
+              shader_parameter/normal_scale = 3.0
+              shader_parameter/texture_cracks = ExtResource("2_d0eaq")
+              shader_parameter/texture_albedo = ExtResource("3_hfjrh")
+              shader_parameter/texture_orm = ExtResource("4_5ap6k")
+              shader_parameter/heightmap_scale = 0.509804
+              """);
+        var ice = GodotMaterial.read(folder.resolve("sheet.tres").toFile(), textures.toFile());
+        assertEquals(GodotMaterial.Kind.SHADER, ice.kind);
+        assertEquals(folder.resolve("sheet_albedo.png").toFile(), ice.albedo());
+        File orm = folder.resolve("sheet_orm.png").toFile();
+        assertEquals(orm, ice.occlusion());
+        assertEquals(orm, ice.roughnessMap());
+        assertEquals(orm, ice.metallicMap());
+        assertEquals(GodotMaterial.RED, ice.occlusionChannel());
+        assertEquals(GodotMaterial.GREEN, ice.roughnessChannel());
+        assertEquals(GodotMaterial.BLUE, ice.metallicChannel());
+        assertEquals(.25f, ice.roughness(), "The shader's default, which Godot does not save");
+        assertEquals(0, ice.metallic(), "Declared without a default: Godot's zero");
+        assertEquals(1, ice.normalScale(), "An undeclared parameter has no effect, whatever the resource says");
+        assertEquals(.509804f, ice.heightmapScale());
+        assertArrayEquals(new float[] { .5f, .5f, .5f, .5f }, ice.albedoColor());
+        assertEquals(folder.resolve("sheet_cracks.png").toFile().getCanonicalFile(), ice.extra("cracks").getCanonicalFile());
+        assertNull(ice.normal());
+        assertNull(ice.emission());
+        assertFalse(ice.heightmapFlipped());
+        assertFalse(ice.declares("variation"));
+        assertFalse(ice.declares("board_wind"));
+        assertFalse(ice.declares("commented"));
+        var error = assertThrows(IllegalArgumentException.class, () -> ice.extra("coverage"));
+        assertTrue(error.getMessage().contains("shader_parameter/texture_coverage"), error.getMessage());
+
+        // An editor export replaces the ShaderMaterial with Material Maker's StandardMaterial3D: refuse it.
+        Files.writeString(folder.resolve("sheet.tres"), """
+              [gd_resource type="StandardMaterial3D" format=2]
+              [ext_resource path="sheet_albedo.png" type="Texture" id=1]
+              [resource]
+              albedo_texture = ExtResource( 1 )
+              """);
+        error = assertThrows(IllegalArgumentException.class,
+              () -> GodotMaterial.read(folder.resolve("sheet.tres").toFile(), textures.toFile()));
+        assertTrue(error.getMessage().contains("export.py --wrap"), error.getMessage());
+    }
+
     @Test
     void rejectsResourcesTheBoardCannotRender() throws Exception {
         Path folder = Files.createDirectories(textures.resolve("scenery"));
@@ -102,6 +177,9 @@ class GpuBoardMaterialsTest {
               + "type=\"Texture\" id=1]\n[resource]\n", "textures folder");
         rejected(folder, "[gd_resource type=\"StandardMaterial3D\" format=3]\n[resource]\nroughness = rough\n", "finite");
         rejected(folder, "[gd_resource type=\"StandardMaterial3D\" format=3]\n[resource]\n", "albedo_texture");
+        rejected(folder, "[gd_resource type=\"ShaderMaterial\" format=3]\n[resource]\n", "needs its shader");
+        rejected(folder, "[gd_resource type=\"ShaderMaterial\" format=3]\n[ext_resource type=\"Shader\" path=\"absent.gdshader\" "
+              + "id=\"1\"]\n[resource]\nshader = ExtResource(\"1\")\n", "Missing required board material shader");
     }
 
     private void rejected(Path folder, String text, String reason) throws Exception {
@@ -263,9 +341,10 @@ class GpuBoardMaterialsTest {
         assertEquals(128f / 255, emission.green(), 1e-7);
         assertEquals(64f / 255, emission.blue(), 1e-7);
         Path tres = textures.resolve("terrain/lava/lava.tres");
-        Files.writeString(tres, Files.readString(tres).replace("emission_energy = 2.0", "emission_energy = -1.0"));
+        Files.writeString(tres, Files.readString(tres).replace("shader_parameter/emission_energy = 2.0",
+              "shader_parameter/emission_energy = -1.0"));
         assertThrows(IllegalArgumentException.class, () -> new GpuAssets().lavaEmission());
-        Files.writeString(tres, Files.readString(tres).replace("emission_enabled = true", "emission_enabled = false"));
+        Files.writeString(tres, Files.readString(tres).replace("shader_parameter/texture_emission", "; texture_emission"));
         assertThrows(IllegalArgumentException.class, () -> new GpuAssets().lavaEmission());
     }
 
@@ -303,6 +382,9 @@ class GpuBoardMaterialsTest {
                     GpuMaterialMaps.size(map);
                 }
                 assertTrue(catalog.isLoose(name) != catalog.constrainedNames().contains(name), "Catalogued once: " + name);
+                File shader = new File(file.getParent().toFile(), material.name() + ".gdshader");
+                assertEquals(shader.isFile(), material.kind == GodotMaterial.Kind.SHADER, "A shader beside it: " + name);
+                if (shader.isFile()) { shaderMaterialIsComplete(material, shader); }
                 if (catalog.isLoose(name)) {
                     int[] size = GpuMaterialMaps.size(material.albedo());
                     // Any width is valid (a wider export covers more ground); the maps must be square.
@@ -315,6 +397,30 @@ class GpuBoardMaterialsTest {
         catalogued.addAll(catalog.constrainedNames());
         assertEquals(catalogued, names, "Every catalogued material exists");
         assertFalse(names.isEmpty());
+        // The maps StandardMaterial3D has no slot for (docs/gpu-board-materials.md).
+        for (String[] extra : new String[][] { { "terrain/lava/lava", "coverage" }, { "terrain/lava/crust", "glow" },
+              { "terrain/ice/sheet", "cracks" } }) {
+            var material = GodotMaterial.read(new File(shipped, extra[0] + ".tres"), shipped);
+            assertTrue(material.extra(extra[1]).isFile(), extra[0]);
+        }
+    }
+
+    /** The ShaderMaterial of its own shader: every map the shader declares is assigned, every value is declared. */
+    private static void shaderMaterialIsComplete(GodotMaterial material, File shader) throws Exception {
+        assertEquals(shader.getCanonicalFile(), material.texture("shader").getCanonicalFile(), material.file.toString());
+        var code = Files.readString(shader.toPath());
+        var maps = java.util.regex.Pattern.compile("uniform\\s+sampler2D\\s+(\\w+)").matcher(code);
+        while (maps.find()) {
+            File map = material.texture("shader_parameter/" + maps.group(1));
+            assertNotNull(map, material.file + " assigns " + maps.group(1));
+            assertTrue(map.isFile(), map.toString());
+        }
+        for (String line : Files.readAllLines(material.file.toPath())) {
+            if (line.startsWith("shader_parameter/")) {
+                String parameter = line.substring("shader_parameter/".length(), line.indexOf('=')).strip();
+                assertTrue(material.declares(parameter), material.file + ": " + shader.getName() + " declares " + parameter);
+            }
+        }
     }
 
     /** Reproducible noise in every channel, including alpha. */

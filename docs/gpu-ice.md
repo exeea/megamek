@@ -16,9 +16,10 @@ is present. Rules for discovery, movement and breaking ice stay in the game code
 | `data/models/board/textures/terrain/ice` | Chromatic scattering-tint input, normal and packed optical controls. |
 
 The Material Maker project `mm-data/tools/materials/terrain/ice/sheet` exports the
-`terrain/ice/sheet` Godot 4 Standard material ([board materials](gpu-board-materials.md)):
-`sheet_albedo`, `_normal`, `_heightmap`, `_orm` (roughness), `_sss` (cloudiness) and the
-extra `sheet_cracks` map. Run `python tools/materials/export.py` from the `mm-data` root.
+`terrain/ice/sheet` material, a Godot 4 `ShaderMaterial` of its preview shader `sheet.gdshader`
+([board materials](gpu-board-materials.md#shadermaterials)): `sheet_albedo`, `_normal`,
+`_heightmap`, `_orm` (roughness), `_sss` (cloudiness) and `sheet_cracks` (`texture_cracks`).
+Run `python tools/materials/export.py` from the `mm-data` root.
 Exported wider than its catalogued 1024 pixels, the sheet covers proportionally more
 ground before it repeats (`u_iceCoverage`).
 

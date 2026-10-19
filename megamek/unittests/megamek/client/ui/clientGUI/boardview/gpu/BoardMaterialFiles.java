@@ -7,14 +7,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import javax.imageio.ImageIO;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
- * Test fixtures in the board's material format: Material Maker's Godot 4 Standard export (GodotMaterial) and the
- * textures folder's materials.json (GpuMaterialCatalog). Fixtures are given in the renderer's packed layouts
+ * Test fixtures in the board's material format: Material Maker's Godot 4 Standard export, ShaderMaterials for maps it
+ * has no slot for (GodotMaterial), and the textures folder's materials.json (GpuMaterialCatalog). Fixtures are given in the renderer's packed layouts
  * (GpuMaterialMaps.Layout), which these split into the Godot maps the loader packs them from again.
  */
 final class BoardMaterialFiles {
@@ -38,6 +39,8 @@ final class BoardMaterialFiles {
           throws IOException {
         Path folder = Files.createDirectories(textures.resolve(material).getParent());
         String name = textures.resolve(material).getFileName().toString();
+        // A Material Maker export: any earlier ShaderMaterial of this material is gone (see heat).
+        Files.deleteIfExists(folder.resolve(name + ".gdshader"));
         write(folder, name + "_albedo.png", color);
         write(folder, name + "_normal.png", godotNormal(normal));
         write(folder, name + "_heightmap.png", gray(surface, 0));
@@ -47,18 +50,43 @@ final class BoardMaterialFiles {
         loose(textures, material, color.getWidth(), Float.NaN);
     }
 
-    /** Lava's heat as Material Maker's emission map and its extra mask: molten RGB+coverage, or crust R+glow. */
+    /**
+     * Lava's heat, which turns a {@link #relief} material into the ShaderMaterial export.py makes of it: Material Maker's
+     * emission map and the shader's extra map, molten RGB with its coverage or crust R with its glow.
+     */
     static void heat(Path textures, String material, BufferedImage heat, float energy) throws IOException {
         Path folder = textures.resolve(material).getParent();
         String name = textures.resolve(material).getFileName().toString();
         boolean molten = name.equals("lava");
+        String extra = molten ? "coverage" : "glow";
         write(folder, name + "_emission.png", molten ? channels(heat, 0, 1, 2, -1) : channels(heat, 0, 0, 0, -1));
-        write(folder, name + (molten ? "_coverage.png" : "_glow.png"), gray(heat, 3));
-        Path resource = folder.resolve(name + ".tres");
-        String text = Files.readString(resource);
-        text = text.replace("[resource]", "[ext_resource path=\"" + name + "_emission.png\" type=\"Texture\" id=5]\n[resource]");
-        Files.writeString(resource, text + "emission_enabled = true\nemission_energy = " + energy
-              + "\nemission_texture = ExtResource( 5 )\n");
+        write(folder, name + "_" + extra + ".png", gray(heat, 3));
+        float relief = GodotMaterial.read(folder.resolve(name + ".tres").toFile(), textures.toFile()).heightmapScale();
+        shaderMaterial(folder, name, List.of("albedo", "orm", "normal", "heightmap", "emission", extra),
+              Map.of("heightmap_scale", relief, "emission_energy", energy));
+    }
+
+    /**
+     * A ShaderMaterial of a minimal {@code <name>.gdshader}: the standard parameters with Godot's defaults, and a
+     * {@code texture_<map>} parameter assigned {@code <name>_<map>.png} for each of {@code maps}.
+     */
+    static void shaderMaterial(Path folder, String name, List<String> maps, Map<String, Float> numbers) throws IOException {
+        var shader = new StringBuilder("shader_type spatial;\nuniform vec4 albedo : source_color = vec4(1.0);\n"
+              + "uniform float roughness = 1.0;\nuniform float metallic = 0.0;\nuniform float normal_scale = 1.0;\n"
+              + "uniform float heightmap_scale = 5.0;\nuniform float emission_energy = 1.0;\n");
+        var tres = new StringBuilder("[gd_resource type=\"ShaderMaterial\" format=3]\n\n[ext_resource type=\"Shader\" path=\"")
+              .append(name).append(".gdshader\" id=\"1_shader\"]\n");
+        var parameters = new StringBuilder("[resource]\nshader = ExtResource(\"1_shader\")\n");
+        for (String map : maps) {
+            shader.append("uniform sampler2D texture_").append(map).append(";\n");
+            tres.append("[ext_resource type=\"Texture2D\" path=\"").append(name).append('_').append(map).append(".png\" id=\"")
+                  .append(map).append("\"]\n");
+            parameters.append("shader_parameter/texture_").append(map).append(" = ExtResource(\"").append(map).append("\")\n");
+        }
+        numbers.forEach((parameter, value) -> parameters.append("shader_parameter/").append(parameter).append(" = ")
+              .append(value).append('\n'));
+        Files.writeString(folder.resolve(name + ".gdshader"), shader.append("void fragment() { }\n"));
+        Files.writeString(folder.resolve(name + ".tres"), tres.append('\n').append(parameters));
     }
 
     /** A material of colour alone, constrained to its footprint. */
