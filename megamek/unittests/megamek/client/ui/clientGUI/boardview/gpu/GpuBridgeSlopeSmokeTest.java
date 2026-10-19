@@ -23,6 +23,56 @@ import org.junit.jupiter.api.Test;
 /** Rendered slope, picking and edit integration using the same installed bridge geometry. */
 @Tag("on-demand")
 class GpuBridgeSlopeSmokeTest {
+    @Test
+    void addingAndRemovingRoadPaintKeepsTheBareBridgeRampAndPicking() throws Exception {
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "bridge-slopes");
+        Files.createDirectories(output.toPath());
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1280, 960);
+        config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var terrain = new GpuTerrain();
+                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                var at = new Coords(4, 4);
+                var bankAt = at.translated(3);
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    camera.setIsometric(true);
+                    camera.orbit(25 - camera.azimuth(), 65 - camera.tilt());
+                    camera.camera.zoom = .11f;
+                    camera.center(BoardGeometry.center(at, 1).lerp(BoardGeometry.center(bankAt, 0), .5f));
+                    frame.prepare(terrain, camera, BoardBridgeSlopeTest.lowerBank(at, 3, false));
+                    for (int step = 0; step < 3; step++) {
+                        boolean paved = step == 1;
+                        var scene = BoardBridgeSlopeTest.lowerBank(at, 3, paved);
+                        terrain.update(scene);
+                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(output, step + (paved ? "-road-ramp.png" : "-bare-ramp.png")));
+                        for (float t : new float[] { .35f, .45f, .55f, .65f }) {
+                            float height = (1.5f - 2 * t) * BoardGeometry.level()
+                                  + GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale();
+                            var p = BoardGeometry.center(at, 1).lerp(BoardGeometry.center(bankAt, 0), t);
+                            var ray = new Ray(new Vector3(p.x, p.y, height + 20), new Vector3(0, 0, -1));
+                            var hit = terrain.hit(scene, ray);
+                            assertNotNull(hit);
+                            assertEquals(400, hit.distance(), .05f,
+                                  "Installed picking follows the same continuous ramp before and after road edits");
+                        }
+                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    }
+                } catch (Throwable error) { failure.set(error); }
+                finally { frame.dispose(); terrain.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Bare bridge ramp rendering and road edits", failure.get()); }
+    }
+
     /** Close views of the steel fascia where the sloping deck meets each concrete approach. */
     @Test
     void trussApproachesRenderAtBothBankHeightsAndLevelScales() throws Exception {

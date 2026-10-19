@@ -75,14 +75,37 @@ final class BoardBridgeSlope {
     static List<BoardSurface.Face> profile(BoardScene.Tile tile, BoardBridge.Deck deck) {
         var result = new ArrayList<BoardSurface.Face>();
         var center = BoardGeometry.center(tile.coords(), 0);
+        var corners = new Vector3[6];
+        var inner = new Vector3[6];
         for (int edge = 0; edge < 6; edge++) {
-            var a = BoardGeometry.corner(tile.coords(), 0, edge);
-            var b = BoardGeometry.corner(tile.coords(), 0, edge + 1);
-            var innerA = new Vector3(center).lerp(a, .5f);
-            var innerB = new Vector3(center).lerp(b, .5f);
-            var mouthA = new Vector3(a).lerp(b, .25f);
-            var mouthB = new Vector3(a).lerp(b, .75f);
-            mouthA.z = mouthB.z = deck.rises().get(BoardGeometry.edgeDirection(edge)) * BoardGeometry.level();
+            corners[edge] = BoardGeometry.corner(tile.coords(), 0, edge);
+            inner[edge] = new Vector3(center).lerp(corners[edge], .5f);
+        }
+        float wide = (BoardRoad.CORRIDOR_HALF + BoardRoad.SHOULDER) * BoardGeometry.hexScale();
+        for (int edge = 0; edge < 6; edge++) {
+            int direction = BoardGeometry.edgeDirection(edge), next = (edge + 1) % 6;
+            if ((deck.corridor().sides() & 1 << direction) == 0 || deck.rises().get(direction) == 0) { continue; }
+            var across = new Vector3(corners[next]).sub(corners[edge]).nor();
+            var midpoint = new Vector3(corners[edge]).lerp(corners[next], .5f).lerp(center, .5f);
+            // Share the widened hub corners with the adjoining patches, avoiding overlapping grade planes.
+            // Adjacent graded exits retain their common corner so junctions still have one continuous surface.
+            if (deck.rises().get(BoardGeometry.edgeDirection((edge + 5) % 6)) == 0) {
+                inner[edge] = new Vector3(midpoint).mulAdd(across, -wide);
+            }
+            if (deck.rises().get(BoardGeometry.edgeDirection(next)) == 0) {
+                inner[next] = new Vector3(midpoint).mulAdd(across, wide);
+            }
+        }
+        for (int edge = 0; edge < 6; edge++) {
+            int next = (edge + 1) % 6, direction = BoardGeometry.edgeDirection(edge);
+            var a = corners[edge];
+            var b = corners[next];
+            var innerA = inner[edge];
+            var innerB = inner[next];
+            float inset = (deck.corridor().sides() & 1 << direction) == 0 ? .25f : .5f - wide / a.dst(b);
+            var mouthA = new Vector3(a).lerp(b, inset);
+            var mouthB = new Vector3(a).lerp(b, 1 - inset);
+            mouthA.z = mouthB.z = deck.rises().get(direction) * BoardGeometry.level();
             result.add(face(center, innerA, innerB, -1));
             result.add(face(innerA, a, mouthA, edge));
             result.add(face(innerA, mouthA, mouthB, edge));

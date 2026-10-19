@@ -380,6 +380,7 @@ final class GpuTerrain implements Disposable {
                 private final int biomeSoilUniform = register("u_biomeSoilLayer");
                 private final int biomeSoilTileUniform = register("u_biomeSoilTile");
                 private final int mudMaterialUniform = register("u_mudMaterial");
+                private final int bankMaterialsUniform = register("u_bankMaterials");
                 private final int roughnessLayersUniform = register("u_roughnessLayers");
                 // Upload before render-time texture-unit assignment, like the other shared maps.
                 private final GpuAssets.SculptRoughness sculptRoughness = program.hasUniform("u_sculptRoughness[0]")
@@ -509,6 +510,10 @@ final class GpuTerrain implements Disposable {
                     }
                     if (has(mudMaterialUniform)) {
                         set(mudMaterialUniform, 2f * SCULPT_LAYERS.indexOf("mud"), assets.sculptTile("mud"));
+                    }
+                    if (has(bankMaterialsUniform)) {
+                        set(bankMaterialsUniform, 2f * SCULPT_LAYERS.indexOf("soil-contact"), assets.sculptTile("soil-contact"),
+                              2f * SCULPT_LAYERS.indexOf("gravel"), assets.sculptTile("gravel"));
                     }
                     if (sculptRoughness != null) {
                         float[] metadata = sculptRoughness.metadata();
@@ -5308,7 +5313,7 @@ final class GpuTerrain implements Disposable {
         if (bank != null) { return sculptVertex(p, bank, shore, surface); }
         Color data = Float.isNaN(shore) ? new Color(1, (surface.tile.elevation() + 64) / 255f, 0, .3f)
               : waterColor(1, surface.waterHeight(p.x, p.y), shoreTint(shore, 0));
-        return vertex(p, normals.get(p), 99, 99, data);
+        return vertex(p, normals.get(p), 99, Float.isNaN(shore) ? 99 : shoreRim(99, surface.tile), data);
     }
 
     private Material sculptMaterial(BoardScene.Surface family) {
@@ -5577,10 +5582,14 @@ final class GpuTerrain implements Disposable {
     private static void coveredPolygons(BoardSurface surface, BoardSurface.Face face, WaterCover waters,
           Consumer<List<MeshPartBuilder.VertexInfo>> polygonConsumer) {
         BoardRelief.Shade a = surface.relief.shade(face.a()), b = surface.relief.shade(face.b()), c = surface.relief.shade(face.c());
-        if (openWater(surface.tile) != null && submergedCliff(a) && submergedCliff(b) && submergedCliff(c)) {
-            // This is the pool's own vertical bed boundary. Its projection lies on (or behind an undercut in)
-            // the water outline, so an XY coverage test cannot decide whether it is submerged. Keep the bed's
-            // waterline and material mapping; the shader uses height to leave the narrow emerged rim dry.
+        boolean bank = (face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.SHORE)
+              && a != null && b != null && c != null && a.kind() == BoardRelief.Kind.GROUND
+              && b.kind() == a.kind() && c.kind() == a.kind();
+        if (openWater(surface.tile) != null && (bank || submergedCliff(a) && submergedCliff(b) && submergedCliff(c))) {
+            // An emerged bank needs its pool's height too: soil and damp gravel begin above the water, while
+            // absorption still uses actual depth. Clipping it to the wet footprint erased that dry-side transition.
+            // The pool's vertical bed boundaries also retain this reference: their projection can lie behind an
+            // undercut, where an XY coverage test cannot decide submersion. Exterior cliffs still use clipping.
             float shore = GpuWaterShader.palette(surface.tile.liquid());
             polygonConsumer.accept(List.of(sculptVertex(face.a(), a, shore, surface),
                   sculptVertex(face.b(), b, shore, surface), sculptVertex(face.c(), c, shore, surface)));
@@ -5638,7 +5647,10 @@ final class GpuTerrain implements Disposable {
                         Color data = waterColor(vertex.color.r, height, shoreTint(GpuWaterShader.palette(water.water().tile.liquid()),
                               ground ? (vertex.color.a - .3f) / .1f : 0));
                         var shaded = new MeshPartBuilder.VertexInfo().set(vertex).setCol(data);
-                        if (!ground) {
+                        if (ground) {
+                            // Water-tagged ground uses foot/rim order, like the shore material's wall projection.
+                            shaded.uv.set(vertex.uv.y, shoreRim(vertex.uv.x, water.water().tile));
+                        } else {
                             shaded.color.b = (224 + 240 * data.b) / 255f;
                             // Wet rock uses alpha for the water palette. Preserve its pigment variation in the
                             // unused second UV; a submerged cliff has no per-rock tint.
@@ -5737,7 +5749,17 @@ final class GpuTerrain implements Disposable {
         if (shade.kind() == BoardRelief.Kind.CLIFF && Float.isFinite(shade.projection())) {
             data.a = .5f + shade.projection() / (2 * (float) Math.PI);
         }
-        return vertex(p, shade.normal(), shade.rim(), shade.foot(), data);
+        // Ordinary ground stores rim/foot distances; the shore shader reads foot/rim, as drowned walls do.
+        // Drowned cliffs already carry that wall-oriented order and must not be swapped again.
+        boolean wetGround = wet && shade.kind() == BoardRelief.Kind.GROUND;
+        float rim = wetGround ? shade.rim() : shade.foot();
+        return vertex(p, shade.normal(), wetGround ? shade.foot() : shade.rim(),
+              wet ? shoreRim(rim, surface.tile) : rim, data);
+    }
+
+    /** Depth-zero ownership in the sign of an otherwise nonnegative shore distance; no extra vertex channel. */
+    private static float shoreRim(float distance, BoardScene.Tile water) {
+        return water.waterDepth() == 0 ? -1 - distance : distance;
     }
 
     /** Ground's otherwise unused blue range holds the fractional water level, preserving sloped-bed optics. */

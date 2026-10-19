@@ -81,10 +81,10 @@ final class BoardBridge {
         /** The deck road's course over its own sides: what its paint covers. */
         BoardRoad road(Coords coords) { return BoardRoad.layout(coords, roadExits, kind, neighbors::get).corridor(corridor); }
 
-        /** The carriageway over every bridge exit at a road's width: the slab and its top. */
+        /** One physical carriageway over every bridge exit, spanning both ways of a road/rail corridor. */
         BoardRoad slab(Coords coords) {
             return BoardRoad.layout(coords, exits, kind == BoardRoad.Kind.NONE ? BoardRoad.Kind.ALLEY : kind, neighbors::get)
-                  .corridor(corridor);
+                  .bridgeCorridor(corridor);
         }
 
         /** Whether the deck road paints the whole top: it has every bridge exit. */
@@ -315,10 +315,12 @@ final class BoardBridge {
               other.bridgeExits(), next.elevation() + other.elevation(), direction);
     }
 
-    /** Connected decks and road approaches each own half the grade; bare banks keep the authored deck height. */
+    /** Connected decks and approaches share the grade; built bridges also ramp down onto bare banks. */
     static float edgeElevation(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
         float level = tile.elevation() + feature(tile).elevation();
         if (connected(tile, next, direction)) { return (level + next.elevation() + feature(next).elevation()) / 2; }
-        return road(tile, next, direction) ? (level + next.elevation()) / 2 : level;
+        boolean ramp = road(tile, next, direction) || family(tile) != Family.NATURAL && !guideway(tile)
+              && bank(tile, next, direction) && next.elevation() < level;
+        return ramp ? (level + next.elevation()) / 2 : level;
     }
 }

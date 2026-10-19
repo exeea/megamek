@@ -125,7 +125,9 @@ final class BoardRiver {
     /** The caller intersects this union with its shore field, so larger values cannot change the shore. */
     float field(float x, float y, float limit) {
         float result = Float.NEGATIVE_INFINITY;
-        float cell = BoardRelief.WANDER_CELL * scale;
+        // The spline already meanders over several hexes. Reuse the width sample at a shorter scale for small,
+        // irregular bank scallops, without adding shore searches, noise evaluations or increasing mesh resolution.
+        float cell = .3f * BoardRelief.WANDER_CELL * scale;
         float wander = .3f * BoardRelief.SHORE_WANDER * BoardRelief.gradient(x / cell + 3.1f, y / cell - 1.7f);
         window(x, y);
         // Round whole branches near confluences and tight bends, where their inner banks otherwise meet in a cusp.

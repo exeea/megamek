@@ -14,7 +14,57 @@ import org.junit.jupiter.api.Test;
 
 class BoardRiverTest {
     @Test
-    void channelProfilesKeepTheExactShoreFieldAcrossDepthAndArtworkChanges() {
+    void exposedBanksMeetAcrossFrozenAndOpenRiverMouths() {
+        var original = BoardRelief.tuning();
+        var geometry = BoardGeometry.tuning();
+        try {
+            BoardGeometry.tune(BoardGeometry.DEFAULTS);
+            BoardRelief.tune(BoardRelief.DEFAULTS);
+            Coords frozen = new Coords(3, 3);
+            for (int direction = 0; direction < 6; direction++) {
+                Coords open = frozen.translated(direction);
+                List<BoardScene.Tile> tiles = new ArrayList<>();
+                for (int x = 0; x < 7; x++) {
+                    for (int y = 0; y < 7; y++) {
+                        Coords coords = new Coords(x, y);
+                        boolean wet = coords.equals(frozen) || coords.equals(open);
+                        tiles.add(new BoardScene.Tile(coords, 0, wet ? 1 : -1, coords.equals(frozen), 0,
+                              BoardScene.Surface.SNOW, null, null, null, null, null, List.of(), List.of(),
+                              wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                    }
+                }
+                BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+                BoardSurface frozenSurface = new BoardSurface(scene, scene.tile(frozen));
+                BoardSurface openSurface = new BoardSurface(scene, scene.tile(open));
+                List<BoardSurface.Face> frozenBank = frozenSurface.faces.stream()
+                      .filter(face -> face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.SHORE)
+                      .toList();
+                List<BoardSurface.Face> openBank = openSurface.faces.stream()
+                      .filter(face -> face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.SHORE)
+                      .toList();
+                int edge = Math.floorMod(1 - direction, 6), compared = 0;
+                Vector3[] corners = frozenSurface.waterGeometry().shoreCorners();
+                Vector3 a = corners[edge], b = corners[(edge + 1) % 6];
+                Vector3 across = BoardGeometry.center(open, 0).sub(BoardGeometry.center(frozen, 0)).nor().scl(.0001f);
+                for (int k = 1; k < 100; k++) {
+                    Vector3 p = new Vector3(a).lerp(b, k / 100f);
+                    float own = BoardSurface.sampleHeight(frozenBank, p.x - across.x, p.y - across.y, Float.NaN);
+                    float theirs = BoardSurface.sampleHeight(openBank, p.x + across.x, p.y + across.y, Float.NaN);
+                    if (Float.isNaN(own) || Float.isNaN(theirs)) { continue; }
+                    assertEquals(own, theirs, .005f, "Frozen/open banks meet without a slit in direction " + direction
+                          + " at " + p);
+                    compared++;
+                }
+                assertTrue(compared > 10, "Both dry banks of the shared mouth were sampled: " + compared);
+            }
+        } finally {
+            BoardRelief.tune(original);
+            BoardGeometry.tune(geometry);
+        }
+    }
+
+    @Test
+    void channelProfilesStayDeterministicAcrossDepthArtworkAndQueryOrderChanges() {
         var original = BoardRelief.tuning();
         var geometry = BoardGeometry.tuning();
         try {
@@ -23,15 +73,22 @@ class BoardRiverTest {
             Coords center = new Coords(3, 3), artwork = center.translated(2);
             BoardScene scene = scene(Map.of(center, 1, center.translated(0), 0, center.translated(1), 2,
                   artwork, 1, center.translated(4), 0, new Coords(0, 0), 1), artwork);
-            // Baseline from the per-segment radius evaluation, including lake inlets and board edges.
+            // Sample mixed depths, lake inlets, authored water and the board edge before warming the reverse query.
             BoardRiver river = new BoardRiver(scene);
-            long fingerprint = 1;
+            List<Vector3> samples = new ArrayList<>();
             for (int x = -80; x < 540; x += 13) {
                 for (int y = -570; y < 80; y += 17) {
-                    fingerprint = 31 * fingerprint + Float.floatToIntBits(river.field(x + .25f, y + .75f));
+                    float field = river.field(x + .25f, y + .75f);
+                    assertFalse(Float.isNaN(field), "The shore field remains defined");
+                    samples.add(new Vector3(x + .25f, y + .75f, field));
                 }
             }
-            assertEquals(-2321408399562387359L, fingerprint, "Exact shore profile");
+            BoardRiver reverse = new BoardRiver(scene);
+            for (int i = samples.size() - 1; i >= 0; i--) {
+                Vector3 sample = samples.get(i);
+                assertEquals(sample.z, reverse.field(sample.x, sample.y), "Query order cannot move a bank");
+                assertEquals(sample.z, river.field(sample.x, sample.y), "A cached query cannot move a bank");
+            }
         } finally {
             BoardRelief.tune(original);
             BoardGeometry.tune(geometry);

@@ -373,7 +373,10 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             var across = new Vector3(-along.y, along.x, 0);
             var gate = new Vector3(center).mulAdd(along, half);
             gate.z = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, next, d));
-            if (BoardBridge.road(tile, next, d) && next.elevation() < level) {
+            boolean bare = !BoardBridge.road(tile, next, d);
+            // A bare bank gets a loose apron (GpuRoads.deckPatches), never over pavement.
+            if (bare && next.surface() != BoardScene.Surface.CONCRETE) { bareExits |= 1 << d; }
+            if (next.elevation() < level) {
                 solidExits |= 1 << d;
                 lengths.add((half * .5f + block.size().y * scale) / scale);
                 var below = surfaces.computeIfAbsent(tile.coords(), c -> new BoardSurface(scene, tile, lod));
@@ -393,10 +396,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 if (supported) { break; }
             }
             float supportedAt = reach;
-            boolean bare = !BoardBridge.road(tile, next, d);
             boolean ramp = !bare && next.elevation() != level;
-            // A bare bank gets a loose apron (GpuRoads.deckPatches), never over pavement.
-            if (bare && next.surface() != BoardScene.Surface.CONCRETE) { bareExits |= 1 << d; }
             reach += block.size().y * scale;
             lengths.add(reach / scale);
             int edge = Math.floorMod(1 - d, 6);
@@ -456,8 +456,8 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
               List.copyOf(lengths), bareExits, solidExits);
     }
 
-    /** One closed concrete block spans both insets. The authored entrance blocks stand on the flat road beyond it. */
-    private static void ramp(List<BoardBridge.Facet> faces, BoardScene.Tile tile, BoardScene.Tile road, int direction,
+    /** One closed concrete block spans both insets. The authored entrance blocks stand on the flat bank beyond it. */
+    private static void ramp(List<BoardBridge.Facet> faces, BoardScene.Tile tile, BoardScene.Tile bank, int direction,
           Vector3 center, Vector3 gate, Vector3 along, Vector3 across, float half, Block block,
           List<BoardSurface.Face> ground, List<BoardSurface.Face> below) {
         float scale = BoardGeometry.hexScale();
@@ -478,10 +478,10 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             top[i].z = center.z;
             base[i] = new Vector3(gate).mulAdd(across, offsets[i]);
             base[i].mulAdd(along, new Vector3(foot).sub(base[i]).dot(normal) / along.dot(normal));
-            base[i].z = BoardGeometry.groundZ(road) + GpuRoads.SURFACE_LIFT * scale;
+            base[i].z = BoardGeometry.groundZ(bank) + GpuRoads.SURFACE_LIFT * scale;
             end[i] = new Vector3(base[i]).mulAdd(along, length);
         }
-        float bottom = Math.min(BoardGeometry.groundZ(tile), BoardGeometry.groundZ(road));
+        float bottom = Math.min(BoardGeometry.groundZ(tile), BoardGeometry.groundZ(bank));
         for (var surface : List.of(ground, below)) {
             for (var face : surface) { bottom = Math.min(bottom, Math.min(face.a().z, Math.min(face.b().z, face.c().z))); }
         }
@@ -493,7 +493,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
         support(faces, top[0], base[0], base[3], top[3], bottom, 0);
         quad(faces, new Vector3(top[3].x, top[3].y, bottom), new Vector3(base[3].x, base[3].y, bottom),
               new Vector3(base[0].x, base[0].y, bottom), new Vector3(top[0].x, top[0].y, bottom), BoardBridge.Part.STRUCTURE);
-        // Only the road half needs new rails; the bridge half retains its authored rails on the same plane.
+        // Only the bank half needs new rails; the bridge half retains its authored rails on the same plane.
         var mouth = row(top, base, .5f, true);
         prism(faces, mouth[0], base[0], base[1], mouth[1], 0, 2.5f * scale, BoardBridge.Part.STRUCTURE);
         prism(faces, mouth[2], base[2], base[3], mouth[3], 0, 2.5f * scale, BoardBridge.Part.STRUCTURE);

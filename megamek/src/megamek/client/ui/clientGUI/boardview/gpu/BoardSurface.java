@@ -777,8 +777,8 @@ final class BoardSurface {
                       segment / (float) SHORE_SEGMENTS);
                 Vector3 b = new Vector3(shoreCorners[edge]).lerp(shoreCorners[(edge + 1) % 6],
                       (segment + 1f) / SHORE_SEGMENTS);
-                Vector3 lipA = shoreLip(bedOutline[index], a);
-                Vector3 lipB = shoreLip(bedOutline[next], b);
+                Vector3 lipA = shoreLip(bedOutline[index], a, index);
+                Vector3 lipB = shoreLip(bedOutline[next], b, next);
                 quad(a, b, lipB, lipA, Finish.TOP, edge);
                 quad(lipA, lipB, bedOutline[next], bedOutline[index], Finish.SHORE, edge);
             }
@@ -1879,13 +1879,20 @@ final class BoardSurface {
               * (joinB[edge] == null ? BoardRelief.smooth((1 - s) / .2f) : 1);
     }
 
-    private Vector3 shoreLip(Vector3 waterline, Vector3 boundary) {
+    private Vector3 shoreLip(Vector3 waterline, Vector3 boundary, int index) {
         // The bank's width is horizontal, just as BoardRelief.stub measures it. A descending stream can put its
         // waterline far below the corner; counting that height shortened the rim used to close its side walls.
         float distance = (float) Math.hypot(boundary.x - waterline.x, boundary.y - waterline.y);
-        Vector3 lip = new Vector3(waterline).lerp(boundary,
-              Math.min(1, BoardRelief.SHORE_LIP * BoardGeometry.hexScale() / Math.max(distance, .0001f)));
-        lip.z = center.z;
+        float fraction = Math.min(1, BoardRelief.SHORE_LIP * BoardGeometry.hexScale() / Math.max(distance, .0001f));
+        Vector3 lip = new Vector3(waterline).lerp(boundary, fraction);
+        boolean graded = !tile.frozen() && !tile.liquid().molten();
+        if (graded && index % SHORE_SEGMENTS == 0) {
+            int edge = index / SHORE_SEGMENTS, before = (edge + 5) % 6;
+            graded = (!mouth(edge) || relief.gradedBankMouth(edge))
+                  && (!mouth(before) || relief.gradedBankMouth(before));
+        }
+        // The wall snapshot precedes sculpting: its mouth ends must follow the same grade as the rendered bank.
+        lip.z = graded ? center.z - (center.z - waterline.z) * (1 - fraction) : center.z;
         return lip;
     }
 

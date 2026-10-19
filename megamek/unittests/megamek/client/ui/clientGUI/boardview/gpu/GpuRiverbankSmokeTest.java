@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 import javax.swing.SwingUtilities;
@@ -21,6 +23,7 @@ import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.game.Game;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
@@ -29,6 +32,73 @@ import org.junit.jupiter.api.Test;
 /** Sculpted riverbanks continue adjacent material cover and rebuild when that cover changes. */
 @Tag("on-demand")
 class GpuRiverbankSmokeTest {
+    @Test
+    void comparesRaisedWetAndDryBanksAndAridShallows() throws Exception {
+        var scenes = new ArrayList<BoardScene>();
+        var names = new ArrayList<String>();
+        SwingUtilities.invokeAndWait(() -> {
+            for (String theme : List.of("grass", "dirt", "desert", "mars")) {
+                boolean arid = theme.equals("desert") || theme.equals("mars");
+                for (int variant = 0; variant < 2; variant++) {
+                    int depth = arid ? variant : variant == 0 ? -1 : 1;
+                    Hex[] hexes = new Hex[49];
+                    for (int y = 0; y < 7; y++) {
+                        for (int x = 0; x < 7; x++) {
+                            Hex hex = new Hex(x < 3 ? 1 : 0, "", theme);
+                            if (depth >= 0 && x == 3 && y > 0 && y < 6) {
+                                hex.addTerrain(new Terrain(Terrains.WATER, depth));
+                            }
+                            hexes[y * 7 + x] = hex;
+                        }
+                    }
+                    var game = new Game();
+                    game.setBoard(new Board(7, 7, hexes));
+                    try (var source = new GpuMapSource(game, null, null)) { scenes.add(source.takeFrame().scene()); }
+                    names.add(theme + (arid ? "-depth" + depth : depth < 0 ? "-dry" : "-water"));
+                }
+            }
+        });
+        var failure = new AtomicReference<Throwable>();
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var terrain = new GpuTerrain();
+                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    Vector3 high = BoardGeometry.center(new Coords(2, 3), 1);
+                    Vector3 low = BoardGeometry.center(new Coords(3, 3), 0);
+                    Vector3 target = new Vector3(high).lerp(low, .5f);
+                    Vector3 outward = new Vector3(low).sub(high); outward.z = 0; outward.nor();
+                    camera.camera.zoom = .2f;
+                    camera.camera.near = 1;
+                    camera.camera.far = 3000;
+                    camera.camera.up.set(Vector3.Z);
+                    camera.camera.position.set(target).mulAdd(outward, 650).add(0, 0, 350);
+                    camera.camera.lookAt(target);
+                    camera.camera.update();
+                    File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
+                    assertTrue(output.isDirectory() || output.mkdirs());
+                    for (int i = 0; i < scenes.size(); i++) {
+                        BoardScene scene = scenes.get(i);
+                        frame.prepare(terrain, camera, scene);
+                        terrain.update(scene);
+                        terrain.animate(0, List.of());
+                        for (int settle = 0; settle < 3; settle++) { frame.render(terrain, camera, scene); }
+                        Thread.sleep(600);
+                        frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(output, "riverbank-" + names.get(i) + "-slope.png"));
+                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    }
+                } catch (Throwable error) { failure.set(error); }
+                finally { terrain.dispose(); frame.dispose(); Gdx.app.exit(); }
+            }
+        }, GpuBoardWindow.configuration(false));
+        if (failure.get() != null) { throw new AssertionError("Raised wet/dry bank comparison", failure.get()); }
+    }
+
     @Test
     void banksMatchSandGrassAndSnowAndFollowSurfaceUpdates() throws Exception {
         Hex[] hexes = new Hex[49];
@@ -83,21 +153,21 @@ class GpuRiverbankSmokeTest {
                         terrain.update(scene);
                         int[] roles = GpuTerrainPreparationSmokeTest.checkBlendedRoles(terrain, "submerged riverbank");
                         assertTrue(roles[3] > 0, "The bank fixture must contain blended shore triangles");
-                        draw(outputFrame, terrain, camera);
+                        outputFrame.draw(terrain, camera.camera, true);
                         File output = new File(System.getProperty("megamek.gpu.screenshots"));
                         GpuBoardTestUi.capture(new File(output, "riverbank-terrain-top.png"));
                         checkBanks(scene, river);
                         int sandyBank = bankPixels(camera, river, sandEdge);
-                        draw(outputFrame, terrain, camera);
+                        outputFrame.draw(terrain, camera.camera, true);
                         assertEquals(sandyBank, bankPixels(camera, river, sandEdge), "A paused bank keeps the same pixels");
                         camera.setIsometric(true);
-                        draw(outputFrame, terrain, camera);
+                        outputFrame.draw(terrain, camera.camera, true);
                         GpuBoardTestUi.capture(new File(output, "riverbank-terrain-isometric.png"));
 
                         terrain.update(edited);
                         GpuTerrainPreparationSmokeTest.checkBlendedRoles(terrain, "edited submerged riverbank");
                         camera.setIsometric(false);
-                        draw(outputFrame, terrain, camera);
+                        outputFrame.draw(terrain, camera.camera, true);
                         checkBanks(edited, river);
                         assertNotEquals(sandyBank, bankPixels(camera, river, sandEdge),
                               "Changing the adjacent sand to snow must rebuild the visible bank material");
@@ -113,13 +183,6 @@ class GpuRiverbankSmokeTest {
             }, GpuBoardWindow.configuration(false));
         }
         assertNull(failure.get(), () -> String.valueOf(failure.get()));
-    }
-
-    private static void draw(GpuSceneTestOutput outputFrame, GpuTerrain terrain, BoardCamera camera) {
-        outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
-        terrain.render(camera.camera, false);
-        terrain.renderTransparent(camera.camera);
-        outputFrame.display();
     }
 
     private static void checkBanks(BoardScene scene, Coords river) {

@@ -191,25 +191,31 @@ final class BoardBridgeTruss {
         double[] along = new double[line.size()];
         for (int i = 1; i < line.size(); i++) { along[i] = along[i - 1] + line.get(i).sub(line.get(i - 1)).length(); }
         boolean[] sharp = new boolean[line.size()];
+        boolean[] corner = new boolean[line.size()];
         List<Integer> turns = new ArrayList<>();
         for (int i = 1; i + 1 < line.size(); i++) {
             Point before = line.get(i).sub(line.get(i - 1)).unit(), after = line.get(i + 1).sub(line.get(i)).unit();
             double turn = Math.toDegrees(Math.acos(Math.clamp(before.dot(after), -1, 1)));
+            corner[i] = turn > 30;
             sharp[i] = turn > 30 || turn / ((along[i + 1] - along[i - 1]) / 2) > 4;
             if (distance(line.get(i), line.get(i - 1), line.get(i + 1)) > .0001) { turns.add(i); }
         }
         List<Double> stops = new ArrayList<>();
+        List<Double> hardStops = new ArrayList<>();
         stops.add(0.0);
         for (int i = 1; i + 1 < line.size(); i++) {
             if (!sharp[i]) { continue; }
             int end = i;
             while (end + 2 < line.size() && sharp[end + 1] && along[end + 1] - along[end] < PANEL / 2) { end++; }
             double middle = (along[i] + along[end]) / 2;
-            int corner = i;
+            int selected = i;
             for (int j = i + 1; j <= end; j++) {
-                if (Math.abs(along[j] - middle) < Math.abs(along[corner] - middle)) { corner = j; }
+                if (Math.abs(along[j] - middle) < Math.abs(along[selected] - middle)) { selected = j; }
             }
-            stops.add(along[corner]);
+            stops.add(along[selected]);
+            for (int j = i; j <= end; j++) {
+                if (corner[j]) { hardStops.add(along[selected]); break; }
+            }
             i = end;
         }
         stops.add(along[along.length - 1]);
@@ -238,26 +244,24 @@ final class BoardBridgeTruss {
                 positions.set(positions.size() - 2, Math.max(positions.get(positions.size() - 2), last));
             }
         }
-        double allowance = OFFSET - Math.max(VERTICAL.width(), DIAGONAL.width()) / 2;
-        while (true) {
-            List<Double> refined = new ArrayList<>();
-            refined.add(positions.getFirst());
-            for (int i = 1; i < positions.size(); i++) {
-                double start = positions.get(i - 1), end = positions.get(i), worst = 0;
-                Point a = at(line, along, start), b = at(line, along, end);
-                for (int j = 0; j < line.size(); j++) {
-                    if (along[j] > start && along[j] < end) { worst = Math.max(worst, distance(line.get(j), a, b)); }
+        // Curvature changes a member's course, not the spacing of full-height structural posts. Tapered deck
+        // envelopes can contain many nearby turns; placing a post at each one turns an open truss into a wall.
+        double spacing = Math.min(PANEL / 4, along[along.length - 1] / 4);
+        for (int i = 1; i + 1 < positions.size();) {
+            double position = positions.get(i);
+            boolean cornerNode = hardStops.stream().anyMatch(stop -> Math.abs(stop - position) < 1e-6);
+            if (!cornerNode && (position - positions.get(i - 1) < spacing
+                  || positions.get(i + 1) - position < spacing)) { positions.remove(i); }
+            else { i++; }
+        }
+        if (positions.size() % 2 == 0) {
+            int widest = 1;
+            for (int i = 2; i < positions.size(); i++) {
+                if (positions.get(i) - positions.get(i - 1) > positions.get(widest) - positions.get(widest - 1)) {
+                    widest = i;
                 }
-                double clearance = i == 1 || i == positions.size() - 1
-                      ? OFFSET - END_POST.width() / 2 : allowance;
-                if (worst > clearance) {
-                    refined.add(start + (end - start) / 3);
-                    refined.add(start + 2 * (end - start) / 3);
-                }
-                refined.add(end);
             }
-            if (refined.size() == positions.size()) { break; }
-            positions = refined;
+            positions.add(widest, (positions.get(widest - 1) + positions.get(widest)) / 2);
         }
         return positions.stream().map(position -> at(line, along, position)).toList();
     }
@@ -278,12 +282,47 @@ final class BoardBridgeTruss {
 
     private static Vector3 across(Vector3 direction) { return new Vector3(-direction.y, direction.x, 0).nor(); }
 
+    /** A brace follows the same outside contour as the chord, with its height changing between structural nodes. */
+    private static void brace(Builder builder, List<Point> line, double[] along, double start, double end,
+          float first, float last, Section section) {
+        if (end < start) {
+            brace(builder, line, along, end, start, last, first, section);
+            return;
+        }
+        List<Vector3> course = new ArrayList<>();
+        course.add(at(line, along, start).at(first));
+        for (int i = 1; i + 1 < line.size(); i++) {
+            if (along[i] > start && along[i] < end) {
+                course.add(line.get(i).at(first + (last - first) * (float) ((along[i] - start) / (end - start))));
+            }
+        }
+        course.add(at(line, along, end).at(last));
+        for (int i = 0; i + 1 < course.size(); i++) {
+            Vector3 a = course.get(i), b = course.get(i + 1);
+            Plane before = i == 0 ? null : braceJoin(course, i);
+            Plane after = i + 2 == course.size() ? null : braceJoin(course, i + 1);
+            builder.member(a, b, across(new Vector3(b).sub(a)), section, false, false, before, after);
+        }
+    }
+
+    private static Plane braceJoin(List<Vector3> course, int index) {
+        Vector3 point = course.get(index);
+        Vector3 normal = new Vector3(point).sub(course.get(index - 1)).nor()
+              .add(new Vector3(course.get(index + 1)).sub(point).nor()).nor();
+        return new Plane(point, normal);
+    }
+
     private static void truss(Builder builder, List<Point> line, int first, int last, int joints) {
         List<Point> points = nodes(line);
         int n = points.size() - 1;
         float centre = TOP - TOP_CHORD.depth() / 2, high = TOP - TOP_CHORD.depth();
         double[] along = new double[line.size()];
         for (int i = 1; i < line.size(); i++) { along[i] = along[i - 1] + line.get(i).sub(line.get(i - 1)).length(); }
+        double[] stations = new double[points.size()];
+        for (int i = 0; i < points.size(); i++) {
+            int segment = segment(line, points.get(i));
+            stations[i] = along[segment] + points.get(i).sub(line.get(segment)).length();
+        }
         int startSegment = segment(line, points.get(1)), endSegment = segment(line, points.get(n - 1));
         double startAlong = (joints & (1 << first)) != 0 ? 0
               : Math.max(0, along[startSegment] + points.get(1).sub(line.get(startSegment)).length() - SEAT);
@@ -311,14 +350,14 @@ final class BoardBridgeTruss {
             builder.vertical(points.get(i), tangent, BAND, high);
         }
         for (int i = 1; i < n - 1; i++) {
-            builder.diagonal(points.get(i).at(i % 2 == 0 ? FOOT : centre),
-                  points.get(i + 1).at(i % 2 == 0 ? centre : FOOT));
+            brace(builder, line, along, stations[i], stations[i + 1], i % 2 == 0 ? FOOT : centre,
+                  i % 2 == 0 ? centre : FOOT, DIAGONAL);
         }
         for (int end : new int[] { 0, n }) {
             int inner = end == 0 ? 1 : n - 1, direction = end == 0 ? first : last;
             Point point = points.get(end), approach = points.get(inner).sub(point).unit();
             Edge edge = edge(direction);
-            Point setback = approach.scale(1 / approach.dot(edge.inward()));
+            double setback = 1 / approach.dot(edge.inward());
             if ((joints & (1 << direction)) != 0) {
                 List<Point> half = new ArrayList<>();
                 half.add(point.add(edge.along().scale(-VERTICAL.width() / 2)));
@@ -326,10 +365,11 @@ final class BoardBridgeTruss {
                 half.add(half.get(1).add(edge.inward().scale(VERTICAL.depth() / 2)));
                 half.add(half.getFirst().add(edge.inward().scale(VERTICAL.depth() / 2)));
                 builder.verticalRing(half, point.add(edge.inward().scale(VERTICAL.depth() / 4)), BAND, high);
-                builder.diagonal(point.add(setback.scale(.7)).at(FOOT), points.get(inner).at(centre));
+                brace(builder, line, along, stations[end] + (end == 0 ? .7 : -.7) * setback,
+                      stations[inner], FOOT, centre, DIAGONAL);
             } else {
-                Vector3 a = point.add(setback.scale(.9)).at(.3f), b = points.get(inner).at(centre);
-                builder.member(a, b, across(new Vector3(b).sub(a)), END_POST, false, false, null, null);
+                brace(builder, line, along, stations[end] + (end == 0 ? .9 : -.9) * setback,
+                      stations[inner], .3f, centre, END_POST);
             }
         }
     }
@@ -438,10 +478,6 @@ final class BoardBridgeTruss {
             surfaces.add(new Surface(ring.stream().map(p -> p.at(low)).toList(), new Vector3(0, 0, -1), false));
             surfaces.add(new Surface(ring.stream().map(p -> p.at(high)).toList(), new Vector3(0, 0, 1), false));
             solid(surfaces);
-        }
-
-        void diagonal(Vector3 a, Vector3 b) {
-            member(a, b, across(new Vector3(b).sub(a)), DIAGONAL, false, false, null, null);
         }
     }
 }

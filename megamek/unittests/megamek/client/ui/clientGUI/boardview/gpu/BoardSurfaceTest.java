@@ -500,11 +500,12 @@ class BoardSurfaceTest {
 
     @ParameterizedTest
     @ValueSource(floats = { 0.5f, 1, 2 })
-    void dryRiverEdgesRetainTheirFullHeight(float scale) {
+    void dryRiverRimsRetainTheirFullHeightWhileBanksGradeTowardsWater(float scale) {
         BoardGeometry.Tuning original = BoardGeometry.tuning();
         try {
             BoardGeometry.tune(new BoardGeometry.Tuning(scale, 0.6f, 0.87f, 18, 0.8f));
             Coords center = new Coords(7, 33);
+            int graded = 0;
             for (int mask = 0; mask < 64; mask++) {
                 BoardScene scene = riverScene(center, mask);
                 BoardSurface surface = new BoardSurface(scene, scene.tile(center));
@@ -520,8 +521,12 @@ class BoardSurfaceTest {
                     // Just inside the bank's rim, which rounds its corners as every cliff's does.
                     for (int sample = 20; sample <= 80; sample++) {
                         Vector3 point = new Vector3(a).lerp(b, sample / 100f).mulAdd(inward, .015f * BoardGeometry.WIDTH);
-                        assertEquals(top, surface.height(point.x, point.y), 0.01f * scale,
-                              "Water neighbor mask " + mask + ", dry edge " + edge + ", sample " + sample);
+                        float height = surface.height(point.x, point.y);
+                        assertTrue(height <= top + .01f * scale
+                                    && height >= surface.waterHeight(point.x, point.y) - .01f * scale,
+                              "Water neighbor mask " + mask + ", dry edge " + edge + ", sample " + sample
+                                    + " must grade between its rim and water: " + height);
+                        if (height < top - .01f * scale) { graded++; }
                     }
                 }
                 for (BoardSurface.Side side : surface.sides(scene, BoardGeometry.floor(scene))) {
@@ -531,6 +536,7 @@ class BoardSurfaceTest {
                     }
                 }
             }
+            assertTrue(graded > 0, "The banks must begin grading before reaching the waterline");
         } finally {
             BoardGeometry.tune(original);
         }
@@ -565,6 +571,32 @@ class BoardSurfaceTest {
             assertEquals(high, BoardGeometry.pick(scene, new Ray(new Vector3(point).mulAdd(outward, 6), outward.scl(-1))));
         }
         // Frozen falls keep their curtain and picking: BoardFrozenWaterfallTest.
+    }
+
+    @Test
+    void wallsBesideFallsMeetTheGradedBank() {
+        Coords high = new Coords(2, 2);
+        for (int direction = 0; direction < 6; direction++) {
+            BoardScene scene = riverScene(Map.of(high, 3, high.translated(direction), 0), false);
+            BoardSurface upper = new BoardSurface(scene, scene.tile(high));
+            int edge = upper.waterfalls.getFirst().edge();
+            int checked = 0;
+            for (BoardSurface.Side side : upper.sides(scene, BoardGeometry.floor(scene))) {
+                if (side.edge() != edge) { continue; }
+                Vector3 middle = new Vector3(side.a()).lerp(side.b(), .5f);
+                float bank = Float.NEGATIVE_INFINITY;
+                for (BoardSurface.Face face : upper.faces) {
+                    if (face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.SHORE) {
+                        bank = Math.max(bank, face.height(middle.x, middle.y));
+                    }
+                }
+                if (!Float.isFinite(bank)) { continue; } // The crest's submerged wall has no bank above it.
+                assertEquals(bank, middle.z, .03f,
+                      "The wall beside fall " + direction + " must close at the rendered bank: " + middle);
+                checked++;
+            }
+            assertTrue(checked > 0, "The fixture must contain bank walls beside the fall");
+        }
     }
 
     @Test

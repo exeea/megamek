@@ -47,9 +47,10 @@ vec3 waterShallows(vec4 weights) {
 }
 vec3 waterShallows(float palette) { return waterShallows(waterPalette(palette)); }
 
-// Even ankle-deep water reads as water: a shallow floor of optical depth, faded in from the water line itself.
+// Clear-water margins reveal the bed before the extra tint builds across the shallow shelf. Other liquid palettes
+// retain their immediate colour; surface and submerged ground share this same optical depth.
 vec3 waterTransmission(vec4 palette, float levels) {
-    float optical = max(levels, 0.0) + 0.16 * smoothstep(0.0, 0.05, levels);
+    float optical = max(levels, 0.0) + 0.16 * smoothstep(0.0, mix(0.05, 0.45, palette.x), levels);
     return exp(-waterAbsorption(palette) * (optical * WATER_PATH));
 }
 vec3 waterTransmission(float palette, float levels) { return waterTransmission(waterPalette(palette), levels); }

@@ -6,7 +6,9 @@ layout(location = 0) out vec4 fragColor;
 // four materials (ground, debris, wall, mantle), mapped in world space, and lights them with the board's one light
 // model (shadeSurface, surface-shading.glsl): linear albedo times linear light. Scene radiance stays linear
 // through blending and atmosphere; the final composite tones and encodes the whole frame once.
-in vec2 v_diffuseUV;   // ground: rim / foot distance (drowned cliff: height above bed / foot distance);
+in vec2 v_diffuseUV;   // dry ground: rim / foot distance; water-tagged ground: foot / rim distance;
+                            // drowned cliff: height above bed / foot distance;
+                            // depth-zero water tags encode the second distance as -1 - distance;
                             // cliff: height above foot / depth below rim; rock: above root
                             // / below top. All in metres. Wet rock: above root / pigment variation.
                             // Plants: authored red / green.
@@ -130,6 +132,7 @@ vec3 groundTone(vec3 albedo, vec3 world, float broad, float fine, float region, 
 
 // sculpt-material-functions
 void main() {
+    vec2 surfaceUV = v_diffuseUV;
     vec3 face = normalize(v_normal);
     float occlusion = v_color.r;
     float level = floor(v_color.g * 255.0 + .5) - 64.0;
@@ -146,6 +149,8 @@ void main() {
     if (mudShell) occlusion = 1.0;
     bool pit = kind >= .625 && kind < .875;
     bool shore = ground && v_color.a < .25;
+    bool zeroDepth = shore && surfaceUV.y < 0.0;
+    if (zeroDepth) surfaceUV.y = -1.0 - surfaceUV.y;
     // Rock-kind bytes 224..254 carry the fractional water level; 255 remains ordinary dry rock.
     bool wetRock = kind >= .875 && kind < .999;
     bool waterCovered = shore || wetRock;
@@ -179,6 +184,7 @@ void main() {
     // Depth below this water hex's level, in metres, and height above its water, which lies u_waterLine lower.
     float depth = waterCovered ? (level * u_levelHeight - v_cloudPosition.z) / u_metre : -1.0;
     float above = waterCovered ? u_waterLine / u_metre - depth : 99.0;
+    shallowSediment = zeroDepth ? 1.0 - smoothstep(-.25, .05, above) : -1.0;
     vec2 p = vec2(world.x, -world.y);
     // Capture numerical-map gradients before varying material/coverage branches.
     mat2 groundGradient = mat2(dFdx(p), dFdy(p));
@@ -220,7 +226,15 @@ void main() {
 #else
     bool rocky = natural && (cliff || bedrock || (shore && face.z < .6));
 #endif
-    float sediment = shore ? 1.0 - smoothstep(-.25, .05, above) : 0.0;
+    // Reuse the material's world fields for a broken soil/gravel margin. Keep it below the dry rim so the
+    // neighbouring land agrees at the seam; no new noise reads or shoreline mesh are needed.
+    riverBank = shore && natural && palette < .5;
+    float bankMargin = .995 * u_waterLine / u_metre;
+    // Use the whole exposed bank for the fade. Nested height smoothsteps compressed it into a sharp strip.
+    float bankProgress = clamp((bankMargin - above) / max(bankMargin - .01, .001), 0.0, 1.0);
+    bankProgress += (broad * .35 + fine * .65 - .5) * .3 * bankProgress * (1.0 - bankProgress);
+    // Dry cover is gone just before the waterline; the endpoints still match the adjoining ground and bed.
+    float sediment = riverBank ? bankProgress : shore ? 1.0 - smoothstep(-.25, .05, above) : 0.0;
     // Levels of water over a submerged bed; none elsewhere.
     float submerged = 0.0;
     vec3 transmission = vec3(1.0);
@@ -230,8 +244,8 @@ void main() {
     if (u_clay < .5) {
         vec4 detail = vec4(0.0, 0.0, 1.0, 1.0);
         if (natural) {
-            float foot = shore || cliff || bedrock ? v_diffuseUV.x : v_diffuseUV.y;
-            float rim = shore || cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x;
+            float foot = shore || cliff || bedrock ? surfaceUV.x : surfaceUV.y;
+            float rim = shore || cliff || bedrock ? surfaceUV.y : surfaceUV.x;
             float rock = ground ? rockiness(steps) : bedrock ? 1.0 : v_color.g;
             float bed = ground ? .5 : hardness;
 #ifdef terrainBlendFlag
@@ -278,8 +292,8 @@ void main() {
                   : planar(u_sculptLayers.x, q, u_sculptTiles.x, broad);
             vec4 rubble = planar(u_sculptLayers.y, q, u_sculptTiles.y, fine);
             vec4 weights = debrisWeights();
-            float rim = 1.0 - smoothstep(.3, 2.2 + 1.5 * fine, v_diffuseUV.x);
-            float foot = 1.0 - smoothstep(.4, 3.0 + 2.0 * broad, v_diffuseUV.y);
+            float rim = 1.0 - smoothstep(.3, 2.2 + 1.5 * fine, surfaceUV.x);
+            float foot = 1.0 - smoothstep(.4, 3.0 + 2.0 * broad, surfaceUV.y);
             float slope = 1.0 - smoothstep(.8, .96, face.z);
             float patches = smoothstep(.56, .78, fine * .7 + broad * .3);
             // Mantled ground shows scree only beside rock cliffs; beside the earth banks of lower steps a meadow wears
@@ -289,7 +303,7 @@ void main() {
             float want = clamp(max(edges * rock, slope * weights.z) + patches * weights.w, 0.0, 1.0);
             // A water hex's bed is stony from just above the waterline down, whatever grows on the land around; its
             // dry bank stays the land's own ground.
-            if (shore) want = max(want, 1.0 - smoothstep(-.25, .05, above));
+            if (shore) want = max(want, sediment);
             float w = heightBlend(top.a, rubble.a, want);
             albedo = mix(top.rgb, rubble.rgb, w);
             materialHeight = mix(top.a, rubble.a, w);
@@ -318,7 +332,7 @@ void main() {
             // The bush GLB supplies distinct woody stems and leaves; UV/alpha carry its linear RGB.
             // Live shader reload can still encounter .25-kind meshes from the earlier height-based format.
             float leaf = texture(u_rainNoise, world.xy / 7.0 + world.z * .13).r;
-            vec3 pigment = kind > .275 ? vec3(v_diffuseUV, v_color.a)
+            vec3 pigment = kind > .275 ? vec3(surfaceUV, v_color.a)
                   : family(0.0) ? toLinear(vec3(.27, .35, .12)) : toLinear(vec3(.40, .42, .26));
             albedo = pigment * mix(.92, 1.06, leaf);
         } else if (pit) {
@@ -338,7 +352,7 @@ void main() {
                 }
             }
         } else if (cliff && family(4.0)) {
-            concreteSlab(world, worldDx, worldDy, face, projection, v_diffuseUV.x, v_diffuseUV.y,
+            concreteSlab(world, worldDx, worldDy, face, projection, surfaceUV.x, surfaceUV.y,
                   albedo, normal, occlusion, cavity, roughness);
         } else {
             // Rocks: the two vertical projections, V running down the face, never mirrored from outside.
@@ -367,7 +381,7 @@ void main() {
                 roughness = crown > 0.0 ? mix(stone,
                       planarRoughness(u_sculptLayers.z, p, groundGradient, u_sculptTiles.z, fine, roughness), crown) : stone;
             }
-            float h = v_diffuseUV.x;
+            float h = surfaceUV.x;
             // Broad ledges collect the ground cover (sand, snow, moss on alpine rock); on the rock kit only snow and
             // sand dust lie.
             float ledge = smoothstep(.8, .95, face.z) * smoothstep(.3, .6, fine) * (family(0.0) ? .7 : 1.0);
@@ -387,7 +401,7 @@ void main() {
                 }
             }
             // Stable per-block pigment variation, independent of water optics and root occlusion.
-            albedo *= mix(.78, 1.0, wetRock ? v_diffuseUV.y : v_color.a);
+            albedo *= mix(.78, 1.0, wetRock ? surfaceUV.y : v_color.a);
             if (family(0.0)) {
                 float moss = smoothstep(.7, .94, face.z) * smoothstep(.6, .8, fine);
                 albedo *= mix(vec3(1.0), toLinear(vec3(.9, .97, .82)), moss * .22);
@@ -398,10 +412,10 @@ void main() {
             cavity = detail.a * .6 + .4;
         }
         if (ground && !shore && family(4.0)) {
-            occlusion = 1.0 - .3 * exp(-v_diffuseUV.y / 3.5);
+            occlusion = 1.0 - .3 * exp(-surfaceUV.y / 3.5);
         }
         if (shore && !natural && family(4.0) && face.z < .6) {
-            concreteSlab(world, worldDx, worldDy, face, projection, v_diffuseUV.x, v_diffuseUV.y,
+            concreteSlab(world, worldDx, worldDy, face, projection, surfaceUV.x, surfaceUV.y,
                   albedo, normal, occlusion, cavity, roughness);
         }
         // Natural materials fade within rockNormal (materialNormal in volcanic programs); slab and rock kit paths share
@@ -413,8 +427,8 @@ void main() {
         }
 #ifdef terrainBlendFlag
         if ((ground || cliff) && !rocky) {
-            float foot = shore || cliff ? v_diffuseUV.x : v_diffuseUV.y;
-            float rim = shore || cliff ? v_diffuseUV.y : v_diffuseUV.x;
+            float foot = shore || cliff ? surfaceUV.x : surfaceUV.y;
+            float rim = shore || cliff ? surfaceUV.y : surfaceUV.x;
             float rock = ground ? rockiness(steps) : v_color.g;
             // A bank blend must use sediment below the waterline, never repaint the bed with neighbouring turf.
             blendCovers(world, face, foot, rim, rock, ground ? .5 : hardness, sediment,
@@ -426,8 +440,8 @@ void main() {
         // finds no cover and leaves everything as it is.
 #ifdef biomeMaskFlag
         if (ground || cliff || bedrock) {
-            biomeSurface(world, face, shore, above, cliff || bedrock ? v_diffuseUV.x : 0.0,
-                  cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x, materialHeight, sand, deckMud, region,
+            biomeSurface(world, face, shore, above, cliff || bedrock ? surfaceUV.x : 0.0,
+                  cliff || bedrock ? surfaceUV.y : surfaceUV.x, materialHeight, sand, deckMud, region,
                   albedo, normal, cavity, roughness, grass, bounce, biomePool, biomeDamp);
         }
 #endif
@@ -439,10 +453,12 @@ void main() {
             normal = normalize(normal + vec3(gust * sway * .12 * u_wind.z * grass, 0.0));
         }
         if (waterCovered) {
-            // Wet in a band just above the waterline and below it.
-            shoreAbsorption = .65 * (1.0 - smoothstep(0.0, .12, above)) * (1.0 - smoothstep(0.0, .20, biomeDamp));
+            // Damp sediment stops short of the patchy dry bank, following the same already-sampled fields.
+            float dampMargin = shore && natural ? bankMargin * .65 : .12;
+            shoreAbsorption = .65 * (1.0 - smoothstep(0.0, dampMargin, above))
+                  * (1.0 - smoothstep(0.0, .20, biomeDamp));
         }
-        if (watered) {
+        if (watered && above < 0.0) {
             // Beneath the waterline the bed keeps the hue its column of water passes and catches caustics
             // (water-optics.glsl), while the surface above removes the brightness the column absorbs.
             submerged = max(0.0, depth * u_metre - u_waterLine) / u_levelHeight;
@@ -585,7 +601,7 @@ void main() {
     // Fade through the final level above the black cap. All walls around one pit share this height reference,
     // even where their rims stand at different levels, so the fade cannot break into wedges at their corners.
     if (abyss) {
-        float light = smoothstep(0.0, .9 * u_levelHeight / u_metre, v_diffuseUV.x);
+        float light = smoothstep(0.0, .9 * u_levelHeight / u_metre, surfaceUV.x);
         result *= light * light;
     }
     fragColor = vec4(result, 1.0);

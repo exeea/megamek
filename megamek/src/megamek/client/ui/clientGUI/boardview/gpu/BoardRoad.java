@@ -214,6 +214,11 @@ final class BoardRoad {
     /** Widen or move only the shared corridor arms, blending along their existing road courses. */
     BoardRoad corridor(RailRoute.Corridor value) { return corridor(value, MIDDLE_HALF); }
 
+    /** One centered carrier supports both lanes and the track, whichever rail placement the author chooses. */
+    BoardRoad bridgeCorridor(RailRoute.Corridor value) {
+        return corridor(new RailRoute.Corridor(value.sides(), 0, 0), CORRIDOR_HALF);
+    }
+
     private record Anchor(float along, float width, float x, float y) { }
 
     private BoardRoad corridor(RailRoute.Corridor value, float middleWidth) {
@@ -319,19 +324,35 @@ final class BoardRoad {
             float[] first = line.at(0), after = line.at(.01f);
             if (line.from() >= 0) {
                 float length = (float) Math.hypot(after[0] - first[0], after[1] - first[1]);
-                first[0] -= 2 * (after[0] - first[0]) / length; first[1] -= 2 * (after[1] - first[1]) / length;
+                float reach = borderReach(line.from());
+                first[0] -= reach * (after[0] - first[0]) / length; first[1] -= reach * (after[1] - first[1]) / length;
             }
             path.moveTo(first[0], first[1]);
             for (int i = 1; i <= 24; i++) { float[] p = line.at(i / 24f); path.lineTo(p[0], p[1]); }
             if (line.to() >= 0) {
                 float[] end = line.at(1), before = line.at(.99f);
                 float length = (float) Math.hypot(end[0] - before[0], end[1] - before[1]);
-                path.lineTo(end[0] + 2 * (end[0] - before[0]) / length, end[1] + 2 * (end[1] - before[1]) / length);
+                float reach = borderReach(line.to());
+                path.lineTo(end[0] + reach * (end[0] - before[0]) / length, end[1] + reach * (end[1] - before[1]) / length);
             }
             result.add(new Area(new BasicStroke(halfWidth * 2, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND)
                   .createStrokedShape(path)));
         }
         return result;
+    }
+
+    /** The median continues over the same bank extension as its road, including the yellow edge lines. */
+    private float borderReach(int direction) {
+        Vector2 edge = border(direction);
+        float length = edge.len(), nx = edge.x / length, ny = edge.y / length, reach = 2;
+        for (var path : paths) {
+            for (Point end : List.of(path.getFirst(), path.getLast())) {
+                if (Math.abs(end.x * ny - end.y * nx) < .01f) {
+                    reach = Math.max(reach, end.x * nx + end.y * ny - length);
+                }
+            }
+        }
+        return reach;
     }
 
     private Area sideArms() {
@@ -688,10 +709,12 @@ final class BoardRoad {
                 float x = (BoardGeometry.centerX(next) - BoardGeometry.centerX(coords)) / (2 * BoardGeometry.hexScale());
                 float y = (BoardGeometry.centerY(next) - BoardGeometry.centerY(coords)) / (2 * BoardGeometry.hexScale());
                 float length = (float) Math.hypot(x, y), reach = lengths.get(d) + .25f;
+                float[] shift = RailRoute.borderOffset(d, BESIDE_ROAD * corridor.lateral(d));
                 for (int end : new int[] { 0, points.size() - 1 }) {
                     var p = points.get(end);
-                    if (Math.hypot(p.x - x * 1.06f, p.y - y * 1.06f) < .01f) {
-                        points.set(end, new Point(x * (1 + reach / length), y * (1 + reach / length), p.width));
+                    if (Math.hypot(p.x - shift[0] - x * 1.06f, p.y - shift[1] - y * 1.06f) < .01f) {
+                        points.set(end, new Point(x * (1 + reach / length) + shift[0],
+                              y * (1 + reach / length) + shift[1], p.width));
                     }
                 }
             }

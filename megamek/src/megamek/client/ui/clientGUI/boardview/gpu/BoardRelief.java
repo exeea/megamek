@@ -2112,8 +2112,8 @@ final class BoardRelief {
     // ---- Water hex banks -------------------------------------------------------------------------------------
 
     /**
-     * A water hex's banks: the ground between its canonical boundary and its waterline, level at the hex's level and
-     * dropping over a narrow shore to the water. An open mouth has none but for its short stretch from each corner to
+     * A water hex's banks: the ground between its canonical boundary and its waterline, grading down to the water.
+     * An open mouth has none but for its short stretch from each corner to
      * where the waterline meets the mouth, which both hexes of the mouth build alike. The bed inside the waterline and
      * the water itself are {@link BoardSurface}'s.
      */
@@ -2198,7 +2198,7 @@ final class BoardRelief {
     }
 
     /**
-     * One run of banks over {@code count} edges from edge {@code first}, strip by strip: the boundary, a level lip and
+     * One run of banks over {@code count} edges from edge {@code first}, strip by strip: the boundary, an intermediate lip and
      * the waterline. With {@code mouths} the run starts and ends where the waterline meets the open mouth before it and
      * after it, and takes in the stretch of each mouth from its corner to that point.
      */
@@ -2268,8 +2268,11 @@ final class BoardRelief {
                 room = Math.min(room, .4f * (float) Math.hypot(w.x - p.x - t * dx, w.y - p.y - t * dy));
             }
             float f = Math.min(.5f, room / Math.max(gap, 1e-4f));
+            // Grade the existing rows across the available bank instead of leaving a flat shelf and a tiny drop
+            // at the water. This also gives the material room to lose dry cover before reaching the waterline.
             lip.add(lip(boundary, waterline[(index + waterline.length - 1) % waterline.length], w,
-                  waterline[(index + 1) % waterline.length], (b.x - w.x) * f, (b.y - w.y) * f, base));
+                  waterline[(index + 1) % waterline.length], (b.x - w.x) * f, (b.y - w.y) * f,
+                  tile.frozen() || tile.liquid().molten() ? base : base - (base - w.z) * (1 - f)));
             lipParameters.add(first + k / (float) perEdge);
             inner.add(w);
             innerParameters.add(first + k / (float) perEdge);
@@ -2304,8 +2307,8 @@ final class BoardRelief {
 
     /**
      * The boundary samples of mouth edge {@code e} between its corner and where the waterline meets it (at {@code t},
-     * this hex's fraction of the edge), falling from the hex's level to the water there over the bank's lip, or over
-     * all of the stub where it is shorter. Both hexes of the mouth build them alike; a straight wall under a fall's
+     * this hex's fraction of the edge), falling from the hex's level to the water over the available bank.
+     * Both hexes of the mouth build them alike; a straight wall under a fall's
      * mouth tops out on them too.
      */
     private void stub(List<Vector3> outer, List<Float> parameters, List<Vector3> boundary, int[] starts, int e,
@@ -2315,7 +2318,10 @@ final class BoardRelief {
         float water = waterline[(before ? (edge + 1) % 6 : edge) * (waterline.length / 6)].z;
         Corner a = corner(self, edge), b = corner(self, edge + 1);
         float length = (float) Math.hypot(b.x + b.move()[0] - a.x - a.move()[0], b.y + b.move()[1] - a.y - a.move()[1]);
-        float ramp = Math.min(SHORE_LIP * BoardGeometry.hexScale(), (before ? 1 - t : t) * length);
+        float ramp = Math.max(1e-4f, (before ? 1 - t : t) * length);
+        if (!gradedBankMouth(edge)) {
+            ramp = Math.min(SHORE_LIP * BoardGeometry.hexScale(), ramp);
+        }
         for (int i = 1; i < samples; i++) {
             // Where the steps through a corner slide the samples along the mouth, each counts where it lies.
             Vector3 p = new Vector3(boundary.get(starts[edge] + i));
@@ -2325,6 +2331,13 @@ final class BoardRelief {
             outer.add(p);
             parameters.add(unwrapped + s);
         }
+    }
+
+    /** Both sides of a mouth retain the narrow lip where a frozen or molten bank needs its original profile. */
+    boolean gradedBankMouth(int edge) {
+        BoardScene.Tile across = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
+        return !tile.frozen() && !tile.liquid().molten()
+              && (across == null || !across.frozen() && !across.liquid().molten());
     }
 
     /** Where p lies along this hex's edge e at its level, as its fraction from the edge's first corner. */
