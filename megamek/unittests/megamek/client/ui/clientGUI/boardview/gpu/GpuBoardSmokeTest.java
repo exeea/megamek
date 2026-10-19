@@ -136,8 +136,10 @@ class GpuBoardSmokeTest {
                             movingHash = capture("movement.png");
                             assertTrue(isMoving());
                             assertEquals(new Coords(7, 5), fixture.entity.getPosition());
-                            Gdx.input.getInputProcessor().keyDown(Input.Keys.SPACE);
-                            Gdx.input.getInputProcessor().keyUp(Input.Keys.SPACE);
+                            // Esc with nothing open skips the playback; the next frame presents its results.
+                            assertTrue(Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE));
+                            Gdx.input.getInputProcessor().keyUp(Input.Keys.ESCAPE);
+                        } else if (frames() == 127) {
                             assertFalse(isMoving());
                             assertEquals(new Coords(7, 5), fixture.entity.getPosition());
                             assertEquals(0, fixture.clicks.get(), "Skipping animation must not issue orders");

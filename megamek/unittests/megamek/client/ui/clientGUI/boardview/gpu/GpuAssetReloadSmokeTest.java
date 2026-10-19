@@ -145,11 +145,12 @@ class GpuAssetReloadSmokeTest {
                             compositeSource = composite.replace(outputColor,
                                   "fragColor = vec4(vec3(0.85, 0.15, 0.65) + color * 0.001,");
                             unitSource = GpuShaderSource.read("unit-material.frag")
-                                  .replace("return diffuse;", "return diffuse.bgr; // asset-reload-unit");
+                                  .replace("return diffuse;", "return diffuse.bgr;");
                             Files.writeString(shaders.resolve("atmosphere-composite.frag"), compositeSource);
                             Files.writeString(shaders.resolve("unit-material.frag"), unitSource);
+                            // Compilation drops comments (GpuGlsl.withoutComments), so the shared include's edit is a define.
                             Files.writeString(shaders.resolve("light-model.glsl"),
-                                  GpuShaderSource.read("light-model.glsl") + "\n// asset-reload-include\n");
+                                  GpuShaderSource.read("light-model.glsl") + "\n#define ASSET_RELOAD_INCLUDE\n");
                             GpuAssetReloadTest.png(directory.resolve("models/board/textures/terrain/classic/rock.png"), 0xff0000ff);
                             // Finished material exports change both packed data maps and the authoring scale.
                             // Deliberately distinct alpha values expose accidental sRGB conversion of height/AO.
@@ -189,8 +190,8 @@ class GpuAssetReloadSmokeTest {
                             for (var entry : reloaded.entrySet()) {
                                 assertTrue(entry.getValue().isCompiled(), entry.getKey());
                                 if (entry.getKey().startsWith("units")) {
-                                    assertTrue(entry.getValue().getFragmentShaderSource().contains("asset-reload-unit"));
-                                    assertTrue(entry.getValue().getVertexShaderSource().contains("asset-reload-include"));
+                                    assertTrue(entry.getValue().getFragmentShaderSource().contains("return diffuse.bgr;"));
+                                    assertTrue(entry.getValue().getFragmentShaderSource().contains("ASSET_RELOAD_INCLUDE"));
                                 }
                             }
                             assertCompositePixels();
