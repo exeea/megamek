@@ -88,7 +88,7 @@ class GpuShaderLiveSmokeTest {
                 GpuTerrain originalTerrain;
                 ShaderProgram original, preview;
                 Object units;
-                String composite, light;
+                String composite, colorSpace;
                 int step;
                 long revision;
                 float sampleSeconds;
@@ -105,7 +105,7 @@ class GpuShaderLiveSmokeTest {
                             manager = (GpuShaderManager) field(this, "shaderEdits");
                             original = compositeProgram();
                             composite = GpuShaderSource.readDisk("atmosphere-composite.frag");
-                            light = GpuShaderSource.readDisk("light-model.glsl");
+                            colorSpace = GpuShaderSource.readDisk("color-space.glsl");
                             // Edit shaders is the tuning model's button, in the HUD's tuning panel footer.
                             GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(this, "tuning-edit-shaders"));
                             step = 1;
@@ -131,7 +131,7 @@ class GpuShaderLiveSmokeTest {
                             capture();
                             units = ((GpuShaderProvider) ((ModelBatch) field(this, "unitBatch")).getShaderProvider()).active();
                             // A shared include prepares material replacements before the later composite fails.
-                            edit("light-model.glsl", light + "\n// live-editor-shared-include\n");
+                            edit("color-space.glsl", colorSpace + "\n// live-editor-shared-include\n");
                             edit("atmosphere-composite.frag", "#version 330 core\nthis is an unfinished edit");
                             step = 3;
                         } else if (step == 3 && editorStatus().startsWith("Preview unchanged")) {

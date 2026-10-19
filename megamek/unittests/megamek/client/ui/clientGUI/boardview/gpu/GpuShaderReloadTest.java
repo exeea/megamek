@@ -257,7 +257,7 @@ class GpuShaderReloadTest {
             case "terrain-magma-solid.frag", "terrain-magma-flow.frag" -> GpuTerrain.litFragment(name);
             case "ocean-finish.glsl" -> GpuOcean.fragment("ocean-water-finish.frag") + GpuOcean.fragment("ocean-lava-finish.frag");
             case "ocean-water-finish.frag", "ocean-lava-finish.frag" -> GpuOcean.fragment(name);
-            case "model.frag", "model-surface.glsl" -> GpuUnitShader.fragment();
+            case "model.frag", "model-surface.glsl", "light-model.glsl" -> GpuUnitShader.fragment();
             default -> unitVertex();
         };
     }

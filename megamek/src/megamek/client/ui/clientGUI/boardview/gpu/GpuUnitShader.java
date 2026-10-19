@@ -125,7 +125,9 @@ final class GpuUnitShader extends DefaultShader {
         source = replaceOnce(source, MAIN,
               "#ifdef modelSurfaceFlag\nout vec2 v_modelUV;\n#endif\n" + MAIN
                     + "\n#ifdef modelSurfaceFlag\nv_modelUV = a_texCoord0;\n#endif\n", "vertex");
-        source = replaceOnce(source, MAIN, GpuShaderSource.read("light-model.glsl") + "\n" + MAIN, "vertex");
+        // The vertex stage needs only the colour transfer (toLinear). The light model belongs to the fragment stages:
+        // with environment lighting it calls functions only they define, which Mesa's linker rejects in this stage.
+        source = replaceOnce(source, MAIN, GpuShaderSource.read("color-space.glsl") + "\n" + MAIN, "vertex");
         // A recolourable model's shared mesh takes its placement's colours before any lighting (RigidGlb.recolour).
         source = replaceOnce(source, MAIN, GpuShaderSource.read("model-colour-slots.glsl") + "\n" + MAIN, "vertex");
         String color = "v_color = a_color;";

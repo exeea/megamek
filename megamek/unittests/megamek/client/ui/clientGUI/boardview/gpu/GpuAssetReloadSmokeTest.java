@@ -148,8 +148,8 @@ class GpuAssetReloadSmokeTest {
                                   .replace("return diffuse;", "return diffuse.bgr; // asset-reload-unit");
                             Files.writeString(shaders.resolve("atmosphere-composite.frag"), compositeSource);
                             Files.writeString(shaders.resolve("unit-material.frag"), unitSource);
-                            Files.writeString(shaders.resolve("light-model.glsl"),
-                                  GpuShaderSource.read("light-model.glsl") + "\n// asset-reload-include\n");
+                            Files.writeString(shaders.resolve("color-space.glsl"),
+                                  GpuShaderSource.read("color-space.glsl") + "\n// asset-reload-include\n");
                             Path textures = directory.resolve("models/board/textures");
                             GpuAssetReloadTest.png(textures.resolve("terrain/classic/rock_albedo.png"), 0xff0000ff);
                             // A finished export changes every map, wider than its catalogued 512 pixels: at the same
@@ -306,7 +306,7 @@ class GpuAssetReloadSmokeTest {
                                 copyNativeBatch(Path.of(nativePlan), directory);
                                 Files.delete(shaders.resolve("atmosphere-composite.frag"));
                                 Files.delete(shaders.resolve("unit-material.frag"));
-                                Files.delete(shaders.resolve("light-model.glsl"));
+                                Files.delete(shaders.resolve("color-space.glsl"));
                                 GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(this, "tuning-reload-assets"));
                                 assertTrue(button.isDisabled());
                                 step = 8;
