@@ -149,7 +149,7 @@ class GpuShaderLiveSmokeTest {
                             var provider = (GpuShaderProvider) ((ModelBatch) field(this, "unitBatch")).getShaderProvider();
                             assertNotSame(units, provider.active());
                             assertTrue(provider.sources().stream().allMatch(source ->
-                                  source.vertex().contains("live-editor-shared-include")));
+                                  source.fragment().contains("live-editor-shared-include")));
                             assertEquals(composite, GpuShaderSource.readDisk("atmosphere-composite.frag"));
                             checkInactiveEffect();
                             manager.run(() -> assertTrue(manager.apply(Map.of()).success()));

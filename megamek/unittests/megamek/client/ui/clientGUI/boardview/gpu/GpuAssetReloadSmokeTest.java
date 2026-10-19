@@ -190,7 +190,7 @@ class GpuAssetReloadSmokeTest {
                                 assertTrue(entry.getValue().isCompiled(), entry.getKey());
                                 if (entry.getKey().startsWith("units")) {
                                     assertTrue(entry.getValue().getFragmentShaderSource().contains("asset-reload-unit"));
-                                    assertTrue(entry.getValue().getVertexShaderSource().contains("asset-reload-include"));
+                                    assertTrue(entry.getValue().getFragmentShaderSource().contains("asset-reload-include"));
                                 }
                             }
                             assertCompositePixels();
