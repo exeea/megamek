@@ -9,6 +9,7 @@ import java.io.File;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.math.Intersector;
@@ -173,8 +174,14 @@ class GpuRoadSourceTest {
 
     /** The shipped board as a game shows it: converted where it loads, as every load site does. */
     static BoardScene scene(String path) throws Exception {
+        return scene(path, board -> { });
+    }
+
+    /** The shipped board after {@code edit}, as an editor would change it, then converted and shown. */
+    static BoardScene scene(String path, Consumer<Board> edit) throws Exception {
         Board board = new Board();
         board.load(new File("data/boards/" + path));
+        edit.accept(board);
         BoardSceneryLayouts.convert(board);
         var scene = new AtomicReference<BoardScene>();
         try (var fixture = GpuBoardFixture.create(board)) {
