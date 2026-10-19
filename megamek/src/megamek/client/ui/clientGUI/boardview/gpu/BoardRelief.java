@@ -3712,8 +3712,9 @@ final class BoardRelief {
         for (int r = 0; r < rows.length; r++) { rows[r] = grid[r][0].z; }
         int columns = grid[0].length - 1, last = grid.length - 1;
         float m = metres(1);
-        boolean wetBank = edge.room > 0 && edge.lower != null && edge.lower.liquid()
+        boolean slopingBank = edge.room > 0 && edge.lower != null
               && edge.upper.family() != CONCRETE && !wall(edge.upper, edge.lower);
+        boolean wetBank = slopingBank && edge.lower.liquid();
         // Bank or rock: this step's own height, blending into the average of every step through each corner, so a
         // cliff that grows from two to three levels turns from earth to rock gradually and both walls agree there.
         float own = prominence(edge.drop), atA = cornerRock(edge.a, own), atB = cornerRock(edge.b, own);
@@ -3733,16 +3734,16 @@ final class BoardRelief {
             Vector3[] below = grid[Math.max(0, r - 1)];
             for (int i = 0; i <= columns; i++) {
                 Vector3 p = grid[r][i];
-                Shade rim = contour.isEmpty() && (r == last || wetBank) && rims[e] != null
+                Shade rim = contour.isEmpty() && (r == last || slopingBank) && rims[e] != null
                       ? shades.get(rims[e][Math.round(parameters[i] * (rims[e].length - 1))]) : null;
                 // Where a step with room meets the ground at its foot, its lowest row faces up and is shaded like the
                 // ground there, easing into the step's own shading within a metre and a half, so no seam shows.
                 boolean toe = (edge.footRoom > 0 || wetBank) && r == 0;
                 Vector3 normal = rim != null && r == last ? rim.normal() : toe ? new Vector3(0, 0, 1)
                       : gridNormal(edge, e, grid[r], above, below, i, columns);
-                if (wetBank) {
-                    // The submerged continuation puts this foot halfway down its full slope, but the exposed
-                    // face still meets level ground. Feather both contacts without changing that shared geometry.
+                if (slopingBank) {
+                    // Water-facing and land-facing slopes share these contacts. Feather both alike so their
+                    // normals, and the material blend they control, remain continuous around the corner.
                     float low = grid[0][i].z, high = grid[last][i].z;
                     float contact = Math.min(1.5f * m, (high - low) * .5f);
                     if (contact > EPSILON && (p.z - low < contact || high - p.z < contact)) {

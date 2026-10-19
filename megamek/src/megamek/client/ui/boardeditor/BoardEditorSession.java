@@ -123,7 +123,9 @@ public final class BoardEditorSession {
          * Sets the inspected pavement hex's {@link HexAppearance.Edges} (value "auto", "fitted" or "hex"), stored as its
          * pavement appearance (Auto as none). One undo step.
          */
-        EDGES, WAY_LAYER, WAY_TRACKS, CORRIDOR
+        EDGES, WAY_LAYER, WAY_TRACKS, CORRIDOR,
+        /** Sets a road layer's cosmetic junction controls (target "road" or "bridgeRoad", value "stops", "signals" or "gantry"). */
+        TRAFFIC_CONTROL
     }
     /** Text values are parsed and validated here, never by a view that also owns game state. */
     public record Command(Action action, String target, String value) {
@@ -710,6 +712,7 @@ public final class BoardEditorSession {
                 });
                 case DESIGN_ROTATION -> edit(hex -> rotate(hex, command.target(), command.value()));
                 case EDGES -> edit(hex -> setEdges(hex, command.value()));
+                case TRAFFIC_CONTROL -> edit(hex -> setTrafficControl(hex, command.target(), command.value()));
                 case ASSET -> {
                     var design = blueprint.asset(command.value()); require(design != null, "Unknown object design");
                     paintTemplate = new Hex(0); sampledHex = null;
@@ -1403,9 +1406,8 @@ public final class BoardEditorSession {
         if (road) {
             hex.addTerrain(new Terrain(type, paintTemplate.terrainLevel(Terrains.ROAD), deck || old != null && old.hasExitsSpecified(), exits));
             HexAppearance look = paintTemplate.getAppearance().get("road");
-            // The road's shape selectors belong to the ground; a deck stores only its chosen surface material.
-            appearance(hex, deck ? "bridgeRoad" : "road", deck && look != null
-                  ? new HexAppearance(null, null, look.material(), null) : look);
+            // Shape selectors belong to the ground; a deck keeps the chosen surface and junction controls.
+            appearance(hex, deck ? "bridgeRoad" : "road", deck ? roadSurface(look) : look);
         } else {
             String owner = deck ? "bridgeRail" : "rail";
             int laid = old == null ? 0 : HexAppearance.tracks(hex.getAppearance(), owner);
@@ -1419,6 +1421,13 @@ public final class BoardEditorSession {
         var looks = new LinkedHashMap<>(hex.getAppearance());
         if (value == null) { looks.remove(owner); } else { looks.put(owner, value); }
         hex.setAppearance(looks);
+    }
+
+    /** A road moved to another height keeps its surface and controls; ground shape selectors do not move with it. */
+    private static HexAppearance roadSurface(HexAppearance look) {
+        if (look == null) { return null; }
+        HexAppearance surface = look.material() == null ? null : new HexAppearance(null, null, look.material(), null);
+        return HexAppearance.withTrafficControl(surface, look.trafficControl());
     }
 
     private static String wayOwner(int type) {
@@ -1459,7 +1468,7 @@ public final class BoardEditorSession {
         HexAppearance look = hex.getAppearance().get(wayOwner(source));
         removeWay(hex, source);
         hex.addTerrain(new Terrain(target, way.getLevel(), true, way.getExits()));
-        appearance(hex, wayOwner(target), road && look != null ? new HexAppearance(null, null, look.material(), null) : look);
+        appearance(hex, wayOwner(target), road ? roadSurface(look) : look);
     }
 
     /** One corridor run, one edit: middle, beside, or the other side. */
@@ -2729,7 +2738,11 @@ public final class BoardEditorSession {
 
     private void setVariant(Hex hex, String owner, String value) {
         Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
-        if (value.isEmpty()) { styles.remove(owner); }
+        var control = HexAppearance.trafficControl(styles, owner);
+        if (value.isEmpty()) {
+            HexAppearance retained = HexAppearance.withTrafficControl(null, control);
+            if (retained == null) { styles.remove(owner); } else { styles.put(owner, retained); }
+        }
         else {
             var variant = blueprint.variant(value);
             require(variant != null && variant.owner().equals(owner), "Unknown appearance choice");
@@ -2746,14 +2759,14 @@ public final class BoardEditorSession {
                         setTerrain(hex, field.terrain(), compatible.getFirst().value());
                     }
                 }
-                styles.put(owner, new HexAppearance(current == null ? null : current.variant(),
-                      null, variant.material(), null));
+                styles.put(owner, HexAppearance.withTrafficControl(new HexAppearance(current == null ? null : current.variant(),
+                      null, variant.material(), null), control));
             } else {
                 // Switching between skins keeps the look's rotation; any other design has none.
                 var was = current == null || current.variant() == null ? null : blueprint.variant(current.variant());
                 boolean skins = variant.skin() != null && was != null && was.skin() != null;
-                styles.put(owner, new HexAppearance(variant.id(), null, current == null ? null : current.material(),
-                      variant.blend() ? .5 : null, BoardDecoration.Colours.NONE, skins ? current.rotation() : null));
+                styles.put(owner, HexAppearance.withTrafficControl(new HexAppearance(variant.id(), null, current == null ? null : current.material(),
+                      variant.blend() ? .5 : null, BoardDecoration.Colours.NONE, skins ? current.rotation() : null), control));
             }
         }
         hex.setAppearance(styles);
@@ -2783,6 +2796,14 @@ public final class BoardEditorSession {
         Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
         if (edges == HexAppearance.Edges.AUTO) { styles.remove("pavement"); } else { styles.put("pavement", HexAppearance.of(edges)); }
         hex.setAppearance(styles);
+    }
+
+    private static void setTrafficControl(Hex hex, String owner, String value) {
+        require(owner.equals("road") || owner.equals("bridgeRoad"), "Choose a road layer.");
+        require(hex.containsTerrain(owner.equals("road") ? Terrains.ROAD : Terrains.BRIDGE_ROAD),
+              Messages.getString("BoardEditor.addTerrainFirst"));
+        var control = HexAppearance.TrafficControl.valueOf(value.toUpperCase(java.util.Locale.ROOT));
+        appearance(hex, owner, HexAppearance.withTrafficControl(hex.getAppearance().get(owner), control));
     }
 
     /** Arms a card: {@code owner}'s preset or design {@code key}, or for owner "theme" the Theme card of theme {@code key}. */
@@ -2819,6 +2840,7 @@ public final class BoardEditorSession {
         else if (target.startsWith("variant:")) { setVariant(next, target.substring(8), value); }
         else if (target.startsWith("rotation:")) { rotate(next, target.substring(9), value); }
         else if (target.equals("edges")) { setEdges(next, value); }
+        else if (target.equals("trafficControl")) { setTrafficControl(next, "road", value); }
         else if (target.startsWith("object:")) {
             require(!next.getDecorations().isEmpty(), Messages.getString("BoardEditor.chooseObjectBrush"));
             next.setDecorations(List.of(objectValue(next.getDecorations().getFirst(), target.substring(7), value)));
@@ -3208,8 +3230,8 @@ public final class BoardEditorSession {
                 var styles = new LinkedHashMap<>(hex.getAppearance());
                 String key = field.terrain().equals("bridge_road") ? "bridgeRoad" : owner.id();
                 var old = styles.get(key);
-                styles.put(key, new HexAppearance(old == null ? null : old.variant(), old == null ? null : old.asset(),
-                      choice.material(), old == null ? null : old.strength()));
+                styles.put(key, HexAppearance.withTrafficControl(new HexAppearance(old == null ? null : old.variant(), old == null ? null : old.asset(),
+                      choice.material(), old == null ? null : old.strength()), HexAppearance.trafficControl(styles, key)));
                 hex.setAppearance(styles);
             }
         }

@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.awt.image.BufferedImage;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -13,7 +14,9 @@ import java.util.Random;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import megamek.common.Configuration;
 import megamek.common.Hex;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Terrain;
@@ -501,6 +504,66 @@ class BoardSurfaceTest {
                 }
             }
         } finally { BoardGeometry.tune(geometry); }
+    }
+
+    @Test
+    void riverFacingSlopesShareTheirShadingWithTheAdjoiningDrySlope() throws Exception {
+        var geometry = BoardGeometry.tuning();
+        var relief = BoardRelief.tuning();
+        try {
+            BoardGeometry.tune(BoardGeometry.DEFAULTS);
+            BoardRelief.tune(BoardRelief.DEFAULTS);
+            var board = BoardFile.loadSheet(new File(Configuration.boardsDir(),
+                  "GrassLands/16x17 Grasslands River CommCenter.board"), false, true);
+            var scene = GpuLegacyImportSmokeTest.scene(board);
+            // The bridge landing and the separate northern hill both turn from a river bank into a dry slope.
+            for (var coords : List.of(new Coords(8, 15), new Coords(10, 2))) {
+                int wetEdge = coords.getX() == 8 ? 3 : 4, dryEdge = wetEdge + 1;
+                assertTrue(scene.tile(coords.translated(BoardGeometry.edgeDirection(wetEdge))).liquid().present());
+                assertFalse(scene.tile(coords.translated(BoardGeometry.edgeDirection(dryEdge))).liquid().present());
+                for (TerrainLod lod : TerrainLod.values()) {
+                    Map<Coords, BoardSurface> surfaces = new HashMap<>();
+                    surfaces.put(coords, new BoardSurface(scene, scene.tile(coords), lod));
+                    for (int direction = 0; direction < 6; direction++) {
+                        Coords at = coords.translated(direction);
+                        if (scene.tile(at) != null) { surfaces.put(at, new BoardSurface(scene, scene.tile(at), lod)); }
+                    }
+                    var surface = surfaces.get(coords);
+                    Map<Vector3, BoardRelief.Shade> wet = new HashMap<>(), dry = new HashMap<>();
+                    for (var face : surface.walls(scene, BoardGeometry.floor(scene), surfaces)) {
+                        if (face.landEdge() != wetEdge && face.landEdge() != dryEdge) { continue; }
+                        var shades = face.landEdge() == wetEdge ? wet : dry;
+                        for (var point : List.of(face.a(), face.b(), face.c())) {
+                            // Equal positions have separate vertex identities and must retain each side's shade.
+                            shades.put(point, surface.relief.shade(point));
+                        }
+                    }
+                    int feet = 0, rims = 0, middle = 0;
+                    float top = surface.tile.elevation() * BoardGeometry.level(), contact = BoardRelief.metres(1.5f);
+                    for (var entry : wet.entrySet()) {
+                        Vector3 point = entry.getKey();
+                        var a = entry.getValue();
+                        var b = dry.get(point);
+                        if (b == null) { continue; }
+                        String label = coords + ", " + lod + " at " + point;
+                        assertTrue(a.normal().epsilonEquals(b.normal(), .00001f), "Shared slope normal: " + label);
+                        assertEquals(a.kind(), b.kind(), label);
+                        assertEquals(a.level(), b.level(), .00001f, "Shared rock amount: " + label);
+                        assertEquals(a.rim(), b.rim(), .00001f, "Shared foot distance: " + label);
+                        assertEquals(a.foot(), b.foot(), .00001f, "Shared rim distance: " + label);
+                        assertEquals(a.tint(), b.tint(), .00001f, "Shared material tint: " + label);
+                        if (point.z > 0 && point.z < contact) { feet++; }
+                        else if (point.z < top && point.z > top - contact) { rims++; }
+                        else if (point.z >= contact && point.z <= top - contact) { middle++; }
+                    }
+                    assertTrue(feet > 0 && rims > 0 && middle > 0,
+                          "Exercise both contact bands and the steep middle at " + coords + ", " + lod);
+                }
+            }
+        } finally {
+            BoardRelief.tune(relief);
+            BoardGeometry.tune(geometry);
+        }
     }
 
     @Test

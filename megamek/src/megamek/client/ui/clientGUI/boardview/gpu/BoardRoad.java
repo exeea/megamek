@@ -78,6 +78,8 @@ final class BoardRoad {
     private static final float CORRIDOR = .55f;
     /** Centre-line dash and gap lengths; a road fits whole dashes between the borders it crosses. */
     private static final float DASH = 7, GAP = 6;
+    /** Stop bars sit outside the shared turning area, leaving one approach dash before the border. */
+    private static final float STOP_APPROACH = .72f;
     private final Coords coords;
     private final List<List<Point>> paths;
     /** Where the road crosses each border it leaves by: its dashes are anchored there, identically on both sides. */
@@ -644,6 +646,15 @@ final class BoardRoad {
                 for (int b = a + 1; b < ends.size(); b++) {
                     if (RailRoute.piece(sides.get(a), sides.get(b)) >= 3) {
                         paths.add(course(ends.get(a), ends.get(b)));
+                    } else if (Math.floorMod(sides.get(a) - sides.get(b), 6) == 1
+                          || Math.floorMod(sides.get(b) - sides.get(a), 6) == 1) {
+                        // Round the tight corners of a crossing too, without forcing its hex exits onto square axes.
+                        // These short turn envelopes share the same distance/clearance calculation as every road.
+                        Point from = scale(ends.get(a), .64f, kind.halfWidth);
+                        Point to = scale(ends.get(b), .64f, kind.halfWidth);
+                        List<Point> turn = new ArrayList<>(List.of(from));
+                        curve(turn, from, scale(from, 1f / 3, kind.halfWidth), scale(to, 1f / 3, kind.halfWidth), to);
+                        paths.add(turn);
                     }
                 }
             }
@@ -923,6 +934,59 @@ final class BoardRoad {
     /** The period nearest {@code period} that fits whole periods into {@code span}: road dashes, rail sleepers. */
     static float fit(float span, float period) { return span / Math.max(1, Math.round(span / period)); }
 
+    /**
+     * One junction approach in tile pixels. The axis at {@code x,y} points outwards along {@code nx,ny}; its incoming
+     * right-hand lane lies from {@code inner} to {@code outer} along {@code -ny,nx}. Roadside controls use the same
+     * position and face the outward normal, standing beyond {@code outer} on that side of the road.
+     */
+    record StopApproach(int direction, float x, float y, float nx, float ny, float inner, float outer) {
+        private End edge() { return new End(new Point(x, y, outer), nx, ny); }
+    }
+
+    /** Paved approaches of a three/four-way crossing, derived after its road/rail corridor has been fitted. */
+    List<StopApproach> stopApproaches(int exits) {
+        int count = Integer.bitCount(exits & 63);
+        if (count < 3 || count > 4) { return List.of(); }
+        List<StopApproach> result = new ArrayList<>();
+        int remaining = exits & 63;
+        for (var path : paintPaths()) {
+            int side = Integer.lowestOneBit(remaining);
+            remaining &= ~side;
+            int direction = Integer.numberOfTrailingZeros(side);
+            if (joins.stream().anyMatch(join -> join.direction() == direction && join.kind() != Kind.PAVED)) { continue; }
+            Vector2 axis = border(direction);
+            float stop = axis.len() * STOP_APPROACH;
+            axis.nor();
+            for (int i = 1; i < path.size(); i++) {
+                Point a = path.get(i - 1), b = path.get(i);
+                float from = a.x * axis.x + a.y * axis.y, to = b.x * axis.x + b.y * axis.y;
+                if (from > stop || to < stop || to - from < .001f) { continue; }
+                float t = (stop - from) / (to - from);
+                float dx = b.x - a.x, dy = b.y - a.y, length = (float) Math.hypot(dx, dy);
+                float width = a.width + t * (b.width - a.width);
+                float inner = (corridor.middle() & side) == 0 ? .7f : MEDIAN_HALF + .7f;
+                result.add(new StopApproach(direction, a.x + t * dx, a.y + t * dy, dx / length, dy / length,
+                      inner, Math.max(inner, width - .7f)));
+                break;
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    /** White transverse bars cover only the incoming lanes, leaving outgoing lanes and railway medians clear. */
+    Area stopLines(int exits) {
+        Area result = new Area();
+        for (var approach : stopApproaches(exits)) {
+            Path2D.Float bar = new Path2D.Float();
+            bar.moveTo(approach.x - approach.ny * approach.inner, approach.y + approach.nx * approach.inner);
+            bar.lineTo(approach.x - approach.ny * approach.outer, approach.y + approach.nx * approach.outer);
+            result.add(new Area(new BasicStroke(1.2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER).createStrokedShape(bar)));
+        }
+        result.intersect(footprint(-.4f));
+        result.subtract(medianAxis(MEDIAN_HALF + .1f));
+        return result;
+    }
+
     /** Short dashes stay out of junctions; their phase is anchored in board space along each approach. */
     Area markings(Coords coords, int exits) {
         Area area = new Area();
@@ -951,11 +1015,7 @@ final class BoardRoad {
         for (Join join : joins) {
             if (join.kind() != Kind.PAVED) { markedExits &= ~(1 << join.direction()); }
         }
-        int throughExits = 0;
-        for (int d = 0; d < 3; d++) {
-            int pair = (1 << d) | (1 << (d + 3));
-            if ((markedExits & pair) == pair) { throughExits |= pair; }
-        }
+        var stops = stopApproaches(exits);
         int remaining = exits;
         for (var points : paintPaths()) {
             int arm = Integer.lowestOneBit(remaining);
@@ -975,7 +1035,7 @@ final class BoardRoad {
             }
             // Every border a road crosses sits in the middle of a gap, seen from both of its hexes, and a road
             // between two borders fits whole dashes, so the centre line continues through turns and bridges alike.
-            // A junction's arm fits the period of the straight road through it, so a through route keeps its dashes.
+            // A junction's arm keeps that same period on its approach; the stop plane clears its conflict area.
             float span = anchors.size() > 1 ? anchors.getLast() - anchors.getFirst()
                   : anchors.isEmpty() ? 0 : 2 * anchors.getFirst();
             float period = span > 0 ? fit(span, DASH + GAP) : DASH + GAP;
@@ -983,8 +1043,10 @@ final class BoardRoad {
             float phase = ((dash + (period - dash) / 2 - anchor) % period + period) % period;
             Area paint = new Area(new BasicStroke(.8f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND,
                   10, new float[] { dash, period - dash }, phase).createStrokedShape(path));
-            if (junction && (throughExits & arm) == 0) {
-                paint.subtract(new Area(new Ellipse2D.Float(-12, -12, 24, 24)));
+            if (junction) {
+                int direction = Integer.numberOfTrailingZeros(arm);
+                stops.stream().filter(stop -> stop.direction() == direction).findFirst()
+                      .ifPresent(stop -> paint.intersect(stop.edge().band(1.4f, 128)));
             }
             area.add(paint);
         }

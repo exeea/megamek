@@ -270,12 +270,21 @@ public final class BoardFile {
             Map<String, HexAppearance> values = new LinkedHashMap<>();
             appearances.fields().forEachRemaining(field -> {
                 JsonNode style = field.getValue();
-                only(style, "variant", "asset", "material", "strength", "colours", "rotation", "tracks", "beside");
+                only(style, "variant", "asset", "material", "strength", "colours", "rotation", "tracks", "beside", "trafficControl");
+                var control = style.has("trafficControl") ? HexAppearance.TrafficControl.valueOf(
+                      string(style, "trafficControl", "").toUpperCase(java.util.Locale.ROOT)) : null;
+                if (control != null) {
+                    require(field.getKey().equals("road") || field.getKey().equals("bridgeRoad"), "Traffic controls belong to a road");
+                }
+                if (control == HexAppearance.TrafficControl.GANTRY && style.size() == 1) {
+                    // A previously explicit default-only choice normalizes to an absent road appearance.
+                    return;
+                }
                 HexAppearance value = new HexAppearance(string(style, "variant", null), string(style, "asset", null),
                       string(style, "material", null), style.has("strength") ? number(style, "strength", 0) : null,
                       colours(style), style.has("rotation") ? integer(style, "rotation", 0) : null,
                       style.has("tracks") ? integer(style, "tracks", 0) : null,
-                      style.has("beside") ? integer(style, "beside", 0) : null);
+                      style.has("beside") ? integer(style, "beside", 0) : null, control);
                 value.validateOwner(field.getKey());
                 values.put(field.getKey(), value);
             });
@@ -411,6 +420,7 @@ public final class BoardFile {
                 if (value.rotation() != null) { style.put("rotation", value.rotation()); }
                 if (value.tracks() != null) { style.put("tracks", value.tracks()); }
                 if (value.beside() != null) { style.put("beside", value.beside()); }
+                if (value.trafficControl() != null) { style.put("trafficControl", value.trafficControl().name().toLowerCase(java.util.Locale.ROOT)); }
                 putColours(style, value.colours());
             });
         }

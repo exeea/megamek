@@ -657,6 +657,7 @@ final class GpuTerrain implements Disposable {
             GpuLavaLighting.register(result);
             GpuAmbientOcclusion.register(result);
             GpuModelMaterial.register(result);
+            GpuTrafficSignal.register(result, () -> clock);
             GpuBuildingCutaway.register(result);
             GpuSurfaceScars.register(result);
             GpuLiquidShader.register(result);
@@ -4044,6 +4045,7 @@ final class GpuTerrain implements Disposable {
             // Its renderables carry the colours to the instance data and the shader (copy keeps them).
             if (placedObject) { instance.userData = RigidGlb.packed(feature.colours()); }
             for (Material material : instance.materials) {
+                GpuTrafficSignal.mark(feature.asset(), material);
                 if (building == null && material.id.equals("wall")) {
                     material.get(TextureAttribute.class, TextureAttribute.Diffuse).scaleV = feature.height();
                 }

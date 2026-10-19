@@ -3,16 +3,88 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.Configuration;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class BoardRiverTest {
+    @Test
+    void theConvertedBridgeBankRoundsItsThreeShoresWithoutAProjectingShelf() throws Exception {
+        var geometry = BoardGeometry.tuning();
+        var relief = BoardRelief.tuning();
+        try {
+            BoardGeometry.tune(BoardGeometry.DEFAULTS);
+            BoardRelief.tune(BoardRelief.DEFAULTS);
+            var board = BoardFile.loadSheet(new File(Configuration.boardsDir(),
+                  "GrassLands/16x17 Grasslands River CommCenter.board"), false, true);
+            Coords bridge = new Coords(7, 14), peninsula = new Coords(8, 15);
+            assertEquals(1, board.getHex(bridge).terrainLevel(Terrains.BRIDGE_ROAD),
+                  "Exercise the converted map that the game renders, including its connected paved bridge");
+            var scene = GpuLegacyImportSmokeTest.scene(board);
+            for (TerrainLod lod : TerrainLod.values()) {
+                Map<Coords, BoardSurface> surfaces = new HashMap<>();
+                for (Coords at : List.of(bridge, new Coords(7, 15), new Coords(8, 14), peninsula)) {
+                    var surface = new BoardSurface(scene, scene.tile(at), lod);
+                    surfaces.put(at, surface);
+                    for (var face : surface.faces) {
+                        if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+                        Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                        assertTrue(normal.z >= -.001f * normal.len(), "No folded bank top: " + at + ", " + lod);
+                    }
+                }
+                BoardSurface water = surfaces.get(bridge), land = surfaces.get(peninsula);
+                List<Vector3> bank = water.waterBoundary(5);
+                Vector3 first = bank.getFirst(), last = bank.getLast();
+                Vector3 along = new Vector3(last).sub(first).nor();
+                float previous = 0;
+                for (Vector3 point : bank) {
+                    float width = Intersector.distanceSegmentPoint(first.x, first.y, last.x, last.y, point.x, point.y);
+                    assertTrue(width < BoardRelief.metres(4),
+                          "The narrow bank stays near its two mouths instead of forming a long shelf: " + width);
+                    float progress = new Vector3(point).sub(first).dot(along);
+                    assertTrue(progress >= previous - .01f * BoardGeometry.hexScale(),
+                          "The shore advances around the bank without doubling back into a pointed tongue");
+                    previous = progress;
+                }
+                int count = BoardSurface.SHORE_SEGMENTS;
+                for (int edge : new int[] { 0, 4 }) {
+                    Coords neighbor = bridge.translated(BoardGeometry.edgeDirection(edge));
+                    BoardSurface across = surfaces.get(neighbor);
+                    int opposite = (edge + 3) % 6;
+                    for (int i = 0; i <= count; i++) {
+                        Vector3 a = water.outline.get((edge * count + i) % (6 * count));
+                        Vector3 b = across.outline.get(((opposite + 1) * count - i) % (6 * count));
+                        assertTrue(a.epsilonEquals(b, .002f), "The three shores retain their exact shared mouths");
+                    }
+                }
+                for (Coords at : List.of(bridge, new Coords(7, 15), new Coords(8, 14))) {
+                    BoardSurface shore = surfaces.get(at);
+                    int edge = Math.floorMod(1 - at.direction(peninsula), 6), opposite = (edge + 3) % 6;
+                    for (float t : new float[] { .25f, .5f, .75f }) {
+                        for (float z : new float[] { 0, BoardGeometry.level() / 2, BoardGeometry.level() }) {
+                            assertTrue(shore.relief.roadPoint(edge, t, z)
+                                  .epsilonEquals(land.relief.roadPoint(opposite, 1 - t, z), .002f),
+                                  "The water-owned bank and the raised land share the same wall");
+                        }
+                    }
+                }
+            }
+        } finally {
+            BoardRelief.tune(relief);
+            BoardGeometry.tune(geometry);
+        }
+    }
+
     @Test
     void concreteAcrossANarrowChannelCannotPullTheOppositeBankIntoWater() {
         var original = BoardRelief.tuning();

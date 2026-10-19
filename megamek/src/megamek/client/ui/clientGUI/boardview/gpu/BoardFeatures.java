@@ -12,10 +12,13 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 import megamek.common.Hex;
+import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BoardTreeDistribution;
+import megamek.common.board.BridgeSpan;
 import megamek.common.board.Coords;
 import megamek.common.board.HexTile;
+import megamek.common.board.HexAppearance;
 import megamek.common.board.RailRoute;
 import megamek.common.board.TilesetScenery;
 import megamek.common.units.Terrains;
@@ -180,6 +183,7 @@ final class BoardFeatures {
         if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) {
             // A chasm keeps its placed objects and a bridge across it, whose deck stands on the hex's own level.
             List<BoardScene.Feature> chasm = new ArrayList<>(decorations(hex, coords, board));
+            chasm.addAll(roadControls(hex, coords, board, false));
             addBridge(hex, chasm);
             return List.copyOf(chasm);
         }
@@ -305,7 +309,121 @@ final class BoardFeatures {
         rough(hex, coords, result, board);
         BoardScatter.capture(hex, coords, result);
         result.addAll(decorations(hex, coords, board));
+        result.addAll(roadControls(hex, coords, board, detailedGround(hex, structureModels, blankTerrains, scenery)));
         return List.copyOf(result);
+    }
+
+    /** Road-owned GLBs share the stop bars' approach frame and the normal ground/deck support path. */
+    static List<BoardScene.Feature> roadControls(Hex hex, Coords coords, Function<Coords, Hex> board,
+          boolean groundVisible) {
+        List<BoardScene.Feature> result = new ArrayList<>();
+        for (boolean deck : new boolean[] { false, true }) {
+            if (deck ? !hex.containsTerrain(Terrains.BRIDGE)
+                  : !groundVisible || HexTile.liquid(hex) || hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { continue; }
+            BoardRoad.Kind kind = deck ? BoardRoad.deck(hex) : BoardRoad.capture(hex);
+            if (kind != BoardRoad.Kind.PAVED) { continue; }
+            int exits = hex.getTerrain(deck ? Terrains.BRIDGE_ROAD : Terrains.ROAD).getExits() & 63;
+            if (deck) { exits &= hex.getTerrain(Terrains.BRIDGE).getExits(); }
+            int count = Integer.bitCount(exits);
+            if (count < 3 || count > 4) { continue; }
+            var road = BoardRoad.layout(coords, exits, kind,
+                  direction -> roadNeighbor(hex, board.apply(coords.translated(direction)), direction, deck))
+                  .corridor(RailRoute.corridor(hex, coords, board, deck));
+            String owner = deck ? "bridgeRoad" : "road";
+            var control = HexAppearance.trafficControl(hex.getAppearance(), owner);
+            for (var approach : road.stopApproaches(exits)) {
+                // Other turning envelopes can widen this approach beyond its own lane. Follow the whole asphalt
+                // edge along the stop plane, keeping the narrow base on its shoulder. Front is model +Y.
+                float offset = approach.outer() + .7f;
+                while (road.distance(approach.x() - approach.ny() * offset,
+                      approach.y() + approach.nx() * offset) < .5f) { offset += .25f; }
+                String asset = control == HexAppearance.TrafficControl.STOPS ? "scenery/road/stop-sign" : "scenery/road/traffic-signal";
+                BoardDecoration.Stretch stretch = BoardDecoration.Stretch.NONE;
+                if (control == HexAppearance.TrafficControl.GANTRY) {
+                    var gantry = gantry(road, approach, offset);
+                    if (gantry != null) {
+                        offset = gantry.offset();
+                        stretch = new BoardDecoration.Stretch(gantry.stretch(), 1, 1);
+                        asset = "scenery/road/traffic-signal-gantry";
+                    }
+                }
+                float x = approach.x() - approach.ny() * offset;
+                float y = approach.y() + approach.nx() * offset;
+                // A crowded offset rail junction may have no shoulder before the hex ends. Keep the half-pixel
+                // base inside this support instead of planting a pole on an uncaptured neighbour or beyond a deck.
+                if (!HexTile.contains(0, 0, HexTile.WIDTH / 2f + Math.abs(x) + .5f,
+                      -HexTile.HEIGHT / 2f + Math.abs(y) + .5f, HexTile.WIDTH, HexTile.HEIGHT)) { continue; }
+                double rotation = Math.toDegrees(Math.atan2(-approach.nx(), approach.ny()));
+                String id = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":" + owner + ":stop:" + approach.direction();
+                result.add(feature(hex, new BoardDecoration(id, "prop", asset, null,
+                      x / HexTile.WIDTH, y / HexTile.HEIGHT, rotation, false, 1,
+                      BoardDecoration.Placement.on(deck ? "bridge" : "ground", 0), 0, false, 0, 0, null, false, 0, stretch)));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private record Gantry(float offset, float stretch) { }
+
+    /** Native dimensions first; modest X fitting changes reach without changing vertical vehicle clearance. */
+    private static Gantry gantry(BoardRoad road, BoardRoad.StopApproach approach, float roadside) {
+        // The authored GLB: heads 1.2m and 2.4m from the mast, .5m wide; square footing .42m, at 2.8 model px/m.
+        float near = 3.36f, far = 6.72f, lamp = .7f, foot = .588f;
+        for (boolean nativeSize : new boolean[] { true, false }) {
+            for (int step = 0; step <= 12; step++) {
+                float offset = roadside + step * .125f;
+                float minimum = Math.max(.85f, (offset - approach.outer()) / (near - lamp));
+                float maximum = Math.min(1.25f, (offset - approach.inner()) / (far + lamp));
+                if (minimum > maximum) { continue; }
+                float stretch = nativeSize ? 1 : Math.clamp(1, minimum, maximum);
+                if (stretch < minimum || stretch > maximum) { continue; }
+                boolean supported = true;
+                for (int side : new int[] { -1, 1 }) {
+                    for (int along : new int[] { -1, 1 }) {
+                        float across = offset + side * foot * stretch;
+                        float x = approach.x() - approach.ny() * across + approach.nx() * along * foot;
+                        float y = approach.y() + approach.nx() * across + approach.ny() * along * foot;
+                        float clearance = road.distance(x, y);
+                        supported &= clearance >= .02f && clearance <= BoardRoad.SHOULDER - .02f
+                              && HexTile.contains(0, 0, x + HexTile.WIDTH / 2f, y - HexTile.HEIGHT / 2f,
+                                    HexTile.WIDTH, HexTile.HEIGHT);
+                    }
+                }
+                if (supported) { return new Gantry(offset, stretch); }
+            }
+        }
+        // A crowded/offset rail apron may not support the broad footing or both heads over its incoming lane.
+        return null;
+    }
+
+    /** Capture the same joined road layer that BoardRoad.of and BoardBridge.deck use for the rendered paint. */
+    private static BoardRoad.Kind roadNeighbor(Hex hex, Hex next, int direction, boolean deck) {
+        if (next == null) { return BoardRoad.Kind.NONE; }
+        int reverse = (direction + 3) % 6;
+        if (deck) {
+            if (next.containsTerrain(Terrains.BRIDGE) && BridgeSpan.joined(hex.getTerrain(Terrains.BRIDGE).getExits(),
+                  BridgeSpan.deck(hex), next.getTerrain(Terrains.BRIDGE).getExits(), BridgeSpan.deck(next), direction)) {
+                return next.containsTerrainExit(Terrains.BRIDGE_ROAD, reverse) ? BoardRoad.deck(next) : BoardRoad.Kind.NONE;
+            }
+            return bridgeApproach(next, hex, reverse) ? BoardRoad.capture(next) : BoardRoad.Kind.NONE;
+        }
+        if (bridgeApproach(hex, next, direction)) {
+            return next.containsTerrainExit(Terrains.BRIDGE_ROAD, reverse) ? BoardRoad.deck(next) : BoardRoad.Kind.NONE;
+        }
+        return next.containsTerrainExit(Terrains.ROAD, reverse) ? BoardRoad.capture(next) : BoardRoad.Kind.NONE;
+    }
+
+    /** The road and deck must expose matching sides before their shared layer-choice predicate applies. */
+    private static boolean bridgeApproach(Hex road, Hex bridge, int direction) {
+        int reverse = (direction + 3) % 6;
+        if (HexTile.liquid(road) || !bridge.containsTerrainExit(Terrains.BRIDGE, reverse)
+              || (groundWays(road) & (1 << direction)) == 0) { return false; }
+        boolean continuation = !HexTile.liquid(bridge) && (groundWays(bridge) & (1 << reverse)) != 0;
+        return HexTile.bridgeApproach(road.getLevel(), bridge.getLevel(), BridgeSpan.deck(bridge), continuation);
+    }
+
+    private static int groundWays(Hex hex) {
+        return (hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() : 0) | RailRoute.groundSides(hex);
     }
 
     /**

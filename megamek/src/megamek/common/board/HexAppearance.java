@@ -13,9 +13,12 @@ import java.util.Set;
  * where it differs from the default of its sides ({@link RailRoute#pieces(int)}): owners {@code "rail"} (the ground
  * rail) and {@code "bridgeRail"} (the deck rail) only, made by {@link #tracks(int)}. {@code beside} chooses the beside-road
  * corridor and its physical side at each border ({@link #beside(Map, String)}); the middle corridor stores none.
+ * {@code trafficControl} chooses the cosmetic junction controls for {@code "road"} or {@code "bridgeRoad"}; gantries
+ * are the default and store none.
  */
 public record HexAppearance(String variant, String asset, String material, Double strength,
-      BoardDecoration.Colours colours, Integer rotation, Integer tracks, Integer beside) implements Serializable {
+      BoardDecoration.Colours colours, Integer rotation, Integer tracks, Integer beside,
+      TrafficControl trafficControl) implements Serializable {
     public static final Set<String> OWNERS = Set.of("ground", "road", "building", "pavement", "fuelTank",
           "vegetation", "rough", "bridge", "bridgeRoad", "rail", "bridgeRail", "scorch");
     /**
@@ -48,6 +51,29 @@ public record HexAppearance(String variant, String asset, String material, Doubl
      * through objects; {@link #HEX}: plain hex steps.
      */
     public enum Edges { AUTO, FITTED, HEX }
+
+    /** Cosmetic junction controls: stop signs, roadside lights, or overhead lights on a metal gantry. */
+    public enum TrafficControl { STOPS, SIGNALS, GANTRY }
+
+    /** The road layer's junction controls; absent choices use stop lines and overhead traffic lights. */
+    public static TrafficControl trafficControl(Map<String, HexAppearance> appearance, String owner) {
+        HexAppearance stored = appearance.get(owner);
+        return stored == null || stored.trafficControl() == null ? TrafficControl.GANTRY : stored.trafficControl();
+    }
+
+    /** Changes only the junction controls, keeping the road's surface and shape. Default controls store nothing. */
+    public static HexAppearance withTrafficControl(HexAppearance current, TrafficControl control) {
+        control = control == null ? TrafficControl.GANTRY : control;
+        if (current == null) {
+            return control == TrafficControl.GANTRY ? null : new HexAppearance(null, null, null, null,
+                  BoardDecoration.Colours.NONE, null, null, null, control);
+        }
+        if (control == TrafficControl.GANTRY && current.variant() == null && current.asset() == null && current.material() == null) {
+            return null;
+        }
+        return new HexAppearance(current.variant(), current.asset(), current.material(), current.strength(),
+              current.colours(), current.rotation(), current.tracks(), current.beside(), control);
+    }
 
     public static final HexAppearance EDGES_FITTED = new HexAppearance("pavement/fitted", null, null, null);
     public static final HexAppearance EDGES_HEX = new HexAppearance("pavement/hex", null, null, null);
@@ -116,6 +142,12 @@ public record HexAppearance(String variant, String asset, String material, Doubl
         this(variant, asset, material, strength, colours, rotation, tracks, null);
     }
 
+    /** An appearance with the default road junction controls. */
+    public HexAppearance(String variant, String asset, String material, Double strength, BoardDecoration.Colours colours,
+          Integer rotation, Integer tracks, Integer beside) {
+        this(variant, asset, material, strength, colours, rotation, tracks, beside, null);
+    }
+
     /** The rail appearance that stores the junction layout {@code tracks}; null (none) for the default layout, 0. */
     public static HexAppearance tracks(int tracks) {
         return rail(tracks, 0);
@@ -181,11 +213,15 @@ public record HexAppearance(String variant, String asset, String material, Doubl
 
     public HexAppearance {
         colours = colours == null ? BoardDecoration.Colours.NONE : colours;
+        // Java serialization may contain a control-only gantry from before it became the default.
+        if (trafficControl == TrafficControl.GANTRY && (variant != null || asset != null || material != null)) {
+            trafficControl = null;
+        }
         if (!colours.slots().isEmpty() && !"bridge/truss".equals(variant) && !"bridge/truss-pillars".equals(variant)) {
             throw new IllegalArgumentException("Only a truss bridge stores colours");
         }
-        if (variant == null && asset == null && material == null) {
-            throw new IllegalArgumentException("An appearance needs a variant, asset or material");
+        if (variant == null && asset == null && material == null && trafficControl == null) {
+            throw new IllegalArgumentException("An appearance needs a variant, asset, material or traffic controls");
         }
         for (String key : new String[] { variant, asset, material }) {
             if (key != null && (key.isBlank() || key.contains("..") || key.startsWith("/") || key.contains("\\") || key.contains(":"))) {
@@ -215,6 +251,7 @@ public record HexAppearance(String variant, String asset, String material, Doubl
         if (!OWNERS.contains(owner) || asset != null && !owner.equals("building")
               || material != null && !owner.equals("road") && !owner.equals("bridgeRoad") || strength != null && !owner.equals("ground")
               || !colours.slots().isEmpty() && !owner.equals("bridge") || rotation != null && !owner.equals("vegetation")
+              || trafficControl != null && !owner.equals("road") && !owner.equals("bridgeRoad")
               || (tracks != null || beside != null) && !owner.equals("rail") && !owner.equals("bridgeRail")) {
             throw new IllegalArgumentException("Appearance fields do not belong to " + owner);
         }

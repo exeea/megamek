@@ -25,6 +25,29 @@ class WayLayerEditorTest {
     @TempDir Path directory;
     private static final Coords CENTRE = new Coords(4, 4);
 
+    @Test void roadBrushControlsFollowGroundAndDeckAndAnExplicitLayerMove() {
+        var session = new BoardEditorSession();
+        session.board().setHex(CENTRE, new Hex(0, "water:2", ""));
+        road(session);
+        send(session, Action.BRUSH_VALUE, "trafficControl", "signals");
+        stroke(session, CENTRE.translated(0), CENTRE, CENTRE.translated(3));
+        assertEquals(HexAppearance.TrafficControl.SIGNALS,
+              HexAppearance.trafficControl(session.board().getHex(CENTRE).getAppearance(), "bridgeRoad"));
+        assertEquals(HexAppearance.TrafficControl.SIGNALS,
+              HexAppearance.trafficControl(session.board().getHex(CENTRE.translated(0)).getAppearance(), "road"));
+        inspect(session, CENTRE);
+        send(session, Action.WAY_LAYER, "bridge_road", "ground");
+        assertEquals(HexAppearance.TrafficControl.SIGNALS,
+              HexAppearance.trafficControl(session.board().getHex(CENTRE).getAppearance(), "road"));
+        send(session, Action.UNDO, "", "");
+        send(session, Action.TRAFFIC_CONTROL, "bridgeRoad", "stops");
+        assertEquals(HexAppearance.TrafficControl.STOPS,
+              HexAppearance.trafficControl(session.board().getHex(CENTRE).getAppearance(), "bridgeRoad"));
+        assertEquals(HexAppearance.TrafficControl.SIGNALS,
+              HexAppearance.trafficControl(session.board().getHex(CENTRE.translated(0)).getAppearance(), "road"),
+              "Editing a deck's controls does not change the ground road's controls");
+    }
+
     @Test void roadAcrossWaterUsesAnImplicitDeckAndReturnsToDryGround() throws Exception {
         var session = new BoardEditorSession();
         session.board().setHex(CENTRE, new Hex(0, "water:2;ice:1", ""));
@@ -36,10 +59,12 @@ class WayLayerEditorTest {
         assertEquals(9, water.getTerrain(Terrains.BRIDGE).getExits());
         assertEquals(9, water.getTerrain(Terrains.BRIDGE_ROAD).getExits());
         assertFalse(water.containsTerrain(Terrains.ROAD));
+        assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(water.getAppearance(), "bridgeRoad"));
         for (int side : new int[] { 0, 3 }) {
             Hex bank = session.board().getHex(CENTRE.translated(side));
             assertTrue(bank.containsTerrain(Terrains.ROAD));
             assertFalse(bank.hasBridge());
+            assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(bank.getAppearance(), "road"));
         }
         Path file = directory.resolve("crossing.board2");
         session.save(file);

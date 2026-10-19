@@ -324,6 +324,10 @@ final class GpuRoads {
         }
         if (kind == BoardRoad.Kind.PAVED) {
             patches.add(markings(road, coords, exits));
+            Area stops = road.stopLines(exits);
+            if (!stops.isEmpty()) {
+                patches.add(new Patch(stops, "concrete", new Color(.96f, .96f, .92f, 1), 1.5f, .065f, null));
+            }
             Area median = road.medianLines();
             if (!median.isEmpty()) {
                 patches.add(new Patch(median, "concrete", new Color(.95f, .78f, .25f, 1), 1.5f, .065f, null));

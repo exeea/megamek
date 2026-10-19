@@ -1214,6 +1214,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                   chosen -> send(Action.BRUSH_VALUE, "edges", chosen));
             row.setName("editor-brush-edges"); controls.add(row);
         }
+        if (brush.sampledHex() == null && definition.id().equals("road")) {
+            controls.add(trafficControlChoice(brush.appearance(), "road",
+                  chosen -> send(Action.BRUSH_VALUE, "trafficControl", chosen)));
+        }
         var zone = zoneBrush(brush);
         if (zone != null) { controls.add(zoneNumber(zone)); }
         controls.add(clearOnly(brush));
@@ -1628,6 +1632,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         } else if (appearance.hasChildren()) { detail.add(appearance).row(); }
         for (var field : definition.fields()) { if (!field.optional() || snapshot.property(field.terrain()) != null) { field(field); } }
         if (definition.id().equals("pavement")) { pavementEdges(); }
+        if (definition.id().equals("road")) { trafficControl("road"); }
         if (definition.id().equals("scorch")) {
             detail.add(scorchSeverity(snapshot.appearance(), chosen -> send(Action.VARIANT, "scorch", chosen))).growX().row();
         }
@@ -1732,12 +1737,34 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         return "BoardEditor.edges" + name.charAt(0) + name.substring(1).toLowerCase(Locale.ROOT);
     }
 
+    private Table trafficControlChoice(Map<String, megamek.common.board.HexAppearance> appearance, String owner,
+          Consumer<String> choose) {
+        var current = megamek.common.board.HexAppearance.trafficControl(appearance, owner);
+        List<Option> options = List.of(new Option(UiKit.text("BoardEditor.trafficStops"), "stops"),
+              new Option(UiKit.text("BoardEditor.trafficSignals"), "signals"),
+              new Option(UiKit.text("BoardEditor.trafficGantry"), "gantry"));
+        String label = switch (current) {
+            case STOPS -> "BoardEditor.trafficStops";
+            case SIGNALS -> "BoardEditor.trafficSignals";
+            case GANTRY -> "BoardEditor.trafficGantry";
+        };
+        Table row = choice(UiKit.text("BoardEditor.trafficControl"), UiKit.text(label), options, choose);
+        row.setName("editor-traffic-control-" + owner);
+        return row;
+    }
+
+    private void trafficControl(String owner) {
+        detail.add(trafficControlChoice(snapshot.appearance(), owner,
+              chosen -> send(Action.TRAFFIC_CONTROL, owner, chosen))).growX().row();
+    }
+
     private void wayRow(String terrain, boolean deck) {
         var owner = blueprint.component(terrain.equals("road") ? "road" : "ways");
         var field = owner.fields().stream().filter(item -> item.terrain().equals(terrain)).findFirst().orElseThrow();
         if (snapshot.property(terrain) == null) { text(field.label() + " · " + UiKit.text("BoardEditor.none")); return; }
         field(field);
         if (snapshot.property("bridge") != null) { wayLayerButtons(terrain, deck); }
+        if (terrain.equals("road") || terrain.equals("bridge_road")) { trafficControl(deck ? "bridgeRoad" : "road"); }
         if (terrain.equals("rail") || terrain.equals("bridge_rail")) {
             var rail = snapshot.property(terrain);
             var kind = rail.value() == 2 ? RailRoute.Kind.MAGLEV : RailRoute.Kind.RAIL;

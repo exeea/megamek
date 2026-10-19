@@ -52,6 +52,8 @@ final class GpuGroundCover implements Disposable {
     static final float MAX_HEIGHT_FRACTION = .07f;
     /** Metres frozen land's jagged border reaches past its hex edge at most: the shard offset, lean and splinters. */
     private static final float ICE_BORDER_REACH = 5.2f;
+    /** Land-side metres over which standing grass thins to the bare bank. */
+    private static final float SHORE_FADE_METRES = 3;
 
     /** Whether a hex grows grass: natural grass ground, or its neighbour within a level of a grass hex. */
     static boolean grows(BoardScene scene, BoardScene.Tile tile) {
@@ -96,6 +98,7 @@ final class GpuGroundCover implements Disposable {
         float sink = BoardGeometry.width() * .001f;
         // Frozen land's jagged border reaches across a shared edge (terrain-ice.glsl); no blade grows through it.
         List<Vector3[]> iceEdges = new ArrayList<>();
+        List<Vector3[]> shoreEdges = new ArrayList<>();
         for (int edge = 0; edge < 6; edge++) {
             var neighbor = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
             if (neighbor != null && neighbor.frozen() && !neighbor.liquid().present()
@@ -103,8 +106,14 @@ final class GpuGroundCover implements Disposable {
                 iceEdges.add(new Vector3[] { BoardGeometry.corner(tile.coords(), 0, edge),
                       BoardGeometry.corner(tile.coords(), 0, edge + 1) });
             }
+            if (neighbor != null && neighbor.liquid().present() && !neighbor.liquid().volcanic() && !neighbor.frozen()
+                  && neighbor.elevation() == tile.elevation()) {
+                shoreEdges.add(new Vector3[] { BoardGeometry.corner(tile.coords(), 0, edge),
+                      BoardGeometry.corner(tile.coords(), 0, edge + 1) });
+            }
         }
         float iceReach = BoardRelief.metres(ICE_BORDER_REACH);
+        float shoreReach = BoardRelief.metres(SHORE_FADE_METRES);
         var obstacles = new BoardObstacles(scene, tile);
         var cover = new BoardSurfaceBlend.Sampler(scene, tile);
         var root = new Vector3();
@@ -137,7 +146,17 @@ final class GpuGroundCover implements Disposable {
                   : tile.surface() == BoardScene.Surface.GRASS ? 1 : 0;
             if (tundraEdge) { grass *= 1 - BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, x, y, z); }
             if (paint != null && grass > 0) { grass *= 1 - paint.at(x, y); }
-            if (chance <= grass * BoardRelief.smooth((grass - .55f) / .35f)) {
+            float growth = grass * BoardRelief.smooth((grass - .55f) / .35f);
+            if (chance > growth) { continue; }
+            if (!shoreEdges.isEmpty()) {
+                float distance = shoreReach;
+                for (Vector3[] edge : shoreEdges) {
+                    distance = Math.min(distance, BoardRelief.distance(x, y, edge[0].x, edge[0].y, edge[1].x, edge[1].y));
+                }
+                // Thin the accepted roots, not the cover input: its grass threshold would turn this fade into a cut.
+                growth *= BoardRelief.smooth(distance / shoreReach);
+            }
+            if (chance <= growth) {
                 roots.addAll(x, y, z - sink, rank);
             }
         }

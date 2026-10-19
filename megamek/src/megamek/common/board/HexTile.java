@@ -103,6 +103,16 @@ public final class HexTile {
         return (exit && continuation) || ((exit || continuation) && levels <= 2);
     }
 
+    /**
+     * Which connected layer a dry road approaches: a level ground continuation wins; otherwise a level deck wins
+     * over sloping ground, and a deck within one level is the fallback where no ground carriageway continues.
+     * Callers first check the road and bridge exits; the capture and renderer share this layer choice.
+     */
+    public static boolean bridgeApproach(int roadLevel, int groundLevel, float deckLevel, boolean continuation) {
+        return Math.abs(deckLevel - roadLevel) <= 1
+              && (!continuation || roadLevel != groundLevel && deckLevel == roadLevel);
+    }
+
     /** Whether the 3D board draws the hex's road: a paved, alley, dirt or gravel ROAD. */
     public static boolean road(Hex hex) {
         if (!hex.containsTerrain(Terrains.ROAD)) { return false; }

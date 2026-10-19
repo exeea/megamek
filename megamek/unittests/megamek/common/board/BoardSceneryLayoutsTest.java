@@ -30,6 +30,31 @@ import org.junit.jupiter.api.io.TempDir;
  * board exactly as a desktop client does.
  */
 class BoardSceneryLayoutsTest {
+    @Test void legacyCrossingsInheritOverheadSignalsAndNativeChoicesArePreserved() throws Exception {
+        Board board = Board.createEmptyBoard(3, 1);
+        put(board, new Coords(0, 0), "road:1:27");
+        put(board, new Coords(1, 0), "road:1:11");
+        put(board, new Coords(2, 0), "road:1:9");
+        board.getHex(0, 0).setAppearance(Map.of("road", new HexAppearance("road/rounded", null, "asphalt", null)));
+        BoardSceneryLayouts.convert(board);
+        assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(board.getHex(0, 0).getAppearance(), "road"));
+        assertEquals("road/rounded", board.getHex(0, 0).getAppearance().get("road").variant());
+        assertEquals("asphalt", board.getHex(0, 0).getAppearance().get("road").material());
+        assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(board.getHex(1, 0).getAppearance(), "road"));
+        assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(board.getHex(2, 0).getAppearance(), "road"));
+        String converted = text(board);
+        assertFalse(converted.contains("trafficControl"), "Legacy roads inherit the same default as authored roads");
+        BoardSceneryLayouts.convert(board);
+        assertEquals(converted, text(board));
+        var road = board.getHex(0, 0).getAppearance().get("road");
+        board.getHex(0, 0).setAppearance(Map.of("road", HexAppearance.withTrafficControl(road, HexAppearance.TrafficControl.STOPS)));
+        board.getHex(1, 0).setAppearance(Map.of("road", HexAppearance.withTrafficControl(null, HexAppearance.TrafficControl.SIGNALS)));
+        BoardSceneryLayouts.convert(board);
+        assertEquals(HexAppearance.TrafficControl.STOPS, HexAppearance.trafficControl(board.getHex(0, 0).getAppearance(), "road"),
+              "Reopening an authored native crossing never turns its lights back on");
+        assertEquals(HexAppearance.TrafficControl.SIGNALS, HexAppearance.trafficControl(board.getHex(1, 0).getAppearance(), "road"));
+    }
+
     private static final Coords PICNIC = new Coords(0, 0), BRIDGE = new Coords(2, 0), PLAIN_BRIDGE = new Coords(7, 0),
           CAR_PARK = new Coords(1, 2), SECOND_PICNIC = new Coords(6, 2);
 
@@ -70,6 +95,12 @@ class BoardSceneryLayoutsTest {
                 Hex before = loaded.getHex(x, y), after = board.getHex(x, y);
                 for (int type : before.getTerrainTypes()) {
                     Terrain was = before.getTerrain(type), is = after.getTerrain(type);
+                    if (type == Terrains.FLUFF && was.getLevel() == 9 && was.getExits() < 3) {
+                        // Maglev tracks are now rule terrain; their old art token and route object are removed.
+                        assertFalse(after.containsTerrain(Terrains.FLUFF));
+                        assertTrue(RailRoute.find(after, RailRoute.Kind.MAGLEV) != null);
+                        continue;
+                    }
                     assertTrue(is != null && is.getLevel() == was.getLevel() && is.getExits() == was.getExits(),
                           x + "," + y + " keeps " + was);
                 }
@@ -184,8 +215,7 @@ class BoardSceneryLayoutsTest {
     }
 
     /**
-     * A hex changes exactly when one of its layers is marked taken: the predicate the 3D board will use to skip the art
-     * that the conversion turned into objects.
+     * A taken layer is represented by its objects, bridge type or maglev terrain, so the 3D board skips its old art.
      */
     @Test
     void theConversionChangesExactlyTheHexesWithATakenLayer() {
@@ -197,7 +227,8 @@ class BoardSceneryLayoutsTest {
                 boolean any = TilesetScenery.resolve(loaded.getHex(x, y), false).layers().stream()
                       .anyMatch(TilesetScenery.Layer::taken);
                 Hex hex = board.getHex(x, y);
-                assertEquals(any, !hex.getDecorations().isEmpty() || HexAppearance.pillars(hex.getAppearance()),
+                assertEquals(any, !hex.getDecorations().isEmpty() || HexAppearance.pillars(hex.getAppearance())
+                            || RailRoute.find(hex, RailRoute.Kind.MAGLEV) != null,
                       x + "," + y);
                 if (any) { taken++; }
             }

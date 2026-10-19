@@ -710,13 +710,10 @@ final class BoardSurface {
         }
         int reverse = (direction + 3) % 6;
         boolean continuation = !bridge.liquid().present() && (bridge.wayExits() & (1 << reverse)) != 0;
-        if (continuation && road.elevation() == bridge.elevation()) {
-            return null;
-        }
         // A level deck wins over a sloped ground road; a sloped deck is the last connected-road fallback.
         return bridge.features().stream().filter(feature -> feature.asset().equals("bridge")
-              && Math.abs(bridge.elevation() + feature.elevation() - road.elevation()) <= 1
-              && (!continuation || bridge.elevation() + feature.elevation() == road.elevation())
+              && HexTile.bridgeApproach(road.elevation(), bridge.elevation(), bridge.elevation() + feature.elevation(),
+                    continuation)
               && (feature.bridgeExits() & (1 << reverse)) != 0).findFirst().orElse(null);
     }
 
@@ -1998,8 +1995,10 @@ final class BoardSurface {
                 float rawRadius = radius(trace[i]);
                 // Meet a mouth with the same tangent from both hexes. Correcting only its radius misses cases where
                 // the raw trace follows the hex edge past the fixed opening, then doubles back into a pointed bank.
-                float fromCorrection = fromNormal == null ? fromOffset : bankJoin(from, fromNormal, limit, rawRadius);
-                float toCorrection = toNormal == null ? toOffset : bankJoin(to, toNormal, limit, rawRadius);
+                float fromCorrection = fromNormal == null ? fromOffset
+                      : bankJoin(from, fromNormal, limit, rawRadius, fromOffset);
+                float toCorrection = toNormal == null ? toOffset
+                      : bankJoin(to, toNormal, limit, rawRadius, toOffset);
                 float outerRadius = radius(limit);
                 if (fromCliff || toCliff) {
                     // A fixed wall endpoint must not push the natural shore onto the straight hex edge or beneath
@@ -2033,12 +2032,19 @@ final class BoardSurface {
         return new Vector3(shoreCorners[(edge + 1) % 6]).sub(shoreCorners[edge]);
     }
 
-    /** Radial correction onto the tangent through an end, preserving the bed's non-crossing radial rings. */
-    private float bankJoin(Vector3 end, Vector3 normal, Vector3 limit, float rawRadius) {
+    /** A local tangent blend at a mouth, preserving the bed's non-crossing radial rings. */
+    private float bankJoin(Vector3 end, Vector3 normal, Vector3 limit, float rawRadius, float offset) {
         float denominator = (limit.x - center.x) * normal.x + (limit.y - center.y) * normal.y;
         float numerator = (end.x - center.x) * normal.x + (end.y - center.y) * normal.y;
-        if (Math.abs(denominator) < 1e-6f || numerator * denominator <= 0) { return 0; }
-        return radius(limit) * numerator / denominator - rawRadius;
+        if (Math.abs(denominator) < 1e-6f || numerator * denominator <= 0) { return offset; }
+        float correction = radius(limit) * numerator / denominator - rawRadius;
+        float bend = correction - offset;
+        float width = SHORE_BANK * BoardGeometry.hexScale();
+        // Keep ordinary mouth curves intact, but limit an infinite tangent that would pull the bank into the channel.
+        // The excess bends smoothly toward one more bank width, without clipping the shared endpoint tangent.
+        float excess = Math.abs(bend) - 2 * width;
+        if (excess <= 0) { return correction; }
+        return offset + Math.copySign(2 * width + width * (excess / (width + excess)), bend);
     }
 
     private float radius(Vector3 point) {

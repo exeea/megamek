@@ -286,7 +286,7 @@ public final class BoardSceneryLayouts {
 
     /**
      * {@code appearance} with each design of {@code designs} ({@link #designs}) whose owner has none: an owner's design,
-     * such as a user's pick, wins over its token. A road design keeps the road's finish.
+     * such as a user's pick, wins over its token. A road design keeps the road's finish and junction controls.
      */
     private static Map<String, HexAppearance> designed(Map<String, HexAppearance> appearance,
           Map<Integer, Map<String, HexAppearance>> designs) {
@@ -296,7 +296,8 @@ public final class BoardSceneryLayouts {
                 HexAppearance current = result.get(owner);
                 if (current == null) { result.put(owner, design); }
                 else if (current.variant() == null && current.asset() == null) {
-                    result.put(owner, new HexAppearance(design.variant(), null, current.material(), design.strength()));
+                    result.put(owner, HexAppearance.withTrafficControl(
+                          new HexAppearance(design.variant(), null, current.material(), design.strength()), current.trafficControl()));
                 }
             });
         }
@@ -390,7 +391,7 @@ public final class BoardSceneryLayouts {
      * ({@link #maglevPillars}) and a rail bridge carries its rail across its span ({@link #carryRails}), a crane tip that a
      * converted crane's boom reaches places nothing ({@link #reachedTips}), minor objects step clear of the fitted
      * concrete walls ({@link #clearOfConcreteWalls}), and, once the bridges are typed, every deck gets the road the 3D
-     * board drew on it ({@link #deckRoads}). A token that a hex
+     * board drew on it ({@link #deckRoads}). Road junctions inherit the default overhead traffic lights. A token that a hex
      * design draws gets that design ({@link #design}): seaport container yards and cranes on woods become the woods'
      * container yard look at their rotation (a skin, {@link #skin}). A hex that already holds a twin of every object its art
      * decodes to ({@link BoardDecoration#twin}: a token typed again in the editor) gets none of them. A legacy board's
@@ -1249,10 +1250,11 @@ public final class BoardSceneryLayouts {
             if (String.valueOf(before.getTerrain(token)).equals(String.valueOf(hex.getTerrain(token)))) { return; }
             owners.forEach((owner, design) -> {
                 HexAppearance current = appearance.get(owner);
-                // A road design keeps the road's finish (designed): the design is its variant.
+                // A road design keeps the road's finish and controls (designed): the design is its variant.
                 if (current == null || !java.util.Objects.equals(current.variant(), design.variant())) { return; }
-                if (current.material() == null) { appearance.remove(owner); }
-                else { appearance.put(owner, new HexAppearance(null, null, current.material(), null)); }
+                HexAppearance surface = current.material() == null ? null : new HexAppearance(null, null, current.material(), null);
+                HexAppearance retained = HexAppearance.withTrafficControl(surface, current.trafficControl());
+                if (retained == null) { appearance.remove(owner); } else { appearance.put(owner, retained); }
             });
         });
         hex.setAppearance(designed(appearance, designs(hex, layers(hex))));

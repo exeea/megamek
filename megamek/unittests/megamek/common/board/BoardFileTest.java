@@ -19,6 +19,43 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardFileTest {
+    @Test void roadTrafficControlsRoundTripWithoutReplacingSurfacesOrRailLayouts() throws Exception {
+        Board board = Board.createEmptyBoard(1, 1);
+        Hex hex = new Hex(0, "road:1:27;rail:1:9;bridge:1:27;bridge_cf:40;bridge_elev:1;bridge_road:1:27", "");
+        var road = HexAppearance.withTrafficControl(new HexAppearance("road/rounded", null, "asphalt", null),
+              HexAppearance.TrafficControl.SIGNALS);
+        var lights = HexAppearance.withTrafficControl(null, HexAppearance.TrafficControl.SIGNALS);
+        hex.setAppearance(Map.of("road", road, "bridgeRoad", lights, "rail", HexAppearance.rail(3, 64)));
+        board.setHex(0, 0, hex);
+        String saved = encode(board);
+        assertTrue(saved.contains("\"trafficControl\":\"signals\""), saved);
+        assertEquals(hex.getAppearance(), BoardFile.readNative(saved).getHex(0, 0).getAppearance());
+        assertEquals(hex.getAppearance(), BoardFile.fromClipboard(BoardFile.clipboard(hex)).getAppearance());
+        assertThrows(java.io.IOException.class, () -> BoardFile.readNative(saved.replace("\"signals\"", "\"unknown\"")));
+        assertThrows(IllegalArgumentException.class, () -> lights.validateOwner("rail"));
+        assertEquals(new HexAppearance("road/rounded", null, "asphalt", null),
+              HexAppearance.withTrafficControl(road, HexAppearance.TrafficControl.GANTRY));
+        assertNull(HexAppearance.withTrafficControl(lights, HexAppearance.TrafficControl.GANTRY));
+        var gantry = HexAppearance.withTrafficControl(road, HexAppearance.TrafficControl.GANTRY);
+        var stops = HexAppearance.withTrafficControl(null, HexAppearance.TrafficControl.STOPS);
+        hex.setAppearance(Map.of("road", gantry, "bridgeRoad", stops, "rail", HexAppearance.rail(3, 64)));
+        String overhead = encode(board);
+        assertFalse(overhead.contains("\"trafficControl\":\"gantry\""), "The default gantry choice needs no field");
+        assertTrue(overhead.contains("\"trafficControl\":\"stops\""), "An explicit stop-only choice survives saving");
+        assertEquals(hex.getAppearance(), BoardFile.readNative(overhead).getHex(0, 0).getAppearance());
+        assertEquals(hex.getAppearance(), BoardFile.fromClipboard(BoardFile.clipboard(hex)).getAppearance());
+        String explicitGantry = saved.replace("\"signals\"", "\"gantry\"");
+        assertEquals(Map.of("road", gantry, "rail", HexAppearance.rail(3, 64)),
+              BoardFile.readNative(explicitGantry).getHex(0, 0).getAppearance(),
+              "Previously explicit gantries normalize to the same default, including a control-only appearance");
+        assertThrows(java.io.IOException.class, () -> BoardFile.readNative(explicitGantry.replace("\"bridgeRoad\"", "\"ground\"")));
+        assertThrows(java.io.IOException.class, () -> BoardFile.readNative(explicitGantry.replace("\"road\"", "\"pavement\"")));
+        hex.setAppearance(Map.of("road", new HexAppearance(null, null, "asphalt", null)));
+        assertFalse(encode(board).contains("trafficControl"), "The default adds no field to existing appearances");
+        assertEquals(HexAppearance.TrafficControl.GANTRY,
+              HexAppearance.trafficControl(BoardFile.readNative(encode(board)).getHex(0, 0).getAppearance(), "road"));
+    }
+
     @Test void threeAxisRotationRoundTripsInVersionTwoAndOldObjectsDefaultToUpright() throws Exception {
         Board board = Board.createEmptyBoard(1, 1);
         var tilted = new BoardDecoration("tilted", "prop", "scenery/vehicles/car", null, .1, .2, 75,
@@ -254,6 +291,22 @@ class BoardFileTest {
         assertEquals(1, undo.getDecorations().size());
     }
 
+    @Test void javaSerializationAcceptsAnExplicitGantryThatNowMeansTheDefault() throws Exception {
+        Hex original = new Hex(0, "road:1:27", "");
+        var explicit = new HexAppearance(null, null, null, null, BoardDecoration.Colours.NONE,
+              null, null, null, HexAppearance.TrafficControl.GANTRY);
+        original.setAppearance(Map.of("road", explicit));
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream output = new ObjectOutputStream(bytes)) { output.writeObject(original); }
+        try (ObjectInputStream input = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            Hex loaded = (Hex) input.readObject();
+            assertEquals(original.getAppearance(), loaded.getAppearance());
+            assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(loaded.getAppearance(), "road"));
+            assertNull(HexAppearance.withTrafficControl(loaded.getAppearance().get("road"), HexAppearance.TrafficControl.GANTRY),
+                  "Newly authored default choices still omit the appearance");
+        }
+    }
+
     @Test void nativeMetadataAndLobbyNamesRemainDiscoverable() throws Exception {
         Board board = Board.createEmptyBoard(2, 3); board.addTag("test tag");
         Path file = directory.resolve("native.board2"); BoardFile.save(board, file);
@@ -307,8 +360,11 @@ class BoardFileTest {
         assertEquals(4, bridge.terrainLevel(Terrains.BRIDGE_ELEV));
         assertTrue(bridge.getDecorations().stream().anyMatch(d -> d.placement().receiver().terrain().equals("ground")));
         assertTrue(bridge.getDecorations().stream().anyMatch(d -> d.placement().receiver().terrain().equals("bridge")));
-        var elevated = example.getHex(1, 3).getDecorations();
-        assertEquals(java.util.Set.of(4.0, 5.0), elevated.stream().map(d -> d.placement().level()).collect(java.util.stream.Collectors.toSet()));
+        var elevatedHex = example.getHex(1, 3);
+        var elevated = elevatedHex.getDecorations();
+        // The train follows its deck receiver; only the independent beacon stores an absolute height.
+        assertEquals(java.util.Set.of(4.0, 5.0), elevated.stream().map(d -> d.placement().level(elevatedHex))
+              .collect(java.util.stream.Collectors.toSet()));
         // The route marker keeps its N/S sides; a board flip reflects them as terrain exits are.
         var route = RailRoute.find(example.getHex(1, 3), RailRoute.Kind.MAGLEV);
         assertEquals(9, route.connections());

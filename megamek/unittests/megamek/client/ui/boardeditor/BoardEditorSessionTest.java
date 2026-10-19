@@ -20,6 +20,7 @@ import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.loaders.MapSettings;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -30,6 +31,39 @@ import org.junit.jupiter.api.io.TempDir;
 class BoardEditorSessionTest {
     @TempDir Path directory;
     private final Coords at = new Coords(1, 1);
+
+    @Test void junctionControlsSurviveRoadDesignChangesAndAreUndoableAndSaved() throws Exception {
+        var session = session();
+        send(session, Action.ADD_COMPONENT, "", "road");
+        assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(session.board().getHex(at).getAppearance(), "road"));
+        send(session, Action.TRAFFIC_CONTROL, "road", "signals");
+        send(session, Action.VARIANT, "road", "road/rounded");
+        send(session, Action.TERRAIN, "road", "4");
+        send(session, Action.VARIANT, "road", "road/material/gravel");
+        var road = session.board().getHex(at).getAppearance().get("road");
+        assertEquals(HexAppearance.TrafficControl.SIGNALS, road.trafficControl());
+        assertEquals("road/rounded", road.variant());
+        assertEquals("gravel", road.material());
+        send(session, Action.TRAFFIC_CONTROL, "road", "gantry");
+        var gantry = HexAppearance.withTrafficControl(road, HexAppearance.TrafficControl.GANTRY);
+        assertEquals(gantry, session.board().getHex(at).getAppearance().get("road"));
+        send(session, Action.UNDO, "", "");
+        assertEquals(road, session.board().getHex(at).getAppearance().get("road"));
+        send(session, Action.REDO, "", "");
+        send(session, Action.TRAFFIC_CONTROL, "road", "stops");
+        assertEquals(HexAppearance.TrafficControl.STOPS, HexAppearance.trafficControl(session.board().getHex(at).getAppearance(), "road"));
+        Path stopsFile = directory.resolve("road-stops.board2"); session.save(stopsFile);
+        assertEquals(HexAppearance.TrafficControl.STOPS, HexAppearance.trafficControl(BoardFile.read(stopsFile).getHex(at).getAppearance(), "road"));
+        send(session, Action.UNDO, "", "");
+        assertEquals(gantry, session.board().getHex(at).getAppearance().get("road"));
+        Path file = directory.resolve("road-controls.board2"); session.save(file);
+        assertEquals(gantry, BoardFile.read(file).getHex(at).getAppearance().get("road"));
+        send(session, Action.VARIANT, "road", "");
+        assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(session.board().getHex(at).getAppearance(), "road"),
+              "Resetting the road design keeps its independent junction controls");
+        send(session, Action.REMOVE_COMPONENT, "", "road");
+        assertFalse(session.board().getHex(at).getAppearance().containsKey("road"));
+    }
 
     @Test void boardSettingsRemainUnsavedAcrossHexUndoAndSaveTogether() throws Exception {
         var session = session();
