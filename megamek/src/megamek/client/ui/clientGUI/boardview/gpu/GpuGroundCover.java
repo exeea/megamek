@@ -57,14 +57,23 @@ final class GpuGroundCover implements Disposable {
 
     /** Whether a hex grows grass: natural grass ground, or its neighbour within a level of a grass hex. */
     static boolean grows(BoardScene scene, BoardScene.Tile tile) {
-        if (!BoardSurfaceBlend.natural(tile) || BoardBiome.kind(tile) != BoardScene.Biome.NONE) { return false; }
-        if (tile.surface() == BoardScene.Surface.GRASS) { return true; }
+        boolean shallow = shallowShore(tile);
+        if ((!BoardSurfaceBlend.natural(tile) && !shallow) || BoardBiome.kind(tile) != BoardScene.Biome.NONE) { return false; }
+        if (shallow && BoardBiome.plantKind(scene, tile) != BoardScene.Biome.NONE) { return false; }
+        if (!shallow && tile.surface() == BoardScene.Surface.GRASS) { return true; }
         for (int direction = 0; direction < 6; direction++) {
             var neighbor = scene.tile(tile.coords().translated(direction));
             if (BoardSurfaceBlend.natural(neighbor) && neighbor.surface() == BoardScene.Surface.GRASS
                   && Math.abs(neighbor.elevation() - tile.elevation()) <= 1) { return true; }
         }
         return false;
+    }
+
+    /** Only exposed ordinary depth-zero banks can extend the adjoining meadow into a water hex. */
+    static boolean shallowShore(BoardScene.Tile tile) {
+        return tile != null && tile.waterDepth() == 0 && tile.liquid().present() && !tile.liquid().volcanic()
+              && !tile.frozen() && !tile.ultraSublevel() && !tile.backdrop().present() && tile.detailedGround()
+              && !tile.building() && (tile.roadExits() == 0 || BoardRoad.rendered(tile));
     }
 
     /**
@@ -77,11 +86,20 @@ final class GpuGroundCover implements Disposable {
      */
     static FloatArray plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
           BoardDecals.Opacity paint) {
-        List<BoardSurface.Face> ground = new ArrayList<>(surface.top().stream()
-              .filter(face -> face.finish() == BoardSurface.Finish.TOP).toList());
-        if (BoardGeometry.tuning().stepsBetweenTops()) { ground.addAll(surface.slopes()); }
-        ground.removeIf(face -> BoardSurface.bridgeSupport(scene, tile, face)
-              || new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor().z <= .7f);
+        var vegetation = surface.vegetation();
+        List<BoardSurface.Face> ground;
+        Map<Vector3, Vector3> normals;
+        Map<Vector3, Float> waterHeights = vegetation == null ? Map.of() : vegetation.waterHeights();
+        if (vegetation != null) {
+            ground = vegetation.faces();
+            normals = vegetation.normals();
+        } else {
+            ground = new ArrayList<>(surface.top().stream()
+                  .filter(face -> face.finish() == BoardSurface.Finish.TOP).toList());
+            if (BoardGeometry.tuning().stepsBetweenTops()) { ground.addAll(surface.slopes()); }
+            ground.removeIf(face -> BoardSurface.bridgeSupport(scene, tile, face));
+            normals = BoardSurface.vertexNormals(ground);
+        }
         var roots = new FloatArray();
         if (ground.isEmpty()) { return roots; }
         var support = new GpuBiomeVegetation.Support(ground);
@@ -89,12 +107,14 @@ final class GpuGroundCover implements Disposable {
         float centerX = BoardGeometry.centerX(coords), centerY = BoardGeometry.centerY(coords);
         float halfWidth = BoardGeometry.width() / 2, halfHeight = BoardGeometry.height() / 2;
         var random = new Random(coords.getX() * 0x9E3779B97F4A7C15L ^ coords.getY() * 0xC2B2AE3D27D4EB4FL);
-        boolean boundary = BoardSurfaceBlend.boundary(scene, tile);
+        boolean boundary = shallowShore(tile) || BoardSurfaceBlend.boundary(scene, tile);
         boolean tundraEdge = BoardBiome.kind(tile) == BoardScene.Biome.TUNDRA;
+        boolean marshEdge = false;
         for (int direction = 0; direction < 6; direction++) {
             tundraEdge |= BoardBiome.kind(scene.neighbor(tile, direction)) == BoardScene.Biome.TUNDRA;
+            marshEdge |= BoardBiome.kind(scene.neighbor(tile, direction)) == BoardScene.Biome.MARSH;
         }
-        BoardRoad road = BoardRoad.carriageway(tile) ? BoardRoad.way(scene, tile) : null;
+        var roads = BoardRoad.nearbyWays(scene, tile);
         float sink = BoardGeometry.width() * .001f;
         // Frozen land's jagged border reaches across a shared edge (terrain-ice.glsl); no blade grows through it.
         List<Vector3[]> iceEdges = new ArrayList<>();
@@ -107,7 +127,7 @@ final class GpuGroundCover implements Disposable {
                       BoardGeometry.corner(tile.coords(), 0, edge + 1) });
             }
             if (neighbor != null && neighbor.liquid().present() && !neighbor.liquid().volcanic() && !neighbor.frozen()
-                  && neighbor.elevation() == tile.elevation()) {
+                  && neighbor.waterDepth() > 0 && neighbor.elevation() == tile.elevation()) {
                 shoreEdges.add(new Vector3[] { BoardGeometry.corner(tile.coords(), 0, edge),
                       BoardGeometry.corner(tile.coords(), 0, edge + 1) });
             }
@@ -115,8 +135,10 @@ final class GpuGroundCover implements Disposable {
         float iceReach = BoardRelief.metres(ICE_BORDER_REACH);
         float shoreReach = BoardRelief.metres(SHORE_FADE_METRES);
         var obstacles = new BoardObstacles(scene, tile);
+        boolean minerals = tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.METAL);
         var cover = new BoardSurfaceBlend.Sampler(scene, tile);
         var root = new Vector3();
+        var normal = new Vector3();
         for (int rank = 0; rank < ROOTS_PER_HEX; rank++) {
             // The same random sequence at every detail level: every candidate draws its place and its growth chance
             // before any ground-dependent rejection.
@@ -133,8 +155,8 @@ final class GpuGroundCover implements Disposable {
             // scenery leave the surrounding grass and empty gaps untouched.
             if (!obstacles.isEmpty() && obstacles.obstructs(root.set(x, y, z), 2 * BoardGeometry.hexScale(),
                   MAX_HEIGHT_FRACTION * BoardGeometry.width())) { continue; }
-            if (road != null && road.distance((x - centerX) / BoardGeometry.hexScale(),
-                  (y - centerY) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 1) { continue; }
+            if (minerals && BoardMetalDeposits.covers(coords, tile.features(), x, y, 2 * BoardGeometry.hexScale())) { continue; }
+            if (BoardRoad.distance(roads, x, y) < BoardRoad.SHOULDER + 1) { continue; }
             boolean iced = false;
             for (Vector3[] edge : iceEdges) {
                 float ex = edge[1].x - edge[0].x, ey = edge[1].y - edge[0].y;
@@ -145,9 +167,15 @@ final class GpuGroundCover implements Disposable {
             float grass = boundary ? BoardSurfaceBlend.grass(tile, cover.sample(x, y, z), x, y)
                   : tile.surface() == BoardScene.Surface.GRASS ? 1 : 0;
             if (tundraEdge) { grass *= 1 - BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, x, y, z); }
+            if (marshEdge && waterHeights.containsKey(face.a())) {
+                grass *= 1 - BoardBiome.coverage(scene, BoardScene.Biome.MARSH, x, y, z);
+            }
             if (paint != null && grass > 0) { grass *= 1 - paint.at(x, y); }
             float growth = grass * BoardRelief.smooth((grass - .55f) / .35f);
-            if (chance > growth) { continue; }
+            // Follow the same smoothly varying normals as the turf material, including the next hex's slope toe.
+            // A whole-triangle cutoff removes green ground and leaves straight, full-density blade edges.
+            growth *= groundGrowth(face, normals, waterHeights, x, y, z, normal);
+            if (growth <= 0 || chance > growth) { continue; }
             if (!shoreEdges.isEmpty()) {
                 float distance = shoreReach;
                 for (Vector3[] edge : shoreEdges) {
@@ -162,6 +190,25 @@ final class GpuGroundCover implements Disposable {
         }
         roots.shrink();
         return roots;
+    }
+
+    /** Interpolate the rendered normal and water reference on the actual support; allocate nothing per root. */
+    private static float groundGrowth(BoardSurface.Face face, Map<Vector3, Vector3> normals,
+          Map<Vector3, Float> waterHeights, float x, float y, float z, Vector3 normal) {
+        Vector3 a = face.a(), b = face.b(), c = face.c();
+        float area = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+        float u = Math.max(0, ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / area);
+        float v = Math.max(0, ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / area);
+        float w = Math.max(0, 1 - u - v);
+        float up = normal.set(normals.get(a)).scl(u).mulAdd(normals.get(b), v).mulAdd(normals.get(c), w).nor().z;
+        float growth = BoardRelief.smooth((up - .6f) / .35f);
+        if (waterHeights.containsKey(a)) {
+            float water = (waterHeights.get(a) * u + waterHeights.get(b) * v + waterHeights.get(c) * w) / (u + v + w);
+            // Keep a bare wet toe, then restore the meadow over the exposed shallow bank.
+            float above = (z - water) / BoardGeometry.hexScale();
+            growth *= BoardRelief.smooth((above - .18f) / .52f);
+        }
+        return growth;
     }
 
     /** One blade template's instanced draw for a chunk. Its buffer persists while the chunk's roots are unchanged. */

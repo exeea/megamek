@@ -914,6 +914,11 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     if (shallowSediment >= 0.0 && (abs(familyId - DESERT_FAMILY) < .5 || abs(familyId - MARS_FAMILY) < .5)) {
         sediment = shallowSediment;
     }
+    // Shallow grassy coasts keep the adjoining turf across more of the exposed bank. The wet toe and submerged
+    // bed still reach full sediment; the existing world-space variation breaks up the advancing green edge.
+    if (shallowSediment >= 0.0 && (abs(familyId) < .5 || abs(familyId - TROPICAL_FAMILY) < .5)) {
+        sediment = sediment * sediment * sediment;
+    }
     vec4 ramp, trim, kind;
     cliffFamily(familyId, ramp, trim, kind);
     bool fungus = abs(familyId - FUNGUS_FAMILY) < .5;
