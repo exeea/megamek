@@ -326,6 +326,15 @@ class GpuBoardMaterialsTest {
         byte[] resized = GpuAssets.onGrid(map, 4, 4);
         assertEquals(16, resized.length);
         for (byte value : resized) { assertEquals(90, value, "Resampling keeps a uniform map's value"); }
+        // A ramp along X stays along X: rows agree, and each row rises from the dark texel to the bright one.
+        var ramp = new GpuAssets.AuthoredRoughness(.5f, new byte[] { 0, (byte) 255 }, 2, 1);
+        byte[] wide = GpuAssets.onGrid(ramp, 4, 2);
+        assertEquals(8, wide.length);
+        for (int x = 0; x < 4; x++) { assertEquals(wide[x], wide[4 + x], "Column " + x + " is the same in each row"); }
+        for (int x = 1; x < 4; x++) {
+            assertTrue((wide[x] & 255) >= (wide[x - 1] & 255), "The ramp rises along X at " + x);
+        }
+        assertTrue((wide[0] & 255) < 128 && (wide[3] & 255) > 128, "The ends keep their texels' sides");
     }
 
     private GpuAssets.AuthoredRoughness roughness(Path folder, int first, int second, float factor) throws Exception {

@@ -105,7 +105,7 @@ class GpuConcreteProjectionSmokeTest {
             shader.setUniformi("u_rainNoise", 1);
             if (source.isBlank()) {
                 shader.setUniformi("u_roughnessLayers", 2);
-                shader.setUniformf("u_sculptRoughness[0]", -1, -1);
+                shader.setUniformf("u_sculptRoughness[0]", .9f, -1);
             }
             for (float slope : new float[] { 0, .5f, 1 }) {
                 shader.setUniformf("u_slope", slope);
@@ -125,16 +125,14 @@ class GpuConcreteProjectionSmokeTest {
                 }
             }
             if (source.isBlank()) {
-                // Exercise the real slab implementation, including its absent-property fallback.
+                // Exercise the real slab implementation with uniform authored roughness, fully rough included.
                 shader.setUniformi("u_mode", 2);
-                for (float scalar : new float[] { -1, .15f, .85f }) {
+                for (float scalar : new float[] { .15f, .85f, 1 }) {
                     shader.setUniformf("u_sculptRoughness[0]", scalar, -1);
                     quad.render(shader, GL20.GL_TRIANGLE_STRIP);
                     byte[] response = ScreenUtils.getFrameBufferPixels(false);
-                    float expected = scalar < 0 ? .9f : scalar;
                     for (int channel = 0; channel < 3; channel++) {
-                        assertEquals(expected * 255, response[channel] & 255, 1,
-                              "Cast slab must respect its authored scalar or preserve the legacy fallback");
+                        assertEquals(scalar * 255, response[channel] & 255, 1, "Cast slab must render its authored roughness");
                     }
                 }
             }

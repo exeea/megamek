@@ -10,13 +10,13 @@ in vec4 v_turfWeights;
 in vec4 v_turfOthers;
 in vec4 v_turfArid;
 
-vec3 turfColor(vec3 artwork, mat2 gradient, out float roughness) {
+// The ground's roughness replaces the blade's own where any family has turf weight.
+vec3 turfColor(vec3 artwork, mat2 gradient, inout float roughness) {
     vec3 world = v_cloudPosition / u_metre;
     vec3 fields = groundFields(u_rainNoise, world);
     vec2 p = vec2(world.x, -world.y);
     vec3 pigment = vec3(0.0);
-    float total = 0.0;
-    roughness = 0.0;
+    float total = 0.0, ground = 0.0;
     for (int family = 0; family < SURFACE_FAMILIES; family++) {
         float weight = family < 4 ? v_turfWeights[family] : family < 8 ? v_turfOthers[family - 4] : v_turfArid[family - 8];
         if (weight <= .0001) continue;
@@ -27,14 +27,14 @@ vec3 turfColor(vec3 artwork, mat2 gradient, out float roughness) {
         mat2 farGradient = TURN * gradient * (2.0 / (material.y * 2.37));
         vec3 base = mix(textureGrad(u_terrainLayers, vec3(nearUv, material.x * .5), nearGradient[0], nearGradient[1]).rgb,
               textureGrad(u_terrainLayers, vec3(farUv, material.x * .5), farGradient[0], farGradient[1]).rgb, fields.x);
-        roughness += mix(authoredRoughness(material.x, nearUv, nearGradient),
+        ground += mix(authoredRoughness(material.x, nearUv, nearGradient),
               authoredRoughness(material.x, farUv, farGradient), fields.x) * weight;
         base = groundToneFor(float(family), base, world, fields.x, fields.y, fields.z, 0.0, 0.0);
         pigment += base * weight;
         total += weight;
     }
     pigment /= max(total, .0001);
-    roughness /= max(total, .0001);
+    if (total > .0001) roughness = ground / total;
     // The generated atlas has pale blade highlights. Use these as bounded cavity/detail, never as a second
     // light source or another brightening pass on the terrain pigment.
     float detail = mix(.62, 1.08,

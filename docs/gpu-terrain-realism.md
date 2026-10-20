@@ -80,15 +80,16 @@ The user set these boundaries:
   height sources, and their caps fade around the crest into the face. Concrete
   faces sample along their rim direction. Eleven ground families have ambient wear;
   the SAND tile cover has none. See [materials and geometry](gpu-terrain-materials.md).
-- **Roughness.** Every surface material authors its roughness
-  ([board materials](gpu-board-materials.md#sculpted-terrain-roughness)): grass .92,
-  sand and tropical .94, soil, hardpan and concrete .90, granite and basalt .73,
-  rock .80, sandstone and Mars rock .81, snow .82, lunar .96 and fungus .84. All but
-  concrete vary by ±.04 with their grain, smoother on raised grain. The `cliffMaterial` path, tundra mats,
-  turf and road coats read the same maps as tops, rock kits, pavement, tree pits and
-  volcanic programs' natural material. Marsh peat (.80), quick mud (.72) and moss
-  (.93) stay rough; only exposed pools get the water response. Cavity is visibility,
-  not roughness.
+- **Roughness.** Every surface material authors its roughness ([board
+  materials](gpu-board-materials.md#sculpted-terrain-roughness)): grass, earth and
+  contact soil .92, sand and tropical .94, dirt, hardpan, gravel, scree and concrete
+  .90, granite and basalt .73, rock .80, sandstone and Mars rock .81, snow .82, lunar
+  ground .96 (its cliffs .92, scree .90) and fungal ground and cliffs .84 (mats .90,
+  fibres .92). All but concrete vary by ±.04 with their grain, smoother on raised
+  grain. The `cliffMaterial` path, tundra mats, turf and road coats read the same maps
+  as tops, rock kits, pavement, tree pits and volcanic programs' natural material.
+  Marsh peat (.80), quick mud (.72) and moss (.93) stay rough; only exposed pools get
+  the water response. Cavity is visibility, not roughness.
 - **Lighting.** The scene stays linear in RGBA16F targets with highlight headroom,
   and emission joins reflected light before the single display encoding. Direct
   light uses energy-coupled GGX; an offline table integrates the analytic sky for
