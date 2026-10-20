@@ -136,13 +136,22 @@ public class BoardClassifier {
     /**
      * Get a singleton instance of the Board Classifier, initializing if necessary
      */
-    public static BoardClassifier getInstance() {
+    public static synchronized BoardClassifier getInstance() {
         if (instance == null) {
-            instance = new BoardClassifier();
-            instance.scanForBoards();
+            BoardClassifier classifier = new BoardClassifier();
+            classifier.scanForBoards();
+            instance = classifier;
         }
 
         return instance;
+    }
+
+    /**
+     * Discards the cached board catalogue after saved boards change. The next {@link #getInstance()} call scans the
+     * board directories again; existing references retain their previous snapshot.
+     */
+    public static synchronized void invalidate() {
+        instance = null;
     }
 
     /**

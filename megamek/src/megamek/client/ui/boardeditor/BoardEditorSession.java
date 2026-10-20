@@ -41,6 +41,7 @@ import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
 import megamek.common.board.RailRoute;
+import megamek.common.enums.BuildingType;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
 import megamek.common.loaders.MapSettings;
@@ -343,6 +344,11 @@ public final class BoardEditorSession {
     private Coords selected;
     private int brush = 1;
     private Path path;
+    /** Last successful save in this session, retained across Open/New so returning to the lobby can refresh it. */
+    private Path lastSavedPath;
+    /** An assembled preview already contains the lobby's rotation, theme and elevation adjustments. */
+    private boolean fromAssembledPreview;
+    private boolean lastSaveFromAssembledPreview;
     /** The .board2 next to an imported legacy file: the import's name and Save's default while {@code path} is null. */
     private Path suggested;
     private Hex clipboard;
@@ -406,6 +412,8 @@ public final class BoardEditorSession {
     public Game game() { return game; }
     public Board board() { return game.getBoard(); }
     public Path path() { return path; }
+    public Path lastSavedPath() { return lastSavedPath; }
+    public boolean lastSaveFromAssembledPreview() { return lastSaveFromAssembledPreview; }
     /** Copy and Paste also use {@code clipboard} for hexes as text (the editor window passes the system clipboard). */
     public void textClipboard(java.awt.datatransfer.Clipboard clipboard) { textClipboard = clipboard; }
     public boolean dirty() {
@@ -546,6 +554,7 @@ public final class BoardEditorSession {
         }
         dropTakenTokens(board, every);
         this.path = path; suggested = null; importIssues = converted;
+        fromAssembledPreview = false;
         undo.clear(); redo.clear();
         currentId = savedId = ++nextId;
         install(board);
@@ -573,6 +582,25 @@ public final class BoardEditorSession {
      */
     public void open(Path file) throws IOException {
         Board loaded = BoardFile.read(file, true); // Failure leaves the document, history and path intact.
+        boolean reopeningAssembled = lastSaveFromAssembledPreview && java.nio.file.Files.exists(lastSavedPath)
+              && java.nio.file.Files.isSameFile(file, lastSavedPath);
+        openDocument(loaded, file);
+        fromAssembledPreview = reopeningAssembled;
+    }
+
+    /** Opens an independent copy of a preview, retaining its source file when known; generated maps have none. */
+    public void open(Board preview, Path file) {
+        openDocument(BoardUtilities.resize(preview, 0, 0, 0, 0), file);
+        fromAssembledPreview = file == null;
+    }
+
+    private void openDocument(Board loaded, Path file) {
+        if (file == null) {
+            replace(loaded, null);
+            currentId = ++nextId; // A generated preview has never been saved.
+            message = "";
+            return;
+        }
         // The editor saves only .board2, so another file is never Save's target; the conversion decides by content.
         boolean legacy = !BoardFile.isNativeName(file.toString());
         replace(loaded, legacy ? null : file);
@@ -602,6 +630,8 @@ public final class BoardEditorSession {
             board().setSourceHeader(board().licenseHeader());
         }
         BoardFile.save(board(), file);
+        lastSavedPath = file;
+        lastSaveFromAssembledPreview = fromAssembledPreview;
         path = file;
         savedId = currentId;
         savedTags = Set.copyOf(board().getTags());
@@ -1812,7 +1842,7 @@ public final class BoardEditorSession {
                     // A route drawn by hand is built as its release builds it; any other event is the event itself.
                     if (drawsRoutes()) { wayReceivers.put(at, support); drawing = new RoutePath(drawn); drawPath(); }
                     else { pointer(event, pointX, pointY, routing, null, false, support); }
-                    if (!stroke.isEmpty()) { completeStroke(); }
+                    if (!stroke.isEmpty() || wallBrush() && !painted.isEmpty()) { completeStroke(); }
                     notice[0] = strokeNotice;
                     layers.putAll(wayLayers);
                     originals.keySet().forEach(cell -> after.put(cell, board().getHex(cell).duplicate()));
@@ -2738,7 +2768,8 @@ public final class BoardEditorSession {
 
     private void setVariant(Hex hex, String owner, String value) {
         Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
-        var control = HexAppearance.trafficControl(styles, owner);
+        var stored = styles.get(owner);
+        var control = stored == null ? null : stored.trafficControl();
         if (value.isEmpty()) {
             HexAppearance retained = HexAppearance.withTrafficControl(null, control);
             if (retained == null) { styles.remove(owner); } else { styles.put(owner, retained); }
@@ -3126,8 +3157,8 @@ public final class BoardEditorSession {
             moveObjects(destinations);
         }
         moveHexes(); dragOrigin = moveTarget = null; movingObjects.clear();
+        if (!stroke.isEmpty() || wallBrush() && !painted.isEmpty()) { completeStroke(); }
         if (!stroke.isEmpty()) {
-            completeStroke();
             Map<Coords, Hex> after = new LinkedHashMap<>();
             stroke.keySet().forEach(at -> after.put(at, board().getHex(at).duplicate()));
             long id = ++nextId;
@@ -3150,9 +3181,44 @@ public final class BoardEditorSession {
     private void completeStroke() {
         // Reconcile after all stamped hexes are installed, so adjacent copies can keep their joined route sides.
         if (sampledHex != null && (tool == Tool.PAINT || tool == Tool.ERASE)) { keepJoinedSides(painted); }
+        if (wallBrush()) { joinWalls(); }
         // Resolve any legacy tokens pasted by an older brush before reconciling the authored layers.
         convertTokens();
         wayDecks();
+    }
+
+    private boolean wallBrush() {
+        return brushKey.equals("building/wall") && (tool == Tool.PAINT || tool == Tool.ERASE);
+    }
+
+    /** Only the wall brush joins its newly painted segments; existing unrelated authored exits remain untouched. */
+    private void joinWalls() {
+        int wall = BuildingType.WALL.getTypeValue();
+        for (Coords at : painted) {
+            Hex current = board().getHex(at), before = stroke.get(at);
+            boolean present = current.terrainLevel(Terrains.BUILDING) == wall;
+            if (!present && (before == null || before.terrainLevel(Terrains.BUILDING) != wall)) { continue; }
+            int exits = 0;
+            if (present) {
+                // Let Hex decide matching building types/classes and single-hex emplacements; no duplicated rules.
+                Hex automatic = current.duplicate();
+                automatic.addTerrain(new Terrain(Terrains.BUILDING, wall, false, 0));
+                for (int direction = 0; direction < 6; direction++) {
+                    automatic.setExits(board().getHex(at.translated(direction)), direction, false);
+                }
+                exits = automatic.getTerrain(Terrains.BUILDING).getExits() & 63;
+                int joined = exits;
+                change(at, hex -> hex.addTerrain(new Terrain(Terrains.BUILDING, wall, true, joined)));
+            }
+            for (int direction = 0; direction < 6; direction++) {
+                Coords next = at.translated(direction);
+                Hex neighbour = board().getHex(next);
+                if (neighbour == null || neighbour.terrainLevel(Terrains.BUILDING) != wall) { continue; }
+                int back = 1 << ((direction + 3) % 6), sides = neighbour.getTerrain(Terrains.BUILDING).getExits();
+                int joined = (exits & 1 << direction) != 0 ? sides | back : sides & ~back;
+                change(next, hex -> hex.addTerrain(new Terrain(Terrains.BUILDING, wall, true, joined)));
+            }
+        }
     }
 
     private void history(ArrayDeque<Edit> from, ArrayDeque<Edit> to, boolean forward) {
@@ -3231,7 +3297,7 @@ public final class BoardEditorSession {
                 String key = field.terrain().equals("bridge_road") ? "bridgeRoad" : owner.id();
                 var old = styles.get(key);
                 styles.put(key, HexAppearance.withTrafficControl(new HexAppearance(old == null ? null : old.variant(), old == null ? null : old.asset(),
-                      choice.material(), old == null ? null : old.strength()), HexAppearance.trafficControl(styles, key)));
+                      choice.material(), old == null ? null : old.strength()), old == null ? null : old.trafficControl()));
                 hex.setAppearance(styles);
             }
         }

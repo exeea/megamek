@@ -51,9 +51,13 @@ import java.util.Arrays;
 import java.util.List;
 
 import megamek.common.Configuration;
+import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
 import megamek.common.loaders.MapSettings;
+import megamek.common.net.enums.PacketCommand;
+import megamek.common.net.packets.Packet;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -201,6 +205,42 @@ class LobbyBoardHandlerTest {
 
         assertFalse(lobbyBoardHandler.hasBoardFromLounge());
         assertEquals(0, game.getBoard().getWidth());
+    }
+
+    @Test
+    void editorSaveReloadPacketRescansFilesInvalidatesBattlefieldAndLoadsSavedContents() throws IOException {
+        Path existingFile = temporaryBoardsDirectory.resolve("editor-existing.board2");
+        Path saveAsFile = temporaryBoardsDirectory.resolve("editor-save-as.board2");
+        Board edited = Board.createEmptyBoard(2, 2);
+        edited.getHex(0, 0).setLevel(1);
+        BoardFile.save(edited, existingFile);
+        game.setMapSettings(createMapSettingsFor(List.of("/editor-existing.board2")));
+        TWGameManager manager = spyWithoutNetwork();
+        manager.handlePacket(0, new Packet(PacketCommand.LOBBY_GENERATE_BOARD));
+        assertEquals(1, game.getBoard().getHex(0, 0).getLevel());
+
+        edited.getHex(0, 0).setLevel(4);
+        BoardFile.save(edited, existingFile);
+        edited.getHex(0, 0).setLevel(7);
+        BoardFile.save(edited, saveAsFile);
+        assertEquals(1, game.getBoard().getHex(0, 0).getLevel(), "Saving alone leaves the cached battlefield intact");
+
+        // The editor's close callback uses this normal client command, including when the selection is unchanged.
+        manager.handlePacket(0, new Packet(PacketCommand.SENDING_MAP_SETTINGS,
+              MapSettings.getInstance(game.getMapSettings())));
+        assertEquals(0, game.getBoard().getWidth(), "The server must discard its pre-save battlefield");
+        assertTrue(game.getMapSettings().getBoardsAvailableVector().contains("/editor-save-as.board2"));
+        assertEquals(List.of("/editor-existing.board2"), game.getMapSettings().getBoardsSelectedVector());
+        manager.handlePacket(0, new Packet(PacketCommand.LOBBY_GENERATE_BOARD));
+        assertEquals(4, game.getBoard().getHex(0, 0).getLevel(), "Rebuilding reloads the overwritten file");
+
+        MapSettings savedSelection = MapSettings.getInstance(game.getMapSettings());
+        savedSelection.setBoardsSelectedVector(List.of("/editor-save-as.board2"));
+        manager.handlePacket(0, new Packet(PacketCommand.SENDING_MAP_SETTINGS, savedSelection));
+        assertEquals(0, game.getBoard().getWidth());
+        assertEquals(List.of("/editor-save-as.board2"), game.getMapSettings().getBoardsSelectedVector());
+        manager.handlePacket(0, new Packet(PacketCommand.LOBBY_GENERATE_BOARD));
+        assertEquals(7, game.getBoard().getHex(0, 0).getLevel(), "Save As loads the newly selected file");
     }
 
     @Test
