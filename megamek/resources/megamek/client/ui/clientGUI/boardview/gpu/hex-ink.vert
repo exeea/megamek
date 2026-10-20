@@ -8,6 +8,7 @@ uniform vec3 u_hexSize;
 uniform vec2 u_boardSize;
 uniform vec3 u_thresholds; // Initial, black-to-white, white-to-black; all linear.
 uniform float u_exposure;
+uniform vec3 u_spaceClear; // Pre-composite clear color, removed from uncovered pixels behind a dark space backdrop.
 flat out vec2 v_ink;
 const vec2 corners[6] = vec2[6](vec2(.5, 0), vec2(.25, .5), vec2(-.25, .5),
       vec2(-.5, 0), vec2(-.25, -.5), vec2(.25, -.5));
@@ -15,15 +16,15 @@ const vec2 corners[6] = vec2[6](vec2(.5, 0), vec2(.25, .5), vec2(-.25, .5),
 
 // The scene uses nearest sampling for depth-aware composition. Filter these sparse brightness taps
 // explicitly so subpixel panning cannot jump between unrelated HDR texels; do not change scene state.
-vec3 filteredScene(vec2 uv) {
+vec4 filteredScene(vec2 uv) {
     ivec2 last = textureSize(u_scene, 0) - ivec2(1);
     vec2 pixel = uv * vec2(last + ivec2(1)) - .5;
     ivec2 base = ivec2(floor(pixel));
     vec2 weight = fract(pixel);
-    vec3 a = texelFetch(u_scene, clamp(base, ivec2(0), last), 0).rgb;
-    vec3 b = texelFetch(u_scene, clamp(base + ivec2(1, 0), ivec2(0), last), 0).rgb;
-    vec3 c = texelFetch(u_scene, clamp(base + ivec2(0, 1), ivec2(0), last), 0).rgb;
-    vec3 d = texelFetch(u_scene, clamp(base + ivec2(1), ivec2(0), last), 0).rgb;
+    vec4 a = texelFetch(u_scene, clamp(base, ivec2(0), last), 0);
+    vec4 b = texelFetch(u_scene, clamp(base + ivec2(1, 0), ivec2(0), last), 0);
+    vec4 c = texelFetch(u_scene, clamp(base + ivec2(0, 1), ivec2(0), last), 0);
+    vec4 d = texelFetch(u_scene, clamp(base + ivec2(1), ivec2(0), last), 0);
     return mix(mix(a, b, weight.x), mix(c, d, weight.x), weight.y);
 }
 
@@ -34,7 +35,8 @@ vec4 source(vec3 world, bool edge) {
     if (ndc.z < -1.0 || ndc.z > 1.0) return vec4(0.0);
     if (!edge && (any(lessThan(ndc.xy, vec2(-1.0))) || any(greaterThan(ndc.xy, vec2(1.0))))) return vec4(0.0);
     vec2 uv = clamp(ndc.xy * .5 + .5, vec2(0.0), vec2(1.0));
-    return vec4(filteredScene(uv), 1.0);
+    vec4 sampled = filteredScene(uv);
+    return vec4(max(sampled.rgb - u_spaceClear * (1.0 - sampled.a), vec3(0.0)), 1.0);
 }
 
 // Only needed to initialize a sliver with no inset tap. Test the full convex hex against the viewport:
