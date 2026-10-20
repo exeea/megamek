@@ -155,9 +155,11 @@ final class GpuHexText implements Disposable {
                     chunk.bounds().ext(centerX - BoardGeometry.width(), centerY - BoardGeometry.width(), z - 1)
                           .ext(centerX + BoardGeometry.width(), centerY + BoardGeometry.width(), z + 1);
                     font.getData().setScale(label.font().getSize2D() / GpuBoardSkin.FONT_RESOLUTION);
-                    int argb = label.argb();
-                    // Preserve deliberately colored labels and their outline. Neutral ink adapts without rebuilding.
-                    boolean neutral = (argb >>> 16 & 255) == (argb >>> 8 & 255)
+                    boolean space = tile.backdrop() == BoardBackdrop.SPACE;
+                    int argb = space ? label.argb() | 0x00ffffff : label.argb();
+                    // Space always keeps white text and its dark outline, regardless of sampled brightness.
+                    // Other neutral ink adapts without rebuilding; deliberately colored labels retain their color.
+                    boolean neutral = !space && (argb >>> 16 & 255) == (argb >>> 8 & 255)
                           && (argb >>> 8 & 255) == (argb & 255);
                     font.setColor(((argb >>> 16) & 255) / 255f, ((argb >>> 8) & 255) / 255f,
                           (argb & 255) / 255f, ((argb >>> 24) & 255) / 255f);

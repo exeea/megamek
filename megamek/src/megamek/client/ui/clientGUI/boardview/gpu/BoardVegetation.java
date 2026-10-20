@@ -18,9 +18,12 @@ final class BoardVegetation {
     record Site(int elevation, BoardScene.Surface family, BoardScene.Biome biome, boolean natural,
           boolean liquid, int waterDepth, boolean frozen, int exits, BoardRoad.Kind road, int rails, RailRoute.Corridor corridor) { }
     record Key(List<Site> sites) { }
-    /** Finished support, shading normals and local shore water heights; no terrain builder is retained. */
-    record Ground(List<BoardSurface.Face> faces, Map<Vector3, Vector3> normals, Map<Vector3, Float> waterHeights) {
-        Ground(List<BoardSurface.Face> faces, Map<Vector3, Vector3> normals) { this(faces, normals, Map.of()); }
+    /** Finished support and accepted mineral soil footprints; no terrain builder or placement cache is retained. */
+    record Ground(List<BoardSurface.Face> faces, Map<Vector3, Vector3> normals, Map<Vector3, Float> waterHeights,
+          List<BoardSurface.Face> water, List<BoardScene.Feature> minerals) {
+        Ground(List<BoardSurface.Face> faces, Map<Vector3, Vector3> normals) {
+            this(faces, normals, Map.of(), List.of(), List.of());
+        }
     }
 
     private BoardVegetation() { }
@@ -54,6 +57,7 @@ final class BoardVegetation {
             return null;
         }
         List<BoardSurface.Face> faces = new ArrayList<>();
+        List<BoardSurface.Face> water = new ArrayList<>(own.waterFaces);
         Map<Vector3, Vector3> normals = new IdentityHashMap<>();
         Map<Vector3, Float> waterHeights = new IdentityHashMap<>();
         Map<BoardSurface, Map<Vector3, Vector3>> topNormals = new IdentityHashMap<>();
@@ -72,6 +76,7 @@ final class BoardVegetation {
             if (!borrows(own.tile, neighbor)) { continue; }
             var source = sources.get(neighbor.coords());
             if (source == null) { continue; }
+            water.addAll(source.waterFaces);
             List<BoardSurface.Face> incoming = new ArrayList<>();
             // Curved shores cross the canonical hex edge in either direction. Both owners use the drawn ground.
             if (GpuGroundCover.shallowShore(own.tile) || GpuGroundCover.shallowShore(neighbor)) {
@@ -90,7 +95,8 @@ final class BoardVegetation {
                 add(scene, source, face, faces, normals, waterHeights, topNormals);
             }
         }
-        return new Ground(List.copyOf(faces), Collections.unmodifiableMap(normals), Collections.unmodifiableMap(waterHeights));
+        return new Ground(List.copyOf(faces), Collections.unmodifiableMap(normals),
+              Collections.unmodifiableMap(waterHeights), List.copyOf(water), GpuMineralGround.accepted(scene, own.tile, own));
     }
 
     private static boolean groundFace(BoardScene.Tile tile, BoardSurface.Face face) {

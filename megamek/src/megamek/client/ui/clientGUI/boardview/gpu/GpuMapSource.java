@@ -74,6 +74,7 @@ final class GpuMapSource implements BoardSource {
     private final BoardEditorSession editor;
     private final Runnable requestClose;
     private final Runnable requestLegacy2D;
+    private final Runnable requestEditor;
     /** Only Swing owns the active brush stroke; render input carries the board generation it picked. */
     private Board editorStrokeBoard;
     /** Swing queues wheel notches (hex, levels) in arrival order until a capture; releasing Ctrl commits the undo entry. */
@@ -158,6 +159,11 @@ final class GpuMapSource implements BoardSource {
     }
 
     GpuMapSource(Game game, Window owner, BoardEditorSession editor, Runnable requestClose, Runnable requestLegacy2D) {
+        this(game, owner, editor, requestClose, requestLegacy2D, null);
+    }
+
+    GpuMapSource(Game game, Window owner, BoardEditorSession editor, Runnable requestClose, Runnable requestLegacy2D,
+          Runnable requestEditor) {
         if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
         if (editor != null && editor.game() != game) { throw new IllegalArgumentException("The editor owns its Game"); }
         this.game = game;
@@ -165,6 +171,7 @@ final class GpuMapSource implements BoardSource {
         this.editor = editor;
         this.requestClose = requestClose;
         this.requestLegacy2D = requestLegacy2D;
+        this.requestEditor = requestEditor;
         atmosphere = new GpuAtmosphereControls(() -> owner, game::getBoard, game::getPlanetaryConditions, () -> closed);
         if (editor != null) { trace = GpuTraceOverlay.Settings.capture(); }
         timer = new Timer(33, event -> refresh());
@@ -243,6 +250,9 @@ final class GpuMapSource implements BoardSource {
     /** Map workspaces expose their existing document and application actions without requiring a game client. */
     private List<BoardScene.Command> menuCommands() {
         List<BoardScene.Command> commands = new ArrayList<>();
+        if (editor == null && requestEditor != null) {
+            commands.add(menuCommand("boardEdit3D", "BoardEditor.edit3D", requestEditor));
+        }
         if (editor != null && requestLegacy2D != null) {
             // The editor opens its live Legacy 2D Preview beside itself; a preview switches through View > Renderer.
             commands.add(menuCommand("boardPreview2D", "BoardEditor.preview2D", requestLegacy2D));
