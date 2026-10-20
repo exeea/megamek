@@ -806,37 +806,47 @@ vec2 packedTopSurface(float layer, PackedTopCoordinates uv, out vec3 normal) {
 
 // Sides: one read per projection, the two side projections always and the top only where the face lies back.
 // Tops (no sides): the top projection's two reads; far away two repeats settle to the map's average.
-vec4 rockTexel(sampler2DArray maps, float layer, float tile, MaterialProjection p, bool sides, float variation,
-      bool translated) {
+// The role's authored roughness comes from the same coordinates: its map while the normal detail lasts, as the relief
+// that carries its grain does, and beyond that the map's mean, which costs no read.
+vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float variation, bool translated,
+      out float roughness) {
+    vec2 authored = u_sculptRoughness[int(layer + .5)];
+    float grain = authored.y >= 0.0 ? terrainNormalDetail : 0.0;
+    float mapped = authored.x;
+    vec4 pigment;
     if (!sides) {
         vec2 a, b;
         mat2 gradientB;
         float t;
         topCoordinates(p, tile, variation, translated, a, b, gradientB, t);
-        vec4 pigment = mix(materialTexel(maps, layer, a, p.topGradient / tile),
-              materialTexel(maps, layer, b, gradientB), t);
-        if (farDetail > 0.0 && !translated) {
-            pigment = mix(pigment, materialTexel(maps, layer, p.top / tile, p.topGradient * (4096.0 / tile)),
-                  farDetail);
+        pigment = mix(materialTexel(u_terrainLayers, layer, a, p.topGradient / tile),
+              materialTexel(u_terrainLayers, layer, b, gradientB), t);
+        if (grain > 0.0) {
+            mapped = mix(materialTexel(u_roughnessLayers, authored.y, a, p.topGradient / tile).r,
+                  materialTexel(u_roughnessLayers, authored.y, b, gradientB).r, t);
         }
-        return pigment;
+        if (farDetail > 0.0 && !translated) {
+            pigment = mix(pigment, materialTexel(u_terrainLayers, layer, p.top / tile, p.topGradient * (4096.0 / tile)),
+                  farDetail);
+            mapped = mix(mapped, authored.x, farDetail);
+        }
+    } else {
+        pigment = mix(materialTexel(u_terrainLayers, layer, p.y / tile + .37, p.yGradient / tile),
+              materialTexel(u_terrainLayers, layer, p.x / tile, p.xGradient / tile), p.side);
+        if (grain > 0.0) {
+            mapped = mix(materialTexel(u_roughnessLayers, authored.y, p.y / tile + .37, p.yGradient / tile).r,
+                  materialTexel(u_roughnessLayers, authored.y, p.x / tile, p.xGradient / tile).r, p.side);
+        }
+        if (p.lying > 0.0) {
+            pigment = mix(pigment, materialTexel(u_terrainLayers, layer, p.top / tile, p.topGradient / tile), p.lying);
+            if (grain > 0.0) {
+                mapped = mix(mapped, materialTexel(u_roughnessLayers, authored.y, p.top / tile, p.topGradient / tile).r,
+                      p.lying);
+            }
+        }
     }
-    vec4 steep = mix(materialTexel(maps, layer, p.y / tile + .37, p.yGradient / tile),
-          materialTexel(maps, layer, p.x / tile, p.xGradient / tile), p.side);
-    if (p.lying <= 0.0) return steep;
-    return mix(steep, materialTexel(maps, layer, p.top / tile, p.topGradient / tile), p.lying);
-}
-vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float variation, bool translated) {
-    return rockTexel(u_terrainLayers, layer, tile, p, sides, variation, translated);
-}
-
-// The authored roughness that goes with rockTexel's colour, from the same reads. Its grain fades out with the normal
-// detail, as the relief does, and then the map's mean replaces the reads.
-float rockRoughness(float layer, float tile, MaterialProjection p, bool sides, float variation, bool translated) {
-    vec2 authored = u_sculptRoughness[int(layer + .5)];
-    if (authored.y < 0.0 || terrainNormalDetail <= 0.0) return authored.x;
-    return mix(authored.x, rockTexel(u_roughnessLayers, authored.y, tile, p, sides, variation, translated).r,
-          terrainNormalDetail);
+    roughness = mix(authored.x, mapped, grain);
+    return pigment;
 }
 
 // The matching world normal and cavity from the normal/AO array; a top uses the same two reads as its colour.
@@ -1012,8 +1022,10 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     float tileA = dot(isFirst, vec4(tiles.x, tiles.w, tiles.y, tiles.z));
     float variationA = dot(isFirst, variations);
     bool translatedA = dot(isFirst, translated) > .5;
-    vec4 a = rockTexel(layerA, tileA, p, sides, variationA, translatedA);
+    float roughnessA, roughnessB;
+    vec4 a = rockTexel(layerA, tileA, p, sides, variationA, translatedA, roughnessA);
     vec4 b = a;
+    roughnessB = roughnessA;
     float share = 0.0;
     float layerB = layerA, tileB = tileA, variationB = variationA;
     bool translatedB = translatedA;
@@ -1022,7 +1034,7 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
         tileB = dot(isSecond, vec4(tiles.x, tiles.w, tiles.y, tiles.z));
         variationB = dot(isSecond, variations);
         translatedB = dot(isSecond, translated) > .5;
-        b = rockTexel(layerB, tileB, p, sides, variationB, translatedB);
+        b = rockTexel(layerB, tileB, p, sides, variationB, translatedB, roughnessB);
         // Height blend (materialWeights): where both are wanted, the layer whose relief stands higher shows.
         float wa = first + a.a * .38 * 4.0 * first * (1.0 - first);
         float wb = second + b.a * .38 * 4.0 * second * (1.0 - second);
@@ -1066,9 +1078,7 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     result.cavity = mix(na.a, nb.a, share);
     result.height = mix(a.a, b.a, share);
     result.emission = vec3(0.0);
-    float roughnessA = rockRoughness(layerA, tileA, p, sides, variationA, translatedA);
-    result.roughness = share > 0.0
-          ? mix(roughnessA, rockRoughness(layerB, tileB, p, sides, variationB, translatedB), share) : roughnessA;
+    result.roughness = mix(roughnessA, roughnessB, share);
     result.volcanic = 0.0;
     return result;
 }
