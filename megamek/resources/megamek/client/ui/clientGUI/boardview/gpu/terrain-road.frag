@@ -221,7 +221,7 @@ void main() {
     groundFilm(normal, puddle);
     float roughness = m.mapped ? properties.g : -1.0;
 #ifdef roadCoatFlag
-    if (!m.mapped) roughness = authoredRoughness(float((m.maps - 3) * 2), uv, roadGradient, roughness);
+    if (!m.mapped) roughness = authoredRoughness(float((m.maps - 3) * 2), uv, roadGradient);
 #endif
     albedo = groundLighting(albedo, normal, geometric, wet, response, puddle, roughness,
           m.mapped ? mix(1.0, properties.b, .7) : 1.0);

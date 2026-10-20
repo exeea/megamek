@@ -59,7 +59,7 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
     vec4 cover, fringe;
     float tundra;
     biomeCoverage(world, 14.0, length(abs(worldDx.xy) + abs(worldDy.xy)), cover, fringe, tundra);
-    if (!shore) { tundraSurface(world, face, tundra, color, normal, cavity, grass, bounce); }
+    if (!shore) { tundraSurface(world, face, tundra, color, normal, cavity, roughness, grass, bounce); }
     if (family(4.0)) return;
     cover.yzw *= min(3.0, 1.0 / max(dot(cover.yzw, vec3(1.0)), .0001));
     // Broad reach on level ground connects shore patches. On a draining face retain the graded coverage;

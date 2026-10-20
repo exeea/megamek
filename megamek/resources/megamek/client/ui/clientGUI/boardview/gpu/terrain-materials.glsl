@@ -19,32 +19,6 @@ struct TerrainMaterial {
 
 float materialBlendWidth() { return .13 + min(.2, pixelMetres * .16); }
 
-// Perceptual roughness estimates for dry materials, not measured scans. Cavity is visibility, not roughness:
-// it must not make a crevice a different material. Small grain variation uses height independently of AO.
-// Fine variation fades with the normal maps; distant materials retain their broad response without extra reads.
-float mappedRoughness(float base, float height) {
-    return clamp(base + terrainNormalDetail * (.5 - height) * .08, .55, .98);
-}
-
-float stoneRoughness(float familyId, float hardness) {
-    float stone = mix(.80, .66, hardness);
-    if (abs(familyId - LUNAR_FAMILY) < .5) return .92;
-    if (abs(familyId - FUNGUS_FAMILY) < .5) return .84;
-    if (abs(familyId - 2.0) < .5 || abs(familyId - DESERT_FAMILY) < .5
-          || abs(familyId - MARS_FAMILY) < .5) stone += .08;
-    return stone;
-}
-
-float coverRoughness(float familyId) {
-    if (abs(familyId - LUNAR_FAMILY) < .5) return .96;
-    if (abs(familyId - 2.0) < .5 || abs(familyId - TROPICAL_FAMILY) < .5) return .94;
-    if (abs(familyId) < .5) return .92;
-    if (abs(familyId - 3.0) < .5 || abs(familyId - 4.0) < .5) return .80;
-    if (abs(familyId - 5.0) < .5) return .82;
-    if (abs(familyId - FUNGUS_FAMILY) < .5) return .84;
-    return .90;
-}
-
 // Natural wear follows the existing relief, modulated by continuous world fields instead of repeated stamps.
 // Channels are recesses, low grains, chipped edges and high grains. Loose/organic covers favour the height
 // channels; stone favours cavities and normal-map edges. Fine wear fades with the material's normal detail.
@@ -230,36 +204,34 @@ vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection
     return vec4(color, pigment.a);
 }
 
-// Base surface authority is independent of optional normal detail and its distance fade.
+// Base surface authority is independent of optional normal detail and its distance fade. A role without weight
+// contributes nothing.
 float materialRoughness(float colorMap, float tile, float weight, MaterialProjection p,
-      float variation, bool fungus, bool singleScale, float fallback) {
-    if (weight <= 0.0) return fallback;
+      float variation, bool fungus, bool singleScale) {
+    if (weight <= 0.0) return 0.0;
     vec2 authored = u_sculptRoughness[int(colorMap * .5)];
-    if (authored.y >= 0.0) {
-        return sampleMaterialMap(u_roughnessLayers, authored.y, tile, p, variation, fungus, singleScale).r;
-    }
-    return authored.x >= 0.0 ? authored.x : fallback;
+    if (authored.y < 0.0) return authored.x;
+    return sampleMaterialMap(u_roughnessLayers, authored.y, tile, p, variation, fungus, singleScale).r;
 }
 #endif
 
 // Legacy planar/slab/rock paths retain their own colour-map projection.
-float planarRoughness(float layer, vec2 p, mat2 gradient, float tile, float mixer, float fallback) {
+float planarRoughness(float layer, vec2 p, mat2 gradient, float tile, float mixer) {
     vec2 authored = u_sculptRoughness[int(layer * .5)];
-    if (authored.y < 0.0) return authored.x >= 0.0 ? authored.x : fallback;
-    float value = mix(authoredRoughness(layer, p / tile, gradient / tile, fallback),
-          authoredRoughness(layer, TURN * p / (tile * 2.37) + .31, TURN * gradient / (tile * 2.37), fallback), mixer);
-    return farDetail > 0.0 ? mix(value, textureLod(u_roughnessLayers, vec3(p / tile, authored.y), 12.0).r, farDetail) : value;
+    if (authored.y < 0.0) return authored.x;
+    float value = mix(authoredRoughness(layer, p / tile, gradient / tile),
+          authoredRoughness(layer, TURN * p / (tile * 2.37) + .31, TURN * gradient / (tile * 2.37)), mixer);
+    return farDetail > 0.0 ? mix(value, authored.x, farDetail) : value;
 }
 
-float translatedRoughness(float layer, vec2 uv, mat2 gradient, float variation, float fallback) {
+float translatedRoughness(float layer, vec2 uv, mat2 gradient, float variation) {
     vec2 authored = u_sculptRoughness[int(layer * .5)];
-    if (authored.y >= 0.0) return translatedTexel(u_roughnessLayers, authored.y, uv, gradient, variation).r;
-    return authored.x >= 0.0 ? authored.x : fallback;
+    if (authored.y < 0.0) return authored.x;
+    return translatedTexel(u_roughnessLayers, authored.y, uv, gradient, variation).r;
 }
 
-float wallRoughness(float layer, vec2 x, vec2 y, mat2 dx, mat2 dy, float side, float fallback) {
-    if (!hasAuthoredRoughness(layer)) return fallback;
-    return mix(authoredRoughness(layer, y, dy, fallback), authoredRoughness(layer, x, dx, fallback), side);
+float wallRoughness(float layer, vec2 x, vec2 y, mat2 dx, mat2 dy, float side) {
+    return mix(authoredRoughness(layer, y, dy), authoredRoughness(layer, x, dx), side);
 }
 
 #ifdef volcanicFlag
@@ -485,15 +457,10 @@ TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, ve
     result.cavity = dot(vec4(na.a, nb.a, nc.a, nd.a), weights);
     result.height = dot(vec4(a.a, b.a, c.a, d.a), weights);
     result.emission = vec3(0.0);
-    float mantleRoughness = abs(familyId - 5.0) < .5 ? coverRoughness(familyId)
-          : arid ? stoneRoughness(familyId, hardness) : .92;
-    vec4 roughness = vec4(mappedRoughness(coverRoughness(familyId), a.a),
-          mappedRoughness(mantleRoughness, b.a), mappedRoughness(.90, c.a),
-          mappedRoughness(stoneRoughness(familyId, hardness), d.a));
-    roughness.x = materialRoughness(layers.x, tiles.x, weights.x, projection, broad, fungus, sand, roughness.x);
-    roughness.y = materialRoughness(layers.w, tiles.w, weights.y, projection, mantleVariation, fungus, plates, roughness.y);
-    roughness.z = materialRoughness(layers.y, tiles.y, weights.z, projection, fine, fungus, false, roughness.z);
-    roughness.w = materialRoughness(layers.z, tiles.z, weights.w, projection, broad, fungus, false, roughness.w);
+    vec4 roughness = vec4(materialRoughness(layers.x, tiles.x, weights.x, projection, broad, fungus, sand),
+          materialRoughness(layers.w, tiles.w, weights.y, projection, mantleVariation, fungus, plates),
+          materialRoughness(layers.y, tiles.y, weights.z, projection, fine, fungus, false),
+          materialRoughness(layers.z, tiles.z, weights.w, projection, broad, fungus, false));
     result.roughness = dot(roughness, weights);
     result.volcanic = 0.0;
     return result;
@@ -534,7 +501,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
       float broad, float fine, float region,
       inout vec3 color, inout vec3 normal, inout float cavity, inout float height, inout float grass, inout float sand,
       inout vec3 bounce, inout float response, inout float rainCover,
-      out vec3 emission, out float roughness, out float volcanic, out vec4 weights) {
+      out vec3 emission, inout float roughness, out float volcanic, out vec4 weights) {
     vec4 raw = max(v_coverWeights, vec4(0.0));
 #ifndef volcanicFlag
     // A slot under 2 % coverage is left out; the remaining weights renormalize below.
@@ -598,7 +565,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     a = volcanicMaterial(magmaMaterial, coverFamilies.x, bankHeat);
 #else
     if (abs(coverFamilies.x - 4.0) < .5) {
-        a = TerrainMaterial(color, normal, cavity, height, vec3(0.0), coverRoughness(4.0), 0.0);
+        a = TerrainMaterial(color, normal, cavity, height, vec3(0.0), roughness, 0.0);
 #ifdef volcanicFlag
     } else if (coverFamilies.x > VOLCANIC_CRUST_FAMILY - .5) {
         a = volcanicMaterial(magmaMaterial, coverFamilies.x, bankHeat);
@@ -839,24 +806,37 @@ vec2 packedTopSurface(float layer, PackedTopCoordinates uv, out vec3 normal) {
 
 // Sides: one read per projection, the two side projections always and the top only where the face lies back.
 // Tops (no sides): the top projection's two reads; far away two repeats settle to the map's average.
-vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float variation, bool translated) {
+vec4 rockTexel(sampler2DArray maps, float layer, float tile, MaterialProjection p, bool sides, float variation,
+      bool translated) {
     if (!sides) {
         vec2 a, b;
         mat2 gradientB;
         float t;
         topCoordinates(p, tile, variation, translated, a, b, gradientB, t);
-        vec4 pigment = mix(materialTexel(u_terrainLayers, layer, a, p.topGradient / tile),
-              materialTexel(u_terrainLayers, layer, b, gradientB), t);
+        vec4 pigment = mix(materialTexel(maps, layer, a, p.topGradient / tile),
+              materialTexel(maps, layer, b, gradientB), t);
         if (farDetail > 0.0 && !translated) {
-            pigment = mix(pigment, materialTexel(u_terrainLayers, layer, p.top / tile, p.topGradient * (4096.0 / tile)),
+            pigment = mix(pigment, materialTexel(maps, layer, p.top / tile, p.topGradient * (4096.0 / tile)),
                   farDetail);
         }
         return pigment;
     }
-    vec4 steep = mix(materialTexel(u_terrainLayers, layer, p.y / tile + .37, p.yGradient / tile),
-          materialTexel(u_terrainLayers, layer, p.x / tile, p.xGradient / tile), p.side);
+    vec4 steep = mix(materialTexel(maps, layer, p.y / tile + .37, p.yGradient / tile),
+          materialTexel(maps, layer, p.x / tile, p.xGradient / tile), p.side);
     if (p.lying <= 0.0) return steep;
-    return mix(steep, materialTexel(u_terrainLayers, layer, p.top / tile, p.topGradient / tile), p.lying);
+    return mix(steep, materialTexel(maps, layer, p.top / tile, p.topGradient / tile), p.lying);
+}
+vec4 rockTexel(float layer, float tile, MaterialProjection p, bool sides, float variation, bool translated) {
+    return rockTexel(u_terrainLayers, layer, tile, p, sides, variation, translated);
+}
+
+// The authored roughness that goes with rockTexel's colour, from the same reads. Its grain fades out with the normal
+// detail, as the relief does, and then the map's mean replaces the reads.
+float rockRoughness(float layer, float tile, MaterialProjection p, bool sides, float variation, bool translated) {
+    vec2 authored = u_sculptRoughness[int(layer + .5)];
+    if (authored.y < 0.0 || terrainNormalDetail <= 0.0) return authored.x;
+    return mix(authored.x, rockTexel(u_roughnessLayers, authored.y, tile, p, sides, variation, translated).r,
+          terrainNormalDetail);
 }
 
 // The matching world normal and cavity from the normal/AO array; a top uses the same two reads as its colour.
@@ -1086,9 +1066,9 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     result.cavity = mix(na.a, nb.a, share);
     result.height = mix(a.a, b.a, share);
     result.emission = vec3(0.0);
-    vec4 roughness = vec4(coverRoughness(familyId), capPlates > .5 ? stoneRoughness(familyId, hardness) : .92, .90,
-          stoneRoughness(familyId, hardness));
-    result.roughness = mappedRoughness(dot(roughness, roleShare), result.height);
+    float roughnessA = rockRoughness(layerA, tileA, p, sides, variationA, translatedA);
+    result.roughness = share > 0.0
+          ? mix(roughnessA, rockRoughness(layerB, tileB, p, sides, variationB, translatedB), share) : roughnessA;
     result.volcanic = 0.0;
     return result;
 }

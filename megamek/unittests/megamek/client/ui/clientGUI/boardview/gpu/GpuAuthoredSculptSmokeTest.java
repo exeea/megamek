@@ -97,7 +97,7 @@ class GpuAuthoredSculptSmokeTest {
             apply(manager, Map.of("terrain-sculpt.frag", diagnostic(source)));
             File textures = GpuMaterialMaps.boardTextures();
             float mulchRoughness = GpuAssets.authoredRoughness(GodotMaterial.read(
-                  new File(textures, "terrain/surfaces/tree-pit-mulch.tres"), textures)).scalar();
+                  new File(textures, "terrain/surfaces/tree-pit-mulch.tres"), textures)).value();
             var checks = new ArrayList<Executable>();
             for (int index = 0; index < specimens.size(); index++) {
                 var specimen = specimens.get(index);

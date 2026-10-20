@@ -760,20 +760,20 @@ class GpuColorTextureSmokeTest {
             int unpack = GL11.glGetInteger(GL20.GL_UNPACK_ALIGNMENT);
             try (var sample = new Sampler(true)) {
                 Path sculpt = Files.createDirectories(directory.resolve("models/board/textures/terrain/surfaces"));
-                for (String name : List.of("mapped", "scalar", "legacy")) { sculptPair(sculpt, name); }
-                // Godot's rule: a varying roughness map is a map, a factor below 1 over none is a scalar, and the
-                // default (factor 1 over white) keeps the contextual roughness.
+                for (String name : List.of("mapped", "scalar", "rough")) { sculptPair(sculpt, name); }
+                // Godot's rule: a varying roughness map is a map (sent with its mean), the factor alone without a map
+                // is a scalar, and the default (factor 1 over white) is fully rough.
                 int[] values = { 17, 61, 103, 149, 193, 239 };
                 roughnessMap(sculpt.resolve("mapped_orm.png"), 3, 2, values);
                 Path scalar = sculpt.resolve("scalar.tres");
                 Files.writeString(scalar, Files.readString(scalar).replace("roughness = 1.0", "roughness = 0.27")
                       .replace("roughness_texture = ExtResource( 2 )\n", ""));
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 8);
-                var material = assets.sculptRoughness(List.of("mapped", "scalar", "legacy"));
+                var material = assets.sculptRoughness(List.of("mapped", "scalar", "rough"));
                 assertEquals(8, GL11.glGetInteger(GL20.GL_UNPACK_ALIGNMENT), "Odd rows must restore unpack state");
-                assertSame(material, assets.sculptRoughness(List.of("mapped", "scalar", "legacy")));
+                assertSame(material, assets.sculptRoughness(List.of("mapped", "scalar", "rough")));
                 org.junit.jupiter.api.Assertions.assertArrayEquals(
-                      new float[] { -1, 0, .27f, -1, -1, -1 }, material.metadata());
+                      new float[] { 127 / 255f, 0, .27f, -1, 1, -1 }, material.metadata(), 1e-6f);
                 material.maps().bind();
                 assertEquals(GL30.GL_R8, GL11.glGetTexLevelParameteri(GL30.GL_TEXTURE_2D_ARRAY, 0,
                       GL11.GL_TEXTURE_INTERNAL_FORMAT), "Roughness must use compact numerical storage");
@@ -792,7 +792,7 @@ class GpuColorTextureSmokeTest {
                 assets.dispose();
                 assertEquals(0, material.maps().getTextureObjectHandle());
                 assertFalse(GL11.glIsTexture(handle), "The asset owner releases the array");
-                var reloaded = assets.sculptRoughness(List.of("mapped", "scalar", "legacy"));
+                var reloaded = assets.sculptRoughness(List.of("mapped", "scalar", "rough"));
                 org.junit.jupiter.api.Assertions.assertNotSame(material, reloaded);
                 assertEquals(103 / 255.0, sample.read(reloaded.maps(), 2.5f / 3, .25f, 0, 0)[0], .0006);
             } finally {
@@ -803,7 +803,7 @@ class GpuColorTextureSmokeTest {
         });
     }
 
-    /** Use the actual shared shader with provider metadata: an authored map, a scalar and the contextual fallback. */
+    /** Use the actual shared shader with provider metadata: an authored map, a scalar and a fully rough default. */
     private static void assertAuthoredRoughness(GpuAssets.SculptRoughness material) {
         var quad = GpuAtmosphere.screenQuad();
         var shader = GpuGlsl.compile("Authored roughness contract", GpuShaderSource.read("atmosphere.vert"),
@@ -812,7 +812,7 @@ class GpuColorTextureSmokeTest {
                     out vec4 fragColor;
                     uniform float u_material;
                     void main() {
-                        float roughness = authoredRoughness(u_material, vec2(.5 / 3.0, .25), mat2(0.0), .81);
+                        float roughness = authoredRoughness(u_material, vec2(.5 / 3.0, .25), mat2(0.0));
                         fragColor = vec4(vec3(roughness), 1.0);
                     }
                     """);
@@ -822,7 +822,7 @@ class GpuColorTextureSmokeTest {
             shader.bind();
             shader.setUniformi("u_roughnessLayers", 0);
             shader.setUniform2fv("u_sculptRoughness[0]", material.metadata(), 0, material.metadata().length);
-            float[] expected = { 17 / 255f, .27f, .81f };
+            float[] expected = { 17 / 255f, .27f, 1 };
             for (int i = 0; i < expected.length; i++) {
                 shader.setUniformf("u_material", i * 2f);
                 quad.render(shader, GL20.GL_TRIANGLES);
@@ -830,14 +830,14 @@ class GpuColorTextureSmokeTest {
                 Gdx.gl.glReadPixels(1, 1, 1, 1, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, actual);
                 for (int channel = 0; channel < 3; channel++) {
                     assertEquals(expected[i] * 255, Byte.toUnsignedInt(actual.get(channel)), 1,
-                          "Actual shader precedence: authored map, scalar, then legacy fallback");
+                          "Actual shader: the authored map, else the scalar");
                 }
             }
         } finally { shader.dispose(); quad.dispose(); }
     }
 
     @Test
-    void sculptRoughnessRejectsAmbiguousOrIncompleteAuthoring() {
+    void sculptRoughnessResamplesAndRejectsIncompleteAuthoring() {
         nativeCheck(() -> {
             var previous = megamek.common.Configuration.dataDir();
             megamek.common.Configuration.setDataDir(directory.toFile());
@@ -847,7 +847,14 @@ class GpuColorTextureSmokeTest {
                 sculptPair(sculpt, "second");
                 roughnessMap(sculpt.resolve("first_orm.png"), 3, 2, new int[] { 1, 2, 3, 4, 5, 6 });
                 roughnessMap(sculpt.resolve("second_orm.png"), 2, 2, new int[] { 1, 2, 3, 4 });
-                assertRoughnessRejected("no implicit resize");
+                // A smaller map takes the largest grid, as the colour arrays resample theirs.
+                var assets = new GpuAssets();
+                try {
+                    var mixed = assets.sculptRoughness(List.of("first", "second"));
+                    assertEquals(3, mixed.maps().getWidth());
+                    assertEquals(2, mixed.maps().getHeight());
+                    assertEquals(2, mixed.maps().getDepth());
+                } finally { assets.dispose(); }
                 Files.delete(sculpt.resolve("second_orm.png"));
                 assertRoughnessRejected("second_orm.png");
                 roughnessMap(sculpt.resolve("second_orm.png"), 3, 2, new int[] { 1, 2, 3, 4, 5, 6 });

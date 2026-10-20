@@ -309,13 +309,10 @@ void main() {
             float w = heightBlend(top.a, rubble.a, want);
             albedo = mix(top.rgb, rubble.rgb, w);
             materialHeight = mix(top.a, rubble.a, w);
-            if (hasAuthoredRoughness(u_sculptLayers.x) || hasAuthoredRoughness(u_sculptLayers.y)) {
-                float topRoughness = family(4.0)
-                      ? translatedRoughness(u_sculptLayers.x, q / u_sculptTiles.x, concreteGradient, concreteVariation, roughness)
-                      : planarRoughness(u_sculptLayers.x, q, qGradient, u_sculptTiles.x, broad, roughness);
-                roughness = mix(topRoughness,
-                      planarRoughness(u_sculptLayers.y, q, qGradient, u_sculptTiles.y, fine, roughness), w);
-            }
+            float topRoughness = family(4.0)
+                  ? translatedRoughness(u_sculptLayers.x, q / u_sculptTiles.x, concreteGradient, concreteVariation)
+                  : planarRoughness(u_sculptLayers.x, q, qGradient, u_sculptTiles.x, broad);
+            roughness = mix(topRoughness, planarRoughness(u_sculptLayers.y, q, qGradient, u_sculptTiles.y, fine), w);
             // In patches only: most of a bank's lip keeps its turf.
             if (family(0.0)) {
                 float wear = max(rim * .55, foot * .75) * (1.0 - rock) * smoothstep(.35, .7, fine);
@@ -341,12 +338,12 @@ void main() {
             // A tree pit in the pavement: authored bark mulch inside a concrete kerb.
             if (v_color.a > .5) {
                 albedo = planar(u_sculptLayers.x, p, u_sculptTiles.x, broad).rgb;
-                roughness = planarRoughness(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad, roughness);
+                roughness = planarRoughness(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad);
             } else {
                 vec4 mulch = planar(u_treePitMaterial.x, p, u_treePitMaterial.y, fine);
                 albedo = mulch.rgb;
                 materialHeight = mulch.a;
-                roughness = planarRoughness(u_treePitMaterial.x, p, groundGradient, u_treePitMaterial.y, fine, roughness);
+                roughness = planarRoughness(u_treePitMaterial.x, p, groundGradient, u_treePitMaterial.y, fine);
                 if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
                     vec4 detail = planarNormal(u_treePitMaterial.x + 1.0, p, u_treePitMaterial.y, fine);
                     normal = upNormal(detail.rgb, face);
@@ -376,12 +373,11 @@ void main() {
                     cavity = mix(cavity, top.a * .5 + .5, crown);
                 }
             }
-            roughness = mappedRoughness(stoneRoughness(sculptFamily, .5), wall.a);
-            if (hasAuthoredRoughness(u_sculptLayers.z)) {
-                float stone = wallRoughness(u_sculptLayers.z, uvx, uvy,
-                      wallXGradient / u_sculptTiles.z, wallYGradient / u_sculptTiles.z, side, roughness);
-                roughness = crown > 0.0 ? mix(stone,
-                      planarRoughness(u_sculptLayers.z, p, groundGradient, u_sculptTiles.z, fine, roughness), crown) : stone;
+            roughness = wallRoughness(u_sculptLayers.z, uvx, uvy,
+                  wallXGradient / u_sculptTiles.z, wallYGradient / u_sculptTiles.z, side);
+            if (crown > 0.0) {
+                roughness = mix(roughness,
+                      planarRoughness(u_sculptLayers.z, p, groundGradient, u_sculptTiles.z, fine), crown);
             }
             float h = surfaceUV.x;
             // Broad ledges collect the ground cover (sand, snow, moss on alpine rock); on the rock kit only snow and
@@ -396,8 +392,7 @@ void main() {
                 vec4 top = planar(u_sculptLayers.x, p, u_sculptTiles.x, broad);
                 float w = heightBlend(wall.a, top.a, ledge);
                 albedo = mix(albedo, groundTone(top.rgb, world, broad, fine, region, 0.0, 0.0), w);
-                roughness = mix(roughness, planarRoughness(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad,
-                      mappedRoughness(coverRoughness(sculptFamily), top.a)), w);
+                roughness = mix(roughness, planarRoughness(u_sculptLayers.x, p, groundGradient, u_sculptTiles.x, broad), w);
                 if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
                     normal = normalize(mix(normal, upNormal(planarNormal(u_sculptLayers.x + 1.0, p, u_sculptTiles.x, broad).rgb, face), w));
                 }

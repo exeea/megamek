@@ -107,15 +107,19 @@ then draws it in the layout its glTF role takes, sharing the board's own texture
 
 ### Sculpted terrain roughness
 
-Sculpted terrain normally takes its roughness from context: its role, hardness and
-distance. A material replaces it with authored roughness, following Godot's meaning:
+Sculpted terrain takes each material's own roughness, with Godot's meaning: the ORM
+map's G channel times `roughness`, or `roughness` alone without a map. A uniform map
+is sent as its one value; a map that varies is a layer of the terrain's roughness
+array, resampled to the largest map there, as the colour arrays are. Roughness 1 is
+fully rough: the game estimates no roughness of its own for any material.
 
-- A roughness channel that varies is a roughness map (times `roughness`).
-- A uniform channel, or none, with `roughness` below 1 is that scalar.
-- Godot's default (factor 1 over a white map, which Material Maker writes while
-  the roughness input is unconnected) keeps the contextual roughness.
-
-Mud and scorch keep their roughness in their own normal maps instead.
+Every role of a natural surface (cover, mantle, debris and rock, on tops and walls)
+reads its material's map with the same projection as its colour, and so do tundra
+mats, turf, road coats, pavement, tree pits and rock kits. Where the normal detail
+fades out with distance, the map's grain fades to its mean, which costs no texture
+read. Mud and scorch also keep their roughness in their own normal maps, which
+their shaders read. Effects on top of a material keep their own values: wet ground,
+marsh peat and moss, scorch deposits and ground damage.
 
 ## Loose and constrained materials
 

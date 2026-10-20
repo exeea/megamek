@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -302,14 +303,29 @@ class GpuBoardMaterialsTest {
     void authoredRoughnessFollowsGodotsFactorAndMap() throws Exception {
         GdxNativesLoader.load();
         Path folder = textures.resolve("terrain/surfaces");
-        // Material Maker writes a white roughness channel while the input is unconnected: the context stays.
-        assertEquals(-1, roughness(folder, 255, 255, 1).scalar());
-        assertEquals(.92f, roughness(folder, 255, 255, .92f).scalar(), "A factor over a white map is a scalar");
-        assertEquals(128 / 255f, roughness(folder, 128, 128, 1).scalar(), 1e-6, "A uniform map is a scalar");
+        // As in Godot, a white channel at factor 1 is fully rough; nothing falls back to an estimate.
+        var rough = roughness(folder, 255, 255, 1);
+        assertEquals(1, rough.value());
+        assertNull(rough.map());
+        assertEquals(.92f, roughness(folder, 255, 255, .92f).value(), "A factor over a white map is a scalar");
+        assertEquals(128 / 255f, roughness(folder, 128, 128, 1).value(), 1e-6, "A uniform map is a scalar");
         var map = roughness(folder, 40, 200, 1);
-        assertEquals(-1, map.scalar());
+        assertEquals(120 / 255f, map.value(), 1e-6, "A map carries its mean");
         assertArrayEquals(new byte[] { 40, (byte) 200 }, map.map());
         assertEquals(2, map.width());
+        var scaled = roughness(folder, 40, 200, .5f);
+        assertArrayEquals(new byte[] { 20, 100 }, scaled.map(), "The factor scales the map");
+        assertEquals(60 / 255f, scaled.value(), 1e-6);
+    }
+
+    @Test
+    void roughnessMapsTakeTheLargestGrid() {
+        GdxNativesLoader.load();
+        var map = new GpuAssets.AuthoredRoughness(.5f, new byte[] { 90, 90, 90, 90 }, 2, 2);
+        assertSame(map.map(), GpuAssets.onGrid(map, 2, 2), "A map on the grid is used as it is");
+        byte[] resized = GpuAssets.onGrid(map, 4, 4);
+        assertEquals(16, resized.length);
+        for (byte value : resized) { assertEquals(90, value, "Resampling keeps a uniform map's value"); }
     }
 
     private GpuAssets.AuthoredRoughness roughness(Path folder, int first, int second, float factor) throws Exception {

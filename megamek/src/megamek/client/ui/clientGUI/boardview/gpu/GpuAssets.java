@@ -194,38 +194,33 @@ final class GpuAssets implements Disposable {
 
     private static String sculptName(String name) { return "terrain/surfaces/" + name; }
 
-    /** Optional authored scalar/map metadata in the same stable material order as the sculpt array. */
+    /** Each material's uniform value or map mean, then its map layer or -1, in the sculpt array's stable order. */
     record SculptRoughness(TextureArray maps, float[] metadata) { }
 
     /**
-     * Authored roughness, which replaces the terrain's contextual (role, hardness, distance) roughness: map > scalar >
-     * the contextual fallback. A material authors it as Godot does: a roughness map that varies is a map (times the
-     * {@code roughness} factor); a uniform map or none, with a factor below 1, is that scalar. The Godot default (factor 1
-     * over a white map, which Material Maker writes while the roughness input is unconnected) keeps the context. Mud and
-     * scorch keep their roughness in their own normal maps' blue channel instead (GpuMaterialMaps.NORMAL_ROUGHNESS).
+     * Every sculpted material's roughness, as Godot reads it: the ORM map's roughness channel times the
+     * {@code roughness} factor, or the factor alone without a map. A uniform map is sent as its value; a map that varies
+     * becomes a layer, beside its mean, which distant terrain uses instead of reading the map.
      */
     SculptRoughness sculptRoughness(List<String> names) {
         if (sculptRoughness != null) { return sculptRoughness; }
-        var layers = new ArrayList<byte[]>();
+        var authored = new ArrayList<AuthoredRoughness>();
         int width = 1, height = 1;
         float[] metadata = new float[names.size() * 2];
-        Arrays.fill(metadata, -1);
         for (int index = 0; index < names.size(); index++) {
-            String name = sculptName(names.get(index));
-            if (GpuMaterialMaps.PACKED_ROUGHNESS.contains(name)) { continue; }
-            var authored = authoredRoughness(definition(name));
-            if (authored.map() == null) {
-                metadata[index * 2] = authored.scalar();
-                continue;
-            }
-            if (layers.isEmpty()) { width = authored.width(); height = authored.height(); }
-            else if (authored.width() != width || authored.height() != height) {
-                throw new IllegalArgumentException("Roughness array dimensions must agree; no implicit resize: " + name);
-            }
-            metadata[index * 2 + 1] = layers.size();
-            layers.add(authored.map());
+            var roughness = authoredRoughness(definition(sculptName(names.get(index))));
+            metadata[index * 2] = roughness.value();
+            metadata[index * 2 + 1] = -1;
+            if (roughness.map() == null) { continue; }
+            metadata[index * 2 + 1] = authored.size();
+            authored.add(roughness);
+            width = Math.max(width, roughness.width());
+            height = Math.max(height, roughness.height());
         }
-        // Validate every supplied map before allocating GL storage. No resizing or inferred material data.
+        // Validate every supplied map before allocating GL storage. Smaller maps take the largest grid, as in the
+        // colour arrays, so each still spans its material's repeat.
+        var layers = new ArrayList<byte[]>();
+        for (var roughness : authored) { layers.add(onGrid(roughness, width, height)); }
         var data = new RoughnessArrayData(layers, width, height);
         TextureArray maps = null;
         try {
@@ -245,29 +240,42 @@ final class GpuAssets implements Disposable {
         } finally { data.disposeSources(); }
     }
 
-    /** A sculpted material's authored roughness: an R8 map, else a scalar, else -1 for the contextual roughness. */
-    record AuthoredRoughness(float scalar, byte[] map, int width, int height) { }
+    /** A sculpted material's roughness: a uniform value (no map), or an R8 map and its mean. */
+    record AuthoredRoughness(float value, byte[] map, int width, int height) { }
+
+    /** A roughness map resampled to the array's grid, as {@link GpuColorTexture#arrayPixels} resamples a colour map. */
+    static byte[] onGrid(AuthoredRoughness roughness, int width, int height) {
+        if (roughness.width() == width && roughness.height() == height) { return roughness.map(); }
+        var source = new Pixmap(roughness.width(), roughness.height(), Pixmap.Format.RGBA8888);
+        try {
+            var pixels = source.getPixels();
+            for (byte value : roughness.map()) { pixels.put(value).put(value).put(value).put((byte) 255); }
+            pixels.position(0);
+            var resized = GpuColorTexture.arrayPixels(source, width, height, false);
+            byte[] values = new byte[width * height];
+            for (int texel = 0; texel < values.length; texel++) { values[texel] = resized.get(texel * 4); }
+            return values;
+        } finally { source.dispose(); }
+    }
 
     /** {@link #sculptRoughness}'s rule for one material, without a graphics context. */
     static AuthoredRoughness authoredRoughness(GodotMaterial material) {
         float factor = material.roughness();
         if (factor < 0 || factor > 1) { throw new IllegalArgumentException("Invalid sculpt roughness: " + material.file); }
         File file = material.roughnessMap();
-        if (file == null) { return new AuthoredRoughness(factor < 1 ? factor : -1, null, 0, 0); }
+        if (file == null) { return new AuthoredRoughness(factor, null, 0, 0); }
         requireFiles(List.of(new FileHandle(file)));
         var channel = GpuMaterialMaps.channel(file, material.roughnessChannel());
         byte[] values = channel.values();
         boolean uniform = true;
         for (byte value : values) { uniform &= value == values[0]; }
-        if (uniform) {
-            // A uniform map is a scalar; white with factor 1 is Godot's default and keeps the context.
-            float scalar = (values[0] & 255) / 255f * factor;
-            return new AuthoredRoughness(scalar < 1 ? scalar : -1, null, 0, 0);
+        if (uniform) { return new AuthoredRoughness((values[0] & 255) / 255f * factor, null, 0, 0); }
+        long sum = 0;
+        for (int texel = 0; texel < values.length; texel++) {
+            if (factor != 1) { values[texel] = (byte) Math.round((values[texel] & 255) * factor); }
+            sum += values[texel] & 255;
         }
-        if (factor != 1) {
-            for (int texel = 0; texel < values.length; texel++) { values[texel] = (byte) Math.round((values[texel] & 255) * factor); }
-        }
-        return new AuthoredRoughness(-1, values, channel.width(), channel.height());
+        return new AuthoredRoughness(sum / 255f / values.length, values, channel.width(), channel.height());
     }
 
     /** R8 is independent of the albedo/normal pair; all supplied maps retain their exact declared resolution. */

@@ -87,8 +87,8 @@ class GpuMaterialLodSmokeTest {
             }
         }
         var sculpt = target.resolve("textures/terrain/surfaces");
-        // Only these five ordinary roles participate; every other material keeps the contextual roughness (Godot's
-        // default factor 1 over a white ORM roughness). Unrelated authored maps may have different resolutions.
+        // Only these five ordinary roles appear in the scene; every factor is Godot's default 1, so each role's
+        // roughness is its ORM map alone. Unrelated authored maps may have different resolutions.
         try (var files = java.nio.file.Files.list(sculpt)) {
             for (var file : files.filter(path -> path.toString().endsWith(".tres")).toList()) {
                 String text = java.nio.file.Files.readString(file);

@@ -80,16 +80,15 @@ The user set these boundaries:
   height sources, and their caps fade around the crest into the face. Concrete
   faces sample along their rim direction. Eleven ground families have ambient wear;
   the SAND tile cover has none. See [materials and geometry](gpu-terrain-materials.md).
-- **Roughness.** Dry cover estimates are grass .92, sand and tropical .94, soil and
-  hardpan .90, rock and concrete .80, snow .82, lunar .96 and fungus .84. Rock faces
-  range from .80 to .66 with hardness (+.08 for sand, desert and Mars); lunar faces
-  are .92 and fungal faces .84. Grain varies these by up to ±.04 with normal detail.
-  A material's authored roughness ([board materials](gpu-board-materials.md#sculpted-terrain-roughness))
-  overrides them on ordinary rock kits,
-  pavement, tree pits and volcanic programs' natural material. The `cliffMaterial` path
-  (including zero-gravity bedrock), biomes and tundra keep the estimates. Marsh
-  peat (.80), quick mud (.72) and moss (.93) stay rough; only exposed pools get the
-  water response. Cavity is visibility, not roughness.
+- **Roughness.** Every surface material authors its roughness
+  ([board materials](gpu-board-materials.md#sculpted-terrain-roughness)): grass .92,
+  sand and tropical .94, soil, hardpan and concrete .90, granite and basalt .73,
+  rock .80, sandstone and Mars rock .81, snow .82, lunar .96 and fungus .84. All but
+  concrete vary by ±.04 with their grain, smoother on raised grain. The `cliffMaterial` path, tundra mats,
+  turf and road coats read the same maps as tops, rock kits, pavement, tree pits and
+  volcanic programs' natural material. Marsh peat (.80), quick mud (.72) and moss
+  (.93) stay rough; only exposed pools get the water response. Cavity is visibility,
+  not roughness.
 - **Lighting.** The scene stays linear in RGBA16F targets with highlight headroom,
   and emission joins reflected light before the single display encoding. Direct
   light uses energy-coupled GGX; an offline table integrates the analytic sky for
@@ -138,7 +137,7 @@ own shading. It is presentation styling, not a physical claim about altitude.
 | 1. Lighting and material consistency | Photographic material accuracy is not established: passing the linear-light and BRDF checks does not prove it, and the final appearance review of the maps is pending. | The default landscape review's 34 top/isometric conditions plus dry/wet plant checks. Record render cost separately from geometry counts and whole-game FPS. |
 | 2. Vegetation assets | Crowns and trunks show their authored shapes at close range; silhouettes, branch art, large-form variety and ground contact are below the photorealism target. | Preserve grass fullness, support, alpha coverage and the 480/240/96/12 triangle budgets. Replace an asset only for a visible improvement at gameplay scale. |
 | 3. Landscape composition | Large level-derived plateaus and tall hex columns remain visible; outcrop and fin-group placement is not done. | Keep game heights, route clearance and shared picking/support. |
-| 4. Material sources | Height and roughness are artistic estimates; there are no measured roughness maps, and source images carry some baked lighting. | Preserve aligned channels, shared arrays and continuous weathering. Raise resolution only for a demonstrated texel-density problem. |
+| 4. Material sources | Height and roughness are artistic estimates; the roughness maps derive from each material's height, not from measurement, and source images carry some baked lighting. | Preserve aligned channels, shared arrays and continuous weathering. Raise resolution only for a demonstrated texel-density problem. |
 | 5. Contact and image stability | Motion aliasing and photographic asset quality are visible limits. | Keep the existing contact shading. A new screen-space or temporal pass needs its own visual and timing comparison. |
 | 6. Combat scars | First impacts in new areas pay projection and upload cost, and array growth re-uploads existing marks; the per-frame queue bound is not a millisecond budget. | Follow confirmed attack playback; no new playing heights, terrain triangles or per-mark draws. |
 
