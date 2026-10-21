@@ -72,10 +72,10 @@ Two contracts carry it to the shaders:
   roughness, metallic and scattering for each material whose finish varies, an sRGB layer for each
   emission map, and per material its values or means, emission tint and constant glow. Sculpt
   materials sit at their sculpt layer's index, road materials from `ROAD_FINISH`.
-- A draw of one material, a model's or the board's own (`GpuModelMaterial`, `GpuModelRelief`):
-  roughness, metallic and scattering factors over a `METALLIC_ROUGHNESS` map, which carries the
-  factors itself, the emission map as the emissive texture times its tint, plus the glow, and the
-  heightmap parallax. A GLB material whose base colour is a board material's `_albedo.png` *is*
+- A draw of one material, a model's or the board's own (`GpuModelMaterial`): roughness, metallic
+  and scattering factors over a `METALLIC_ROUGHNESS` map, which carries the factors itself, the
+  emission map as the emissive texture times its tint, plus the glow, and the heightmap parallax
+  (the heightmap is the material's bump texture, so no attribute type is added). A GLB material whose base colour is a board material's `_albedo.png` *is*
   that board material: its `.tres` replaces the GLB's own metallic-roughness and adds every map
   the GLB leaves out (normal, occlusion, emission, height). `GpuAssets.finish` gives the board's
   own single-material draws (classic tiles, industrial plants) the same.
@@ -87,8 +87,10 @@ What keeps its own shading:
   emissive factors. On a plant it keeps its role's response (bark .90, snow .95, leaves passing
   .35 of their light), and untextured mycelium glows its own vertex colour.
 - Impostor cards draw their plant's baked look; fungal glow breathes slowly across a colony.
-- Crop rows and marsh sedge, composited at run time from their artwork, keep their blades'
-  shared response.
+- Crop rows and marsh sedge, whose artwork is composited at run time, take their material's
+  finish as the means of its maps: a uniform roughness, metallic, scattering and glow.
+- Meadow blades are their grass: they take the grass material's finish where they root, as
+  turf takes its ground's.
 
 ### Parallax
 
