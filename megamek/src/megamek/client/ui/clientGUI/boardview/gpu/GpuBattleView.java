@@ -764,13 +764,12 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setFluffHidden(boardCamera.tactical());
         terrain.setGrass(tuning.grass());
         terrain.setWaterEffects(tuning.waterEffects());
-        if (unitTextures.update(scene.units().stream().filter(unit -> !unit.sensorContact()
+        // Sprite meshes bake their atlas UVs. New artwork is appended, so only the moved slots need new meshes.
+        Set<BoardScene.Pixels> moved = unitTextures.updateRegions(scene.units().stream().filter(unit -> !unit.sensorContact()
               && (unitModels == null || unitModels.get(unit.model(), unit.id()) == null)).map(BoardScene.Unit::image).distinct()
-              .collect(Collectors.toMap(pixels -> pixels, pixels -> pixels)))) {
-            disposeSpriteModels(sprite -> true);
-        }
+              .collect(Collectors.toMap(pixels -> pixels, pixels -> pixels)), Map.of());
         Set<BoardScene.Pixels> images = scene.units().stream().map(BoardScene.Unit::image).collect(Collectors.toSet());
-        disposeSpriteModels(sprite -> !images.contains(sprite.pixels()));
+        disposeSpriteModels(sprite -> moved.contains(sprite.pixels()) || !images.contains(sprite.pixels()));
         updateCameraFocus(scene, frame.centerRequest(), instantAction);
         // The first visible frame's delta may still include the hidden window's loading time.
         boardCamera.advance(entranceStarting ? 0 : Gdx.graphics.getDeltaTime());

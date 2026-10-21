@@ -1250,8 +1250,8 @@ final class GpuBoardSource implements BoardSource {
                     pose.armsFlipped(), pose.hullDown()));
         model = model == null ? new BoardScene.UnitModel("", "", "", 1, 0, BoardScene.LocationDamage.NONE, dead)
               : new BoardScene.UnitModel(model.asset(), model.fallback(), model.variant(), model.figures(), model.twist(), model.damage(), dead);
-        var pixels = retained(view.getTilesetManager().wreckMarkerFor(entity, -1), usedImages);
-        return new BoardScene.Unit(captured.id(), -1, captured.name(), captured.location(), pixels, false, null,
+        // The 3D board has no wreck artwork: the unit keeps its own artwork and mesh, fallen and fully damaged.
+        return new BoardScene.Unit(captured.id(), -1, captured.name(), captured.location(), captured.image(), false, null,
               captured.height(), captured.airborne(), model, captured.outlineRgb(), captured.footprint(), null, captured.heat());
     }
 
