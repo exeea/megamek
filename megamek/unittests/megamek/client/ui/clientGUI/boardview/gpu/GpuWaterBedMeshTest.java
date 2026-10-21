@@ -4,15 +4,81 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.util.HashMap;
 import java.util.List;
 
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.Configuration;
+import megamek.common.board.BoardFile;
+import megamek.common.board.Coords;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuWaterBedMeshTest {
+    @ParameterizedTest
+    @CsvSource({
+          "Map Pack Savannahs/16x17 River Delta-Drainage Basin 1 (Savannah).board, 8, 12",
+          "unofficial/Lanceman/16x17 Waterfall.board, 4, 7",
+          "Map Pack Volcanic/16x17 Laze Plumes 1.board, 3, 5"
+    })
+    void convertedShallowBarsKeepTheirGeometryAndContinuousWaterMaterial(String path, int x, int y) throws Exception {
+        var board = BoardFile.loadSheet(new File(Configuration.boardsDir(), path), false, true);
+        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var tile = scene.tile(new Coords(x, y));
+        assertEquals(0, tile.waterDepth(), "The converted fixture includes the reported shallow bar");
+        for (TerrainLod lod : List.of(TerrainLod.FULL, TerrainLod.MEDIUM)) {
+            var surface = new BoardSurface(scene, tile, lod);
+            var bed = surface.renderBed(surface.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.BED).toList());
+            double expectedArea = 0, drawnArea = 0;
+            float highest = Float.NEGATIVE_INFINITY, drawnHighest = Float.NEGATIVE_INFINITY;
+            for (var face : bed) {
+                expectedArea += area(face.a(), face.b(), face.c());
+                for (var p : List.of(face.a(), face.b(), face.c())) { highest = Math.max(highest, p.z); }
+            }
+            assertTrue(highest > BoardGeometry.waterZ(tile) + .01f, "Keep the existing exposed bar: " + path);
+            var plan = GpuTerrain.prepareSculpt(scene, tile, surface, BoardGeometry.floor(scene), lod, new HashMap<>());
+            int dry = 0, wet = 0;
+            for (var triangles : plan.blended().values()) for (var triangle : triangles) {
+                var a = triangle.a().vertex().position;
+                var b = triangle.b().vertex().position;
+                var c = triangle.c().vertex().position;
+                var middle = new Vector3(a).add(b).add(c).scl(1 / 3f);
+                // The material batches also contain the surrounding bank and walls; isolate the actual bed plane.
+                float bedHeight = BoardSurface.sampleHeight(bed, middle.x, middle.y, Float.NaN);
+                if (!Float.isFinite(bedHeight) || Math.abs(bedHeight - middle.z) > .001f) { continue; }
+                drawnArea += area(a, b, c);
+                for (var point : List.of(triangle.a(), triangle.b(), triangle.c())) {
+                    var vertex = point.vertex();
+                    var p = vertex.position;
+                    drawnHighest = Math.max(drawnHighest, p.z);
+                    assertEquals(p.z, BoardSurface.sampleHeight(bed, p.x, p.y, Float.NaN), .003f,
+                          "Material preparation keeps the canonical bar surface");
+                    assertTrue(vertex.color.a < .25f && vertex.color.b < .125f,
+                          "Wet and exposed parts share water material context: " + path + " " + lod + " " + p);
+                    if (p.z > surface.waterHeight(p.x, p.y) + .01f) {
+                        dry++;
+                        assertTrue(vertex.uv.y <= -1, "An exposed bar retains depth-zero material ownership");
+                        float water = (vertex.color.g * 255 - 64 + vertex.color.b * 8) * BoardGeometry.level()
+                              - BoardGeometry.hexScale();
+                        assertEquals(surface.waterHeight(p.x, p.y), water, .003f,
+                              "The existing bank fade can continue across the exposed bar");
+                    } else { wet++; }
+                }
+            }
+            assertTrue(dry > 0 && wet > 0, "Exercise both sides of the waterline on the same bed");
+            assertEquals(highest, drawnHighest, .003f, "The visible bar is not flattened or submerged");
+            assertEquals(expectedArea, drawnArea, expectedArea * .0001,
+                  "Material preparation preserves the whole bed without duplicate layers");
+        }
+    }
+
+    private static float area(Vector3 a, Vector3 b, Vector3 c) {
+        return Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) / 2;
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { 1, 4 })
     void levelPoolBedsStayInsideTheWaterAlongCurvedBanksAndMouths(int depth) {

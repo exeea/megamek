@@ -28,7 +28,8 @@ class BoardRoadBridgePaintTest {
     }
 
     @Test
-    void middleBallastAndBothYellowLinesContinueThroughEveryRampDirection() {
+    void middleBallastAndBothMedianLinesContinueThroughEveryRampDirection() {
+        float medianLine = BoardRoad.MEDIAN_HALF + .4f;
         for (int d = 0; d < 6; d++) {
             int exits = 1 << d | 1 << (d + 3) % 6;
             var road = extend(road(exits, new RailRoute.Corridor(exits, 0, 0)), d);
@@ -41,12 +42,12 @@ class BoardRoadBridgePaintTest {
                 assertTrue(road.medianBand().contains(x, y), "Ballast continues beyond border " + d);
                 assertFalse(road.street(x, y), "The ramp's center remains reserved for rail");
                 for (int side : new int[] { -1, 1 }) {
-                    assertTrue(lines.contains(x + side * ny * 6, y - side * nx * 6),
+                    assertTrue(lines.contains(x + side * ny * medianLine, y - side * nx * medianLine),
                           "Both median lines continue on ramp " + d + " at " + along);
                 }
             }
-            assertFalse(lines.contains(edge[0] + nx * (REACH + 3) + ny * 6,
-                  edge[1] + ny * (REACH + 3) - nx * 6), "Paint ends with the carrier");
+            assertFalse(lines.contains(edge[0] + nx * (REACH + 3) + ny * medianLine,
+                  edge[1] + ny * (REACH + 3) - nx * medianLine), "Paint ends with the carrier");
         }
     }
 
@@ -60,7 +61,7 @@ class BoardRoadBridgePaintTest {
                 float[] edge = RailRoute.border(d);
                 float length = (float) Math.hypot(edge[0], edge[1]);
                 float nx = edge[0] / length, ny = edge[1] / length;
-                float[] shift = RailRoute.borderOffset(d, -6.35f * corridor.lateral(d));
+                float[] shift = RailRoute.borderOffset(d, RailRoute.BESIDE_ROAD * corridor.lateral(d));
                 for (float along : new float[] { 4, 12, 22 }) {
                     float x = edge[0] + nx * along + shift[0], y = edge[1] + ny * along + shift[1];
                     assertEquals(-BoardRoad.Kind.PAVED.halfWidth, road.distance(x, y), .02f,

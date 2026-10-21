@@ -15,12 +15,15 @@ import java.util.stream.Collectors;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
+import megamek.common.board.BoardModelBounds;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
@@ -31,6 +34,49 @@ import org.junit.jupiter.api.Test;
 /** Legacy maglev decodes to route markers and separate pieces measured from its sprites; the palette keeps five entries. */
 class BoardSceneryMaglevTest {
     private static final String WAGON = "scenery/maglev/wagon", CAB = "scenery/maglev/cab", PLATFORM = "scenery/maglev/platform";
+
+    @Test
+    void conventionalStockUsesLargerAuthoredMeshesAndMatchingPlacementBoundsWhileMaglevAndCarsStayUnchanged() {
+        Coords at = new Coords(3, 4);
+        for (String asset : List.of("scenery/rail/locomotive", "scenery/rail/box-car", RailRoute.BUFFER_STOP,
+              WAGON, CAB, "scenery/vehicles/car")) {
+            var object = new BoardDecoration("stock", "prop", asset, null, .12, -.18, 0, false, 1.25,
+                  BoardDecoration.Placement.ground(), 0, false, 0, 0);
+            Hex hex = new Hex(); hex.setDecorations(List.of(object));
+            var feature = BoardFeatures.capture(hex, at, Map.of()).stream()
+                  .filter(f -> object.equals(f.decoration())).findFirst().orElseThrow();
+            float[] raw = BoardModelBounds.bounds(asset);
+            assertNotNull(raw, asset);
+            float expectedScale = 1.25f * (asset.startsWith("scenery/rail/") ? 1.3f : 1);
+            var drawn = new BoundingBox(new Vector3(raw[0], raw[1], raw[2]), new Vector3(raw[3], raw[4], raw[5]))
+                  .mul(BoardFeatures.decorationTransform(at, feature, 0));
+            assertEquals((raw[3] - raw[0]) * expectedScale * BoardGeometry.hexScale(), drawn.getWidth(), .001f, asset);
+            assertEquals((raw[4] - raw[1]) * expectedScale * BoardGeometry.hexScale(), drawn.getHeight(), .001f, asset);
+            assertEquals((raw[5] - raw[2]) * expectedScale * BoardGeometry.hexScale(), drawn.getDepth(), .001f, asset);
+            var footprint = BoardModelBounds.footprint(at, object);
+            assertNotNull(footprint, asset);
+            assertEquals(drawn.min.x / BoardGeometry.hexScale(), footprint.stream().mapToDouble(p -> p.x()).min().orElseThrow(), .001, asset);
+            assertEquals(drawn.max.y / BoardGeometry.hexScale(), footprint.stream().mapToDouble(p -> p.y()).max().orElseThrow(), .001, asset);
+            assertEquals(1.25, object.scale(), "Runtime scale never changes saved author scale");
+        }
+    }
+
+    @Test
+    void newConventionalTrainStampsGrowCarSpacingWhileMaglevStampCoordinatesArePreserved() {
+        for (String stamp : List.of("stamp/rail-train", "stamp/express-train", "stamp/colony-train", "stamp/maglev-train")) {
+            String layout = BoardEditorBlueprint.get().asset(stamp).layout();
+            var rows = BoardSceneryLayouts.layout(layout).components();
+            var objects = BoardSceneryLayouts.stamp(layout, new Hex(), new Coords(2, 2));
+            assertEquals(rows.size(), objects.size(), stamp);
+            double spacing = stamp.equals("stamp/maglev-train") ? 1 : 1.3;
+            for (int i = 0; i < rows.size(); i++) {
+                var row = rows.get(i); var object = objects.get(i);
+                assertEquals(row.x() * spacing, object.x() * 84, .0001, stamp);
+                assertEquals(row.y() * spacing, object.y() * 72, .0001, stamp);
+                assertEquals(row.scale(), object.scale(), .0001, stamp);
+            }
+        }
+    }
 
     /** What each legacy sprite shows: the route's sides, a platform, cab and wagon count, and parked cars. */
     private record Sprite(int sides, int platforms, int cabs, int wagons, int cars) { }

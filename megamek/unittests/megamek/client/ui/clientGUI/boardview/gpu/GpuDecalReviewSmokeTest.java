@@ -98,7 +98,7 @@ class GpuDecalReviewSmokeTest {
             for (int side = 0; side < 2; side++) {
                 for (int slot = 0; slot < size.slots().size(); slot++) {
                     rows.add(new BoardSceneryLayouts.Component("scenery/vehicles/car", false,
-                          0, 0, 0, 0, .8f, 0, BoardDecoration.Stretch.NONE,
+                          0, 0, 0, 0, 1, 0, BoardDecoration.Stretch.NONE,
                           BoardDecoration.Colours.of(PAINT[(slot + side) % PAINT.length]), new BoardSceneryLayouts.Seat(side, slot)));
                 }
             }

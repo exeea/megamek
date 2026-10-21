@@ -86,8 +86,7 @@ class GpuDecalPlacementSmokeTest {
                             // The tileset decals are the Classic graphics': a build of their own.
                             terrain.setColumns(tactical);
                             terrain.update(scene);
-                            float expected = tactical && sample.name().startsWith("bridge")
-                                  ? GpuTilesetTerrain.deckZ(scene.tile(CENTER)) : support;
+                            float expected = support;
                             // Paint and terrain-owned sprites are overlays; art the conversion turned into placed
                             // objects (the skylights) draws in 3D in both views (GpuSceneryPlacementSmokeTest).
                             var tile = scene.tile(CENTER);

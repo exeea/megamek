@@ -158,7 +158,7 @@ final class GpuBiomeVegetation implements Disposable {
         final FloatArray canopy = new FloatArray(), canopySpans = new FloatArray();
         // Crop-only: the current furrow's strips as (start, end, start height, end height) in furrow metres.
         private final FloatArray furrow = new FloatArray();
-        final BoardRoad road;
+        final List<BoardRoad> roads;
         // The paint on this hex's ground, or null: no plant grows through it.
         final BoardDecals.Opacity paint;
         // Structures, objects, piers and low decks, which no plant grows through (as blades: GpuGroundCover); null: none.
@@ -184,7 +184,7 @@ final class GpuBiomeVegetation implements Disposable {
             levelZ = BoardGeometry.groundZ(tile);
             uniform = key.sites().stream().allMatch(site -> site != null && site.biome() == kind
                   && site.elevation() == tile.elevation());
-            road = BoardRoad.carriageway(tile) ? BoardRoad.way(scene, tile) : null;
+            roads = BoardRoad.nearbyWays(scene, tile);
             var nearby = new BoardObstacles(scene, tile);
             obstacles = nearby.isEmpty() ? null : nearby;
             across = BoardBiome.ROW_METRES;
@@ -245,8 +245,7 @@ final class GpuBiomeVegetation implements Disposable {
                 if (water != null) {
                     if (z <= water.height(px, py) + .015f * metre) { continue; }
                 }
-                if (road != null && road.distance((px - BoardGeometry.centerX(tile.coords())) / BoardGeometry.hexScale(),
-                      (py - BoardGeometry.centerY(tile.coords())) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 1) { continue; }
+                if (BoardRoad.distance(roads, px, py) < BoardRoad.SHOULDER + 1) { continue; }
                 if (obstructed(px, py, z, REED_RADIUS * metre)) { continue; }
                 float wet = BoardBiome.wetness(px / metre, py / metre);
                 if (wet < .48f || wet > .80f) { continue; }
@@ -369,7 +368,7 @@ final class GpuBiomeVegetation implements Disposable {
               float start, float end, float seed) {
             float metre = BoardRelief.metres(1);
             FloatArray points = new FloatArray();
-            if (road == null && paint == null && obstacles == null && inland(px, py, start, metre) && inland(px, py, end, metre)
+            if (roads.isEmpty() && paint == null && obstacles == null && inland(px, py, start, metre) && inland(px, py, end, metre)
                   && level(pieces, start, end)) {
                 // Cultivated everywhere on this strip: follow the exact triangle pieces.
                 float gap = .001f * BoardGeometry.hexScale() / metre, last = Float.NEGATIVE_INFINITY;
@@ -430,8 +429,7 @@ final class GpuBiomeVegetation implements Disposable {
             float cover = inland(px, py, at, metre) ? BoardBiome.sameLevel(z, levelZ) : BoardBiome.coverage(scene, kind, x, y, z);
             if ((paint == null ? cover : cover * (1 - paint.at(x, y))) < CULTIVATED) { return Float.NaN; }
             // Include the horizontal canopy's reach in the road clearance.
-            if (road != null && road.distance((x - BoardGeometry.centerX(tile.coords())) / BoardGeometry.hexScale(),
-                  (y - BoardGeometry.centerY(tile.coords())) / BoardGeometry.hexScale())
+            if (BoardRoad.distance(roads, x, y)
                   < BoardRoad.SHOULDER + 1 + ROW_HALF_WIDTH * metre / BoardGeometry.hexScale()) { return Float.NaN; }
             return obstructed(x, y, z, ROW_HALF_WIDTH * metre) ? Float.NaN : z;
         }

@@ -1288,7 +1288,7 @@ public class Board implements Serializable {
                     }
                     int elevation = Integer.parseInt(args[1]);
                     // The coordinates in the .board file are ignored!
-                    nd[index] = new Hex(elevation, args[2], args[3], new Coords(index % nw, index / nw));
+                    nd[index] = legacyHex(elevation, args[2], args[3], new Coords(index % nw, index / nw));
                     index++;
                 } else if ((st.ttype == StreamTokenizer.TT_WORD) && st.sval.equalsIgnoreCase("description")) {
                     st.nextToken();
@@ -1348,6 +1348,31 @@ public class Board implements Serializable {
         } else if (errors == null) {
             logger.error("errors - Invalid board data!");
         }
+    }
+
+    /**
+     * Legacy files sometimes retain an empty {@code none} marker. Drop only that marker; unknown names must not
+     * silently become terrain type zero and hide a misspelled gameplay terrain.
+     */
+    private static Hex legacyHex(int elevation, String terrain, String theme, Coords coords) {
+        Hex hex = new Hex(elevation, "", theme, coords);
+        for (StringTokenizer tokens = new StringTokenizer(terrain, ";", false); tokens.hasMoreTokens(); ) {
+            String token = tokens.nextToken().strip();
+            int colon = token.indexOf(':');
+            String name = colon < 0 ? token : token.substring(0, colon);
+            if (name.equals("none")) { continue; }
+            try {
+                if (Terrains.getType(name) == 0) {
+                    throw new IllegalArgumentException("Unknown terrain name: " + name);
+                }
+                hex.addTerrain(new Terrain(token));
+            } catch (IllegalArgumentException | IndexOutOfBoundsException failure) {
+                throw new IllegalArgumentException("Hex " + coords.getBoardNum() + ": invalid terrain \"" + token
+                      + "\" (" + failure.getMessage() + ")", failure);
+            }
+        }
+        hex.normalizeImportedRoad();
+        return hex;
     }
 
     public boolean isValid() {

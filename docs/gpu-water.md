@@ -106,14 +106,19 @@ The material fade spans the full exposed bank with linear coverage, rather than
 stacked height smoothsteps that compress it into a sharp strip. Both effects
 fade below the dry rim to preserve the adjoining land's material. This
 uses the existing soil-contact and gravel material roles, so snow, dune sand and
-turf give way to exposed sediment before reaching the water. Exposed bank
-vertices retain their pool's water-height reference; actual submersion still
+turf give way to exposed sediment before reaching the water. Depth-zero grass
+and tropical shores retain turf farther down the exposed bank, with the same
+sediment at the wet toe and below water. Their grass roots use the finished bank
+and local water reference, including where that bank extends into a land hex.
+Exposed bank vertices retain their pool's water-height reference; actual submersion still
 controls water absorption. This adds no maps, passes or shoreline objects.
 At the outer edge, the original material slots remain in use until their weights
 fade to zero. On earth banks, cover then fades into soil before soil fades into
 gravel, avoiding a visible third role being discarded halfway through the
-transition. Grass and tropical turf finish fading into soil at 60% of the bank;
-gravel starts at 90%. Other covers retain their previous 90% soil transition.
+transition. On positive-depth banks, grass and tropical turf finish fading into
+soil at 60% of the bank; gravel starts at 90%. Depth-zero turf cubes the sediment
+progress before these transitions, keeping the green cover closer to the wet toe.
+Other covers retain their previous 90% soil transition.
 Rock cliffs keep their existing strongest-two-role selection. Mixed-cover
 draws also use the existing second role inside this narrow band to retain the fade.
 The two-role limit within each material is unchanged, although the band activates
@@ -128,6 +133,13 @@ encoded as `-1 - distance` in the second shore UV, then decoded before shading;
 this reuses the existing vertex layout. Desert and Mars depth-zero surfaces mix
 their original near-water sediment curve 50/50 with the broader deposit curve.
 Their deeper beds retain the existing deposit textures and treatment.
+
+Exposed depth-zero bars keep their existing relief above water. During bed material
+preparation, the portions outside water coverage retain their own pool's height
+and depth-zero marker too. This lets the same sediment fade cross the waterline
+instead of cutting directly to dry grass or sand along clipped triangles, which
+made joined banks look like a second coast. Already submerged pieces keep their
+covering water's metadata. Geometry, water opacity and shader programs are unchanged.
 
 Natural slopes facing water or dry land feather their shading normals into the shared ground at
 the foot and crest, using the existing 1.5-metre contact distance capped at half
@@ -218,7 +230,7 @@ short chop keeps its real height whatever the configured maximum. Scenario gravi
 amplitudes and its wave speeds. In vacuum (`GpuTerrain.setVacuum`, from the visual
 pressure, which zero gravity forces to VACUUM) or at zero gravity, `GpuTerrain.update`
 derives an airless presentation from the source tiles (`BoardScene.Tile.lunar`): every
-surface uses LUNAR, and the vegetation, snow and black ice disappear with their labels
+surface except CONCRETE uses LUNAR, and the vegetation, snow and black ice disappear with their labels
 (trees, grass, plant and fungus scatter, fields, felled timber, biomes, swamp). The
 tiles are `barren`, so the relief's field cover grows no shrubs on them; lunar-theme
 ground with air keeps its shrubs. In vacuum with gravity, water and hazardous

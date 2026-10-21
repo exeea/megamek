@@ -15,13 +15,16 @@ flat out ivec3 v_style;
 flat out vec4 v_overlay;
 flat out float v_level;
 flat out float v_ink;
+flat out float v_space;
 // OVERLAY_CONTRAST
 void main() {
     // Captured hex elevations also keep the overhead grid aligned with perspective projection.
     vec3 center = vec3(a_hex.x * .75 + .5, -(a_hex.y + mod(a_hex.x, 2.0) * .5 + .5), a_hex.z);
     vec3 position = (center + a_position) * u_hexSize;
     v_style = ivec3(a_style.xyz + .5);
+    v_space = a_style.w;
     v_ink = u_ground == 0 && u_contrastEnabled > 0.0 ? overlayInk(a_hex.xy) : 0.0;
+    if (v_space > .5) v_ink = .7;
     if (u_ground == 1) {
         // A liquid's marks lie a hair under its surface (BoardGeometry.waterZ), so a deck over it covers them; every
         // other mark lies on the plane above the board.

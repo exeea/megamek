@@ -62,6 +62,7 @@ final class GpuHexGrid implements Disposable {
     private int top;
     /** The board's lowest hex level, where level shading starts. */
     private int lowest;
+    private boolean space;
 
     GpuHexGrid() {
         shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU hex grid and ground layer",
@@ -94,15 +95,17 @@ final class GpuHexGrid implements Disposable {
     void render(BoardCamera camera, BoardScene scene, boolean columns, boolean tactical, GpuBattleStatus.Arc arc,
           boolean levelShading, GpuAtmosphere atmosphere) {
         boolean grid = BoardGeometry.tuning().gridShade() < 1;
-        if (scene.tiles().isEmpty() || !tactical && (!grid || !columns && !camera.isTopDown())) {
+        if (scene.tiles().isEmpty() || !tactical && !grid) {
             return;
         }
         update(scene, tactical ? arc : GpuBattleStatus.Arc.NONE);
+        boolean spaceOnly = !tactical && !columns && !camera.isTopDown();
+        if (spaceOnly && !space) { return; }
         if (tactical) {
             // Water a hair under its surface, the rest on a plane above the board: only a deck over water covers it.
             Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
             Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
-        } else if (columns) {
+        } else if (columns || spaceOnly) {
             // Coplanar with the column tops: pulled toward the camera, it wins over them and loses to anything nearer.
             Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
             Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
@@ -124,6 +127,7 @@ final class GpuHexGrid implements Disposable {
             shader.setUniformf("u_hexSize", BoardGeometry.width(), BoardGeometry.height(), BoardGeometry.level());
             shader.setUniformf("u_gridShade", grid ? BoardGeometry.tuning().gridShade() : 1);
             shader.setUniformi("u_ground", tactical ? 1 : 0);
+            shader.setUniformi("u_spaceOnly", spaceOnly ? 1 : 0);
             shader.setUniformf("u_planes", top * BoardGeometry.level(), BoardGeometry.hexScale());
             shader.setUniformf("u_levels", lowest, levelShading ? LEVEL_SHADE : 0, LEVEL_SHADE_MAX);
             hex.render(shader, GL20.GL_TRIANGLES);
@@ -153,6 +157,7 @@ final class GpuHexGrid implements Disposable {
             data = new float[count * FLOATS];
             top = 0;
             lowest = Integer.MAX_VALUE;
+            space = false;
             int at = 0;
             for (var tile : scene.tiles()) {
                 data[at] = tile.coords().getX();
@@ -161,6 +166,8 @@ final class GpuHexGrid implements Disposable {
                 data[at + 3] = edges(scene, tile);
                 data[at + 4] = area(scene, tile);
                 data[at + 5] = marks(tile);
+                data[at + 6] = tile.backdrop() == BoardBackdrop.SPACE ? 1 : 0;
+                space |= data[at + 6] != 0;
                 at += FLOATS;
                 top = Math.max(top, tile.elevation() + tile.cover().height() + PLANE_HEADROOM);
                 lowest = Math.min(lowest, tile.elevation());

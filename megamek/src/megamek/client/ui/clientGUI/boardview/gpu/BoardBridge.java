@@ -15,6 +15,7 @@ import megamek.common.board.BoardDecoration;
 import megamek.common.board.BridgeSpan;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
+import megamek.common.board.HexTile;
 import megamek.common.board.RailRoute;
 
 /**
@@ -22,10 +23,12 @@ import megamek.common.board.RailRoute;
  * carries, the stored {@code bridge_road} ({@link BoardScene.Tile#deckRoad}).
  */
 final class BoardBridge {
-    static final float NATURAL_HALF_WIDTH = 4;
+    static final float NATURAL_HALF_WIDTH = 8;
+    /** The built deck's shoulder scales with its carriageway; ground-road shoulders remain narrower. */
+    static final float SHOULDER = HexTile.ROAD_HALF_WIDTH / 5;
     /** Half the passage both deck styles reserve, in model px: a natural mouth or a paved lane and its shoulder. */
     static final float PASSAGE_HALF_WIDTH = Math.max(NATURAL_HALF_WIDTH * 1.04f * BoardGeometry.TILE_WIDTH / 30,
-          BoardRoad.Kind.PAVED.halfWidth + BoardRoad.SHOULDER);
+          BoardRoad.Kind.PAVED.halfWidth + SHOULDER);
     /** Slab beneath the deck surface, model px (deck top Z = 0, slab bottom Z = -1.5). */
     static final float SLAB = 1.5f;
 
@@ -68,28 +71,44 @@ final class BoardBridge {
      * {@code piers}: the hex's Pillars toggle ({@link HexAppearance#PILLARS}), see {@link BoardBridgeFooting#pier}.
      * {@code colours}: the look span's truss colours ({@link BridgeSpan#truss}), null for the standard design or a natural
      * span. {@code joints}: the exits whose neighbour is a joined deck of its family ({@link #connected}); a truss
-     * continues there and ends with an end post at every other exit. Any change rebuilds the hex.
+     * continues there and ends with an end post at every other exit. {@code rail} retains independently routed deck
+     * tracks too, so a shared corridor is not required to keep a road junction clear of a roundabout island.
+     * Any change rebuilds the hex.
      */
     record Deck(BoardRoad.Kind kind, int roadExits, int exits, boolean natural, List<BoardRoad.Kind> neighbors,
           BoardScene.Surface surface, List<Float> rises, boolean piers, BoardDecoration.Colours colours, int joints,
-          RailRoute.Corridor corridor) {
+          RailRoute.Corridor corridor, List<Float> cornerRises, boolean rail) {
+        Deck(BoardRoad.Kind kind, int roadExits, int exits, boolean natural, List<BoardRoad.Kind> neighbors,
+              BoardScene.Surface surface, List<Float> rises, boolean piers, BoardDecoration.Colours colours, int joints,
+              RailRoute.Corridor corridor, List<Float> cornerRises) {
+            this(kind, roadExits, exits, natural, neighbors, surface, rises, piers, colours, joints, corridor,
+                  cornerRises, corridor.sides() != 0);
+        }
+        Deck(BoardRoad.Kind kind, int roadExits, int exits, boolean natural, List<BoardRoad.Kind> neighbors,
+              BoardScene.Surface surface, List<Float> rises, boolean piers, BoardDecoration.Colours colours, int joints,
+              RailRoute.Corridor corridor) {
+            this(kind, roadExits, exits, natural, neighbors, surface, rises, piers, colours, joints, corridor, List.of());
+        }
         Deck(BoardRoad.Kind kind, int roadExits, int exits, boolean natural, List<BoardRoad.Kind> neighbors,
               BoardScene.Surface surface, List<Float> rises, boolean piers, BoardDecoration.Colours colours, int joints) {
             this(kind, roadExits, exits, natural, neighbors, surface, rises, piers, colours, joints, RailRoute.Corridor.NONE);
         }
 
         /** The deck road's course over its own sides: what its paint covers. */
-        BoardRoad road(Coords coords) { return BoardRoad.layout(coords, roadExits, kind, neighbors::get).corridor(corridor); }
+        BoardRoad road(Coords coords) {
+            BoardRoad road = BoardRoad.layout(coords, roadExits, kind, neighbors::get);
+            return (rail ? road.solidHub() : road).corridor(corridor);
+        }
 
         /** One physical carriageway over every bridge exit, spanning both ways of a road/rail corridor. */
         BoardRoad slab(Coords coords) {
-            return BoardRoad.layout(coords, exits, kind == BoardRoad.Kind.NONE ? BoardRoad.Kind.ALLEY : kind, neighbors::get)
-                  .bridgeCorridor(corridor);
+            BoardRoad road = BoardRoad.layout(coords, exits, kind == BoardRoad.Kind.NONE ? BoardRoad.Kind.ALLEY : kind, neighbors::get);
+            return (rail ? road.solidHub() : road).bridgeCorridor(corridor);
         }
 
         /** Whether the deck road paints the whole top: it has every bridge exit. */
         boolean paved() { return kind != BoardRoad.Kind.NONE && (roadExits & exits) == exits && corridor.beside() == 0; }
-        boolean sloped() { return rises.stream().anyMatch(rise -> rise != 0); }
+        boolean sloped() { return rises.stream().anyMatch(rise -> rise != 0) || cornerRises.stream().anyMatch(rise -> rise != 0); }
         boolean truss() { return colours != null; }
     }
 
@@ -202,7 +221,62 @@ final class BoardBridge {
         }
         return new Deck(tile.deckRoad(), tile.deckRoadExits(), bridge.bridgeExits(), family == Family.NATURAL,
               List.copyOf(neighbors), material.surface(), List.copyOf(rises), HexAppearance.pillars(tile.appearance()),
-              material.truss(), joints, tile.deckCorridor());
+              material.truss(), joints, tile.deckCorridor(), cornerRises(scene, tile),
+              tile.features().stream().anyMatch(feature -> RailRoute.isRoute(feature.decoration())
+                    && RailRoute.onDeck(feature.decoration())));
+    }
+
+    /** Every deck sharing a corner derives its height from the same connected decks there, never from its own mean. */
+    private static List<Float> cornerRises(BoardScene scene, BoardScene.Tile tile) {
+        return cornerRises(scene, tile, false);
+    }
+
+    /** A Classic natural cap meets the bank itself; its graded approach stays inside the full hex footprint. */
+    static List<Float> naturalCornerRises(BoardScene scene, BoardScene.Tile tile) {
+        return cornerRises(scene, tile, true);
+    }
+
+    private static List<Float> cornerRises(BoardScene scene, BoardScene.Tile tile, boolean bankHeight) {
+        float level = tile.elevation() + feature(tile).elevation();
+        var result = new ArrayList<Float>();
+        for (int corner = 0; corner < 6; corner++) {
+            int first = BoardGeometry.edgeDirection(corner), second = BoardGeometry.edgeDirection((corner + 5) % 6);
+            var neighbors = new BoardScene.Tile[] { tile, scene.tile(tile.coords().translated(first)),
+                  scene.tile(tile.coords().translated(second)) };
+            boolean[] joined = { true, false, false };
+            for (int pass = 0; pass < 2; pass++) {
+                for (int a = 0; a < neighbors.length; a++) {
+                    if (!joined[a]) { continue; }
+                    for (int b = 0; b < neighbors.length; b++) {
+                        if (joined[b] || neighbors[b] == null) { continue; }
+                        int d = neighbors[a].coords().direction(neighbors[b].coords());
+                        if (cornerJoined(neighbors[a], neighbors[b], d)
+                              || cornerJoined(neighbors[b], neighbors[a], (d + 3) % 6)) { joined[b] = true; }
+                    }
+                }
+            }
+            float height = 0;
+            int count = 0;
+            float banks = 0;
+            int bankCount = 0;
+            for (int i = 0; i < neighbors.length; i++) {
+                if (joined[i]) {
+                    var bridge = feature(neighbors[i]);
+                    height += neighbors[i].elevation() + (bridge == null ? 0 : bridge.elevation());
+                    count++;
+                    if (bridge == null) {
+                        banks += neighbors[i].elevation();
+                        bankCount++;
+                    }
+                }
+            }
+            result.add((bankHeight && bankCount != 0 ? banks / bankCount : height / count) - level);
+        }
+        return List.copyOf(result);
+    }
+
+    private static boolean cornerJoined(BoardScene.Tile a, BoardScene.Tile b, int direction) {
+        return feature(a) != null && (connected(a, b, direction) || road(a, b, direction) || bank(a, b, direction));
     }
 
     /**
@@ -315,7 +389,7 @@ final class BoardBridge {
     static float passage(BoardScene.Tile tile, int direction) {
         if (guideway(tile)) { return 2; }
         return ((tile.corridor().sides() | tile.deckCorridor().sides()) & 1 << direction) != 0
-              ? BoardRoad.CORRIDOR_HALF + BoardRoad.SHOULDER : PASSAGE_HALF_WIDTH;
+              ? BoardRoad.CORRIDOR_HALF + SHOULDER : PASSAGE_HALF_WIDTH;
     }
 
     /** The decks join ({@link BridgeSpan#joined}): one span, one type, a joint the piers may stand under. */

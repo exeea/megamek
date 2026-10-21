@@ -12,7 +12,9 @@ flat in ivec3 v_style;    // x: cliffs topped (bits 0-5), cliffs below (6-11), 1
 flat in vec4 v_overlay;   // the enemy's arc code (1 rear, 2 side, 3 front), distance, rear rays, side dashes
 flat in float v_level;    // the hex's level
 flat in float v_ink;
+flat in float v_space;
 uniform int u_ground;     // 1: the Tactical View's ground layer; 0: the grid alone
+uniform int u_spaceOnly;  // Isometric Enhanced draws only the faint borders of transparent SPACE hexes.
 uniform vec3 u_levels;    // level shading: the board's lowest level, the lightening per level above it (0: off), its cap
 // LIGHT_MODEL
 // SCENE_RADIANCE
@@ -104,10 +106,11 @@ vec4 fill(int code) {
 }
 
 void main() {
+    if (u_spaceOnly == 1 && v_space < .5) discard;
     float grid = 1.0 - terrainGrid(v_board);
     if (u_ground == 0) {
         if (grid <= 0.0) discard;
-        fragColor = vec4(vec3(v_ink), grid);
+        fragColor = vec4(vec3(v_ink), grid * (v_space > .5 ? .3 : 1.0));
         return;
     }
     pixel = max(fwidth(v_local.x), fwidth(v_local.y)) / APOTHEM;
@@ -119,7 +122,7 @@ void main() {
     vec4 color = vec4(0.0);
 
     // Level shading under every mark: a warm light wash by the hex's level, so heights read from above.
-    color = over(color, LIGHT, min(u_levels.z, u_levels.y * max(0.0, v_level - u_levels.x)));
+    if (v_space < .5) color = over(color, LIGHT, min(u_levels.z, u_levels.y * max(0.0, v_level - u_levels.x)));
 
     // Woods, liquids and roofs: a fill, the woods' crowns, and the area's outline.
     vec4 tint = fill(code);
@@ -129,7 +132,7 @@ void main() {
         float spacing = density == 0 ? .1286 : density == 1 ? .0921 : .0729;
         color = over(color, tint.rgb * .45, .55 * dots(spacing, .024));
     }
-    color = over(color, INK, grid);
+    color = over(color, v_space > .5 ? vec3(.6, .7, .85) : INK, grid * (v_space > .5 ? .3 : 1.0));
     if (smoke > 0) {
         color = over(color, vec3(.86, .87, .88), .16 * float(smoke));
         color = over(color, vec3(.92, .93, .94), .5 * hatch(smoke == 2 ? .05 : .085, .3));

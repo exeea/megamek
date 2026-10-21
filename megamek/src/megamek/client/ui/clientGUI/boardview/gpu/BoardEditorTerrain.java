@@ -1,12 +1,10 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
@@ -14,30 +12,42 @@ import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.enums.BasementType;
 import megamek.common.units.Terrains;
 
-/** Editor-only annotations for authored state with no visible artwork, on the existing hex marker plane. */
+/** EDT capture of editor badges and deployment annotations; no render thread reads live terrain. */
 final class BoardEditorTerrain {
     private BoardEditorTerrain() { }
 
-    static List<Integer> types(Hex hex, Set<Integer> blank) {
-        List<Integer> result = new ArrayList<>();
-        for (int type : hex.getTerrainTypes()) {
-            // A legacy art token that draws nothing never reaches the editor: the conversion takes it (takenTokens).
-            boolean invisible = switch (type) {
-                case Terrains.BLACK_ICE, Terrains.BLDG_BASE_COLLAPSED, Terrains.METAL_CONTENT -> true;
-                case Terrains.BLDG_BASEMENT_TYPE -> blank.contains(type);
-                default -> false;
-            };
-            if (invisible) { result.add(type); }
+    enum Kind { BASEMENT, UNKNOWN_BASEMENT, COLLAPSED_BASEMENT, BLACK_ICE, METAL_DEPOSITS }
+    record Badge(Kind kind, String text) { }
+
+    /** Stable top-to-bottom order, with the full list frozen before it crosses to the render thread. */
+    static List<Badge> badges(Hex hex) {
+        List<Badge> result = new ArrayList<>();
+        if (hex.containsTerrain(Terrains.BUILDING)) {
+            var basement = BasementType.getType(hex.terrainLevel(Terrains.BLDG_BASEMENT_TYPE));
+            if (!basement.isNone()) {
+                result.add(new Badge(basement.isUnknown() ? Kind.UNKNOWN_BASEMENT : Kind.BASEMENT,
+                      basement.isUnknown() ? "B?" : "B" + basement.getDepth()));
+            }
         }
-        return result.stream().sorted().toList();
+        if (hex.terrainLevel(Terrains.BLDG_BASE_COLLAPSED) == 1) {
+            result.add(new Badge(Kind.COLLAPSED_BASEMENT, Messages.getString("BoardEditor.badge.collapsed")));
+        }
+        if (hex.containsTerrain(Terrains.BLACK_ICE)) {
+            result.add(new Badge(Kind.BLACK_ICE, Terrains.getEditorName(Terrains.BLACK_ICE)));
+        }
+        if (hex.containsTerrain(Terrains.METAL_CONTENT)) {
+            result.add(new Badge(Kind.METAL_DEPOSITS,
+                  Messages.getString("BoardEditor.badge.metal", hex.terrainLevel(Terrains.METAL_CONTENT))));
+        }
+        return List.copyOf(result);
     }
 
-    static BoardTactical capture(Hex hex, Coords coords, Set<Integer> blank) {
-        List<Integer> types = types(hex, blank);
+    static BoardTactical capture(Hex hex, Coords coords) {
         boolean deployment = hex.containsTerrain(Terrains.DEPLOYMENT_ZONE);
-        if (types.isEmpty() && !deployment) { return BoardTactical.EMPTY; }
+        if (!deployment) { return BoardTactical.EMPTY; }
         var graphics = new BoardTacticalGraphics();
         var local = BoardTacticalGraphics.onHexPlane(graphics, BoardArtwork.largeTileLocation(coords.getX(), coords.getY(), 1));
         try {
@@ -55,28 +65,6 @@ final class BoardEditorTerrain {
                 String label = zones.isEmpty() ? Messages.getString("BoardEditor.deploymentZoneMarker.none")
                       : Messages.getString("BoardEditor.deploymentZoneMarker", zones);
                 local.drawString(label, 42 - local.getFontMetrics().stringWidth(label) / 2f, 61);
-            }
-            if (!types.isEmpty()) {
-                local.setColor(new Color(0xDC162431, true));
-                local.fillRoundRect(13, 16, 58, 38, 5, 5);
-                local.setColor(new Color(hex.containsTerrain(Terrains.BLACK_ICE) ? 0xBBEEFF : 0xF2CD7A));
-                local.setStroke(new BasicStroke(1.5f));
-                if (hex.containsTerrain(Terrains.BLACK_ICE)) {
-                    for (int angle = 0; angle < 180; angle += 60) {
-                        double radians = Math.toRadians(angle);
-                        int x = (int) Math.round(8 * Math.cos(radians)), y = (int) Math.round(8 * Math.sin(radians));
-                        local.drawLine(42 - x, 28 - y, 42 + x, 28 + y);
-                    }
-                } else {
-                    local.drawLine(36, 20, 36, 35);
-                    local.drawPolyline(new int[] {36, 49, 45, 36}, new int[] {20, 20, 26, 26}, 4);
-                }
-                local.setFont(new Font(Font.DIALOG, Font.BOLD, 8));
-                String label = Terrains.getEditorName(types.contains(Terrains.BLACK_ICE) ? Terrains.BLACK_ICE : types.getFirst());
-                if (types.size() > 1) { label += " +" + (types.size() - 1); }
-                float size = Math.min(8f, 54f * 8f / Math.max(1, local.getFontMetrics().stringWidth(label)));
-                local.setFont(local.getFont().deriveFont(size));
-                local.drawString(label, 42 - local.getFontMetrics().stringWidth(label) / 2f, 46);
             }
         } finally { local.dispose(); }
         try { return graphics.snapshot(); }

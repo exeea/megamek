@@ -46,6 +46,8 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
+import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
+import megamek.client.ui.enums.DialogResult;
 import megamek.common.annotations.Nullable;
 import megamek.common.units.Entity;
 import megamek.client.ui.util.ScreenFit;
@@ -198,6 +200,8 @@ public final class GpuBoardWindow {
     private final Timer startupTimer;
     private volatile BoardSource source;
     private volatile String previewTitle;
+    /** EDT-owned source of the current preview; null for a generated or assembled lobby map. */
+    private File previewFile;
     private volatile String loadingMessage = Messages.getString("ClientGUI.waitingOnTheServer");
     private final Window swingWindow;
     /** Preview windows own their temporary game and leave the browser's modal session intact. */
@@ -283,7 +287,7 @@ public final class GpuBoardWindow {
             reportPreviewFailure(owner, failure);
             return;
         }
-        openPreview(owner, board);
+        openPreview(owner, board, boardFile);
     }
 
     /**
@@ -300,18 +304,22 @@ public final class GpuBoardWindow {
 
     /** The preview owns a temporary game; the shared renderer supplies all terrain and camera controls. */
     public static synchronized void openPreview(Window owner, Board board) {
+        openPreview(owner, board, null);
+    }
+
+    private static synchronized void openPreview(Window owner, Board board, File file) {
         if (!SwingUtilities.isEventDispatchThread()) {
             throw new IllegalStateException("Open the GPU preview on the Swing event thread");
         }
         Objects.requireNonNull(owner);
         if (active != null) {
             if (isPreviewOf(owner)) {
-                active.replacePreview(board, true);
+                active.replacePreview(board, file, true);
             } else if (active.preview || active.closing) {
                 active.close(false);
                 active.afterClose = () -> {
                     if (owner.isShowing()) {
-                        openPreview(owner, board);
+                        openPreview(owner, board, file);
                     }
                 };
             } else {
@@ -323,7 +331,9 @@ public final class GpuBoardWindow {
             Game game = new Game();
             game.setBoard(board);
             game.setPhase(GamePhase.LOUNGE);
-            start(new GpuBoardWindow(null, null, () -> null, owner, null, game));
+            GpuBoardWindow window = new GpuBoardWindow(null, null, () -> null, owner, null, game);
+            window.previewFile = file;
+            start(window);
         } catch (RuntimeException | LinkageError failure) {
             reportPreviewFailure(owner, failure);
         }
@@ -340,7 +350,7 @@ public final class GpuBoardWindow {
      */
     public static synchronized void updatePreview(Window owner, Board board) {
         if (isPreviewOf(owner)) {
-            active.replacePreview(board, false);
+            active.replacePreview(board, null, false);
         }
     }
 
@@ -376,13 +386,44 @@ public final class GpuBoardWindow {
         }
         try {
             BoardEditorSession editor = new BoardEditorSession();
-            // Copy and Paste carry hexes as text between MegaMek windows and text editors, as the old editor did.
-            editor.textClipboard(Toolkit.getDefaultToolkit().getSystemClipboard());
             if (file != null) { editor.open(file.toPath()); }
             else if (chooseFile && !editor.chooseOpen(owner)) { return; }
-            start(new GpuBoardWindow(null, null, () -> null, owner, editor, editor.game()));
+            startEditor(owner, editor);
         } catch (IOException | RuntimeException failure) {
             reportPreviewFailure(owner, failure);
+        }
+    }
+
+    private static void startEditor(Window owner, BoardEditorSession editor) {
+        // Copy and Paste carry hexes as text between MegaMek windows and text editors, as the old editor did.
+        editor.textClipboard(Toolkit.getDefaultToolkit().getSystemClipboard());
+        start(new GpuBoardWindow(null, null, () -> null, owner, editor, editor.game()));
+    }
+
+    /** EDT: copy the displayed map before releasing its renderer; editing must not change the lobby's board. */
+    private void requestEditor() {
+        if (!preview || closing) { return; }
+        try {
+            BoardEditorSession session = new BoardEditorSession();
+            session.open(mapGame.getBoard(), previewFile == null ? null : previewFile.toPath());
+            close(false);
+            afterClose = () -> {
+                Window owner = swingWindow;
+                if (owner instanceof AdvancedSearchMapDialog browser) {
+                    owner = browser.getOwner();
+                    // End the original modal call deliberately; the editor returns directly to the lobby.
+                    browser.setResult(DialogResult.CANCELLED);
+                    browser.dispose();
+                }
+                if (owner == null || !owner.isDisplayable()) { return; }
+                try {
+                    startEditor(owner, session);
+                } catch (RuntimeException | LinkageError failure) {
+                    reportPreviewFailure(owner, failure);
+                }
+            };
+        } catch (RuntimeException failure) {
+            reportPreviewFailure(swingWindow, failure);
         }
     }
 
@@ -397,7 +438,7 @@ public final class GpuBoardWindow {
             return;
         }
         close(false);
-        afterClose = () -> showLegacy2DPreview(swingWindow, mapGame);
+        afterClose = () -> showLegacy2DPreview(swingWindow, mapGame, previewFile);
     }
 
     /**
@@ -421,7 +462,7 @@ public final class GpuBoardWindow {
      * A file-browser or lobby preview's Legacy 2D window, with the 3D preview's Renderer menu: Classic or Enhanced
      * returns to the 3D preview of this exact board, including a randomly generated one, with the chosen graphics.
      */
-    private static void showLegacy2DPreview(Window owner, Game game) {
+    private static void showLegacy2DPreview(Window owner, Game game, File file) {
         JDialog dialog = boardWindow2D(owner, previewTitle(game.getBoard()), "board-preview-2d", game);
         if (dialog == null) { return; }
         JMenuBar menu = new JMenuBar();
@@ -430,7 +471,7 @@ public final class GpuBoardWindow {
             if (!ClientGUI.VIEW_LEGACY_2D.equals(choice)) {
                 GUIPreferences.getInstance().setBoardGraphics(ClientGUI.VIEW_GRAPHICS_CLASSIC.equals(choice)
                       ? BoardGraphics.CLASSIC : BoardGraphics.ENHANCED);
-                openPreview(owner, game.getBoard());
+                openPreview(owner, game.getBoard(), file);
                 if (active != null && active.preview && active.swingWindow == owner
                       && active.mapGame.getBoard() == game.getBoard()) { dialog.dispose(); }
             }
@@ -479,8 +520,9 @@ public final class GpuBoardWindow {
      *
      * @param raise whether the window comes to the front and takes the keyboard, as an explicit preview request does
      */
-    private void replacePreview(Board board, boolean raise) {
+    private void replacePreview(Board board, File file, boolean raise) {
         previewTitle = previewTitle(board);
+        previewFile = file;
         mapGame.setBoard(board); // The source's existing game listener captures and publishes the replacement.
         Lwjgl3Application app = application;
         if (app != null) {
@@ -738,7 +780,8 @@ public final class GpuBoardWindow {
         if (mapGame != null && (mapGame.getBoard().getWidth() < 1 || mapGame.getBoard().getHeight() < 1)) { return; }
         try {
             source = mapGame == null ? new GpuBoardSource(view, panel)
-                  : new GpuMapSource(mapGame, swingWindow, editor, this::requestExit, this::requestLegacy2D);
+                  : new GpuMapSource(mapGame, swingWindow, editor, this::requestExit, this::requestLegacy2D,
+                        preview ? this::requestEditor : null);
             startupTimer.stop();
         } catch (RuntimeException | LinkageError failure) {
             startupFailure = failure;
@@ -892,6 +935,7 @@ public final class GpuBoardWindow {
         if (editor != null) {
             restoreLegacy2D = swingWindow != null && swingWindow.isDisplayable();
             quitHandler(null);
+            if (editor.lastSavedPath() != null) { refreshSavedBoard(); }
         }
         // The native window is already destroyed. Never resurrect a client that is shutting down.
         if (afterClose != null) {
@@ -901,6 +945,26 @@ public final class GpuBoardWindow {
         }
         if (failure != null) {
             reportFailure(failure);
+        }
+    }
+
+    /** EDT: refresh from the saved file, including when later unsaved edits were discarded on close. */
+    private void refreshSavedBoard() {
+        megamek.utilities.BoardClassifier.invalidate();
+        for (Window owner = swingWindow; owner != null; owner = owner.getOwner()) {
+            if (!owner.isDisplayable()) { continue; }
+            try {
+                if (owner instanceof AdvancedSearchMapDialog browser) {
+                    browser.refreshBoards();
+                }
+                ClientGUI client = ClientGUI.forFrame(owner);
+                if (client != null && client.chatlounge != null) {
+                    client.chatlounge.boardEditorClosed(editor.lastSavedPath(), editor.lastSaveFromAssembledPreview());
+                    break;
+                }
+            } catch (RuntimeException failure) {
+                LOGGER.error(failure, "Could not refresh maps after closing the 3D editor");
+            }
         }
     }
 

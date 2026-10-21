@@ -55,8 +55,10 @@ public final class RailRoute {
         String folder() { return asset.substring(0, asset.lastIndexOf('/') + 1); }
     }
 
+    /** Visual size of conventional track and rolling stock; maglev retains its authored dimensions. */
+    public static final float CONVENTIONAL_SCALE = 1.3f;
     /** The rail top above the track's carrier plane (the ground or a deck), in model px: rolling stock rides on it. */
-    public static final float RAIL_TOP = 1.4f;
+    public static final float RAIL_TOP = 1.4f * CONVENTIONAL_SCALE;
     /** The rail kind's buffer stop, which closes every dead end and stranded stub. */
     public static final String BUFFER_STOP = "scenery/rail/buffer-stop";
     /** The maglev's station platform: it rides the route's level but stands beside the track, not on it. */
@@ -68,7 +70,7 @@ public final class RailRoute {
     /** How far a stranded side's stub reaches in from its border: beside two other sides, and beside one. */
     public static final float STUB_SHORT = 13, STUB_LONG = 16;
     /** A buffer stop stands this far before its track's end, so its struts stay on the track (model px). */
-    public static final float STOP_DEPTH = 6.5f;
+    public static final float STOP_DEPTH = 6.5f * CONVENTIONAL_SCALE;
     /** Half the length of the stub a marker without sides draws (model px). */
     public static final float LONE_STUB = 12;
     /** Track pieces per layout: three straights and six arcs. */
@@ -261,11 +263,16 @@ public final class RailRoute {
 
     // ---------------------------------------------------------------- road and rail corridors
 
-    /** Shared corridor borders; beside marks option A and right stores the physical side of its track there. */
-    public record Corridor(int sides, int beside, int right, int tracks) {
+    /**
+     * Shared corridor borders; beside marks option A and right stores the physical side of its track there.
+     * roadEnd also retains a shared terminal's length when its adjoining junction cannot carry a corridor.
+     */
+    public record Corridor(int sides, int beside, int right, int tracks, boolean roadEnd) {
         public static final Corridor NONE = new Corridor(0, 0, 0);
 
         public Corridor(int sides, int beside, int right) { this(sides, beside, right, 0); }
+
+        public Corridor(int sides, int beside, int right, int tracks) { this(sides, beside, right, tracks, sides != 0); }
 
         /** Right of looking out through d. Opposite hexes use opposite signs for the same physical point. */
         public float lateral(int d) {
@@ -275,8 +282,13 @@ public final class RailRoute {
         public int middle() { return sides & ~beside; }
     }
 
-    /** Track offset from the corridor axis in option A, in model pixels. */
-    public static final float BESIDE_RAIL = 8.25f;
+    /** The ordinary track's ballast footprint; widening its adjacent road does not widen the railway. */
+    public static final float BALLAST_HALF_WIDTH = 5.6f * CONVENTIONAL_SCALE;
+    /** Clear space between the paved edge and the ballast foot, in model pixels. */
+    public static final float CORRIDOR_GAP = 1.5f;
+    /** Road and track offsets balance the two footprints around their shared corridor axis. */
+    public static final float BESIDE_ROAD = -(BALLAST_HALF_WIDTH + CORRIDOR_GAP / 2);
+    public static final float BESIDE_RAIL = HexTile.ROAD_HALF_WIDTH + CORRIDOR_GAP / 2;
 
     /** Rail sides that continue gently, with hairpin stubs excluded. */
     public static int corridorSides(BoardDecoration marker, int bridgeExits) {
@@ -322,7 +334,11 @@ public final class RailRoute {
                 if (bit) { right |= side(d); }
             }
         }
-        return sides == 0 ? Corridor.NONE : new Corridor(sides, beside, right, route.tracks());
+        // A terminal still ends with its road when the adjoining junction cannot carry a corridor (a hairpin or
+        // multi-arm hub). This changes only its closed end; the border retains the neighbour's ordinary width.
+        boolean roadEnd = Integer.bitCount(route.connections()) == 1
+              && hex.getTerrain(deck ? Terrains.BRIDGE_ROAD : Terrains.ROAD).getExits() == route.connections();
+        return sides == 0 && !roadEnd ? Corridor.NONE : new Corridor(sides, beside, right, route.tracks(), sides != 0 || roadEnd);
     }
 
     /** The connected corridor containing a selected derived rail, on either ground or deck. */
@@ -453,6 +469,9 @@ public final class RailRoute {
 
     /** Whether an object of {@code asset} stands on a rail's rail top: rail rolling stock and the buffer stop. */
     public static boolean railRider(String asset) { return rides(asset) == Kind.RAIL || asset.equals(BUFFER_STOP); }
+
+    /** Conventional rolling stock and its buffer stop match the generated track's physical scale. */
+    public static float visualScale(String asset) { return railRider(asset) ? CONVENTIONAL_SCALE : 1; }
 
     // ---------------------------------------------------------------- pieces
 
@@ -699,6 +718,12 @@ public final class RailRoute {
               (HexTile.centerY(next, HexTile.HEIGHT) - HexTile.centerY(origin, HexTile.HEIGHT)) / 2 };
     }
 
+    /** The closed end opposite a road's single exit, shared by the road and its corridor track. */
+    public static float[] roadEnd(int direction) {
+        float[] edge = border(direction);
+        return new float[] { -edge[0] * HexTile.ROAD_END_REACH, -edge[1] * HexTile.ROAD_END_REACH };
+    }
+
     /**
      * A lateral shift along the actual hex edge, {@code offset} model pixels right of the outward centre line.
      * The 84x72 lattice is slightly non-regular: a plain perpendicular shift misses its diagonal borders, leaving
@@ -719,9 +744,8 @@ public final class RailRoute {
     public static float stub(int sides) { return Integer.bitCount(sides & 63) == 3 ? STUB_SHORT : STUB_LONG; }
 
     /**
-     * The buffer stops of a rail with these drawn sides: one where a single side's track ends at the centre, one at the
-     * end of each stranded side's stub, and one at each end of the stub a marker without sides draws. Each faces the
-     * track it closes and stands {@link #STOP_DEPTH} before the track's end.
+     * The buffer stops of a rail with these drawn sides: one at each closed track end. Each faces the track it closes
+     * and stands {@link #STOP_DEPTH} before its end.
      */
     public static List<Stop> stops(int sides) {
         return stops(sides, Corridor.NONE);
@@ -729,25 +753,19 @@ public final class RailRoute {
 
     /** Stops follow the same lateral placement as the track and its riders. */
     public static List<Stop> stops(int sides, Corridor corridor) {
-        sides &= 63;
         List<Stop> result = new ArrayList<>(2);
-        if (sides == 0) {
-            result.add(new Stop(0, LONE_STUB - STOP_DEPTH, 180));
-            result.add(new Stop(0, STOP_DEPTH - LONE_STUB, 0));
-            return result;
-        }
-        boolean deadEnd = Integer.bitCount(sides) == 1;
-        int ends = deadEnd ? sides : stranded(sides);
-        for (int d = 0; d < 6; d++) {
-            if ((ends & side(d)) == 0) { continue; }
-            float[] edge = border(d);
-            float length = (float) Math.hypot(edge[0], edge[1]);
-            // From the border inwards: to the centre for a dead end, to the stub's end for a stranded side.
-            float t = 1 - ((deadEnd ? length : stub(sides)) - STOP_DEPTH) / length;
-            // The buffers (the model's +y) face the border the track comes from.
-            float offset = corridor.lateral(d) * BESIDE_RAIL;
-            result.add(new Stop(edge[0] * t + edge[1] / length * offset,
-                  edge[1] * t - edge[0] / length * offset, (float) Math.toDegrees(Math.atan2(-edge[0], edge[1]))));
+        for (Line line : lines(sides, pieces(sides), corridor)) {
+            float[] a = line.at(0), b = line.at(1);
+            float length = (float) Math.hypot(b[0] - a[0], b[1] - a[1]);
+            float dx = (b[0] - a[0]) / length, dy = (b[1] - a[1]) / length;
+            if (line.from() < 0) {
+                result.add(new Stop(a[0] + dx * STOP_DEPTH, a[1] + dy * STOP_DEPTH,
+                      (float) Math.toDegrees(Math.atan2(-dx, dy))));
+            }
+            if (line.to() < 0) {
+                result.add(new Stop(b[0] - dx * STOP_DEPTH, b[1] - dy * STOP_DEPTH,
+                      (float) Math.toDegrees(Math.atan2(dx, -dy))));
+            }
         }
         return result;
     }
@@ -824,15 +842,17 @@ public final class RailRoute {
         return List.copyOf(result);
     }
 
-    /** Track courses shifted by the corridor's authored option A; option B retains the original axis. */
+    /** Corridor tracks share their road's terminal plane; option A shifts the track, option B retains its axis. */
     public static List<Line> lines(int sides, int pieces, Corridor corridor) {
-        if (corridor.beside() == 0) { return lines(sides, pieces); }
+        if (corridor.sides() == 0 && !corridor.roadEnd()) { return lines(sides, pieces); }
         return lines(sides, pieces).stream().map(line -> {
             float a = -corridor.lateral(line.from()) * BESIDE_RAIL;
             float b = corridor.lateral(line.to()) * BESIDE_RAIL;
             if (line.from() < 0) { a = b; }
             if (line.to() < 0) { b = a; }
-            return new Line(line.from(), line.to(), line.a(), line.b(), a, b);
+            float[] start = line.from() < 0 && line.to() >= 0 && corridor.roadEnd()
+                  ? roadEnd(line.to()) : line.a();
+            return new Line(line.from(), line.to(), start, line.b(), a, b);
         }).toList();
     }
 

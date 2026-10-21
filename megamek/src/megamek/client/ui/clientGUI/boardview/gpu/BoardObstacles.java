@@ -23,16 +23,21 @@ final class BoardObstacles {
     private record Geometry(Map<String, BoardShape> shapes, Map<String, String> modules, BoundingBox bounds) { }
 
     /** Reload assets publishes fresh models on the next terrain build; workers retain their immutable snapshot. */
-    static void reload() { MODELS.clear(); }
+    static void reload() { MODELS.clear(); BoardWall.reload(); }
 
     /** Projected triangles retain empty courtyards and gaps between tanks. */
-    record Footprint(List<Vector3> triangles, float low, float high, BoundingBox bounds) {
+    record Footprint(List<Vector3> triangles, float low, float high, BoundingBox bounds, boolean localHeight) {
+        Footprint(List<Vector3> triangles, float low, float high, BoundingBox bounds) {
+            this(triangles, low, high, bounds, false);
+        }
+
         boolean obstructs(Vector3 base, float radius, float height) {
             if (base.z + height < low || base.z > high || base.x + radius < bounds.min.x
                   || base.x - radius > bounds.max.x || base.y + radius < bounds.min.y
                   || base.y - radius > bounds.max.y) { return false; }
             for (int i = 0; i < triangles.size(); i += 3) {
                 Vector3 a = triangles.get(i), b = triangles.get(i + 1), c = triangles.get(i + 2);
+                if (localHeight && base.z > Math.max(a.z, Math.max(b.z, c.z))) { continue; }
                 float area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
                 if (Math.abs(area) > .00001f
                       && Intersector.isPointInTriangle(base.x, base.y, a.x, a.y, b.x, b.y, c.x, c.y)
@@ -85,8 +90,9 @@ final class BoardObstacles {
                   && feature.kind() != BoardScene.FeatureKind.PROP
                   && feature.kind() != BoardScene.FeatureKind.SCENERY
                   || feature.asset().equals("bridge") || feature.asset().equals("field")) { continue; }
-            boolean procedural = BoardIndustrial.supports(feature);
-            boolean custom = object == null && !procedural && feature.asset().startsWith("buildings/")
+            boolean wall = BoardWall.supports(feature.asset());
+            boolean assembled = BoardIndustrial.supports(feature) || wall;
+            boolean custom = object == null && !assembled && feature.asset().startsWith("buildings/")
                   && TilesetScenery.customBuildingFile(feature.asset()).isFile();
             File root = new File(Configuration.dataDir(), custom ? "models/buildings" : "models/board");
             // A tree's winter form has the shape of its bare file's geometry.
@@ -94,10 +100,11 @@ final class BoardObstacles {
                   : RigidGlb.source(root, feature.asset()).file();
             // Unresolved native references draw a renderer-owned placeholder and must remain editable.
             if (object != null && !file.isFile()) { continue; }
-            var geometry = procedural ? null : geometry(root, file, custom);
+            var geometry = assembled ? null : geometry(root, file, custom);
             List<Vector3> points = new ArrayList<>();
-            if (procedural) {
-                points.addAll(BoardIndustrial.triangles(BoardIndustrial.layout(scene, tile, feature)));
+            if (assembled) {
+                points.addAll(wall ? BoardWall.triangles(BoardWall.layout(scene, tile, feature))
+                      : BoardIndustrial.triangles(BoardIndustrial.layout(scene, tile, feature)));
             } else if (custom) {
                 var modules = GpuBuilding.select(geometry.modules(), Math.max(1, Math.round(feature.height())),
                       GpuBuilding.seed(tile, feature));
@@ -159,7 +166,13 @@ final class BoardObstacles {
             float low = ground + feature.elevation() * BoardGeometry.level()
                   + (feature.kind() == BoardScene.FeatureKind.SCENERY ? 0 : bounds.min.z * verticalScale);
             float height = custom ? feature.height() * BoardGeometry.level() : bounds.getDepth() * verticalScale;
-            footprints.add(new Footprint(List.copyOf(points), low, low + height + upperGround - ground, bounds));
+            if (wall) {
+                // The tall pier must not reserve empty space over its shorter connecting arms.
+                for (Vector3 point : points) {
+                    point.z = low + (point.z - bounds.min.z) * verticalScale + upperGround - ground;
+                }
+            }
+            footprints.add(new Footprint(List.copyOf(points), low, low + height + upperGround - ground, bounds, wall));
         }
     }
 

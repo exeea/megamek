@@ -22,6 +22,29 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFeaturesTest {
     @Test
+    void liveCrossingsReplaceOnlyOldPanelsOnTheSameRoadAndRailSurface() {
+        var hex = new Hex(0, "road:1:18;rail:1:9;bridge:1:9;bridge_elev:2;bridge_road:1:18", "");
+        var ground = megamek.common.board.BoardDecoration.Placement.ground();
+        var deck = megamek.common.board.BoardDecoration.Placement.on("bridge", 0);
+        String panel = "decal/rail/level-crossing";
+        var covered = new megamek.common.board.BoardDecoration("covered", "decal", panel, null, 0, 0, 0, false, 1, ground, 0);
+        var above = new megamek.common.board.BoardDecoration("above", "decal", panel, null, 0, 0, 0, false, 1, deck, 0);
+        var beside = new megamek.common.board.BoardDecoration("beside", "decal", panel, null, .4, .4, 0, false, 1, ground, 0);
+        hex.setDecorations(java.util.List.of(covered, above, beside));
+        var at = new Coords(2, 2);
+        var visible = BoardFeatures.capture(hex, at, Map.of()).stream().map(BoardScene.Feature::decoration).toList();
+        assertFalse(visible.contains(covered), "The road crossing uses the embedded track");
+        assertTrue(visible.contains(above), "Ground rails do not replace artwork on the bridge above them");
+        assertTrue(visible.contains(beside), "An authored panel away from the crossing remains available");
+        megamek.common.board.RailRoute.lay(hex, true, 9, 0);
+        visible = BoardFeatures.capture(hex, at, Map.of()).stream().map(BoardScene.Feature::decoration).toList();
+        assertFalse(visible.contains(above), "A deck road and deck rail replace their own old crossing panel");
+        hex.removeTerrain(Terrains.ROAD);
+        visible = BoardFeatures.capture(hex, at, Map.of()).stream().map(BoardScene.Feature::decoration).toList();
+        assertTrue(visible.contains(covered), "Track without a road does not claim an authored panel");
+    }
+
+    @Test
     void aPlacedObjectIsOneFeatureWithItsOwnTransform() {
         String asset = "scenery/parks/picnic-table";
         var placement = megamek.common.board.BoardDecoration.Placement.absolute(4);
@@ -136,6 +159,20 @@ class BoardFeaturesTest {
             assertFalse(BoardFeatures.detailedGround(hex, models), "Keep separate terrain markings: " + terrain);
             hex.removeTerrain(terrain);
         }
+    }
+
+    @Test
+    void cityParkEmptyTerrainMarkerKeepsEnhancedGroundBeneathItsBuilding() {
+        // City Park 0916 retains an old "none" token beside its actual building terrain.
+        Hex hex = new Hex(1, "none:2:4;bldg_elev:3:4;building:4:4;bldg_cf:105:4", "");
+        var models = Map.of(Terrains.BUILDING, "buildings/saxarba/building_hard/building_hard_04");
+        assertTrue(BoardFeatures.detailedGround(hex, models),
+              "An empty legacy marker must not replace enhanced grass with tileset artwork");
+        assertFalse(BoardFeatures.detailedGround(hex, Map.of()),
+              "Ignoring the empty marker must still require a model for the building");
+        hex.addTerrain(new Terrain(Terrains.RUBBLE, 1));
+        assertFalse(BoardFeatures.detailedGround(hex, models),
+              "Real unmodeled terrain must still retain its artwork");
     }
 
     @Test

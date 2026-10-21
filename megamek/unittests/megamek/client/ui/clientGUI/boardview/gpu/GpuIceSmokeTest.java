@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.util.Map;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
@@ -16,12 +17,14 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.RenderableSorter;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.NumberUtils;
@@ -52,7 +55,8 @@ class GpuIceSmokeTest {
             public void create() {
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(settings(13));
-                var tactical = new GpuTactical(terrain::tacticalSurface);
+                var badges = new GpuEditorBadges();
+                var annotations = new SpriteBatch();
                 try (var pixels = new GpuSceneTestOutput()) {
                     var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                     assertTrue(output.isDirectory() || output.mkdirs());
@@ -138,23 +142,23 @@ class GpuIceSmokeTest {
                     assertTrue(difference(beforeRemoval, restored) > 1, "Removing ice must remove the visible coat");
                     terrain.update(hidden);
                     assertArrayEquals(restored, sample(pixels, terrain, camera, ROAD), "Hidden ice retains the restored dry surface");
-                    var marker = BoardEditorTerrain.capture(new Hex(0, "black_ice:1;bldg_base_collapsed:1", ""), ROAD,
-                          java.util.Set.of());
-                    var marked = new BoardScene(hidden.boardId(), hidden.width(), hidden.height(), hidden.tiles(),
-                          hidden.units(), hidden.plannedPath(), hidden.selectedId(), hidden.phase(), hidden.commands(),
-                          hidden.light(), hidden.firingLines(), hidden.rangeBorders(), hidden.markers(), marker);
+                    var stack = BoardEditorTerrain.badges(new Hex(0, "black_ice:1;bldg_base_collapsed:1", ""));
                     camera.setIsometric(true);
                     camera.camera.zoom = .10f;
                     camera.center(BoardGeometry.center(ROAD, 0));
-                    frame.render(terrain, camera, marked);
-                    tactical.update(marked);
-                    tactical.render(camera.camera, 0);
+                    frame.render(terrain, camera, hidden);
+                    annotations.setProjectionMatrix(new Matrix4().setToOrtho2D(0, 0,
+                          camera.camera.viewportWidth, camera.camera.viewportHeight));
+                    annotations.begin();
+                    badges.render(annotations, camera.camera, 1, hidden, Map.of(ROAD, stack), terrain::roofBounds, ROAD);
+                    annotations.end();
                     GpuReviewFrame.save(new File(output, "ice-editor-marker.png"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
-                    tactical.dispose();
+                    annotations.dispose();
+                    badges.dispose();
                     frame.dispose();
                     terrain.dispose();
                     Gdx.app.exit();

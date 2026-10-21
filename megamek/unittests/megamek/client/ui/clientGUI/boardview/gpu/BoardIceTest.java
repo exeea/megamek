@@ -14,7 +14,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 import java.util.stream.Stream;
@@ -79,7 +78,7 @@ class BoardIceTest {
     }
 
     @Test
-    void editorUsesTheExistingMarkerPlaneAndRemovesMarkersAfterTerrainEdits() throws Exception {
+    void editorStacksBadgesAndRemovesThemAfterTerrainEdits() throws Exception {
         onEdt(() -> {
             var game = new Game();
             var board = Board.createEmptyBoard(2, 2);
@@ -90,11 +89,13 @@ class BoardIceTest {
             editor.game().setBoard(board);
             try (var source = new GpuMapSource(editor.game(), null, editor)) {
                 var markers = source.takeFrame().scene().tactical();
-                assertFalse(markers.fills().isEmpty());
-                markers.fills().forEach(fill -> assertNotNull(fill.planeAnchor()));
+                assertEquals(BoardTactical.EMPTY, markers, "Floating badges replace the old ground card");
+                assertEquals(java.util.List.of(BoardEditorTerrain.Kind.COLLAPSED_BASEMENT, BoardEditorTerrain.Kind.BLACK_ICE),
+                      source.editorBadges().get(coords).stream().map(BoardEditorTerrain.Badge::kind).toList());
                 board.setHex(coords, new Hex(0));
                 source.refresh();
                 assertEquals(BoardTactical.EMPTY, source.takeFrame().scene().tactical());
+                assertTrue(source.editorBadges().isEmpty(), "Removing the flags clears their entire stack");
             }
             return null;
         });
@@ -218,12 +219,13 @@ class BoardIceTest {
                 artwork.invalidate(coords);
                 var visible = artwork.capture(board, coords, board.getHex(coords));
                 assertFalse(visible.blankTerrains().contains(Terrains.GROUND_FLUFF));
-                assertTrue(BoardEditorTerrain.types(board.getHex(coords), visible.blankTerrains()).isEmpty());
+                assertTrue(BoardEditorTerrain.badges(board.getHex(coords)).isEmpty());
             }
             var flags = new Hex(0, "black_ice:1;bldg_base_collapsed:1;metal_deposit:1;fluff:0;road_fluff:99", "");
-            var types = BoardEditorTerrain.types(flags, Set.of(Terrains.FLUFF, Terrains.ROAD_FLUFF));
+            var badges = BoardEditorTerrain.badges(flags);
             // Blank legacy tokens never reach the editor (the conversion drops them), so they are never marked.
-            assertEquals(Set.of(Terrains.BLACK_ICE, Terrains.BLDG_BASE_COLLAPSED, Terrains.METAL_CONTENT), Set.copyOf(types));
+            assertEquals(List.of(BoardEditorTerrain.Kind.COLLAPSED_BASEMENT, BoardEditorTerrain.Kind.BLACK_ICE,
+                  BoardEditorTerrain.Kind.METAL_DEPOSITS), badges.stream().map(BoardEditorTerrain.Badge::kind).toList());
             return null;
         });
     }

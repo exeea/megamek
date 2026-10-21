@@ -66,6 +66,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.Serial;
+import java.nio.file.Path;
 import java.text.NumberFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -144,6 +145,7 @@ import megamek.common.annotations.Nullable;
 import megamek.common.autoResolve.converter.MMSetupForces;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDimensions;
+import megamek.common.board.BoardFile;
 import megamek.common.board.postprocess.TWBoardTransformer;
 import megamek.common.enums.GamePhase;
 import megamek.common.enums.NeuralInterfaceMode;
@@ -372,6 +374,8 @@ public class ChatLounge extends AbstractPhaseDisplay
 
     private transient ImageLoader loader;
     private final transient Map<String, Image> baseImages = new HashMap<>();
+    /** An editor save needs a preview reload even when the server has no generated board to invalidate. EDT. */
+    private boolean boardEditorRefreshPending;
 
     private final transient MapListMouseAdapter mapListMouseListener = new MapListMouseAdapter();
 
@@ -1571,6 +1575,71 @@ public class ChatLounge extends AbstractPhaseDisplay
         }
     }
 
+    /**
+     * Reloads the lobby after a native editor saved a board and closed. The server rescans its boards and invalidates
+     * its generated battlefield through the normal map-settings command; thumbnails must also forget their files.
+     */
+    public void boardEditorClosed(Path savedFile, boolean savedAssembledPreview) {
+        if (savedFile == null || isIgnoringEvents() || !game().getPhase().isLounge()) {
+            return;
+        }
+        MapSettings settings = MapSettings.getInstance(mapSettings);
+        try {
+            settings = settingsForSavedBoard(settings, savedFile, savedAssembledPreview);
+        } catch (IOException failure) {
+            LOGGER.warn(failure, "Could not select the board saved by the 3D editor: {}", savedFile);
+        }
+        for (MapPreviewButton button : mapButtons) {
+            button.reset();
+        }
+        mapIcons.clear();
+        synchronized (baseImages) {
+            if (loader != null) {
+                loader.cancel(true);
+            }
+            loader = new ImageLoader();
+            baseImages.clear();
+            invalidBoards.clear();
+            serverBoards.clear();
+        }
+        loader.execute();
+        boardEditorRefreshPending = true;
+        client().sendMapSettings(settings);
+    }
+
+    /** Only a saved source sheet keeps its placement; an assembled preview already includes its adjustments. */
+    static MapSettings settingsForSavedBoard(MapSettings settings, Path savedFile, boolean savedAssembledPreview)
+          throws IOException {
+        Path saved = savedFile.toRealPath();
+        for (File directory : List.of(Configuration.boardsDir(),
+              new File(Configuration.userDataDir(), Configuration.boardsDir().toString()))) {
+            if (!directory.isDirectory()) {
+                continue;
+            }
+            Path root = directory.toPath().toRealPath();
+            if (!saved.startsWith(root)) {
+                continue;
+            }
+            String name = "/" + BoardFile.selectionName(root.relativize(saved).toString()).replace('\\', '/');
+            Path resolved = new MegaMekFile(Configuration.boardsDir(), BoardFile.fileName(name)).getFile().toPath();
+            if (!resolved.toRealPath().equals(saved)) {
+                continue;
+            }
+            BoardDimensions size = BoardFile.metadata(saved).size();
+            boolean selected = settings.getBoardsSelectedVector().stream().filter(Objects::nonNull)
+                  .map(value -> value.startsWith(Board.BOARD_REQUEST_ROTATION)
+                        ? value.substring(Board.BOARD_REQUEST_ROTATION.length()) : value)
+                  .anyMatch(value -> value.equals(name) || ("/" + value).equals(name));
+            if (savedAssembledPreview || !selected || !settings.getBoardSize().equals(size)) {
+                settings.setMapSize(1, 1);
+                settings.setBoardSize(size.width(), size.height());
+                settings.setBoardsSelectedVector(List.of(name));
+            }
+            return settings;
+        }
+        return settings;
+    }
+
     /** A new roll of the map settings; the open 3D preview shows it without coming to the front or taking the keys. */
     private void rollPreviewBoard() {
         boolean shows3D = shows3DPreview();
@@ -2763,6 +2832,10 @@ public class ChatLounge extends AbstractPhaseDisplay
         refreshBoardsAvailable();
         updateSearch(fldSearch.getText());
         refreshLabels();
+        if (boardEditorRefreshPending) {
+            boardEditorRefreshPending = false;
+            refreshBoardPreviews();
+        }
     }
 
     /** OK Refreshes the Map Summary, Tech Level and Game Year labels. */
@@ -4068,17 +4141,23 @@ public class ChatLounge extends AbstractPhaseDisplay
             // Add the board name label and the server-side board label if necessary
             String text = LobbyUtility.cleanBoardName(boardName, mapSettings);
             Graphics g = bufImage.getGraphics();
-            if (!errors.isEmpty()) {
-                invalidBoards.add(boardName);
-            }
             drawMinimapLabel(text, bufImage.getWidth(), bufImage.getHeight(), g, !errors.isEmpty());
             if (!boardFile.exists() && !boardName.startsWith(MapSettings.BOARD_GENERATED)) {
-                serverBoards.add(boardName);
                 markServerSideBoard(bufImage);
             }
             g.dispose();
 
             synchronized (baseImages) {
+                // A save can replace this loader while the old file is still being read or rendered.
+                if (this != loader || isCancelled()) {
+                    return null;
+                }
+                if (!errors.isEmpty()) {
+                    invalidBoards.add(boardName);
+                }
+                if (!boardFile.exists() && !boardName.startsWith(MapSettings.BOARD_GENERATED)) {
+                    serverBoards.add(boardName);
+                }
                 baseImages.put(boardName, bufImage);
             }
             return bufImage;
@@ -4128,12 +4207,26 @@ public class ChatLounge extends AbstractPhaseDisplay
             while (!isCancelled()) {
                 // Create thumbnails for the MapSettings boards
                 String boardName = boards.poll(1, TimeUnit.SECONDS);
-                if (boardName != null && !baseImages.containsKey(boardName)) {
+                if (boardName != null) {
+                    synchronized (baseImages) {
+                        if (baseImages.containsKey(boardName)) {
+                            continue;
+                        }
+                    }
                     image = prepareImage(boardName);
-                    ChatLounge.this.redrawMapTable(image);
+                    if (image != null) {
+                        publish(image);
+                    }
                 }
             }
             return null;
+        }
+
+        @Override
+        protected void process(List<Image> images) {
+            if (this == loader && !isCancelled() && !images.isEmpty()) {
+                ChatLounge.this.redrawMapTable(images.getLast());
+            }
         }
     }
 

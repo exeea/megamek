@@ -7,7 +7,7 @@ import java.awt.geom.Area;
 import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -25,15 +25,28 @@ final class BoardNaturalBridge {
 
     static Shape build(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck, TerrainLod lod,
           Map<Coords, BoardSurface> surfaces) {
+        return build(scene, tile, deck, lod, surfaces, false);
+    }
+
+    /** Classic retains a normal hex cap with graded exits; both envelopes use the same hollow shell. */
+    static Shape build(BoardScene scene, BoardScene.Tile tile, BoardBridge.Deck deck, TerrainLod lod,
+          Map<Coords, BoardSurface> surfaces, boolean fullHex) {
         var bridge = BoardBridge.feature(tile);
         float level = tile.elevation() + bridge.elevation();
         var center = BoardGeometry.center(tile.coords(), level);
         int exits = bridge.bridgeExits();
         float space = clearance(tile, center.z);
         boolean[] levelBanks = new boolean[6];
+        var cornerRises = fullHex ? BoardBridge.naturalCornerRises(scene, tile) : List.<Float>of();
         var bankTops = new Path2D.Float();
         var outline = new ArrayList<Rim>();
         for (int d = 0; d < 6; d++) {
+            if (fullHex) {
+                var corner = BoardGeometry.corner(tile.coords(), level, d);
+                corner.z += cornerRises.get(d) * BoardGeometry.level();
+                outline.add(new Rim(corner, BoardGeometry.edgeDirection(d)));
+                continue;
+            }
             var gate = BoardGeometry.center(tile.coords().translated(d), level).sub(center).scl(.5f);
             float length = gate.len();
             var along = new Vector3(gate).nor();
@@ -44,7 +57,8 @@ final class BoardNaturalBridge {
             }
             var next = scene.tile(tile.coords().translated(d));
             boolean bank = BoardBridge.abutment(tile, next, d);
-            float width = mouthWidth(center.x + gate.x, center.y + gate.y, bank);
+            // Only walkable landings need the extra flare; tall cliffs receive the full-width span itself.
+            float width = mouthWidth(center.x + gate.x, center.y + gate.y, bank && BoardBridge.bank(tile, next, d));
             levelBanks[d] = bank && next.elevation() == level;
             var across = new Vector3(-along.y, along.x, 0);
             var ground = bank ? surfaces.computeIfAbsent(next.coords(), c -> new BoardSurface(scene, next, lod)) : null;
@@ -76,9 +90,10 @@ final class BoardNaturalBridge {
                 outline.add(new Rim(point, d));
             }
         }
-        // Directions run clockwise; the solid's top needs counterclockwise winding.
-        Collections.reverse(outline);
-        int edgeSteps = lod == TerrainLod.FULL ? 5 : lod == TerrainLod.MEDIUM ? 3 : lod == TerrainLod.COARSE ? 2 : 1;
+        // Wide neighboring mouths can cross their directional sectors. Order their points around the centre
+        // before rounding so the radial shell never doubles back over an adjacent branch.
+        outline.sort(Comparator.comparingDouble(edge -> Math.atan2(edge.point().y - center.y, edge.point().x - center.x)));
+        int edgeSteps = fullHex ? 1 : lod == TerrainLod.FULL ? 5 : lod == TerrainLod.MEDIUM ? 3 : lod == TerrainLod.COARSE ? 2 : 1;
         var rim = new ArrayList<Rim>();
         for (int i = 0; i < outline.size(); i++) {
             var a = outline.get(i);
@@ -87,7 +102,7 @@ final class BoardNaturalBridge {
             int steps = mouth ? 1 : edgeSteps;
             for (int j = 0; j < steps; j++) {
                 float t = j / (float) steps;
-                var point = mouth ? new Vector3(a.point()).lerp(b.point(), t) : curve(outline, i, t);
+                var point = mouth ? new Vector3(a.point()).lerp(b.point(), t) : curve(outline, i, t, center);
                 if (j > 0) {
                     var outward = new Vector3(point).sub(center); outward.z = 0; outward.nor();
                     point.mulAdd(outward, BoardRelief.metres(2) * (noise(point.x * .6f, point.y * .6f) - .5f));
@@ -95,22 +110,25 @@ final class BoardNaturalBridge {
                 rim.add(new Rim(point, mouth || j == 0 ? a.exit() : -1));
             }
         }
-        int rings = lod == TerrainLod.FULL ? 5 : lod == TerrainLod.MEDIUM ? 4 : lod == TerrainLod.COARSE ? 3 : 2;
+        int rings = lod == TerrainLod.FULL ? 5 : lod == TerrainLod.MEDIUM ? 4 : lod == TerrainLod.COARSE ? 3 : 1;
+        if (fullHex) { rings = Math.max(2, rings); }
         var facets = new ArrayList<Facet>();
         Vector3[][] top = new Vector3[rings + 1][rim.size()], bottom = new Vector3[rings + 1][rim.size()];
         for (int r = 0; r <= rings; r++) {
-            // The outer fifth is exposed caprock at every LOD; only interior sampling changes with distance.
-            float t = r == rings ? 1 : .8f * r / (rings - 1);
+            // Near spans retain an exposed caprock band; the distant span only needs the centre and silhouette.
+            float t = r == 0 ? 0 : r == rings ? 1 : .8f * r / (rings - 1);
+            if (fullHex && r > 0) { t = .5f + .5f * (r - 1) / (rings - 1); }
             for (int i = 0; i < rim.size(); i++) {
                 var edge = rim.get(i);
                 var point = new Vector3(center).lerp(edge.point(), t);
+                if (fullHex) { point.z = center.z + (edge.point().z - center.z) * Math.max(0, 2 * t - 1); }
                 // A level bank and its passage share one planar cap. Eroding the approach below it exposes a
                 // cliff ledge at the real bank outline, even when the final mouth overlaps solid ground.
-                if (edge.exit() < 0 || !levelBanks[edge.exit()]) {
+                if (!fullHex && (edge.exit() < 0 || !levelBanks[edge.exit()])) {
                     point.z -= Math.min(BoardRelief.metres(1.4f), space * .16f) * t * (1 - t)
                           * (.3f + .7f * noise(point.x * .35f, point.y * .35f));
                 }
-                if (edge.exit() < 0) {
+                if (!fullHex && edge.exit() < 0) {
                     point.z -= Math.min(BoardRelief.metres(1.3f), space * .16f) * t * t * (.6f + .4f * noise(point.x, point.y));
                 }
                 top[r][i] = point;
@@ -129,7 +147,7 @@ final class BoardNaturalBridge {
                 float spring = Math.min(BoardRelief.metres(5.3f), room * .79f);
                 float thickness = (crown + (spring - crown) * anchored) * (.93f + .1f * noise(point.x, point.y));
                 bottom[r][i] = new Vector3(point).add(0, 0, -thickness);
-                if (edge.exit() < 0) {
+                if (!fullHex && edge.exit() < 0) {
                     var inward = new Vector3(center).sub(point); inward.z = 0; inward.nor();
                     bottom[r][i].mulAdd(inward, BoardRelief.metres(.8f) * t * t * t * t);
                 }
@@ -139,7 +157,7 @@ final class BoardNaturalBridge {
             int n = (i + 1) % rim.size();
             for (int r = 1; r <= rings; r++) {
                 boolean mouth = rim.get(i).exit() >= 0 && rim.get(i).exit() == rim.get(n).exit();
-                var cover = r == rings && !mouth ? Part.RIM : Part.TOP;
+                var cover = !fullHex && rings > 1 && r == rings && !mouth ? Part.RIM : Part.TOP;
                 triangle(facets, top[r - 1][i], top[r][i], top[r][n], cover);
                 triangle(facets, bottom[r - 1][i], bottom[r][n], bottom[r][i], Part.SOFFIT);
                 if (r > 1) {
@@ -148,10 +166,13 @@ final class BoardNaturalBridge {
                 }
             }
             int exit = rim.get(i).exit();
-            if (exit >= 0 && exit == rim.get(n).exit()
-                  && BoardBridge.connected(tile, scene.tile(tile.coords().translated(exit)), exit)) { continue; }
+            var neighbor = exit < 0 ? null : scene.tile(tile.coords().translated(exit));
+            if (exit >= 0 && (fullHex || exit == rim.get(n).exit())
+                  && BoardBridge.connected(tile, neighbor, exit)
+                  && (!fullHex || BoardBridge.family(neighbor) == BoardBridge.Family.NATURAL
+                        && neighbor.elevation() + BoardBridge.feature(neighbor).elevation() == level)) { continue; }
             // Broad broken strata define the close silhouette; the shared normal maps supply small fissures.
-            int beds = lod == TerrainLod.FULL ? 3 : lod == TerrainLod.MEDIUM ? 2 : 1;
+            int beds = fullHex ? 1 : lod == TerrainLod.FULL ? 3 : lod == TerrainLod.MEDIUM ? 2 : 1;
             var a = top[rings][i];
             var b = top[rings][n];
             for (int bed = 1; bed <= beds; bed++) {
@@ -201,21 +222,33 @@ final class BoardNaturalBridge {
 
     /** Ordinary bank cuts have one outline; keep its ears instead of splitting every triangle into horizontal strips. */
     private static List<BoardSurface.Face> clippedTop(Area area) {
-        if (!area.isSingular()) {
-            return BoardTacticalGeometry.flat(area, -1).stream().map(face -> new BoardSurface.Face(
-                  face.a(), face.b(), face.c(), BoardSurface.Finish.TOP)).toList();
-        }
-        var contour = new ArrayList<Vector3>();
+        var contours = new ArrayList<List<Vector3>>();
+        List<Vector3> contour = null;
         float[] point = new float[6];
         for (var path = area.getPathIterator(null); !path.isDone(); path.next()) {
             int type = path.currentSegment(point);
+            if (type == PathIterator.SEG_MOVETO) { contour = new ArrayList<>(); contours.add(contour); }
             if (type == PathIterator.SEG_MOVETO || type == PathIterator.SEG_LINETO) {
                 contour.add(new Vector3(point[0], point[1], 0));
             }
         }
+        // A scalloped bank can leave several separate pieces of one triangle. Triangulate each outline directly;
+        // horizontal strips are only necessary if a piece contains a hole.
+        for (var outer : contours) {
+            var path = new Path2D.Float();
+            path.moveTo(outer.getFirst().x, outer.getFirst().y);
+            for (var p : outer) { path.lineTo(p.x, p.y); }
+            path.closePath();
+            for (var inner : contours) {
+                if (inner != outer && path.contains(inner.getFirst().x, inner.getFirst().y)) {
+                    return BoardTacticalGeometry.flat(area, -1).stream().map(face -> new BoardSurface.Face(
+                          face.a(), face.b(), face.c(), BoardSurface.Finish.TOP)).toList();
+                }
+            }
+        }
         var result = new ArrayList<BoardSurface.Face>();
-        if (contour.size() >= 3) {
-            BoardSurface.polygon(contour.toArray(Vector3[]::new), BoardSurface.Finish.TOP, result);
+        for (var points : contours) {
+            if (points.size() >= 3) { BoardSurface.polygon(points.toArray(Vector3[]::new), BoardSurface.Finish.TOP, result); }
         }
         return result;
     }
@@ -245,8 +278,9 @@ final class BoardNaturalBridge {
     }
 
     /** Round the exposed outline through its control points; mouths keep their exact shared contacts. */
-    private static Vector3 curve(List<Rim> outline, int index, float t) {
+    private static Vector3 curve(List<Rim> outline, int index, float t, Vector3 center) {
         var a = outline.get(index).point();
+        if (t == 0) { return new Vector3(a); }
         var b = outline.get((index + 1) % outline.size()).point();
         var before = outline.get(Math.floorMod(index - 1, outline.size())).point();
         var after = outline.get((index + 2) % outline.size()).point();
@@ -254,8 +288,14 @@ final class BoardNaturalBridge {
         var first = new Vector3(b).sub(before).scl(1f / 6).limit(limit).add(a);
         var second = new Vector3(a).sub(after).scl(1f / 6).limit(limit).add(b);
         float u = 1 - t;
-        return new Vector3(a).scl(u * u * u).mulAdd(first, 3 * u * u * t)
+        var point = new Vector3(a).scl(u * u * u).mulAdd(first, 3 * u * u * t)
               .mulAdd(second, 3 * u * t * t).mulAdd(b, t * t * t);
+        double angle = Math.atan2(a.y - center.y, a.x - center.x);
+        double sweep = Math.atan2(b.y - center.y, b.x - center.x) - angle;
+        if (sweep < 0) { sweep += Math.PI * 2; }
+        double radius = Math.hypot(point.x - center.x, point.y - center.y);
+        return point.set(center.x + (float) (radius * Math.cos(angle + sweep * t)),
+              center.y + (float) (radius * Math.sin(angle + sweep * t)), point.z);
     }
 
     private static float anchoring(BoardScene scene, BoardScene.Tile tile, Vector3 point) {
@@ -277,6 +317,8 @@ final class BoardNaturalBridge {
         // Within the chunk walls are already complete; an out-of-chunk bank can be borrowed by several spans.
         synchronized (ground) { walls = ground.walls(scene, BoardGeometry.floor(scene), surfaces); }
         float reach = 0;
+        var opening = List.of(new Vector3(-width, center.z - space, 0), new Vector3(width, center.z - space, 0),
+              new Vector3(width, center.z, 0), new Vector3(-width, center.z, 0));
         for (var face : walls) {
             // Around a scalloped corner the contact can belong to the bank's adjoining edge as well.
             int facing = Math.floorMod(BoardGeometry.edgeDirection(face.landEdge()) - direction - 3, 6);
@@ -284,16 +326,19 @@ final class BoardNaturalBridge {
             var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
             if (normal.dot(along) >= 0) { continue; }
             float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
-            float bottom = Float.POSITIVE_INFINITY, top = Float.NEGATIVE_INFINITY, depth = 0;
+            float bottom = Float.POSITIVE_INFINITY, top = Float.NEGATIVE_INFINITY;
+            var projected = new ArrayList<Vector3>(3);
             for (var p : List.of(face.a(), face.b(), face.c())) {
                 float x = p.x - center.x, y = p.y - center.y;
                 float lateral = y * along.x - x * along.y;
                 low = Math.min(low, lateral); high = Math.max(high, lateral);
                 bottom = Math.min(bottom, p.z); top = Math.max(top, p.z);
-                depth = Math.max(depth, x * along.x + y * along.y);
+                projected.add(new Vector3(lateral, p.z, x * along.x + y * along.y));
             }
             if (low <= width && high >= -width && bottom <= center.z && top >= center.z - space) {
-                reach = Math.max(reach, depth);
+                // A coarse wall triangle may reach far around the bank outside the opening. Only its clipped
+                // contact depth belongs here; its remote corner can push the mouth through the far cliff wall.
+                for (var point : BoardTacticalGeometry.clip(projected, opening)) { reach = Math.max(reach, point.z); }
             }
         }
         return reach + BoardRelief.metres(1.25f);

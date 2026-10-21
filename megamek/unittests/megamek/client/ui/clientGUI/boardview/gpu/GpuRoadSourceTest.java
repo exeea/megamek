@@ -122,7 +122,7 @@ class GpuRoadSourceTest {
                       "A tree stands off the road in " + tile.coords().getBoardNum());
             }
             var surface = new BoardSurface(scene, tile);
-            for (var face : surface.retainingPanels) {
+            for (var face : surface.retainingPanelFaces()) {
                 var neighbor = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(face.landEdge())));
                 assertTrue(neighbor.elevation() > tile.elevation(),
                       "A road only walls a slope it cuts into, never one it runs along the top of: " + tile.coords().getBoardNum());

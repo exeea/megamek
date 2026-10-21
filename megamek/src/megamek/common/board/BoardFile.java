@@ -276,10 +276,6 @@ public final class BoardFile {
                 if (control != null) {
                     require(field.getKey().equals("road") || field.getKey().equals("bridgeRoad"), "Traffic controls belong to a road");
                 }
-                if (control == HexAppearance.TrafficControl.GANTRY && style.size() == 1) {
-                    // A previously explicit default-only choice normalizes to an absent road appearance.
-                    return;
-                }
                 HexAppearance value = new HexAppearance(string(style, "variant", null), string(style, "asset", null),
                       string(style, "material", null), style.has("strength") ? number(style, "strength", 0) : null,
                       colours(style), style.has("rotation") ? integer(style, "rotation", 0) : null,

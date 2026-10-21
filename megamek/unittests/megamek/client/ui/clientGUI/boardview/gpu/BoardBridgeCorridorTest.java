@@ -24,20 +24,76 @@ class BoardBridgeCorridorTest {
     private static final Coords AT = new Coords(4, 4);
 
     @Test
+    void anIndependentDeckRailPreventsAnIslandInTheRoadAndItsSupportingSlab() {
+        for (boolean rail : new boolean[] { false, true }) {
+            Hex hex = new Hex(0, "bridge:1:63;bridge_cf:40;bridge_elev:2;bridge_road:1:31"
+                  + (rail ? ";bridge_rail:1:32" : ""), "");
+            var tile = BoardBridgeMaterialsTest.withDeckRoad(BoardBridgeSlopeTest.bridge(AT, 0, 2, 63),
+                  BoardRoad.Kind.PAVED, 31).withFeatures(BoardFeatures.capture(hex, AT, Map.of()));
+            var scene = BoardSurfaceBlendTest.scene(at -> at.equals(AT) ? tile
+                  : BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS));
+            var deck = BoardBridge.deck(scene, tile);
+            assertEquals(0, deck.corridor().sides(), "The independent rail has no shared road approach");
+            assertEquals(rail, deck.road(AT).footprint(0).contains(0, 0),
+                  "A rail-bearing road hub must not grow a roundabout island");
+            assertEquals(rail, deck.slab(AT).footprint(0).contains(0, 0),
+                  "The structural bridge deck must carry the independent track across its hub");
+            assertEquals(rail ? 5 : 0, deck.road(AT).stopApproaches(31).size());
+        }
+    }
+
+    @Test
+    void aPlainBridgeHasThirtyPixelCarriagewayAndThreePixelShoulders() {
+        for (boolean truss : new boolean[] { false, true }) {
+            var shape = shape(-1, RailRoute.Corridor.NONE, truss);
+            assertEquals(36, shape.bounds().getWidth(), .001f, "The former 18px deck is twice as wide");
+            for (float x : new float[] { -14.9f, 0, 14.9f }) { assertEquals(0, height(shape, x, 0), .001f); }
+            for (float x : new float[] { -16.5f, 16.5f }) { assertTrue(height(shape, x, 0) > 1); }
+        }
+    }
+
+    @Test
     void movingTheTrackBesideTheRoadKeepsOneWideDeckWithOnlyOutsideBarriers() {
         for (boolean truss : new boolean[] { false, true }) {
             for (int beside : new int[] { 0, 9 }) {
                 for (int right : new int[] { 0, 9 }) {
                     var shape = shape(9, new RailRoute.Corridor(9, beside, right), truss);
                     for (float y : new float[] { -30, -15, 0, 15, 30 }) {
-                        for (float x : new float[] { -13, -8.25f, -2, 0, 2, 8.25f, 13 }) {
+                        for (float x : new float[] { -20.5f, -RailRoute.BESIDE_RAIL, -2, 0, 2, RailRoute.BESIDE_RAIL, 20.5f }) {
                             assertEquals(0, height(shape, x, y), .001f,
                                   "The road, rail and space between them belong to one unobstructed deck");
                         }
                     }
-                    for (float x : new float[] { -14.65f, 14.65f }) {
+                    float barrier = BoardRoad.CORRIDOR_HALF + BoardBridge.SHOULDER / 2;
+                    for (float x : new float[] { -barrier, barrier }) {
                         assertTrue(height(shape, x, 0) > 1, "The outside bridge barriers are retained");
                     }
+                }
+            }
+        }
+    }
+
+    @Test
+    void northSouthSeamsSupportTheFullBallastAndCarsWhileShouldersOverhangUnusedHexes() {
+        for (boolean truss : new boolean[] { false, true }) {
+            for (var corridor : List.of(new RailRoute.Corridor(9, 0, 0), new RailRoute.Corridor(9, 9, 0),
+                  new RailRoute.Corridor(9, 9, 9))) {
+                var shape = shape(9, corridor, truss);
+                float rail = RailRoute.BESIDE_RAIL * corridor.lateral(0);
+                float road = RailRoute.BESIDE_ROAD * corridor.lateral(0);
+                float lane = corridor.beside() == 0 ? (BoardRoad.MIDDLE_HALF + BoardRoad.MEDIAN_HALF) / 2
+                      : BoardRoad.Kind.PAVED.halfWidth / 2;
+                for (int end : new int[] { -1, 1 }) {
+                    for (float x : new float[] { rail - 5.6f, rail - 3.8f, rail, rail + 3.8f, rail + 5.6f,
+                          road - lane - 3, road - lane + 3, road + lane - 3, road + lane + 3 }) {
+                        assertEquals(0, height(shape, x, end * 35.9f), .001f,
+                              "Ballast, sleepers and scale-1 cars retain a flat carrier past the 42px edge corners");
+                        var crossing = new Ray(new Vector3(x, end * 35.75f, 1), new Vector3(0, end, 0));
+                        assertTrue(shape.hit(crossing) > .6f * .6f, "No seam barrier across the occupied width");
+                    }
+                    float barrier = BoardRoad.CORRIDOR_HALF + BoardBridge.SHOULDER / 2;
+                    assertTrue(height(shape, barrier, end * 35.9f) > 1,
+                          "The outer shoulder continues into the unused intermediate hex instead of narrowing at the corner");
                 }
             }
         }
@@ -49,7 +105,7 @@ class BoardBridgeCorridorTest {
             for (int right : new int[] { 0, 8 }) {
                 var shape = shape(8, new RailRoute.Corridor(8, 8, right), truss);
                 for (float y : new float[] { -30, -15, 0, 4 }) {
-                    for (float x : new float[] { -11, -8.25f, -2, 0, 2, 8.25f, 11 }) {
+                    for (float x : new float[] { -18.5f, -RailRoute.BESIDE_RAIL, -2, 0, 2, RailRoute.BESIDE_RAIL, 18.5f }) {
                         assertEquals(0, height(shape, x, y), .001f,
                               "The rail stop must not grow an internal parapet or rounded truss enclosure");
                     }
@@ -89,8 +145,10 @@ class BoardBridgeCorridorTest {
         Hex hex = new Hex(0);
         hex.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, 9));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 1));
-        hex.setDecorations(List.of(new BoardDecoration("track", "prop", RailRoute.Kind.RAIL.asset, null,
-              0, 0, 0, false, 1, BoardDecoration.Placement.on("bridge", 0), 0).withConnections(railExits)));
+        if (railExits >= 0) {
+            hex.setDecorations(List.of(new BoardDecoration("track", "prop", RailRoute.Kind.RAIL.asset, null,
+                  0, 0, 0, false, 1, BoardDecoration.Placement.on("bridge", 0), 0).withConnections(railExits)));
+        }
         var tile = BoardBridgeSlopeTest.bridge(AT, 0, 1, 9)
               .withFeatures(BoardFeatures.capture(hex, AT, Map.of()));
         var deck = new BoardBridge.Deck(BoardRoad.Kind.PAVED, 9, 9, false,

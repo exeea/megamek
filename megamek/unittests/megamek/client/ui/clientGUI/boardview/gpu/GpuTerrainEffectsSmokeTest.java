@@ -53,6 +53,43 @@ class GpuTerrainEffectsSmokeTest {
     private final File output = new File(System.getProperty("megamek.gpu.screenshots"), "fire-smoke");
 
     @Test
+    void screenTerrainDrawsNativeChaffFromBothViews() throws Exception {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setInitialVisible(false);
+        config.setWindowedMode(SIZE, SIZE);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var effects = new GpuTerrainEffects();
+                var depth = new GpuEffectDepth();
+                var target = new GpuSceneTestOutput(SIZE, SIZE);
+                try {
+                    Files.createDirectories(output.toPath());
+                    var surfaces = new BoardSurface.Cache();
+                    var centre = BoardGeometry.center(new Coords(0, 0), 0);
+                    for (boolean side : new boolean[] { false, true }) {
+                        var camera = side ? sideCamera(centre, .7f) : camera(centre, .3f, false);
+                        var clear = draw(target, effects, depth, surfaces,
+                              scene(1, 1, BoardFireSmoke.NONE, false), camera, null, null);
+                        for (int level : new int[] { 0, 1 }) {
+                            var hex = new megamek.common.Hex(0, "screen:" + level, "");
+                            var image = draw(target, effects, depth, surfaces,
+                                  scene(1, 1, BoardFireSmoke.capture(hex), false), camera, null, null);
+                            assertEquals(1, effects.size());
+                            assertTrue(different(clear, image) > 1000, "Screen terrain must draw a volume");
+                            save(image, "screen-" + level + (side ? "-side" : "-top"));
+                        }
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { target.close(); effects.dispose(); depth.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Native screen terrain", failure.get()); }
+    }
+
+    @Test
     void persistentEffectsFollowTheBoardAndStayVisibleAtAllLods() throws Exception {
         boolean closure = Boolean.getBoolean("megamek.gpu.adaptationClosure");
         BoardScene dome = closure ? GpuMagmaSmokeTest.domeScene() : null;

@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -11,11 +12,13 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,6 +36,158 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardBridgeFootingTest {
+    @Test
+    void airportTerminalFollowsTheWholeRailProfileAtItsRearJoin() throws Exception {
+        var scene = GpuRoadSourceTest.scene("unofficial/Derv_Maps/25x25 Airport 3000.board");
+        var bridge = scene.tile(new Coords(15, 11));
+        // Inner rear corner of the reported cap: the rail approaches from negative forward.
+        var rear = new Vector3(945.55707f, -870.40546f, 0);
+        var forward = new Vector3(-.868243f, -.496139f, 0).nor();
+        var outward = new Vector3(-.50077f, .86558f, 0).nor();
+        for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
+            var footing = BoardBridgeFooting.build(scene, bridge, lod, new HashMap<>());
+            for (float across : new float[] { .4f, 1.5f, 2.8f }) {
+                var railTop = new Vector3(rear).mulAdd(forward, -.02f).mulAdd(outward, across);
+                railTop.z = 100;
+                var capTop = new Vector3(railTop).mulAdd(forward, .04f);
+                float railHeight = 100 - (float) Math.sqrt(footing.shape().hit(new Ray(railTop, new Vector3(0, 0, -1))));
+                float capHeight = 100 - (float) Math.sqrt(footing.shape().hit(new Ray(capTop, new Vector3(0, 0, -1))));
+                assertEquals(.28f, capHeight - railHeight, .1f,
+                      lod + " retains the authored cap lip across the falling rail, without a raised wedge");
+            }
+            var rail = new Vector3(rear).mulAdd(forward, -.02f).mulAdd(outward, 2.8f);
+            rail.z = -100;
+            float bottom = rail.z + (float) Math.sqrt(footing.shape().hit(new Ray(rail, Vector3.Z)));
+            assertTrue(Float.isFinite(bottom), "Sample the actual underside of the rail before its cap");
+            for (float along : new float[] { .05f, .2f }) {
+                var outside = new Vector3(rear).mulAdd(forward, along).mulAdd(outward, 5.5f);
+                outside.z = bottom + .1f;
+                var ray = new Ray(outside, new Vector3(outward).scl(-1));
+                assertTrue(footing.shape().hit(ray) < 1.2f * 1.2f,
+                      lod + " the cap covers the lower outer rail edge instead of leaving a protruding wedge");
+            }
+        }
+    }
+
+    @Test
+    void airportLevelBridgesMeetTheWholeJunctionMouthWithoutBuriedRoadSlabs() throws Exception {
+        var scene = GpuRoadSourceTest.scene("unofficial/Derv_Maps/25x25 Airport 3000.board");
+        var junction = scene.tile(new Coords(14, 12));
+        assertEquals(63, junction.roadExits());
+        float scale = BoardGeometry.hexScale();
+        for (boolean classic : new boolean[] { false, true }) {
+            for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
+                var surfaces = new HashMap<Coords, BoardSurface>();
+                for (int direction : new int[] { 1, 2 }) {
+                    var tile = scene.tile(junction.coords().translated(direction));
+                    var deck = BoardBridge.deck(scene, tile);
+                    var footing = BoardBridgeFooting.build(scene, tile, lod, surfaces, classic);
+                    var shape = footing.withDeck(scene, tile, deck, lod, surfaces, classic);
+                    var bank = surfaces.get(junction.coords());
+                    assertNotNull(bank);
+                    assertTrue(bank.ramps != 0, "The other junction arms descend to level one");
+                    int edge = Math.floorMod(1 - direction, 6);
+                    var a = BoardGeometry.corner(junction.coords(), 0, edge);
+                    var b = BoardGeometry.corner(junction.coords(), 0, edge + 1);
+                    var tangent = new Vector3(b).sub(a).nor();
+                    var inward = new Vector3(-tangent.y, tangent.x, 0);
+                    var gate = new Vector3(a).lerp(b, .5f);
+                    if (inward.dot(BoardGeometry.center(junction.coords(), 0).sub(gate)) < 0) { inward.scl(-1); }
+                    float half = BoardSurface.roadMouth(junction, tile, direction) * scale;
+                    float height = BoardSurface.roadEdgeElevation(junction, tile, direction) * BoardGeometry.level();
+                    String context = (classic ? "Classic " : "Enhanced ") + lod + " " + tile.coords().getBoardNum();
+                    for (int station = -8; station <= 8; station++) {
+                        var point = new Vector3(gate).mulAdd(tangent, (half - .1f * scale) * station / 8);
+                        var onBank = new Vector3(point).mulAdd(inward, .02f * scale);
+                        var onDeck = new Vector3(point).mulAdd(inward, -.02f * scale);
+                        assertEquals(height, BoardSurface.sampleHeight(bank.foundation(), onBank.x, onBank.y, Float.NaN),
+                              .08f * scale, context + " reserves the complete bridge passage at " + station);
+                        if (Math.abs((half - .1f * scale) * station / 8) < BoardRoad.Kind.PAVED.halfWidth * scale) {
+                            assertEquals(height + GpuRoads.SURFACE_LIFT * scale, BoardBridge.top(shape, onDeck.x, onDeck.y),
+                                  .008f * scale, context + " joins the supported deck at " + station);
+                        }
+                    }
+                    for (var face : footing.shape().facets()) {
+                        if (face.part() != BoardBridge.Part.TOP) { continue; }
+                        var point = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1f / 3);
+                        assertFalse(Float.isFinite(BoardSurface.sampleHeight(bank.foundation(), point.x, point.y, Float.NaN)),
+                              context + " must not bury a second painted landing inside the existing graded bank");
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void classicBridgeBorrowsSharpBanksAndPierFoundationsOutsideItsChunk() throws Exception {
+        var scene = GpuRoadSourceTest.scene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
+        var tile = scene.tile(new Coords(8, 7));
+        var surfaces = new HashMap<Coords, BoardSurface>();
+        // Start empty, as happens when a ground rail borrows a bridge from the adjacent chunk.
+        var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, surfaces, true);
+        var shape = footing.withDeck(scene, tile, BoardBridge.deck(scene, tile), TerrainLod.FULL, surfaces, true);
+        assertFalse(shape.facets().isEmpty());
+        assertFalse(surfaces.isEmpty());
+        for (var source : surfaces.values()) {
+            assertTrue(source.columns(), "An off-chunk support must not construct Enhanced relief");
+            var center = BoardGeometry.center(source.tile.coords(), source.tile.elevation());
+            assertEquals(BoardGeometry.groundZ(source.tile), source.height(center.x, center.y), .006f);
+            for (var face : source.walls(scene, BoardGeometry.floor(scene), surfaces)) {
+                var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                assertEquals(0, normal.z, .001f, "Classic banks remain vertical beside the bridge");
+            }
+        }
+    }
+
+    @Test
+    void plaineBanksBesideTheDescendingBridgeApproachKeepTheirNaturalMaterial() throws Exception {
+        var scene = GpuRoadSourceTest.scene("unofficial/Cartes/16x17 Plaine 1.board");
+        var tile = scene.tile(new Coords(9, 11));
+        var bridge = scene.tile(new Coords(9, 10));
+        assertTrue(BoardSurface.roadEdgeElevation(tile, bridge, 0) < tile.elevation(),
+              "This is a cut down to a lower bridge, not raised approach fill");
+        var surfaces = new HashMap<Coords, BoardSurface>();
+        for (var neighbor : scene.tiles()) {
+            if (tile.coords().distance(neighbor.coords()) <= 1) {
+                surfaces.put(neighbor.coords(), new BoardSurface(scene, neighbor));
+            }
+        }
+        var terrain = new HashMap<BoardSurface, List<BoardSurface.Face>>();
+        for (var surface : surfaces.values()) {
+            var faces = new ArrayList<>(surface.groundFaces());
+            faces.addAll(surface.walls(scene, BoardGeometry.floor(scene), surfaces));
+            terrain.put(surface, faces);
+        }
+        // Fixed world positions of the stray white pieces in the reported oblique view:
+        // the left toe, the exposed bank beside the support, and the detached lower-right toe.
+        // A removed toe exposes the neighboring hex, whose terrain owns its material decision.
+        boolean hitApproachBank = false;
+        for (var point : List.of(new Vector3(633.066f, -817.937f, .210f),
+              new Vector3(590.961f, -827.158f, 5.250f), new Vector3(585.089f, -819.141f, .558f))) {
+            var ray = new Ray(new Vector3(point).add(-20, 20, 20), new Vector3(1, -1, -1).nor());
+            BoardSurface.Face visible = null;
+            BoardSurface owner = null;
+            float distance = Float.POSITIVE_INFINITY;
+            var hit = new Vector3();
+            for (var entry : terrain.entrySet()) {
+                for (var face : entry.getValue()) {
+                    var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                    if (normal.dot(ray.direction) < 0
+                          && Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
+                          && ray.origin.dst2(hit) < distance) {
+                        visible = face;
+                        owner = entry.getKey();
+                        distance = ray.origin.dst2(hit);
+                    }
+                }
+            }
+            assertNotNull(visible, "The natural bank remains closed at " + point);
+            assertFalse(owner.bridgeSupport(visible), "A cut bank must not become a detached concrete piece: " + point);
+            hitApproachBank |= owner.tile.coords().equals(tile.coords());
+        }
+        assertTrue(hitApproachBank, "The rays exercise the descending approach's own exposed bank");
+    }
+
     @Test
     void convertedLegacyBridgePaintStaysAboveTheSlabAndBothBankRoads() throws Exception {
         var board = BoardFile.loadSheet(new File(Configuration.boardsDir(),
@@ -185,7 +340,7 @@ class BoardBridgeFootingTest {
                         var bank = surfaces.get(at.translated(direction));
                         var ground = bank.faces.stream().filter(f -> f.finish() != BoardSurface.Finish.OUTCROP).toList();
                         for (int side : new int[] { -1, 1 }) {
-                            float lateral = 9 * BoardGeometry.hexScale() + BoardRelief.metres(.15f);
+                            float lateral = 18 * BoardGeometry.hexScale() + BoardRelief.metres(.15f);
                             var cap = new Vector3(gate).mulAdd(along, reach - BoardRelief.metres(1.38f));
                             float deckHeight = height(footing.shape(), cap);
                             cap.mulAdd(across, side * lateral);
@@ -268,6 +423,9 @@ class BoardBridgeFootingTest {
                   .dst(ordinaryBank.relief.roadPoint(edge, .5f, top)) > BoardRelief.metres(2),
                   "The fixture exercises the former projecting grassy landing");
             for (float t : new float[] { 1f / 3, .5f, 2f / 3 }) {
+                assertTrue(bank.relief.roadPoint(edge, t, top)
+                      .dst(bank.relief.roadPoint(edge, t, top - .001f)) < .01f,
+                      "The supported bank meets its rim continuously instead of snapping under the deck");
                 float aboveRoad = top + BoardRelief.metres(1);
                 assertTrue(bank.relief.roadPoint(edge, t, aboveRoad)
                       .epsilonEquals(ordinaryBank.relief.roadPoint(edge, t, aboveRoad), .002f),
@@ -291,7 +449,7 @@ class BoardBridgeFootingTest {
             var across = new Vector3(-along.y, along.x, 0);
             for (int side : new int[] { -1, 0, 1 }) {
                 var toe = new Vector3(gate).mulAdd(along, reach - BoardRelief.metres(.05f))
-                      .mulAdd(across, side * (9 * BoardGeometry.hexScale() + BoardRelief.metres(.15f)));
+                      .mulAdd(across, side * (18 * BoardGeometry.hexScale() + BoardRelief.metres(.15f)));
                 float support = BoardSurface.sampleHeight(bank.foundation(), toe.x, toe.y, Float.NaN);
                 assertTrue(Float.isFinite(support), "The bridge's widened terminal reaches the actual natural bank");
                 float height = height(footing.shape(), toe);
@@ -320,7 +478,7 @@ class BoardBridgeFootingTest {
             float scale = BoardGeometry.hexScale();
             var end = BoardGeometry.center(at, 3).lerp(BoardGeometry.center(at.translated(3), 3), .5f)
                   .add(0, -footing.lengths().get(3) * scale + BoardRelief.metres(.01f), 0);
-            for (float lateral : new float[] { 0, -8.25f, 8.25f }) {
+            for (float lateral : new float[] { 0, -16.5f, 16.5f }) {
                 var p = new Vector3(end).add(lateral * scale, 0, 0);
                 float support = BoardSurface.sampleHeight(ground, p.x, p.y, Float.NaN);
                 var ray = new Ray(new Vector3(p).add(0, 0, BoardGeometry.level() * 3), new Vector3(0, 0, -1));
@@ -786,7 +944,9 @@ class BoardBridgeFootingTest {
             var mask = GpuRoads.mask(road, tail);
             float start = -BoardGeometry.TILE_HEIGHT / 2 - footing.lengths().get(3);
             float end = start - BoardRelief.metres(7) / scale;
-            assertTrue(maskAlpha(mask, 0, start - .05f) > .95f, "The landing starts with the deck's material");
+            assertTrue(GpuRoads.coverage(road, tail, 0, start - .05f) > .95f, "The landing starts with the deck's material");
+            // The cut between head and tail may fall inside an antialiased mask texel; sample its first full texel.
+            assertTrue(maskAlpha(mask, 0, start - .5f) > .95f, "The start of the rasterized landing remains fully covered");
             int partial = 0;
             for (float y = start - .5f; y > end; y -= .25f) {
                 float alpha = maskAlpha(mask, 0, y);

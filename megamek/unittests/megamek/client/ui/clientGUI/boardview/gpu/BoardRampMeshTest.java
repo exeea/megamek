@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +15,32 @@ import com.badlogic.gdx.math.Vector3;
 import org.junit.jupiter.api.Test;
 
 class BoardRampMeshTest {
+    @Test
+    void simplifiedBoundarySamplesKeepTheEmittedCarrierNormal() {
+        float scale = BoardGeometry.hexScale();
+        var faces = grid((x, y) -> .25f * x + .5f * y);
+        var rim = faces.stream().flatMap(face -> List.of(face.a(), face.b(), face.c()).stream())
+              .filter(point -> point.x == -3 * scale).distinct()
+              .sorted(Comparator.comparingDouble(point -> point.y))
+              .map(point -> new BoardRelief.RoadRimPoint((point.y / scale + 3) / 6, point, null))
+              .toArray(BoardRelief.RoadRimPoint[]::new);
+        BoardRampMesh.simplify(faces, new Vector3(), point -> point.y >= 0, point -> false);
+        var normals = BoardSurface.vertexNormals(faces);
+        assertTrue(java.util.Arrays.stream(rim).filter(point -> !normals.containsKey(point.point())).count() >= 3,
+              "The actual simplifier must remove interior samples from this collinear boundary");
+
+        var scene = BoardSurfaceBlendTest.scene(at -> BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, 0,
+              BoardScene.Surface.SAND));
+        var relief = new BoardRelief(scene, scene.tile(BoardRoadTest.CENTER), 0);
+        relief.roadRim(0, rim);
+        relief.roadRimNormals(normals);
+        var expected = new Vector3(-.25f, -.5f, 1).nor();
+        for (var point : relief.rim(0)) {
+            assertTrue(point.normal() != null && point.normal().dot(expected) > .99999f,
+                  "Every captured wall column must retain the simplified ramp plane's normal: " + point);
+        }
+    }
+
     @Test
     void repeatedCandidatesClassifyEachSourcePointOnceAndKeepTheRamp() {
         float scale = BoardGeometry.hexScale();

@@ -11,6 +11,7 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.ConcreteFit;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
+import megamek.common.board.RailRoute;
 
 /**
  * The scene's fitted concrete outline ({@link ConcreteFit}), shared with adjoining terrain, water, artwork and picking:
@@ -120,7 +121,7 @@ final class BoardConcrete {
             for (BoardScene.Feature feature : tile.features()) {
                 if (feature.decoration() == null || !fitFeature(feature)) { continue; }
                 List<ConcreteFit.Point> footprint = footprint(scene, tile, feature);
-                if (footprint != null && fit.reaches(footprint, tile.coords())) {
+                if (footprint != null && reaches(scene, fit, tile, feature, footprint)) {
                     inside.add(new Cut(tile.coords(), feature.decoration().id(), feature.decoration().asset()));
                 }
             }
@@ -175,10 +176,19 @@ final class BoardConcrete {
             for (BoardScene.Feature feature : tile.features()) {
                 if (feature.decoration() == null || !fitFeature(feature)) { continue; }
                 List<ConcreteFit.Point> footprint = footprint(scene, tile, feature);
-                if (footprint == null || fit.reaches(footprint, tile.coords())) { result.add(tile.coords()); break; }
+                if (footprint == null || reaches(scene, fit, tile, feature, footprint)) { result.add(tile.coords()); break; }
             }
         }
         return result;
+    }
+
+    /** Ground rails cross their graded openings; their side walls still have to clear the track. */
+    private static boolean reaches(BoardScene scene, ConcreteFit fit, BoardScene.Tile tile,
+          BoardScene.Feature feature, List<ConcreteFit.Point> footprint) {
+        int openings = BoardRail.route(feature) && RailRoute.kind(feature.decoration()) == RailRoute.Kind.RAIL
+              && !RailRoute.onDeck(feature.decoration()) && BoardRail.level(tile, feature) == tile.elevation()
+              ? BoardSurface.ramps(scene, tile) & BoardRail.drawnSides(tile, feature) : 0;
+        return fit.reaches(footprint, tile.coords(), openings);
     }
 
     /** A placed object's footprint on the board plane: the hull of {@link BoardObstacles#outline}; null when unknown. */
