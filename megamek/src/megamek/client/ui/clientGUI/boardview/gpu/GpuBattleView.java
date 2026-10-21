@@ -767,23 +767,10 @@ class GpuBattleView extends ApplicationAdapter {
         if (unitTextures.update(scene.units().stream().filter(unit -> !unit.sensorContact()
               && (unitModels == null || unitModels.get(unit.model(), unit.id()) == null)).map(BoardScene.Unit::image).distinct()
               .collect(Collectors.toMap(pixels -> pixels, pixels -> pixels)))) {
-            spriteModels.values().forEach(GpuUnitModel::dispose);
-            spriteModels.clear();
-            unitPicking.clear();
-            attachments.geometryChanged();
+            disposeSpriteModels(sprite -> true);
         }
         Set<BoardScene.Pixels> images = scene.units().stream().map(BoardScene.Unit::image).collect(Collectors.toSet());
-        boolean removedSprites = spriteModels.entrySet().removeIf(entry -> {
-            if (images.contains(entry.getKey().pixels())) {
-                return false;
-            }
-            entry.getValue().dispose();
-            return true;
-        });
-        if (removedSprites) {
-            unitPicking.clear();
-            attachments.geometryChanged();
-        }
+        disposeSpriteModels(sprite -> !images.contains(sprite.pixels()));
         updateCameraFocus(scene, frame.centerRequest(), instantAction);
         // The first visible frame's delta may still include the hidden window's loading time.
         boardCamera.advance(entranceStarting ? 0 : Gdx.graphics.getDeltaTime());
@@ -3233,6 +3220,24 @@ class GpuBattleView extends ApplicationAdapter {
         }
         if (source != null) {
             source.close();
+        }
+    }
+
+    /**
+     * Instances borrow a sprite model's mesh, so they leave with it: picking before {@link #prepareUnits} rebuilds them
+     * would otherwise read the freed vertex buffer and crash the JVM.
+     */
+    private void disposeSpriteModels(java.util.function.Predicate<UnitSprite> evicted) {
+        boolean removed = spriteModels.entrySet().removeIf(entry -> {
+            if (!evicted.test(entry.getKey())) { return false; }
+            var model = entry.getValue().instance.model;
+            unitInstances.values().removeIf(instance -> instance.model == model);
+            entry.getValue().dispose();
+            return true;
+        });
+        if (removed) {
+            unitPicking.clear();
+            attachments.geometryChanged();
         }
     }
 
