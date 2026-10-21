@@ -206,6 +206,10 @@ public final class TilesetScenery {
                 }
             }
         }
+        // Walls are a supported building type without legacy building art. The renderer generates their solid mesh.
+        if (hex.terrainLevel(Terrains.BUILDING) == megamek.common.enums.BuildingType.WALL.getTypeValue()) {
+            models.putIfAbsent(Terrains.BUILDING, "buildings/wall-" + (hex.getTerrain(Terrains.BUILDING).getExits() & 63));
+        }
         return Map.copyOf(models);
     }
 
@@ -291,8 +295,7 @@ public final class TilesetScenery {
                     default -> 0; // The 2b/3b variants intentionally omit the road.
                 };
                 result.add(new Layer(layer, types, Kind.MODEL, asset, BoardSceneryLayouts.imported(types, hex)));
-            } else if (types.contains(Terrains.ROAD) && hex.terrainLevel(Terrains.ROAD) >= 1
-                  && hex.terrainLevel(Terrains.ROAD) <= Terrains.ROAD_LVL_GRAVEL) {
+            } else if (types.contains(Terrains.ROAD) && HexTile.road(hex)) {
                 // Road-fluff surface variants use the same material, joins and relief as every other road.
                 result.add(new Layer(layer, types, Kind.ROAD_SURFACE, null, false));
             } else {

@@ -14,11 +14,97 @@ import java.util.List;
 import java.util.Map;
 
 import megamek.common.Hex;
+import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardFileTest {
+    @Test void legacyRoadSelectorsNormalizeBeforeEitherFormatIsResaved() throws Exception {
+        for (int selector : new int[] { -42, 0, 1, 2, 3, 4, 5, 6, 7, 34, 90, Integer.MAX_VALUE }) {
+            int expected = selector == 0 ? Terrain.LEVEL_NONE : selector >= 1 && selector <= 4 ? selector : 1;
+            String terrain = "road:" + selector + ":44;rough:2";
+            Board loaded = new Board();
+            loaded.load("size 1 1\noption exit_roads_to_pavement false\nhex 0101 0 \"" + terrain + "\" \"grass\"\nend\n", null);
+            Hex hex = loaded.getHex(0, 0);
+            assertEquals(expected, hex.terrainLevel(Terrains.ROAD), "Selector " + selector);
+            if (selector == 0) {
+                assertFalse(hex.containsTerrain(Terrains.ROAD));
+            } else {
+                assertEquals(44, hex.getTerrain(Terrains.ROAD).getExits());
+                assertTrue(hex.getTerrain(Terrains.ROAD).hasExitsSpecified());
+            }
+            assertEquals(2, hex.terrainLevel(Terrains.ROUGH));
+            assertEquals("grass", hex.getTheme());
+            String saved = encode(loaded);
+            assertEquals(selector != 0, saved.contains("road:"), saved);
+            assertEquals(expected, BoardFile.readNative(saved).getHex(0, 0).terrainLevel(Terrains.ROAD));
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            loaded.saveLegacy(output, false);
+            String oldFormat = output.toString(StandardCharsets.UTF_8);
+            assertEquals(selector != 0, oldFormat.contains("road:"), oldFormat);
+            if (selector != 0) {
+                assertTrue(saved.contains("road:" + expected + ":44"), saved);
+                assertTrue(oldFormat.contains("road:" + expected + ":44"), oldFormat);
+            }
+            Board reread = new Board(); reread.load(oldFormat, null);
+            assertEquals(expected, reread.getHex(0, 0).terrainLevel(Terrains.ROAD));
+        }
+    }
+
+    @Test void clipboardRoadNormalizationPreservesImplicitExitsAndOtherTerrainAndLeavesRuleParsingAlone() throws Exception {
+        Hex source = new Hex(0, "road:90;bridge_road:7:9;rough:2", "grass");
+        assertEquals(90, source.terrainLevel(Terrains.ROAD), "Generic hex parsing also parses tileset rules");
+        assertEquals(Terrain.WILDCARD, new Hex(0, "road:*", "").terrainLevel(Terrains.ROAD));
+        Hex loaded = Hex.parseClipboardString(source.getClipboardString());
+        assertNotNull(loaded);
+        assertEquals(1, loaded.terrainLevel(Terrains.ROAD));
+        assertFalse(loaded.getTerrain(Terrains.ROAD).hasExitsSpecified());
+        assertEquals(0, loaded.getTerrain(Terrains.ROAD).getExits());
+        assertEquals(source.getTerrain(Terrains.BRIDGE_ROAD).toString(), loaded.getTerrain(Terrains.BRIDGE_ROAD).toString());
+        assertEquals(source.getTerrain(Terrains.ROUGH).toString(), loaded.getTerrain(Terrains.ROUGH).toString());
+        assertEquals(source.getTheme(), loaded.getTheme());
+        Hex zero = Hex.parseClipboardString(new Hex(0, "road:0:44;fluff:5:4", "").getClipboardString());
+        assertNotNull(zero);
+        assertFalse(zero.containsTerrain(Terrains.ROAD));
+        assertEquals("fluff:5:4", zero.getTerrain(Terrains.FLUFF).toString());
+        for (int selector : new int[] { 0, 5, 90 }) {
+            Hex nativeSource = new Hex(0, "road:" + selector + ":44", "");
+            assertEquals(selector, BoardFile.fromClipboard(BoardFile.clipboard(nativeSource)).terrainLevel(Terrains.ROAD));
+            String nativeText = "{\"format\":\"megamek-board\",\"version\":2,\"size\":{\"width\":1,\"height\":1},"
+                  + "\"hexes\":[{\"at\":[1,1],\"elevation\":0,\"terrain\":\"road:" + selector + ":44\"}]}";
+            assertEquals(selector, BoardFile.readNative(nativeText, true).getHex(0, 0).terrainLevel(Terrains.ROAD),
+                  "Native documents retain their stored values");
+        }
+    }
+
+    @Test void genevaParkingCarsSurviveRoadNormalizationAndNativeConversion() throws Exception {
+        // Exact terrain from GenevaT49 hexes 1404 and 1202; their cars are selected by fluff, independently of road.
+        for (String terrain : List.of("road:5:44;fluff:5:4", "road:6:9;fluff:5:2")) {
+            Hex original = new Hex(0, terrain, "grass");
+            var models = TilesetScenery.resolve(original, false).scenery().models();
+            String expected = terrain.endsWith(":4") ? "scenery/fluff/cars_5" : "scenery/fluff/cars_3";
+            assertEquals(List.of(expected), models);
+            Board loaded = new Board();
+            loaded.load("size 1 1\nhex 0101 0 \"" + terrain + "\" \"grass\"\nend\n", null);
+            Hex hex = loaded.getHex(0, 0);
+            assertEquals(1, hex.terrainLevel(Terrains.ROAD));
+            assertEquals(original.getTerrain(Terrains.ROAD).getExits(), hex.getTerrain(Terrains.ROAD).getExits());
+            assertEquals(original.getTerrain(Terrains.FLUFF).toString(), hex.getTerrain(Terrains.FLUFF).toString());
+            assertEquals(models, TilesetScenery.resolve(hex, false).scenery().models());
+            ByteArrayOutputStream output = new ByteArrayOutputStream(); loaded.saveLegacy(output, false);
+            Board legacyAgain = new Board(); legacyAgain.load(output.toString(StandardCharsets.UTF_8), null);
+            assertEquals(models, TilesetScenery.resolve(legacyAgain.getHex(0, 0), false).scenery().models());
+            BoardSceneryLayouts.convert(loaded);
+            var decorations = loaded.getHex(0, 0).getDecorations();
+            assertTrue(decorations.stream().anyMatch(object -> object.asset().startsWith("scenery/vehicles/")));
+            Board nativeAgain = BoardFile.readNative(encode(loaded));
+            assertEquals(decorations, nativeAgain.getHex(0, 0).getDecorations());
+            assertEquals(1, nativeAgain.getHex(0, 0).terrainLevel(Terrains.ROAD));
+            assertEquals(original.getTerrain(Terrains.ROAD).getExits(), nativeAgain.getHex(0, 0).getTerrain(Terrains.ROAD).getExits());
+        }
+    }
+
     @Test void roadTrafficControlsRoundTripWithoutReplacingSurfacesOrRailLayouts() throws Exception {
         Board board = Board.createEmptyBoard(1, 1);
         Hex hex = new Hex(0, "road:1:27;rail:1:9;bridge:1:27;bridge_cf:40;bridge_elev:1;bridge_road:1:27", "");
@@ -34,26 +120,50 @@ class BoardFileTest {
         assertThrows(java.io.IOException.class, () -> BoardFile.readNative(saved.replace("\"signals\"", "\"unknown\"")));
         assertThrows(IllegalArgumentException.class, () -> lights.validateOwner("rail"));
         assertEquals(new HexAppearance("road/rounded", null, "asphalt", null),
-              HexAppearance.withTrafficControl(road, HexAppearance.TrafficControl.GANTRY));
-        assertNull(HexAppearance.withTrafficControl(lights, HexAppearance.TrafficControl.GANTRY));
+              HexAppearance.withTrafficControl(road, null));
+        assertNull(HexAppearance.withTrafficControl(lights, null));
         var gantry = HexAppearance.withTrafficControl(road, HexAppearance.TrafficControl.GANTRY);
         var stops = HexAppearance.withTrafficControl(null, HexAppearance.TrafficControl.STOPS);
         hex.setAppearance(Map.of("road", gantry, "bridgeRoad", stops, "rail", HexAppearance.rail(3, 64)));
         String overhead = encode(board);
-        assertFalse(overhead.contains("\"trafficControl\":\"gantry\""), "The default gantry choice needs no field");
+        assertTrue(overhead.contains("\"trafficControl\":\"gantry\""), "An explicit gantry choice survives a later topology change");
         assertTrue(overhead.contains("\"trafficControl\":\"stops\""), "An explicit stop-only choice survives saving");
         assertEquals(hex.getAppearance(), BoardFile.readNative(overhead).getHex(0, 0).getAppearance());
         assertEquals(hex.getAppearance(), BoardFile.fromClipboard(BoardFile.clipboard(hex)).getAppearance());
         String explicitGantry = saved.replace("\"signals\"", "\"gantry\"");
-        assertEquals(Map.of("road", gantry, "rail", HexAppearance.rail(3, 64)),
+        assertEquals(Map.of("road", gantry, "bridgeRoad", HexAppearance.withTrafficControl(null, HexAppearance.TrafficControl.GANTRY),
+                    "rail", HexAppearance.rail(3, 64)),
               BoardFile.readNative(explicitGantry).getHex(0, 0).getAppearance(),
-              "Previously explicit gantries normalize to the same default, including a control-only appearance");
+              "Both material-bearing and control-only gantries retain their explicit choice");
         assertThrows(java.io.IOException.class, () -> BoardFile.readNative(explicitGantry.replace("\"bridgeRoad\"", "\"ground\"")));
         assertThrows(java.io.IOException.class, () -> BoardFile.readNative(explicitGantry.replace("\"road\"", "\"pavement\"")));
         hex.setAppearance(Map.of("road", new HexAppearance(null, null, "asphalt", null)));
         assertFalse(encode(board).contains("trafficControl"), "The default adds no field to existing appearances");
         assertEquals(HexAppearance.TrafficControl.GANTRY,
               HexAppearance.trafficControl(BoardFile.readNative(encode(board)).getHex(0, 0).getAppearance(), "road"));
+    }
+
+    @Test void tJunctionDefaultsAndExplicitGantryOverridesSurviveSavingAndClipboard() throws Exception {
+        Board board = Board.createEmptyBoard(1, 1);
+        Hex hex = new Hex(0, "road:1:11;bridge:1:11;bridge_cf:40;bridge_elev:1;bridge_road:1:11", "");
+        board.setHex(0, 0, hex);
+        assertEquals(HexAppearance.TrafficControl.STOPS, HexAppearance.trafficControl(hex.getAppearance(), "road", 11));
+        assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(hex.getAppearance(), "road", 27));
+        var surface = new HexAppearance("road/rounded", null, "asphalt", null);
+        hex.setAppearance(Map.of("road", HexAppearance.withTrafficControl(surface, HexAppearance.TrafficControl.GANTRY),
+              "bridgeRoad", HexAppearance.withTrafficControl(null, HexAppearance.TrafficControl.GANTRY)));
+        for (Hex loaded : List.of(BoardFile.readNative(encode(board)).getHex(0, 0),
+              BoardFile.fromClipboard(BoardFile.clipboard(hex)))) {
+            assertEquals(hex.getAppearance(), loaded.getAppearance());
+            for (String owner : List.of("road", "bridgeRoad")) {
+                assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(loaded.getAppearance(), owner, 11),
+                      "Explicit signals must not revert to priority stops at a T");
+            }
+        }
+        hex.setAppearance(Map.of("road", surface));
+        Hex loaded = BoardFile.readNative(encode(board)).getHex(0, 0);
+        assertEquals(HexAppearance.TrafficControl.STOPS, HexAppearance.trafficControl(loaded.getAppearance(), "road", 11),
+              "A surface with no stored control keeps the topology-dependent default");
     }
 
     @Test void threeAxisRotationRoundTripsInVersionTwoAndOldObjectsDefaultToUpright() throws Exception {
@@ -291,8 +401,8 @@ class BoardFileTest {
         assertEquals(1, undo.getDecorations().size());
     }
 
-    @Test void javaSerializationAcceptsAnExplicitGantryThatNowMeansTheDefault() throws Exception {
-        Hex original = new Hex(0, "road:1:27", "");
+    @Test void javaSerializationKeepsAnExplicitGantryOverride() throws Exception {
+        Hex original = new Hex(0, "road:1:11", "");
         var explicit = new HexAppearance(null, null, null, null, BoardDecoration.Colours.NONE,
               null, null, null, HexAppearance.TrafficControl.GANTRY);
         original.setAppearance(Map.of("road", explicit));
@@ -301,9 +411,8 @@ class BoardFileTest {
         try (ObjectInputStream input = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
             Hex loaded = (Hex) input.readObject();
             assertEquals(original.getAppearance(), loaded.getAppearance());
-            assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(loaded.getAppearance(), "road"));
-            assertNull(HexAppearance.withTrafficControl(loaded.getAppearance().get("road"), HexAppearance.TrafficControl.GANTRY),
-                  "Newly authored default choices still omit the appearance");
+            assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(loaded.getAppearance(), "road", 11));
+            assertEquals(explicit, HexAppearance.withTrafficControl(loaded.getAppearance().get("road"), HexAppearance.TrafficControl.GANTRY));
         }
     }
 

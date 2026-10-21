@@ -30,7 +30,7 @@ final class BoardBridgeTruss {
     /** The runtime steel and editor swatches share the same Body slot and default paint. */
     static final RigidGlb.ColourSlot BODY = new RigidGlb.ColourSlot("Body", PAINTS.getFirst().colour(), PAINTS);
     private static final float BOTTOM = -2, BAND = 1.2f, TOP = 12.5f, FOOT = .8f;
-    private static final double OFFSET = .75, PANEL = 12, SEAT = .7;
+    private static final double OFFSET = BoardBridge.SHOULDER / 2, PANEL = 12, SEAT = .7;
     private static final Section TOP_CHORD = new Section(1.5f, 1.3f), END_POST = new Section(1.4f, 1.3f),
           VERTICAL = new Section(1.1f, .8f), DIAGONAL = new Section(1, .7f);
     private static final List<Point> CORNERS = IntStream.range(0, 6).mapToObj(BoardGeometry::modelCorner)
@@ -73,14 +73,14 @@ final class BoardBridgeTruss {
         BoardBridgeMesh.walls(faces, steel, BOTTOM, BAND, BoardBridge.Part.STEEL, colour);
         BoardBridgeMesh.cap(faces, concrete, 2.5f, true, BoardBridge.Part.STRUCTURE, null);
         BoardBridgeMesh.walls(faces, concrete, 0, 2.5f, BoardBridge.Part.STRUCTURE, null);
-        Builder builder = new Builder(faces, colour);
+        Builder builder = new Builder(faces, colour, bridge.exits());
         Path2D.Double boundary = new Path2D.Double();
         for (var contour : BoardBridgeMesh.contours(carriageway)) { boundary.append(path(contour), false); }
         // Stroke only exposed boundaries: Area can retain internal Boolean seams which are not structural edges.
         Area outside = new Area(carriageway);
         outside.add(new Area(new BasicStroke((float) (2 * OFFSET), BasicStroke.CAP_SQUARE, BasicStroke.JOIN_MITER)
               .createStrokedShape(boundary)));
-        outside.intersect(area(CORNERS.stream().map(p -> p.at(0)).toList()));
+        BoardBridgeMesh.clipExits(outside, bridge.exits());
         for (var chain : chains(outside, bridge.exits())) {
             truss(builder, chain.points(), chain.first(), chain.last(), bridge.joints());
         }
@@ -111,8 +111,8 @@ final class BoardBridgeTruss {
         int result = -1;
         for (int d = 0; d < 6; d++) {
             if ((exits & (1 << d)) == 0) { continue; }
-            Point a = CORNERS.get(EDGES[d][0]), b = CORNERS.get(EDGES[d][1]);
-            if (distance(point, a, b) < .001) {
+            Edge edge = edge(d);
+            if (Math.abs(point.sub(edge.middle()).dot(edge.inward())) < .001) {
                 if (result >= 0) { return -1; }
                 result = d;
             }
@@ -375,10 +375,11 @@ final class BoardBridgeTruss {
     }
 
     /** Owns only this rebuild's emitted facets; no GL resources or retained mutable geometry. */
-    private record Builder(List<BoardBridge.Facet> faces, Color colour) {
+    private record Builder(List<BoardBridge.Facet> faces, Color colour, int exits) {
         /** Clip each closed member before triangulation, closing any cut at the shared tile plane. */
         void solid(List<Surface> surfaces) {
             for (int edge = 0; edge < CORNERS.size(); edge++) {
+                if ((exits & 1 << BoardGeometry.edgeDirection(edge)) == 0) { continue; }
                 Vector3 a = CORNERS.get(edge).at(0), b = CORNERS.get((edge + 1) % CORNERS.size()).at(0);
                 Vector3 along = new Vector3(b).sub(a).nor(), outward = new Vector3(along.y, -along.x, 0);
                 if (surfaces.stream().flatMap(s -> s.points().stream())

@@ -16,11 +16,13 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.imageio.ImageIO;
 import javax.imageio.metadata.IIOMetadataNode;
 import javax.swing.SwingUtilities;
 
+import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
@@ -247,6 +249,46 @@ class GpuMapSourceTest {
             } finally {
                 preferences.setValue(GUIPreferences.SHOW_TRACE_OVERLAY, shown);
             }
+            return null;
+        });
+    }
+
+    @Test
+    void previewMenuOpensTheEditorOnSwingAndRejectsClosedWorkspaceActions() throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        AtomicBoolean requestedOnSwing = new AtomicBoolean();
+        Runnable edit = () -> {
+            requestedOnSwing.set(SwingUtilities.isEventDispatchThread());
+            requests.incrementAndGet();
+        };
+        GpuMapSource source = onEdt(() -> {
+            var editor = new BoardEditorSession();
+            try (var editing = new GpuMapSource(editor.game(), null, editor, null, null, edit);
+                  var unavailable = new GpuMapSource(editor.game(), null, null)) {
+                for (var workspace : List.of(editing, unavailable)) {
+                    assertTrue(workspace.takeFrame().globalCommands().stream()
+                          .noneMatch(command -> command.id().equals("boardEdit3D")));
+                }
+            }
+            return new GpuMapSource(editor.game(), null, null, null, null, edit);
+        });
+        BoardScene.Command command;
+        try {
+            command = onEdt(() -> command(source, "boardEdit3D"));
+            assertTrue(command.enabled());
+            assertEquals(Messages.getString("BoardEditor.edit3D"), command.label());
+            command.action().run();
+            onEdt(() -> {
+                assertEquals(1, requests.get());
+                assertTrue(requestedOnSwing.get(), "Native menu input must hand the editor request to Swing");
+                return null;
+            });
+        } finally {
+            onEdt(() -> { source.close(); return null; });
+        }
+        command.action().run();
+        onEdt(() -> {
+            assertEquals(1, requests.get(), "A closed preview cannot open an editor from a stale menu action");
             return null;
         });
     }

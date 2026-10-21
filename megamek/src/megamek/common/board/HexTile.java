@@ -18,6 +18,10 @@ public final class HexTile {
     public static final int HEIGHT = 72;
     /** One level in authored board models, in the units of an 84 by 72 hex. */
     public static final int LEVEL_HEIGHT = 18;
+    /** Half the ordinary two-lane road's width in authored model units, shared by roads and their rail corridors. */
+    public static final float ROAD_HALF_WIDTH = 15;
+    /** A road terminus reaches this fraction of a hex radius beyond its centre, without adding an opposite exit. */
+    public static final float ROAD_END_REACH = .8f;
 
     private HexTile() { }
 
@@ -113,11 +117,9 @@ public final class HexTile {
               && (!continuation || roadLevel != groundLevel && deckLevel == roadLevel);
     }
 
-    /** Whether the 3D board draws the hex's road: a paved, alley, dirt or gravel ROAD. */
+    /** Every ROAD is drawable; the game treats levels other than dirt and gravel as paved. */
     public static boolean road(Hex hex) {
-        if (!hex.containsTerrain(Terrains.ROAD)) { return false; }
-        int level = hex.terrainLevel(Terrains.ROAD);
-        return level == 1 || level == 2 || level == Terrains.ROAD_LVL_DIRT || level == Terrains.ROAD_LVL_GRAVEL;
+        return hex.containsTerrain(Terrains.ROAD);
     }
 
     /**

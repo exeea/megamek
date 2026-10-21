@@ -25,6 +25,72 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardConcreteMeshTest {
     @Test
+    void terminalRoadsAndTheirNeighborsCoverTheWholeFittedConcreteFootprint() {
+        for (var panel : RoadGradeFixture.Panel.values()) {
+            var scene = RoadGradeFixture.scene(RoadGradeFixture.focused(true, panel, "x-mixed", 0, 0));
+            var outline = BoardConcrete.of(scene);
+            Set<Coords> owners = new HashSet<>();
+            for (int direction : new int[] { 0, 1, 4 }) {
+                Coords end = RoadGradeFixture.focusedCenter(0).translated(direction, 2);
+                owners.add(end);
+                for (int d = 0; d < 6; d++) { owners.add(end.translated(d)); }
+            }
+            for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
+                for (Coords at : owners) {
+                    var surface = new BoardSurface(scene, scene.tile(at), lod);
+                    assertFittedTop(surface, outline, panel + " " + at + "/" + lod);
+                }
+            }
+        }
+    }
+
+    @Test
+    void separatePlateausCannotFoldTheirSharedLowerNeighbors() {
+        // The first layout has separate contours at one height; the second combines successive height passes.
+        for (var rows : List.of(
+              List.of("111111111", "111111111", "113111111", "113133311", "131443311",
+                    "131443311", "111133111", "111111111", "111111111"),
+              List.of("111111111", "111331111", "122331111", "122211111", "122331111",
+                    "111114411", "111114411", "111114411", "111111111"))) {
+            var scene = scene(at -> at.getX() < 9 ? rows.get(at.getY()).charAt(at.getX()) - '0' : 1, false, 63);
+            var outline = BoardConcrete.of(scene);
+            assertTrue(scene.tiles().stream().anyMatch(tile -> outline.fit().footprint(tile.coords()) != null),
+                  "Safe parts of the plateaus still use fitted boundaries");
+            for (var tile : scene.tiles()) {
+                for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
+                    assertFittedTop(new BoardSurface(scene, tile, lod), outline, tile.coords() + "/" + lod);
+                }
+            }
+        }
+    }
+
+    private static void assertFittedTop(BoardSurface surface, BoardConcrete outline, String label) {
+        var at = surface.tile.coords();
+        var center = BoardGeometry.center(at, surface.tile.elevation());
+        double expected = 0, actual = 0;
+        for (int e = 0; e < 6; e++) {
+            var a = outline.corner(at, e).sub(center);
+            var b = outline.corner(at, (e + 1) % 6).sub(center);
+            expected += ((double) a.x * b.y - (double) a.y * b.x) / 2;
+            var middle = outline.corner(at, e).lerp(outline.corner(at, (e + 1) % 6), .5f);
+            for (float t : new float[] { .5f, .98f }) {
+                var p = new Vector3(center).lerp(middle, t);
+                float height = BoardSurface.sampleHeight(surface.faces, p.x, p.y, Float.NaN);
+                assertTrue(Float.isFinite(height), label + " has no gap inside its fitted edge");
+                if (surface.ramps == 0) {
+                    assertEquals(center.z, height, .001f, "An ungraded concrete slab stays at its own level");
+                }
+            }
+        }
+        for (var face : surface.faces) {
+            float area = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z / 2;
+            assertTrue(area > 0, label + " concrete top cannot fold: " + face);
+            actual += area;
+        }
+        assertEquals(Math.abs(expected), actual, .1, label + " includes every part of the fitted footprint exactly once");
+    }
+
+    @Test
     void commCenterBorderSlopeUsesItsActualFaceNormals() throws Exception {
         BoardScene scene = commCenter();
         for (TerrainLod lod : TerrainLod.values()) {
@@ -143,6 +209,7 @@ class BoardConcreteMeshTest {
     @ValueSource(ints = { 1, 2, 3, 6 })
     void markedCliffsStayPlanarForTheirFullHeightAtEveryDetail(int levels) {
         BoardScene scene = scene(at -> at.getX() >= 8 ? levels : 0, false, 63);
+        BoardConcrete outline = BoardConcrete.of(scene);
         for (TerrainLod lod : TerrainLod.values()) {
             for (Coords at : List.of(new Coords(2, 2), new Coords(7, 4), new Coords(8, 4))) {
                 BoardSurface surface = new BoardSurface(scene, scene.tile(at), lod);
@@ -162,26 +229,36 @@ class BoardConcreteMeshTest {
                 assertEquals(BoardGeometry.width() * BoardGeometry.height() * .75f, area, .01f);
                 for (int e = 0; e < 6; e++) {
                     for (float t : new float[] { .1f, .5f, .99f }) {
-                        Vector3 p = new Vector3(center).lerp(BoardGeometry.corner(at, scene.tile(at).elevation(), e), t);
+                        Vector3 p = new Vector3(center).lerp(outline.corner(at, e).add(0, 0, center.z), t);
                         assertEquals(center.z, surface.height(p.x, p.y), .001f, "Picking/support covers the whole slab");
                     }
                 }
                 var walls = surface.walls(scene, BoardGeometry.floor(scene));
                 if (at.getX() < 8) { assertTrue(walls.isEmpty()); continue; }
                 assertEquals(4, walls.size(), "Two exposed rectangular panels: " + lod);
-                float wallArea = 0;
+                float wallArea = 0, expectedWallArea = 0;
+                for (int e = 0; e < 6; e++) {
+                    var neighbor = scene.tile(at.translated(BoardGeometry.edgeDirection(e)));
+                    if (neighbor != null && neighbor.elevation() < scene.tile(at).elevation()) {
+                        expectedWallArea += outline.corner(at, e).dst(outline.corner(at, (e + 1) % 6))
+                              * (scene.tile(at).elevation() - neighbor.elevation()) * BoardGeometry.level();
+                    }
+                }
                 for (var face : walls) {
                     Vector3 cross = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
                     wallArea += cross.len() / 2;
                     assertTrue(cross.dot(new Vector3(face.a()).sub(center)) > 0, "Panels face out");
+                    Vector3 a = outline.corner(at, face.landEdge());
+                    Vector3 edge = outline.corner(at, (face.landEdge() + 1) % 6).sub(a);
                     for (var p : List.of(face.a(), face.b(), face.c())) {
+                        assertEquals(0, (edge.x * (p.y - a.y) - edge.y * (p.x - a.x)) / edge.len(), .001f,
+                              "The full-height panel stays on its fitted vertical plane");
                         assertTrue(surface.relief.shade(p).normal().epsilonEquals(new Vector3(cross).nor(), .0001f));
                         assertEquals(p.z / BoardRelief.metres(1), surface.relief.shade(p).rim(), .001f);
                         assertEquals((center.z - p.z) / BoardRelief.metres(1), surface.relief.shade(p).foot(), .001f);
                     }
                 }
-                float edgeLength = BoardGeometry.corner(at, levels, 0).dst(BoardGeometry.corner(at, levels, 1));
-                assertEquals(2 * edgeLength * levels * BoardGeometry.level(), wallArea, .01f, "Panels have no holes or overlaps");
+                assertEquals(expectedWallArea, wallArea, .01f, "Fitted panels have no holes or overlaps");
             }
         }
     }

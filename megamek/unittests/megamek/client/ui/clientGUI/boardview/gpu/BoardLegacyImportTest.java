@@ -181,11 +181,12 @@ class BoardLegacyImportTest {
         assertEquals(BoardDecoration.Placement.surface("fuelTank", "top", 0),
               board.getHex(TANK).getDecorations().getFirst().placement());
 
-        // A maglev track becomes one ungrouped N/S route marker; a code without artwork stays in the game's memory.
-        assertTrue(board.getHex(MAGLEV).containsTerrain(Terrains.FLUFF));
-        var route = board.getHex(MAGLEV).getDecorations();
+        // Maglev artwork becomes authoritative N/S rail terrain; its transient conversion marker is removed.
+        assertFalse(board.getHex(MAGLEV).containsTerrain(Terrains.FLUFF), "The maglev token is fully consumed");
+        assertEquals(2, board.getHex(MAGLEV).terrainLevel(Terrains.RAIL), "Maglev remains its distinct rail kind");
+        assertTrue(board.getHex(MAGLEV).getDecorations().isEmpty(), "The route derives from terrain, not a stored object");
+        var route = megamek.common.board.RailRoute.markers(board.getHex(MAGLEV), megamek.common.board.RailRoute.Kind.MAGLEV);
         assertEquals(1, route.size());
-        assertTrue(megamek.common.board.RailRoute.isRoute(route.getFirst()));
         assertEquals(9, route.getFirst().connections());
         assertNull(route.getFirst().group());
         assertEquals(9, board.getHex(INVALID).terrainLevel(Terrains.FLUFF));
@@ -353,7 +354,7 @@ class BoardLegacyImportTest {
      * A car park's two decal rows (model px): beside a road, each row's open side on the road's fading asphalt edge
      * ({@link BoardRoad.Kind#halfWidth} less {@link GpuRoads#FEATHER}), so the gray verge is hidden and the carriageway
      * clear; without one, back to back and mirrored, their closed sides meeting on the line through the hex centre.
-     * Either way the rows lie on opposite sides and inside the hex, so clipping cuts nothing.
+     * Either way the rows lie on opposite sides. Full-size bays may cross hex edges, so parking paint is not clipped.
      */
     private static void assertRows(List<BoardDecoration> plates, boolean road, String name) {
         assertEquals(2, plates.size(), name);
@@ -364,18 +365,13 @@ class BoardLegacyImportTest {
             // How far the row's centre lies along its back direction (its +y, toward its closed side).
             double toward = -Math.sin(turn) * x + Math.cos(turn) * y;
             assertEquals(!road, plate.mirror(), name);
+            assertFalse(plate.clipToHex(), name + ": complete bays across hex edges");
             if (road) {
                 double edge = toward - half;
                 assertTrue(edge >= BoardRoad.Kind.PAVED.halfWidth - GpuRoads.FEATHER && edge < BoardRoad.Kind.PAVED.halfWidth,
                       name + ": road-side edge " + edge);
             } else {
                 assertEquals(0, toward + half, 1e-3, name + ": the closed side on the centre line");
-            }
-            for (int corner = 0; corner < 4; corner++) {
-                double u = (corner % 3 == 0 ? -1 : 1) * size.width() * plate.scale() / 2, v = (corner < 2 ? -1 : 1) * half;
-                double cx = x + u * Math.cos(turn) - v * Math.sin(turn), cy = y + u * Math.sin(turn) + v * Math.cos(turn);
-                assertTrue(Math.abs(cy) <= 36 + 1e-6 && Math.abs(cx) <= 42 - 21 * Math.abs(cy) / 36 + 1e-6,
-                      name + ": inside the hex at " + cx + ", " + cy);
             }
         }
         // The second row is the first turned half a turn about the hex centre.
@@ -613,6 +609,14 @@ class BoardLegacyImportTest {
         for (BoardDecoration member : members) {
             UUID.fromString(member.id());
             assertEquals(group, member.group());
+        }
+        Hex crossed = new Hex(0, "road:1:09;rail:1:18", "");
+        var at = new Coords(3, 4);
+        var clearance = BoardRoad.clearance(at, crossed, ignored -> null);
+        for (var member : BoardSceneryLayouts.stamp("scenery/saxarba/roads/road_trees{exits}", crossed, at)) {
+            assertTrue(clearance.distance((float) member.x() * BoardGeometry.TILE_WIDTH,
+                  (float) member.y() * BoardGeometry.TILE_HEIGHT) >= BoardRoad.SHOULDER,
+                  "Roadside trunks clear the road and crossing rail; natural canopies may overhang the verge");
         }
         var error = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
               () -> BoardSceneryLayouts.stamp("scenery/saxarba/roads/road_trees{exits}", new Hex(0), new Coords(3, 4)));

@@ -25,8 +25,30 @@ final class BoardBridgeMesh {
 
     /** Model coordinates: deck top at zero, before the shared bridge grade and placement are applied. */
     static List<BoardBridge.Facet> build(BoardScene.Tile tile, BoardBridge.Deck deck) {
+        var outline = outline(tile, deck);
+        Area carriageway = outline.carriageway(), slab = outline.slab();
+        Area kerbs = new Area(slab);
+        kerbs.subtract(carriageway);
+        var faces = new ArrayList<BoardBridge.Facet>();
+        cap(faces, carriageway, 0, true, BoardBridge.Part.TOP, null);
+        cap(faces, slab, -BoardBridge.SLAB, false, BoardBridge.Part.STRUCTURE, null);
+        if (deck.truss()) {
+            Area steel = BoardBridgeTruss.append(faces, carriageway, kerbs, deck);
+            slabWalls(faces, slab, steel);
+        } else {
+            walls(faces, slab, -BoardBridge.SLAB, 0, BoardBridge.Part.STRUCTURE, null);
+            cap(faces, kerbs, PARAPET, true, BoardBridge.Part.STRUCTURE, null);
+            walls(faces, kerbs, 0, PARAPET, BoardBridge.Part.STRUCTURE, null);
+        }
+        return List.copyOf(faces);
+    }
+
+    /** The same clipped boundaries form the suspended deck and the solid support at a bank. */
+    record Outline(Area carriageway, Area slab) { }
+
+    static Outline outline(BoardScene.Tile tile, BoardBridge.Deck deck) {
         BoardRoad road = deck.slab(tile.coords());
-        Area carriageway = road.footprint(0), slab = road.footprint(BoardRoad.SHOULDER);
+        Area carriageway = road.footprint(0), slab = road.footprint(BoardBridge.SHOULDER);
         boolean rail = false;
         for (var feature : tile.features()) {
             var marker = feature.decoration();
@@ -46,7 +68,7 @@ final class BoardBridgeMesh {
                 float half = deck.corridor().sides() == 0 ? BoardRoad.Kind.PAVED.halfWidth
                       : BoardRoad.CORRIDOR_HALF - RailRoute.BESIDE_RAIL;
                 carriageway.add(band(path, half));
-                slab.add(band(path, half + BoardRoad.SHOULDER));
+                slab.add(band(path, half + BoardBridge.SHOULDER));
             }
         }
         if (BoardRoad.roundabout(deck.exits())) {
@@ -55,26 +77,12 @@ final class BoardBridgeMesh {
             slab.add(island);
             if (rail) { carriageway.add(island); }
         }
-        Area hex = hex();
-        carriageway.intersect(hex);
-        slab.intersect(hex);
+        clipExits(carriageway, deck.exits());
+        clipExits(slab, deck.exits());
         // One polygon per boundary is shared by caps, walls and the kerb subtraction.
         carriageway = polygon(carriageway);
         slab = polygon(slab);
-        Area kerbs = new Area(slab);
-        kerbs.subtract(carriageway);
-        var faces = new ArrayList<BoardBridge.Facet>();
-        cap(faces, carriageway, 0, true, BoardBridge.Part.TOP, null);
-        cap(faces, slab, -BoardBridge.SLAB, false, BoardBridge.Part.STRUCTURE, null);
-        if (deck.truss()) {
-            Area steel = BoardBridgeTruss.append(faces, carriageway, kerbs, deck);
-            slabWalls(faces, slab, steel);
-        } else {
-            walls(faces, slab, -BoardBridge.SLAB, 0, BoardBridge.Part.STRUCTURE, null);
-            cap(faces, kerbs, PARAPET, true, BoardBridge.Part.STRUCTURE, null);
-            walls(faces, kerbs, 0, PARAPET, BoardBridge.Part.STRUCTURE, null);
-        }
-        return List.copyOf(faces);
+        return new Outline(carriageway, slab);
     }
 
     private static Area band(Path2D path, float halfWidth) {
@@ -82,15 +90,27 @@ final class BoardBridgeMesh {
               .createStrokedShape(path));
     }
 
-    private static Area hex() {
+    /** Joined mouths share exact seam planes; wide shoulders may overhang an unused neighbouring hex. */
+    static void clipExits(Area area, int exits) {
+        var bounds = area.getBounds2D();
+        List<Vector3> boundary = List.of(new Vector3((float) bounds.getMinX(), (float) bounds.getMinY(), 0),
+              new Vector3((float) bounds.getMaxX(), (float) bounds.getMinY(), 0),
+              new Vector3((float) bounds.getMaxX(), (float) bounds.getMaxY(), 0),
+              new Vector3((float) bounds.getMinX(), (float) bounds.getMaxY(), 0));
+        for (int edge = 0; edge < 6; edge++) {
+            if ((exits & 1 << BoardGeometry.edgeDirection(edge)) != 0) {
+                boundary = BoardTacticalGeometry.clip(boundary, BoardGeometry.modelCorner(edge), BoardGeometry.modelCorner(edge + 1));
+            }
+        }
         Path2D.Float path = new Path2D.Float();
-        for (int i = 0; i < 6; i++) {
-            var point = BoardGeometry.modelCorner(i);
+        for (int i = 0; i < boundary.size(); i++) {
+            var point = boundary.get(i);
             if (i == 0) { path.moveTo(point.x, point.y); }
             else { path.lineTo(point.x, point.y); }
         }
+        if (boundary.isEmpty()) { area.reset(); return; }
         path.closePath();
-        return new Area(path);
+        area.intersect(new Area(path));
     }
 
     private static Area polygon(Area area) {

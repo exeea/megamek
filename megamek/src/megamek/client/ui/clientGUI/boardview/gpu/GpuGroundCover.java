@@ -103,6 +103,8 @@ final class GpuGroundCover implements Disposable {
         var roots = new FloatArray();
         if (ground.isEmpty()) { return roots; }
         var support = new GpuBiomeVegetation.Support(ground);
+        var water = vegetation == null || vegetation.water().isEmpty() ? null
+              : new GpuBiomeVegetation.Support(vegetation.water());
         Coords coords = tile.coords();
         float centerX = BoardGeometry.centerX(coords), centerY = BoardGeometry.centerY(coords);
         float halfWidth = BoardGeometry.width() / 2, halfHeight = BoardGeometry.height() / 2;
@@ -135,7 +137,7 @@ final class GpuGroundCover implements Disposable {
         float iceReach = BoardRelief.metres(ICE_BORDER_REACH);
         float shoreReach = BoardRelief.metres(SHORE_FADE_METRES);
         var obstacles = new BoardObstacles(scene, tile);
-        boolean minerals = tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.METAL);
+        List<BoardScene.Feature> minerals = vegetation == null ? List.of() : vegetation.minerals();
         var cover = new BoardSurfaceBlend.Sampler(scene, tile);
         var root = new Vector3();
         var normal = new Vector3();
@@ -151,11 +153,13 @@ final class GpuGroundCover implements Disposable {
             var face = support.face(x, y);
             if (face == null) { continue; }
             float z = face.height(x, y);
+            // A descending stream and its bed can have different diagonals. Its actual surface, not interpolated
+            // bank shading metadata, decides whether a root is submerged.
+            if (water != null && z - sink <= water.height(x, y)) { continue; }
             // Test the actual authored triangles: geyser basins/rims and other
             // scenery leave the surrounding grass and empty gaps untouched.
             if (!obstacles.isEmpty() && obstacles.obstructs(root.set(x, y, z), 2 * BoardGeometry.hexScale(),
                   MAX_HEIGHT_FRACTION * BoardGeometry.width())) { continue; }
-            if (minerals && BoardMetalDeposits.covers(coords, tile.features(), x, y, 2 * BoardGeometry.hexScale())) { continue; }
             if (BoardRoad.distance(roads, x, y) < BoardRoad.SHOULDER + 1) { continue; }
             boolean iced = false;
             for (Vector3[] edge : iceEdges) {
@@ -171,6 +175,10 @@ final class GpuGroundCover implements Disposable {
                 grass *= 1 - BoardBiome.coverage(scene, BoardScene.Biome.MARSH, x, y, z);
             }
             if (paint != null && grass > 0) { grass *= 1 - paint.at(x, y); }
+            if (!minerals.isEmpty()) {
+                grass *= 1 - GpuMineralGround.coverage(minerals, (x - centerX) / BoardGeometry.hexScale(),
+                      (y - centerY) / BoardGeometry.hexScale());
+            }
             float growth = grass * BoardRelief.smooth((grass - .55f) / .35f);
             // Follow the same smoothly varying normals as the turf material, including the next hex's slope toe.
             // A whole-triangle cutoff removes green ground and leaves straight, full-density blade edges.

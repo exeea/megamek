@@ -28,6 +28,7 @@ final class BoardBridgeSlope {
                 continue;
             }
             boolean slab = Math.max(face.a().z, Math.max(face.b().z, face.c().z)) <= .001f;
+            boolean vertical = Math.abs(face.normal().z) < .0001f;
             var polygon = List.of(a, b, c);
             for (var patch : profile) {
                 int direction = patch.landEdge() < 0 ? -1 : BoardGeometry.edgeDirection(patch.landEdge());
@@ -43,12 +44,34 @@ final class BoardBridgeSlope {
                 }
                 for (int i = 1; i + 1 < exposed.size(); i++) {
                     clipper.prepare(new BoardTacticalGeometry.Triangle(exposed.getFirst(), exposed.get(i), exposed.get(i + 1), -1));
-                    clipper.displace(patch, triangle -> BoardBridge.triangle(faces, triangle.a(), triangle.b(), triangle.c(),
-                          face.part(), face.colour()));
+                    clipper.displace(patch, triangle -> {
+                        // A vertical face has no XY area, so both patches beside a shared edge can contain it.
+                        // The solid support owns that boundary; its neighbour must not restore buried fascia.
+                        if (vertical && !ownsBoundary(profile, patch, footing.solidExits(),
+                              triangle)) { return; }
+                        BoardBridge.triangle(faces, triangle.a(), triangle.b(), triangle.c(), face.part(), face.colour());
+                    });
                 }
             }
         }
         return BoardBridge.shape(BoardScene.Surface.CONCRETE, level, faces);
+    }
+
+    private static boolean ownsBoundary(List<BoardSurface.Face> profile, BoardSurface.Face patch, int solidExits,
+          BoardTacticalGeometry.Triangle triangle) {
+        if (patch.landEdge() >= 0 && (solidExits & 1 << BoardGeometry.edgeDirection(patch.landEdge())) != 0) {
+            return true;
+        }
+        for (var candidate : profile) {
+            if (candidate.landEdge() < 0 || (solidExits & 1 << BoardGeometry.edgeDirection(candidate.landEdge())) == 0) {
+                continue;
+            }
+            // Only a solid support takes ownership of a boundary face. Choosing between its own coplanar
+            // triangles can discard the sole emitted fascia when clipping rounds a diagonal edge differently.
+            if (List.of(triangle.a(), triangle.b(), triangle.c()).stream()
+                  .allMatch(point -> Float.isFinite(candidate.height(point.x, point.y)))) { return false; }
+        }
+        return true;
     }
 
     /** Clip a facet at the concrete support's top, retaining winding and the exposed steel above it. */
@@ -69,32 +92,38 @@ final class BoardBridgeSlope {
     }
 
     /**
-     * A level central hub and broad planar approaches, with a constant height across each complete mouth: the grade the
-     * deck's slab is displaced onto, relative to its deck plane (world XY). The piers' caps follow it too.
+     * A level central hub and broad planar approaches. Adjacent mouths blend through their shared corner height;
+     * inactive sides retain the full deck overhang. The slab and pier caps use this same grade (world XY).
      */
     static List<BoardSurface.Face> profile(BoardScene.Tile tile, BoardBridge.Deck deck) {
         var result = new ArrayList<BoardSurface.Face>();
         var center = BoardGeometry.center(tile.coords(), 0);
         var corners = new Vector3[6];
+        var original = new Vector3[6];
         var inner = new Vector3[6];
         for (int edge = 0; edge < 6; edge++) {
-            corners[edge] = BoardGeometry.corner(tile.coords(), 0, edge);
+            original[edge] = BoardGeometry.corner(tile.coords(), 0, edge);
+            corners[edge] = new Vector3(original[edge]);
             inner[edge] = new Vector3(center).lerp(corners[edge], .5f);
         }
-        float wide = (BoardRoad.CORRIDOR_HALF + BoardRoad.SHOULDER) * BoardGeometry.hexScale();
+        float shoulder = BoardBridge.SHOULDER * BoardGeometry.hexScale();
         for (int edge = 0; edge < 6; edge++) {
             int direction = BoardGeometry.edgeDirection(edge), next = (edge + 1) % 6;
-            if ((deck.corridor().sides() & 1 << direction) == 0 || deck.rises().get(direction) == 0) { continue; }
-            var across = new Vector3(corners[next]).sub(corners[edge]).nor();
-            var midpoint = new Vector3(corners[edge]).lerp(corners[next], .5f).lerp(center, .5f);
-            // Share the widened hub corners with the adjoining patches, avoiding overlapping grade planes.
-            // Adjacent graded exits retain their common corner so junctions still have one continuous surface.
-            if (deck.rises().get(BoardGeometry.edgeDirection((edge + 5) % 6)) == 0) {
-                inner[edge] = new Vector3(midpoint).mulAdd(across, -wide);
+            if ((deck.exits() & 1 << direction) == 0) { continue; }
+            float wide = mouthWidth(deck, direction), half = original[edge].dst(original[next]) / 2;
+            var across = new Vector3(original[next]).sub(original[edge]).nor();
+            var midpoint = new Vector3(original[edge]).lerp(original[next], .5f);
+            for (int end = 0; end < 2; end++) {
+                int corner = end == 0 ? edge : next, neighbor = end == 0 ? (edge + 5) % 6 : next;
+                float sign = end == 0 ? -1 : 1;
+                if (!sharedCorner(deck, corner, BoardGeometry.edgeDirection(neighbor), direction)) {
+                    inner[corner] = new Vector3(midpoint).lerp(center, .5f).mulAdd(across, sign * wide);
+                    if (wide > half) { corners[corner] = new Vector3(midpoint).mulAdd(across, sign * wide); }
+                }
             }
-            if (deck.rises().get(BoardGeometry.edgeDirection(next)) == 0) {
-                inner[next] = new Vector3(midpoint).mulAdd(across, wide);
-            }
+        }
+        for (int corner = 0; corner < 6; corner++) {
+            corners[corner].z = deck.cornerRises().isEmpty() ? 0 : deck.cornerRises().get(corner) * BoardGeometry.level();
         }
         for (int edge = 0; edge < 6; edge++) {
             int next = (edge + 1) % 6, direction = BoardGeometry.edgeDirection(edge);
@@ -102,11 +131,33 @@ final class BoardBridgeSlope {
             var b = corners[next];
             var innerA = inner[edge];
             var innerB = inner[next];
-            float inset = (deck.corridor().sides() & 1 << direction) == 0 ? .25f : .5f - wide / a.dst(b);
-            var mouthA = new Vector3(a).lerp(b, inset);
-            var mouthB = new Vector3(a).lerp(b, 1 - inset);
-            mouthA.z = mouthB.z = deck.rises().get(direction) * BoardGeometry.level();
+            Vector3 mouthA = a, mouthB = b;
+            if ((deck.exits() & 1 << direction) != 0) {
+                float length = original[edge].dst(original[next]), inset = .5f - mouthWidth(deck, direction) / length;
+                boolean sharedA = sharedCorner(deck, edge, BoardGeometry.edgeDirection((edge + 5) % 6), direction);
+                boolean sharedB = sharedCorner(deck, next, BoardGeometry.edgeDirection(next), direction);
+                // Adjacent graded mouths meet one shared corner; their outer shoulders blend into its common height.
+                mouthA = new Vector3(original[edge]).lerp(original[next], sharedA ? Math.max(inset, shoulder / length) : inset);
+                mouthB = new Vector3(original[edge]).lerp(original[next], 1 - (sharedB ? Math.max(inset, shoulder / length) : inset));
+                mouthA.z = mouthB.z = deck.rises().get(direction) * BoardGeometry.level();
+                if (!sharedA && inset <= 0) { a.z = mouthA.z; }
+                if (!sharedB && inset <= 0) { b.z = mouthB.z; }
+            }
             result.add(face(center, innerA, innerB, -1));
+            if ((deck.exits() & 1 << direction) == 0) {
+                int first = result.size();
+                // A widened neighbouring mouth can make this side's skirt concave. Choose its interior diagonal;
+                // fanning from innerA would otherwise fold the last triangle back over the level centre.
+                if (cross(innerA, a, b) * cross(innerA, b, innerB) < 0) {
+                    result.add(face(innerA, a, innerB, edge));
+                    result.add(face(a, b, innerB, edge));
+                } else {
+                    result.add(face(innerA, a, b, edge));
+                    result.add(face(innerA, b, innerB, edge));
+                }
+                extendApproach(result, first, deck, edge, original, center);
+                continue;
+            }
             result.add(face(innerA, a, mouthA, edge));
             result.add(face(innerA, mouthA, mouthB, edge));
             result.add(face(innerA, mouthB, innerB, edge));
@@ -115,7 +166,69 @@ final class BoardBridgeSlope {
         return result;
     }
 
+    /** Continue one approach's grade around its curved parapet, then meet the level junction without a twist. */
+    private static void extendApproach(List<BoardSurface.Face> result, int first, BoardBridge.Deck deck, int edge,
+          Vector3[] original, Vector3 center) {
+        int approach = -1;
+        for (int nearby : new int[] { (edge + 5) % 6, (edge + 1) % 6 }) {
+            int direction = BoardGeometry.edgeDirection(nearby);
+            if ((deck.exits() & 1 << direction) == 0 || deck.rises().get(direction) == 0) { continue; }
+            if (approach >= 0) { return; }
+            approach = nearby;
+        }
+        if (approach < 0) { return; }
+        var a = new Vector3(center).lerp(original[approach], .5f);
+        var b = new Vector3(center).lerp(original[(approach + 1) % 6], .5f);
+        var normal = new Vector3(-(b.y - a.y), b.x - a.x, 0);
+        float span = new Vector3(center).sub(a).dot(normal);
+        float rise = deck.rises().get(BoardGeometry.edgeDirection(approach)) * BoardGeometry.level();
+        var source = new ArrayList<>(result.subList(first, result.size()));
+        // Keep the existing blend where another mouth or shared corner requires a different height.
+        for (var face : source) {
+            for (var point : List.of(face.a(), face.b(), face.c())) {
+                float height = rise * Math.max(0, -new Vector3(point).sub(a).dot(normal) / span);
+                if (Math.abs(point.z - height) > .001f) { return; }
+            }
+        }
+        result.subList(first, result.size()).clear();
+        for (var face : source) {
+            var triangle = List.of(face.a(), face.b(), face.c());
+            for (boolean sloped : new boolean[] { false, true }) {
+                var polygon = BoardTacticalGeometry.clip(triangle, sloped ? b : a, sloped ? a : b);
+                var graded = new ArrayList<Vector3>();
+                for (var point : polygon) {
+                    var p = new Vector3(point);
+                    p.z = sloped ? rise * Math.max(0, -new Vector3(p).sub(a).dot(normal) / span) : 0;
+                    graded.add(p);
+                }
+                for (int i = 1; i + 1 < graded.size(); i++) {
+                    result.add(face(graded.getFirst(), graded.get(i), graded.get(i + 1), edge));
+                }
+            }
+        }
+    }
+
+    private static float mouthWidth(BoardBridge.Deck deck, int direction) {
+        float width = ((deck.corridor().sides() & 1 << direction) == 0 ? BoardRoad.Kind.PAVED.halfWidth : BoardRoad.CORRIDOR_HALF)
+              + BoardBridge.SHOULDER;
+        int edge = Math.floorMod(1 - direction, 6);
+        var across = BoardGeometry.modelCorner(edge + 1).sub(BoardGeometry.modelCorner(edge)).nor();
+        var axis = BoardGeometry.modelCorner(edge).add(BoardGeometry.modelCorner(edge + 1)).nor();
+        // The lattice edge is slightly oblique to its center line. Match the actual full-width slab and footing,
+        // including the thin outer strip which otherwise falls into the neighboring grade patch.
+        return width * BoardGeometry.hexScale() / Math.abs(across.x * axis.y - across.y * axis.x);
+    }
+
+    private static boolean sharedCorner(BoardBridge.Deck deck, int corner, int otherDirection, int direction) {
+        return (deck.exits() & 1 << otherDirection) != 0 || !deck.cornerRises().isEmpty()
+              && Math.abs(deck.cornerRises().get(corner) - deck.rises().get(direction)) >= .0001f;
+    }
+
     private static BoardSurface.Face face(Vector3 a, Vector3 b, Vector3 c, int edge) {
         return new BoardSurface.Face(a, b, c, BoardSurface.Finish.TOP, edge);
+    }
+
+    private static float cross(Vector3 a, Vector3 b, Vector3 c) {
+        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
     }
 }

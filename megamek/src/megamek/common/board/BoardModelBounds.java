@@ -59,8 +59,9 @@ public final class BoardModelBounds {
         double x = HexTile.centerX(at, HexTile.WIDTH) + object.x() * HexTile.WIDTH;
         double y = HexTile.centerY(at, HexTile.HEIGHT) + object.y() * HexTile.HEIGHT;
         var stretch = object.stretch();
-        double sx = object.scale() * stretch.x() * (object.mirror() ? -1 : 1), sy = object.scale() * stretch.y();
-        double sz = object.scale() * stretch.z();
+        double scale = object.scale() * RailRoute.visualScale(object.asset());
+        double sx = scale * stretch.x() * (object.mirror() ? -1 : 1), sy = scale * stretch.y();
+        double sz = scale * stretch.z();
         List<ConcreteFit.Point> corners = new ArrayList<>(8);
         for (int i = 0; i < 8; i++) {
             double[] turned = object.rotateVector(sx * ((i & 1) == 0 ? bounds[0] : bounds[3]),

@@ -54,7 +54,7 @@ class BoardRoadTest {
                     assertFalse(paint.contains(22 * nx, 22 * ny), "Paint ends before entering the circulating lane");
                     for (float radius : new float[] { 11, 18, 25 }) {
                         assertTrue(shape.contains(radius * nx, radius * ny),
-                              "The whole ring keeps the approach's 15-unit width, including room around the island");
+                              "The whole ring keeps one 15-unit circulating lane, including room around the island");
                     }
                     for (float along : new float[] { -9, 9 }) {
                         for (float across : new float[] { -5, 5 }) {
@@ -65,12 +65,14 @@ class BoardRoadTest {
                 }
                 for (int d = 0; d < 6; d++) {
                     Vector3 gate = gate(at, d), across = new Vector3(-gate.y, gate.x, 0).nor();
-                    for (float offset : new float[] { -7, 0, 7 }) {
+                    for (float offset : new float[] { -14, 0, 14 }) {
                         var p = new Vector3(gate).mulAdd(across, offset);
-                        assertEquals((exits & (1 << d)) != 0, shape.contains(p.x, p.y), "No pinched or phantom entrance");
                         if ((exits & (1 << d)) != 0) {
-                            assertEquals(Math.abs(offset) - 7.5f, road.distance(p.x, p.y), .001f,
+                            assertTrue(shape.contains(p.x, p.y), "An approach reaches its border at its full width");
+                            assertEquals(Math.abs(offset) - BoardRoad.Kind.PAVED.halfWidth, road.distance(p.x, p.y), .001f,
                                   "Clearance and material feathering must use the whole carriageway at a join");
+                        } else if (offset == 0) {
+                            assertFalse(shape.contains(p.x, p.y), "An absent approach has no invented centre-line entrance");
                         }
                     }
                 }
@@ -163,8 +165,12 @@ class BoardRoadTest {
             if (kind == BoardRoad.Kind.DIRT) {
                 var tracks = road.tracks(1);
                 Vector3 worn = new Vector3(outward).scl(.68f);
-                assertTrue(tracks.contains(worn.x - 3, worn.y) && tracks.contains(worn.x + 3, worn.y));
-                assertFalse(tracks.contains(worn.x, worn.y), "The ground can return between the two wheel marks");
+                for (int lane : new int[] { -1, 1 }) {
+                    float centre = worn.x + lane * kind.halfWidth / 2;
+                    assertTrue(tracks.contains(centre - BoardRoad.WHEEL_OFFSET, worn.y)
+                          && tracks.contains(centre + BoardRoad.WHEEL_OFFSET, worn.y));
+                    assertFalse(tracks.contains(centre, worn.y), "The ground can return between each lane's two tyres");
+                }
             }
         }
     }
@@ -218,7 +224,7 @@ class BoardRoadTest {
                 var tile = scene.tile(at);
                 var road = BoardRoad.of(scene, tile);
                 var patches = GpuRoads.patches(tile, road);
-                for (float offset : new float[] { -8, -6.5f, 6.5f, 8 }) {
+                for (float offset : new float[] { -15.5f, -14, 14, 15.5f }) {
                     Vector3 p = new Vector3(gate).scl(at.equals(CENTER) ? 1 : -1).mulAdd(across, offset);
                     var margin = patches.stream().filter(t -> t.shape().contains(p.x, p.y)).toList();
                     assertEquals(2, margin.size(), "Only the two fading materials meet in the loose margin");
@@ -247,16 +253,19 @@ class BoardRoadTest {
             var road = BoardRoad.of(scene, scene.tile(CENTER));
             Vector3 along = gate(CENTER, d).nor(), across = new Vector3(-along.y, along.x, 0);
             for (float progress = -23; progress <= 34; progress += 3) {
-                for (int side : new int[] { -1, 1 }) {
-                    Vector3 centre = new Vector3(along).scl(progress).mulAdd(across, side * BoardRoad.WHEEL_OFFSET);
-                    assertEquals(1, road.wheelCoverage(centre.x, centre.y), .001f);
-                    var heading = road.wheelDirection(centre.x, centre.y);
-                    assertEquals(1, heading.len(), .001f);
-                    assertEquals(1, Math.abs(heading.x * along.x + heading.y * along.y), .001f,
-                          "Compacted scuffs follow the road, including reversed paths");
-                    assertTrue(road.tracks(1 << d).contains(centre.x, centre.y));
-                    Vector3 outside = new Vector3(centre).mulAdd(across, side * (BoardRoad.TRACK_HALF_WIDTH + .2f));
-                    assertEquals(0, road.wheelCoverage(outside.x, outside.y));
+                for (int lane : new int[] { -1, 1 }) {
+                    for (int side : new int[] { -1, 1 }) {
+                        Vector3 centre = new Vector3(along).scl(progress).mulAdd(across,
+                              lane * BoardRoad.Kind.DIRT.halfWidth / 2 + side * BoardRoad.WHEEL_OFFSET);
+                        assertEquals(1, road.wheelCoverage(centre.x, centre.y), .001f);
+                        var heading = road.wheelDirection(centre.x, centre.y);
+                        assertEquals(1, heading.len(), .001f);
+                        assertEquals(1, Math.abs(heading.x * along.x + heading.y * along.y), .001f,
+                              "Compacted scuffs follow the road, including reversed paths");
+                        assertTrue(road.tracks(1 << d).contains(centre.x, centre.y));
+                        Vector3 outside = new Vector3(centre).mulAdd(across, side * (BoardRoad.TRACK_HALF_WIDTH + .2f));
+                        assertEquals(0, road.wheelCoverage(outside.x, outside.y));
+                    }
                 }
             }
         }
@@ -292,7 +301,7 @@ class BoardRoadTest {
                       GpuRoads.materialCoverage(secondCover, -gate.x, -gate.y), .001f);
                 Vector3 along = new Vector3(gate).nor();
                 for (float progress = -20; progress < 35; progress += 2) {
-                    Vector3 edgePoint = new Vector3(along).scl(progress).mulAdd(across, 7.5f);
+                    Vector3 edgePoint = new Vector3(along).scl(progress).mulAdd(across, BoardRoad.Kind.PAVED.halfWidth);
                     assertEquals(0, first.distance(edgePoint.x, edgePoint.y), .001f,
                           "The material transition must not squeeze the carriageway");
                 }
@@ -314,15 +323,14 @@ class BoardRoadTest {
         }
         var straightScene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
         var straight = BoardRoad.of(straightScene, straightScene.tile(CENTER)).markings(CENTER, 9);
-        // The approach phase still agrees with the neighbouring road, but a controlled junction clears its hub.
-        for (float y = -33.875f; y <= 34; y += .25f) {
-            if (Math.abs(y) < 25) {
-                assertFalse(paint.contains(0, y), "No through dashes cross the junction's conflict area");
-            } else if (Math.abs(y) > 28) {
-                assertEquals(straight.contains(0, y), paint.contains(0, y),
-                      "The main road's approach dashes retain their border phase, y=" + y);
-            }
+        // Priority affects stop bars, not the clear space needed for turns across the divider.
+        for (float y = -8; y <= 8; y += .25f) {
+            assertFalse(paint.contains(0, y), "The junction leaves the through divider clear for turning traffic");
         }
+        for (float y = 31; y <= 34; y += .25f) {
+            assertTrue(paint.contains(0, y) && paint.contains(0, -y), "Both priority approaches channel traffic with solid lines");
+        }
+        assertFalse(straight.contains(0, 35), "A separate straight road retains the gap at its border");
     }
 
     @Test
@@ -343,7 +351,11 @@ class BoardRoadTest {
                     // A splat borrows whole faces; fragments outside its mask never appear.
                     if (!patch.shape().contains((p.x - BoardGeometry.centerX(CENTER)) / BoardGeometry.hexScale(),
                           (p.y - BoardGeometry.centerY(CENTER)) / BoardGeometry.hexScale())) { continue; }
-                    assertEquals(surface.height(p.x, p.y) + patch.lift() * BoardGeometry.hexScale(), p.z, .002f,
+                    // Rounding the centroid's XY can change its height on a steep, narrow triangle. Compare both
+                    // planes at that same point instead of comparing the sampled ground to averaged vertex Z.
+                    float painted = new BoardSurface.Face(triangle.a(), triangle.b(), triangle.c(), BoardSurface.Finish.TOP)
+                          .height(p.x, p.y);
+                    assertEquals(surface.height(p.x, p.y) + patch.lift() * BoardGeometry.hexScale(), painted, .002f,
                           "Carrier " + triangle + " direction " + direction + " patch " + patch.texture());
                     triangles++;
                 }
@@ -367,8 +379,8 @@ class BoardRoadTest {
                 assertTrue(GpuRoads.drape(tile, surface, patch).size() <= surface.faces.size(),
                       "A dash, shoulder or tyre mark must not split terrain triangles");
                 var mask = GpuRoads.mask(road, patch);
-                inside = Math.max(inside, maskAlpha(mask, 6, 8));
-                outside = Math.max(outside, maskAlpha(mask, 11, 8));
+                inside = Math.max(inside, maskAlpha(mask, kind.halfWidth - 1.5f, 8));
+                outside = Math.max(outside, maskAlpha(mask, kind.halfWidth + 3.5f, 8));
             }
             assertTrue(inside > .4f, "The mask preserves the road's width for " + kind);
             assertEquals(0, outside, "Borrowing terrain faces must not paint the surrounding hex");
@@ -483,8 +495,8 @@ class BoardRoadTest {
             hex.removeTerrain(Terrains.ICE);
         }
         hex.addTerrain(new Terrain(Terrains.ROAD, 17, true, 9));
-        assertEquals(BoardRoad.Kind.NONE, BoardRoad.capture(hex));
-        assertFalse(BoardFeatures.detailedGround(hex, Map.of()));
+        assertEquals(BoardRoad.Kind.PAVED, BoardRoad.capture(hex));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
         hex.removeTerrain(Terrains.ROAD);
         hex.addTerrain(new Terrain(Terrains.ROAD_FLUFF, 1));
         assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Standalone artwork is not a captured road");

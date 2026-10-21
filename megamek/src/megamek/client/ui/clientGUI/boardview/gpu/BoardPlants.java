@@ -18,7 +18,7 @@ import com.badlogic.gdx.utils.FloatArray;
 record BoardPlants(GpuBiomeVegetation.Crops crops, FloatArray reeds, FloatArray grass, FloatArray turf) {
     static BoardPlants plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface support, TerrainLod lod,
           List<BoardDecals.Stamp> stamps) {
-        if (tile.ultraSublevel() || lod == TerrainLod.DISTANT) { return null; }
+        if (tile.ultraSublevel() || tile.backdrop().present() || lod == TerrainLod.DISTANT) { return null; }
         var kind = BoardBiome.plantKind(scene, tile);
         var paint = BoardDecals.Opacity.of(tile, stamps);
         GpuBiomeVegetation.Crops crops = kind == BoardScene.Biome.FIELD ? GpuBiomeVegetation.plant(scene, tile, support, paint)

@@ -10,8 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
@@ -28,6 +30,7 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
@@ -35,14 +38,15 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The 3D Graphics as a build mode of the terrain: a game that starts in Classic builds
- * only what Classic draws (no relief, water or lava field, wave simulation, tree, scatter, grass, biome or sculpted
- * material); a switch either way rebuilds the board behind the loading stage and retires the other build; the Tactical
- * View never changes the build.
+ * only what Classic draws (no water or lava field, wave simulation, tree, scatter, grass or biome).
+ * Roads, rails and their supports use shared infrastructure; Classic natural bridges retain full hex caps. A switch
+ * rebuilds behind the loading stage and retires the other build; the Tactical View never changes the build.
  */
 @Tag("on-demand")
 class GpuGraphicsModeSmokeTest {
     private static final int WIDTH = 12, HEIGHT = 10;
-    private static final Coords BUILDING = new Coords(2, 7), BRIDGE = new Coords(7, 3), WOODS = new Coords(1, 2);
+    private static final Coords BUILDING = new Coords(2, 7), BRIDGE = new Coords(7, 3), WOODS = new Coords(1, 2),
+          ROAD = new Coords(2, 5), RAIL = new Coords(9, 5);
 
     @Test
     void classicBuildsOnlyItsLayersAndASwitchRebuildsBehindTheLoadingStage() throws Exception {
@@ -87,9 +91,12 @@ class GpuGraphicsModeSmokeTest {
         view.boardCamera.fit(scene);
         frames(view, 3);
         assertTrue(terrain.columns(), "A Classic game builds the tileset columns");
-        assertTrue(((List<?>) get(terrain, "terrainMaterialSamples")).isEmpty(), "and warms up no sculpted shader");
+        // Shared road overlays may warm their terrain shader in Classic too. Its base columns still use tileset art.
         verifyClassic(terrain, scene);
+        Set<GpuRoads.MaskData> roadMasks = infrastructure(terrain);
         capture("graphics-classic.png");
+        captureNaturalPassage(view, terrain, scene, false);
+        captureRailPlateau(view, terrain, scene, false);
         List<Object> classic = new ArrayList<>((List<?>) get(terrain, "chunks"));
 
         // To Enhanced: the next frame finds the board unbuilt and shows the loading stage, then the 3D chunks commit.
@@ -107,7 +114,16 @@ class GpuGraphicsModeSmokeTest {
               "The woods have their trees");
         assertTrue(enhanced.stream().anyMatch(chunk -> materials(chunk).stream().anyMatch(GpuTerrain::sculpted)),
               "The relief is sculpted");
+        assertEquals(roadMasks, infrastructure(terrain), "Graphics modes install the same generated road paint");
         capture("graphics-enhanced.png");
+        view.setTacticalView(true);
+        frames(view, 3);
+        assertEquals(roadMasks, infrastructure(terrain), "Enhanced Tactical keeps the same infrastructure");
+        assertTrue(terrain.fluffHidden());
+        assertFalse(terrain.busy(), "T starts no terrain rebuild");
+        capture("graphics-enhanced-tactical.png");
+        view.setTacticalView(false);
+        frames(view, 3);
         List<Object> relief = new ArrayList<>(enhanced);
 
         // Back to Classic, by the same rule: the loading stage, then the columns; the 3D layers are released.
@@ -151,7 +167,10 @@ class GpuGraphicsModeSmokeTest {
         assertTrue(terrain.fluffHidden());
         assertTrue(terrain.columns(), "T never changes the build");
         assertFalse(terrain.busy(), "T starts no rebuild");
+        assertEquals(roadMasks, infrastructure(terrain), "Classic Tactical keeps the same infrastructure");
         capture("graphics-classic-tactical.png");
+        captureNaturalPassage(view, terrain, scene, true);
+        captureRailPlateau(view, terrain, scene, true);
         view.setTacticalView(false);
         frames(view, 3);
         assertFalse(terrain.fluffHidden());
@@ -161,20 +180,21 @@ class GpuGraphicsModeSmokeTest {
     }
 
     /**
-     * A Classic build: no water or lava field, wave simulation, tree, scatter, road, decal of the 3D view, biome map,
-     * grass or sculpted material; the building and the bridge's deck art stand on the columns, and a pointer straight
+     * A Classic build: no water or lava field, wave simulation, tree, scatter, Enhanced decal, biome map,
+     * grass; shared roads, rails and built bridges retain their own materials beside the buildings, and a pointer straight
      * down picks each column's own hex at its top.
      */
     private static void verifyClassic(GpuTerrain terrain, BoardScene scene) throws Exception {
         for (Object chunk : (List<?>) get(terrain, "chunks")) {
             assertNull(get(chunk, "waterField"));
             assertNull(get(chunk, "lavaField"));
-            for (String layer : List.of("scatter", "overlays", "surfaceDecals")) {
+            for (String layer : List.of("scatter", "surfaceDecals")) {
                 assertTrue(((List<?>) get(chunk, layer)).isEmpty(), "No " + layer + " layer");
             }
             assertTrue(((Map<?, ?>) get(get(chunk, "stand"), "trees")).isEmpty(), "No tree");
             assertTrue(((Map<?, ?>) get(get(chunk, "scatterStand"), "trees")).isEmpty(), "No scattered plant");
-            assertTrue(materials(chunk).stream().noneMatch(GpuTerrain::sculpted), "No sculpted material");
+            assertTrue(materials(chunk).stream().anyMatch(material -> material.has(GpuTilesetTerrain.Grading.TYPE)),
+                  "Classic retains its column artwork beside the shared infrastructure materials");
             assertTrue(materials(chunk).stream().noneMatch(material -> material.has(GpuWaterShader.TYPE)), "No 3D water");
         }
         assertNull(((GpuOcean) get(terrain, "ocean")).texture(), "No wave simulation");
@@ -193,6 +213,12 @@ class GpuGraphicsModeSmokeTest {
             assertEquals(GpuTilesetTerrain.column(scene, scene.tile(coords), floor).top(),
                   terrain.tacticalSurface(coords).top(), "The overlays drape on the column of " + coords);
         }
+        var railColumn = terrain.tacticalSurface(RAIL);
+        assertTrue(railColumn.slopes().isEmpty(), "The flat track keeps the surrounding Classic plateau flat");
+        for (var wall : railColumn.walls()) {
+            var normal = new Vector3(wall.b()).sub(wall.a()).crs(new Vector3(wall.c()).sub(wall.a())).nor();
+            assertEquals(0, normal.z, .0001f, "The installed rail carrier retains Classic vertical outer sides");
+        }
         for (Coords coords : List.of(WOODS, new Coords(4, 4), new Coords(10, 1))) {
             Vector3 centre = BoardGeometry.center(coords, 0);
             var hit = terrain.selectionHit(scene, new Ray(new Vector3(centre.x, centre.y, 1000), new Vector3(0, 0, -1)));
@@ -201,6 +227,85 @@ class GpuGraphicsModeSmokeTest {
             assertEquals(1000 - scene.tile(coords).elevation() * BoardGeometry.level(), Math.sqrt(hit.distance()), .01,
                   "at its flat top");
         }
+        for (int corner = 0; corner < 6; corner++) {
+            var point = BoardGeometry.corner(BRIDGE, 1, corner).lerp(BoardGeometry.center(BRIDGE, 1), .1f);
+            var hit = terrain.selectionHit(scene, new Ray(new Vector3(point.x, point.y, 1000), new Vector3(0, 0, -1)));
+            assertNotNull(hit);
+            assertEquals(BRIDGE, hit.coords(), "The normal hex cap owns picking out to every corner");
+            float height = 1000 - (float) Math.sqrt(hit.distance());
+            assertTrue(height >= -.01f && height <= point.z + .01f,
+                  "The full Classic cap includes its graded approaches");
+        }
+        var center = BoardGeometry.center(BRIDGE, 1);
+        for (int direction : new int[] { 1, 4 }) {
+            var bank = BoardGeometry.center(BRIDGE.translated(direction), 0);
+            for (float fraction : new float[] { .2f, .375f, .4999f, .5001f, .6f }) {
+                var p = new Vector3(center).lerp(bank, fraction);
+                var hit = terrain.selectionHit(scene, new Ray(new Vector3(p.x, p.y, 1000), new Vector3(0, 0, -1)));
+                assertNotNull(hit);
+                float expected = BoardGeometry.level() * (fraction <= .25f ? 1
+                      : fraction < .5f ? 2 - 4 * fraction : 0);
+                assertEquals(expected, 1000 - (float) Math.sqrt(hit.distance()), .01f,
+                      "Drawing and picking share a continuous slope from the central cap onto the bare bank");
+            }
+        }
+    }
+
+    private static void captureNaturalPassage(GpuBattleView view, GpuTerrain terrain, BoardScene scene, boolean tactical) {
+        var camera = view.boardCamera;
+        camera.setIsometric(true);
+        camera.orbit(20 - camera.azimuth(), 65 - camera.tilt());
+        camera.center(BoardGeometry.center(BRIDGE, 1));
+        camera.zoom(.2f / camera.camera.zoom);
+        camera.update();
+        frames(view, 3);
+        capture(tactical ? "graphics-classic-natural-bridge-tactical-close.png" : "graphics-classic-natural-bridge-oblique.png");
+        assertFalse(terrain.busy(), "Inspecting the passage never rebuilds the terrain");
+        camera.orbit(0 - camera.azimuth(), 45 - camera.tilt());
+        camera.fit(scene);
+        frames(view, 3);
+    }
+
+    /** The flat rail must not introduce a brown relief ribbon along the neighbouring plateau edge. */
+    private static void captureRailPlateau(GpuBattleView view, GpuTerrain terrain, BoardScene scene, boolean tactical) {
+        var camera = view.boardCamera;
+        camera.setIsometric(true);
+        camera.orbit(20 - camera.azimuth(), 65 - camera.tilt());
+        camera.center(BoardGeometry.center(RAIL, scene.tile(RAIL).elevation()).add(-18 * BoardGeometry.hexScale(), 0, 0));
+        camera.zoom(.2f / camera.camera.zoom);
+        camera.update();
+        frames(view, 3);
+        capture(tactical ? "graphics-classic-rail-plateau-tactical-close.png" : "graphics-classic-rail-plateau-oblique.png");
+        assertFalse(terrain.busy(), "Inspecting the plateau never rebuilds the terrain");
+        camera.orbit(0 - camera.azimuth(), 45 - camera.tilt());
+        camera.fit(scene);
+        frames(view, 3);
+    }
+
+    /** Installed generated coats and structural supports must survive either graphics and its Tactical View. */
+    private static Set<GpuRoads.MaskData> infrastructure(GpuTerrain terrain) {
+        Set<GpuRoads.MaskData> masks = new HashSet<>();
+        boolean bridge = false, rails = false;
+        for (Object chunk : (List<?>) get(terrain, "chunks")) {
+            // Batched draw materials retain the atlas texture; the installed tile ranges retain each mask's data.
+            for (Object tile : ((Map<?, ?>) get(chunk, "tileMeshes")).values()) {
+                for (Object range : (List<?>) get(tile, "ranges")) {
+                    Material material = (Material) get(range, "material");
+                    var mask = material.get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE);
+                    if (mask != null) { masks.add(mask.data); }
+                }
+            }
+            Object bridgeTile = ((Map<?, ?>) get(chunk, "tileMeshes")).get(BRIDGE);
+            bridge |= bridgeTile != null && get(bridgeTile, "bridgeShape") != null;
+            for (Object prop : (List<?>) get(chunk, "props")) {
+                rails |= RAIL.equals(get(prop, "coords")) && get(prop, "decorationFeature") instanceof BoardScene.Feature feature
+                      && BoardRail.route(feature);
+            }
+        }
+        assertFalse(masks.isEmpty(), "Generated road surfaces and stop bars are installed");
+        assertTrue(bridge, "The actual bridge structure owns drawing and picking");
+        assertTrue(rails, "The generated rail route remains installed");
+        return masks;
     }
 
     /** The materials of a chunk's terrain layers. */
@@ -259,9 +364,17 @@ class GpuGraphicsModeSmokeTest {
         tank.addTerrain(new Terrain(Terrains.FUEL_TANK_CF, 40));
         tank.addTerrain(new Terrain(Terrains.FUEL_TANK_MAGN, 100));
         Hex bridge = hexes[BRIDGE.getY() * WIDTH + BRIDGE.getX()];
+        bridge.setAppearance(Map.of("bridge", HexAppearance.NATURAL_BRIDGE));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, (1 << 1) | (1 << 4)));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 1));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 80));
+        bridge.addTerrain(new Terrain(Terrains.BRIDGE_ROAD, 1, true, (1 << 1) | (1 << 4)));
+        for (int d : new int[] { 0, 1, 3, 4 }) {
+            Coords next = ROAD.translated(d);
+            hexes[next.getY() * WIDTH + next.getX()].addTerrain(new Terrain(Terrains.ROAD, 1, true, 1 << ((d + 3) % 6)));
+        }
+        hexes[ROAD.getY() * WIDTH + ROAD.getX()].addTerrain(new Terrain(Terrains.ROAD, 1, true, 27));
+        hexes[RAIL.getY() * WIDTH + RAIL.getX()].addTerrain(new Terrain(Terrains.RAIL, 1, true, 9));
         return new Board(WIDTH, HEIGHT, hexes);
     }
 }

@@ -137,6 +137,16 @@ public class Hex implements Serializable {
     }
     //endregion Constructors
 
+    /** Legacy imports discard road zero and retain the four road surfaces; other selectors mean paved road. */
+    public void normalizeImportedRoad() {
+        Terrain road = getTerrain(Terrains.ROAD);
+        if (road != null && road.getLevel() == 0) {
+            removeTerrain(Terrains.ROAD);
+        } else if (road != null && (road.getLevel() < 1 || road.getLevel() > 4)) {
+            addTerrain(new Terrain(Terrains.ROAD, 1, road.hasExitsSpecified(), road.getExits()));
+        }
+    }
+
     //region Getters/Setters
 
     /**
@@ -1149,6 +1159,8 @@ public class Hex implements Serializable {
                     break;
             }
         }
-        return new Hex(hexLevel, terrainString, theme, new Coords(0, 0));
+        Hex hex = new Hex(hexLevel, terrainString, theme, new Coords(0, 0));
+        hex.normalizeImportedRoad();
+        return hex;
     }
 }

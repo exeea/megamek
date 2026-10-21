@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 import megamek.common.Hex;
 import megamek.common.units.Terrains;
@@ -70,6 +71,10 @@ public final class ConcreteFit {
     private final List<Cell> cells;
     private final float scale, hexWidth, hexHeight;
     private final boolean everywhere;
+    /** Null for material boundaries; otherwise the higher owner of a dry concrete level boundary. */
+    private final Integer plateau;
+    /** Prior accepted plateaus, read only while this temporary level fit is constructed. */
+    private final ConcreteFit previous;
     /** Hexes that keep their outline because a placed object pins them. */
     private final Set<Coords> pinned;
     /** Moved lattice corners by {@link #slot}; null where a corner keeps its place. */
@@ -83,6 +88,11 @@ public final class ConcreteFit {
      * only against water. {@code pinned} hexes keep their outline.
      */
     public ConcreteFit(int width, int height, List<Cell> cells, float scale, boolean everywhere, Set<Coords> pinned) {
+        this(width, height, cells, scale, everywhere, pinned, null, null);
+    }
+
+    private ConcreteFit(int width, int height, List<Cell> cells, float scale, boolean everywhere,
+          Set<Coords> pinned, Integer plateau, ConcreteFit previous) {
         this.width = width;
         this.height = height;
         this.cells = cells;
@@ -90,10 +100,37 @@ public final class ConcreteFit {
         hexWidth = HexTile.WIDTH * scale;
         hexHeight = HexTile.HEIGHT * scale;
         this.everywhere = everywhere;
+        this.plateau = plateau;
+        this.previous = previous;
         this.pinned = Set.copyOf(pinned);
         shifts = new Shift[(3 * width + 2) * (2 * height + 2)];
         footprints = new float[width * height][];
         fit();
+        if (plateau == null && everywhere) { fitLevels(); }
+    }
+
+    /** Reuse the same contour fitter for each plateau, with one owner for every height boundary. */
+    private void fitLevels() {
+        Set<Coords> levelPins = new HashSet<>(pinned);
+        Set<Integer> elevations = new TreeSet<>();
+        for (Cell tile : cells) {
+            if (footprint(tile.coords()) != null) { levelPins.add(tile.coords()); }
+            if (tile.concrete() && !tile.liquid()) { elevations.add(tile.level()); }
+        }
+        if (elevations.size() < 2) { return; }
+        // The lowest concrete level cannot own a boundary against another concrete level.
+        elevations.remove(elevations.iterator().next());
+        // A material or water outline has priority; three-level corners are pinned below, so the remaining
+        // level runs cannot compete for a lattice corner.
+        Set<Coords> fitted = new HashSet<>();
+        for (int elevation : elevations) {
+            ConcreteFit next = new ConcreteFit(width, height, cells, scale, everywhere, levelPins, elevation, this);
+            for (int i = 0; i < shifts.length; i++) {
+                if (shifts[i] == null && next.shifts[i] != null) { shifts[i] = next.shifts[i]; }
+            }
+            for (Cell tile : cells) { if (next.footprint(tile.coords()) != null) { fitted.add(tile.coords()); } }
+        }
+        footprints(fitted);
     }
 
     /**
@@ -221,9 +258,13 @@ public final class ConcreteFit {
     private void fit() {
         Map<Long, Corner> corners = new TreeMap<>();
         for (Cell land : cells) {
-            if (land.liquid() || !land.concrete()) { continue; }
+            if (land.liquid() || !land.concrete() || plateau != null && land.level() != plateau) { continue; }
             for (int e = 0; e < 6; e++) {
                 Cell water = cell(land.coords().translated(HexTile.edgeDirection(e)));
+                // A graded opening owns its road plane, not a vertical plateau wall to straighten.
+                if (plateau != null && (land.ramps() & 1 << HexTile.edgeDirection(e)) != 0) { continue; }
+                if (plateau != null && (water == null || !water.concrete() || water.liquid()
+                      || water.level() >= land.level())) { continue; }
                 if (!outside(water) || water.liquid() && water.level() > land.level()) { continue; }
                 Corner a = coastCorner(corners, land.coords(), e);
                 Corner b = coastCorner(corners, land.coords(), (e + 1) % 6);
@@ -237,15 +278,15 @@ public final class ConcreteFit {
             }
         }
         for (Corner corner : corners.values()) {
-            Integer dryLevel = null, waterLevel = null;
+            Integer dryLevel = null, outsideLevel = null;
             corner.border &= corner.tiles.size() == 2 && (corner.previous == null) != (corner.next == null);
             corner.pinned = !corner.border && (corner.tiles.size() != 3 || corner.previous == null || corner.next == null);
             for (Cell tile : corner.tiles) {
                 corner.pinned |= fixedBoundary(corner, tile);
                 if (outside(tile)) {
-                    if (tile.liquid()) {
-                        corner.pinned |= tile.frozen() || waterLevel != null && waterLevel != tile.level();
-                        waterLevel = tile.level();
+                    if (tile.liquid() || plateau != null) {
+                        corner.pinned |= tile.frozen() || outsideLevel != null && outsideLevel != tile.level();
+                        outsideLevel = tile.level();
                     }
                 } else {
                     corner.pinned |= dryLevel != null && dryLevel != tile.level();
@@ -264,9 +305,9 @@ public final class ConcreteFit {
                 }
             }
         }
-        simplify(corners.values(), null);
+        simplify(corners, null);
         Set<Corner> continued = continueSides(corners.values());
-        if (!continued.isEmpty()) { simplify(corners.values(), continued); }
+        if (!continued.isEmpty()) { simplify(corners, continued); }
         Set<Coords> fitted = new HashSet<>();
         corners.forEach((key, corner) -> {
             float dx = corner.point.x - corner.original.x, dy = corner.point.y - corner.original.y;
@@ -276,6 +317,10 @@ public final class ConcreteFit {
             }
         });
         // Surface blending asks for this polygon repeatedly per vertex: derive it once from the same corner shifts.
+        footprints(fitted);
+    }
+
+    private void footprints(Set<Coords> fitted) {
         for (Coords coords : fitted) {
             float[] outline = new float[12];
             for (int k = 0; k < 6; k++) {
@@ -287,13 +332,13 @@ public final class ConcreteFit {
         }
     }
 
-    private void simplify(Collection<Corner> corners, Set<Corner> changed) {
+    private void simplify(Map<Long, Corner> corners, Set<Corner> changed) {
         Set<Corner> visited = new HashSet<>();
         // Open chains first; otherwise starting midway would split a continuous quay at an arbitrary hex.
-        for (Corner corner : corners) {
-            if (corner.previous == null) { simplifyChain(corner, visited, changed); }
+        for (Corner corner : corners.values()) {
+            if (corner.previous == null) { simplifyChain(corner, visited, changed, corners); }
         }
-        for (Corner corner : corners) { simplifyChain(corner, visited, changed); }
+        for (Corner corner : corners.values()) { simplifyChain(corner, visited, changed, corners); }
     }
 
     private Corner coastCorner(Map<Long, Corner> corners, Coords coords, int k) {
@@ -313,7 +358,7 @@ public final class ConcreteFit {
     }
 
     /** A broad patch can be one rectangle too. Try the three lattice axes and keep the least displaced safe fit. */
-    private boolean fitRectangle(List<Corner> chain) {
+    private boolean fitRectangle(List<Corner> chain, Map<Long, Corner> corners) {
         if (chain.stream().anyMatch(corner -> corner.pinned && !corner.dock)) { return false; }
         float area = 0;
         Set<Cell> land = new HashSet<>();
@@ -373,6 +418,7 @@ public final class ConcreteFit {
             for (int i = 0; i < chain.size() && fits; i++) {
                 fits = clearEdge(chain.get(i), points[i], points[(i + 1) % chain.size()]);
             }
+            if (fits && plateau != null) { fits = clearFootprints(chain, 0, chain.size() - 1, points, corners); }
             if (fits && error < bestError) { best = points; bestError = error; }
         }
         if (best == null) { return false; }
@@ -380,14 +426,14 @@ public final class ConcreteFit {
         return true;
     }
 
-    private void simplifyChain(Corner start, Set<Corner> visited, Set<Corner> changed) {
+    private void simplifyChain(Corner start, Set<Corner> visited, Set<Corner> changed, Map<Long, Corner> corners) {
         if (visited.contains(start)) { return; }
         List<Corner> chain = new ArrayList<>();
         for (Corner at = start; at != null && visited.add(at); at = at.next) {
             chain.add(at);
         }
         if (chain.size() < 3 || changed != null && Collections.disjoint(chain, changed)) { return; }
-        if (chain.getLast().next == start && fitRectangle(chain)) { return; }
+        if (chain.getLast().next == start && fitRectangle(chain, corners)) { return; }
         if (chain.getLast().next == start) {
             int anchor = 0;
             Point center = new Point(0, 0);
@@ -404,7 +450,7 @@ public final class ConcreteFit {
         int first = 0;
         for (int i = 1; i < chain.size(); i++) {
             if (chain.get(i).pinned || i == chain.size() - 1) {
-                fitLanding(chain, first, i);
+                fitLanding(chain, first, i, corners);
                 first = i;
             }
         }
@@ -542,7 +588,7 @@ public final class ConcreteFit {
     }
 
     /** Fit the quay between fixed rectangle sides, then use their intersections as the landing corners. */
-    private void fitLanding(List<Corner> chain, int first, int last) {
+    private void fitLanding(List<Corner> chain, int first, int last, Map<Long, Corner> corners) {
         if (last - first < 2) { return; }
         List<Run> runs = new ArrayList<>();
         for (int i = first; i < last;) {
@@ -588,15 +634,16 @@ public final class ConcreteFit {
             candidate.set(i, new Run(a.first, split, a.line, a.rectangle));
             candidate.set(i + 1, new Run(split, b.last, b.line, b.rectangle));
             candidate.remove(i + 2);
-            if (landingPoints(chain, first, last, candidate) != null) { runs = candidate; }
+            if (landingPoints(chain, first, last, candidate, corners) != null) { runs = candidate; }
             else { i++; }
         }
-        Point[] points = landingPoints(chain, first, last, runs);
+        Point[] points = landingPoints(chain, first, last, runs, corners);
         if (points == null) { return; }
         for (int i = first; i <= last; i++) { chain.get(i).point = points[i - first]; }
     }
 
-    private Point[] landingPoints(List<Corner> chain, int first, int last, List<Run> runs) {
+    private Point[] landingPoints(List<Corner> chain, int first, int last, List<Run> runs,
+          Map<Long, Corner> corners) {
         // The fitted intersection may belong to a neighbouring lattice corner. Assign it to the nearest one,
         // instead of pulling the arbitrary subdivision endpoint across a whole hex and rejecting both long sides.
         List<Run> joined = new ArrayList<>(runs);
@@ -608,11 +655,12 @@ public final class ConcreteFit {
             joined.set(i, new Run(a.first, split, a.line, a.rectangle));
             joined.set(i + 1, new Run(split, b.last, b.line, b.rectangle));
         }
-        Point[] points = outlinePoints(chain, first, last, joined);
-        return points == null && !joined.equals(runs) ? outlinePoints(chain, first, last, runs) : points;
+        Point[] points = outlinePoints(chain, first, last, joined, corners);
+        return points == null && !joined.equals(runs) ? outlinePoints(chain, first, last, runs, corners) : points;
     }
 
-    private Point[] outlinePoints(List<Corner> chain, int first, int last, List<Run> runs) {
+    private Point[] outlinePoints(List<Corner> chain, int first, int last, List<Run> runs,
+          Map<Long, Corner> corners) {
         Point[] points = new Point[last - first + 1];
         points[0] = chain.get(first).point;
         points[points.length - 1] = chain.get(last).point;
@@ -652,7 +700,39 @@ public final class ConcreteFit {
             if (i < last && points[i + 1 - first] == null) { return null; }
             if (i < last && !clearEdge(chain.get(i), p, points[i + 1 - first])) { return null; }
         }
-        return points;
+        return plateau == null || clearFootprints(chain, first, last, points, corners) ? points : null;
+    }
+
+    /** A fitted wall also moves the adjoining hexes; none of their edges may turn inside out. */
+    private boolean clearFootprints(List<Corner> chain, int first, int last, Point[] candidate,
+          Map<Long, Corner> corners) {
+        Map<Long, Point> points = new HashMap<>();
+        Set<Cell> touched = new HashSet<>();
+        for (int i = first; i <= last; i++) {
+            points.put(key(chain.get(i).original), candidate[i - first]);
+            touched.addAll(chain.get(i).tiles);
+        }
+        for (Cell tile : touched) {
+            Point center = center(tile.coords());
+            for (int e = 0; e < 6; e++) {
+                Point a = fittedPoint(tile.coords(), e, points, corners);
+                Point b = fittedPoint(tile.coords(), (e + 1) % 6, points, corners);
+                float side = (b.x - a.x) * (center.y - a.y) - (b.y - a.y) * (center.x - a.x);
+                if (side <= .001f * scale * scale) { return false; }
+            }
+        }
+        return true;
+    }
+
+    /** Earlier plateau shifts have the same priority here as when their results are merged. */
+    private Point fittedPoint(Coords coords, int k, Map<Long, Point> candidate, Map<Long, Corner> corners) {
+        Point original = original(coords, k);
+        long key = key(original);
+        if (previous != null && !previous.shift(key).equals(Shift.ZERO)) { return previous.corner(coords, k); }
+        Point point = candidate.get(key);
+        if (point != null) { return point; }
+        Corner corner = corners.get(key);
+        return corner == null ? original : corner.point;
     }
 
     /** Straight quay runs use the board's three construction axes or their perpendiculars. */
@@ -676,8 +756,8 @@ public final class ConcreteFit {
         for (int i = begin; i <= end; i++) {
             for (Cell tile : chain.get(i).tiles) {
                 float at = nx * HexTile.centerX(tile.coords(), hexWidth) + ny * HexTile.centerY(tile.coords(), hexHeight);
-                if (outside(tile)) { low = Math.max(low, at + 18 * scale); }
-                else { high = Math.min(high, at - 16 * scale); }
+                if (outside(tile)) { low = Math.max(low, at + margin(tile, 18)); }
+                else { high = Math.min(high, at - margin(tile, 16)); }
             }
         }
         if (low <= high) { offset = Math.clamp(offset, low, high); }
@@ -705,7 +785,7 @@ public final class ConcreteFit {
             if (!corner.next.tiles.contains(tile)) { continue; }
             float cx = HexTile.centerX(tile.coords(), hexWidth), cy = HexTile.centerY(tile.coords(), hexHeight);
             float side = (dx * (cy - a.y) - dy * (cx - a.x)) / length;
-            if (outside(tile) ? side > -17.999f * scale : side < 15.999f * scale) { return false; }
+            if (outside(tile) ? side > -margin(tile, 18) + .001f * scale : side < margin(tile, 16) - .001f * scale) { return false; }
             if (fixedBoundary(corner, tile)) {
                 for (int k = 0; k < 6; k++) {
                     Point p = original(tile.coords(), k);
@@ -717,8 +797,15 @@ public final class ConcreteFit {
         return true;
     }
 
+    private float margin(Cell tile, float minimum) {
+        // Unlike a quay, an inland cut can carry the full road/rail corridor. Leave room for its
+        // axis-aligned ballast bounds and shoulder; placed-object checks still reject an actual collision.
+        float route = RailRoute.BESIDE_RAIL + (float) Math.sqrt(2) * RailRoute.BALLAST_HALF_WIDTH + 1.5f;
+        return (plateau != null && tile.wayExits() != 0 ? Math.max(minimum, route) : minimum) * scale;
+    }
+
     private boolean protectedLand(Cell tile) {
-        return fixedFootprint(tile) || tile.wayExits() != 0 || tile.ramps() != 0;
+        return fixedFootprint(tile) || plateau == null && (tile.wayExits() != 0 || tile.ramps() != 0);
     }
 
     private boolean fixedFootprint(Cell tile) {
@@ -732,9 +819,15 @@ public final class ConcreteFit {
      * one level (it only changes the ground beneath the object) does not count.
      */
     public boolean reaches(List<Point> footprint, Coords at) {
+        return reaches(footprint, at, 0);
+    }
+
+    /** As above, excluding actual route openings whose connected ramp has no wall across that route. */
+    public boolean reaches(List<Point> footprint, Coords at, int openings) {
         Cell tile = cell(at);
         for (int k = 0; k < 6; k++) {
-            if (shift(at, k).equals(Shift.ZERO) && shift(at, (k + 1) % 6).equals(Shift.ZERO)
+            if ((openings & 1 << HexTile.edgeDirection(k)) != 0
+                  || shift(at, k).equals(Shift.ZERO) && shift(at, (k + 1) % 6).equals(Shift.ZERO)
                   || !wall(tile, cell(at.translated(HexTile.edgeDirection(k))))) {
                 continue;
             }
@@ -870,6 +963,18 @@ public final class ConcreteFit {
     }
 
     private boolean fixedBoundary(Corner corner, Cell tile) {
+        if (plateau != null) {
+            // The ramp mesh also owns its level mouths; moving either endpoint would leave its
+            // unchanged road corridor unsupported. Unconnected wall runs can still be fitted.
+            if (tile.ramps() != 0) {
+                for (int e = 0; e < 6; e++) {
+                    if (((tile.wayExits() | tile.ramps()) & 1 << HexTile.edgeDirection(e)) != 0
+                          && (corner.original.dst2(original(tile.coords(), e)) < .001f
+                                || corner.original.dst2(original(tile.coords(), (e + 1) % 6)) < .001f)) { return true; }
+                }
+            }
+            return fixedFootprint(tile) || tile.ultraSublevel();
+        }
         // Moving a material boundary on one ground plane preserves the complete neighbouring foundation.
         // Structures on the concrete itself, height changes and road ramps keep their original footprint.
         return !tile.liquid() && protectedLand(tile)
@@ -878,7 +983,8 @@ public final class ConcreteFit {
     }
 
     private boolean outside(Cell tile) {
-        return tile != null && !tile.molten() && (tile.liquid() || everywhere && !tile.concrete());
+        return tile != null && !tile.molten() && (tile.liquid() || everywhere && (!tile.concrete()
+              || plateau != null && tile.level() < plateau));
     }
 
     private float dockHalf(Cell land, float[] axis) {
@@ -894,6 +1000,7 @@ public final class ConcreteFit {
 
     /** Zero links: platform; one: end; two opposite: span; two others: angle. Other patterns are quay landings. */
     private int dockLinks(Cell land) {
+        if (plateau != null) { return -1; }
         if (land.liquid() || !land.concrete() || protectedLand(land)) { return -1; }
         int links = 0;
         Integer waterLevel = null;

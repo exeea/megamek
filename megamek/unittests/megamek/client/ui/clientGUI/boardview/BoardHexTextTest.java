@@ -31,6 +31,18 @@ class BoardHexTextTest {
     private static final int BOTTOM = HEX_H - 6;
 
     @Test
+    void mixedPlatformBoardsUseReadableTextForSpaceAndSky() {
+        var preferences = GUIPreferences.getInstance();
+        for (String terrain : List.of("space:1", "sky:1", "pavement:1")) {
+            var labels = BoardHexText.capture(COORDS, new Hex(0, terrain, ""), new Board(), 1,
+                  FONT, FONT, true, true, false);
+            int expected = (terrain.equals("space:1") ? preferences.getBoardSpaceTextColor()
+                  : preferences.getBoardTextColor()).getRGB();
+            assertTrue(labels.stream().allMatch(label -> label.argb() == expected));
+        }
+    }
+
+    @Test
     void theTypeLinesUseTheOfficialWordsInTheirFixedOrder() {
         // Woods and jungle (container yards are woods) write only the cover word; a canopy of height 1 is FOLIAGE.
         assertEquals(List.of("LIGHT"), types("woods:1;foliage_elev:2"));

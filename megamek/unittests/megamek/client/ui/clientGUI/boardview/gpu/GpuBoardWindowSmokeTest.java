@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -73,16 +74,19 @@ import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
 import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
+import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
 import megamek.client.ui.dialogs.miniReport.MiniReportDisplayDialog;
 import megamek.client.ui.dialogs.miniReport.MiniReportDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
+import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Hex;
+import megamek.common.Configuration;
 import megamek.common.Report;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
@@ -92,6 +96,7 @@ import megamek.common.enums.GamePhase;
 import megamek.common.loaders.MapSettings;
 import megamek.common.units.Entity;
 import megamek.common.units.Terrains;
+import megamek.utilities.BoardClassifier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -552,6 +557,171 @@ class GpuBoardWindowSmokeTest {
                     return null;
                 });
             }
+        }
+    }
+
+    @Test
+    void previewMenuOpensCurrentFileIn3DEditorWithoutChangingPreviewBoard() throws Exception {
+        assertPreviewEditorHandoff(false, false, false);
+    }
+
+    @Test
+    void previewMenuEditsGeneratedReplacementWithoutKeepingPreviousFile() throws Exception {
+        assertPreviewEditorHandoff(true, false, false);
+    }
+
+    @Test
+    void savedPreviewReturnsToTheLobbyWithTheSavedMap() throws Exception {
+        assertPreviewEditorHandoff(true, true, false);
+    }
+
+    @Test
+    void savedBrowserPreviewDismissesTheModalBrowserAndReturnsDirectlyToLobby() throws Exception {
+        assertPreviewEditorHandoff(false, true, true);
+    }
+
+    private static void assertPreviewEditorHandoff(boolean replaceFile, boolean saveBeforeClose, boolean modalBrowser)
+          throws Exception {
+        var directory = Files.createTempDirectory("preview-editor-handoff-");
+        var file = directory.resolve("preview.board2");
+        var savedFile = file.resolveSibling(file.getFileName() + "-edited.board2");
+        var originalBoards = Configuration.boardsDir();
+        BoardFile.save(Board.createEmptyBoard(8, 8), file);
+        byte[] saved = Files.readAllBytes(file);
+        Coords at = new Coords(3, 4);
+        var lobby = mock(megamek.client.ui.panels.phaseDisplay.lobby.ChatLounge.class);
+        var client = mock(ClientGUI.class);
+        client.chatlounge = lobby;
+        doAnswer(call -> {
+            assertTrue(SwingUtilities.isEventDispatchThread(), "The lobby refresh belongs to Swing");
+            return null;
+        }).when(lobby).boardEditorClosed(any(), anyBoolean());
+        JFrame launcher = onSwing(() -> {
+            var frame = new JFrame("Preview launcher");
+            frame.getRootPane().putClientProperty(ClientGUI.class, client);
+            frame.setSize(400, 300);
+            frame.setVisible(true);
+            return frame;
+        });
+        try {
+            AtomicReference<DialogResult> browserResult = new AtomicReference<>();
+            Window previewOwner = launcher;
+            if (modalBrowser) {
+                Configuration.setBoardsDir(directory.toFile());
+                BoardClassifier.invalidate();
+                previewOwner = onSwing(() -> {
+                    var browser = new AdvancedSearchMapDialog(launcher);
+                    browser.setSize(800, 600);
+                    SwingUtilities.invokeLater(() -> browserResult.set(browser.showDialog()));
+                    return browser;
+                });
+                Window browser = previewOwner;
+                await(() -> onSwing(browser::isShowing));
+                assertNull(browserResult.get(), "The real map browser is in its modal showDialog call");
+            }
+            Window owner = previewOwner;
+            Application previous = Gdx.app;
+            onSwing(() -> { GpuBoardWindow.openPreview(owner, file.toFile()); return null; });
+            await(() -> Gdx.app != null && Gdx.app != previous);
+            await(() -> previewSource() != null);
+            BoardSource preview = previewSource();
+            await(() -> previewReady(preview));
+            Application previewApplication = Gdx.app;
+            if (replaceFile) {
+                long generation = preview.takeFrame().boardGeneration();
+                onSwing(() -> {
+                    GpuBoardWindow.openPreview(launcher, Board.createEmptyBoard(7, 9));
+                    return null;
+                });
+                await(() -> preview.takeFrame().boardGeneration() > generation && previewReady(preview));
+                assertSame(previewApplication, Gdx.app, "Browsing retains the existing preview window");
+            }
+            var gameField = GpuMapSource.class.getDeclaredField("game");
+            gameField.setAccessible(true);
+            Board shown = onSwing(() -> {
+                Board board = ((megamek.common.game.Game) gameField.get(preview)).getBoard();
+                // The handoff must copy the displayed state, even when it differs from the file on disk.
+                board.setHex(at, new Hex(3));
+                preview.refresh();
+                return board;
+            });
+            await(() -> previewReady(preview));
+            awaitNavigation();
+            input(() -> GpuBoardTestUi.click("utility-menu"));
+            onGl(() -> { GpuBoardTestUi.click("/boardEdit3D"); return null; });
+            await(() -> Gdx.app != null && Gdx.app != previewApplication);
+            await(() -> previewSource() != null);
+            BoardSource editorSource = previewSource();
+            await(() -> previewReady(editorSource));
+            awaitNavigation();
+            var editorField = GpuMapSource.class.getDeclaredField("editor");
+            editorField.setAccessible(true);
+            BoardEditorSession editor = (BoardEditorSession) editorField.get(editorSource);
+            assertNotNull(editor, "The preview menu opens the standalone editor");
+            assertTrue(preview.isClosed(), "The handoff releases the old preview");
+            if (modalBrowser) {
+                await(() -> browserResult.get() != null);
+                assertEquals(DialogResult.CANCELLED, browserResult.get(),
+                      "Editing dismisses the browser without applying its old selection");
+                assertFalse(onSwing(owner::isDisplayable), "The browser cannot reopen without its original caller");
+            }
+            onSwing(() -> {
+                assertNotSame(shown, editor.board(), "The editor owns a separate document");
+                assertEquals(shown.getWidth(), editor.board().getWidth());
+                assertEquals(shown.getHeight(), editor.board().getHeight());
+                assertEquals(3, editor.board().getHex(at).getLevel());
+                assertEquals(replaceFile ? null : file, editor.path(),
+                      "Only the currently displayed file supplies the editor's save path");
+                assertEquals(replaceFile, editor.dirty(), "Generated maps have never been saved");
+                assertFalse(launcher.isShowing());
+                return null;
+            });
+
+            input(() -> editorWheel(at, true, true, -1));
+            onSwing(() -> {
+                assertEquals(4, editor.board().getHex(at).getLevel(), "Native input edits the opened map");
+                assertEquals(3, shown.getHex(at).getLevel(), "Editing must not mutate the preview's board");
+                assertTrue(editor.dirty());
+                return null;
+            });
+            assertArrayEquals(saved, Files.readAllBytes(file), "Opening and editing do not implicitly save the file");
+            if (saveBeforeClose) {
+                onSwing(() -> { editor.save(savedFile); editorSource.refresh(); return null; });
+                verify(lobby, never()).boardEditorClosed(any(), anyBoolean());
+                input(() -> GpuBoardTestUi.click("utility-menu"));
+                onGl(() -> { GpuBoardTestUi.click("/close"); return null; });
+            } else {
+                pressShortcut(KeyCommandBind.UNDO);
+                assertEquals(replaceFile, onSwing(editor::dirty));
+                onSwing(() -> { GpuBoardWindow.closeFor((ClientGUI) null); return null; });
+            }
+            await(editorSource::isClosed);
+            await(() -> onSwing(launcher::isShowing));
+            if (saveBeforeClose) {
+                verify(lobby).boardEditorClosed(savedFile, replaceFile);
+                assertEquals(4, BoardFile.read(savedFile).getHex(at).getLevel());
+            } else {
+                verify(lobby, never()).boardEditorClosed(any(), anyBoolean());
+            }
+            if (modalBrowser) {
+                assertFalse(onSwing(owner::isShowing), "Closing the editor returns directly to the lobby");
+                assertFalse(onSwing(owner::isDisplayable), "The dismissed browser remains disposed");
+            }
+            assertTrue(onSwing(() -> editor.game().getGameListeners().isEmpty()));
+        } finally {
+            onSwing(() -> {
+                GpuBoardWindow.closeFor((ClientGUI) null);
+                for (Window owned : launcher.getOwnedWindows()) { owned.dispose(); }
+                launcher.dispose();
+                return null;
+            });
+            if (modalBrowser) {
+                Configuration.setBoardsDir(originalBoards);
+                BoardClassifier.invalidate();
+            }
+            Files.deleteIfExists(file);
+            Files.deleteIfExists(savedFile);
+            Files.deleteIfExists(directory);
         }
     }
 

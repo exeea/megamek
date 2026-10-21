@@ -30,15 +30,19 @@ class BoardRoadEmbankmentTest {
     @ParameterizedTest
     @ValueSource(ints = {0, 1, 2, 3, 4, 5})
     void aGradedBankSharesTheCarrierNormalInEveryDirection(int direction) throws Exception {
+        var scene = gradedBank(direction);
+        var surface = new BoardSurface(scene, scene.tile(BoardRoadTest.CENTER));
+        assertTrue(surface.ramps != 0);
+        assertJoinedNormals(scene, surface, List.of(0, 1, 2, 3, 4, 5), 12);
+    }
+
+    private static BoardScene gradedBank(int direction) {
         var at = BoardRoadTest.CENTER;
         var approach = at.translated(direction);
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+        return BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
               c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
               c.equals(at) ? 1 << direction : 0,
               c.equals(at) ? 2 : c.equals(approach) ? 1 : 0, BoardScene.Surface.SAND));
-        var surface = new BoardSurface(scene, scene.tile(at));
-        assertTrue(surface.ramps != 0);
-        assertJoinedNormals(scene, surface, List.of(0, 1, 2, 3, 4, 5), 12);
     }
 
     @SuppressWarnings("unchecked")

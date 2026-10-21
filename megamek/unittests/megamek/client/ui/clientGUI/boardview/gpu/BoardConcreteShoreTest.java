@@ -482,6 +482,33 @@ class BoardConcreteShoreTest {
     }
 
     @Test
+    void concreteLevelWallsFitBetweenProtectedRoadOpeningsUnlessHexEdgesAreChosen() {
+        for (var panel : RoadGradeFixture.Panel.values()) {
+            var board = RoadGradeFixture.focused(true, panel, "x-mixed", 0, 0);
+            Coords ramp = RoadGradeFixture.focusedCenter(0).translated(1), end = ramp.translated(1);
+            BoardScene scene = RoadGradeFixture.scene(board);
+            BoardConcrete shape = BoardConcrete.of(scene);
+            // The graded opening keeps its existing road plane. Beyond it, the exposed level
+            // boundary still fits a straight wall through the terminal hex's intermediate corner.
+            Vector3 a = shape.corner(end, 0), b = shape.corner(end, 2);
+            assertEquals(0, distance(a, b, shape.corner(end, 1)), .003f, panel + " exposed wall run");
+            assertTrue(shape.corners(end).stream().anyMatch(shift -> shift.x() != 0 || shift.y() != 0),
+                  "Protecting the road opening must not disable fitting of its exposed walls");
+            assertFalse(shape.fit().pinned().contains(ramp), "The track's graded mouth is not a retaining wall");
+
+            var appearance = new HashMap<>(board.getHex(ramp).getAppearance());
+            appearance.put("pavement", HexAppearance.EDGES_HEX);
+            board.getHex(ramp).setAppearance(appearance);
+            BoardConcrete hex = BoardConcrete.of(RoadGradeFixture.scene(board));
+            for (var shift : hex.corners(ramp)) {
+                assertEquals(0, Math.hypot(shift.x(), shift.y()), .001f, panel + " explicit Hex outline");
+            }
+            assertTrue(hex.corners(end).stream().anyMatch(shift -> shift.x() != 0 || shift.y() != 0),
+                  "The manual outline override must not turn off fitting for the whole concrete plateau");
+        }
+    }
+
+    @Test
     void concreteAroundAnEnclosedTerrainPatchHasThreeStraightSides() {
         BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
         Set<Coords> island = new HashSet<>();

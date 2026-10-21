@@ -42,7 +42,7 @@ final class BoardRim {
     Images material(BoardScene scene, BoardScene.Tile tile, float floor,
           BoardScene.Pixels incline, BoardScene.Pixels highIncline) {
         Images ground = new Images(tile.ground(), tile.normals());
-        if (tile.liquid().present()) { return ground; }
+        if (tile.liquid().present() || tile.backdrop().present()) { return ground; }
         BoardSurface surface = new BoardSurface(scene, tile);
         List<BoardSurface.Side> sides = surface.sides(scene, floor);
         if (sides.isEmpty()) { return ground; }
@@ -79,7 +79,7 @@ final class BoardRim {
     private static boolean highDrop(BoardScene scene, BoardScene.Tile tile, BoardSurface.Side side) {
         int direction = BoardGeometry.edgeDirection(side.edge());
         BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
-        if (neighbor != null) {
+        if (neighbor != null && !neighbor.backdrop().present()) {
             return high(tile, direction, tile.groundLevel() - neighbor.groundLevel());
         }
         return high(tile, direction,
@@ -102,7 +102,7 @@ final class BoardRim {
     BoardScene.Pixels column(BoardScene scene, BoardScene.Tile tile, BoardScene.Pixels art,
           BoardScene.Pixels incline, BoardScene.Pixels highIncline) {
         List<Patch> patches = new ArrayList<>();
-        int ramps = BoardSurface.ramps(scene, tile);
+        int ramps = BoardSurface.columnRamps(scene, tile);
         for (int edge = 0; edge < 6; edge++) {
             int direction = BoardGeometry.edgeDirection(edge);
             BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
@@ -116,8 +116,9 @@ final class BoardRim {
             // A road ramps through the middle of this edge: its mouth stays clear, as the libGDX board's did.
             float middle = BoardGeometry.corner(tile.coords(), 0, edge).dst(BoardGeometry.corner(tile.coords(), 0, edge + 1))
                   / BoardGeometry.hexScale() / 2;
-            patches.add(new Patch(edge, Float.NEGATIVE_INFINITY, quantize(middle - BoardSurface.ROAD_MOUTH), high));
-            patches.add(new Patch(edge, quantize(middle + BoardSurface.ROAD_MOUTH), Float.POSITIVE_INFINITY, high));
+            float mouth = BoardSurface.roadMouth(tile, neighbor, direction);
+            patches.add(new Patch(edge, Float.NEGATIVE_INFINITY, quantize(middle - mouth), high));
+            patches.add(new Patch(edge, quantize(middle + mouth), Float.POSITIVE_INFINITY, high));
         }
         if (patches.isEmpty() || tile.liquid().present()) { return art; }
         int width = Math.max(art.width(), (int) BoardGeometry.TILE_WIDTH);

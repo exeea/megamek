@@ -41,6 +41,7 @@ public final class BoardSceneryLayouts {
     public static final String PILLAR = "scenery/parks/pillar";
     /** A hex in the rows' model px. */
     private static final float TILE_WIDTH = HexTile.WIDTH, TILE_HEIGHT = HexTile.HEIGHT;
+    private static final String ROAD_TREES = "scenery/saxarba/roads/road_trees";
     private static final Map<String, Layout> LAYOUTS = read();
 
     private BoardSceneryLayouts() { }
@@ -119,11 +120,15 @@ public final class BoardSceneryLayouts {
          * where they would find no support: water or an industrial plant, which its fixed-level maglev crosses. A car park's
          * decal rows (the decals with car slots) stand beside its lane's road ({@code road}, as the data places them) or,
          * without one, back to back ({@link Plate#of}); a seated car parks in its slot of its decal row. Other decal rows
-         * lie as the data places them.
+         * lie as the data places them. Parking paint can extend across the hex edge with its full-size bays and cars.
          */
         public List<BoardDecoration> decorations(Coords coords, Hex hex, Supplier<String> ids, String group, boolean road) {
             List<BoardDecoration> result = new ArrayList<>();
             boolean ownRoute = components.stream().anyMatch(Component::route);
+            // A conventional train composition grows with its cars, retaining its coupler gaps. Mixed scenery and
+            // route layouts keep their authored locations; their offsets describe the surrounding hex, not a train.
+            boolean conventionalTrain = !components.isEmpty()
+                  && components.stream().allMatch(row -> RailRoute.rides(row.asset()) == RailRoute.Kind.RAIL);
             // Each kind's marker placement: the layout's own marker, else the one already on the hex.
             Map<RailRoute.Kind, BoardDecoration.Placement> routes = new HashMap<>();
             for (RailRoute.Kind kind : RailRoute.Kind.values()) {
@@ -152,6 +157,7 @@ public final class BoardSceneryLayouts {
                     continue;
                 }
                 float x = own == null ? row.x() : own.x(), y = own == null ? row.y() : own.y();
+                if (conventionalTrain) { x *= RailRoute.CONVENTIONAL_SCALE; y *= RailRoute.CONVENTIONAL_SCALE; }
                 float rotation = row.route() ? 0 : own == null ? row.rotation() : own.rotation();
                 if (row.seat() != null) {
                     // The slot as the plate paints it: a mirrored plate flips its art along the row.
@@ -165,7 +171,8 @@ public final class BoardSceneryLayouts {
                 }
                 result.add(new BoardDecoration(ids.get(), row.decal() ? "decal" : "prop", row.asset(), null,
                       x / TILE_WIDTH, y / TILE_HEIGHT, rotation,
-                      own != null && own.mirror(), row.scale(), placement, 0, row.decal(), 0, 0,
+                      own != null && own.mirror(), row.scale(), placement, 0,
+                      row.decal() && BoardDecalArt.footprint(row.asset()).slots().isEmpty(), 0, 0,
                       row.route() ? null : group, false, row.connections(), row.stretch(), row.colours()));
             }
             return result;
@@ -201,6 +208,97 @@ public final class BoardSceneryLayouts {
     }
 
     public static Layout layout(String asset) { return LAYOUTS.get(asset); }
+
+    /** Roadside tree rows clear every ground route arm, including a rail that crosses or shares their road. */
+    private static Layout layout(String asset, Hex hex) {
+        if (asset.startsWith(ROAD_TREES)) {
+            int rails = RailRoute.groundSides(hex);
+            int sides = Integer.parseInt(asset.substring(ROAD_TREES.length())) | rails;
+            asset = ROAD_TREES + String.format(Locale.ROOT, "%02d", sides & 63);
+        }
+        return LAYOUTS.get(asset);
+    }
+
+    /** Plain-road rows stay near their verge. Only an actual railway needs room for its additional footprint. */
+    private static List<BoardDecoration> clearTreesOfRail(List<BoardDecoration> objects, Hex hex, Coords at,
+          Function<Coords, Hex> board) {
+        int sides = RailRoute.groundSides(hex);
+        if (sides == 0) { return objects; }
+        var marker = RailRoute.markers(hex, RailRoute.Kind.RAIL).stream().filter(m -> !RailRoute.onDeck(m)).findFirst();
+        if (marker.isEmpty()) { return objects; }
+        var corridor = RailRoute.corridor(hex, at, board);
+        var tracks = RailRoute.lines(sides, RailRoute.pieces(marker.get(), sides), corridor);
+        List<float[]> bands = new ArrayList<>();
+        for (var track : tracks) {
+            treeBand(bands, track, RailRoute.BALLAST_HALF_WIDTH);
+            int ends = (track.from() < 0 ? 0 : 1 << track.from()) | (track.to() < 0 ? 0 : 1 << track.to());
+            if ((ends & corridor.sides()) == 0) { continue; }
+            // Keep the centered/beside union clear. A standalone stamp has no neighbors to resolve a border's side.
+            treeBand(bands, new RailRoute.Line(track.from(), track.to(), track.a(), track.b()),
+                  RailRoute.BESIDE_RAIL + RailRoute.BALLAST_HALF_WIDTH);
+        }
+        if (Integer.bitCount(sides) >= 3) {
+            // The road fills a shared junction's centre even where the selected rail curves leave an inner gap.
+            for (int d = 0; d < 6; d++) {
+                if ((corridor.sides() & 1 << d) == 0) { continue; }
+                for (var arm : RailRoute.lines(1 << d, 0)) {
+                    treeBand(bands, arm, RailRoute.BESIDE_RAIL + RailRoute.BALLAST_HALF_WIDTH);
+                }
+            }
+        }
+        List<BoardDecoration> moved = new ArrayList<>();
+        for (var object : objects) {
+            var hull = BoardModelBounds.footprint(at, object);
+            if (hull == null) { moved.add(object); continue; }
+            float x = (float) object.x() * TILE_WIDTH, y = (float) object.y() * TILE_HEIGHT;
+            float cx = HexTile.centerX(at, TILE_WIDTH) + x, cy = HexTile.centerY(at, TILE_HEIGHT) + y;
+            var footprint = new float[hull.size() * 8 + 1][2];
+            for (int edge = 0; edge < hull.size(); edge++) {
+                var a = hull.get(edge); var b = hull.get((edge + 1) % hull.size());
+                for (int i = 0; i < 8; i++) {
+                    footprint[edge * 8 + i] = new float[] { a.x() + (b.x() - a.x()) * i / 8 - cx,
+                          a.y() + (b.y() - a.y()) * i / 8 - cy };
+                }
+            }
+            for (int step = 0; step < 100; step++) {
+                float distance = treeDistance(bands, footprint, x, y);
+                if (distance >= 1.5f) { break; }
+                float dx = treeDistance(bands, footprint, x + .1f, y) - treeDistance(bands, footprint, x - .1f, y);
+                float dy = treeDistance(bands, footprint, x, y + .1f) - treeDistance(bands, footprint, x, y - .1f);
+                float length = (float) Math.hypot(dx, dy);
+                if (length < .0001f) { dx = x; dy = y; length = (float) Math.hypot(x, y); }
+                if (length < .0001f) { break; }
+                float move = Math.min(2, 1.51f - distance);
+                x += dx / length * move; y += dy / length * move;
+            }
+            moved.add(object.transform(x / TILE_WIDTH, y / TILE_HEIGHT, object.rotation(), object.mirror(), object.scale(),
+                  object.placement()));
+        }
+        return List.copyOf(moved);
+    }
+
+    private static void treeBand(List<float[]> bands, RailRoute.Line track, float width) {
+        float[] a = track.at(0);
+        for (int i = 1; i <= 24; i++) {
+            float[] b = track.at(i / 24f);
+            bands.add(new float[] { a[0], a[1], b[0], b[1], width });
+            a = b;
+        }
+    }
+
+    private static float treeDistance(List<float[]> bands, float[][] footprint, float x, float y) {
+        float distance = Float.POSITIVE_INFINITY;
+        for (var p : footprint) {
+            for (var band : bands) {
+                float dx = band[2] - band[0], dy = band[3] - band[1];
+                float t = Math.clamp(((x + p[0] - band[0]) * dx + (y + p[1] - band[1]) * dy)
+                      / (dx * dx + dy * dy), 0, 1);
+                distance = Math.min(distance, (float) Math.hypot(x + p[0] - band[0] - t * dx,
+                      y + p[1] - band[1] - t * dy) - band[4]);
+            }
+        }
+        return distance;
+    }
 
     /**
      * The rows the hex's vegetation design draws as a skin ({@link BoardEditorBlueprint.Skin}, a container yard): its
@@ -514,11 +612,12 @@ public final class BoardSceneryLayouts {
                     // A row of pillar art along a legacy maglev is that maglev's Pillars (maglevPillars), no objects either.
                     if (pillarRows.contains(coords) && LAYOUTS.get(model.key()).pillars()) { continue; }
                     // Every model key has rows: TilesetScenery counts only layouts.json keys as models.
-                    Layout rows = LAYOUTS.get(model.key());
+                    Layout rows = layout(model.key(), hex);
                     while (used.contains(prefix + "g" + keys)) { keys++; }
                     String group = rows.pieces() > 1 ? prefix + "g" + keys : null;
                     keys++;
-                    added.addAll(rows.decorations(coords, hex, ids, group, road));
+                    var objects = rows.decorations(coords, hex, ids, group, road);
+                    added.addAll(model.key().startsWith(ROAD_TREES) ? clearTreesOfRail(objects, hex, coords, board::getHex) : objects);
                 }
                 // Rail art is laid as rail terrain on the ground or the deck (railOnDeck); art without sides (rail00)
                 // joins the rails beside it, and lays nothing beside none.
@@ -639,6 +738,7 @@ public final class BoardSceneryLayouts {
                             continue;
                         }
                         int level = HexTile.road(next) ? next.terrainLevel(Terrains.ROAD) : 1;
+                        if (!DECK_ROAD_RANK.contains(level)) { level = 1; }
                         if (DECK_ROAD_RANK.indexOf(level) > DECK_ROAD_RANK.indexOf(best)) { best = level; }
                     }
                 }
@@ -1311,10 +1411,11 @@ public final class BoardSceneryLayouts {
             if (!hex.containsTerrain(Terrains.ROAD)) { throw new IllegalArgumentException("Paint a road first"); }
             key = key.replace("{exits}", String.format(Locale.ROOT, "%02d", hex.getTerrain(Terrains.ROAD).getExits() & 63));
         }
-        Layout rows = LAYOUTS.get(key);
+        Layout rows = layout(key, hex);
         if (rows == null) { throw new IllegalArgumentException("Unknown stamp layout " + key); }
         String group = rows.pieces() > 1 ? UUID.randomUUID().toString() : null;
-        return rows.decorations(at, hex, () -> UUID.randomUUID().toString(), group, roadside(hex));
+        var objects = rows.decorations(at, hex, () -> UUID.randomUUID().toString(), group, roadside(hex));
+        return key.startsWith(ROAD_TREES) ? clearTreesOfRail(objects, hex, at, neighbor -> null) : objects;
     }
 
     /**

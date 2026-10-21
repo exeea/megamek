@@ -130,9 +130,12 @@ final class GpuMapSource implements BoardSource {
     private List<BoardScene.Tile> tiles = List.of();
     /** EDT-owned derived editor annotations; never supplied to map previews or gameplay. */
     private final Map<Coords, BoardTactical> terrainMarkers = new HashMap<>();
+    private final Map<Coords, List<BoardEditorTerrain.Badge>> badges = new HashMap<>();
+    private Map<Coords, List<BoardEditorTerrain.Badge>> badgeSnapshot = Map.of();
     private BoardTactical editorTerrain = BoardTactical.EMPTY;
     private long boardGeneration;
-    private record Publication(Frame frame, BoardEditorSession.Snapshot editor, GpuEditorPreview.Data preview) { }
+    private record Publication(Frame frame, BoardEditorSession.Snapshot editor, GpuEditorPreview.Data preview,
+          Map<Coords, List<BoardEditorTerrain.Badge>> badges) { }
     private volatile Publication publication;
     /** Render-thread latch: selection and geometry must describe the same EDT capture for the entire frame. */
     private Publication rendering;
@@ -202,17 +205,23 @@ final class GpuMapSource implements BoardSource {
             contextCoords = null;
             images.clear();
             terrainMarkers.clear();
+            badges.clear();
             dirtyAll();
             atmosphere.reset();
         }
         List<BoardScene.Tile> next = terrain.tiles(board, (coords, pixels) -> {
             if (editor == null) { return; }
-            var markers = BoardEditorTerrain.capture(board.getHex(coords), coords, pixels.blankTerrains());
+            Hex hex = board.getHex(coords);
+            var flags = BoardEditorTerrain.badges(hex);
+            if (flags.isEmpty()) { badges.remove(coords); }
+            else { badges.put(coords, flags); }
+            var markers = BoardEditorTerrain.capture(hex, coords);
             if (markers == BoardTactical.EMPTY) { terrainMarkers.remove(coords); }
             else { terrainMarkers.put(coords, markers); }
         });
         if (next != tiles) {
             tiles = next;
+            badgeSnapshot = Map.copyOf(badges);
             editorTerrain = editor == null ? BoardTactical.EMPTY : new BoardTactical(
                   terrainMarkers.values().stream().flatMap(value -> value.fills().stream()).toList(),
                   terrainMarkers.values().stream().flatMap(value -> value.labels().stream()).toList());
@@ -244,7 +253,8 @@ final class GpuMapSource implements BoardSource {
         if (editor != null && state.activeBrush().way() && editorHover != null) {
             editorBrush = new EditorBrush(hover, boardGeneration, editor.brush(hover), editor.wayHint(editorHover.coords(), shownPreview));
         }
-        publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, projected);
+        publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, projected,
+              badgeSnapshot);
     }
 
     /** Map workspaces expose their existing document and application actions without requiring a game client. */
@@ -507,7 +517,7 @@ final class GpuMapSource implements BoardSource {
     }
 
     @Override public List<String> editorThemes() { return editorThemes; }
-    private void dirtyAll() { terrainMarkers.clear(); terrain.changed(null); }
+    private void dirtyAll() { terrainMarkers.clear(); badges.clear(); terrain.changed(null); }
     private static void onSwing(Runnable action) {
         if (SwingUtilities.isEventDispatchThread()) { action.run(); } else { SwingUtilities.invokeLater(action); }
     }
@@ -607,6 +617,10 @@ final class GpuMapSource implements BoardSource {
     private void closeMeasuring() { ruler = null; }
 
     public BoardEditorSession.Snapshot editorState() { return (rendering == null ? publication : rendering).editor(); }
+
+    @Override public Map<Coords, List<BoardEditorTerrain.Badge>> editorBadges() {
+        return (rendering == null ? publication : rendering).badges();
+    }
 
     @Override public GpuEditorPreview.Data editorPreview() { return (rendering == null ? publication : rendering).preview(); }
 

@@ -170,6 +170,7 @@ class GpuBattleView extends ApplicationAdapter {
     private GpuUnitVisibility unitVisibility;
     private GpuWireframe wireframe;
     private GpuMarkers markers;
+    private GpuEditorBadges editorBadges;
     private GpuTextures<BoardScene.Pixels> unitTextures;
     private ModelBatch unitBatch;
     private SpriteBatch annotationBatch;
@@ -371,6 +372,7 @@ class GpuBattleView extends ApplicationAdapter {
         };
         boardCamera.terrainHit = ray -> scene == null || terrain == null ? null : terrain.selectionHit(scene, ray);
         markers = new GpuMarkers();
+        if (source.isEditor()) { editorBadges = new GpuEditorBadges(); }
         if (source.isGameplay()) { markers.prepareModels(); }
         unitTextures = new GpuTextures<>(false, true);
         overlay = new GpuBoardOverlay();
@@ -821,6 +823,7 @@ class GpuBattleView extends ApplicationAdapter {
             boardInput.mouseMoved(Gdx.input.getX(), Gdx.input.getY());
         }
         hoverClock += animationSeconds();
+        groundSurfaces.columns(terrain.columns());
         renderStage("unit poses");
         markers.beginFrame(scene.markers(), Gdx.graphics.getDeltaTime());
         prepareUnits();
@@ -979,7 +982,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (!boardCamera.tactical()) {
             hexGrid.render(boardCamera, scene, terrain.columns(), false, GpuBattleStatus.Arc.NONE, false, atmosphere);
         }
-        renderHexText();
+        renderHexText(wireframeView);
         overlay.renderGhost(boardCamera.camera, shownUnit);
         fireControl.renderLabels(boardCamera.camera);
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
@@ -1088,6 +1091,7 @@ class GpuBattleView extends ApplicationAdapter {
             if (boardInput.boardGesture) { boardInput.interrupt(); }
         }
         if (ui instanceof GpuHud hud && frame.scene() != null) {
+            overlay.columns(terrain.columns());
             overlay.update(frame.withScene(scene), view, source.uiPreferences(), hud.state);
         }
     }
@@ -2111,6 +2115,10 @@ class GpuBattleView extends ApplicationAdapter {
         annotationBatch.begin();
         markers.renderLabels(annotationBatch, boardCamera.camera, layoutScale,
               markers.labelObstacles(boardCamera.camera));
+        if (editorBadges != null) {
+            editorBadges.render(annotationBatch, boardCamera.camera, layoutScale, scene,
+                  source.editorBadges(), terrain::roofBounds, hovered);
+        }
         if (source.isEditor() && editorPreviewShown()) { renderEditorPreviewLabel(); }
         annotationBatch.end();
     }
@@ -2178,11 +2186,13 @@ class GpuBattleView extends ApplicationAdapter {
         return result;
     }
 
-    private void renderHexText() {
+    private void renderHexText(boolean wireframeView) {
         var overlays = source.uiPreferences().overlays();
         hexText.update(scene, theme.skin.getFont("default-font"), theme.skin.getFont(GpuBoardSkin.OUTLINE_FONT),
-              terrain::roofBounds, boardCamera.tactical(), overlays.hexTypes(), overlays.hexLabelOutline());
-        hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0, atmosphere);
+              terrain::roofBounds, boardCamera.tactical(), overlays.hexTypes(),
+              overlays.hexLabelOutline() || wireframeView);
+        hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0,
+              atmosphere, wireframeView);
     }
 
     /** The camera zoom of {@code notches} of the mouse wheel, on the board and on the minimap. */
@@ -3210,6 +3220,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (annotationBatch != null) {
             annotationBatch.dispose();
         }
+        if (editorBadges != null) { editorBadges.dispose(); }
         if (unitTextures != null) {
             unitTextures.dispose();
         }

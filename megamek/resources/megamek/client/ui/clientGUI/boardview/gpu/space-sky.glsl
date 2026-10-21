@@ -1,9 +1,8 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // A distant procedural skybox shared by every transparent SPACE cell and the exterior of its board.
 // A single slowly rotated sampling direction keeps every layer coherent; no fractal flicker or rapid swirling.
-// Edit these two constants to tune the background. Speed is radians/second (0 pauses); density is 0..2, default 1.
-const float SPACE_DRIFT_SPEED = .004;
-const float SPACE_DENSITY = 1.0;
+const float SPACE_DRIFT_SPEED = .005;
+const float SPACE_DENSITY = 1.7;
 
 float spaceHash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);

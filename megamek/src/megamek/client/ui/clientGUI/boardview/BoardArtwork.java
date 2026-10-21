@@ -426,7 +426,7 @@ public final class BoardArtwork implements AutoCloseable {
             if (original != null) { UIUtil.setHighQualityRendering(original); }
             if (objects != null) { UIUtil.setHighQualityRendering(objects); }
             for (var layer : resolved.layers()) {
-                if (layer.kind() == TilesetScenery.Kind.SKIPPED) { continue; }
+                if (layer.kind() == TilesetScenery.Kind.SKIPPED || layer.kind() == TilesetScenery.Kind.ROAD_SURFACE) { continue; }
                 if (layer.kind() == TilesetScenery.Kind.QUAY) {
                     if (placedSources != null) { placedSources.add(layer.file()); }
                     continue;
@@ -472,7 +472,8 @@ public final class BoardArtwork implements AutoCloseable {
     /**
      * The hex's Saxarba art, as the Tactical View shows it: its base, its supers and its orthographic images, without
      * the incline and cliff edges, which the view's BoardRim shades from the levels instead, without the bridge, which
-     * it lays on the deck, and without rails (their track is drawn), structures or scenery. Scenery retains its original
+     * it draws as geometry, and without roads or rails (their shared native surfaces are drawn), structures or scenery.
+     * Scenery retains its original
      * selected artwork in a separate overlay, so both views can put it on roofs and lakebeds instead of baking it into the
      * column top.
      * Pavement uses its full variant: the shared concrete geometry supplies its outline in both GPU views.
@@ -486,6 +487,13 @@ public final class BoardArtwork implements AutoCloseable {
         if (BoardTreeDistribution.noTrees(hex)) { BoardTreeDistribution.TREE_TERRAINS.forEach(hex::removeTerrain); }
         for (int terrain : BRIDGE_TERRAINS) { hex.removeTerrain(terrain); }
         for (int terrain : RAIL_TERRAINS) { hex.removeTerrain(terrain); }
+        hex.removeTerrain(Terrains.ROAD);
+        hex.removeTerrain(Terrains.ROAD_FLUFF);
+        if (hex.getAppearance().containsKey("road")) {
+            Map<String, HexAppearance> appearance = new HashMap<>(hex.getAppearance());
+            appearance.remove("road");
+            hex.setAppearance(appearance);
+        }
         for (int structure : structures.keySet()) {
             for (int terrain : STRUCTURE_TERRAINS.get(structure)) { hex.removeTerrain(terrain); }
         }
@@ -585,7 +593,8 @@ public final class BoardArtwork implements AutoCloseable {
           Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED,
           Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.INDUSTRIAL, Terrains.ROUGH,
           Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
-          Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.FIRE, Terrains.SMOKE, Terrains.IMPASSABLE,
+          Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.FIRE, Terrains.SMOKE, Terrains.SCREEN,
+          Terrains.METAL_CONTENT, Terrains.IMPASSABLE,
           Terrains.ULTRA_SUBLEVEL };
 
     @Override

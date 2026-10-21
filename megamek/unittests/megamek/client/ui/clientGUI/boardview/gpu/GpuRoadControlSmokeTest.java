@@ -87,7 +87,8 @@ class GpuRoadControlSmokeTest {
                               : i == 0 || i == 2 ? "stop-sign" : "traffic-signal");
                         for (boolean angled : new boolean[] { false, true }) {
                             camera.setIsometric(angled);
-                            camera.camera.zoom = .16f;
+                            // Native gantry reach needs the wider view to fall below the ordinary prop LOD threshold.
+                            camera.camera.zoom = i >= 4 ? .20f : .16f;
                             if (angled) { camera.orbit(25 - camera.azimuth(), 55 - camera.tilt()); }
                             camera.center(BoardGeometry.center(AT, level));
                             frame.prepare(terrain, camera, scene);
@@ -152,7 +153,7 @@ class GpuRoadControlSmokeTest {
             var levels = (List<?>) field(prop, "levels");
             assertNotNull(levels, "Actual GLB levels must load, not the missing-model fallback");
             assertEquals(2, levels.size());
-            assertEquals(level, field(prop, "lod"), "The ordinary prop thresholds select the captured LOD");
+            assertEquals(level, field(prop, "lod"), asset + ": the ordinary prop thresholds select the captured LOD");
             assertSame(levels.get(level), instance.model);
             assertNotNull(instance.getMaterial("Amber"));
             assertTrue(instance.getMaterial("Amber").has(GpuModelLight.TYPE));

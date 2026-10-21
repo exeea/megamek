@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -71,19 +72,130 @@ class BoardRoadSlopeTest {
 
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
-    void motorwayRetainingPanelsStayNearTheirRoadBelowZero(TerrainLod lod) {
+    void motorwayCutsKeepClosedNaturalBanksBelowZero(TerrainLod lod) {
         var scene = BoardCliffSeamTest.scene(new File(
               "data/boards/unofficial/SimonLandmine/64x68/64x68 Motorway-M1-2.board"));
         var tile = scene.tile(new Coords(27, 25));
         assertEquals(-3, tile.elevation(), "Exercise the reported road bend below elevation zero");
         var surface = new BoardSurface(scene, tile, lod);
-        assertTrue(!surface.retainingPanels.isEmpty(), "The road bend must still have retaining panels");
-        // Walls retain at most one level of the cut, rounded up to a half-metre step with a quarter-metre cap.
-        float ceiling = BoardGeometry.groundZ(tile) + BoardGeometry.level() + BoardRelief.metres(.75f);
-        for (var face : surface.retainingPanels) {
-            for (var point : List.of(face.a(), face.b(), face.c())) {
-                assertTrue(point.z <= ceiling + .001f, tile.coords().getBoardNum() + " " + lod
-                      + " retaining panel rises above its local cut: " + point.z + " > " + ceiling);
+        assertTrue(surface.retainingPanelFaces().isEmpty(), "A road cut keeps its natural bank below zero too");
+        assertClosed(scene, tile.coords(), lod);
+    }
+
+    @Test
+    void cityRoadCutsKeepClosedNaturalBanks() {
+        var scene = BoardCliffSeamTest.scene(new File(
+              "data/boards/unofficial/Lanceman/16x17 City Hills Residential 2 (with Structures).board"));
+        for (var lod : TerrainLod.values()) {
+            for (var at : List.of(new Coords(13, 8), new Coords(14, 9))) {
+                var surface = new BoardSurface(scene, scene.tile(at), lod);
+                assertTrue(surface.retainingPanelFaces().isEmpty(),
+                      "The natural City roadside must not acquire freestanding concrete panels: " + at + "/" + lod);
+                assertClosed(scene, at, lod);
+            }
+        }
+    }
+
+    @Test
+    void plaineGradedApproachDoesNotKeepTheOldFlatToePanel() throws Exception {
+        var scene = GpuRoadSourceTest.scene("unofficial/Cartes/16x17 Plaine 1.board");
+        for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
+            var approach = new BoardSurface(scene, scene.tile(new Coords(10, 12)), lod);
+            // The old level-zero toe put an 18-unit panel in open air ahead of the graded bank at 1113.
+            var acrossOldPanel = new Ray(new Vector3(649, -895, 15), new Vector3(-5, -8.6f, 0));
+            assertFalse(approach.retainingPanelFaces().stream().anyMatch(face -> Intersector.intersectRayTriangle(
+                        acrossOldPanel, face.a(), face.b(), face.c(), new Vector3())),
+                  "A graded earthwork must not retain a freestanding panel at its former level toe: " + lod);
+            var junction = new BoardSurface(scene, scene.tile(new Coords(9, 11)), lod);
+            var acrossLevelCut = new Ray(new Vector3(629.236f, -883.532f, 17.5f),
+                  new Vector3(-.3368f, -.9415f, 0));
+            assertTrue(junction.retainingPanelFaces().isEmpty(), "The adjoining natural cut needs no concrete panel");
+            var terrain = new ArrayList<BoardSurface.Face>();
+            var near = new HashMap<Coords, BoardSurface>();
+            for (var tile : scene.tiles()) {
+                if (tile.coords().distance(new Coords(9, 11)) <= 1) {
+                    near.put(tile.coords(), new BoardSurface(scene, tile, lod));
+                }
+            }
+            // The higher neighbor owns the natural bank; the removed panel belonged to the lower road.
+            for (var surface : near.values()) {
+                terrain.addAll(surface.groundFaces());
+                terrain.addAll(surface.walls(scene, BoardGeometry.floor(scene), near));
+            }
+            assertTrue(terrain.stream().anyMatch(face -> Intersector.intersectRayTriangle(
+                        acrossLevelCut, face.a(), face.b(), face.c(), new Vector3())),
+                  "Removing the panel must keep the actual terrain bank behind it: " + lod);
+            assertClosed(scene, new Coords(10, 12), lod);
+        }
+    }
+
+    @Test
+    void minesRoadBanksDoNotUndercutTheirSupportingRims() throws Exception {
+        var scene = GpuRoadSourceTest.scene("Deserts/16x17 Mines 1.board");
+        for (var lod : TerrainLod.values()) {
+            for (int[] bank : new int[][] { {3, 7, 0}, {4, 8, 1} }) {
+                var at = new Coords(bank[0], bank[1]);
+                var tile = scene.tile(at);
+                var surface = new BoardSurface(scene, tile, lod);
+                float top = tile.elevation() * BoardGeometry.level();
+                int checked = 0;
+                // The level -1 roads border the bare level -2 hollow at 0508. Releasing road clearance
+                // immediately below their rims used to leave downward-facing caps and thin bank spikes.
+                for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
+                    float high = Math.max(face.a().z, Math.max(face.b().z, face.c().z));
+                    float low = Math.min(face.a().z, Math.min(face.b().z, face.c().z));
+                    if (face.landEdge() != bank[2] || high < top - .001f) {
+                        continue;
+                    }
+                    var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                    if (normal.len2() < .000001f) { continue; }
+                    // Allow only the subpixel inset from triangulating the curved vertical boundary.
+                    assertTrue(normal.z >= 0 || -normal.z * (high - low)
+                                <= .01f * BoardGeometry.hexScale() * Math.hypot(normal.x, normal.y),
+                          "The upper bank must support its road rim without an undercut: " + at + "/" + lod + " " + face);
+                    checked++;
+                }
+                assertTrue(checked > 0, "Inspect the emitted upper bank at " + at + "/" + lod);
+                // Supporting the curved cap must preserve its rim, foot, and adjoining cliff columns.
+                assertClosed(scene, at, lod);
+            }
+        }
+    }
+
+    @Test
+    void largeMountainRoadsKeepNativeRockBelowTheirSupportedApproaches() {
+        var scene = BoardCliffSeamTest.scene(new File("data/boards/Map Set 5/16x17 Large Mountain 2.board"));
+        var natural = scene.withTiles(scene.tiles().stream().map(tile -> BoardRoadTest.tile(tile.coords(),
+              BoardRoad.Kind.NONE, 0, tile.elevation(), tile.surface())).toList());
+        for (int[] example : new int[][] { {8, 3, 1}, {9, 3, 0} }) {
+            var at = new Coords(example[0], example[1]);
+            // Road-adjacent cliffs retain their full shared sampling even at distant LOD.
+            var nativeSurface = new BoardSurface(natural, natural.tile(at), TerrainLod.FULL);
+            for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
+                var surface = new BoardSurface(scene, scene.tile(at), lod);
+                var walls = surface.walls(scene, BoardGeometry.floor(scene));
+                // Distant meshes intentionally omit these lower rock rows; verify the formation at full detail,
+                // then check that every rendered detail still closes its support and adjoining gate below.
+                for (float t : lod == TerrainLod.FULL ? new float[] { .25f, .5f, .75f } : new float[0]) {
+                    // This lower rock lies beneath the neighboring level-two road's supporting bank as well.
+                    // Level-one rock can still belong to that transition; the deeper formation must be intact.
+                    var rock = nativeSurface.relief.wetCliffContact(example[2], t, .5f * BoardGeometry.level());
+                    float nearest = Float.POSITIVE_INFINITY;
+                    for (var face : walls) {
+                        if (face.landEdge() != example[2]) { continue; }
+                        var points = List.of(face.a(), face.b(), face.c());
+                        for (int i = 0; i < 3; i++) {
+                            var start = points.get(i);
+                            var span = new Vector3(points.get((i + 1) % 3)).sub(start);
+                            float u = span.len2() == 0 ? 0
+                                  : Math.clamp(new Vector3(rock).sub(start).dot(span) / span.len2(), 0, 1);
+                            nearest = Math.min(nearest, new Vector3(start).mulAdd(span, u).dst(rock));
+                        }
+                    }
+                    assertTrue(nearest < .01f, at + "/" + lod + " lost native rock beneath the road by " + nearest);
+                }
+                // Recovering the deeper rock must not detach its cap, foot, or the adjoining ramp gates.
+                assertClosed(scene, at, lod);
             }
         }
     }
@@ -298,7 +410,8 @@ class BoardRoadSlopeTest {
         var surface = new BoardSurface(scene, scene.tile(at));
         assertTrue(BoardSurface.ramps(scene, scene.tile(at)) != 0, "the slab must carry a ramp approach");
         long top = surface.groundFaces().stream().filter(face -> face.finish() == BoardSurface.Finish.TOP).count();
-        assertTrue(top < 1500, "concrete ramp slab emitted " + top + " top triangles");
+        // Non-ramp edges also retain the grade samples needed by a widened approach's vertical curve.
+        assertTrue(top < 1600, "concrete ramp slab emitted " + top + " top triangles");
         assertClosed(scene, at);
     }
 
@@ -329,7 +442,7 @@ class BoardRoadSlopeTest {
         assertClosed(scene, at, TerrainLod.FULL);
     }
 
-    private static void assertClosed(BoardScene scene, Coords at, TerrainLod lod) {
+    static void assertClosed(BoardScene scene, Coords at, TerrainLod lod) {
         Map<Coords, BoardSurface> surfaces = new HashMap<>();
         for (var tile : scene.tiles()) {
             if (at.distance(tile.coords()) <= 2) { surfaces.put(tile.coords(), new BoardSurface(scene, tile, lod)); }
@@ -344,8 +457,9 @@ class BoardRoadSlopeTest {
                 for (int i = 0; i < 3; i++) {
                     var a = points.get(i);
                     var b = points.get((i + 1) % 3);
-                    if (a.dst2(b) < .000001f) { continue; }
                     String first = key(a), second = key(b);
+                    // Retain short T-junction segments for coverage, excluding only a keyed vertex's self-edge.
+                    if (first.equals(second)) { continue; }
                     String key = first.compareTo(second) < 0 ? first + "/" + second : second + "/" + first;
                     edges.computeIfAbsent(key, ignored -> new ArrayList<>()).add(new Segment(a, b, surface.tile.coords(),
                           face.finish(), face.landEdge()));

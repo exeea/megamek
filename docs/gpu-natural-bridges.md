@@ -43,7 +43,15 @@ rebuilds the affected span and its adjoining banks, including across chunk bound
 
 ## Geometry and existing terrain
 
-`BoardNaturalBridge` builds a separate hollow shell with curved, uneven outlines, broad bank shoulders,
+In Classic graphics, `BoardNaturalBridge` uses a normal six-corner hex cap whose centre
+stays at deck height and whose exit sectors slope to the adjoining banks, including
+banks without roads. Connected caps derive the same shared corner heights. The cap
+uses ordinary dry tileset artwork matching the span's surface. The arch remains hollow,
+so an angled view reveals the passage beneath. The installed shell supplies drawing,
+picking and road support in both normal and Tactical View. Road and rail courses are
+shared with Enhanced; the natural terrain envelope is the deliberate visual difference.
+
+In Enhanced graphics, `BoardNaturalBridge` builds a separate hollow shell with curved, uneven outlines, broad bank shoulders,
 an eroded cap and a thick, asymmetric arch underneath. Rounded side strata bulge between the chipped
 top and recessed underside. Shared terrain normal smoothing joins the broad rock facets; the surface
 engine supplies photographic albedo, normal maps, geology, weather response and material batches.

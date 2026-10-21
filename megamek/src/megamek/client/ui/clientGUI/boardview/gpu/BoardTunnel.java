@@ -7,13 +7,16 @@ import java.util.List;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
+import megamek.common.board.RailRoute;
 
 /** Cosmetic portals at authored road exits blocked by a tall wall. Never adds a game connection. */
-record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind kind, boolean bridge) {
+record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind kind, boolean bridge, float widthScale) {
     static final String ASSET = "road-tunnel";
     static final String BRIDGE_ASSET = "road-tunnel-bridge";
     // Asset contract: mm-data tools/board-models/road-tunnel.md. +Y points into the cliff, Z is up.
     static final float HALF_WIDTH = 9.5f;
+    /** Authored GLBs have a 15px carriageway; only their lateral dimension follows the carried route. */
+    static final float ASSET_ROAD_HALF = 7.5f;
     static final float SPRING = 6;
     static final float DEPTH = 18;
     static final int ARCH_SEGMENTS = 16;
@@ -46,7 +49,11 @@ record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind ki
             Vector3 along = new Vector3(neighbor).sub(center).nor();
             Vector3 origin = center.lerp(neighbor, .5f).mulAdd(along, -3 * BoardGeometry.hexScale());
             origin.z += GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale();
-            result.add(new BoardTunnel(tile.coords(), origin, along, kind, bridge));
+            int rails = bridge ? tile.features().stream().map(BoardScene.Feature::decoration)
+                  .filter(route -> RailRoute.kind(route) == RailRoute.Kind.RAIL && RailRoute.onDeck(route))
+                  .mapToInt(route -> route.connections()).reduce(0, (a, b) -> a | b) : tile.railExits();
+            float half = (rails & 1 << d) != 0 ? BoardRoad.CORRIDOR_HALF : kind.halfWidth;
+            result.add(new BoardTunnel(tile.coords(), origin, along, kind, bridge, half / ASSET_ROAD_HALF));
         }
     }
 
@@ -55,18 +62,19 @@ record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind ki
     Matrix4 transform() {
         float turn = (float) Math.toDegrees(Math.atan2(-along.x, along.y));
         float scale = BoardGeometry.hexScale();
-        return new Matrix4().setToTranslation(origin).rotate(Vector3.Z, turn).scale(scale, scale, scale);
+        return new Matrix4().setToTranslation(origin).rotate(Vector3.Z, turn).scale(scale * widthScale, scale, scale);
     }
 
     private Vector3 local(Vector3 p) {
         float scale = BoardGeometry.hexScale(), x = (p.x - origin.x) / scale, y = (p.y - origin.y) / scale;
-        return new Vector3(x * along.y - y * along.x, x * along.x + y * along.y, (p.z - origin.z) / scale);
+        return new Vector3((x * along.y - y * along.x) / widthScale, x * along.x + y * along.y, (p.z - origin.z) / scale);
     }
 
     /** How far (x, y) lies to either side of the wing walls, in tile pixels; negative within them. */
     float beside(float x, float y) {
         Vector3 p = local(new Vector3(x, y, origin.z));
-        return p.y < -8 || p.y > DEPTH + 2 ? Float.POSITIVE_INFINITY : Math.abs(p.x) - (bridge ? 13.3f : 18);
+        return p.y < -8 || p.y > DEPTH + 2 ? Float.POSITIVE_INFINITY
+              : (Math.abs(p.x) - (bridge ? 13.3f : 18)) * widthScale;
     }
 
     /** Keep whole decorative rocks clear of the shell, wing walls and the road approaching the mouth. */
@@ -74,9 +82,9 @@ record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind ki
         Vector3 p = local(base);
         float scale = BoardGeometry.hexScale(), r = radius / scale;
         if (p.z >= 20 || p.z + height / scale <= -1) { return false; }
-        boolean shell = Math.abs(p.x) < (bridge ? 13.3f : 18) + r
+        boolean shell = Math.abs(p.x) < (bridge ? 13.3f : 18) + r / widthScale
               && p.y > (bridge ? -.1f : -7) - r && p.y < DEPTH + r;
-        boolean approach = Math.abs(p.x) < HALF_WIDTH + 1 + r && p.y > -36 - r && p.y < r;
+        boolean approach = Math.abs(p.x) < HALF_WIDTH + 1 + r / widthScale && p.y > -36 - r && p.y < r;
         return shell || approach;
     }
 

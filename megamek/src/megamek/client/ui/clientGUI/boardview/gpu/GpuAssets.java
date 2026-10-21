@@ -574,7 +574,7 @@ final class GpuAssets implements Disposable {
     }
 
     GpuBuilding.Assembly building(String asset, int levels, long seed, boolean withInterior) {
-        if (!asset.startsWith("buildings/")) { return null; }
+        if (!asset.startsWith("buildings/") || BoardWall.supports(asset)) { return null; }
         if (!buildings.containsKey(asset)) {
             File customRoot = new File(Configuration.dataDir(), "models/buildings");
             FileHandle file = new FileHandle(TilesetScenery.customBuildingFile(asset));
@@ -662,6 +662,7 @@ final class GpuAssets implements Disposable {
     }
 
     Model lodModel(String name, int level) {
+        if (BoardWall.supports(name)) { return wallLevels(name, 1).get(level); }
         return modelLods.computeIfAbsent(name, shape -> {
             // A tree's winter form may be its bare file's snow variant.
             var source = RigidGlb.source(root, shape);
@@ -677,6 +678,30 @@ final class GpuAssets implements Disposable {
             }
             return List.copyOf(levels);
         }).get(level);
+    }
+
+    /** The captured wall layout determines the shared mesh; this asset owner's ordinary cache disposes it. */
+    Model wall(BoardWall.Layout layout) {
+        return wallLevels(layout).getFirst();
+    }
+
+    /** Two authored component levels; remaining slots reuse the far mesh, like the ordinary rigid model loader. */
+    List<Model> wallLevels(String asset, int levels) {
+        return wallLevels(BoardWall.layout(asset, levels));
+    }
+
+    List<Model> wallLevels(BoardWall.Layout layout) {
+        String shape = layout.asset() + "@height-" + layout.height() + "@arms-" + layout.arms();
+        return modelLods.computeIfAbsent(shape, ignored -> {
+            List<Model> result = new ArrayList<>();
+            for (int lod = 0; lod < BoardWall.LODS; lod++) {
+                int own = lod;
+                result.add(models.computeIfAbsent(MeshLod.name(shape, lod),
+                      key -> createModel(BoardWall.model(layout, own))));
+            }
+            while (result.size() < RigidGlb.LEVELS) { result.add(result.getLast()); }
+            return List.copyOf(result);
+        });
     }
 
     Texture material(String name) {

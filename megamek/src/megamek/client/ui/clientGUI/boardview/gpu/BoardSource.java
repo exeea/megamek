@@ -194,6 +194,9 @@ interface BoardSource extends AutoCloseable {
     /** Drops the route the editor's drag draws by hand, unbuilt (Esc or a right click during the drag). */
     default void cancelEditorStroke() { }
     default megamek.client.ui.boardeditor.BoardEditorSession.Snapshot editorState() { return null; }
+
+    /** Per-hex authoring cues from the same capture as takeFrame; never exposed by gameplay or map previews. */
+    default Map<Coords, List<BoardEditorTerrain.Badge>> editorBadges() { return Map.of(); }
     default List<String> editorThemes() { return List.of(); }
     default void editorCommand(megamek.client.ui.boardeditor.BoardEditorSession.Command command, long generation) { }
     default void editorValue(megamek.client.ui.boardeditor.BoardEditorSession.Command command, boolean finished, long generation) { }

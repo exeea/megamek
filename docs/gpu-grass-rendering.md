@@ -47,7 +47,9 @@ height above the local waterline and leaving a bare wet toe. Curved shore and be
 triangles can cross the hex edge; neighboring owners share that support while
 each root stays in its canonical hex. The vegetation snapshot carries the same
 per-vertex water reference as the bank material, including descending streams,
-without retaining terrain builders. Grass uses the neighboring land's sampled
+without retaining terrain builders. A root is also checked against the actual
+water triangles, whose diagonals can differ from the bank's on descending streams.
+Grass uses the neighboring land's sampled
 cover, so a water tile's default grass family cannot green a desert coast.
 Frozen, molten and positive-depth water retain their existing vegetation rules;
 shallow wetland banks remain reed-owned.

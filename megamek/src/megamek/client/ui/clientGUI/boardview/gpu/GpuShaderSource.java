@@ -98,6 +98,7 @@ final class GpuShaderSource {
             case "ATMOSPHERE_FOV" -> "atmosphere-fov.glsl";
             case "ATMOSPHERE_GRADE" -> "atmosphere-grade.glsl";
             case "ATMOSPHERE_GLARE" -> "atmosphere-glare.glsl";
+            case "SPACE_SKY" -> "space-sky.glsl";
             case "HEAT_RADIANCE" -> "heat-radiance.glsl";
             case "OCEAN_FINISH" -> "ocean-finish.glsl";
             case "terrain-ground-color-functions" -> "terrain-ground-color.glsl";

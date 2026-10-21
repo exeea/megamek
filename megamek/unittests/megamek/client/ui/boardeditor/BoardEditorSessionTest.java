@@ -32,6 +32,26 @@ class BoardEditorSessionTest {
     @TempDir Path directory;
     private final Coords at = new Coords(1, 1);
 
+    @Test void changingATJunctionSurfacePreservesAutomaticPriorityAndExplicitSignals() throws Exception {
+        var session = session();
+        send(session, Action.ADD_COMPONENT, "", "road");
+        for (int direction : new int[] { 0, 1, 3 }) { send(session, Action.EDGE, "road", Integer.toString(direction)); }
+        send(session, Action.VARIANT, "road", "road/rounded");
+        send(session, Action.TERRAIN, "road", "4");
+        send(session, Action.VARIANT, "road", "road/material/gravel");
+        Hex hex = session.board().getHex(at);
+        assertEquals(11, hex.getTerrain(Terrains.ROAD).getExits());
+        assertNull(hex.getAppearance().get("road").trafficControl(), "Surface edits do not turn automatic defaults into overrides");
+        assertEquals(HexAppearance.TrafficControl.STOPS, HexAppearance.trafficControl(hex.getAppearance(), "road", 11));
+        send(session, Action.TRAFFIC_CONTROL, "road", "gantry");
+        send(session, Action.VARIANT, "road", "");
+        send(session, Action.TERRAIN, "road", "1");
+        Path file = directory.resolve("t-junction-controls.board2"); session.save(file);
+        Hex loaded = BoardFile.read(file).getHex(at);
+        assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(loaded.getAppearance(), "road", 11),
+              "Explicit signals survive surface edits, design reset and saving");
+    }
+
     @Test void junctionControlsSurviveRoadDesignChangesAndAreUndoableAndSaved() throws Exception {
         var session = session();
         send(session, Action.ADD_COMPONENT, "", "road");
@@ -294,6 +314,35 @@ class BoardEditorSessionTest {
         assertEquals(12, query.terrainLevel(Terrains.FLUFF));
         assertFalse(hex.containsTerrain(Terrains.ROAD_FLUFF));
         assertEquals(9, hex.getTerrain(Terrains.ROAD).getExits());
+    }
+
+    @Test void spaceAndWallPaletteBrushesPaintSaveAndUndoTheirActualTerrain() throws Exception {
+        var blueprint = BoardEditorBlueprint.get();
+        assertTrue(blueprint.entry("space/empty").sections().contains("ground-water/basic"));
+        assertTrue(blueprint.entry("building/wall").sections().contains("buildings/gameplay"));
+        var session = session();
+        send(session, Action.CHOOSE_BRUSH, "space", "empty");
+        session.pointer(at, 0, 0, false); session.finishStroke();
+        assertEquals(1, session.board().getHex(at).terrainLevel(Terrains.SPACE));
+        Path file = directory.resolve("space-and-walls.board2");
+        session.save(file);
+        assertEquals(1, BoardFile.read(file).getHex(at).terrainLevel(Terrains.SPACE));
+        send(session, Action.UNDO, "", "");
+        assertFalse(session.board().getHex(at).containsTerrain(Terrains.SPACE));
+        send(session, Action.REDO, "", "");
+        assertEquals(1, session.board().getHex(at).terrainLevel(Terrains.SPACE));
+
+        send(session, Action.CHOOSE_BRUSH, "building", "wall");
+        Coords wall = new Coords(2, 2), next = wall.translated(0);
+        session.pointer(wall, 0, 0, false); session.pointer(next, 0, 0, true); session.finishStroke();
+        for (Coords spot : List.of(wall, next)) {
+            assertEquals(5, session.board().getHex(spot).terrainLevel(Terrains.BUILDING));
+            assertEquals(120, session.board().getHex(spot).terrainLevel(Terrains.BLDG_CF));
+        }
+        assertTrue(session.board().getHex(wall).containsTerrainExit(Terrains.BUILDING, 0));
+        assertTrue(session.board().getHex(next).containsTerrainExit(Terrains.BUILDING, 3));
+        session.save(file);
+        assertEquals(5, BoardFile.read(file).getHex(wall).terrainLevel(Terrains.BUILDING));
     }
 
     @Test void paintsConfiguredRoadShapeAndMaterialTogetherAsOneUndoableStroke() {
