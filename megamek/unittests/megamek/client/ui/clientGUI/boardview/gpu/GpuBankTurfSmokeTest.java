@@ -21,6 +21,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.game.Game;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -83,12 +84,14 @@ class GpuBankTurfSmokeTest {
                         frame.render(terrain, camera, scene);
                         String name = "grassland" + (index + 2) + "-hex-" + tile.coords().getBoardNum();
                         GpuReviewFrame.save(new File(output, name + "-oblique.png"));
+                        assertNoBlackPixels(name + "-oblique");
                         camera.camera.position.set(target).add(0, 0, 800);
                         camera.camera.up.set(0, 1, 0);
                         camera.camera.lookAt(target);
                         camera.camera.update();
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, name + "-top.png"));
+                        assertNoBlackPixels(name + "-top");
                         var plants = terrain.planted(tile.coords());
                         assertNotNull(plants);
                         assertNotNull(plants.turf(), name + " must exercise visible turf");
@@ -109,6 +112,19 @@ class GpuBankTurfSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Native bank turf", failure.get()); }
+    }
+
+    /**
+     * Lit grassland never shades to exact black; NaN shading does. On llvmpipe, a material read whose repeat was 0 in
+     * a pixel that skipped it once drew black dotted lines along the material roles (sampledTile, terrain-materials.glsl).
+     */
+    private static void assertNoBlackPixels(String name) {
+        byte[] pixels = ScreenUtils.getFrameBufferPixels(false);
+        int black = 0;
+        for (int i = 0; i < pixels.length; i += 4) {
+            if (pixels[i] == 0 && pixels[i + 1] == 0 && pixels[i + 2] == 0) { black++; }
+        }
+        assertEquals(0, black, name + " must not shade any pixel to NaN (exact black)");
     }
 
     private static int bankScore(BoardScene scene, BoardScene.Tile tile) {
