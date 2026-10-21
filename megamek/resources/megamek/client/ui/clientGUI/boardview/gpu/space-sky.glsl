@@ -1,7 +1,7 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // A distant procedural skybox shared by every transparent SPACE cell and the exterior of its board.
 // A single slowly rotated sampling direction keeps every layer coherent; no fractal flicker or rapid swirling.
-const float SPACE_DRIFT_SPEED = .005;
+const float SPACE_DRIFT_SPEED = .004;
 const float SPACE_DENSITY = 1.7;
 
 float spaceHash(vec2 p) {
